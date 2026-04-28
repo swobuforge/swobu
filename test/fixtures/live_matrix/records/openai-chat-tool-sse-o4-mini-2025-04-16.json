@@ -1,0 +1,33 @@
+{
+  "captured_at": "2026-04-22T20:07:50.779633401+01:00",
+  "scenario_case": {
+    "id": "openai-chat-tool-sse-o4-mini-2025-04-16",
+    "provider": "openai",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "o4-mini-2025-04-16"
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://api.openai.com/v1/chat/completions",
+    "path": "/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu-live-matrix/1"
+    },
+    "body": "{\"max_tokens\":16,\"messages\":[{\"content\":\"Call tool noop with x=1 and stop.\",\"role\":\"user\"}],\"model\":\"o4-mini-2025-04-16\",\"stream\":true,\"tool_choice\":{\"function\":{\"name\":\"noop\"},\"type\":\"function\"},\"tools\":[{\"function\":{\"description\":\"No-op tool\",\"name\":\"noop\",\"parameters\":{\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"type\":\"object\"}},\"type\":\"function\"}]}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req_f83701f8523341e6986f00375b7971de"
+    },
+    "status_code": 400,
+    "body": "{\n  \"error\": {\n    \"message\": \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"max_tokens\",\n    \"code\": \"unsupported_parameter\"\n  }\n}"
+  },
+  "error": "http 400",
+  "duration_ms": 248
+}

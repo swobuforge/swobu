@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-04-22T20:07:00.712727982+01:00",
+  "scenario_case": {
+    "id": "openai-chat-tool-sse-gpt-4o-2024-11-20",
+    "provider": "openai",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-4o-2024-11-20"
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://api.openai.com/v1/chat/completions",
+    "path": "/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu-live-matrix/1"
+    },
+    "body": "{\"max_tokens\":16,\"messages\":[{\"content\":\"Call tool noop with x=1 and stop.\",\"role\":\"user\"}],\"model\":\"gpt-4o-2024-11-20\",\"stream\":true,\"tool_choice\":{\"function\":{\"name\":\"noop\"},\"type\":\"function\"},\"tools\":[{\"function\":{\"description\":\"No-op tool\",\"name\":\"noop\",\"parameters\":{\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"type\":\"object\"}},\"type\":\"function\"}]}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "X-Request-Id": "req_cedaa4c6aedc49a0bd3bd688b6003e43"
+    },
+    "status_code": 200,
+    "body": "data: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_Kg7u9GSFn2FxBUEUwCdupI4v\",\"type\":\"function\",\"function\":{\"name\":\"noop\",\"arguments\":\"\"}}],\"refusal\":null},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"rB0a0dboZvz7X\"}\n\ndata: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"\"}\n\ndata: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"x\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"M1\"}\n\ndata: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\":\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"\"}\n\ndata: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"W9\"}\n\ndata: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"a3\"}\n\ndata: {\"id\":\"chatcmpl-DXXCW4oJA39sbMF3jevGgaRTbFMlt\",\"object\":\"chat.completion.chunk\",\"created\":1776884820,\"model\":\"gpt-4o-2024-11-20\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_bd30353b5a\",\"choices\":[{\"index\":0,\"delta\":{},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"obfuscation\":\"l9VMKQs\"}\n\ndata: [DONE]\n\n"
+  },
+  "duration_ms": 566
+}

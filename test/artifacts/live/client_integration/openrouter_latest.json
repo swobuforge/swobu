@@ -1,0 +1,12 @@
+{
+  "captured_at_utc": "2026-04-28T00:36:35Z",
+  "provider_run": "2026-04-28T00:34:59Z",
+  "client_run": "2026-04-28T00:35:03Z",
+  "clients": [
+    {
+      "name": "aider",
+      "version": "aider 0.86.2",
+      "found": true
+    }
+  ]
+}

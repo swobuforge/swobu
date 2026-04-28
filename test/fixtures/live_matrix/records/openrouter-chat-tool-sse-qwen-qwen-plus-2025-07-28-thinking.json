@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-04-22T19:48:49.387855101+01:00",
+  "scenario_case": {
+    "id": "openrouter-chat-tool-sse-qwen-qwen-plus-2025-07-28-thinking",
+    "provider": "openrouter",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "model": "qwen/qwen-plus-2025-07-28:thinking"
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "path": "/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu-live-matrix/1"
+    },
+    "body": "{\"max_tokens\":16,\"messages\":[{\"content\":\"Call tool noop with x=1 and stop.\",\"role\":\"user\"}],\"model\":\"qwen/qwen-plus-2025-07-28:thinking\",\"stream\":true,\"tool_choice\":{\"function\":{\"name\":\"noop\"},\"type\":\"function\"},\"tools\":[{\"function\":{\"description\":\"No-op tool\",\"name\":\"noop\",\"parameters\":{\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"type\":\"object\"}},\"type\":\"function\"}]}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "status_code": 400,
+    "body": "{\"error\":{\"message\":\"Provider returned error\",\"code\":400,\"metadata\":{\"raw\":\"{\\\"error\\\":{\\\"message\\\":\\\"\u003c400\u003e InternalError.Algo.InvalidParameter: The tool_choice parameter does not support being set to required or object in thinking mode\\\",\\\"type\\\":\\\"invalid_request_error\\\",\\\"param\\\":null,\\\"code\\\":\\\"invalid_parameter_error\\\"},\\\"id\\\":\\\"chatcmpl-5600af44-2076-9716-b7aa-f6c45ec4dff1\\\",\\\"request_id\\\":\\\"5600af44-2076-9716-b7aa-f6c45ec4dff1\\\"}\",\"provider_name\":\"Alibaba\",\"is_byok\":false}},\"user_id\":\"user_38efliiVXOoMSSfw4EjKz6oZr0w\"}"
+  },
+  "error": "http 400",
+  "duration_ms": 546
+}

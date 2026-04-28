@@ -1,0 +1,13 @@
+{
+  "client_id": "aider",
+  "method": "POST",
+  "path": "/c/jobs/v1/chat/completions",
+  "expected_model": "primary",
+  "expected_stream": true,
+  "required_message_substrings": [
+    "hermetic-aider-token"
+  ],
+  "required_system_hint_substrings": [
+    "Act as an expert software developer"
+  ]
+}

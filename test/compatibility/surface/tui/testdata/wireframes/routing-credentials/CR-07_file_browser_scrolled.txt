@@ -1,0 +1,24 @@
+Swobu! 🧌                                                   ready   [ ? ] [ + new workspace ]
+────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾                                                                               
+    name              test                                      edit ↵                      
+    endpoint          /c/test/                                                              
+    create            not ready                                                             
+                                                                                            
+  routing ▾                                                                                 
+    run on            OpenRouter                                choose ↵                    
+    credentials       file                                      choose ↵                    
+    credential file   not set                                   browse ↵                    
+      path              /tmp/TestCockpitScenarios_ExactScreenMatchesWireframeArtifactsRouti…
+      find              _                                                                   
+  >    ../                                                                                  
+       token-a.txt                                                                          
+       token-aa.txt                                                                         
+       token-aaa.txt                                                                        
+       token-aaaa.txt                                                                       
+       token-aaaaa.txt                                                                      
+                        … 5 more                                                            
+    model             not set                                   choose ↵                    
+                                                                                            
+────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ select   esc close   ? help                                                     

@@ -1,0 +1,116 @@
+{
+  "captured_at": "2026-04-27T23:50:10.274615473+01:00",
+  "scenario_case": {
+    "id": "openai-completions-text-buffered",
+    "provider": "openai",
+    "protocol": "completions",
+    "transport": "http_post",
+    "scenario": "text_min",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-4.1-mini",
+    "model_env": "OPENAI_MODEL"
+  },
+  "request": {
+    "method": "POST",
+    "url": "/completions",
+    "path": "/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu/dev"
+    },
+    "body": "{\"model\":\"gpt-4.1-mini\",\"prompt\":\"Reply with OK\"}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req_7ba04501b212428fb3b697a1d97c0bd5"
+    },
+    "status_code": 404,
+    "body": "{\n  \"error\": {\n    \"message\": \"This is a chat model and not supported in the v1/completions endpoint. Did you mean to use v1/chat/completions?\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"model\",\n    \"code\": null\n  }\n}"
+  },
+  "client": {
+    "request": {
+      "method": "POST",
+      "url": "http://127.0.0.1:45203/c/openai-completions-text-buffered/v1/completions",
+      "path": "/c/openai-completions-text-buffered/v1/completions",
+      "headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "swobu-live-matrix/1"
+      },
+      "body": "{\"max_tokens\":16,\"model\":\"gpt-4.1-mini\",\"prompt\":\"Reply with OK\",\"stream\":false}"
+    },
+    "response": {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "status_code": 404,
+      "body": "{\n  \"error\": {\n    \"message\": \"This is a chat model and not supported in the v1/completions endpoint. Did you mean to use v1/chat/completions?\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"model\",\n    \"code\": null\n  }\n}"
+    }
+  },
+  "session": {
+    "session_id": "openai-completions-text-buffered-session",
+    "request_id": "openai-completions-text-buffered-request",
+    "events": [
+      {
+        "seq": 1,
+        "direction": "client-\u003eswobu",
+        "at": "2026-04-27T23:50:10.302129861+01:00",
+        "wire": {
+          "method": "POST",
+          "url": "http://127.0.0.1:45203/c/openai-completions-text-buffered/v1/completions",
+          "path": "/c/openai-completions-text-buffered/v1/completions",
+          "headers": {
+            "Content-Type": "application/json",
+            "User-Agent": "swobu-live-matrix/1"
+          },
+          "body": "{\"max_tokens\":16,\"model\":\"gpt-4.1-mini\",\"prompt\":\"Reply with OK\",\"stream\":false}"
+        }
+      },
+      {
+        "seq": 2,
+        "direction": "swobu-\u003eprovider",
+        "attempt_index": 1,
+        "at": "2026-04-27T23:50:10.303518355+01:00",
+        "wire": {
+          "method": "POST",
+          "url": "/completions",
+          "path": "/completions",
+          "headers": {
+            "Content-Type": "application/json",
+            "User-Agent": "swobu/dev"
+          },
+          "body": "{\"model\":\"gpt-4.1-mini\",\"prompt\":\"Reply with OK\"}"
+        }
+      },
+      {
+        "seq": 3,
+        "direction": "provider-\u003eswobu",
+        "attempt_index": 1,
+        "at": "2026-04-27T23:50:10.930809755+01:00",
+        "wire": {
+          "headers": {
+            "Content-Type": "application/json",
+            "X-Request-Id": "req_7ba04501b212428fb3b697a1d97c0bd5"
+          },
+          "status_code": 404,
+          "body": "{\n  \"error\": {\n    \"message\": \"This is a chat model and not supported in the v1/completions endpoint. Did you mean to use v1/chat/completions?\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"model\",\n    \"code\": null\n  }\n}"
+        }
+      },
+      {
+        "seq": 4,
+        "direction": "swobu-\u003eclient",
+        "at": "2026-04-27T23:50:10.931451539+01:00",
+        "wire": {
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "status_code": 404,
+          "body": "{\n  \"error\": {\n    \"message\": \"This is a chat model and not supported in the v1/completions endpoint. Did you mean to use v1/chat/completions?\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"model\",\n    \"code\": null\n  }\n}"
+        }
+      }
+    ]
+  },
+  "error": "http 404",
+  "duration_ms": 656
+}

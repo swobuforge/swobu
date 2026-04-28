@@ -1,0 +1,24 @@
+Swobu! 🧌                                    ready   [ ? ] [› acme] [ staging ] [ + ]
+────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾                                                                       
+    name              acme                                      edit ↵              
+    endpoint          /c/acme/                                  copy ↵              
+    delete workspace                                            delete ↵            
+                                                                                    
+  routing ▸                                                                         
+    OpenRouter · models                                                             
+                                                                                    
+  clients ▾                                                                         
+    client            not set                                   choose ↵            
+>   setup                                                       view ↵              
+                                                                                    
+  traffic ▸                                                                         
+    no traffic yet                                                                  
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ view   ? help   esc back   tab tabs                                     

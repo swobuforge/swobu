@@ -1,0 +1,5 @@
+{
+  "source_record": "test/fixtures/live_matrix/records/openai-responses-previous-response-not-found.json",
+  "source_field": "response.body",
+  "extraction": "verbatim"
+}

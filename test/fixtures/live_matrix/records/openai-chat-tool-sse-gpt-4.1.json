@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-04-22T20:06:40.575380391+01:00",
+  "scenario_case": {
+    "id": "openai-chat-tool-sse-gpt-4.1",
+    "provider": "openai",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-4.1"
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://api.openai.com/v1/chat/completions",
+    "path": "/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu-live-matrix/1"
+    },
+    "body": "{\"max_tokens\":16,\"messages\":[{\"content\":\"Call tool noop with x=1 and stop.\",\"role\":\"user\"}],\"model\":\"gpt-4.1\",\"stream\":true,\"tool_choice\":{\"function\":{\"name\":\"noop\"},\"type\":\"function\"},\"tools\":[{\"function\":{\"description\":\"No-op tool\",\"name\":\"noop\",\"parameters\":{\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"type\":\"object\"}},\"type\":\"function\"}]}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "X-Request-Id": "req_bffd1dfd85fe4e1693ef43639c126896"
+    },
+    "status_code": 200,
+    "body": "data: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_ondvKw00w9eRDAdTEzlSjpoK\",\"type\":\"function\",\"function\":{\"name\":\"noop\",\"arguments\":\"\"}}],\"refusal\":null},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"s5QBMmH3Hq15\"}\n\ndata: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"7vmdOkOObU9LdSN\"}\n\ndata: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"x\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"Z\"}\n\ndata: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\":\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"elTRXrYc1fHU3Hm\"}\n\ndata: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"y\"}\n\ndata: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"logprobs\":null,\"finish_reason\":null}],\"obfuscation\":\"l\"}\n\ndata: {\"id\":\"chatcmpl-DXXCCToF2eRZv4nnrmGoSHG6O0uW1\",\"object\":\"chat.completion.chunk\",\"created\":1776884800,\"model\":\"gpt-4.1-2025-04-14\",\"service_tier\":\"default\",\"system_fingerprint\":\"fp_01e94a0094\",\"choices\":[{\"index\":0,\"delta\":{},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"obfuscation\":\"tMfe7x\"}\n\ndata: [DONE]\n\n"
+  },
+  "duration_ms": 1137
+}

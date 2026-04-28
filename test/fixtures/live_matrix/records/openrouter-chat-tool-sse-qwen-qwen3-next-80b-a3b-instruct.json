@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-04-22T19:48:53.429382313+01:00",
+  "scenario_case": {
+    "id": "openrouter-chat-tool-sse-qwen-qwen3-next-80b-a3b-instruct",
+    "provider": "openrouter",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "model": "qwen/qwen3-next-80b-a3b-instruct"
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "path": "/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu-live-matrix/1"
+    },
+    "body": "{\"max_tokens\":16,\"messages\":[{\"content\":\"Call tool noop with x=1 and stop.\",\"role\":\"user\"}],\"model\":\"qwen/qwen3-next-80b-a3b-instruct\",\"stream\":true,\"tool_choice\":{\"function\":{\"name\":\"noop\"},\"type\":\"function\"},\"tools\":[{\"function\":{\"description\":\"No-op tool\",\"name\":\"noop\",\"parameters\":{\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"type\":\"object\"}},\"type\":\"function\"}]}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "text/event-stream"
+    },
+    "status_code": 200,
+    "body": "data: {\"id\":\"gen-1776883733-aK6L3xdbjy40SdPJjH51\",\"object\":\"chat.completion.chunk\",\"created\":1776883733,\"model\":\"qwen/qwen3-next-80b-a3b-instruct-2509\",\"provider\":\"DeepInfra\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_af8a90e633a54118877d6bd6\",\"type\":\"function\",\"function\":{\"name\":\"noop\",\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\ndata: {\"id\":\"gen-1776883733-aK6L3xdbjy40SdPJjH51\",\"object\":\"chat.completion.chunk\",\"created\":1776883733,\"model\":\"qwen/qwen3-next-80b-a3b-instruct-2509\",\"provider\":\"DeepInfra\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\ndata: {\"id\":\"gen-1776883733-aK6L3xdbjy40SdPJjH51\",\"object\":\"chat.completion.chunk\",\"created\":1776883733,\"model\":\"qwen/qwen3-next-80b-a3b-instruct-2509\",\"provider\":\"DeepInfra\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"x\\\": 1}\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\ndata: {\"id\":\"gen-1776883733-aK6L3xdbjy40SdPJjH51\",\"object\":\"chat.completion.chunk\",\"created\":1776883733,\"model\":\"qwen/qwen3-next-80b-a3b-instruct-2509\",\"provider\":\"DeepInfra\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"tool_calls\",\"native_finish_reason\":\"length\"}]}\n\ndata: {\"id\":\"gen-1776883733-aK6L3xdbjy40SdPJjH51\",\"object\":\"chat.completion.chunk\",\"created\":1776883733,\"model\":\"qwen/qwen3-next-80b-a3b-instruct-2509\",\"provider\":\"DeepInfra\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"tool_calls\",\"native_finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":147,\"completion_tokens\":16,\"total_tokens\":163,\"cost\":0.00003083,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.00003083,\"upstream_inference_prompt_cost\":0.00001323,\"upstream_inference_completions_cost\":0.0000176},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"image_tokens\":0,\"audio_tokens\":0}}}\n\ndata: [DONE]\n\n"
+  },
+  "duration_ms": 449
+}

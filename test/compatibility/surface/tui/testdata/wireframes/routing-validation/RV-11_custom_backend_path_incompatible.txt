@@ -1,0 +1,24 @@
+Swobu! 🧌                                        ready   [ ? ] [› lab] [ staging ] [ + ]
+───────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾                                                                          
+    name              lab                                       edit ↵                 
+    endpoint          /c/lab/                                   copy ↵                 
+    delete workspace                                            delete ↵               
+                                                                                       
+  routing ▾                                                                            
+    run on            Custom                                    choose ↵               
+>   models            1 configured                              manage ↵               
+                                                                                       
+  clients ▸                                                                            
+    not set                                                                            
+                                                                                       
+  traffic ▸                                                                            
+    no traffic yet                                                                     
+                                                                                       
+                                                                                       
+                                                                                       
+                                                                                       
+                                                                                       
+                                                                                       
+───────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ manage   ? help   esc back   tab tabs                                      

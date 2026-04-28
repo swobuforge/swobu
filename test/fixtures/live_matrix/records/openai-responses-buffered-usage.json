@@ -1,0 +1,16 @@
+{
+  "captured_at": "2026-04-26T10:41:23Z",
+  "scenario_case": {
+    "id": "openai-responses-buffered-usage",
+    "provider": "openai",
+    "protocol": "responses",
+    "transport": "http_post",
+    "scenario": "text_min",
+    "source": "manual_live_mine"
+  },
+  "response": {
+    "status_code": 200,
+    "body": "{\n  \"id\": \"resp_0db3daa50b36415d0069edebaed67c81969a8f73dd70f7e49f\",\n  \"object\": \"response\",\n  \"created_at\": 1777200046,\n  \"status\": \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\": \"developer\"\n  },\n  \"completed_at\": 1777200048,\n  \"error\": null,\n  \"frequency_penalty\": 0.0,\n  \"incomplete_details\": null,\n  \"instructions\": null,\n  \"max_output_tokens\": 32,\n  \"max_tool_calls\": null,\n  \"model\": \"gpt-4.1-mini-2025-04-14\",\n  \"moderation\": null,\n  \"output\": [\n    {\n      \"id\": \"msg_0db3daa50b36415d0069edebb005108196bb32d946ed515d0f\",\n      \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\": [\n        {\n          \"type\": \"output_text\",\n          \"annotations\": [],\n          \"logprobs\": [],\n          \"text\": \"OK\"\n        }\n      ],\n      \"role\": \"assistant\"\n    }\n  ],\n  \"parallel_tool_calls\": true,\n  \"presence_penalty\": 0.0,\n  \"previous_response_id\": null,\n  \"prompt_cache_key\": null,\n  \"prompt_cache_retention\": \"in_memory\",\n  \"reasoning\": {\n    \"effort\": null,\n    \"summary\": null\n  },\n  \"safety_identifier\": null,\n  \"service_tier\": \"default\",\n  \"store\": true,\n  \"temperature\": 1.0,\n  \"text\": {\n    \"format\": {\n      \"type\": \"text\"\n    },\n    \"verbosity\": \"medium\"\n  },\n  \"tool_choice\": \"auto\",\n  \"tools\": [],\n  \"top_logprobs\": 0,\n  \"top_p\": 1.0,\n  \"truncation\": \"disabled\",\n  \"usage\": {\n    \"input_tokens\": 10,\n    \"input_tokens_details\": {\n      \"cached_tokens\": 0\n    },\n    \"output_tokens\": 2,\n    \"output_tokens_details\": {\n      \"reasoning_tokens\": 0\n    },\n    \"total_tokens\": 12\n  },\n  \"user\": null,\n  \"metadata\": {}\n}"
+  },
+  "error": null
+}

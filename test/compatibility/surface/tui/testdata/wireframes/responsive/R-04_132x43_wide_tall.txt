@@ -1,0 +1,27 @@
+Swobu! 🧌                                                                                    ready   [ ? ] [› acme] [ staging ] [ + ]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾                                                                                                                       
+    name               acme                                     edit ↵                                                              
+    endpoint           /c/acme/                                 copy ↵                                                              
+    delete workspace                                            delete ↵                                                            
+                                                                                                                                    
+  routing ▾                                                                                                                         
+    run on             OpenRouter                               choose ↵                                                            
+>   models             1 configured                             manage ↵                                                            
+                                                                                                                                    
+  clients ▸                                                                                                                         
+    not set                                                                                                                         
+                                                                                                                                    
+  traffic ▸                                                                                                                         
+    no traffic yet                                                                                                                  
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+                                                                                                                                    
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ manage   ? help   esc back   tab tabs                                                                                   
