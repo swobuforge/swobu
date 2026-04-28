@@ -1,0 +1,24 @@
+Swobu! 🧌                                       ready   [ ? ] [ + new workspace ]
+────────────────────────────────────────────────────────────────────────────────
+  workspace ▾                                                                   
+    name              acme                                      edit ↵          
+    endpoint          /c/acme/                                                  
+    create            not ready                                                 
+                                                                                
+  routing ▾                                                                     
+    run on            choose a provider                         choose ↵        
+  >    OpenAI                                                                   
+       OpenRouter                                                               
+       Anthropic                                                                
+       Ollama                                                                   
+       Custom                                                                   
+    credentials       not set                                   choose ↵        
+    model             not set                                   choose ↵        
+                                                                                
+  clients ▸                                                                     
+    not set                                                                     
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ select   esc close   ? help                                         

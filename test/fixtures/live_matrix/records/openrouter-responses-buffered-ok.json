@@ -1,0 +1,16 @@
+{
+  "captured_at": "2026-04-26T10:29:42Z",
+  "scenario_case": {
+    "id": "openrouter-responses-buffered-ok",
+    "provider": "openrouter",
+    "protocol": "responses",
+    "transport": "http_post",
+    "scenario": "text_min",
+    "source": "manual_live_mine"
+  },
+  "response": {
+    "status_code": 200,
+    "body": "\n         \n{\"id\":\"gen-1777199261-yDx6dB5aBNgcmKcENFfK\",\"object\":\"response\",\"created_at\":1777199261,\"model\":\"openai/gpt-4.1-nano-2025-04-14\",\"status\":\"completed\",\"completed_at\":1777199262,\"output\":[{\"id\":\"msg_tmp_ntjj56i95hp\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\",\"annotations\":[],\"logprobs\":[]}]}],\"error\":null,\"incomplete_details\":null,\"tools\":[],\"tool_choice\":\"auto\",\"parallel_tool_calls\":true,\"max_output_tokens\":32,\"temperature\":1,\"top_p\":1,\"presence_penalty\":0,\"frequency_penalty\":0,\"top_logprobs\":0,\"max_tool_calls\":null,\"metadata\":{},\"background\":false,\"previous_response_id\":null,\"service_tier\":\"default\",\"truncation\":\"disabled\",\"store\":false,\"instructions\":null,\"text\":{\"format\":{\"type\":\"text\"}},\"reasoning\":null,\"safety_identifier\":null,\"prompt_cache_key\":null,\"usage\":{\"input_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens\":2,\"output_tokens_details\":{\"reasoning_tokens\":0},\"total_tokens\":12,\"cost\":0.0000018,\"is_byok\":false,\"cost_details\":{\"upstream_inference_cost\":0.0000018,\"upstream_inference_input_cost\":0.000001,\"upstream_inference_output_cost\":8e-7}}}"
+  },
+  "error": null
+}

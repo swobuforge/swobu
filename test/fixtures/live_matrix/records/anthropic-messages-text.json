@@ -1,0 +1,116 @@
+{
+  "captured_at": "2026-04-28T01:33:22.396757028+01:00",
+  "scenario_case": {
+    "id": "anthropic-messages-text",
+    "provider": "anthropic",
+    "protocol": "messages",
+    "transport": "http_post",
+    "scenario": "text_min",
+    "base_url": "https://api.anthropic.com/v1",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "model": "claude-haiku-4-5-20251001"
+  },
+  "request": {
+    "method": "POST",
+    "url": "/messages",
+    "path": "/messages",
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "swobu/dev",
+      "anthropic-version": "2023-06-01"
+    },
+    "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with OK\"}]}],\"max_tokens\":256}"
+  },
+  "response": {
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "status_code": 200,
+    "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_012dc7MjrAbLVAqMtbbGANeZ\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":4,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"}}"
+  },
+  "client": {
+    "request": {
+      "method": "POST",
+      "url": "http://127.0.0.1:45763/c/anthropic-messages-text/v1/messages",
+      "path": "/c/anthropic-messages-text/v1/messages",
+      "headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "swobu-live-matrix/1",
+        "anthropic-version": "2023-06-01"
+      },
+      "body": "{\"max_tokens\":32,\"messages\":[{\"content\":\"Reply with OK\",\"role\":\"user\"}],\"model\":\"claude-haiku-4-5-20251001\"}"
+    },
+    "response": {
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "status_code": 200,
+      "body": "{\"id\":\"msg_012dc7MjrAbLVAqMtbbGANeZ\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5-20251001\",\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}"
+    }
+  },
+  "session": {
+    "session_id": "anthropic-messages-text-session",
+    "request_id": "anthropic-messages-text-request",
+    "events": [
+      {
+        "seq": 1,
+        "direction": "client-\u003eswobu",
+        "at": "2026-04-28T01:33:22.425044089+01:00",
+        "wire": {
+          "method": "POST",
+          "url": "http://127.0.0.1:45763/c/anthropic-messages-text/v1/messages",
+          "path": "/c/anthropic-messages-text/v1/messages",
+          "headers": {
+            "Content-Type": "application/json",
+            "User-Agent": "swobu-live-matrix/1",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": "{\"max_tokens\":32,\"messages\":[{\"content\":\"Reply with OK\",\"role\":\"user\"}],\"model\":\"claude-haiku-4-5-20251001\"}"
+        }
+      },
+      {
+        "seq": 2,
+        "direction": "swobu-\u003eprovider",
+        "attempt_index": 1,
+        "at": "2026-04-28T01:33:22.426345201+01:00",
+        "wire": {
+          "method": "POST",
+          "url": "/messages",
+          "path": "/messages",
+          "headers": {
+            "Content-Type": "application/json",
+            "User-Agent": "swobu/dev",
+            "anthropic-version": "2023-06-01"
+          },
+          "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with OK\"}]}],\"max_tokens\":256}"
+        }
+      },
+      {
+        "seq": 3,
+        "direction": "provider-\u003eswobu",
+        "attempt_index": 1,
+        "at": "2026-04-28T01:33:24.875972925+01:00",
+        "wire": {
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "status_code": 200,
+          "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_012dc7MjrAbLVAqMtbbGANeZ\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":4,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"}}"
+        }
+      },
+      {
+        "seq": 4,
+        "direction": "swobu-\u003eclient",
+        "at": "2026-04-28T01:33:24.87706603+01:00",
+        "wire": {
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "status_code": 200,
+          "body": "{\"id\":\"msg_012dc7MjrAbLVAqMtbbGANeZ\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-4-5-20251001\",\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}"
+        }
+      }
+    ]
+  },
+  "duration_ms": 2480
+}

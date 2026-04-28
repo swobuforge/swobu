@@ -1,0 +1,16 @@
+{
+  "captured_at": "2026-04-26T10:38:12Z",
+  "scenario_case": {
+    "id": "openai-responses-previous-response-not-found",
+    "provider": "openai",
+    "protocol": "responses",
+    "transport": "http_post",
+    "scenario": "continuity_missing_parent",
+    "source": "manual_live_mine"
+  },
+  "response": {
+    "status_code": 400,
+    "body": "{\n  \"error\": {\n    \"message\": \"Previous response with id 'resp_does_not_exist' not found.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"previous_response_id\",\n    \"code\": \"previous_response_not_found\"\n  }\n}"
+  },
+  "error": null
+}

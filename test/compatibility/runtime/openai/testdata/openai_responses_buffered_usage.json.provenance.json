@@ -1,0 +1,5 @@
+{
+  "source_record": "test/fixtures/live_matrix/records/openai-responses-buffered-usage.json",
+  "source_field": "response.body",
+  "extraction": "verbatim"
+}

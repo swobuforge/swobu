@@ -1,0 +1,38 @@
+[
+  {
+    "id": "openai-chat-tool-sse",
+    "provider": "openai",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "api_key_env": "OPENAI_API_KEY",
+    "model_env": "OPENAI_MODEL"
+  },
+  {
+    "id": "openai-responses-text-sse",
+    "provider": "openai",
+    "protocol": "responses",
+    "transport": "sse_streaming",
+    "scenario": "text_min",
+    "api_key_env": "OPENAI_API_KEY",
+    "model_env": "OPENAI_MODEL"
+  },
+  {
+    "id": "openrouter-chat-tool-sse",
+    "provider": "openrouter",
+    "protocol": "chat_completions",
+    "transport": "sse_streaming",
+    "scenario": "tool_min",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "model_env": "OPENROUTER_MODEL"
+  },
+  {
+    "id": "anthropic-messages-text",
+    "provider": "anthropic",
+    "protocol": "messages",
+    "transport": "http_post",
+    "scenario": "text_min",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "model": "claude-haiku-4-5-20251001"
+  }
+]

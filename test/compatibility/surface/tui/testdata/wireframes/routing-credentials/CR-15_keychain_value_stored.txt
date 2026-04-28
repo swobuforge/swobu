@@ -1,0 +1,24 @@
+Swobu! 🧌                                                   ready   [ ? ] [ + new workspace ]
+────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾                                                                               
+    name              test                                      edit ↵                      
+    endpoint          /c/test/                                                              
+    create            not ready                                                             
+                                                                                            
+  routing ▾                                                                                 
+    run on            OpenRouter                                choose ↵                    
+    credentials       keychain                                  choose ↵                    
+    key slot          openrouter/default                        edit ↵                      
+>   key value         missing                                   edit ↵                      
+      key value         paste key value_                          save ↵                    
+    model             not set                                   choose ↵                    
+                                                                                            
+  clients ▸                                                                                 
+    not set                                                                                 
+                                                                                            
+  traffic ▸                                                                                 
+    empty                                                                                   
+                                                                                            
+                                                                                            
+────────────────────────────────────────────────────────────────────────────────────────────
+↵ save   esc close   ? help                                                                 

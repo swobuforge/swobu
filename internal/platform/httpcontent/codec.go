@@ -1,0 +1,75 @@
+package httpcontent
+
+import (
+	"bytes"
+	"compress/gzip"
+	"compress/zlib"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/klauspost/compress/zstd"
+)
+
+// DecodeBytes removes supported HTTP content codings from a fully buffered body.
+// It exists for request bodies where canonical interpretation needs decoded bytes first.
+func DecodeBytes(contentEncoding string, raw []byte) ([]byte, error) {
+	contentEncoding = normalizeContentEncoding(contentEncoding)
+	if contentEncoding == "" || contentEncoding == "identity" {
+		return append([]byte(nil), raw...), nil
+	}
+
+	reader, err := newDecoder(contentEncoding, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = reader.Close()
+	}()
+
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s body: %w", contentEncoding, err)
+	}
+	return decoded, nil
+}
+
+// DecodeStream removes supported HTTP content codings without forcing full-buffer
+// reads, preserving incremental streaming semantics at the transport edge.
+func DecodeStream(contentEncoding string, body io.ReadCloser) (io.ReadCloser, error) {
+	contentEncoding = normalizeContentEncoding(contentEncoding)
+	if contentEncoding == "" || contentEncoding == "identity" {
+		return body, nil
+	}
+	return newDecoder(contentEncoding, body)
+}
+
+func normalizeContentEncoding(contentEncoding string) string {
+	return strings.ToLower(strings.TrimSpace(contentEncoding))
+}
+
+func newDecoder(contentEncoding string, body io.Reader) (io.ReadCloser, error) {
+	switch contentEncoding {
+	case "gzip", "x-gzip":
+		return gzip.NewReader(body)
+	case "deflate":
+		return zlib.NewReader(body)
+	case "zstd":
+		reader, err := zstd.NewReader(body)
+		if err != nil {
+			return nil, err
+		}
+		return zstdReadCloser{Decoder: reader}, nil
+	default:
+		return nil, fmt.Errorf("unsupported content encoding %q", contentEncoding)
+	}
+}
+
+type zstdReadCloser struct {
+	*zstd.Decoder
+}
+
+func (r zstdReadCloser) Close() error {
+	r.Decoder.Close()
+	return nil
+}
