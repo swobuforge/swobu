@@ -18,22 +18,16 @@ const telemetryEndpointEnv = "SWOBU_TELEMETRY_ENDPOINT"
 const telemetryIntervalEnv = "SWOBU_TELEMETRY_INTERVAL"
 const telemetryDebugEnv = "SWOBU_TELEMETRY_DEBUG"
 
-// telemetryProjectionSource is the explicit seam between telemetry export and
-// runtime evidence/status projection truth.
-type telemetryProjectionSource interface {
-	StatusProjectionForScope(scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error)
-}
-
-type embeddedTelemetryRuntime struct {
-	store            telemetry.Store
-	emitter          telemetry.Emitter
-	now              func() time.Time
-	projectionSource telemetryProjectionSource
-	once             sync.Once
-	stopCh           chan struct{}
-	doneCh           chan struct{}
-	hasLast          bool
-	lastCount        evidencestore.StatusCounters
+type embeddedTelemetryRuntimeState struct {
+	store          telemetry.Store
+	emitter        telemetry.Emitter
+	now            func() time.Time
+	projectionLoad func(scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error)
+	once           sync.Once
+	stopCh         chan struct{}
+	doneCh         chan struct{}
+	hasLast        bool
+	lastCount      evidencestore.StatusCounters
 }
 
 func (d *Daemon) startTelemetryRuntime() {
@@ -140,10 +134,10 @@ func (d *Daemon) emitProjectionTelemetryBestEffort(ctx context.Context, includeI
 	if includeInstall {
 		d.telemetry.emitter.EmitInstall(ctx, state, controlplane.SwobuVersion(), runtime.GOOS, runtime.GOARCH)
 	}
-	if d.telemetry.projectionSource == nil {
+	if d.telemetry.projectionLoad == nil {
 		return
 	}
-	projection, err := d.telemetry.projectionSource.StatusProjectionForScope(evidencestore.ProjectionScope{Kind: evidencestore.ProjectionScopeAll})
+	projection, err := d.telemetry.projectionLoad(evidencestore.ProjectionScope{Kind: evidencestore.ProjectionScopeAll})
 	if err != nil {
 		return
 	}
