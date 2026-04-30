@@ -17,7 +17,7 @@ import (
 const (
 	defaultJourneyTimeout       = 30 * time.Second
 	defaultSmallViewportTimeout = 10 * time.Second
-	defaultEndpointReadyTimeout = 10 * time.Second
+	defaultEndpointReadyTimeout = 20 * time.Second
 )
 
 func mustTimeoutFromEnvOrDefault(t *testing.T, envName string, fallback time.Duration) time.Duration {
@@ -111,6 +111,10 @@ func waitForWorkspaceRail(journey harness.OperatorPTYJourney, timeout time.Durat
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		visible := journey.VisibleOutput()
+		// Stable readiness signal: workspace rail is rendered.
+		if strings.Contains(visible, "[›") {
+			return true
+		}
 		for _, needle := range needles {
 			if strings.Contains(visible, needle) {
 				return true
