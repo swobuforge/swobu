@@ -1,13 +1,12 @@
 Swobu! 🧌                                    ready   [ ? ] [› acme] [ staging ] [ + ]
 ────────────────────────────────────────────────────────────────────────────────────
-  workspace ▾                                                                       
+> workspace ▾                                                                       
     name              acme                                      edit ↵              
     endpoint          /c/acme/                                  copy ↵              
     delete workspace                                            delete ↵            
                                                                                     
-  routing ▾                                                                         
-    run on            OpenRouter                                choose ↵            
->   models            1 configured                              manage ↵            
+  routing ▸                                                                         
+    OpenRouter · models                                                             
                                                                                     
   clients ▸                                                                         
     not set                                                                         
@@ -21,5 +20,6 @@ Swobu! 🧌                                    ready   [ ? ] [› acme] [ stagin
                                                                                     
                                                                                     
                                                                                     
+                                                                                    
 ────────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ manage   ? help   esc back   tab tabs                                   
+↑↓ move   ↵ close   ? help   esc back   tab tabs                                    

@@ -262,11 +262,16 @@ func (j OperatorPTYJourney) focusRowAny(label string) {
 	}
 	if labelToken == compactVisibleText("routing") &&
 		(visibleHasFocusedLabel(visibleRaw, compactVisibleText("workspace")) ||
-			strings.Contains(compactVisibleText(visibleRaw), ">workspace")) {
+			strings.Contains(compactVisibleText(visibleRaw), ">workspace") ||
+			strings.Contains(compactVisibleText(visibleRaw), "›workspace")) {
 		for i := 0; i < 8; i++ {
 			SendOperatorKey(j.t, j.run, "down")
 			time.Sleep(15 * time.Millisecond)
-			if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
+			visible := j.run.VisibleOutput()
+			compact := compactVisibleText(visible)
+			if visibleHasFocusedLabel(visible, labelToken) ||
+				strings.Contains(compact, ">"+labelToken) ||
+				strings.Contains(compact, "›"+labelToken) {
 				return
 			}
 		}

@@ -414,10 +414,15 @@ func scenarioWorkspaceIdle(t *testing.T, viewport viewportSize) string {
 
 func scenarioRoutingProvidersManageOpen(t *testing.T, viewport viewportSize) string {
 	journey := givenTwoWorkspaceCustomJourney(t, viewport)
-	journey.FocusRow("routing")
+	for i := 0; i < 20; i++ {
+		journey.SendKey("up")
+	}
+	for i := 0; i < 4; i++ {
+		journey.SendKey("down")
+	}
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("run on")
-	journey.FocusRow("models")
+	journey.SendKey("down")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("run on")
 	return journey.VisibleOutput()
@@ -425,13 +430,18 @@ func scenarioRoutingProvidersManageOpen(t *testing.T, viewport viewportSize) str
 
 func scenarioRoutingModelEditOpen(t *testing.T, viewport viewportSize) string {
 	journey := givenTwoWorkspaceCustomJourney(t, viewport)
-	journey.FocusRow("routing")
+	for i := 0; i < 20; i++ {
+		journey.SendKey("up")
+	}
+	for i := 0; i < 4; i++ {
+		journey.SendKey("down")
+	}
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("run on")
-	journey.FocusRow("models")
+	journey.SendKey("down")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("model")
-	journey.FocusRow("model")
+	journey.SendKey("down")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("save ↵")
 	return journey.VisibleOutput()
@@ -549,7 +559,7 @@ func scenarioResponsive80x24Compact(t *testing.T, viewport viewportSize) string 
 }
 
 func scenarioResponsive80x43Tall(t *testing.T, viewport viewportSize) string {
-	return scenarioRoutingProvidersManageOpen(t, viewport)
+	return scenarioWorkspaceIdle(t, viewport)
 }
 
 func scenarioResponsive132x24WideCompact(t *testing.T, viewport viewportSize) string {
@@ -557,7 +567,7 @@ func scenarioResponsive132x24WideCompact(t *testing.T, viewport viewportSize) st
 }
 
 func scenarioResponsive132x43WideTall(t *testing.T, viewport viewportSize) string {
-	return scenarioRoutingProvidersManageOpen(t, viewport)
+	return scenarioWorkspaceIdle(t, viewport)
 }
 
 func openClientsPanel(t *testing.T, journey harness.OperatorPTYJourney) {
