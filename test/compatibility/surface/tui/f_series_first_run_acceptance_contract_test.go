@@ -161,23 +161,15 @@ func TestFSeries_F08_SuccessTransition(t *testing.T) {
 
 func enterFirstRunName(t *testing.T, journey harness.OperatorPTYJourney, name string) {
 	t.Helper()
-	journey.WaitVisible("name")
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		visible := journey.VisibleOutput()
-		if firstRunNameEditorOpen(visible) {
-			break
-		}
+	journey.WaitVisible("choose a workspace name")
+	for i := 0; i < 3 && !firstRunNameEditorOpen(journey.VisibleOutput()); i++ {
+		journey.SendKey("up")
+		time.Sleep(20 * time.Millisecond)
+	}
+	for i := 0; i < 3 && !firstRunNameEditorOpen(journey.VisibleOutput()); i++ {
 		journey.SendKey("down")
 		journey.ActivateFocusedRow()
 		time.Sleep(60 * time.Millisecond)
-	}
-	if !firstRunNameEditorOpen(journey.VisibleOutput()) {
-		for i := 0; i < 8 && !firstRunNameEditorOpen(journey.VisibleOutput()); i++ {
-			journey.SendKey("up")
-			journey.ActivateFocusedRow()
-			time.Sleep(60 * time.Millisecond)
-		}
 	}
 	journey.WaitVisibleAny("↵ save", "save ↵")
 	journey.TypeText(name)
