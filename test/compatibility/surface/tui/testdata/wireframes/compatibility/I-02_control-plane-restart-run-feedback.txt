@@ -8,7 +8,7 @@ Swobu! 🧌                                         incompatible   [ daemon mism
                                                                                    
   recover ▾                                                                        
 >   restart daemon                                              run ↵              
-      -> failed to restart daemon: shutdown failed with status 404                 
+      -> failed to restart daemon: daemon URL is required                 
                                                                                    
     copy diagnostics                                            copy ↵             
       swobu dev                                                                    
