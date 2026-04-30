@@ -18,9 +18,13 @@ func (loop *AppLoop[M]) FollowUp() <-chan []update.Action {
 
 // Accept sends actions back into the loop from an async effect.
 func (loop *AppLoop[M]) Accept(actions []update.Action) {
+	ctx := loop.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	select {
 	case loop.followUp <- actions:
-	default:
+	case <-ctx.Done():
 	}
 }
 

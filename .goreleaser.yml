@@ -15,6 +15,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -27,6 +28,9 @@ archives:
       - swobu
     formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
     name_template: "swobu_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

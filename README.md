@@ -29,5 +29,9 @@ The runtime implementation is rooted inside `swobucli`:
   - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh -s -- --version vX.Y.Z`
 - custom bin dir:
   - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh -s -- --bin-dir "$HOME/.local/bin"`
+- windows (PowerShell, latest):
+  - `irm https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.ps1 | iex`
+- windows (PowerShell, pinned):
+  - `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.ps1))) -Version vX.Y.Z`
 
-The installer only downloads a release archive, verifies SHA256 against `checksums.txt`, and installs the `swobu` binary.
+The installers only download release archives, verify SHA256 against `checksums.txt`, and install the `swobu` binary.

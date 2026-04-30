@@ -43,3 +43,32 @@ func TestInstallScriptRejectsUnknownFlag(t *testing.T) {
 		t.Fatalf("unexpected error output:\n%s", string(out))
 	}
 }
+
+func TestInstallPowerShellScriptParsesAndDryRunsPinnedVersion(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh not found; skipping PowerShell installer dry-run test")
+	}
+
+	script := repoPath(t, "swobucli", "scripts", "install.ps1")
+	cmd := exec.Command("pwsh", "-NoLogo", "-NoProfile", "-File", script, "-Version", "v0.0.0-test", "-BinDir", "C:\\temp\\swobu-bin", "-DryRun")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.ps1 dry-run failed: %v\n%s", err, string(out))
+	}
+
+	text := string(out)
+	required := []string{
+		"tag=v0.0.0-test",
+		"os=windows",
+		"archive=swobu_v0.0.0-test_windows_",
+		"checksums_url=https://github.com/metrofun/swobu/releases/download/v0.0.0-test/checksums.txt",
+		"install_dir=C:\\temp\\swobu-bin",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("dry-run output missing %q:\n%s", item, text)
+		}
+	}
+}

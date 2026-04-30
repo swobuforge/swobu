@@ -15,7 +15,7 @@ func TestCockpitInteractionModes_FooterReflectsEditMode(t *testing.T) {
 func TestCockpitInteractionModes_EscClosesRunOnPickerLocally(t *testing.T) {
 	daemon := startDaemonWithOneCustomEndpoint(t, "acme")
 	journey := startJourneyWithDaemonAndWorkspaceRail(t, daemon.BaseURL, 160, 50, "acme")
-	journey.FocusRow("routing")
+	journey.FocusRowDown("routing")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("run on")
 	journey.FocusRow("run on")
@@ -29,7 +29,7 @@ func TestCockpitInteractionModes_EscClosesRunOnPickerLocally(t *testing.T) {
 func TestCockpitInteractionModes_EscClosesProvidersManageListLocally(t *testing.T) {
 	daemon := startDaemonWithOneCustomEndpoint(t, "acme")
 	journey := startJourneyWithDaemonAndWorkspaceRail(t, daemon.BaseURL, 160, 50, "acme")
-	journey.FocusRow("routing")
+	journey.FocusRowDown("routing")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("models")
 	journey.FocusRow("models")

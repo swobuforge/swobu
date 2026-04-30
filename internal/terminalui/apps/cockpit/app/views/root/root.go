@@ -5,6 +5,7 @@ import (
 
 	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	appviews "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
@@ -50,6 +51,10 @@ func workspaceBodyKey(model state.Model) string {
 
 func rootOnMountEffects() []update.Effect {
 	return []update.Effect{
+		stateeffect.RefreshDaemonStatusEffect{},
+		stateeffect.RefreshEndpointsEffect{},
+		stateeffect.RefreshCatalogEffect{},
+		stateeffect.RefreshStatusProjectionEffect{},
 		state.ScheduleDaemonRefreshEffect{},
 	}
 }

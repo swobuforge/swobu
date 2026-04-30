@@ -37,11 +37,11 @@ func TestRoot_OnMountStartsDaemonRefreshLoop(t *testing.T) {
 	t.Parallel()
 
 	effects := rootOnMountEffects()
-	if len(effects) != 1 {
-		t.Fatalf("on-mount effect count = %d, want 1", len(effects))
+	if len(effects) != 5 {
+		t.Fatalf("on-mount effect count = %d, want 5", len(effects))
 	}
-	if _, ok := effects[0].(state.ScheduleDaemonRefreshEffect); !ok {
-		t.Fatalf("on-mount effect = %T, want state.ScheduleDaemonRefreshEffect", effects[0])
+	if _, ok := effects[4].(state.ScheduleDaemonRefreshEffect); !ok {
+		t.Fatalf("on-mount effect[4] = %T, want state.ScheduleDaemonRefreshEffect", effects[4])
 	}
 }
 
