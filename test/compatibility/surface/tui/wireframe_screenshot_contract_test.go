@@ -202,10 +202,27 @@ func givenFirstRunJourney(t *testing.T, viewport viewportSize) harness.OperatorP
 
 func givenTwoWorkspaceCustomJourney(t *testing.T, viewport viewportSize) harness.OperatorPTYJourney {
 	t.Helper()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-4.1-mini","object":"model"}]}`))
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"chatcmpl_1","object":"chat.completion","created":1,"model":"gpt-4.1-mini","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+		case "/v1/messages":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
 	daemon := harness.StartDaemonProcess(t, harness.DaemonProcessConfig{
 		Endpoints: []endpointintent.Endpoint{
-			harness.NewEndpoint(t, "acme", "backend-a", harness.NewProviderConfig(t, "backend-a", "openrouter", "https://openrouter.ai/api/v1", "keychain", protocolsurface.ChatCompletions)),
-			harness.NewEndpoint(t, "staging", "backend-b", harness.NewProviderConfig(t, "backend-b", "anthropic", "https://api.anthropic.com/v1", "keychain", protocolsurface.Messages)),
+			harness.NewEndpoint(t, "acme", "backend-a", harness.NewProviderConfig(t, "backend-a", "openrouter", upstream.URL+"/v1", "keychain", protocolsurface.ChatCompletions)),
+			harness.NewEndpoint(t, "staging", "backend-b", harness.NewProviderConfig(t, "backend-b", "anthropic", upstream.URL+"/v1", "keychain", protocolsurface.Messages)),
 		},
 	})
 	journey := startJourneyWithDaemonAndWorkspaceRail(t, daemon.BaseURL, viewport.cols, viewport.rows, "acme", "staging")

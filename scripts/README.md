@@ -8,3 +8,4 @@ Rules:
 
 Script index:
 - `install.sh`: operator installer entrypoint for release binaries (download, checksum verify, install)
+- `install.ps1`: Windows PowerShell installer entrypoint for release binaries (download, checksum verify, install)

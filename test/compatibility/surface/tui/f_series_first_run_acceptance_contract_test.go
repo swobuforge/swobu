@@ -161,19 +161,32 @@ func TestFSeries_F08_SuccessTransition(t *testing.T) {
 
 func enterFirstRunName(t *testing.T, journey harness.OperatorPTYJourney, name string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	journey.WaitVisible("name")
+	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(journey.VisibleOutput(), "↵ save") {
+		visible := journey.VisibleOutput()
+		if firstRunNameEditorOpen(visible) {
 			break
 		}
 		journey.SendKey("down")
 		journey.ActivateFocusedRow()
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(60 * time.Millisecond)
 	}
-	journey.WaitVisible("↵ save")
+	if !firstRunNameEditorOpen(journey.VisibleOutput()) {
+		for i := 0; i < 8 && !firstRunNameEditorOpen(journey.VisibleOutput()); i++ {
+			journey.SendKey("up")
+			journey.ActivateFocusedRow()
+			time.Sleep(60 * time.Millisecond)
+		}
+	}
+	journey.WaitVisibleAny("↵ save", "save ↵")
 	journey.TypeText(name)
 	journey.SendKey("enter")
 	journey.WaitVisible(name)
+}
+
+func firstRunNameEditorOpen(visible string) bool {
+	return strings.Contains(visible, "↵ save") || strings.Contains(visible, "save ↵")
 }
 
 func openFirstRunRouting(t *testing.T, journey harness.OperatorPTYJourney) {

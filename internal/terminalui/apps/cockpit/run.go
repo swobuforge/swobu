@@ -10,9 +10,16 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
+	operatorclient "github.com/metrofun/swobu/internal/app/operator/client"
+	"github.com/metrofun/swobu/internal/domain/endpointintent"
+	platformconfig "github.com/metrofun/swobu/internal/platform/config"
 	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	rootviews "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/views/root"
@@ -28,11 +35,8 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, _ io.Writer) er
 	if err != nil {
 		return err
 	}
-	runner := host.New(screen, rootviews.Root(), state.Model{
-		HeaderStatus:  daemonstate.HeaderOfflineStale,
-		DaemonState:   daemonstate.DaemonStateUnreachable,
-		StreamEnabled: true,
-	}, state.Reduce)
+	model := bootstrapModelFromDaemon(ctx)
+	runner := host.New(screen, rootviews.Root(), model, state.Reduce)
 	restoreForegroundRunner := stateeffect.SetForegroundClientRunner(func(ctx context.Context, executable string, args []string, env map[string]string) (int, error) {
 		exitCode, err := host.RunForegroundClient(ctx, executable, args, env)
 		if err == nil {
@@ -48,4 +52,71 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, _ io.Writer) er
 	})
 	defer restoreForegroundRunner()
 	return runner.Run(ctx)
+}
+
+func bootstrapModelFromDaemon(ctx context.Context) state.Model {
+	model := state.Model{
+		HeaderStatus:  daemonstate.HeaderOfflineStale,
+		DaemonState:   daemonstate.DaemonStateUnreachable,
+		StreamEnabled: true,
+	}
+	client := operatorclient.New(&http.Client{Timeout: 800 * time.Millisecond}, platformconfig.DefaultDaemonURL())
+	endpoints, err := client.List(ctx)
+	if err != nil || len(endpoints) == 0 {
+		return model
+	}
+	model.HeaderStatus = daemonstate.HeaderReady
+	model.DaemonState = daemonstate.DaemonStateUp
+	model.EndpointSnapshots = make([]state.EndpointSnapshot, 0, len(endpoints))
+	for _, ep := range endpoints {
+		snapshot := endpointSnapshotFromIntent(ep)
+		if strings.TrimSpace(snapshot.Name) == "" {
+			continue
+		}
+		model.EndpointSnapshots = append(model.EndpointSnapshots, snapshot)
+	}
+	model.Endpoints = endpointSnapshotNames(model.EndpointSnapshots)
+	if len(model.Endpoints) > 0 {
+		model.CurrentEndpoint = model.Endpoints[0]
+		model.FooterShowTabs = true
+	}
+	return model
+}
+
+func endpointSnapshotFromIntent(ep endpointintent.Endpoint) state.EndpointSnapshot {
+	snapshot := state.EndpointSnapshot{
+		Name:                      strings.TrimSpace(ep.Name().String()),
+		SelectedProviderConfigRef: strings.TrimSpace(ep.SelectedProviderConfigRef().String()),
+		ProviderConfigs:           make([]state.ProviderConfigSnapshot, 0, len(ep.ProviderConfigs())),
+	}
+	for _, providerConfig := range ep.ProviderConfigs() {
+		snapshot.ProviderConfigs = append(snapshot.ProviderConfigs, state.ProviderConfigSnapshot{
+			Ref:           strings.TrimSpace(providerConfig.Ref().String()),
+			ProviderSpec:  strings.TrimSpace(providerConfig.ProviderSpec().String()),
+			BaseURL:       strings.TrimSpace(providerConfig.BaseURL()),
+			CredentialRef: strings.TrimSpace(providerConfig.CredentialRef()),
+			ModelID:       strings.TrimSpace(providerConfig.ModelID()),
+			TargetAlias:   strings.TrimSpace(providerConfig.TargetAlias()),
+			ProtocolKind:  strings.TrimSpace(providerConfig.ProtocolKind().String()),
+		})
+	}
+	return snapshot
+}
+
+func endpointSnapshotNames(entries []state.EndpointSnapshot) []string {
+	seen := make(map[string]struct{}, len(entries))
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }

@@ -27,10 +27,10 @@ func TestB080_OrderedTargetClarity_ProviderDisclosureIsDeterministicAndShowsSele
 
 	journey := startJourneyWithDaemonAndWorkspaceRail(t, daemon.BaseURL, 160, 50, "[› jobs]")
 	journey.WaitVisible("/c/jobs/")
-	journey.FocusRow("routing")
+	journey.FocusRowDown("routing")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("models")
-	journey.FocusRow("models")
+	journey.FocusRowDown("models")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("OpenAI")
 	journey.WaitVisible("Custom")

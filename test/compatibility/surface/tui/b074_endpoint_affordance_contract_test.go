@@ -1,7 +1,9 @@
 package tui_test
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/metrofun/swobu/internal/domain/endpointintent"
 	"github.com/metrofun/swobu/internal/domain/protocolsurface"
@@ -22,10 +24,8 @@ func TestB074_EndpointAffordance_RailShowsTabsAndCreateEntry(t *testing.T) {
 	journey := startJourneyWithDaemonAndWorkspaceRail(t, daemon.BaseURL, 160, 50, "[› acme]", "[› staging]")
 	journey.AssertVisibleContains("[ + ]")
 
-	journey.SendKey("tab")
-	journey.WaitVisible("[› staging]")
-	journey.SendKey("tab")
-	journey.WaitVisibleAny("[› +]", "[ + ]")
+	waitForRailSelectionAfterTab(t, journey, "[› staging]")
+	waitForRailSelectionAfterTab(t, journey, "[› +]")
 }
 
 func TestB074_EndpointAffordance_CanCreateSecondWorkspaceFromRailPlus(t *testing.T) {
@@ -35,12 +35,31 @@ func TestB074_EndpointAffordance_CanCreateSecondWorkspaceFromRailPlus(t *testing
 	journey.SendKey("tab")
 	journey.WaitVisibleAny("[› +]", "[ + ]")
 
-	enterFirstRunName(t, journey, "beta")
+	journey.FocusRowDown("name")
+	journey.ActivateFocusedRow()
+	journey.WaitVisibleAny("↵ save", "save ↵")
+	journey.TypeText("beta")
+	journey.SendKey("enter")
+	journey.WaitVisible("beta")
 	selectFirstRunProvider(t, journey)
 	chooseFirstRunKeyAndModel(t, journey)
 	journey.FocusRow("create")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("[› beta]")
+}
+
+func waitForRailSelectionAfterTab(t *testing.T, journey harness.OperatorPTYJourney, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		visible := journey.VisibleOutput()
+		if strings.Contains(visible, want) {
+			return
+		}
+		journey.SendKey("tab")
+		time.Sleep(40 * time.Millisecond)
+	}
+	t.Fatalf("tab traversal did not reach %q; visible=%q", want, journey.VisibleOutput())
 }
 
 func TestB074_EndpointAffordance_DeleteWorkspaceActionWorks(t *testing.T) {
@@ -49,7 +68,7 @@ func TestB074_EndpointAffordance_DeleteWorkspaceActionWorks(t *testing.T) {
 	journey := startJourneyWithDaemonAndWorkspaceRail(t, daemon.BaseURL, 160, 50, "acme")
 
 	journey.WaitVisible("[› acme]")
-	journey.FocusRow("delete workspace")
+	journey.FocusRowDown("delete workspace")
 	journey.ActivateFocusedRow()
 	journey.WaitVisible("[ + new workspace ]")
 	journey.WaitVisible("choose a workspace name")

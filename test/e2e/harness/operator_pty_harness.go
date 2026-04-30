@@ -33,6 +33,12 @@ func StartSwobuOperatorPTY(t *testing.T, cols int, rows int) *ptykit.HarnessClos
 	// Keep test-scoped daemon URL and related env overrides explicit for child PTY
 	// processes instead of relying on implicit inheritance behavior.
 	cmd.Env = os.Environ()
+	if daemonURL := strings.TrimSpace(os.Getenv("SWOBU_DAEMON_URL")); daemonURL != "" {
+		cmd.Env = append(cmd.Env, "SWOBU_DAEMON_URL="+daemonURL)
+	}
+	if configPath := strings.TrimSpace(os.Getenv("SWOBU_CONFIG_PATH")); configPath != "" {
+		cmd.Env = append(cmd.Env, "SWOBU_CONFIG_PATH="+configPath)
+	}
 	run, err := ptykit.StartCommandWithSize(cmd, cols, rows)
 	if err != nil {
 		t.Skipf("pty unavailable: %v", err)
@@ -195,12 +201,32 @@ func (j OperatorPTYJourney) focusRow(label string, direction string) {
 	if key != "up" && key != "down" {
 		j.t.Fatalf("unsupported focus direction %q", direction)
 	}
+	if labelToken == compactVisibleText("name") {
+		visible := j.run.VisibleOutput()
+		if strings.Contains(visible, "choose a workspace name") && visibleHasFocusedLabel(visible, compactVisibleText("workspace")) {
+			for i := 0; i < 4; i++ {
+				if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
+					return
+				}
+				SendOperatorKey(j.t, j.run, "down")
+				time.Sleep(15 * time.Millisecond)
+			}
+		}
+	}
 	for i := 0; i < 120; i++ {
 		if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
 			time.Sleep(10 * time.Millisecond)
 			if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
 				return
 			}
+		}
+		SendOperatorKey(j.t, j.run, key)
+		time.Sleep(15 * time.Millisecond)
+	}
+	for i := 0; i < 120; i++ {
+		compact := compactVisibleText(j.run.VisibleOutput())
+		if strings.Contains(compact, ">"+labelToken) || strings.Contains(compact, "›"+labelToken) {
+			return
 		}
 		SendOperatorKey(j.t, j.run, key)
 		time.Sleep(15 * time.Millisecond)
@@ -225,6 +251,26 @@ func (j OperatorPTYJourney) focusRowAny(label string) {
 	if visibleHasFocusedLabel(visibleRaw, labelToken) {
 		return
 	}
+	if labelToken == compactVisibleText("name") &&
+		strings.Contains(visibleRaw, "choose a workspace name") &&
+		visibleHasFocusedLabel(visibleRaw, compactVisibleText("workspace")) {
+		SendOperatorKey(j.t, j.run, "down")
+		time.Sleep(15 * time.Millisecond)
+		if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
+			return
+		}
+	}
+	if labelToken == compactVisibleText("routing") &&
+		(visibleHasFocusedLabel(visibleRaw, compactVisibleText("workspace")) ||
+			strings.Contains(compactVisibleText(visibleRaw), ">workspace")) {
+		for i := 0; i < 8; i++ {
+			SendOperatorKey(j.t, j.run, "down")
+			time.Sleep(15 * time.Millisecond)
+			if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
+				return
+			}
+		}
+	}
 	// Try both directions because disclosure rows may be inserted above or below
 	// the current focus depending on prior interactions.
 	for _, key := range []string{"down", "up"} {
@@ -234,6 +280,18 @@ func (j OperatorPTYJourney) focusRowAny(label string) {
 				if visibleHasFocusedLabel(j.run.VisibleOutput(), labelToken) {
 					return
 				}
+			}
+			SendOperatorKey(j.t, j.run, key)
+			time.Sleep(15 * time.Millisecond)
+		}
+	}
+	// Fallback for PTY frames that collapse line breaks: detect focused-row token
+	// in compact output and drive focus linearly.
+	for _, key := range []string{"down", "up"} {
+		for i := 0; i < 120; i++ {
+			compact := compactVisibleText(j.run.VisibleOutput())
+			if strings.Contains(compact, ">"+labelToken) || strings.Contains(compact, "›"+labelToken) {
+				return
 			}
 			SendOperatorKey(j.t, j.run, key)
 			time.Sleep(15 * time.Millisecond)
