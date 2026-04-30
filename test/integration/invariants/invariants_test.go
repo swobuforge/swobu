@@ -194,7 +194,7 @@ func TestCockpitVocabularyDoesNotDriftInAppUserspace(t *testing.T) {
 
 	for _, path := range goFiles {
 		rel := relativeToRoot(t, path)
-		if !strings.HasPrefix(rel, "internal/adapters/inbound/tui/app/views/") {
+		if !strings.HasPrefix(rel, "internal/terminalui/apps/cockpit/app/views/") {
 			continue
 		}
 		if strings.HasSuffix(rel, "_test.go") {
@@ -224,7 +224,7 @@ func TestAppSemanticRowsDoNotPassLayoutSkinStrings(t *testing.T) {
 
 	for _, path := range goFiles {
 		rel := relativeToRoot(t, path)
-		if !strings.HasPrefix(rel, "internal/adapters/inbound/tui/app/views/") {
+		if !strings.HasPrefix(rel, "internal/terminalui/apps/cockpit/app/views/") {
 			continue
 		}
 		if strings.HasSuffix(rel, "_test.go") {
@@ -266,11 +266,65 @@ func TestAppSemanticRowsDoNotPassLayoutSkinStrings(t *testing.T) {
 	}
 }
 
+func TestTerminalUIToolkitDoesNotImportApps(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	goFiles, err := collectGoFiles(root)
+	if err != nil {
+		t.Fatalf("collect go files: %v", err)
+	}
+
+	for _, path := range goFiles {
+		rel := relativeToRoot(t, path)
+		if !strings.HasPrefix(rel, "internal/terminalui/toolkit/") {
+			continue
+		}
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse %s: %v", rel, err)
+		}
+
+		for _, imp := range file.Imports {
+			importPath := strings.Trim(imp.Path.Value, `"`)
+			if strings.Contains(importPath, "/internal/terminalui/apps/") {
+				t.Fatalf("%s imports app surface %q; toolkit must remain app-agnostic", rel, importPath)
+			}
+		}
+	}
+}
+
+func TestTerminalUIRootContainsOnlyEngineToolkitApps(t *testing.T) {
+	t.Parallel()
+
+	root := repoPath(t, "swobucli", "internal", "terminalui")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read %s: %v", relativeToRoot(t, root), err)
+	}
+
+	want := []string{"apps", "engine", "toolkit"}
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		got = append(got, entry.Name())
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("terminalui root dirs = %v, want %v", got, want)
+	}
+}
+
 func TestRepoSupportFilesPresent(t *testing.T) {
 	t.Parallel()
 
 	required := []string{
 		"docs/README.md",
+		"docs/05-engineering/supported-environment-variables.md",
 		"tasks/README.md",
 		"tasks/templates/task-frame-template.md",
 		"tasks/ready/README.md",
@@ -290,10 +344,35 @@ func TestRepoSupportFilesPresent(t *testing.T) {
 	}
 }
 
+func TestSupportedEnvironmentVariablesDocIncludesCoreRuntimeVars(t *testing.T) {
+	t.Parallel()
+
+	path := repoPath(t, "docs", "05-engineering", "supported-environment-variables.md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read supported env vars doc: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"SWOBU_DAEMON_URL",
+		"SWOBU_CONFIG_PATH",
+		"SWOBU_TELEMETRY_STATE_PATH",
+		"DO_NOT_TRACK",
+		"SWOBU_TELEMETRY_ENDPOINT",
+		"SWOBU_TELEMETRY_INTERVAL",
+		"SWOBU_TELEMETRY_DEBUG",
+	}
+	for _, variable := range required {
+		if !strings.Contains(text, "`"+variable+"`") {
+			t.Fatalf("supported env vars doc missing runtime variable %q", variable)
+		}
+	}
+}
+
 func TestCockpitModelCatalogNeverUsesFallbackModelLists(t *testing.T) {
 	t.Parallel()
 
-	path := repoPath(t, "swobucli", "internal", "adapters", "inbound", "tui", "app", "state", "effect", "effect_daemon.go")
+	path := repoPath(t, "swobucli", "internal", "terminalui", "apps", "cockpit", "app", "state", "effect", "effect_daemon.go")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read effect daemon file: %v", err)
@@ -598,7 +677,7 @@ func isBannedIdentifier(path, name string) bool {
 
 func allowsWorkspaceToken(path string) bool {
 	normalized := filepath.ToSlash(path)
-	return strings.Contains(normalized, "/internal/adapters/inbound/tui/app/")
+	return strings.Contains(normalized, "/internal/terminalui/apps/cockpit/app/")
 }
 
 func allowsBannedTokenInPath(path, token string) bool {
@@ -721,7 +800,7 @@ func TestEngineElementDoesNotLeakOutsideEngine(t *testing.T) {
 
 		// Toolkit legitimately uses engine structural types — it's the bridge layer.
 		// Only app code is forbidden from returning them; app must use view.ViewSpec[M].
-		if !strings.Contains(rel, "internal/adapters/inbound/tui/app/") {
+		if !strings.Contains(rel, "internal/terminalui/apps/cockpit/app/") {
 			continue
 		}
 
@@ -786,7 +865,7 @@ func TestEngineInternalsNotImportedByAppCode(t *testing.T) {
 		rel := relativeToRoot(t, path)
 
 		// App userspace code must not import engine internals.
-		if !strings.Contains(rel, "internal/adapters/inbound/tui/app/views/") {
+		if !strings.Contains(rel, "internal/terminalui/apps/cockpit/app/views/") {
 			continue
 		}
 		// Test files are allowed to import engine internals for verification.

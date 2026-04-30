@@ -16,11 +16,12 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/metrofun/swobu/internal/adapters/inbound/tui"
 	"github.com/metrofun/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/metrofun/swobu/internal/bootstrap"
 	platformconfig "github.com/metrofun/swobu/internal/platform/config"
 	"github.com/metrofun/swobu/internal/telemetry"
+	uicli "github.com/metrofun/swobu/internal/terminalui/apps/cli"
+	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit"
 )
 
 // ExitCode is contract-bearing for `swobu status`: healthy=0, reachable but
@@ -37,14 +38,16 @@ const (
 type StatusPayload = daemonlifecycle.StatusPayload
 
 type Runner struct {
-	Stdin             io.Reader
-	Stdout            io.Writer
-	Stderr            io.Writer
-	HTTPClient        *http.Client
-	Start             func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
-	IsInteractive     func() bool
-	AttachOrStart     func(context.Context, io.Writer, io.Writer, *http.Client) error
-	LaunchInteractive func(context.Context, io.Reader, io.Writer, io.Writer) error
+	Stdin               io.Reader
+	Stdout              io.Writer
+	Stderr              io.Writer
+	HTTPClient          *http.Client
+	Start               func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
+	IsInteractive       func() bool
+	AttachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
+	LaunchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer) error
+	StartupHandoffFloor time.Duration
+	Sleep               func(time.Duration)
 }
 
 // daemon control, explicit lifecycle commands, and TUI launch handoff.
@@ -75,19 +78,33 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	}
 	launchInteractive := r.LaunchInteractive
 	if launchInteractive == nil {
-		launchInteractive = tui.Run
+		launchInteractive = cockpit.Run
 	}
 	attachOrStart := r.AttachOrStart
 	if attachOrStart == nil {
 		attachOrStart = defaultAttachOrStart
 	}
+	startupHandoffFloor := r.StartupHandoffFloor
+	if startupHandoffFloor <= 0 {
+		startupHandoffFloor = 1500 * time.Millisecond
+	}
+	sleep := r.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
 
 	if len(args) == 0 {
 		if isInteractive() {
+			if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
+				_, _ = fmt.Fprintln(stderr, err.Error())
+				return ExitDown
+			}
 			if err := attachOrStart(ctx, stdout, stderr, client); err != nil {
 				_, _ = fmt.Fprintln(stderr, err.Error())
 				return ExitDown
 			}
+			sleep(startupHandoffFloor)
+			uicli.NewStartupTranscript(stdout).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
 			if err := launchInteractive(ctx, stdin, stdout, stderr); err != nil {
 				_, _ = fmt.Fprintln(stderr, err.Error())
 				return ExitDown
@@ -117,7 +134,7 @@ func defaultIsInteractive() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
-func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), _ io.Writer, stderr io.Writer, args []string) ExitCode {
+func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to the root daemon config file")
@@ -128,11 +145,27 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, "--config is required")
 		return ExitDown
 	}
+	if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	transcript := uicli.NewStartupTranscript(stdout)
+	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventSplash})
+	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDisclosure})
+	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStart, ConfigPath: *configPath})
 
 	logger := slog.Default()
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "process_start", "config_path", *configPath)
 	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: *configPath, Logger: logger})
 	if err != nil {
+		transcript.Emit(uicli.StartupEvent{
+			Kind: uicli.StartupEventStartupFailed,
+			Text: err.Error(),
+			NextAction: []string{
+				"check daemon config path and values",
+				"run `swobu status`",
+			},
+		})
 		logger.Error("daemon lifecycle", "component", "daemon", "event", "initialization_failed", "error", err.Error())
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
@@ -140,6 +173,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 	defer func() {
 		_ = daemon.Close(context.Background())
 		logger.Info("daemon lifecycle", "component", "daemon", "event", "process_stop")
+		transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStop})
 	}()
 
 	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -164,6 +198,23 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		}
 		return ExitHealthy
 	}
+}
+
+func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
+	store := telemetry.NewStore()
+	state, err := store.LoadOrCreate()
+	if err != nil {
+		return err
+	}
+	if state.NoticeShown {
+		return nil
+	}
+	uicli.NewStartupTranscript(out).Emit(uicli.StartupEvent{
+		Kind: uicli.StartupEventTelemetryDisclosure,
+		Text: telemetry.FirstRunNoticeText(),
+	})
+	_, err = store.MarkNoticeShown()
+	return err
 }
 
 func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.Writer, args []string) ExitCode {
@@ -209,7 +260,7 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 	store := telemetry.NewStore()
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off|inspect|show-payload|reset")
+		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off")
 		return ExitDown
 	}
 
@@ -220,12 +271,6 @@ func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 		return runTelemetrySetEnabled(stdout, stderr, store, true, args[1:])
 	case "off":
 		return runTelemetrySetEnabled(stdout, stderr, store, false, args[1:])
-	case "inspect":
-		return runTelemetryInspect(stdout, stderr, store, args[1:])
-	case "show-payload":
-		return runTelemetryInspect(stdout, stderr, store, args[1:])
-	case "reset":
-		return runTelemetryReset(stdout, stderr, store, args[1:])
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown telemetry subcommand %q\n", args[0])
 		return ExitDown
@@ -245,12 +290,14 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, store telemetry.Stor
 	}
 	payload := struct {
 		Enabled            bool   `json:"enabled"`
+		DoNotTrack         bool   `json:"do_not_track"`
 		AnonymousInstallID string `json:"anonymous_install_id"`
 		FirstSeenAt        string `json:"first_seen_at"`
 		NoticeShown        bool   `json:"notice_shown"`
 		LastUploadAt       string `json:"last_upload_at,omitempty"`
 	}{
-		Enabled:            state.Enabled,
+		Enabled:            state.Enabled && !telemetry.DoNotTrackEnabled(),
+		DoNotTrack:         telemetry.DoNotTrackEnabled(),
 		AnonymousInstallID: state.AnonymousInstallID,
 		FirstSeenAt:        state.FirstSeenAt,
 		NoticeShown:        state.NoticeShown,
@@ -286,53 +333,6 @@ func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, store telemetry.
 	return ExitHealthy
 }
 
-func runTelemetryInspect(stdout io.Writer, stderr io.Writer, store telemetry.Store, args []string) ExitCode {
-	fs := flag.NewFlagSet("telemetry inspect", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return ExitDown
-	}
-	preview, err := store.InspectPreview()
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	if _, err := stdout.Write(append(preview, '\n')); err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	return ExitHealthy
-}
-
-func runTelemetryReset(stdout io.Writer, stderr io.Writer, store telemetry.Store, args []string) ExitCode {
-	fs := flag.NewFlagSet("telemetry reset", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return ExitDown
-	}
-	state, err := store.Reset()
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	payload := struct {
-		Enabled            bool   `json:"enabled"`
-		AnonymousInstallID string `json:"anonymous_install_id"`
-		FirstSeenAt        string `json:"first_seen_at"`
-		NoticeShown        bool   `json:"notice_shown"`
-	}{
-		Enabled:            state.Enabled,
-		AnonymousInstallID: state.AnonymousInstallID,
-		FirstSeenAt:        state.FirstSeenAt,
-		NoticeShown:        state.NoticeShown,
-	}
-	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	return ExitHealthy
-}
-
 func fetchStatus(ctx context.Context, client *http.Client, daemonURL string) (StatusPayload, ExitCode) {
 	payload, class := daemonlifecycle.FetchStatus(ctx, client, daemonURL)
 	switch class {
@@ -358,10 +358,15 @@ func daemonDone(d *bootstrap.Daemon) <-chan struct{} {
 
 func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, client *http.Client) error {
 	_, err := daemonlifecycle.AttachOrStart(ctx, daemonlifecycle.AttachOrStartInput{
-		DaemonURL:        platformconfig.DefaultDaemonURL(),
-		Client:           client,
-		Stdout:           stdout,
-		ReadinessTimeout: 15 * time.Second,
+		DaemonURL:            platformconfig.DefaultDaemonURL(),
+		Client:               client,
+		ResolveDefaultConfig: platformconfig.EnsureDefaultConfigFile,
+		Report:               startupReporterFromWriter(stdout),
+		ReadinessTimeout:     15 * time.Second,
 	})
 	return err
+}
+
+func startupReporterFromWriter(out io.Writer) daemonlifecycle.StartupReporter {
+	return uicli.NewStartupTranscript(out).DaemonLifecycleReporter()
 }

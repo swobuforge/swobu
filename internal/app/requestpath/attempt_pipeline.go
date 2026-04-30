@@ -30,7 +30,7 @@ func (o RequestHandler) defaultAttemptPipeline() AttemptPipeline {
 	return chainedAttemptPipeline{
 		invoke: chainAttemptPipeline(
 			o.terminalAttempt(),
-			o.evidenceMiddleware(),
+			o.runtimeEvidenceMiddleware(),
 			timeoutMiddleware(),
 			continuationMiddleware(),
 			o.toolChoicePolicyMiddleware(),
@@ -58,7 +58,7 @@ func (o RequestHandler) terminalAttempt() AttemptExecutorFn {
 	}
 }
 
-func (o RequestHandler) evidenceMiddleware() AttemptMiddleware {
+func (o RequestHandler) runtimeEvidenceMiddleware() AttemptMiddleware {
 	return func(next AttemptExecutorFn) AttemptExecutorFn {
 		return func(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
 			if o.evidence != nil {

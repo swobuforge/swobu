@@ -1,0 +1,37 @@
+package state
+
+import stateIntent "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/intent"
+
+type SelectEndpoint = stateIntent.SelectEndpoint
+type CreateEndpoint = stateIntent.CreateEndpoint
+type SetCreateDraftName = stateIntent.SetCreateDraftName
+type SetCreateDraftProviderSpec = stateIntent.SetCreateDraftProviderSpec
+type SetCreateDraftModelID = stateIntent.SetCreateDraftModelID
+type SetCreateDraftCredentialRef = stateIntent.SetCreateDraftCredentialRef
+type SetCreateDraftBaseURL = stateIntent.SetCreateDraftBaseURL
+type SetCreateDraftTargetAlias = stateIntent.SetCreateDraftTargetAlias
+type RenameCurrentEndpoint = stateIntent.RenameCurrentEndpoint
+type ToggleStream = stateIntent.ToggleStream
+type SetInteractionMode = stateIntent.SetInteractionMode
+type SetFocusedRowAffordance = stateIntent.SetFocusedRowAffordance
+type FocusNextAfterRebuildRequested = stateIntent.FocusNextAfterRebuildRequested
+type WorkspaceCreateRequested = stateIntent.WorkspaceCreateRequested
+type WorkspaceRenameRequested = stateIntent.WorkspaceRenameRequested
+type WorkspaceDeleteRequested = stateIntent.WorkspaceDeleteRequested
+type RoutingSaveStartedAction = stateIntent.RoutingSaveStartedAction
+type ClientAccessCheckStarted = stateIntent.ClientAccessCheckStarted
+type EndpointCopyRequested = stateIntent.EndpointCopyRequested
+type ClientBaseURLCopyRequested = stateIntent.ClientBaseURLCopyRequested
+type ClientLaunchRequested = stateIntent.ClientLaunchRequested
+type RefreshStatusProjectionRequested = stateIntent.RefreshStatusProjectionRequested
+type SetHelpTabOpenAction = stateIntent.SetHelpTabOpenAction
+type OpenSupportLinkRequested = stateIntent.OpenSupportLinkRequested
+type HelpDiagnosticsCopyRequested = stateIntent.HelpDiagnosticsCopyRequested
+type CompatibilityRestartRequested = stateIntent.CompatibilityRestartRequested
+type CompatibilityDiagnosticsCopyRequested = stateIntent.CompatibilityDiagnosticsCopyRequested
+type SaveSelectedTargetRequested = stateIntent.SaveSelectedTargetRequested
+type SaveProviderConfigRequested = stateIntent.SaveProviderConfigRequested
+type AddProviderConfigRequested = stateIntent.AddProviderConfigRequested
+type DeleteProviderConfigRequested = stateIntent.DeleteProviderConfigRequested
+type StoreKeychainCredentialRequested = stateIntent.StoreKeychainCredentialRequested
+type LoadCreateDraftModelCatalogRequested = stateIntent.LoadCreateDraftModelCatalogRequested

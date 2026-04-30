@@ -3,7 +3,6 @@ package telemetry
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -118,15 +117,39 @@ func TestStore_InspectPreview_UsesCurrentState(t *testing.T) {
 	}
 }
 
-func TestStore_Reset_RotatesIDAndClearsOutbox(t *testing.T) {
+func TestStore_InspectPreview_DoNotTrackOverride(t *testing.T) {
+	t.Setenv("DO_NOT_TRACK", "1")
+	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
+	store := Store{
+		StatePath: statePath,
+		Now:       func() time.Time { return time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC) },
+		Rand:      bytes.NewReader([]byte{0x0a, 0x0b, 0x0c, 0x0d}),
+	}
+	if _, err := store.LoadOrCreate(); err != nil {
+		t.Fatalf("LoadOrCreate returned error: %v", err)
+	}
+	raw, err := store.InspectPreview()
+	if err != nil {
+		t.Fatalf("InspectPreview returned error: %v", err)
+	}
+	var payload struct {
+		TelemetryEnabled bool `json:"telemetry_enabled"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if payload.TelemetryEnabled {
+		t.Fatal("telemetry_enabled = true, want false with DO_NOT_TRACK")
+	}
+}
+
+func TestStore_Reset_RotatesID(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	statePath := filepath.Join(root, "telemetry", "state.json")
-	outboxPath := filepath.Join(root, "telemetry", "outbox.jsonl")
 	store := Store{
-		StatePath:  statePath,
-		OutboxPath: outboxPath,
+		StatePath: statePath,
 		Now: func() time.Time {
 			return time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
 		},
@@ -140,13 +163,6 @@ func TestStore_Reset_RotatesIDAndClearsOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreate returned error: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(outboxPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll returned error: %v", err)
-	}
-	if err := os.WriteFile(outboxPath, []byte("{\"kind\":\"install_summary\"}\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile returned error: %v", err)
-	}
-
 	reset, err := store.Reset()
 	if err != nil {
 		t.Fatalf("Reset returned error: %v", err)
@@ -160,7 +176,36 @@ func TestStore_Reset_RotatesIDAndClearsOutbox(t *testing.T) {
 	if reset.NoticeShown {
 		t.Fatal("notice_shown = true after reset, want false")
 	}
-	if _, err := os.Stat(outboxPath); !os.IsNotExist(err) {
-		t.Fatalf("outbox exists after reset: err=%v", err)
+}
+
+func TestStore_MarkNoticeShown_PersistsState(t *testing.T) {
+	t.Parallel()
+
+	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
+	store := Store{
+		StatePath: statePath,
+		Now:       func() time.Time { return time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC) },
+		Rand:      bytes.NewReader([]byte{0x01, 0x02, 0x03, 0x04}),
+	}
+	state, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate returned error: %v", err)
+	}
+	if state.NoticeShown {
+		t.Fatal("notice_shown = true before mark, want false")
+	}
+	updated, err := store.MarkNoticeShown()
+	if err != nil {
+		t.Fatalf("MarkNoticeShown returned error: %v", err)
+	}
+	if !updated.NoticeShown {
+		t.Fatal("notice_shown = false after mark, want true")
+	}
+	reloaded, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate returned error: %v", err)
+	}
+	if !reloaded.NoticeShown {
+		t.Fatal("notice_shown = false after reload, want true")
 	}
 }

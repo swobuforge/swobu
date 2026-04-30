@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/adapters/inbound/tui/app/state/effect"
 	"github.com/metrofun/swobu/internal/app/operator/clientprofile"
 	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 )
 
 func TestClientHandoffProfiles_ContractPayloads(t *testing.T) {

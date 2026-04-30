@@ -7,10 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	tuieffect "github.com/metrofun/swobu/internal/adapters/inbound/tui/app/state/effect"
-	stateModel "github.com/metrofun/swobu/internal/adapters/inbound/tui/app/state/model"
 	"github.com/metrofun/swobu/internal/domain/endpointintent"
 	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	tuieffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 func TestTUIRoutingAliasMutation_PropagatesToCompatibilityModels(t *testing.T) {

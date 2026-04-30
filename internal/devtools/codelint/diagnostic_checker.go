@@ -31,6 +31,7 @@ const (
 	ruleTUILayoutSkin   = "tui-userspace-layout-skin"
 	ruleTUIGeometryCall = "tui-userspace-geometry-call"
 	ruleTUIClipboardCmd = "tui-clipboard-command-probe"
+	ruleTUIDependency   = "tui-dependency-law"
 	ruleRedundantTrim   = "redundant-model-trim"
 	ruleLongSleep       = "long-sleep"
 	ruleNoEmptyIface    = "no-empty-interface"
@@ -90,6 +91,7 @@ func checkDir(dir string, patterns []string) ([]Diagnostic, error) {
 			diagnostics = append(diagnostics, functionDiagnostics(pkg.Fset, file)...)
 			diagnostics = append(diagnostics, staleReferenceDiagnostics(pkg.Fset, file, fileDirectives)...)
 			diagnostics = append(diagnostics, tuiUserspaceDiagnostics(pkg.Fset, file, filename, fileDirectives)...)
+			diagnostics = append(diagnostics, terminalUIDependencyLawDiagnostics(pkg.Fset, file, filename, fileDirectives)...)
 			diagnostics = append(diagnostics, tuiClipboardCommodityDiagnostics(pkg.Fset, file, filename, fileDirectives)...)
 			diagnostics = append(diagnostics, redundantModelTrimDiagnostics(pkg.Fset, file, filename, fileDirectives)...)
 			diagnostics = append(diagnostics, longSleepDiagnostics(pkg.Fset, file, filename, fileDirectives)...)
@@ -235,7 +237,7 @@ func tuiClipboardCommodityDiagnostics(fset *token.FileSet, file *ast.File, filen
 }
 
 func isTUIClipboardFile(filename string) bool {
-	return strings.Contains(filename, "/internal/adapters/inbound/tui/") &&
+	return strings.Contains(filename, "/internal/terminalui/apps/cockpit/") &&
 		strings.HasSuffix(filename, "/clipboard.go")
 }
 
@@ -566,8 +568,8 @@ func numericLiteral(expr ast.Expr) (float64, bool) {
 }
 
 func isTUIViewOrSelectorFile(filename string) bool {
-	return strings.Contains(filename, "/internal/adapters/inbound/tui/app/views/") ||
-		strings.Contains(filename, "/internal/adapters/inbound/tui/app/selectors/")
+	return strings.Contains(filename, "/internal/terminalui/apps/cockpit/app/views/") ||
+		strings.Contains(filename, "/internal/terminalui/apps/cockpit/app/selectors/")
 }
 
 func isModelFieldAccess(expr ast.Node) bool {
@@ -691,6 +693,71 @@ func tuiUserspaceDiagnostics(fset *token.FileSet, file *ast.File, filename strin
 	return diagnostics
 }
 
+func terminalUIDependencyLawDiagnostics(fset *token.FileSet, file *ast.File, filename string, fileDirectives map[string]bool) []Diagnostic {
+	lane := terminalUILaneFromPath(filename)
+	if lane == "" {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	if fileDirectives[ruleTUIDependency] {
+		pos := fset.PositionFor(file.Package, false)
+		diagnostics = append(diagnostics, Diagnostic{
+			Filename: pos.Filename,
+			Line:     pos.Line,
+			Column:   pos.Column,
+			Message:  "terminalui dependency law does not support swobu:codelint ignore; remove ignore and fix imports",
+		})
+	}
+
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, "\"")
+		target := terminalUILaneFromPath(path)
+		if target == "" {
+			continue
+		}
+		if !terminalUILaneImportAllowed(lane, target) {
+			pos := fset.PositionFor(imp.Pos(), false)
+			diagnostics = append(diagnostics, Diagnostic{
+				Filename: pos.Filename,
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Message:  fmt.Sprintf("terminalui dependency law violation: lane %q must not import lane %q", lane, target),
+			})
+		}
+	}
+	return diagnostics
+}
+
+func terminalUILaneFromPath(path string) string {
+	switch {
+	case strings.Contains(path, "/internal/terminalui/apps/"):
+		return "apps"
+	case strings.Contains(path, "/internal/terminalui/toolkit/"):
+		return "toolkit"
+	case strings.Contains(path, "/internal/terminalui/engine/retained/"),
+		strings.Contains(path, "/internal/terminalui/engine/model/"),
+		strings.HasSuffix(path, "/internal/terminalui/engine/model"),
+		strings.Contains(path, "/internal/terminalui/engine/output/"),
+		strings.HasSuffix(path, "/internal/terminalui/engine/output"):
+		return "engine"
+	default:
+		return ""
+	}
+}
+
+func terminalUILaneImportAllowed(source, target string) bool {
+	switch source {
+	case "engine":
+		return target == "engine"
+	case "toolkit":
+		return target == "engine" || target == "toolkit"
+	case "apps":
+		return target == "engine" || target == "toolkit" || target == "apps"
+	default:
+		return true
+	}
+}
+
 func tuiUserspaceLayoutSkinDiagnostics(fset *token.FileSet, file *ast.File) []Diagnostic {
 	var diagnostics []Diagnostic
 	ast.Inspect(file, func(node ast.Node) bool {
@@ -779,18 +846,18 @@ func tuiUserspaceGeometryCallDiagnostics(fset *token.FileSet, file *ast.File) []
 }
 
 func isTUIAppUserspaceFile(filename string) bool {
-	return strings.Contains(filename, "/internal/adapters/inbound/tui/app/")
+	return strings.Contains(filename, "/internal/terminalui/apps/cockpit/app/")
 }
 
 func isTUIAppShellExceptionFile(filename string) bool {
-	return strings.HasSuffix(filename, "/internal/adapters/inbound/tui/app/views/shell.go")
+	return strings.HasSuffix(filename, "/internal/terminalui/apps/cockpit/app/views/shell.go")
 }
 
 func tuiUserspaceLayoutImportDiagnostics(fset *token.FileSet, file *ast.File) []Diagnostic {
 	var diagnostics []Diagnostic
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, "\"")
-		if !strings.HasSuffix(path, "/engine/rendergraph/layout") {
+		if !strings.HasSuffix(path, "/retained/rendergraph/layout") {
 			continue
 		}
 		pos := fset.PositionFor(imp.Pos(), false)

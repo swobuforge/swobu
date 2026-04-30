@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/metrofun/swobu/internal/telemetry"
 )
 
 func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing.T) {
@@ -37,6 +40,42 @@ func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing
 	}
 }
 
+func TestRunner_InteractiveShowsNoticeBeforeAttachOrStart(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
+	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	attachCalled := false
+	runner := Runner{
+		Stdout:        &stdout,
+		Stderr:        &stderr,
+		IsInteractive: func() bool { return true },
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+			attachCalled = true
+			state, err := telemetry.NewStore().LoadOrCreate()
+			if err != nil {
+				t.Fatalf("LoadOrCreate returned error: %v", err)
+			}
+			if !state.NoticeShown {
+				t.Fatal("notice_shown = false before attach/start")
+			}
+			return fmt.Errorf("stop after notice check")
+		},
+	}
+
+	exitCode := runner.Run(context.Background(), nil)
+	if exitCode != ExitDown {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
+	}
+	if !attachCalled {
+		t.Fatal("attach/start was not called")
+	}
+	if stdout.String() == "" {
+		t.Fatal("stdout is empty, want first-run notice")
+	}
+}
+
 func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testing.T) {
 	var statusCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,5 +98,29 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 	}
 	if statusCalls == 0 {
 		t.Fatal("status endpoint was not probed")
+	}
+}
+
+func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
+	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+
+	var stdout bytes.Buffer
+	runner := Runner{
+		Stdout:        &stdout,
+		IsInteractive: func() bool { return true },
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error { return nil },
+		Sleep:         func(time.Duration) {},
+		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer) error {
+			return nil
+		},
+	}
+
+	exitCode := runner.Run(context.Background(), nil)
+	if exitCode != ExitHealthy {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
+	}
+	if got := stdout.String(); !bytes.Contains([]byte(got), []byte("[HANDOFF] entering interactive cockpit")) {
+		t.Fatalf("stdout missing handoff event; stdout=%q", got)
 	}
 }

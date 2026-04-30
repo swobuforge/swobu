@@ -90,6 +90,7 @@ func Check(root string) ([]Diagnostic, error) {
 	diagnostics = append(diagnostics, checkTaskBuildVsBuyEvidence(root)...)
 	diagnostics = append(diagnostics, checkExecutionLedger(root)...)
 	diagnostics = append(diagnostics, checkReleaseNoteDiscipline(root)...)
+	diagnostics = append(diagnostics, checkTelemetryReleaseDiscipline(root)...)
 
 	slices.SortFunc(diagnostics, func(a, b Diagnostic) int {
 		if a.Warning != b.Warning {
@@ -164,6 +165,70 @@ func checkReleaseNoteDiscipline(root string) []Diagnostic {
 		diagnostics = append(diagnostics, Diagnostic{
 			Filename: rel(root, breakingPath),
 			Message:  fmt.Sprintf("support-band release-note discipline missing required marker %q", required),
+		})
+	}
+	return diagnostics
+}
+
+func checkTelemetryReleaseDiscipline(root string) []Diagnostic {
+	rolloutPath := filepath.Join(
+		root,
+		"docs",
+		"05-engineering",
+		"release-versioning-and-migration",
+		"release-gates-rollout-and-rollback.md",
+	)
+	telemetryPath := filepath.Join(
+		root,
+		"docs",
+		"05-engineering",
+		"observability-and-operability",
+		"product-telemetry-v1.md",
+	)
+
+	var diagnostics []Diagnostic
+	rolloutText, ok := safeText(rolloutPath)
+	if !ok {
+		diagnostics = append(diagnostics, Diagnostic{
+			Filename: rel(root, rolloutPath),
+			Message:  "could not read release-gates doc for telemetry release discipline check",
+		})
+		return diagnostics
+	}
+	for _, required := range []string{
+		"Telemetry disclosure",
+		"opt-out",
+		"`swobu telemetry off`",
+		"`swobu telemetry status`",
+	} {
+		if strings.Contains(rolloutText, required) {
+			continue
+		}
+		diagnostics = append(diagnostics, Diagnostic{
+			Filename: rel(root, rolloutPath),
+			Message:  fmt.Sprintf("telemetry release discipline missing required marker %q", required),
+		})
+	}
+
+	telemetryText, ok := safeText(telemetryPath)
+	if !ok {
+		diagnostics = append(diagnostics, Diagnostic{
+			Filename: rel(root, telemetryPath),
+			Message:  "could not read product-telemetry-v1 doc for telemetry release discipline check",
+		})
+		return diagnostics
+	}
+	for _, required := range []string{
+		"single canonical specification",
+		"enabled by default with user opt-out",
+		"Release blockers for telemetry-enabled launch",
+	} {
+		if strings.Contains(telemetryText, required) {
+			continue
+		}
+		diagnostics = append(diagnostics, Diagnostic{
+			Filename: rel(root, telemetryPath),
+			Message:  fmt.Sprintf("telemetry contract doc missing required marker %q", required),
 		})
 	}
 	return diagnostics
