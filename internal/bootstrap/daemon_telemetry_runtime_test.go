@@ -67,10 +67,10 @@ func TestEmitProjectionTelemetryBestEffort_UsesProjectionSource(t *testing.T) {
 	}
 	emitter := &fakeTelemetryEmitter{}
 	daemon := &Daemon{
-		telemetry: embeddedTelemetryRuntime{
-			store:            telemetry.Store{StatePath: statePath},
-			emitter:          emitter,
-			projectionSource: source,
+		telemetry: embeddedTelemetryRuntimeState{
+			store:          telemetry.Store{StatePath: statePath},
+			emitter:        emitter,
+			projectionLoad: source.StatusProjectionForScope,
 		},
 	}
 
@@ -98,10 +98,10 @@ func TestEmitProjectionTelemetryBestEffort_ProjectionFailureIsIsolated(t *testin
 	source := &fakeTelemetryProjectionSource{err: fmt.Errorf("projection down")}
 	emitter := &fakeTelemetryEmitter{}
 	daemon := &Daemon{
-		telemetry: embeddedTelemetryRuntime{
-			store:            telemetry.Store{StatePath: statePath},
-			emitter:          emitter,
-			projectionSource: source,
+		telemetry: embeddedTelemetryRuntimeState{
+			store:          telemetry.Store{StatePath: statePath},
+			emitter:        emitter,
+			projectionLoad: source.StatusProjectionForScope,
 		},
 	}
 

@@ -53,7 +53,7 @@ type Daemon struct {
 	serveErr   error
 	serveErrMu sync.Mutex
 	evidence   *evidencestore.RequestEvidenceSinkStore
-	telemetry  embeddedTelemetryRuntime
+	telemetry  embeddedTelemetryRuntimeState
 }
 
 var providerResponseHeaderTimeout = 5 * time.Minute
@@ -187,10 +187,10 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_success", "bind_addr", listener.Addr().String())
 	daemon.server = server
 	daemon.listener = listener
-	daemon.telemetry = embeddedTelemetryRuntime{
-		store:            telemetry.NewStore(),
-		now:              time.Now,
-		projectionSource: daemon,
+	daemon.telemetry = embeddedTelemetryRuntimeState{
+		store:          telemetry.NewStore(),
+		now:            time.Now,
+		projectionLoad: daemon.StatusProjectionForScope,
 	}
 
 	go func() {
