@@ -174,6 +174,41 @@ func TestCheckReleaseNoteDisciplineAcceptsRequiredMarkers(t *testing.T) {
 	}
 }
 
+func TestCheckTelemetryReleaseDisciplineReportsMissingMarkers(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, root, "AGENTS.md", "# Swobu Agent Instructions\n")
+	mustWriteFile(t, root, "docs/05-engineering/release-versioning-and-migration/release-gates-rollout-and-rollback.md", "# Release\n")
+	mustWriteFile(t, root, "docs/05-engineering/observability-and-operability/product-telemetry-v1.md", "# Telemetry\n")
+
+	diagnostics := checkTelemetryReleaseDiscipline(root)
+	if len(diagnostics) == 0 {
+		t.Fatal("diagnostics = 0, want telemetry release discipline failures")
+	}
+}
+
+func TestCheckTelemetryReleaseDisciplineAcceptsRequiredMarkers(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, root, "AGENTS.md", "# Swobu Agent Instructions\n")
+	mustWriteFile(t, root, "docs/05-engineering/release-versioning-and-migration/release-gates-rollout-and-rollback.md", strings.Join([]string{
+		"# Release",
+		"## Telemetry disclosure",
+		"opt-out",
+		"`swobu telemetry off`",
+		"`swobu telemetry status`",
+	}, "\n"))
+	mustWriteFile(t, root, "docs/05-engineering/observability-and-operability/product-telemetry-v1.md", strings.Join([]string{
+		"# Product Telemetry v1",
+		"single canonical specification",
+		"enabled by default with user opt-out",
+		"Release blockers for telemetry-enabled launch",
+	}, "\n"))
+
+	diagnostics := checkTelemetryReleaseDiscipline(root)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %+v, want none", diagnostics)
+	}
+}
+
 func mustWriteFile(t *testing.T, root, relPath, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relPath))

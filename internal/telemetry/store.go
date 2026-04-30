@@ -15,7 +15,7 @@ import (
 )
 
 const statePathEnv = "SWOBU_TELEMETRY_STATE_PATH"
-const outboxPathEnv = "SWOBU_TELEMETRY_OUTBOX_PATH"
+const doNotTrackEnv = "DO_NOT_TRACK"
 
 type State struct {
 	Enabled            bool   `json:"enabled"`
@@ -26,18 +26,16 @@ type State struct {
 }
 
 type Store struct {
-	StatePath  string
-	OutboxPath string
-	Now        func() time.Time
-	Rand       io.Reader
+	StatePath string
+	Now       func() time.Time
+	Rand      io.Reader
 }
 
 func NewStore() Store {
 	return Store{
-		StatePath:  defaultStatePath(),
-		OutboxPath: defaultOutboxPath(),
-		Now:        time.Now,
-		Rand:       rand.Reader,
+		StatePath: defaultStatePath(),
+		Now:       time.Now,
+		Rand:      rand.Reader,
 	}
 }
 
@@ -97,10 +95,6 @@ func (s Store) Reset() (State, error) {
 	if path == "" {
 		path = defaultStatePath()
 	}
-	outboxPath := strings.TrimSpace(s.OutboxPath)
-	if outboxPath == "" {
-		outboxPath = defaultOutboxPath()
-	}
 	now := s.Now
 	if now == nil {
 		now = time.Now
@@ -112,9 +106,6 @@ func (s Store) Reset() (State, error) {
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return State{}, fmt.Errorf("remove telemetry state: %w", err)
-	}
-	if err := os.Remove(outboxPath); err != nil && !os.IsNotExist(err) {
-		return State{}, fmt.Errorf("remove telemetry outbox: %w", err)
 	}
 	state := State{
 		Enabled:            enabled,
@@ -128,10 +119,29 @@ func (s Store) Reset() (State, error) {
 	return state, nil
 }
 
+func (s Store) MarkNoticeShown() (State, error) {
+	state, err := s.LoadOrCreate()
+	if err != nil {
+		return State{}, err
+	}
+	if state.NoticeShown {
+		return state, nil
+	}
+	state.NoticeShown = true
+	if err := writeState(s.StatePath, state); err != nil {
+		return State{}, err
+	}
+	return state, nil
+}
+
 func (s Store) InspectPreview() ([]byte, error) {
 	state, err := s.LoadOrCreate()
 	if err != nil {
 		return nil, err
+	}
+	enabled := state.Enabled
+	if isDoNotTrackEnabled() {
+		enabled = false
 	}
 	preview := struct {
 		SchemaVersion      int    `json:"schema_version"`
@@ -148,7 +158,7 @@ func (s Store) InspectPreview() ([]byte, error) {
 		SwobuVersion:       controlplane.SwobuVersion(),
 		OS:                 runtime.GOOS,
 		Arch:               runtime.GOARCH,
-		TelemetryEnabled:   state.Enabled,
+		TelemetryEnabled:   enabled,
 	}
 	out, err := json.Marshal(preview)
 	if err != nil {
@@ -169,20 +179,6 @@ func defaultStatePath() string {
 		return filepath.Join(".", ".swobu", "telemetry", "state.json")
 	}
 	return filepath.Join(home, ".local", "state", "swobu", "telemetry", "state.json")
-}
-
-func defaultOutboxPath() string {
-	if explicit := strings.TrimSpace(os.Getenv(outboxPathEnv)); explicit != "" {
-		return explicit
-	}
-	if xdg := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); xdg != "" {
-		return filepath.Join(xdg, "swobu", "telemetry", "outbox.jsonl")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return filepath.Join(".", ".swobu", "telemetry", "outbox.jsonl")
-	}
-	return filepath.Join(home, ".local", "state", "swobu", "telemetry", "outbox.jsonl")
 }
 
 func writeState(path string, state State) error {
@@ -219,4 +215,29 @@ func newAnonymousInstallID(r io.Reader, now func() time.Time) string {
 		return fmt.Sprintf("anon_%x", buf)
 	}
 	return fmt.Sprintf("anon_%x", now().UnixNano())
+}
+
+func isDoNotTrackEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(doNotTrackEnv)))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func DoNotTrackEnabled() bool {
+	return isDoNotTrackEnabled()
+}
+
+func (s Store) isTelemetryEnabled() bool {
+	if isDoNotTrackEnabled() {
+		return false
+	}
+	state, err := s.LoadOrCreate()
+	if err != nil {
+		return false
+	}
+	return state.Enabled
 }

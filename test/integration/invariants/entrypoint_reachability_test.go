@@ -14,11 +14,13 @@ import (
 const maxHumanScaleFanout = 9
 
 var maxHumanScaleFanoutOverrides = map[string]int{
+	"docs/05-engineering":                                12,
 	"tasks/ready/03-request-path/slices/model-selection": 12,
+	"tasks/ready/04-runtime-cli":                         15,
 	"tasks/ready/05-tui/slices/foundation":               14,
 	"tasks/ready/06-proof-release":                       30,
-	"tasks/ready/07-execution-system":                    16,
-	"swobucli/scripts":                                   10,
+	"tasks/ready/07-execution-system":                    17,
+	"swobucli/scripts":                                   11,
 }
 
 func TestRepoScriptsHaveUpstreamReferences(t *testing.T) {

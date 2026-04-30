@@ -23,6 +23,7 @@ import (
 	"github.com/metrofun/swobu/internal/domain/runtimeevidence"
 	"github.com/metrofun/swobu/internal/platform/config"
 	"github.com/metrofun/swobu/internal/ports"
+	"github.com/metrofun/swobu/internal/telemetry"
 )
 
 type HealthState string
@@ -52,6 +53,7 @@ type Daemon struct {
 	serveErr   error
 	serveErrMu sync.Mutex
 	evidence   *evidencestore.RequestEvidenceSinkStore
+	telemetry  embeddedTelemetryRuntime
 }
 
 var providerResponseHeaderTimeout = 5 * time.Minute
@@ -185,6 +187,11 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_success", "bind_addr", listener.Addr().String())
 	daemon.server = server
 	daemon.listener = listener
+	daemon.telemetry = embeddedTelemetryRuntime{
+		store:            telemetry.NewStore(),
+		now:              time.Now,
+		projectionSource: daemon,
+	}
 
 	go func() {
 		defer close(daemon.done)
@@ -197,6 +204,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		}
 	}()
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "initialization_completed", "bind_addr", listener.Addr().String())
+	daemon.startTelemetryRuntime()
 
 	return daemon, nil
 }
@@ -228,6 +236,7 @@ func (d *Daemon) Close(ctx context.Context) error {
 		}
 		return shutdownErr
 	}
+	d.stopTelemetryRuntimeWithContext(ctx)
 	select {
 	case <-d.done:
 		serveErr := d.serveError()

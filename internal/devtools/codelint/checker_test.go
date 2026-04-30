@@ -172,7 +172,7 @@ func justified() int {
 func TestCheckAllowsTUIAppUserspaceBuildViewCalls(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
 type child struct{}
 
@@ -192,10 +192,10 @@ func TestCheckFailsOnTUIAppUserspaceLayoutImport(t *testing.T) {
 
 	root := t.TempDir()
 	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/engine/rendergraph/layout/layout.go", `package layout`)
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/rendergraph/layout/layout.go", `package layout`)
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
-import _ "example.com/codelinttest/internal/adapters/inbound/tui/engine/rendergraph/layout"
+import _ "example.com/codelinttest/internal/terminalui/engine/retained/rendergraph/layout"
 `)
 
 	diagnostics, err := checkDir(root, []string{"./..."})
@@ -212,13 +212,13 @@ func TestCheckFailsOnTUIAppUserspaceRawLayoutAPIs(t *testing.T) {
 
 	root := t.TempDir()
 	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/engine/rendergraph/layout/layout.go", `package layout
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/rendergraph/layout/layout.go", `package layout
 type FlowChild struct{}
 func NewColumn(...FlowChild) any { return nil }
 `)
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/app/page/sample.go", `package page
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/page/sample.go", `package page
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/engine/rendergraph/layout"
+import "example.com/codelinttest/internal/terminalui/engine/retained/rendergraph/layout"
 
 func compose() any {
 	return layout.NewColumn(layout.FlowChild{})
@@ -239,14 +239,14 @@ func TestCheckAllowsTUIAppShellFileTargetedBoundaryIgnores(t *testing.T) {
 
 	root := t.TempDir()
 	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/engine/rendergraph/layout/layout.go", `package layout
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/rendergraph/layout/layout.go", `package layout
 type FlowChild struct{}
 `)
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/app/views/shell.go", `// swobu:codelint ignore tui-userspace-layout-import
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/views/shell.go", `// swobu:codelint ignore tui-userspace-layout-import
 // swobu:codelint ignore tui-userspace-layout-api
 package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/engine/rendergraph/layout"
+import "example.com/codelinttest/internal/terminalui/engine/retained/rendergraph/layout"
 
 func sample() {
 	_ = layout.FlowChild{}
@@ -268,10 +268,10 @@ func sample() {
 func TestCheckRejectsIgnoreDirectiveForTUIUserspaceBoundaryRules(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `// swobu:codelint ignore tui-userspace-layout-import
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `// swobu:codelint ignore tui-userspace-layout-import
 package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/engine/rendergraph/layout"
+import "example.com/codelinttest/internal/terminalui/engine/retained/rendergraph/layout"
 
 func compose() any { return layout.FlowChild{} }
 `)
@@ -287,9 +287,9 @@ func compose() any { return layout.FlowChild{} }
 func TestCheckFailsOnTUIUserspaceLayoutSkinLiteralInSemanticRows(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/toolkit/views"
+import "example.com/codelinttest/internal/terminalui/toolkit/views"
 
 func bad() any {
 	return views.ListItemRow[struct{}]("   label", false, false, false, nil, nil)
@@ -303,9 +303,9 @@ func bad() any {
 func TestCheckAllowsTUIUserspaceInsetLabelWithoutSkinLiteral(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/toolkit/views"
+import "example.com/codelinttest/internal/terminalui/toolkit/views"
 
 func ok(label string) string {
 	return views.InsetLabel(label, 3)
@@ -316,13 +316,78 @@ func ok(label string) string {
 	}
 }
 
+func TestCheckFailsOnTerminalUIEngineImportingApps(t *testing.T) {
+	t.Parallel()
+
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/engine/retained/loop/sample.go", `package loop
+
+import _ "example.com/codelinttest/internal/terminalui/apps/cockpit/app/state/model"
+`)
+	if joined := joinMessages(diagnostics); !strings.Contains(joined, `terminalui dependency law violation: lane "engine" must not import lane "apps"`) {
+		t.Fatalf("messages = %q, want terminalui dependency law engine->apps warning", joined)
+	}
+}
+
+func TestCheckFailsOnTerminalUIToolkitImportingApps(t *testing.T) {
+	t.Parallel()
+
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/toolkit/views/sample.go", `package views
+
+import _ "example.com/codelinttest/internal/terminalui/apps/cockpit/app/state/model"
+`)
+	if joined := joinMessages(diagnostics); !strings.Contains(joined, `terminalui dependency law violation: lane "toolkit" must not import lane "apps"`) {
+		t.Fatalf("messages = %q, want terminalui dependency law toolkit->apps warning", joined)
+	}
+}
+
+func TestCheckAllowsTerminalUIAppsImportingToolkitAndEngine(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
+	writeModuleFile(t, root, "internal/terminalui/toolkit/views/node.go", "package views\ntype Node struct{}\n")
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/view/node.go", "package view\ntype Node struct{}\n")
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
+
+import (
+	_ "example.com/codelinttest/internal/terminalui/toolkit/views"
+	_ "example.com/codelinttest/internal/terminalui/engine/retained/view"
+)
+`)
+
+	diagnostics, err := checkDir(root, []string{"./..."})
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if joined := joinMessages(diagnostics); strings.Contains(joined, "terminalui dependency law violation") {
+		t.Fatalf("messages = %q, want no terminalui dependency law warning for apps imports", joined)
+	}
+}
+
+func TestCheckRejectsIgnoreDirectiveForTerminalUIDependencyLaw(t *testing.T) {
+	t.Parallel()
+
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/engine/retained/loop/sample.go", `// swobu:codelint ignore tui-dependency-law
+package loop
+
+import _ "example.com/codelinttest/internal/terminalui/apps/cockpit/app/state/model"
+`)
+	joined := joinMessages(diagnostics)
+	if !strings.Contains(joined, "terminalui dependency law does not support swobu:codelint ignore") {
+		t.Fatalf("messages = %q, want non-ignorable terminalui dependency law warning", joined)
+	}
+	if !strings.Contains(joined, `terminalui dependency law violation: lane "engine" must not import lane "apps"`) {
+		t.Fatalf("messages = %q, want dependency-law warning even with ignore marker", joined)
+	}
+}
+
 func TestCheckRejectsIgnoreDirectiveForTUIUserspaceLayoutSkinRule(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `// swobu:codelint ignore tui-userspace-layout-skin
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `// swobu:codelint ignore tui-userspace-layout-skin
 package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/toolkit/views"
+import "example.com/codelinttest/internal/terminalui/toolkit/views"
 
 func bad() any {
 	return views.ListItemRow[struct{}]("   label", false, false, false, nil, nil)
@@ -452,16 +517,16 @@ func TestCheckFailsOnTUIUserspaceDirectGeometryWrapperCalls(t *testing.T) {
 
 	root := t.TempDir()
 	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/engine/view/view.go", `package view
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/view/view.go", `package view
 type RenderNode interface{}
 type Context[M any] struct{}
 type ViewSpec[M any] interface{}
 func Column[M any](ctx *Context[M], kids ...ViewSpec[M]) ViewSpec[M] { return nil }
 func Padded[M any](child ViewSpec[M], top, right, bottom, left int) ViewSpec[M] { return child }
 `)
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/engine/view"
+import "example.com/codelinttest/internal/terminalui/engine/retained/view"
 
 type noop struct{}
 func (noop) BuildView(*view.Context[struct{}]) view.RenderNode { return nil }
@@ -484,15 +549,15 @@ func TestCheckAllowsTUIUserspaceGeometryThroughWithTransforms(t *testing.T) {
 
 	root := t.TempDir()
 	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/engine/view/view.go", `package view
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/view/view.go", `package view
 type RenderNode interface{}
 type Context[M any] struct{}
 type ViewSpec[M any] interface{}
 func WithPadLeft[M any](left int) func(ViewSpec[M]) ViewSpec[M] { return func(base ViewSpec[M]) ViewSpec[M] { return base } }
 `)
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/engine/view"
+import "example.com/codelinttest/internal/terminalui/engine/retained/view"
 
 type noop struct{}
 func (noop) BuildView(*view.Context[struct{}]) view.RenderNode { return nil }
@@ -530,15 +595,15 @@ func TestCheckFailsOnTUIAppUserspaceBuildReturningNode(t *testing.T) {
 
 	root := t.TempDir()
 	writeModuleFile(t, root, "go.mod", "module example.com/codelinttest\n\ngo 1.22\n")
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/engine/view/view.go", `package view
+	writeModuleFile(t, root, "internal/terminalui/engine/retained/view/view.go", `package view
 type Context[T any] struct{}
 type RenderNode interface{}
 type ViewSpec[T any] interface{}
 func Render[T any](_ *Context[T], _ ViewSpec[T]) RenderNode { return nil }
 `)
-	writeModuleFile(t, root, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	writeModuleFile(t, root, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
-import "example.com/codelinttest/internal/adapters/inbound/tui/engine/view"
+import "example.com/codelinttest/internal/terminalui/engine/retained/view"
 
 type W struct{}
 
@@ -562,7 +627,7 @@ func (W) BuildView(ctx *view.Context[struct{}], a view.ViewSpec[struct{}], b vie
 func TestCheckFailsOnTUIClipboardCommandProbeImplementation(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/clipboard.go", `package tui
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/clipboard.go", `package tui
 
 import "os/exec"
 
@@ -579,7 +644,7 @@ func copy(text string) error {
 func TestCheckRejectsIgnoreDirectiveForTUIClipboardCommodityRule(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/clipboard.go", `// swobu:codelint ignore tui-clipboard-command-probe
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/clipboard.go", `// swobu:codelint ignore tui-clipboard-command-probe
 package tui
 
 func copy(text string) string {
@@ -626,7 +691,7 @@ const note = "deprecated API"
 func TestCheckFailsOnRedundantModelTrimInView(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
 import "strings"
 
@@ -646,7 +711,7 @@ func build(model Model) string {
 func TestCheckFailsOnRedundantModelTrimInSelector(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/selectors/sample.go", `package selectors
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/selectors/sample.go", `package selectors
 
 import "strings"
 
@@ -666,7 +731,7 @@ func HeaderHint(model Model) string {
 func TestCheckFailsOnNestedModelFieldTrim(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
 import "strings"
 
@@ -690,7 +755,7 @@ func build(model Model) string {
 func TestCheckAllowsTrimSpaceOnNonModelFields(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := runCheckInTempModule(t, "internal/adapters/inbound/tui/app/views/sample.go", `package views
+	diagnostics := runCheckInTempModule(t, "internal/terminalui/apps/cockpit/app/views/sample.go", `package views
 
 import "strings"
 

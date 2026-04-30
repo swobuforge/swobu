@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -19,6 +20,11 @@ import (
 type Client struct {
 	http    *http.Client
 	baseURL string
+}
+
+type AccessCheckResult struct {
+	Status  string
+	Message string
 }
 
 // New creates a client that talks to the daemon at the given base URL
@@ -127,6 +133,44 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 		return errorFromResponse(resp, "operator client: endpoint delete failed")
 	}
 	return nil
+}
+
+// CheckClientAccess sends a minimal compatibility probe through one endpoint.
+func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, modelID string) (AccessCheckResult, error) {
+	endpointName = strings.TrimSpace(endpointName)
+	if endpointName == "" {
+		return AccessCheckResult{}, fmt.Errorf("operator client: endpoint name is required")
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		modelID = "healthcheck"
+	}
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"stream":false}`, modelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/c/"+endpointName+"/chat/completions", strings.NewReader(body))
+	if err != nil {
+		return AccessCheckResult{}, fmt.Errorf("operator client: client access request could not be built")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return AccessCheckResult{}, fmt.Errorf("operator client: client access check is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return AccessCheckResult{
+			Status:  "reachable",
+			Message: fmt.Sprintf("compatibility request succeeded with status %d", resp.StatusCode),
+		}, nil
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	message := strings.TrimSpace(string(raw))
+	if message == "" {
+		message = fmt.Sprintf("compatibility request returned status %d", resp.StatusCode)
+	}
+	return AccessCheckResult{
+		Status:  fmt.Sprintf("backend %d", resp.StatusCode),
+		Message: message,
+	}, nil
 }
 
 // endpointDocument mirrors the HTTP wire format for a single endpoint.

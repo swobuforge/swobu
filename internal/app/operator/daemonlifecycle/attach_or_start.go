@@ -3,15 +3,12 @@ package daemonlifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
-
-	"github.com/metrofun/swobu/internal/bootstrap"
-	platformconfig "github.com/metrofun/swobu/internal/platform/config"
 )
 
 type StatusPayload struct {
@@ -30,14 +27,48 @@ const (
 	StatusClassDown          StatusClass = "down"
 )
 
+type StartupEventKind string
+
+const (
+	StartupEventSplash             StartupEventKind = "splash"
+	StartupEventDisclosure         StartupEventKind = "disclosure"
+	StartupEventDaemonReady        StartupEventKind = "daemon_ready"
+	StartupEventDaemonNotReachable StartupEventKind = "daemon_not_reachable"
+	StartupEventStartingDaemon     StartupEventKind = "starting_daemon"
+	StartupEventWaitingReadiness   StartupEventKind = "waiting_readiness"
+	StartupEventStartupFailed      StartupEventKind = "startup_failed"
+	StartupEventStartupTimedOut    StartupEventKind = "startup_timed_out"
+)
+
+type StartupEvent struct {
+	Kind       StartupEventKind
+	State      string
+	DaemonURL  string
+	Text       string
+	NextAction []string
+}
+
+type StartupReporter interface {
+	Report(StartupEvent)
+}
+
+type startupReporterFunc func(StartupEvent)
+
+func (f startupReporterFunc) Report(ev StartupEvent) {
+	if f == nil {
+		return
+	}
+	f(ev)
+}
+
 type AttachOrStartInput struct {
 	DaemonURL             string
 	Client                *http.Client
-	Stdout                io.Writer
 	ReadinessTimeout      time.Duration
 	ResolveDefaultConfig  func() (string, error)
 	OpenDaemonLogSink     func() (string, *os.File, error)
 	SpawnForegroundDaemon func(ctx context.Context, configPath string, sink *os.File) error
+	Report                StartupReporter
 }
 
 type DownInput struct {
@@ -53,6 +84,7 @@ type RestartInput struct {
 	ResolveDefaultConfig  func() (string, error)
 	OpenDaemonLogSink     func() (string, *os.File, error)
 	SpawnForegroundDaemon func(ctx context.Context, configPath string, sink *os.File) error
+	Report                StartupReporter
 }
 
 type DownResult string
@@ -80,11 +112,11 @@ func FetchStatus(ctx context.Context, client *http.Client, daemonURL string) (St
 		return StatusPayload{State: string(StatusClassDown)}, StatusClassDown
 	}
 	switch payload.State {
-	case string(bootstrap.HealthStateHealthy):
+	case "healthy":
 		return payload, StatusClassHealthy
-	case string(bootstrap.HealthStateUninitialized):
+	case "uninitialized":
 		return payload, StatusClassUninitialized
-	case string(bootstrap.HealthStateDegraded):
+	case "degraded":
 		return payload, StatusClassDegraded
 	default:
 		return StatusPayload{State: string(StatusClassDown)}, StatusClassDown
@@ -98,24 +130,36 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	}
 	daemonURL := in.DaemonURL
 	if daemonURL == "" {
-		daemonURL = platformconfig.DefaultDaemonURL()
+		return StatusPayload{}, errors.New("daemon URL is required")
 	}
-	stdout := in.Stdout
-	if stdout == nil {
-		stdout = io.Discard
+	report := in.Report
+	if report == nil {
+		report = startupReporterFunc(nil)
 	}
+	report.Report(StartupEvent{Kind: StartupEventSplash})
+	report.Report(StartupEvent{Kind: StartupEventDisclosure})
+
 	payload, class := FetchStatus(ctx, client, daemonURL)
 	if class != StatusClassDown {
+		report.Report(StartupEvent{Kind: StartupEventDaemonReady, State: payload.State})
 		return payload, nil
 	}
-	_, _ = fmt.Fprintf(stdout, "daemon not reachable at %s\n", daemonURL)
+	report.Report(StartupEvent{Kind: StartupEventDaemonNotReachable, DaemonURL: daemonURL})
 
 	resolveConfig := in.ResolveDefaultConfig
 	if resolveConfig == nil {
-		resolveConfig = platformconfig.EnsureDefaultConfigFile
+		return StatusPayload{}, errors.New("resolve daemon config function is required")
 	}
 	configPath, err := resolveConfig()
 	if err != nil {
+		report.Report(StartupEvent{
+			Kind: StartupEventStartupFailed,
+			Text: fmt.Sprintf("resolve daemon config: %v", err),
+			NextAction: []string{
+				"check local config path and permissions",
+				"run `swobu status`",
+			},
+		})
 		return StatusPayload{}, fmt.Errorf("resolve daemon config: %w", err)
 	}
 
@@ -125,6 +169,14 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	}
 	logPath, sink, err := openSink()
 	if err != nil {
+		report.Report(StartupEvent{
+			Kind: StartupEventStartupFailed,
+			Text: fmt.Sprintf("open daemon log sink: %v", err),
+			NextAction: []string{
+				"check local cache/log directory permissions",
+				"run `swobu status`",
+			},
+		})
 		return StatusPayload{}, fmt.Errorf("open daemon log sink: %w", err)
 	}
 	spawn := in.SpawnForegroundDaemon
@@ -133,11 +185,19 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	}
 	if err := spawn(ctx, configPath, sink); err != nil {
 		_ = sink.Close()
+		report.Report(StartupEvent{
+			Kind: StartupEventStartupFailed,
+			Text: fmt.Sprintf("start daemon: %v", err),
+			NextAction: []string{
+				"inspect daemon log path: " + logPath,
+				"run `swobu status`",
+			},
+		})
 		return StatusPayload{}, fmt.Errorf("start daemon: %w", err)
 	}
 	_ = sink.Close()
-	_, _ = fmt.Fprintln(stdout, "starting daemon")
-	_, _ = fmt.Fprintln(stdout, "waiting for daemon readiness")
+	report.Report(StartupEvent{Kind: StartupEventStartingDaemon})
+	report.Report(StartupEvent{Kind: StartupEventWaitingReadiness})
 
 	timeout := in.ReadinessTimeout
 	if timeout <= 0 {
@@ -147,9 +207,28 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	defer cancel()
 	status, err := waitForDaemonReadiness(readinessCtx, client, daemonURL)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			report.Report(StartupEvent{
+				Kind: StartupEventStartupTimedOut,
+				Text: "daemon readiness timed out",
+				NextAction: []string{
+					"run `swobu status`",
+					"inspect daemon log path: " + logPath,
+				},
+			})
+		} else {
+			report.Report(StartupEvent{
+				Kind: StartupEventStartupFailed,
+				Text: fmt.Sprintf("daemon readiness failed: %v", err),
+				NextAction: []string{
+					"run `swobu status`",
+					"inspect daemon log path: " + logPath,
+				},
+			})
+		}
 		return StatusPayload{}, fmt.Errorf("daemon readiness failed (check `swobu status` and logs at %s): %w", logPath, err)
 	}
-	_, _ = fmt.Fprintf(stdout, "daemon ready (%s)\n", status.State)
+	report.Report(StartupEvent{Kind: StartupEventDaemonReady, State: status.State})
 	return status, nil
 }
 
@@ -160,7 +239,7 @@ func Down(ctx context.Context, in DownInput) (DownResult, error) {
 	}
 	daemonURL := in.DaemonURL
 	if daemonURL == "" {
-		daemonURL = platformconfig.DefaultDaemonURL()
+		return "", errors.New("daemon URL is required")
 	}
 	timeout := in.Timeout
 	if timeout <= 0 {
@@ -209,7 +288,7 @@ func Restart(ctx context.Context, in RestartInput) error {
 	}
 	daemonURL := in.DaemonURL
 	if daemonURL == "" {
-		daemonURL = platformconfig.DefaultDaemonURL()
+		return errors.New("daemon URL is required")
 	}
 	if _, err := Down(ctx, DownInput{
 		DaemonURL: daemonURL,
@@ -221,11 +300,11 @@ func Restart(ctx context.Context, in RestartInput) error {
 	_, err := AttachOrStart(ctx, AttachOrStartInput{
 		DaemonURL:             daemonURL,
 		Client:                client,
-		Stdout:                io.Discard,
 		ReadinessTimeout:      in.ReadinessTimeout,
 		ResolveDefaultConfig:  in.ResolveDefaultConfig,
 		OpenDaemonLogSink:     in.OpenDaemonLogSink,
 		SpawnForegroundDaemon: in.SpawnForegroundDaemon,
+		Report:                in.Report,
 	})
 	return err
 }
@@ -248,9 +327,7 @@ func waitForDaemonReadiness(ctx context.Context, client *http.Client, daemonURL 
 
 func isReadinessState(state string) bool {
 	switch state {
-	case string(bootstrap.HealthStateHealthy),
-		string(bootstrap.HealthStateUninitialized),
-		string(bootstrap.HealthStateDegraded):
+	case "healthy", "uninitialized", "degraded":
 		return true
 	default:
 		return false

@@ -1,0 +1,39 @@
+version: 2
+
+project_name: swobu
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: swobu
+    main: ./cmd/swobu
+    binary: swobu
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/metrofun/swobu/internal/app/operator/controlplane.swobuVersion={{ .Version }}
+
+archives:
+  - id: swobu-archive
+    ids:
+      - swobu
+    formats:
+      - tar.gz
+    name_template: "swobu_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: metrofun
+    name: swobu

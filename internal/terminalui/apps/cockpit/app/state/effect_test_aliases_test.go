@@ -1,0 +1,21 @@
+package state
+
+import stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+
+type LaunchClientEffect = stateeffect.LaunchClientEffect
+type WorkspaceSaveSucceeded = stateeffect.WorkspaceSaveSucceeded
+type SaveNewWorkspaceEffect = stateeffect.SaveNewWorkspaceEffect
+type SaveWorkspaceNameEffect = stateeffect.SaveWorkspaceNameEffect
+type ReplaceEndpoints = stateeffect.ReplaceEndpoints
+type RoutingSaveSucceeded = stateeffect.RoutingSaveSucceeded
+type WorkspaceSaveFailed = stateeffect.WorkspaceSaveFailed
+type RoutingSaveFailed = stateeffect.RoutingSaveFailed
+type DaemonRefreshTick = stateeffect.DaemonRefreshTick
+type ControlPlaneIncompatibleDetected = stateeffect.ControlPlaneIncompatibleDetected
+type StoreKeychainCredentialEffect = stateeffect.StoreKeychainCredentialEffect
+type KeychainCredentialStored = stateeffect.KeychainCredentialStored
+type EndpointCopyNoted = stateeffect.EndpointCopyNoted
+type RefreshDaemonStatusEffect = stateeffect.RefreshDaemonStatusEffect
+type RefreshEndpointsEffect = stateeffect.RefreshEndpointsEffect
+type RefreshCatalogEffect = stateeffect.RefreshCatalogEffect
+type RefreshStatusProjectionEffect = stateeffect.RefreshStatusProjectionEffect

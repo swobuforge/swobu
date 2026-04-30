@@ -40,6 +40,7 @@ type DaemonProcessHarness struct {
 type DaemonProcessConfig struct {
 	Endpoints []endpointintent.Endpoint
 	BindAddr  string
+	Env       map[string]string
 }
 
 func StartDaemonProcess(t *testing.T, cfg DaemonProcessConfig) DaemonProcessHarness {
@@ -59,6 +60,14 @@ func StartDaemonProcess(t *testing.T, cfg DaemonProcessConfig) DaemonProcessHarn
 	cmd := exec.Command(swobuBinaryPath(t), "daemon", "--config", configPath)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Env = os.Environ()
+	for key, value := range cfg.Env {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		cmd.Env = append(cmd.Env, trimmed+"="+value)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -131,6 +140,20 @@ func (h DaemonProcessHarness) Status() (DaemonStatusPayload, int, error) {
 		return DaemonStatusPayload{}, exitErr.ExitCode(), decErr
 	}
 	return payload, exitErr.ExitCode(), nil
+}
+
+func (h DaemonProcessHarness) Stdout() string {
+	if h.stdout == nil {
+		return ""
+	}
+	return h.stdout.String()
+}
+
+func (h DaemonProcessHarness) Stderr() string {
+	if h.stderr == nil {
+		return ""
+	}
+	return h.stderr.String()
 }
 
 func (h DaemonProcessHarness) waitForStatusAny(testingT *testing.T, wantExitCodes ...int) {

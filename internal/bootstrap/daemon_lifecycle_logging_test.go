@@ -45,6 +45,38 @@ func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
 	assertContainsLogEvent(t, text, "graceful_shutdown_completed")
 }
 
+func TestDaemonLifecycle_StartFailureIncludesErrorDetailsInErrorAndLogs(t *testing.T) {
+	t.Parallel()
+
+	missingConfigPath := filepath.Join(t.TempDir(), "missing-swobu.yaml")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{}))
+
+	_, err := bootstrap.Start(context.Background(), bootstrap.StartInput{
+		ConfigPath: missingConfigPath,
+		Logger:     logger,
+	})
+	if err == nil {
+		t.Fatal("bootstrap.Start returned nil error for missing config")
+	}
+	errText := err.Error()
+	if !strings.Contains(errText, "missing-swobu.yaml") {
+		t.Fatalf("error = %q, want missing config path detail", errText)
+	}
+	if !strings.Contains(strings.ToLower(errText), "no such file") {
+		t.Fatalf("error = %q, want filesystem cause detail", errText)
+	}
+
+	logText := logs.String()
+	assertContainsLogEvent(t, logText, "intent_store_open_failed")
+	if !strings.Contains(logText, "config_path="+missingConfigPath) {
+		t.Fatalf("logs missing config_path detail; logs=%s", logText)
+	}
+	if !strings.Contains(strings.ToLower(logText), "no such file") {
+		t.Fatalf("logs missing underlying error detail; logs=%s", logText)
+	}
+}
+
 func assertContainsLogEvent(t *testing.T, logs string, event string) {
 	t.Helper()
 	token := "event=" + event

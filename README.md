@@ -20,3 +20,14 @@ The runtime implementation is rooted inside `swobucli`:
 - `make -C swobucli verify`
 - `make -C swobucli test`
 - `make -C swobucli run`
+
+## Install
+
+- latest:
+  - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh`
+- pinned:
+  - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh -s -- --version vX.Y.Z`
+- custom bin dir:
+  - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh -s -- --bin-dir "$HOME/.local/bin"`
+
+The installer only downloads a release archive, verifies SHA256 against `checksums.txt`, and installs the `swobu` binary.
