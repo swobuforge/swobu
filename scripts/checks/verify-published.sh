@@ -2,7 +2,7 @@
 set -eu
 
 release_latest_url="https://github.com/swobuforge/swobu/releases/latest"
-installer_url="https://raw.githubusercontent.com/swobuforge/swobu/main/swobucli/oss/scripts/install.sh"
+installer_url="https://raw.githubusercontent.com/swobuforge/swobu/main/scripts/install.sh"
 
 curl -fsSIL --max-time 10 "$release_latest_url" >/dev/null
 curl -fsSIL --max-time 10 "$installer_url" >/dev/null
