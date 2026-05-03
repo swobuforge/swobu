@@ -16,7 +16,7 @@ No standalone OSS test plane; tests are collocated Go tests (`*_test.go`).
 - `make -C swobucli/oss verify` — merge-safety gate
 - `make -C swobucli/oss test` — deterministic required tests
 - `make -C swobucli/oss build` — local binary build (`.out/swobu`)
-- `make -C swobucli/oss publish patch|minor|major` — tag and push release
+- `make -C swobucli/oss publish patch|minor|major` — tag, build artifacts, and publish GitHub Release
 - `make -C swobucli/oss verify-published` — verify published release/install surfaces
 - `make -C swobucli/oss run` — run operator surface
 

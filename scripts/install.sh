@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO_OWNER="${REPO_OWNER:-metrofun}"
+REPO_OWNER="${REPO_OWNER:-swobuforge}"
 REPO_NAME="${REPO_NAME:-swobu}"
 PROJECT_NAME="${PROJECT_NAME:-swobu}"
 BIN_NAME="${BIN_NAME:-swobu}"

@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$RepoOwner = if ($env:REPO_OWNER) { $env:REPO_OWNER } else { 'metrofun' }
+$RepoOwner = if ($env:REPO_OWNER) { $env:REPO_OWNER } else { 'swobuforge' }
 $RepoName = if ($env:REPO_NAME) { $env:REPO_NAME } else { 'swobu' }
 $ProjectName = if ($env:PROJECT_NAME) { $env:PROJECT_NAME } else { 'swobu' }
 $BinName = if ($env:BIN_NAME) { $env:BIN_NAME } else { 'swobu' }
