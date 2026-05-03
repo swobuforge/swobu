@@ -60,7 +60,7 @@ if git rev-parse "$next_tag" >/dev/null 2>&1; then
 fi
 
 echo "release: running verify"
-make -C swobucli/oss verify
+make verify
 
 echo "release: tagging $next_tag"
 git tag -a "$next_tag" -m "release $next_tag"
