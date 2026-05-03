@@ -16,8 +16,7 @@ case "$kind" in
 esac
 
 oss_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-repo_root="$(CDPATH= cd -- "$oss_root/../.." && pwd)"
-cd "$repo_root"
+cd "$oss_root"
 
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "release failed: working tree has tracked changes; commit/stash first" >&2
