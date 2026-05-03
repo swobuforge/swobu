@@ -3,8 +3,8 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 // DisclosureNoteRows renders subordinate disclosure copy with wrapping so long

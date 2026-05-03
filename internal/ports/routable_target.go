@@ -1,6 +1,6 @@
 package ports
 
-import "github.com/metrofun/swobu/internal/domain/protocolsurface"
+import "github.com/swobuforge/swobu/internal/domain/protocolsurface"
 
 type RoutableTarget struct {
 	BackendRef string

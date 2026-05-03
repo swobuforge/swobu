@@ -19,9 +19,9 @@ func TestFallbackURLForHelpAction(t *testing.T) {
 		},
 		{
 			name:  "failed note for file issue",
-			note:  "file issue open failed; fallback https://github.com/metrofun/swobu/issues",
+			note:  "file issue open failed; fallback https://github.com/swobuforge/swobu/issues",
 			label: "file issue",
-			want:  "https://github.com/metrofun/swobu/issues",
+			want:  "https://github.com/swobuforge/swobu/issues",
 		},
 		{
 			name:  "note for other action ignored",

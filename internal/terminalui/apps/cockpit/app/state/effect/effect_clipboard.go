@@ -3,7 +3,7 @@ package effect
 import (
 	"context"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // CopyEndpointValueEffect copies an endpoint value to the clipboard.

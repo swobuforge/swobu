@@ -1,9 +1,9 @@
 package routetarget
 
 import (
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 // ResolvedRoutableTarget is the execution-ready routable target resolved from

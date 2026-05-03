@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/metrofun/swobu/internal/app/requestpath"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/adapters/outbound/protocols"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 type responseEnvelope struct {

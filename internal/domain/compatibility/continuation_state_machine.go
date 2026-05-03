@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 // ContinuationStore is the narrow persistence contract compatibility needs for

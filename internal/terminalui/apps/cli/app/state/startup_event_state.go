@@ -3,8 +3,8 @@ package state
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/app/operator/daemonlifecycle"
-	"github.com/metrofun/swobu/internal/terminalui/engine/model"
+	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/model"
 )
 
 type EventKind = daemonlifecycle.StartupEventKind

@@ -2,9 +2,9 @@
 package root
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	appviews "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/views"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 const (

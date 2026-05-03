@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"testing"
 
-	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 )
 
 func TestReduce_ClientLaunchRequested_EndToEndLaunchFlow(t *testing.T) {

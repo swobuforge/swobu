@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 const defaultContinuityRetention = 4 * time.Hour

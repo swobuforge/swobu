@@ -1,6 +1,6 @@
 package state
 
-import stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+import stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 
 type LaunchClientEffect = stateeffect.LaunchClientEffect
 type WorkspaceSaveSucceeded = stateeffect.WorkspaceSaveSucceeded

@@ -3,7 +3,7 @@ package routetarget
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 )
 
 func TestResolveSelectedTarget_ReturnsExplicitlySelectedTarget(t *testing.T) {

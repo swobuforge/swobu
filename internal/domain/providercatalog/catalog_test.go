@@ -3,7 +3,7 @@ package providercatalog
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 func TestCatalog_AdapterAndBindingSupport(t *testing.T) {

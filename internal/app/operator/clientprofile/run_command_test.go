@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func TestResolveRunCommand_RunnableProfiles(t *testing.T) {

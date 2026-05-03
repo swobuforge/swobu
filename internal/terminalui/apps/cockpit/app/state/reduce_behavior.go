@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 const daemonRefreshInterval = 2 * time.Second

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/runtimeevidence"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func emitEvidenceEventIfValid(ctx context.Context, sink ports.RequestEvidenceSink, event runtimeevidence.TrafficEvent, err error) {

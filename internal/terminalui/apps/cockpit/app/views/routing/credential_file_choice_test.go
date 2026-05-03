@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func TestCredentialFilePickerItems_DirectoryChoiceDelegatesResetAndFocus(t *testing.T) {

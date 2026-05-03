@@ -3,10 +3,10 @@ package cli
 import (
 	"io"
 
-	"github.com/metrofun/swobu/internal/app/operator/daemonlifecycle"
-	appstate "github.com/metrofun/swobu/internal/terminalui/apps/cli/app/state"
-	appviews "github.com/metrofun/swobu/internal/terminalui/apps/cli/app/views"
-	"github.com/metrofun/swobu/internal/terminalui/engine/output"
+	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
+	appstate "github.com/swobuforge/swobu/internal/terminalui/apps/cli/app/state"
+	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cli/app/views"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/output"
 )
 
 type StartupEventKind = appstate.EventKind

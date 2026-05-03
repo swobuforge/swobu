@@ -1,10 +1,10 @@
 package view
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 type namedRenderNodeMeta struct {

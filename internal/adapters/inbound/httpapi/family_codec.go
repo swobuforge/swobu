@@ -1,6 +1,6 @@
 package httpapi
 
-import "github.com/metrofun/swobu/internal/domain/compatibility"
+import "github.com/swobuforge/swobu/internal/domain/compatibility"
 
 type familyCodec interface {
 	decodeRequest(raw []byte) (compatibility.CanonicalRequest, compatibility.DeliveryMode, error)

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func (e *responsesClientStreamEncoderWire) ensureToolItem(itemID string, callID string, name string) ([][]byte, error) {

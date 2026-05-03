@@ -1,7 +1,7 @@
 package requestpath
 
 import (
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 // BackendModelEntity is the resolved backend model descriptor for one execution.

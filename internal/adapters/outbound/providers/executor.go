@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 
-	anthropicprovider "github.com/metrofun/swobu/internal/adapters/outbound/providers/anthropic"
-	customprovider "github.com/metrofun/swobu/internal/adapters/outbound/providers/custom"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
-	"github.com/metrofun/swobu/internal/ports"
+	anthropicprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
+	customprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/custom"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type CredentialResolver interface {

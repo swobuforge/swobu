@@ -3,7 +3,7 @@ package selectors
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
 func TestFooterHints_NAVUsesEventOwnedFooterVerb(t *testing.T) {

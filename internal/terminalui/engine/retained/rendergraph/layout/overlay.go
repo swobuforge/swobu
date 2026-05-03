@@ -3,8 +3,8 @@ package layout
 import (
 	"strconv"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/paint"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 )
 
 type OverlayChild struct {

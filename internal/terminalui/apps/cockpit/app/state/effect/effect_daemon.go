@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metrofun/swobu/internal/app/operator/controlplane"
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 type daemonRawTrafficRow struct {

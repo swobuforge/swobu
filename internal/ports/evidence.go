@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"github.com/metrofun/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 )
 
 type RequestEvidenceSink interface {

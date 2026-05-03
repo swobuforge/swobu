@@ -3,9 +3,9 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/selectors"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 // FirstRunHero renders first-run setup framing lines.

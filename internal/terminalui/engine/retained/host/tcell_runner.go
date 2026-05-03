@@ -6,12 +6,12 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/loop"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/paint"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/loop"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 type Runner[M any] struct {

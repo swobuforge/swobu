@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	evidencestore "github.com/metrofun/swobu/internal/adapters/outbound/evidence"
-	"github.com/metrofun/swobu/internal/telemetry"
+	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
 type fakeTelemetryProjectionSource struct {

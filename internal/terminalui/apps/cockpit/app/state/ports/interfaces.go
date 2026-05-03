@@ -3,8 +3,8 @@ package ports
 import (
 	"context"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 // DaemonControlPlane is the narrow daemon-facing seam used by cockpit effects.

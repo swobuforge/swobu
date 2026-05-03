@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 type ActionKind string

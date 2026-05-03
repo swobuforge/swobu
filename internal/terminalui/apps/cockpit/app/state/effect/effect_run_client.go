@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/metrofun/swobu/internal/app/operator/clientprofile"
+	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 )
 
 type clientRunSpec struct {

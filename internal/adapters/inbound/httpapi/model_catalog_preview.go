@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	operatormodelcatalog "github.com/metrofun/swobu/internal/app/operator/modelcatalog"
+	operatormodelcatalog "github.com/swobuforge/swobu/internal/app/operator/modelcatalog"
 )
 
 type modelCatalogPreviewReadFunc func(context.Context, operatormodelcatalog.PreviewRequest) (operatormodelcatalog.PreviewSnapshot, error)

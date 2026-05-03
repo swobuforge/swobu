@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/app/requestpath"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type modelsListResponseDTO struct {

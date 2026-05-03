@@ -3,8 +3,8 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func FocusAffordance(verb string, allowSpace bool) func() []update.Action {

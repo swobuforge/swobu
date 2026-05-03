@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type previewProviderCatalogStub struct {

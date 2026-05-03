@@ -4,7 +4,7 @@ package views
 import (
 	"fmt"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 // Section composes a titled column of row views.

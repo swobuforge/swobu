@@ -9,15 +9,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/adapters/outbound/protocols"
-	"github.com/metrofun/swobu/internal/adapters/outbound/protocols/chatcompletions"
-	"github.com/metrofun/swobu/internal/adapters/outbound/protocols/completions"
-	"github.com/metrofun/swobu/internal/adapters/outbound/protocols/responses"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
-	"github.com/metrofun/swobu/internal/platform/httpcontent"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols/chatcompletions"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols/completions"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/platform/httpcontent"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type CredentialResolver interface {

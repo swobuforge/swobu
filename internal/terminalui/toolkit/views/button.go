@@ -3,7 +3,7 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // ButtonRenderNode is a thin preset over the generic Action primitive.

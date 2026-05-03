@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/model"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/model"
 )
 
 func Line(text string) model.Node {

@@ -1,6 +1,6 @@
 package layout
 
-import "github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+import "github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 
 // TreeBuilder materializes retained LayoutNodes from a structural node tree.
 type TreeBuilder struct{}

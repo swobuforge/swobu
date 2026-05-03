@@ -4,8 +4,8 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 func NewChoiceOption[M any](label string, selected bool, onChoose func() []update.Action) view.ViewSpec[M] {

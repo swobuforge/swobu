@@ -1,8 +1,8 @@
 package layout
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/paint"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 )
 
 // ResponsiveSwitchRenderNode selects one branch at layout time based on slot

@@ -16,12 +16,12 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/metrofun/swobu/internal/app/operator/daemonlifecycle"
-	"github.com/metrofun/swobu/internal/bootstrap"
-	platformconfig "github.com/metrofun/swobu/internal/platform/config"
-	"github.com/metrofun/swobu/internal/telemetry"
-	uicli "github.com/metrofun/swobu/internal/terminalui/apps/cli"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit"
+	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
+	"github.com/swobuforge/swobu/internal/bootstrap"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/telemetry"
+	uicli "github.com/swobuforge/swobu/internal/terminalui/apps/cli"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit"
 )
 
 // ExitCode is contract-bearing for `swobu status`: healthy=0, reachable but

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 const envCredentialRefPrefix = "env:"

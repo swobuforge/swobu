@@ -1,11 +1,11 @@
 package requestpath
 
 import (
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
-	"github.com/metrofun/swobu/internal/domain/routetarget"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/domain/routetarget"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func routableTargetFromProviderConfig(endpointName endpointintent.EndpointName, providerConfig endpointintent.ProviderConfig) (ports.RoutableTarget, error) {

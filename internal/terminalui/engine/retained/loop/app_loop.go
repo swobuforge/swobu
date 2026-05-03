@@ -5,9 +5,9 @@ package loop
 import (
 	"context"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/reconcile"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/reconcile"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // Reducer is a pure function: given the current model and one action, it

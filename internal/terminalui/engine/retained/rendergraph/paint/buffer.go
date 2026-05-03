@@ -5,7 +5,7 @@ package paint
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 )
 
 // Cell is one logical terminal cell in the engine backbuffer.

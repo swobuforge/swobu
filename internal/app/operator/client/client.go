@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 // Client talks to the daemon's operator control plane at /_swobu/endpoints.

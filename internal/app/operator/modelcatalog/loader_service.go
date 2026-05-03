@@ -4,10 +4,10 @@ import (
 	"context"
 	"slices"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/routetarget"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/routetarget"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 // Snapshot is the operator read model returned by the app layer for daemon and

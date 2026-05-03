@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	outboundcredentials "github.com/metrofun/swobu/internal/adapters/outbound/credentials"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // SaveSelectedTargetEffect saves the selected provider config ref for an endpoint.

@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
 func TestWrapPayloadLine_WrapsLongProseWithoutEllipsis(t *testing.T) {

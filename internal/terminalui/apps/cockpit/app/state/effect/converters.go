@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.ProviderConfig, error) {

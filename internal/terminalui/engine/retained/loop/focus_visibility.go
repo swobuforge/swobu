@@ -3,8 +3,8 @@ package loop
 import (
 	"reflect"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
 // ensureFocusVisible enforces one runtime-level invariant:

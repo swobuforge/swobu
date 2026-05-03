@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/apps/shared/daemonstate"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/shared/daemonstate"
 )
 
 func HeaderStatus(model state.Model) string {

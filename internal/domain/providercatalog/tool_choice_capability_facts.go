@@ -1,6 +1,6 @@
 package providercatalog
 
-import "github.com/metrofun/swobu/internal/domain/protocolsurface"
+import "github.com/swobuforge/swobu/internal/domain/protocolsurface"
 
 // ToolChoiceCapabilityFact declares one provider/model/protocol capability fact
 // for tool-choice policy behavior.

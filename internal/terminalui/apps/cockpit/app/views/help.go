@@ -3,14 +3,14 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 const (
 	helpAskQuestionURL = "https://x.com/ml_review"
-	helpFileIssueURL   = "https://github.com/metrofun/swobu/issues"
+	helpFileIssueURL   = "https://github.com/swobuforge/swobu/issues"
 )
 
 func BuildHelpSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {

@@ -3,8 +3,8 @@ package views
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
 func TestSelectedClientRunModelID_AlwaysUsesPrimarySelector(t *testing.T) {

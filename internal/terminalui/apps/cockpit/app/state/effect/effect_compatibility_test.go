@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/app/operator/daemonlifecycle"
+	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 )
 
 func TestRestartDaemonCompatibilityMessage_Failure(t *testing.T) {

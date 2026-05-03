@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // CheckClientAccessEffect probes the daemon's endpoint compatibility.

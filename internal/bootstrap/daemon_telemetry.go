@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	evidencestore "github.com/metrofun/swobu/internal/adapters/outbound/evidence"
-	"github.com/metrofun/swobu/internal/app/operator/controlplane"
-	"github.com/metrofun/swobu/internal/telemetry"
+	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
 const telemetryEndpointEnv = "SWOBU_TELEMETRY_ENDPOINT"

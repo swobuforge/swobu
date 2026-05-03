@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/adapters/outbound/protocols"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func Realize(request compatibility.CanonicalRequest, deliveryMode compatibility.DeliveryMode) (protocols.WireRequest, error) {

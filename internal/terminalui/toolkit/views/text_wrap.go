@@ -1,8 +1,8 @@
 package views
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 // WrapLinePreserveIndent wraps long text while preserving indentation.

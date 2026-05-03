@@ -1,4 +1,4 @@
-module github.com/metrofun/swobu
+module github.com/swobuforge/swobu
 
 go 1.22.2
 

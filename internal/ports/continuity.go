@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 // ResponseContinuityStore owns the minimal canonical continuation state

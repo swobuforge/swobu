@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
 type endpointCatalog struct {

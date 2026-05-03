@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestHandle_ContinuationRecoveryRetryIsOwnedByAttemptPipeline(t *testing.T) {
