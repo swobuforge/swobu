@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/app/operator/clientprofile"
+	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 )
 
 func TestSelectedClientActions_UsesProfileActionsForOther(t *testing.T) {

@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
 func providerCredentialSelectionRequired(provider, baseURL, credentialRef string) bool {

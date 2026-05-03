@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // Reduce owns the first design-conforming cockpit's durable app-state updates.

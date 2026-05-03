@@ -1,9 +1,9 @@
 package loop
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/paint"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 )
 
 // Render paints the current retained tree into a fresh backbuffer using the

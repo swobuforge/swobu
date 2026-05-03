@@ -1,8 +1,8 @@
 package requestpath
 
 import (
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 // ExecutionContract carries app-level execution semantics for one requestpath

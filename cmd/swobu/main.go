@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/metrofun/swobu/internal/adapters/inbound/cli"
+	"github.com/swobuforge/swobu/internal/adapters/inbound/cli"
 )
 
 func main() {

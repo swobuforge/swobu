@@ -4,7 +4,7 @@ package views
 import (
 	"fmt"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 func buildAnchoredDisclosure[M any](ctx *view.Context[M], parent view.ViewSpec[M], details []view.ViewSpec[M]) view.RenderNode {

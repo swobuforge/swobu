@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/loop"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/loop"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 )
 
 // Single-source proof matrix for shell/body scroll visibility behavior.

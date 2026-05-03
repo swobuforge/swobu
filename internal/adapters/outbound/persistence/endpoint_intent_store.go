@@ -10,8 +10,8 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 const endpointIntentSchemaVersion = 1

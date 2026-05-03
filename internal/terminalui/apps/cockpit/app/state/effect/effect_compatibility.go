@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metrofun/swobu/internal/app/operator/daemonlifecycle"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 var restartDaemon = startDaemonRestart

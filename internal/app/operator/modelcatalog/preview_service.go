@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 // PreviewRequest captures one first-run provider draft route for model-catalog

@@ -3,9 +3,9 @@ package state
 import (
 	"strings"
 
-	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
-	"github.com/metrofun/swobu/internal/terminalui/apps/shared/daemonstate"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/shared/daemonstate"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func allowWhileControlPlaneIncompatible(action update.Action) bool {

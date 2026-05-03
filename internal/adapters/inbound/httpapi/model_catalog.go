@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	operatormodelcatalog "github.com/metrofun/swobu/internal/app/operator/modelcatalog"
+	operatormodelcatalog "github.com/swobuforge/swobu/internal/app/operator/modelcatalog"
 )
 
 type modelCatalogReadFunc func(context.Context) (operatormodelcatalog.Snapshot, error)

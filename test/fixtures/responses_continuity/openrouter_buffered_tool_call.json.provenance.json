@@ -1,5 +1,0 @@
-{
-  "source_record": "test/fixtures/live_matrix/records/openrouter-responses-buffered-tool-call.json",
-  "source_field": "response.body",
-  "extraction": "verbatim"
-}

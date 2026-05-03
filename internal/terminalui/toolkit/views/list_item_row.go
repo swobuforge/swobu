@@ -3,8 +3,8 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 func InsetLabel(label string, cols int) string {

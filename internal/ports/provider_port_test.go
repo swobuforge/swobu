@@ -3,7 +3,7 @@ package ports
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func TestNewExecuteRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {

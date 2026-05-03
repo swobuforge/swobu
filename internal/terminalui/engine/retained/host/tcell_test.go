@@ -13,15 +13,15 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/metrofun/swobu/internal/app/operator/controlplane"
-	appstate "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	rootviews "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/views/root"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/paint"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	appstate "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	rootviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views/root"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 func TestRunner_RendersCockpitAndHandlesTabAndEscStepBackThenQuit(t *testing.T) {

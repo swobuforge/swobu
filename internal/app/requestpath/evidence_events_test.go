@@ -3,8 +3,8 @@ package requestpath
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestTokenUsageFromExecuteResponse_MapsBufferedOutputUsage(t *testing.T) {

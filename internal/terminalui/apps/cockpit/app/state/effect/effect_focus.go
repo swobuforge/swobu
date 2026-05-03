@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/interaction"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // FocusNextAfterRebuildEffect defers one focus-next hop so newly opened

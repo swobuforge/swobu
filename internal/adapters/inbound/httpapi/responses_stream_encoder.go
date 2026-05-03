@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 type responsesClientStreamEncoderWire struct {

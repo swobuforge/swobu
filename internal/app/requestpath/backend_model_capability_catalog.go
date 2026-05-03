@@ -3,8 +3,8 @@ package requestpath
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 // BackendModelCapabilityCatalog resolves execution-time capability truth from

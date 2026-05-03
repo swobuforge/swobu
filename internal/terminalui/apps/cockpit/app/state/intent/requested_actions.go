@@ -2,7 +2,7 @@
 // Each type represents one semantic state change.
 package intent
 
-import stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
+import stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 
 // --- User input actions ---
 

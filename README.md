@@ -1,37 +1,25 @@
-# swobucli
+# swobucli/oss
 
-This directory is the product root for the Swobu CLI/daemon surface.
+Public runtime and release surface for Swobu.
 
 ## Scope
 
-- operator-facing CLI and daemon product surface
-- compatibility/runtime behavior owned by existing Go runtime roots
+- runtime source (`cmd/`, `internal/`)
+- release/build wiring (`Makefile`, `.goreleaser.yml`, release scripts)
+- public installers (`scripts/install.sh`, `scripts/install.ps1`)
 
-## Runtime mapping
+No standalone OSS test plane; tests are collocated Go tests (`*_test.go`).
 
-The runtime implementation is rooted inside `swobucli`:
+## Public Entrypoints
 
-- `swobucli/cmd/swobu`
-- `swobucli/internal/*`
-- `swobucli/test/*`
+- `make -C swobucli/oss` — list public OSS entrypoints
+- `make -C swobucli/oss verify` — merge-safety gate
+- `make -C swobucli/oss test` — deterministic required tests
+- `make -C swobucli/oss build` — local binary build (`.out/swobu`)
+- `make -C swobucli/oss publish patch|minor|major` — tag and push release
+- `make -C swobucli/oss verify-published` — verify published release/install surfaces
+- `make -C swobucli/oss run` — run operator surface
 
-## Entrypoints
+## Install Command Contract
 
-- `make -C swobucli verify`
-- `make -C swobucli test`
-- `make -C swobucli run`
-
-## Install
-
-- latest:
-  - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh`
-- pinned:
-  - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh -s -- --version vX.Y.Z`
-- custom bin dir:
-  - `curl -fsSL https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.sh | sh -s -- --bin-dir "$HOME/.local/bin"`
-- windows (PowerShell, latest):
-  - `irm https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.ps1 | iex`
-- windows (PowerShell, pinned):
-  - `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/metrofun/swobu/main/swobucli/scripts/install.ps1))) -Version vX.Y.Z`
-
-The installers only download release archives, verify SHA256 against `checksums.txt`, and install the `swobu` binary.
+Install command text advertised by product surfaces must come from one canonical installer URL and must pass integration verification (`verify-published` and site integration command test).

@@ -1,6 +1,6 @@
 package loop
 
-import "github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+import "github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 
 // stableKids returns one copy of children ordered by ascending Z while keeping
 // same-Z siblings in their original order. Runtime reuses this deterministic

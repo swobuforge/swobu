@@ -4,12 +4,12 @@ package views
 import (
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/selectors"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
-	toolkitviews "github.com/metrofun/swobu/internal/terminalui/toolkit/views"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // BuildWorkspaceSection composes the workspace section rows.

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 // TemplateVars carries string substitutions for profile spec templates.

@@ -1,10 +1,10 @@
 package views
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
-	toolkitviews "github.com/metrofun/swobu/internal/terminalui/toolkit/views"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 func cockpitRowPolicy() toolkitviews.RowLayoutPolicy {

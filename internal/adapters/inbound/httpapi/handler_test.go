@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"github.com/metrofun/swobu/internal/app/requestpath"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestHandler_PropagatesRequestID(t *testing.T) {

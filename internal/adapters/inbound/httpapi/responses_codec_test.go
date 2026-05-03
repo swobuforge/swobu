@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func TestDecodeResponsesToolMode_KnownValues(t *testing.T) {

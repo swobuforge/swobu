@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/bootstrap"
+	"github.com/swobuforge/swobu/internal/bootstrap"
 )
 
 func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {

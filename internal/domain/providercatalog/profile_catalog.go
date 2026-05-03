@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 const (

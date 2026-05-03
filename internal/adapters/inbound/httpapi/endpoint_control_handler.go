@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	operatorendpoints "github.com/metrofun/swobu/internal/app/operator/endpoints"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)

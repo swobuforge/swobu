@@ -1,7 +1,7 @@
 package view
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // LifecycleEffects captures mount/unmount effects for view lifecycle hooks.

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/views"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
 )
 
 func providerSpecRow(providerConfig *state.ProviderConfigSnapshot) view.ViewSpec[state.Model] {

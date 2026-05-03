@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/domain/providercatalog"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/selectors"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
 func createRunOnSummary(model state.Model) string {

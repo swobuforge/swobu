@@ -3,8 +3,8 @@ package views
 import (
 	"fmt"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cli/app/state"
-	"github.com/metrofun/swobu/internal/terminalui/engine/model"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cli/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/model"
 )
 
 func Build(startup state.StartupState) model.Node {

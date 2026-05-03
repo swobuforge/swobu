@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	evidencestore "github.com/metrofun/swobu/internal/adapters/outbound/evidence"
+	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 )
 
 func TestStatusProjectionHandler_RejectsMissingScope(t *testing.T) {

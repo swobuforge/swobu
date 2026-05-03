@@ -51,7 +51,7 @@ func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsE
 		return nil, fmt.Errorf("create otel metric resource: %w", err)
 	}
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader), sdkmetric.WithResource(res))
-	meter := provider.Meter("github.com/metrofun/swobu/internal/telemetry")
+	meter := provider.Meter("github.com/swobuforge/swobu/internal/telemetry")
 
 	requestsTotal, err := meter.Int64Counter("swobu_requests_total")
 	if err != nil {

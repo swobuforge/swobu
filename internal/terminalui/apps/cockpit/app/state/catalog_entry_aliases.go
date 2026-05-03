@@ -1,6 +1,6 @@
 package state
 
-import stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
+import stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 
 // Public cockpit app model surface.
 type Model = stateModel.Model

@@ -10,7 +10,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func TestRunForegroundClient_UnavailableWithoutRunner(t *testing.T) {

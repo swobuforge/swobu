@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	evidencestore "github.com/metrofun/swobu/internal/adapters/outbound/evidence"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
-	"github.com/metrofun/swobu/internal/domain/runtimeevidence"
-	"github.com/metrofun/swobu/internal/platform/config"
+	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
 func TestStatus_ReportsDegradedWhenRecentTerminalTrafficHasFailure(t *testing.T) {

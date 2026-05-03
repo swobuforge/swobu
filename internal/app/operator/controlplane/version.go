@@ -3,7 +3,7 @@ package controlplane
 import "strings"
 
 // swobuVersion is overridden at build time via:
-// -ldflags "-X github.com/metrofun/swobu/internal/app/operator/controlplane.swobuVersion=vX.Y.Z"
+// -ldflags "-X github.com/swobuforge/swobu/internal/app/operator/controlplane.swobuVersion=vX.Y.Z"
 var swobuVersion = "dev"
 
 // SwobuVersion returns the canonical daemon/operator version string surfaced

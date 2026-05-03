@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metrofun/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
 func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing.T) {

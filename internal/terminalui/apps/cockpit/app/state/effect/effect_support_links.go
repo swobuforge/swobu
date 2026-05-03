@@ -7,12 +7,12 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 const (
-	SupportAskQuestionURL = "https://github.com/metrofun/swobu/discussions/new/choose"
-	SupportFileIssueURL   = "https://github.com/metrofun/swobu/issues/new/choose"
+	SupportAskQuestionURL = "https://github.com/swobuforge/swobu/discussions/new/choose"
+	SupportFileIssueURL   = "https://github.com/swobuforge/swobu/issues/new/choose"
 )
 
 var startProcess = func(command *exec.Cmd) error {

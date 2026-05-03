@@ -1,7 +1,7 @@
 package view
 
 import (
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
 type ConstrainSpec struct {

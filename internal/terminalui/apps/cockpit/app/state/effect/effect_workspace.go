@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // SaveWorkspaceNameEffect renames an existing workspace through the daemon.

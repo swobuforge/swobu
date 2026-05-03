@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/model"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/model"
 )
 
 type Renderer struct {

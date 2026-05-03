@@ -3,8 +3,8 @@ package view
 import (
 	"strconv"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // ResponsiveView renders wide or narrow based on available width.

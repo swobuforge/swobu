@@ -1,6 +1,6 @@
 package compatibility
 
-import "github.com/metrofun/swobu/internal/domain/protocolsurface"
+import "github.com/swobuforge/swobu/internal/domain/protocolsurface"
 
 type IngressFamily = protocolsurface.Kind
 

@@ -3,7 +3,7 @@ package routing
 import (
 	"testing"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
 func TestApplyProviderEnvKeySelection_CreateModeUsesProviderDefaultProtocol(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func TestLocalResponseContinuityStore_MaterializesLinkedThread(t *testing.T) {

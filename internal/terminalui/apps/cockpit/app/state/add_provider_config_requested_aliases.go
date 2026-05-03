@@ -1,6 +1,6 @@
 package state
 
-import stateIntent "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/intent"
+import stateIntent "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/intent"
 
 type SelectEndpoint = stateIntent.SelectEndpoint
 type CreateEndpoint = stateIntent.CreateEndpoint

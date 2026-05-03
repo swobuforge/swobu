@@ -3,7 +3,7 @@ package requestpath
 import (
 	"context"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 )
 
 type staticRoutingPolicy struct{}

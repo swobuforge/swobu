@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	operatorclient "github.com/metrofun/swobu/internal/app/operator/client"
-	platformconfig "github.com/metrofun/swobu/internal/platform/config"
+	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
 func daemonURL() string {

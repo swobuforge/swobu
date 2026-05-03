@@ -17,14 +17,14 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	operatorclient "github.com/metrofun/swobu/internal/app/operator/client"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	platformconfig "github.com/metrofun/swobu/internal/platform/config"
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	stateeffect "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/effect"
-	rootviews "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/views/root"
-	"github.com/metrofun/swobu/internal/terminalui/apps/shared/daemonstate"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/host"
+	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	rootviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views/root"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/shared/daemonstate"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/host"
 )
 
 // Run is the interactive cockpit entry seam.

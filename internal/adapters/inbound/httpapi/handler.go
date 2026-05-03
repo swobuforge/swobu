@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/metrofun/swobu/internal/app/requestpath"
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/platform/httpcontent"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/platform/httpcontent"
 )
 
 type RequestHandler interface {

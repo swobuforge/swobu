@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metrofun/swobu/internal/app/operator/controlplane"
+	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 )
 
 const statePathEnv = "SWOBU_TELEMETRY_STATE_PATH"

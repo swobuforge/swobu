@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/bootstrap"
-	"github.com/metrofun/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/bootstrap"
+	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
 func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {

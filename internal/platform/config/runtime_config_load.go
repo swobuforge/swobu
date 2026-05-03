@@ -17,8 +17,8 @@ import (
 	cueyaml "cuelang.org/go/encoding/yaml"
 	"gopkg.in/yaml.v3"
 
-	"github.com/metrofun/swobu/internal/domain/endpointintent"
-	"github.com/metrofun/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 //go:embed runtime.cue

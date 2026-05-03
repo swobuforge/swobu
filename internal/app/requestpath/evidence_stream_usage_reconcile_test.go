@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/metrofun/swobu/internal/domain/compatibility"
-	"github.com/metrofun/swobu/internal/domain/runtimeevidence"
-	"github.com/metrofun/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestHandle_StreamingEvidenceReconcilesUsageOnCompletedEvent(t *testing.T) {

@@ -4,8 +4,8 @@ package view
 import (
 	"strconv"
 
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/rendergraph/layout"
-	"github.com/metrofun/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // RenderNode is the app-facing alias for the engine's structural node type.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state"
-	toolkitviews "github.com/metrofun/swobu/internal/terminalui/toolkit/views"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 func trafficOutcome(row state.TrafficRow) string {

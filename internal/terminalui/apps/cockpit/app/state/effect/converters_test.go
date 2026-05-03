@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	stateModel "github.com/metrofun/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 func TestArgsToProviderConfig_RejectsUnsupportedProviderProtocolTuple(t *testing.T) {

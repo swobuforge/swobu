@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metrofun/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 )
 
 type StoreConfig struct {
