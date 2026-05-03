@@ -52,11 +52,7 @@ clean: ## Remove local generated build outputs
 
 fmt-check:
 	@set -eu; \
-	files="$$(find cmd internal test -type f -name '*.go' 2>/dev/null)"; \
-	if [ -z "$$files" ]; then \
-		exit 0; \
-	fi; \
-	gofmt_out="$$(gofmt -l $$files)"; \
+	gofmt_out="$$(find cmd internal -type f -name '*.go' -print0 | xargs -0r gofmt -l)"; \
 	if [ -n "$$gofmt_out" ]; then \
 		printf 'Files need formatting:\n%s\n' "$$gofmt_out"; \
 		exit 1; \
