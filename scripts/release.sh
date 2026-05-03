@@ -123,7 +123,6 @@ done
 
 echo "release: creating GitHub Release $next_tag"
 gh release create "$next_tag" "$release_dist_dir"/swobu_"$next_tag"_*.tar.gz "$checksums_file" \
-  --repo swobuforge/swobu \
   --verify-tag \
   --latest \
   --notes-from-tag
