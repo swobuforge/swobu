@@ -1,0 +1,6 @@
+9d65368eb53347faded78e4994bbb46eff61d56098cc62e7617b2fb21b6f9272  swobu_0.0.0-SNAPSHOT-none_darwin_amd64.tar.gz
+4198202264b8e1dbde855236d287c8a0adc0b2f7a690c8804eaa5fa32fe4a102  swobu_0.0.0-SNAPSHOT-none_darwin_arm64.tar.gz
+9c17abe1b84dbda6ecefd43ccac3cfbaa6761c3e297b9a3769888e0e3351c040  swobu_0.0.0-SNAPSHOT-none_linux_amd64.tar.gz
+1965c9b98a67e8fa6f71eeb54dafd3101d9933a02a78d342dc96aa0243007ae7  swobu_0.0.0-SNAPSHOT-none_linux_arm64.tar.gz
+266d064963744fa5ce7d27e099fb313668d668893095dd7dc89801f632bbacf4  swobu_0.0.0-SNAPSHOT-none_windows_amd64.zip
+b8dabe8a773bc598dafa3d4c189efe6c932fd853019c8e36f32adc2c4269be79  swobu_0.0.0-SNAPSHOT-none_windows_arm64.zip

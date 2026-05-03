@@ -30,7 +30,8 @@ archives:
       - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     name_template: "swobu_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
