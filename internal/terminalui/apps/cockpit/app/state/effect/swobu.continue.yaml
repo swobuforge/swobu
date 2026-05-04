@@ -6,7 +6,7 @@ models:
   - name: Swobu Primary
     provider: openai
     model: primary
-    apiBase: http://127.0.0.1:7777/c/acme/v1
+    apiBase: http://127.0.0.1:7926/c/acme/v1
     roles:
       - chat
       - edit

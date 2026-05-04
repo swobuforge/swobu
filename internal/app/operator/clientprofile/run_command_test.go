@@ -10,7 +10,7 @@ import (
 func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
 	tests := []struct {
 		clientID    string
 		binary      string
@@ -23,7 +23,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			binary:   "aider",
 			contains: []string{"--model", "openai/" + compatibility.PrimaryTargetSelector},
 			envChecks: map[string]string{
-				"AIDER_OPENAI_API_BASE": "http://127.0.0.1:7777/c/acme/v1",
+				"AIDER_OPENAI_API_BASE": "http://127.0.0.1:7926/c/acme/v1",
 				"OPENAI_API_KEY":        "swobu-placeholder",
 			},
 		},
@@ -33,7 +33,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			contains: []string{
 				`model="` + compatibility.PrimaryTargetSelector + `"`,
 				`model_provider="swobu"`,
-				`model_providers.swobu.base_url="http://127.0.0.1:7777/c/acme/v1"`,
+				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
 				`forced_login_method="api"`,
 			},
 		},
@@ -42,7 +42,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			binary:   "claude",
 			contains: []string{"--model", compatibility.PrimaryTargetSelector},
 			envChecks: map[string]string{
-				"ANTHROPIC_BASE_URL": "http://127.0.0.1:7777/c/acme/",
+				"ANTHROPIC_BASE_URL": "http://127.0.0.1:7926/c/acme/",
 				"ANTHROPIC_MODEL":    compatibility.PrimaryTargetSelector,
 			},
 		},
@@ -97,7 +97,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			if command.Prepare.Path != tc.preparePath {
 				t.Fatalf("prepare path=%q want=%q", command.Prepare.Path, tc.preparePath)
 			}
-			if !strings.Contains(command.Prepare.Content, "http://127.0.0.1:7777/c/acme/v1") {
+			if !strings.Contains(command.Prepare.Content, "http://127.0.0.1:7926/c/acme/v1") {
 				t.Fatalf("prepare content=%q", command.Prepare.Content)
 			}
 		})
@@ -107,10 +107,10 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 func TestResolveRunCommand_NonRunnableProfiles(t *testing.T) {
 	t.Parallel()
 
-	if _, ok := ResolveRunCommand("other", "http://127.0.0.1:7777/c/acme/", ""); ok {
+	if _, ok := ResolveRunCommand("other", "http://127.0.0.1:7926/c/acme/", ""); ok {
 		t.Fatal("other must not resolve run command")
 	}
-	if _, ok := ResolveRunCommand("", "http://127.0.0.1:7777/c/acme/", ""); ok {
+	if _, ok := ResolveRunCommand("", "http://127.0.0.1:7926/c/acme/", ""); ok {
 		t.Fatal("empty client must not resolve run command")
 	}
 }

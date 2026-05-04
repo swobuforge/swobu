@@ -1,0 +1,43 @@
+name: Enforce No External PRs
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close-external-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close PRs from non-owner accounts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner.toLowerCase();
+            const actor = context.payload.pull_request.user.login.toLowerCase();
+            if (actor === owner) {
+              core.info(`PR author ${actor} is repository owner; leaving open.`);
+              return;
+            }
+
+            const issue_number = context.payload.pull_request.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body: [
+                "Thanks for the interest.",
+                "",
+                "This repository does not accept external contributions at this time.",
+                "Please contact legal@swobu.com for legal/trademark notices or licensing@swobu.com for commercial terms."
+              ].join("\n")
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: issue_number,
+              state: "closed"
+            });

@@ -132,7 +132,7 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 		t.Fatalf("NewEndpoint returned error: %v", err)
 	}
 
-	if err := Save(path, RuntimeConfig{BindAddr: "127.0.0.1:7777"}, []endpointintent.Endpoint{endpoint}); err != nil {
+	if err := Save(path, RuntimeConfig{BindAddr: "127.0.0.1:7926"}, []endpointintent.Endpoint{endpoint}); err != nil {
 		t.Fatalf("Save returned error: %v", err)
 	}
 	raw, err := os.ReadFile(path)

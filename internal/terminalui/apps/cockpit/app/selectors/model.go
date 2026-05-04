@@ -90,7 +90,7 @@ func ClientBaseURL(model state.Model) string {
 	if current == "" {
 		return "none"
 	}
-	return "http://127.0.0.1:7777/c/" + current + "/"
+	return "http://127.0.0.1:7926/c/" + current + "/"
 }
 
 func CurrentEndpoint(model state.Model) string {

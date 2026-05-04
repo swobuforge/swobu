@@ -47,7 +47,7 @@ func TestReduce_ClientLaunchRequested_EndToEndLaunchFlow(t *testing.T) {
 				CurrentEndpoint: "acme",
 			}
 			effects := Reduce(&model, ClientLaunchRequested{
-				BaseURL: "http://127.0.0.1:7777/c/acme/",
+				BaseURL: "http://127.0.0.1:7926/c/acme/",
 				Preset:  tc.preset,
 			})
 			if got := model.HeaderStatus; got != "running…" {

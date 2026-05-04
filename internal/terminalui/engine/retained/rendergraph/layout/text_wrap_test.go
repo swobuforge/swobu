@@ -18,7 +18,7 @@ func TestWrapLinePreserveIndent_WrapsLongProse(t *testing.T) {
 
 func TestWrapLinePreserveIndent_PreservesLeadingIndentation(t *testing.T) {
 	t.Parallel()
-	line := "    apiBase: http://127.0.0.1:7777/c/acme/v1"
+	line := "    apiBase: http://127.0.0.1:7926/c/acme/v1"
 	segments := WrapLinePreserveIndent(line, 28)
 	if len(segments) < 2 {
 		t.Fatalf("segments=%v want wrapped", segments)
@@ -32,7 +32,7 @@ func TestWrapLinePreserveIndent_PreservesLeadingIndentation(t *testing.T) {
 
 func TestWrapLinePreserveIndent_SplitsLongUnbrokenToken(t *testing.T) {
 	t.Parallel()
-	line := "    OPENCODE_CONFIG_CONTENT={\"provider\":{\"swobu\":{\"options\":{\"baseURL\":\"http://127.0.0.1:7777/c/jobs/v1\"}}}}"
+	line := "    OPENCODE_CONFIG_CONTENT={\"provider\":{\"swobu\":{\"options\":{\"baseURL\":\"http://127.0.0.1:7926/c/jobs/v1\"}}}}"
 	segments := WrapLinePreserveIndent(line, 32)
 	if len(segments) < 2 {
 		t.Fatalf("segments=%v want wrapped", segments)

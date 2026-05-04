@@ -22,7 +22,7 @@ func TestWrapPayloadLine_WrapsLongProseWithoutEllipsis(t *testing.T) {
 
 func TestWrapPayloadLine_PreservesLeadingIndentation(t *testing.T) {
 	t.Parallel()
-	line := "    apiBase: http://127.0.0.1:7777/c/acme/v1"
+	line := "    apiBase: http://127.0.0.1:7926/c/acme/v1"
 	segments := layout.WrapLinePreserveIndent(line, 28)
 	if len(segments) < 2 {
 		t.Fatalf("segments=%v want wrapped", segments)
@@ -44,7 +44,7 @@ func TestDisclosureNoteRows_WrapsLongBackendErrors(t *testing.T) {
 
 func TestWrappedPayloadTextRows_WrapsLongUnbrokenClientCommand(t *testing.T) {
 	t.Parallel()
-	rows := wrappedPayloadTextRows(`OPENCODE_CONFIG_CONTENT={"provider":{"swobu":{"options":{"baseURL":"http://127.0.0.1:7777/c/jobs/v1"}}}}`)
+	rows := wrappedPayloadTextRows(`OPENCODE_CONFIG_CONTENT={"provider":{"swobu":{"options":{"baseURL":"http://127.0.0.1:7926/c/jobs/v1"}}}}`)
 	if len(rows) < 2 {
 		t.Fatalf("rows=%d want wrapped payload output", len(rows))
 	}

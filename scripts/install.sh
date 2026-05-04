@@ -8,16 +8,17 @@ BIN_NAME="${BIN_NAME:-swobu}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${VERSION:-}"
 DRY_RUN="${DRY_RUN:-false}"
+EXPECTED_SHA256="${EXPECTED_SHA256:-}"
 
 usage() {
   cat <<'EOF'
 Install swobu from GitHub Releases.
 
 Usage:
-  install.sh [--version vX.Y.Z] [--bin-dir /path] [--dry-run]
+  install.sh [--version vX.Y.Z] [--bin-dir /path] [--checksum <sha256>] [--dry-run]
 
 Environment overrides:
-  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN
+  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256
 EOF
 }
 
@@ -58,16 +59,8 @@ detect_arch() {
 http_get() {
   url="$1"
   out="$2"
-  if have_cmd curl; then
-    curl -fsSL "$url" -o "$out"
-    return
-  fi
-  if have_cmd wget; then
-    wget -qO "$out" "$url"
-    return
-  fi
-  echo "either curl or wget is required" >&2
-  exit 1
+  need_cmd curl
+  curl -fsSL "$url" -o "$out"
 }
 
 resolve_version() {
@@ -76,9 +69,9 @@ resolve_version() {
     return
   fi
   latest_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-  tmp_json="$tmp_root/latest.json"
-  http_get "$latest_url" "$tmp_json"
-  tag="$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp_json" | head -n 1)"
+  latest_json="$tmp_root/latest.json"
+  http_get "$latest_url" "$latest_json"
+  tag="$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$latest_json" | head -n 1)"
   if [ -z "$tag" ]; then
     echo "failed to resolve latest release tag from $latest_url" >&2
     exit 1
@@ -100,6 +93,17 @@ sha256_of() {
   exit 1
 }
 
+normalize_hex256() {
+  value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) printf "%s" "$value" ;;
+    *)
+      echo "invalid sha256 value: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version)
@@ -114,6 +118,11 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run)
       DRY_RUN=true
+      ;;
+    --checksum)
+      shift
+      [ "$#" -gt 0 ] || { echo "--checksum requires a value" >&2; exit 1; }
+      EXPECTED_SHA256="$1"
       ;;
     -h|--help)
       usage
@@ -147,6 +156,9 @@ if [ "$DRY_RUN" = "true" ]; then
   echo "archive_url=$archive_url"
   echo "checksums_url=$checksums_url"
   echo "install_dir=$INSTALL_DIR"
+  if [ -n "$EXPECTED_SHA256" ]; then
+    echo "expected_sha256=$(normalize_hex256 "$EXPECTED_SHA256")"
+  fi
   exit 0
 fi
 
@@ -161,27 +173,72 @@ http_get "$archive_url" "$archive_path"
 echo "downloading: $checksums_url"
 http_get "$checksums_url" "$checksums_path"
 
-expected="$(awk -v name="$archive" '$2 == name { print $1 }' "$checksums_path")"
+echo "Verifying artifact checksum"
+expected="$(awk -v name="$archive" '
+  NF >= 2 {
+    f = $2
+    sub(/^\*/, "", f)
+    if (f == name) {
+      print tolower($1)
+      exit
+    }
+  }
+' "$checksums_path")"
 if [ -z "$expected" ]; then
   echo "archive $archive not found in checksums.txt" >&2
   exit 1
 fi
 actual="$(sha256_of "$archive_path")"
+expected="$(normalize_hex256 "$expected")"
+actual="$(normalize_hex256 "$actual")"
 if [ "$expected" != "$actual" ]; then
-  echo "checksum mismatch for $archive" >&2
+  echo "error: checksum mismatch for $archive" >&2
   exit 1
+fi
+if [ -n "$EXPECTED_SHA256" ]; then
+  pinned="$(normalize_hex256 "$EXPECTED_SHA256")"
+  if [ "$pinned" != "$actual" ]; then
+    echo "pinned checksum mismatch for $archive" >&2
+    exit 1
+  fi
+else
+  echo "warning: no pinned checksum provided; integrity checked via release checksums only" >&2
 fi
 
 extract_dir="$tmp_root/extract"
 mkdir -p "$extract_dir"
-tar -xzf "$archive_path" -C "$extract_dir"
+if ! tar -tzf "$archive_path" | grep -qx "$BIN_NAME"; then
+  echo "archive missing binary entry: $BIN_NAME" >&2
+  exit 1
+fi
+tar -xzf "$archive_path" -C "$extract_dir" -- "$BIN_NAME"
 
 if [ ! -f "$extract_dir/$BIN_NAME" ]; then
   echo "archive missing binary: $BIN_NAME" >&2
   exit 1
 fi
+if [ -L "$extract_dir/$BIN_NAME" ]; then
+  echo "refusing symlink binary payload: $BIN_NAME" >&2
+  exit 1
+fi
 
 install_path="$INSTALL_DIR/$BIN_NAME"
-cp "$extract_dir/$BIN_NAME" "$install_path"
-chmod 0755 "$install_path"
-echo "installed $BIN_NAME to $install_path"
+tmp_install="$INSTALL_DIR/.${BIN_NAME}.tmp.$$"
+echo "Installing to $install_path"
+cp "$extract_dir/$BIN_NAME" "$tmp_install"
+chmod 0755 "$tmp_install"
+mv -f "$tmp_install" "$install_path"
+echo "$BIN_NAME installed successfully"
+echo
+echo "Run:"
+echo "  $install_path --version"
+
+path_case=":$PATH:"
+case "$path_case" in
+  *":$INSTALL_DIR:"*) ;;
+  *)
+    echo
+    echo "Note: $INSTALL_DIR is not on your PATH."
+    echo "Add it to your shell profile before running $BIN_NAME from a new terminal."
+    ;;
+esac

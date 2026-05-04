@@ -1,4 +1,4 @@
-bind_addr: *"127.0.0.1:7777" | string
+bind_addr: *"127.0.0.1:7926" | string
 
 endpoints: *[] | [...#Endpoint]
 

@@ -6,7 +6,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Swobu",
       "options": {
-        "baseURL": "http://127.0.0.1:7777/c/acme/v1"
+        "baseURL": "http://127.0.0.1:7926/c/acme/v1"
       },
       "models": {
         "primary": { "name": "Primary" }
