@@ -1,0 +1,4 @@
+58c39c928ff44ca80c2abad35dd4dbfe449394a990592ec7d88a9a177546c9a5  swobu_v0.0.4_darwin_amd64.tar.gz
+a4041dfd075c0f489b83814c3add4a560b35bef7e41d0439307793177322d1ff  swobu_v0.0.4_darwin_arm64.tar.gz
+2376a0ae01de3be2badfd3a114bbef999fbdbb21a7aa20bf23264a2f0442b378  swobu_v0.0.4_linux_amd64.tar.gz
+d51140f713fb1f6b091523e39cdef44363a028b49879ccc5d69f2bec45f20e52  swobu_v0.0.4_linux_arm64.tar.gz

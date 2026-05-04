@@ -31,8 +31,8 @@ func TestCatalog_ContainsCanonicalProfiles(t *testing.T) {
 func TestProfileActions_ParetoMatrix(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
-	openAIBase := "http://127.0.0.1:7777/c/acme/v1"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
+	openAIBase := "http://127.0.0.1:7926/c/acme/v1"
 
 	codex := FindByID(Catalog(), "codex")
 	codexActions := codex.Actions(baseURL)
@@ -120,7 +120,7 @@ func TestProfileActions_ParetoMatrix(t *testing.T) {
 	if !strings.Contains(otherActions[0].ActionSummary(), "openai + anthropic") {
 		t.Fatalf("other summary=%q", otherActions[0].ActionSummary())
 	}
-	if got := otherActions[1].Content; got != "Base URL: http://127.0.0.1:7777/c/acme/\nModel:    primary" {
+	if got := otherActions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    primary" {
 		t.Fatalf("other copy values=%q", got)
 	}
 }
@@ -128,7 +128,7 @@ func TestProfileActions_ParetoMatrix(t *testing.T) {
 func TestCatalog_RunVerbOwnershipBoundary(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
 	allowedRunProfiles := map[string]struct{}{
 		"aider":    {},
 		"codex":    {},
@@ -153,7 +153,7 @@ func TestCatalog_RunVerbOwnershipBoundary(t *testing.T) {
 func TestCatalog_ClientRunCapabilityLadder(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
 	expectRunRows := map[string]struct {
 		label string
 		verb  string
@@ -189,7 +189,7 @@ func TestCatalog_ClientRunCapabilityLadder(t *testing.T) {
 func TestCatalog_RunRowsUseVerifiedLanguage(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
 	for _, profile := range Catalog() {
 		for _, action := range profile.Actions(baseURL) {
 			label := strings.ToLower(strings.TrimSpace(action.RowLabel()))
@@ -206,7 +206,7 @@ func TestCatalog_RunRowsUseVerifiedLanguage(t *testing.T) {
 func TestCatalog_NoCopyOnlyRunRows(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
 	for _, profile := range Catalog() {
 		actions := profile.Actions(baseURL)
 		for _, action := range actions {
@@ -223,7 +223,7 @@ func TestCatalog_NoCopyOnlyRunRows(t *testing.T) {
 func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 	t.Parallel()
 
-	baseURL := "http://127.0.0.1:7777/c/acme/"
+	baseURL := "http://127.0.0.1:7926/c/acme/"
 	tests := []struct {
 		profileID string
 		contains  []string
@@ -234,11 +234,11 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 		},
 		{
 			profileID: "claude",
-			contains:  []string{"claude --model", "ANTHROPIC_BASE_URL=http://127.0.0.1:7777/c/acme/"},
+			contains:  []string{"claude --model", "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/"},
 		},
 		{
 			profileID: "aider",
-			contains:  []string{"aider --model", "AIDER_OPENAI_API_BASE=http://127.0.0.1:7777/c/acme/v1"},
+			contains:  []string{"aider --model", "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1"},
 		},
 		{
 			profileID: "continue",

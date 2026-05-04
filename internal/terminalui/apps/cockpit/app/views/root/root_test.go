@@ -207,7 +207,7 @@ func TestRoot_ClientActionPayloadDisclosure_CopyRevealsOnActivateOnly(t *testing
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 	out = rt.Render(viewport).String()
-	if !strings.Contains(out, `model_provider = "swobu"`) || !strings.Contains(out, `base_url = "http://127.0.0.1:7777/c/acme/v1"`) {
+	if !strings.Contains(out, `model_provider = "swobu"`) || !strings.Contains(out, `base_url = "http://127.0.0.1:7926/c/acme/v1"`) {
 		t.Fatalf("file-config payload should be visible after activate; render=%q", out)
 	}
 }
@@ -246,7 +246,7 @@ func TestRoot_ClientActionPayloadDisclosure_OpenCodeFileConfigScrollsAndPreserve
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	if strings.Contains(out, `"baseURL": "http://127.0.0.1:7777/c/acme/v1"`) {
+	if strings.Contains(out, `"baseURL": "http://127.0.0.1:7926/c/acme/v1"`) {
 		t.Fatalf("expected OpenCode baseURL to be below initial disclosure viewport before scrolling; render=%q", out)
 	}
 	for i := 0; i < 8; i++ {
@@ -254,7 +254,7 @@ func TestRoot_ClientActionPayloadDisclosure_OpenCodeFileConfigScrollsAndPreserve
 		rt.Rebuild(Root(), viewport)
 	}
 	out = rt.Render(viewport).String()
-	if !strings.Contains(out, `"baseURL":`) || !strings.Contains(out, `"http://127.0.0.1:7777/c/acme/v1"`) {
+	if !strings.Contains(out, `"baseURL":`) || !strings.Contains(out, `"http://127.0.0.1:7926/c/acme/v1"`) {
 		t.Fatalf("expected OpenCode baseURL visible after disclosure scrolling; render=%q", out)
 	}
 
@@ -417,7 +417,7 @@ func TestRoot_ClientActionPayloadDisclosure_ManualRunRevealsOnActivateOnly(t *te
 	selectClientFromChooser(t, rt, viewport, "Codex")
 	focusRowContaining(t, rt, viewport, "run")
 	out := rt.Render(viewport).String()
-	if strings.Contains(out, `model_providers.swobu.base_url="http://127.0.0.1:7777/c/acme/v1"`) {
+	if strings.Contains(out, `model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`) {
 		t.Fatalf("run command payload should stay hidden on focus; render=%q", out)
 	}
 

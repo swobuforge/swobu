@@ -13,13 +13,19 @@ No standalone OSS test plane; tests are collocated Go tests (`*_test.go`).
 ## Public Entrypoints
 
 - `make -C swobucli/oss` — list public OSS entrypoints
-- `make -C swobucli/oss verify` — merge-safety gate
 - `make -C swobucli/oss test` — deterministic required tests
 - `make -C swobucli/oss build` — local binary build (`.out/swobu`)
-- `make -C swobucli/oss publish patch|minor|major` — tag, build artifacts, and publish GitHub Release
-- `make -C swobucli/oss verify-published` — verify published release/install surfaces
-- `make -C swobucli/oss run` — run operator surface
+- `make -C swobucli/oss artifacts SWOBU_VERSION=vX.Y.Z` — build release archives + checksums
 
-## Install Command Contract
+## Installer Contract
 
-Install command text advertised by product surfaces must come from one canonical installer URL and must pass integration verification (`verify-published` and site integration command test).
+Installers must always verify release archive integrity via `checksums.txt`.
+
+## License
+
+This project is licensed under GNU Lesser General Public License v3.0 only (`LGPL-3.0-only`).
+See `COPYING.LESSER` and `COPYING`.
+
+Commercial licensing is available via licensing@swobu.com.
+
+Copyright (c) 2026 Dmytrii Shchadei.
