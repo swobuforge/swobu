@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +111,76 @@ func TestRunner_TelemetryCommand_UnknownSubcommandFails(t *testing.T) {
 	}
 	if got := stderr.String(); got == "" {
 		t.Fatal("stderr is empty, want unknown telemetry subcommand message")
+	}
+	if got := stderr.String(); !strings.Contains(got, `unknown telemetry subcommand "flush"`) {
+		t.Fatalf("stderr missing unknown telemetry subcommand message; stderr=%q", got)
+	}
+}
+
+func TestRunner_TelemetryCommand_StatePathFlagControlsLocation(t *testing.T) {
+	envStatePath := filepath.Join(t.TempDir(), "env", "state.json")
+	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", envStatePath)
+
+	flagRoot := t.TempDir()
+	flagStatePath := filepath.Join(flagRoot, "flag", "state.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := Runner{Stdout: &stdout, Stderr: &stderr}
+
+	exitCode := runner.Run(context.Background(), []string{"telemetry", "off", "--state-path", flagStatePath})
+	if exitCode != ExitHealthy {
+		t.Fatalf("off exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
+	}
+	if _, err := os.Stat(flagStatePath); err != nil {
+		t.Fatalf("flag state path not written: %v", err)
+	}
+	if _, err := os.Stat(envStatePath); !os.IsNotExist(err) {
+		t.Fatalf("env state path should remain untouched; stat err=%v", err)
+	}
+}
+
+func TestRunner_TelemetryCommand_StatusStatePathReadsFlagPath(t *testing.T) {
+	envStatePath := filepath.Join(t.TempDir(), "env", "state.json")
+	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", envStatePath)
+	flagStatePath := filepath.Join(t.TempDir(), "flag", "state.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := Runner{Stdout: &stdout, Stderr: &stderr}
+
+	exitCode := runner.Run(context.Background(), []string{"telemetry", "off", "--state-path", flagStatePath})
+	if exitCode != ExitHealthy {
+		t.Fatalf("off exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runner.Run(context.Background(), []string{"telemetry", "status", "--state-path", flagStatePath})
+	if exitCode != ExitHealthy {
+		t.Fatalf("status exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
+	}
+	var statusPayload struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("status output is not JSON: %v; raw=%q", err, stdout.String())
+	}
+	if statusPayload.Enabled {
+		t.Fatal("status enabled = true, want false from flag state path")
+	}
+}
+
+func TestRunner_TelemetryCommand_MissingSubcommandShowsError(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := Runner{Stdout: &stdout, Stderr: &stderr}
+
+	exitCode := runner.Run(context.Background(), []string{"telemetry"})
+	if exitCode != ExitDown {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
+	}
+	if got := stderr.String(); !strings.Contains(got, "telemetry subcommand required: status|on|off") {
+		t.Fatalf("stderr missing telemetry missing-subcommand error; stderr=%q", got)
 	}
 }
