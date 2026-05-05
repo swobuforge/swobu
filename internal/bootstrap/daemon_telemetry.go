@@ -4,8 +4,6 @@ import (
 	"context"
 	"os"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +11,11 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/telemetry"
+)
+
+const (
+	embeddedTelemetryEndpoint = "https://api.swobu.com/v1/metrics"
+	embeddedTelemetryInterval = 6 * time.Hour
 )
 
 type embeddedTelemetryRuntimeState struct {
@@ -91,11 +94,10 @@ func (d *Daemon) initTelemetryEmitter(ctx context.Context) bool {
 		d.telemetry.emitter = telemetry.NewStdoutEmitter(os.Stdout)
 		return true
 	}
-	endpoint := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryEndpoint))
-	if endpoint == "" {
-		return false
-	}
-	emitter, err := telemetry.NewMetricsEmitter(ctx, telemetry.MetricsEmitterConfig{EndpointURL: endpoint, Timeout: 5 * time.Second})
+	emitter, err := telemetry.NewMetricsEmitter(ctx, telemetry.MetricsEmitterConfig{
+		EndpointURL: embeddedTelemetryEndpoint,
+		Timeout:     5 * time.Second,
+	})
 	if err != nil {
 		if d.logger != nil {
 			d.logger.Warn("telemetry init failed", "error", err.Error())
@@ -162,13 +164,5 @@ func nonNegativeDelta(current, previous int) int64 {
 }
 
 func telemetryInterval() time.Duration {
-	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryInterval))
-	if raw == "" {
-		return 6 * time.Hour
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		return 6 * time.Hour
-	}
-	return time.Duration(value) * time.Second
+	return embeddedTelemetryInterval
 }
