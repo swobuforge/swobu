@@ -14,7 +14,6 @@ import (
 
 func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {
 	t.Setenv("SWOBU_TELEMETRY_DEBUG", "1")
-	t.Setenv("SWOBU_TELEMETRY_INTERVAL", "1")
 	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
