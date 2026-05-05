@@ -101,7 +101,7 @@ func TestEnvResolver_ResolveCredential_ExplicitKeyEmpty(t *testing.T) {
 
 func TestFileResolver_ResolveCredential_FilePrefixPath(t *testing.T) {
 	dir := t.TempDir()
-	path := dir + "/token"
+	path := dir + "/token.key"
 	if err := os.WriteFile(path, []byte(" token-file \n"), 0o600); err != nil {
 		t.Fatalf("write file token: %v", err)
 	}
@@ -140,5 +140,22 @@ func TestFileResolver_ResolveCredential_RejectsRelativePath(t *testing.T) {
 	_, err := resolver.ResolveCredential(context.Background(), "openrouter", "file:token.txt")
 	if err == nil {
 		t.Fatalf("ResolveCredential returned nil error, want path failure")
+	}
+}
+
+func TestFileResolver_ResolveCredential_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := dir + "/real.key"
+	if err := os.WriteFile(target, []byte("token"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	link := dir + "/linked.key"
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	resolver := NewFileResolver()
+	_, err := resolver.ResolveCredential(context.Background(), "openrouter", "file:"+link)
+	if err == nil {
+		t.Fatalf("ResolveCredential returned nil error, want symlink failure")
 	}
 }

@@ -12,10 +12,8 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
-
-const statePathEnv = "SWOBU_TELEMETRY_STATE_PATH"
-const doNotTrackEnv = "DO_NOT_TRACK"
 
 type State struct {
 	Enabled            bool   `json:"enabled"`
@@ -168,10 +166,10 @@ func (s Store) InspectPreview() ([]byte, error) {
 }
 
 func defaultStatePath() string {
-	if explicit := strings.TrimSpace(os.Getenv(statePathEnv)); explicit != "" {
+	if explicit := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryStatePath)); explicit != "" {
 		return explicit
 	}
-	if xdg := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); xdg != "" {
+	if xdg := strings.TrimSpace(os.Getenv(platformconfig.EnvXDGStateHome)); xdg != "" {
 		return filepath.Join(xdg, "swobu", "telemetry", "state.json")
 	}
 	home, err := os.UserHomeDir()
@@ -218,13 +216,7 @@ func newAnonymousInstallID(r io.Reader, now func() time.Time) string {
 }
 
 func isDoNotTrackEnabled() bool {
-	raw := strings.TrimSpace(strings.ToLower(os.Getenv(doNotTrackEnv)))
-	switch raw {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvDoNotTrack))
 }
 
 func DoNotTrackEnabled() bool {

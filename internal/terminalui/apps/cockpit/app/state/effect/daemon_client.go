@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -16,9 +15,6 @@ import (
 )
 
 func daemonURL() string {
-	if value := strings.TrimSpace(os.Getenv("SWOBU_DAEMON_URL")); value != "" {
-		return value
-	}
 	return platformconfig.DefaultDaemonURL()
 }
 

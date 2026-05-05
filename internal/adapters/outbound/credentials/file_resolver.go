@@ -9,6 +9,7 @@ import (
 )
 
 const fileCredentialRefPrefix = "file:"
+const maxCredentialFileBytes = 16 * 1024
 
 // FileResolver reads provider keys from a local credential file.
 type FileResolver struct{}
@@ -27,6 +28,16 @@ func (r FileResolver) ResolveCredential(ctx context.Context, providerSpec string
 	path, err := fileCredentialPath(credentialRef)
 	if err != nil {
 		return "", err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("credential file %q could not be read", path)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("credential file %q must not be a symlink", path)
+	}
+	if info.Size() > maxCredentialFileBytes {
+		return "", fmt.Errorf("credential file %q exceeds maximum allowed size", path)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

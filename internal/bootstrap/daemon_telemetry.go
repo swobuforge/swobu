@@ -11,12 +11,9 @@ import (
 
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
-
-const telemetryEndpointEnv = "SWOBU_TELEMETRY_ENDPOINT"
-const telemetryIntervalEnv = "SWOBU_TELEMETRY_INTERVAL"
-const telemetryDebugEnv = "SWOBU_TELEMETRY_DEBUG"
 
 type embeddedTelemetryRuntimeState struct {
 	store          telemetry.Store
@@ -86,13 +83,7 @@ func (d *Daemon) runTelemetryRuntime() {
 }
 
 func telemetryDebugEnabled() bool {
-	raw := strings.TrimSpace(strings.ToLower(os.Getenv(telemetryDebugEnv)))
-	switch raw {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvTelemetryDebug))
 }
 
 func (d *Daemon) initTelemetryEmitter(ctx context.Context) bool {
@@ -100,7 +91,7 @@ func (d *Daemon) initTelemetryEmitter(ctx context.Context) bool {
 		d.telemetry.emitter = telemetry.NewStdoutEmitter(os.Stdout)
 		return true
 	}
-	endpoint := strings.TrimSpace(os.Getenv(telemetryEndpointEnv))
+	endpoint := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryEndpoint))
 	if endpoint == "" {
 		return false
 	}
@@ -171,7 +162,7 @@ func nonNegativeDelta(current, previous int) int64 {
 }
 
 func telemetryInterval() time.Duration {
-	raw := strings.TrimSpace(os.Getenv(telemetryIntervalEnv))
+	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryInterval))
 	if raw == "" {
 		return 6 * time.Hour
 	}

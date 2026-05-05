@@ -55,3 +55,53 @@ func TestPreviewLoader_Load_PreservesNonFileCredentialResolutionError(t *testing
 		t.Fatalf("error = %q, want %q", snapshot.Error, want)
 	}
 }
+
+func TestPreviewLoader_Load_AllowsPrivateBaseURL(t *testing.T) {
+	loader := NewPreviewLoader(previewProviderCatalogStub{models: []string{"m1"}})
+	snapshot, err := loader.Load(context.Background(), PreviewRequest{
+		ProviderSpec: "openrouter",
+		BaseURL:      "http://10.1.2.3/v1",
+		CredentialRef: "env:OPENROUTER_API_KEY",
+		ProtocolKind: "chat_completions",
+	})
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if snapshot.Error != "" {
+		t.Fatalf("error = %q, want empty", snapshot.Error)
+	}
+}
+
+func TestPreviewLoader_Load_AllowsUnsupportedBaseURLScheme(t *testing.T) {
+	loader := NewPreviewLoader(previewProviderCatalogStub{models: []string{"m1"}})
+	snapshot, err := loader.Load(context.Background(), PreviewRequest{
+		ProviderSpec: "custom",
+		BaseURL:      "file:///tmp/provider.sock",
+		CredentialRef: "env:CUSTOM_API_KEY",
+		ProtocolKind: "chat_completions",
+	})
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if snapshot.Error != "" {
+		t.Fatalf("error = %q, want empty", snapshot.Error)
+	}
+}
+
+func TestPreviewLoader_Load_AcceptsLocalhostBaseURL(t *testing.T) {
+	loader := NewPreviewLoader(previewProviderCatalogStub{models: []string{"m1"}})
+	snapshot, err := loader.Load(context.Background(), PreviewRequest{
+		ProviderSpec: "custom",
+		BaseURL:      "http://127.0.0.1:11434/v1",
+		ProtocolKind: "chat_completions",
+	})
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if snapshot.Error != "" {
+		t.Fatalf("error = %q, want empty", snapshot.Error)
+	}
+	if len(snapshot.ModelIDs) != 1 || snapshot.ModelIDs[0] != "m1" {
+		t.Fatalf("model_ids = %v, want [m1]", snapshot.ModelIDs)
+	}
+}

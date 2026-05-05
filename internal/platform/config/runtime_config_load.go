@@ -74,14 +74,14 @@ func DefaultBindAddr() string {
 }
 
 func DefaultDaemonURL() string {
-	if daemonURL := strings.TrimSpace(os.Getenv("SWOBU_DAEMON_URL")); daemonURL != "" {
+	if daemonURL := strings.TrimSpace(os.Getenv(EnvDaemonURL)); daemonURL != "" {
 		return daemonURL
 	}
 	return "http://" + DefaultBindAddr()
 }
 
 func DefaultConfigPath() string {
-	if configPath := strings.TrimSpace(os.Getenv("SWOBU_CONFIG_PATH")); configPath != "" {
+	if configPath := strings.TrimSpace(os.Getenv(EnvConfigPath)); configPath != "" {
 		return configPath
 	}
 	configDir, err := os.UserConfigDir()

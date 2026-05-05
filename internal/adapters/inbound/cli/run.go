@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/swobuforge/swobu/internal/bootstrap"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
@@ -95,6 +96,7 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 
 	if len(args) == 0 {
 		if isInteractive() {
+			_ = emitVersionNoticeIfConfigured(stdout)
 			if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
 				_, _ = fmt.Fprintln(stderr, err.Error())
 				return ExitDown
@@ -116,6 +118,9 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	}
 
 	switch args[0] {
+	case "--version", "-v", "version":
+		_, _ = fmt.Fprintln(stdout, controlplane.SwobuVersion())
+		return ExitHealthy
 	case "daemon":
 		return runDaemon(ctx, start, stdout, stderr, args[1:])
 	case "status":
@@ -145,6 +150,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, "--config is required")
 		return ExitDown
 	}
+	_ = emitVersionNoticeIfConfigured(stdout)
 	if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown

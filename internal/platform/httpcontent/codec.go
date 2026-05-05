@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +15,13 @@ import (
 // DecodeBytes removes supported HTTP content codings from a fully buffered body.
 // It exists for request bodies where canonical interpretation needs decoded bytes first.
 func DecodeBytes(contentEncoding string, raw []byte) ([]byte, error) {
+	return DecodeBytesLimited(contentEncoding, raw, 0)
+}
+
+// DecodeBytesLimited removes supported HTTP content codings from a fully
+// buffered body and optionally caps decoded size. A maxDecodedBytes value <= 0
+// means no decoded-size cap.
+func DecodeBytesLimited(contentEncoding string, raw []byte, maxDecodedBytes int64) ([]byte, error) {
 	contentEncoding = normalizeContentEncoding(contentEncoding)
 	if contentEncoding == "" || contentEncoding == "identity" {
 		return append([]byte(nil), raw...), nil
@@ -27,9 +35,16 @@ func DecodeBytes(contentEncoding string, raw []byte) ([]byte, error) {
 		_ = reader.Close()
 	}()
 
-	decoded, err := io.ReadAll(reader)
+	decodedReader := io.Reader(reader)
+	if maxDecodedBytes > 0 {
+		decodedReader = io.LimitReader(reader, maxDecodedBytes+1)
+	}
+	decoded, err := io.ReadAll(decodedReader)
 	if err != nil {
 		return nil, fmt.Errorf("decode %s body: %w", contentEncoding, err)
+	}
+	if maxDecodedBytes > 0 && int64(len(decoded)) > maxDecodedBytes {
+		return nil, errors.New("decoded body exceeds limit")
 	}
 	return decoded, nil
 }

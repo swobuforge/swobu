@@ -229,6 +229,39 @@ func TestWrapLineRowsPreserveIndent_MapsSegmentsToRows(t *testing.T) {
 	}
 }
 
+func TestTrimToWidth_SanitizesControlSequences(t *testing.T) {
+	t.Parallel()
+
+	in := "abc\x1b[31mRED\x1b[0m\r\n\txyz"
+	got := TrimToWidth(in, 64)
+	if strings.ContainsRune(got, '\x1b') {
+		t.Fatalf("trimmed output contains escape rune: %q", got)
+	}
+	if strings.ContainsRune(got, '\r') || strings.ContainsRune(got, '\n') || strings.ContainsRune(got, '\t') {
+		t.Fatalf("trimmed output contains control whitespace rune: %q", got)
+	}
+	if !strings.Contains(got, "abc") || !strings.Contains(got, "RED") || !strings.Contains(got, "xyz") {
+		t.Fatalf("trimmed output lost expected content: %q", got)
+	}
+}
+
+func TestRenderEvidenceRow_SanitizesControlSequences(t *testing.T) {
+	t.Parallel()
+
+	line := RenderEvidenceRow(120, EvidenceRowSpec{
+		Marker: ">",
+		Time:   "12:00:00",
+		Kind:   "ok",
+		Route:  "r\x1b[2Joute",
+		Timing: "1ms",
+		Result: "c 0%",
+		Action: "open ↵",
+	})
+	if strings.ContainsRune(line, '\x1b') {
+		t.Fatalf("evidence row contains escape rune: %q", line)
+	}
+}
+
 func build(w view.ViewSpec[struct{}]) layout.RenderNode { return view.Materialize(nil, w) }
 
 func noopActions() []update.Action { return nil }

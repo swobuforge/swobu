@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-const firstRunNoticeText = `Swobu sends anonymous aggregate reliability and usage summaries by default (opt-out).
+const firstRunNoticeText = `Swobu runs as a local boundary between clients and model backends.
+It sends anonymous aggregate reliability and usage summaries by default (opt-out).
 
 Never sent:
 - prompts

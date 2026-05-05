@@ -60,7 +60,30 @@ http_get() {
   url="$1"
   out="$2"
   need_cmd curl
-  curl -fsSL "$url" -o "$out"
+  if [ -t 2 ]; then
+    curl -fsSL "$url" -o "$out" &
+    curl_pid="$!"
+    spinner_idx=0
+    while kill -0 "$curl_pid" 2>/dev/null; do
+      case "$spinner_idx" in
+        0) spinner='|' ;;
+        1) spinner='/' ;;
+        2) spinner='-' ;;
+        3) spinner='\\' ;;
+      esac
+      printf '\r  progress: %s' "$spinner" >&2
+      spinner_idx=$(( (spinner_idx + 1) % 4 ))
+      sleep 1
+    done
+    if wait "$curl_pid"; then
+      printf '\r  progress: done\n' >&2
+    else
+      printf '\r  progress: failed\n' >&2
+      return 1
+    fi
+  else
+    curl -fsSL "$url" -o "$out"
+  fi
 }
 
 resolve_version() {
