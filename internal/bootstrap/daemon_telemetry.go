@@ -4,6 +4,9 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +31,7 @@ type embeddedTelemetryRuntimeState struct {
 	doneCh         chan struct{}
 	hasLast        bool
 	lastCount      evidencestore.StatusCounters
+	seenRequestIDs map[string]struct{}
 }
 
 func (d *Daemon) startTelemetryRuntime() {
@@ -36,6 +40,9 @@ func (d *Daemon) startTelemetryRuntime() {
 	}
 	if d.telemetry.now == nil {
 		d.telemetry.now = time.Now
+	}
+	if d.telemetry.seenRequestIDs == nil {
+		d.telemetry.seenRequestIDs = make(map[string]struct{})
 	}
 	if d.telemetry.stopCh != nil {
 		return
@@ -86,7 +93,7 @@ func (d *Daemon) runTelemetryRuntime() {
 }
 
 func telemetryDebugEnabled() bool {
-	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvTelemetryDebug))
+	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvTelemetryDebugStdoutSink))
 }
 
 func (d *Daemon) initTelemetryEmitter(ctx context.Context) bool {
@@ -139,6 +146,7 @@ func (d *Daemon) emitProjectionTelemetryBestEffort(ctx context.Context, includeI
 		return
 	}
 	d.telemetry.emitter.EmitCounts(ctx, projection.State, d2xx, d429, d4xx, d5xx)
+	d.emitErrorTracesBestEffort(ctx, projection)
 }
 
 func (d *Daemon) deltaCounters(c evidencestore.StatusCounters) (int64, int64, int64, int64) {
@@ -165,4 +173,62 @@ func nonNegativeDelta(current, previous int) int64 {
 
 func telemetryInterval() time.Duration {
 	return embeddedTelemetryInterval
+}
+
+func (d *Daemon) emitErrorTracesBestEffort(ctx context.Context, projection evidencestore.StatusProjection) {
+	if d == nil || d.telemetry.emitter == nil {
+		return
+	}
+	if d.telemetry.seenRequestIDs == nil {
+		d.telemetry.seenRequestIDs = make(map[string]struct{})
+	}
+	limit := telemetryErrorTraceMaxPerTick()
+	if limit <= 0 {
+		return
+	}
+	emitted := 0
+	debugStacks := telemetryTraceDebugEnabled()
+	for _, row := range projection.RecentTraffic {
+		if emitted >= limit {
+			return
+		}
+		if row.RequestID == "" {
+			continue
+		}
+		if _, seen := d.telemetry.seenRequestIDs[row.RequestID]; seen {
+			continue
+		}
+		if row.StatusCode < 400 {
+			continue
+		}
+		d.telemetry.seenRequestIDs[row.RequestID] = struct{}{}
+		trace := telemetry.ErrorTrace{
+			StatusCode:    row.StatusCode,
+			ResultClass:   strings.TrimSpace(row.Result),
+			ProviderRoute: strings.TrimSpace(row.Route),
+			Operation:     strings.TrimSpace(row.NormalizedOp),
+			DurationMS:    row.DurMillis,
+		}
+		if debugStacks {
+			trace.DebugRawStack = string(debug.Stack())
+		}
+		d.telemetry.emitter.EmitErrorTrace(ctx, trace)
+		emitted++
+	}
+}
+
+func telemetryTraceDebugEnabled() bool {
+	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvTelemetryDebugTraceStack))
+}
+
+func telemetryErrorTraceMaxPerTick() int {
+	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryErrorTraceMaxPerTick))
+	if raw == "" {
+		return 20
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 20
+	}
+	return n
 }
