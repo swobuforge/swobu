@@ -30,6 +30,7 @@ func (s *fakeTelemetryProjectionSource) StatusProjectionForScope(scope evidences
 type fakeTelemetryEmitter struct {
 	installCalls int
 	countCalls   int
+	errorTraces  []telemetry.ErrorTrace
 	lastState    string
 	last2xx      int64
 	last429      int64
@@ -50,6 +51,10 @@ func (e *fakeTelemetryEmitter) EmitCounts(_ context.Context, state string, count
 	e.last429 = count429
 	e.last4xx = count4xx
 	e.last5xx = count5xx
+}
+
+func (e *fakeTelemetryEmitter) EmitErrorTrace(_ context.Context, trace telemetry.ErrorTrace) {
+	e.errorTraces = append(e.errorTraces, trace)
 }
 
 func TestEmitProjectionTelemetryBestEffort_UsesProjectionSource(t *testing.T) {
@@ -90,6 +95,71 @@ func TestEmitProjectionTelemetryBestEffort_UsesProjectionSource(t *testing.T) {
 	}
 	if emitter.lastState != "healthy" || emitter.last2xx != 4 || emitter.last429 != 1 || emitter.last4xx != 2 || emitter.last5xx != 3 {
 		t.Fatalf("counts state=%q 2xx=%d 429=%d 4xx=%d 5xx=%d", emitter.lastState, emitter.last2xx, emitter.last429, emitter.last4xx, emitter.last5xx)
+	}
+}
+
+func TestEmitProjectionTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStackByDefault(t *testing.T) {
+	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK", "1")
+	statePath := writeTelemetryStateFixture(t)
+	source := &fakeTelemetryProjectionSource{
+		out: evidencestore.StatusProjection{
+			State: "degraded",
+			Counters: evidencestore.StatusCounters{
+				Count4xx: 1,
+				Count5xx: 1,
+			},
+			RecentTraffic: []evidencestore.RecentTrafficRow{
+				{RequestID: "req-1", Route: "openai:gpt-4.1", Result: "backend_error", StatusCode: 500, NormalizedOp: "responses.create"},
+				{RequestID: "req-2", Route: "openai:gpt-4.1", Result: "backend_error", StatusCode: 500, NormalizedOp: "responses.create"},
+			},
+		},
+	}
+	emitter := &fakeTelemetryEmitter{}
+	daemon := &Daemon{
+		telemetry: embeddedTelemetryRuntimeState{
+			store:          telemetry.Store{StatePath: statePath},
+			emitter:        emitter,
+			projectionLoad: source.StatusProjectionForScope,
+		},
+	}
+	daemon.emitProjectionTelemetryBestEffort(context.Background(), false)
+	if got := len(emitter.errorTraces); got != 1 {
+		t.Fatalf("error traces=%d, want 1 (capped)", got)
+	}
+	if emitter.errorTraces[0].DebugRawStack != "" {
+		t.Fatal("debug raw stack present by default, want empty")
+	}
+}
+
+func TestEmitProjectionTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *testing.T) {
+	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK", "2")
+	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG", "1")
+	statePath := writeTelemetryStateFixture(t)
+	source := &fakeTelemetryProjectionSource{
+		out: evidencestore.StatusProjection{
+			State: "degraded",
+			Counters: evidencestore.StatusCounters{
+				Count5xx: 1,
+			},
+			RecentTraffic: []evidencestore.RecentTrafficRow{
+				{RequestID: "req-1", Route: "openai:gpt-4.1", Result: "backend_error", StatusCode: 500, NormalizedOp: "responses.create"},
+			},
+		},
+	}
+	emitter := &fakeTelemetryEmitter{}
+	daemon := &Daemon{
+		telemetry: embeddedTelemetryRuntimeState{
+			store:          telemetry.Store{StatePath: statePath},
+			emitter:        emitter,
+			projectionLoad: source.StatusProjectionForScope,
+		},
+	}
+	daemon.emitProjectionTelemetryBestEffort(context.Background(), false)
+	if len(emitter.errorTraces) != 1 {
+		t.Fatalf("error traces=%d, want 1", len(emitter.errorTraces))
+	}
+	if emitter.errorTraces[0].DebugRawStack == "" {
+		t.Fatal("debug raw stack empty, want populated in trace debug mode")
 	}
 }
 

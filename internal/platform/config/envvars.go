@@ -7,10 +7,12 @@ const (
 	EnvConfigPath   = "SWOBU_CONFIG_PATH"
 	EnvXDGStateHome = "XDG_STATE_HOME"
 
-	EnvTelemetryDebug     = "SWOBU_TELEMETRY_DEBUG"
-	EnvTelemetryStatePath = "SWOBU_TELEMETRY_STATE_PATH"
-	EnvDoNotTrack         = "DO_NOT_TRACK"
-	EnvSkipVersionNotice  = "SWOBU_SKIP_VERSION_NOTICE"
+	EnvTelemetryDebugStdoutSink      = "SWOBU_TELEMETRY_STDOUT_SINK_DEBUG"
+	EnvTelemetryDebugTraceStack      = "SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG"
+	EnvTelemetryErrorTraceMaxPerTick = "SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK"
+	EnvTelemetryStatePath            = "SWOBU_TELEMETRY_STATE_PATH"
+	EnvDoNotTrack                    = "DO_NOT_TRACK"
+	EnvSkipVersionNotice             = "SWOBU_SKIP_VERSION_NOTICE"
 )
 
 func EnvTruthy(value string) bool {
