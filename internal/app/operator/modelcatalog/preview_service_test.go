@@ -59,10 +59,10 @@ func TestPreviewLoader_Load_PreservesNonFileCredentialResolutionError(t *testing
 func TestPreviewLoader_Load_AllowsPrivateBaseURL(t *testing.T) {
 	loader := NewPreviewLoader(previewProviderCatalogStub{models: []string{"m1"}})
 	snapshot, err := loader.Load(context.Background(), PreviewRequest{
-		ProviderSpec: "openrouter",
-		BaseURL:      "http://10.1.2.3/v1",
+		ProviderSpec:  "openrouter",
+		BaseURL:       "http://10.1.2.3/v1",
 		CredentialRef: "env:OPENROUTER_API_KEY",
-		ProtocolKind: "chat_completions",
+		ProtocolKind:  "chat_completions",
 	})
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
@@ -75,10 +75,10 @@ func TestPreviewLoader_Load_AllowsPrivateBaseURL(t *testing.T) {
 func TestPreviewLoader_Load_AllowsUnsupportedBaseURLScheme(t *testing.T) {
 	loader := NewPreviewLoader(previewProviderCatalogStub{models: []string{"m1"}})
 	snapshot, err := loader.Load(context.Background(), PreviewRequest{
-		ProviderSpec: "custom",
-		BaseURL:      "file:///tmp/provider.sock",
+		ProviderSpec:  "custom",
+		BaseURL:       "file:///tmp/provider.sock",
 		CredentialRef: "env:CUSTOM_API_KEY",
-		ProtocolKind: "chat_completions",
+		ProtocolKind:  "chat_completions",
 	})
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
