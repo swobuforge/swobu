@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,9 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 	latest := sanitizeLatestVersion(latestRaw)
 	current := strings.TrimSpace(currentRaw)
 	if latest == "" || current == "" || latest == current {
+		return versionNoticeDecision{}
+	}
+	if patchOnlyVersionChange(current, latest) {
 		return versionNoticeDecision{}
 	}
 
@@ -97,4 +101,48 @@ func sanitizeLatestVersion(raw string) string {
 		}
 	}
 	return ""
+}
+
+func patchOnlyVersionChange(current string, latest string) bool {
+	curSemver, okCur := parseSemverLike(current)
+	latSemver, okLat := parseSemverLike(latest)
+	if !okCur || !okLat {
+		return false
+	}
+	return curSemver.major == latSemver.major && curSemver.minor == latSemver.minor && curSemver.patch != latSemver.patch
+}
+
+type semverLike struct {
+	major int
+	minor int
+	patch int
+}
+
+func parseSemverLike(raw string) (semverLike, bool) {
+	value := strings.TrimSpace(raw)
+	value = strings.TrimPrefix(value, "v")
+	if value == "" {
+		return semverLike{}, false
+	}
+	main := value
+	if cut := strings.IndexAny(main, "-+"); cut >= 0 {
+		main = main[:cut]
+	}
+	parts := strings.Split(main, ".")
+	if len(parts) != 3 {
+		return semverLike{}, false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return semverLike{}, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return semverLike{}, false
+	}
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return semverLike{}, false
+	}
+	return semverLike{major: major, minor: minor, patch: patch}, true
 }

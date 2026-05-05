@@ -123,6 +123,35 @@ func TestEvaluateVersionNoticePolicy_TrimsLatestVersionPayload(t *testing.T) {
 	}
 }
 
+func TestPatchOnlyVersionChange(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		current string
+		latest  string
+		want    bool
+	}{
+		{name: "patch only", current: "v1.2.3", latest: "v1.2.9", want: true},
+		{name: "major change", current: "v1.2.3", latest: "v2.0.0", want: false},
+		{name: "minor change", current: "v1.2.3", latest: "v1.3.0", want: false},
+		{name: "same version", current: "v1.2.3", latest: "v1.2.3", want: false},
+		{name: "prerelease patch change", current: "v1.2.3-rc.1", latest: "v1.2.4", want: true},
+		{name: "non semver current", current: "dev", latest: "v1.2.4", want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := patchOnlyVersionChange(tc.current, tc.latest)
+			if got != tc.want {
+				t.Fatalf("patchOnlyVersionChange(%q,%q)=%v, want %v", tc.current, tc.latest, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing.T) {
 	originalFetch := fetchLatestVersion
 	fetchLatestVersion = func() (string, error) { return "", errors.New("timeout") }
