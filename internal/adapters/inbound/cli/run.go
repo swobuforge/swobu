@@ -142,12 +142,20 @@ func defaultIsInteractive() bool {
 func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "path to the root daemon config file")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon [--config <path>]")
+		fs.PrintDefaults()
+	}
+	configPath := fs.String("config", "", fmt.Sprintf("root daemon config path (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitHealthy
+		}
 		return ExitDown
 	}
-	if *configPath == "" {
-		_, _ = fmt.Fprintln(stderr, "--config is required")
+	resolvedConfigPath, err := platformconfig.ResolveDaemonRuntimeConfigPath(*configPath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
 	_ = emitVersionNoticeIfConfigured(stdout)
@@ -158,11 +166,11 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 	transcript := uicli.NewStartupTranscript(stdout)
 	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventSplash})
 	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDisclosure})
-	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStart, ConfigPath: *configPath})
+	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStart, ConfigPath: resolvedConfigPath})
 
 	logger := slog.Default()
-	logger.Info("daemon lifecycle", "component", "daemon", "event", "process_start", "config_path", *configPath)
-	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: *configPath, Logger: logger})
+	logger.Info("daemon lifecycle", "component", "daemon", "event", "process_start", "config_path", resolvedConfigPath)
+	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, Logger: logger})
 	if err != nil {
 		transcript.Emit(uicli.StartupEvent{
 			Kind: uicli.StartupEventStartupFailed,
@@ -225,13 +233,20 @@ func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
 
 func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.Writer, args []string) ExitCode {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	daemonURL := fs.String("daemon-url", platformconfig.DefaultDaemonURL(), "daemon base URL")
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stdout, "usage: swobu status [--daemon-url <url>]")
+		fs.PrintDefaults()
+	}
+	daemonURL := fs.String("daemon-url", "", fmt.Sprintf("daemon base URL (env: %s) (default: %s)", platformconfig.EnvDaemonURL, platformconfig.DefaultDaemonURL()))
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitHealthy
+		}
 		return ExitDown
 	}
 
-	payload, exitCode := fetchStatus(ctx, client, *daemonURL)
+	payload, exitCode := fetchStatus(ctx, client, platformconfig.ResolveDaemonURL(*daemonURL))
 	_ = json.NewEncoder(stdout).Encode(payload)
 	return exitCode
 }
@@ -239,9 +254,16 @@ func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.
 func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Writer, args []string) ExitCode {
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	daemonURL := fs.String("daemon-url", platformconfig.DefaultDaemonURL(), "daemon base URL")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stderr, "usage: swobu down [--daemon-url <url>] [--timeout <duration>]")
+		fs.PrintDefaults()
+	}
+	daemonURL := fs.String("daemon-url", "", fmt.Sprintf("daemon base URL (env: %s) (default: %s)", platformconfig.EnvDaemonURL, platformconfig.DefaultDaemonURL()))
 	timeout := fs.Duration("timeout", 5*time.Second, "time to wait for graceful shutdown")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitHealthy
+		}
 		return ExitDown
 	}
 	if *timeout <= 0 {
@@ -249,7 +271,7 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 		return ExitDown
 	}
 	result, err := daemonlifecycle.Down(ctx, daemonlifecycle.DownInput{
-		DaemonURL: *daemonURL,
+		DaemonURL: platformconfig.ResolveDaemonURL(*daemonURL),
 		Client:    client,
 		Timeout:   *timeout,
 	})
@@ -264,7 +286,6 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 }
 
 func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
-	store := telemetry.NewStore()
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off")
 		return ExitDown
@@ -272,23 +293,33 @@ func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 
 	switch args[0] {
 	case "status":
-		return runTelemetryStatus(stdout, stderr, store, args[1:])
+		return runTelemetryStatus(stdout, stderr, args[1:])
 	case "on":
-		return runTelemetrySetEnabled(stdout, stderr, store, true, args[1:])
+		return runTelemetrySetEnabled(stdout, stderr, true, args[1:])
 	case "off":
-		return runTelemetrySetEnabled(stdout, stderr, store, false, args[1:])
+		return runTelemetrySetEnabled(stdout, stderr, false, args[1:])
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown telemetry subcommand %q\n", args[0])
 		return ExitDown
 	}
 }
 
-func runTelemetryStatus(stdout io.Writer, stderr io.Writer, store telemetry.Store, args []string) ExitCode {
+func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 	fs := flag.NewFlagSet("telemetry status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry status [--state-path <path>]")
+		fs.PrintDefaults()
+	}
+	statePath := fs.String("state-path", "", fmt.Sprintf("telemetry state file path (env: %s) (default: %s)", platformconfig.EnvTelemetryStatePath, platformconfig.ResolveTelemetryStatePath("")))
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitHealthy
+		}
 		return ExitDown
 	}
+	store := telemetry.NewStore()
+	store.StatePath = platformconfig.ResolveTelemetryStatePath(*statePath)
 	state, err := store.LoadOrCreate()
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
@@ -316,12 +347,22 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, store telemetry.Stor
 	return ExitHealthy
 }
 
-func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, store telemetry.Store, enabled bool, args []string) ExitCode {
+func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, args []string) ExitCode {
 	fs := flag.NewFlagSet("telemetry toggle", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry [on|off] [--state-path <path>]")
+		fs.PrintDefaults()
+	}
+	statePath := fs.String("state-path", "", fmt.Sprintf("telemetry state file path (env: %s) (default: %s)", platformconfig.EnvTelemetryStatePath, platformconfig.ResolveTelemetryStatePath("")))
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitHealthy
+		}
 		return ExitDown
 	}
+	store := telemetry.NewStore()
+	store.StatePath = platformconfig.ResolveTelemetryStatePath(*statePath)
 	state, err := store.SetEnabled(enabled)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())

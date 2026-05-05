@@ -166,17 +166,7 @@ func (s Store) InspectPreview() ([]byte, error) {
 }
 
 func defaultStatePath() string {
-	if explicit := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryStatePath)); explicit != "" {
-		return explicit
-	}
-	if xdg := strings.TrimSpace(os.Getenv(platformconfig.EnvXDGStateHome)); xdg != "" {
-		return filepath.Join(xdg, "swobu", "telemetry", "state.json")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return filepath.Join(".", ".swobu", "telemetry", "state.json")
-	}
-	return filepath.Join(home, ".local", "state", "swobu", "telemetry", "state.json")
+	return platformconfig.ResolveTelemetryStatePath("")
 }
 
 func writeState(path string, state State) error {
