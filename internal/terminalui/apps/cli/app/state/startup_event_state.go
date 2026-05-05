@@ -13,6 +13,7 @@ const (
 	EventSplash               EventKind = daemonlifecycle.StartupEventSplash
 	EventDisclosure           EventKind = daemonlifecycle.StartupEventDisclosure
 	EventTelemetryDisclosure  EventKind = "telemetry_disclosure"
+	EventVersionNotice        EventKind = "version_notice"
 	EventDaemonNotReachable   EventKind = daemonlifecycle.StartupEventDaemonNotReachable
 	EventStartingDaemon       EventKind = daemonlifecycle.StartupEventStartingDaemon
 	EventWaitingReadiness     EventKind = daemonlifecycle.StartupEventWaitingReadiness
@@ -60,16 +61,16 @@ func Apply(current StartupState, event Event) StartupState {
 			return next
 		}
 		next.SplashPrinted = true
-		next.Sections = append(next.Sections, SectionRow{Kind: "splash", Title: "SWOBU", Rows: []string{"local AI routing cockpit"}})
+		next.Sections = append(next.Sections, SectionRow{Kind: "splash", Title: "SWOBU", Rows: []string{"unbundle clients from model backends"}})
 	case EventDisclosure:
 		if next.DisclosurePrinted {
 			return next
 		}
 		next.DisclosurePrinted = true
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "startup disclosure", Rows: []string{
-			"startup output is append-only",
-			"machine status stays on `swobu status` JSON",
-			"daemon logs stay in daemon log sink",
+			"operator startup output is append-only",
+			"machine status remains `swobu status` JSON",
+			"daemon logs remain in the daemon log sink",
 		}})
 	case EventTelemetryDisclosure:
 		rows := make([]string, 0)
@@ -79,6 +80,14 @@ func Apply(current StartupState, event Event) StartupState {
 			}
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "telemetry disclosure", Rows: rows})
+	case EventVersionNotice:
+		rows := make([]string, 0)
+		for _, line := range strings.Split(strings.TrimSpace(event.Text), "\n") {
+			if strings.TrimSpace(line) != "" {
+				rows = append(rows, line)
+			}
+		}
+		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "version update notice", Rows: rows})
 	case EventDaemonNotReachable:
 		next.Mode = model.ModeAppend
 		next.Status = ""

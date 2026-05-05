@@ -197,6 +197,46 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	}
 }
 
+func TestHandler_RejectsOversizedRequestBody(t *testing.T) {
+	capturing := &capturingRequestHandler{}
+	handler := NewHandler(capturing)
+	oversized := bytes.Repeat([]byte("a"), int(maxCompressedRequestBodyBytes)+1)
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewReader(oversized))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "BAD_REQUEST") {
+		t.Fatalf("body = %q, want BAD_REQUEST", rec.Body.String())
+	}
+}
+
+func TestHandler_RejectsDecodedBodyOverLimit(t *testing.T) {
+	capturing := &capturingRequestHandler{}
+	handler := NewHandler(capturing)
+
+	var encoded bytes.Buffer
+	gz := gzip.NewWriter(&encoded)
+	_, _ = gz.Write(bytes.Repeat([]byte("x"), int(maxDecodedRequestBodyBytes)+1))
+	_ = gz.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewReader(encoded.Bytes()))
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "BAD_REQUEST") {
+		t.Fatalf("body = %q, want BAD_REQUEST", rec.Body.String())
+	}
+}
+
 func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	capturing := &capturingRequestHandler{}
 	handler := NewHandler(capturing)

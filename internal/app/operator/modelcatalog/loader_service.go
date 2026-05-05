@@ -2,7 +2,10 @@ package modelcatalog
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/compatibility"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -35,12 +38,22 @@ type Entry struct {
 type Loader struct {
 	endpoints ports.EndpointLister
 	providers ports.ProviderModelCatalog
+	coord     *loadCoordinator
 }
+
+type loadCoordinator struct {
+	mu           sync.Mutex
+	cancelActive context.CancelFunc
+	activeID     uint64
+}
+
+var modelCatalogProbeTimeout = 8 * time.Second
 
 func NewLoader(endpoints ports.EndpointLister, providers ports.ProviderModelCatalog) Loader {
 	return Loader{
 		endpoints: endpoints,
 		providers: providers,
+		coord:     &loadCoordinator{},
 	}
 }
 
@@ -52,7 +65,10 @@ func (l Loader) Load(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, errInternalCatalog("provider model catalog is not configured")
 	}
 
-	endpoints, err := l.endpoints.ListEndpoints(ctx)
+	loadCtx, release := l.beginLoad(ctx)
+	defer release()
+
+	endpoints, err := l.endpoints.ListEndpoints(loadCtx)
 	if err != nil {
 		return Snapshot{}, errInternalCatalog("endpoint catalog could not be loaded")
 	}
@@ -77,25 +93,60 @@ func (l Loader) Load(ctx context.Context) (Snapshot, error) {
 			ProviderSpec:      selected.ProviderSpec().String(),
 			ProtocolKind:      selected.ProtocolKind().String(),
 		}
-
-		models, err := l.providers.ListModels(ctx, ports.NewRoutableTarget(
-			selected.Ref().String(),
-			selected.ProviderSpec().String(),
-			selected.BaseURL(),
-			selected.CredentialRef(),
-			selected.ProtocolKind(),
-			string(resolved.RouteProfile.AuthKind),
-			string(resolved.RouteProfile.EndpointMode),
-		))
-		if err != nil {
-			entry.Error = err.Error()
-		} else {
-			entry.ModelIDs = ports.CloneModelIDs(models)
-		}
+		probeCtx, cancelProbe := context.WithTimeout(loadCtx, modelCatalogProbeTimeout)
+		models, probeErr := probeRouteModels(probeCtx, l.providers, modelCatalogProbeInput{
+			ProviderConfigRef: selected.Ref().String(),
+			ProviderSpec:      selected.ProviderSpec().String(),
+			BaseURL:           selected.BaseURL(),
+			CredentialRef:     selected.CredentialRef(),
+			ProtocolKind:      selected.ProtocolKind(),
+		})
+		cancelProbe()
+		entry.ModelIDs = models
+		entry.Error = formatLoadProbeError(probeErr)
 		entries = append(entries, entry)
 	}
 
 	return Snapshot{Entries: entries}, nil
+}
+
+func (l Loader) beginLoad(parent context.Context) (context.Context, func()) {
+	if l.coord == nil {
+		ctx, cancel := context.WithCancel(parent)
+		return ctx, cancel
+	}
+	ctx, cancel := context.WithCancel(parent)
+	l.coord.mu.Lock()
+	l.coord.activeID++
+	id := l.coord.activeID
+	prev := l.coord.cancelActive
+	l.coord.cancelActive = cancel
+	l.coord.mu.Unlock()
+	if prev != nil {
+		prev()
+	}
+	return ctx, func() {
+		l.coord.mu.Lock()
+		if l.coord.activeID == id {
+			l.coord.cancelActive = nil
+		}
+		l.coord.mu.Unlock()
+		cancel()
+	}
+}
+
+func formatLoadProbeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "model catalog refresh superseded by a newer request"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "model catalog probe timed out"
+	default:
+		return err.Error()
+	}
 }
 
 func errInternalCatalog(message string) error {

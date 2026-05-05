@@ -57,6 +57,10 @@ type Daemon struct {
 }
 
 var providerResponseHeaderTimeout = 5 * time.Minute
+var daemonReadHeaderTimeout = 10 * time.Second
+var daemonReadTimeout = 30 * time.Second
+var daemonWriteTimeout = 5 * time.Minute
+var daemonIdleTimeout = 60 * time.Second
 
 // StartInput collects the one runtime config path plus the dependencies
 // bootstrap must wire into the live request path.
@@ -172,10 +176,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		},
 		func(ctx context.Context, name string) error { return endpointIntent.Delete(ctx, name) },
 	))
-	server := &http.Server{
-		Addr:    cfg.BindAddr,
-		Handler: mux,
-	}
+	server := newDaemonHTTPServer(cfg.BindAddr, mux)
 
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_start", "bind_addr", cfg.BindAddr)
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.BindAddr)
@@ -207,6 +208,17 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	daemon.startTelemetryRuntime()
 
 	return daemon, nil
+}
+
+func newDaemonHTTPServer(bindAddr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              bindAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: daemonReadHeaderTimeout,
+		ReadTimeout:       daemonReadTimeout,
+		WriteTimeout:      daemonWriteTimeout,
+		IdleTimeout:       daemonIdleTimeout,
+	}
 }
 
 func newProviderHTTPClient() *http.Client {

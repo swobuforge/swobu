@@ -16,6 +16,11 @@ import (
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
 )
 
+const (
+	maxCompressedRequestBodyBytes int64 = 2 << 20
+	maxDecodedRequestBodyBytes    int64 = 8 << 20
+)
+
 type RequestHandler interface {
 	Handle(ctx context.Context, in requestpath.HandleInput) (requestpath.HandleOutput, error)
 }
@@ -77,7 +82,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestBody, err := decodeRequestBody(r)
+	requestBody, err := decodeRequestBody(w, r)
 	if err != nil {
 		writeCompatibilityError(w, err)
 		return
@@ -163,14 +168,19 @@ func splitCompatibilityPath(raw string) (string, string, error) {
 	return endpointName, suffix, nil
 }
 
-func decodeRequestBody(r *http.Request) ([]byte, error) {
-	raw, err := io.ReadAll(r.Body)
+func decodeRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	limitedBody := http.MaxBytesReader(w, r.Body, maxCompressedRequestBodyBytes)
+	raw, err := io.ReadAll(limitedBody)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return nil, compatibility.BadRequest("request body exceeds maximum allowed size")
+		}
 		return nil, compatibility.BadRequest("request body could not be read")
 	}
-	decoded, err := httpcontent.DecodeBytes(r.Header.Get("Content-Encoding"), raw)
+	decoded, err := httpcontent.DecodeBytesLimited(r.Header.Get("Content-Encoding"), raw, maxDecodedRequestBodyBytes)
 	if err != nil {
-		return nil, compatibility.BadRequest("request content encoding is unsupported or invalid")
+		return nil, compatibility.BadRequest("request content encoding is unsupported, invalid, or exceeds size limits")
 	}
 	return decoded, nil
 }

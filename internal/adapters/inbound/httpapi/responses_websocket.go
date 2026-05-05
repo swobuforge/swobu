@@ -16,10 +16,11 @@ import (
 )
 
 const websocketRequestTypeResponseCreate = "response.create"
+const maxWebsocketRequestBodyBytes = 1 << 20
 
 func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request, endpointName string, normalizedPath compatibility.NormalizedPath) {
 	server := websocket.Server{
-		Handshake: func(*websocket.Config, *http.Request) error { return nil },
+		Handshake: nil,
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
 			defer func() {
 				_ = conn.Close()
@@ -31,6 +32,7 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 }
 
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath compatibility.NormalizedPath) {
+	conn.MaxPayloadBytes = maxWebsocketRequestBodyBytes
 	if h.requests == nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(compatibility.InternalError("request orchestrator is not configured"))))
 		return
@@ -59,6 +61,9 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 }
 
 func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, endpoint endpointintent.EndpointName, normalizedPath compatibility.NormalizedPath, raw []byte) error {
+	if len(raw) > maxWebsocketRequestBodyBytes {
+		return compatibility.BadRequest("websocket request payload exceeds maximum allowed size")
+	}
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {
 		return compatibility.BadRequest("websocket request payload is empty")

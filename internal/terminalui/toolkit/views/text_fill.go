@@ -2,6 +2,7 @@ package views
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -22,6 +23,7 @@ func PadRight(s string, width int) string {
 }
 
 func trimToWidth(s string, width int) string {
+	s = sanitizeTextForTerminal(s)
 	if width <= 0 {
 		return ""
 	}
@@ -53,6 +55,7 @@ func TrimToWidth(s string, width int) string {
 // an ellipsis. Callers that want visual truncation indicators should use
 // trimToWidth instead.
 func trimToWidthRaw(s string, width int) string {
+	s = sanitizeTextForTerminal(s)
 	if width <= 0 {
 		return ""
 	}
@@ -81,7 +84,28 @@ func runeLen(s string) int {
 
 // RuneLen returns rune-aware text width.
 func RuneLen(s string) int {
-	return runeLen(s)
+	return runeLen(sanitizeTextForTerminal(s))
+}
+
+func sanitizeTextForTerminal(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteRune(' ')
+		case r == 0x1b:
+			// Strip ESC to block terminal control-sequence injection.
+		case unicode.IsControl(r):
+			// Drop other control characters.
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func max(a, b int) int {

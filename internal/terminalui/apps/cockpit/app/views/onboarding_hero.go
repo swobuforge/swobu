@@ -12,10 +12,10 @@ import (
 func FirstRunHero(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 	model := ctx.Model()
 	children := []view.ViewSpec[state.Model]{
-		headerTextLine("set up your first workspace"),
+		headerTextLine("unbundle your ai stack"),
 	}
 	if strings.TrimSpace(selectors.CreateDraftName(model)) == "" {
-		children = append(children, headerTextLine("create one stable endpoint for your clients and choose where it runs"))
+		children = append(children, headerTextLine("set one local boundary between your client and your model backend"))
 	} else {
 		// Keep hero block height stable while name edits stream to avoid focus drift.
 		children = append(children, StaticTextLine[state.Model](""))

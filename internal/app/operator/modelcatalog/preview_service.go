@@ -56,27 +56,21 @@ func (l PreviewLoader) Load(ctx context.Context, req PreviewRequest) (PreviewSna
 		baseURL = strings.TrimSpace(providercatalog.DefaultBaseURL(spec))
 	}
 	credentialRef := strings.TrimSpace(req.CredentialRef)
-	routeProfile, ok := providercatalog.ResolveRouteProfile(spec, kind, baseURL, credentialRef)
-	if !ok {
-		return PreviewSnapshot{Error: "selected provider route is unsupported"}, nil
+	models, errText := probeRouteModels(ctx, l.providers, modelCatalogProbeInput{
+		ProviderConfigRef: "draft",
+		ProviderSpec:      spec,
+		BaseURL:           baseURL,
+		CredentialRef:     credentialRef,
+		ProtocolKind:      kind,
+	})
+	if errText != nil {
+		return PreviewSnapshot{Error: normalizePreviewError(errText.Error(), credentialRef)}, nil
 	}
-	models, err := l.providers.ListModels(ctx, ports.NewRoutableTarget(
-		"draft",
-		spec,
-		baseURL,
-		credentialRef,
-		kind,
-		string(routeProfile.AuthKind),
-		string(routeProfile.EndpointMode),
-	))
-	if err != nil {
-		return PreviewSnapshot{Error: normalizePreviewError(err, credentialRef)}, nil
-	}
-	return PreviewSnapshot{ModelIDs: ports.CloneModelIDs(models)}, nil
+	return PreviewSnapshot{ModelIDs: models}, nil
 }
 
-func normalizePreviewError(err error, credentialRef string) string {
-	message := strings.TrimSpace(err.Error())
+func normalizePreviewError(message string, credentialRef string) string {
+	message = strings.TrimSpace(message)
 	if !strings.Contains(strings.ToLower(message), "credential reference could not be resolved") {
 		return message
 	}
