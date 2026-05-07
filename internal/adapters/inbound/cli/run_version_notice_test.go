@@ -44,7 +44,7 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 		t.Fatal("attach/start was not called")
 	}
 	text := stdout.String()
-	if !strings.Contains(text, "╭─ version update notice ") {
+	if !strings.Contains(text, "╭─ Update Available ") {
 		t.Fatalf("missing version notice block; stdout=%q", text)
 	}
 	if !strings.Contains(text, installCommand) {
@@ -183,7 +183,7 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 	if !attachCalled {
 		t.Fatal("attach/start was not called")
 	}
-	if strings.Contains(stdout.String(), "╭─ version update notice ") {
+	if strings.Contains(stdout.String(), "╭─ Update Available ") {
 		t.Fatalf("unexpected version notice on fetch error; stdout=%q", stdout.String())
 	}
 }

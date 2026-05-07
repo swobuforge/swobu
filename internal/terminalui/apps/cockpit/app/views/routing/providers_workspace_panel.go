@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -53,18 +53,18 @@ func closeAddModelCredentialUIState(ui addModelCredentialUIState) addModelCreden
 	return ui
 }
 
-func buildProvidersWorkspaceConfiguredPanel(ctx *view.Context[state.Model], model state.Model, snapshot *state.EndpointSnapshot) view.ViewSpec[state.Model] {
-	expandedRef, setExpandedRef := view.UseState(ctx, func() string { return strings.TrimSpace(snapshot.SelectedProviderConfigRef) })
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	addOpen, setAddOpen := view.UseState(ctx, func() bool { return false })
-	addDraft, setAddDraft := view.UseState(ctx, func() state.ProviderConfigSnapshot {
+func buildProvidersWorkspaceConfiguredPanel(ctx *retained.Context[state.Model], model state.Model, snapshot *state.EndpointSnapshot) retained.ViewSpec[state.Model] {
+	expandedRef, setExpandedRef := retained.UseState(ctx, func() string { return strings.TrimSpace(snapshot.SelectedProviderConfigRef) })
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	addOpen, setAddOpen := retained.UseState(ctx, func() bool { return false })
+	addDraft, setAddDraft := retained.UseState(ctx, func() state.ProviderConfigSnapshot {
 		return state.ProviderConfigSnapshot{Ref: nextProviderRef(snapshot), ProtocolKind: defaultProtocolKindForProvider("")}
 	})
-	addProviderPicker, setAddProviderPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	addProviderPickerOpen, setAddProviderPickerOpen := view.UseState(ctx, func() bool { return false })
-	addModelPicker, setAddModelPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	addModelPickerOpen, setAddModelPickerOpen := view.UseState(ctx, func() bool { return false })
-	addCredentialUI, setAddCredentialUI := view.UseState(ctx, func() addModelCredentialUIState {
+	addProviderPicker, setAddProviderPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	addProviderPickerOpen, setAddProviderPickerOpen := retained.UseState(ctx, func() bool { return false })
+	addModelPicker, setAddModelPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	addModelPickerOpen, setAddModelPickerOpen := retained.UseState(ctx, func() bool { return false })
+	addCredentialUI, setAddCredentialUI := retained.UseState(ctx, func() addModelCredentialUIState {
 		return defaultAddModelCredentialUIState("")
 	})
 
@@ -97,7 +97,7 @@ func buildProvidersWorkspaceConfiguredPanel(ctx *view.Context[state.Model], mode
 		setCredentialUI:       setAddCredentialUI,
 	})
 	rows = append(rows, addRows...)
-	parent := view.Named[state.Model]("providers", views.RowManageWithHooks(
+	parent := retained.Named[state.Model]("providers", views.RowManageWithHooks(
 		views.RowProviders,
 		workspaceModelsCountSummary(snapshot),
 		func() []update.Action {
@@ -130,8 +130,8 @@ func buildWorkspaceProviderRows(
 	expandedRef string,
 	setExpandedRef func(string),
 	_ func() []update.Action,
-) []view.ViewSpec[state.Model] {
-	rows := make([]view.ViewSpec[state.Model], 0, len(snapshot.ProviderConfigs))
+) []retained.ViewSpec[state.Model] {
+	rows := make([]retained.ViewSpec[state.Model], 0, len(snapshot.ProviderConfigs))
 	endpointName := strings.TrimSpace(snapshot.Name)
 	selectedRef := strings.TrimSpace(snapshot.SelectedProviderConfigRef)
 	for _, pc := range snapshot.ProviderConfigs {
@@ -148,7 +148,7 @@ func buildWorkspaceProviderRows(
 				interaction.FocusKeyAction{Key: "provider-summary/" + providerRowKey(ref)},
 			}
 		}
-		parent := view.Named[state.Model]("provider-summary/"+providerRowKey(ref), newProviderSummaryRow(
+		parent := retained.Named[state.Model]("provider-summary/"+providerRowKey(ref), newProviderSummaryRow(
 			pc,
 			ref == selectedRef,
 			isExpanded,
@@ -173,11 +173,11 @@ func buildWorkspaceProviderRows(
 }
 
 func buildWorkspaceAddModelRows(
-	ctx *view.Context[state.Model],
+	ctx *retained.Context[state.Model],
 	model state.Model,
 	snapshot *state.EndpointSnapshot,
 	panel addModelPanelState,
-) []view.ViewSpec[state.Model] {
+) []retained.ViewSpec[state.Model] {
 	label := "add model"
 	verb := "create"
 	if len(snapshot.ProviderConfigs) == 0 {
@@ -197,9 +197,9 @@ func buildWorkspaceAddModelRows(
 		panel.setModelPickerOpen(false)
 		return nil
 	})
-	parent := view.Named[state.Model]("add-model", addRow)
+	parent := retained.Named[state.Model]("add-model", addRow)
 	if !panel.open {
-		return []view.ViewSpec[state.Model]{parent}
+		return []retained.ViewSpec[state.Model]{parent}
 	}
 
 	detailRows := buildWorkspaceAddModelDetailRows(ctx, model, snapshot, panel)
@@ -216,7 +216,7 @@ func buildWorkspaceAddModelRows(
 			interaction.FocusKeyAction{Key: "add-model"},
 		}
 	}
-	return []view.ViewSpec[state.Model]{
+	return []retained.ViewSpec[state.Model]{
 		views.EscClosableDisclosure(parent, true, closeAddModel, detailRows...),
 	}
 }
@@ -238,23 +238,23 @@ func toggleAddModelLane(snapshot *state.EndpointSnapshot, panel addModelPanelSta
 }
 
 func buildWorkspaceAddModelDetailRows(
-	ctx *view.Context[state.Model],
+	ctx *retained.Context[state.Model],
 	model state.Model,
 	snapshot *state.EndpointSnapshot,
 	panel addModelPanelState,
-) []view.ViewSpec[state.Model] {
+) []retained.ViewSpec[state.Model] {
 	draft := panel.draft
 	if strings.TrimSpace(draft.Ref) == "" {
 		draft.Ref = nextProviderRef(snapshot)
 	}
-	rows := []view.ViewSpec[state.Model]{
-		view.Named[state.Model]("add-model/provider", buildAddModelProviderRow(ctx, model, draft, panel)),
-		view.Named[state.Model]("add-model/credentials", buildAddModelCredentialRow(draft, panel)),
+	rows := []retained.ViewSpec[state.Model]{
+		retained.Named[state.Model]("add-model/provider", buildAddModelProviderRow(ctx, model, draft, panel)),
+		retained.Named[state.Model]("add-model/credentials", buildAddModelCredentialRow(draft, panel)),
 	}
 	rows = appendWorkspaceAddModelCredentialRows(ctx, model, rows, draft, panel)
 	rows = append(rows,
-		view.Named[state.Model]("add-model/model", buildAddModelModelChoiceRow(ctx, panel)),
-		view.Named[state.Model]("add-model/id", backendURLEditorRow(ctx, views.RowTargetAlias, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), "not set"), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action {
+		retained.Named[state.Model]("add-model/model", buildAddModelModelChoiceRow(ctx, panel)),
+		retained.Named[state.Model]("add-model/id", backendURLEditorRow(ctx, views.RowTargetAlias, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), "not set"), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action {
 			next := draft
 			next.TargetAlias = strings.TrimSpace(strings.ToLower(value))
 			panel.setDraft(next)
@@ -262,7 +262,7 @@ func buildWorkspaceAddModelDetailRows(
 		})),
 	)
 	if strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "custom") {
-		rows = append(rows, view.Named[state.Model]("add-model/backend-url", backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(draft.BaseURL), "missing"), strings.TrimSpace(draft.BaseURL), "https://host/v1", func(value string) []update.Action {
+		rows = append(rows, retained.Named[state.Model]("add-model/backend-url", backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(draft.BaseURL), "missing"), strings.TrimSpace(draft.BaseURL), "https://host/v1", func(value string) []update.Action {
 			next := draft
 			next.BaseURL = strings.TrimSpace(value)
 			panel.setDraft(next)
@@ -274,31 +274,31 @@ func buildWorkspaceAddModelDetailRows(
 }
 
 func appendWorkspaceAddModelCredentialRows(
-	ctx *view.Context[state.Model],
+	ctx *retained.Context[state.Model],
 	model state.Model,
-	rows []view.ViewSpec[state.Model],
+	rows []retained.ViewSpec[state.Model],
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
-) []view.ViewSpec[state.Model] {
+) []retained.ViewSpec[state.Model] {
 	source := credentialSource(strings.TrimSpace(draft.CredentialRef))
 	if strings.EqualFold(source, "env") {
-		rows = append(rows, view.Named[state.Model]("add-model/env-key", buildAddModelEnvKeyRow(ctx, model, draft, panel)))
+		rows = append(rows, retained.Named[state.Model]("add-model/env-key", buildAddModelEnvKeyRow(ctx, model, draft, panel)))
 	}
 	if strings.EqualFold(source, "keychain") {
-		rows = append(rows, view.Named[state.Model]("add-model/keychain-key-name", buildAddModelKeychainKeyNameRow(ctx, model, draft, panel)))
+		rows = append(rows, retained.Named[state.Model]("add-model/keychain-key-name", buildAddModelKeychainKeyNameRow(ctx, model, draft, panel)))
 	}
 	if strings.EqualFold(source, "file") {
-		rows = append(rows, view.Named[state.Model]("add-model/credential-file", buildAddModelCredentialFileRow(ctx, draft, panel)))
+		rows = append(rows, retained.Named[state.Model]("add-model/credential-file", buildAddModelCredentialFileRow(ctx, draft, panel)))
 	}
 	return rows
 }
 
 func buildAddModelProviderRow(
-	ctx *view.Context[state.Model],
+	ctx *retained.Context[state.Model],
 	model state.Model,
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
-) view.ViewSpec[state.Model] {
+) retained.ViewSpec[state.Model] {
 	providerRow := views.RowChoiceWithCancel("provider", selectors.EmptyOr(providercatalog.DisplayName(strings.TrimSpace(draft.ProviderSpec)), "choose a provider"), func() []update.Action {
 		panel.setProviderPickerOpen(true)
 		views.ResetFilterablePickerState(panel.setProviderPicker)
@@ -313,7 +313,7 @@ func buildAddModelProviderRow(
 			interaction.FocusKeyAction{Key: "add-model/provider-row"},
 		}
 	})
-	providerRowNamed := view.Named[state.Model]("add-model/provider-row", providerRow)
+	providerRowNamed := retained.Named[state.Model]("add-model/provider-row", providerRow)
 	if !panel.providerPickerOpen {
 		return providerRowNamed
 	}
@@ -383,7 +383,7 @@ func workspaceModelsCountSummary(snapshot *state.EndpointSnapshot) string {
 	return fmt.Sprintf("%d configured", count)
 }
 
-func buildAddModelCredentialRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) view.ViewSpec[state.Model] {
+func buildAddModelCredentialRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	summary := selectors.CredentialSummaryFromProviderConfig(&draft)
 	row := views.RowChoiceWithCancel("credentials", selectors.EmptyOr(summary, "not set"), func() []update.Action {
 		next := panel.credentialUI
@@ -414,8 +414,8 @@ func buildAddModelCredentialRow(draft state.ProviderConfigSnapshot, panel addMod
 	return toolkitviews.NewAnchoredDisclosure(row, options...)
 }
 
-func buildAddModelEnvKeyRow(_ *view.Context[state.Model], model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) view.ViewSpec[state.Model] {
-	return view.Build(func(childCtx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func buildAddModelEnvKeyRow(_ *retained.Context[state.Model], model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+	return retained.Build(func(childCtx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		current := strings.TrimSpace(envCredentialKey(draft.CredentialRef))
 		summary, editorValue := envKeySummary(strings.TrimSpace(draft.ProviderSpec), current)
 		return backendURLEditorRow(
@@ -444,8 +444,8 @@ func buildAddModelEnvKeyRow(_ *view.Context[state.Model], model state.Model, dra
 	})
 }
 
-func buildAddModelKeychainKeyNameRow(_ *view.Context[state.Model], model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) view.ViewSpec[state.Model] {
-	return view.Build(func(childCtx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func buildAddModelKeychainKeyNameRow(_ *retained.Context[state.Model], model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+	return retained.Build(func(childCtx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		currentName := keychainCredentialName(draft.CredentialRef)
 		effectiveName := keychainEffectiveName(draft.ProviderSpec, currentName)
 		keyNameRow := backendURLEditorRow(
@@ -479,11 +479,11 @@ func buildAddModelKeychainKeyNameRow(_ *view.Context[state.Model], model state.M
 				}}
 			},
 		)
-		return view.VStack(childCtx, keyNameRow, keyValueRow)
+		return retained.VStack(childCtx, keyNameRow, keyValueRow)
 	})
 }
 
-func buildAddModelCredentialFileRow(ctx *view.Context[state.Model], draft state.ProviderConfigSnapshot, panel addModelPanelState) view.ViewSpec[state.Model] {
+func buildAddModelCredentialFileRow(ctx *retained.Context[state.Model], draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	closeMode := state.InteractionModeManageList
 	currentPath := credentialFilePath(draft.CredentialRef)
 	ui := panel.credentialUI
@@ -543,7 +543,7 @@ func buildAddModelCredentialFileRow(ctx *view.Context[state.Model], draft state.
 		WindowSize:     6,
 		FindLabel:      "find",
 		NoMatchesLabel: "no files",
-		HeaderRows: []view.ViewSpec[state.Model]{
+		HeaderRows: []retained.ViewSpec[state.Model]{
 			views.RowStatic("path", credentialFileBrowserPath(ui.FileBrowse.Dir)),
 		},
 		OnNoMatchFocus: func() []update.Action {
@@ -600,17 +600,17 @@ func applyAddModelCredentialFilePathChoice(draft state.ProviderConfigSnapshot, p
 	return next
 }
 
-func buildAddModelCreateRow(snapshot *state.EndpointSnapshot, draft state.ProviderConfigSnapshot, panel addModelPanelState) view.ViewSpec[state.Model] {
+func buildAddModelCreateRow(snapshot *state.EndpointSnapshot, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	ready := strings.TrimSpace(draft.ProviderSpec) != "" &&
 		strings.TrimSpace(draft.ModelID) != "" &&
 		(!providerCredentialSelectionRequired(draft.ProviderSpec, draft.BaseURL, draft.CredentialRef) || strings.TrimSpace(draft.CredentialRef) != "") &&
 		!isEmptyFileCredentialRef(draft.CredentialRef) &&
 		(!strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "custom") || strings.TrimSpace(draft.BaseURL) != "")
 	if !ready {
-		return view.Named[state.Model]("add-model/create", views.RowStatic("create model", "not ready"))
+		return retained.Named[state.Model]("add-model/create", views.RowStatic("create model", "not ready"))
 	}
 	createDraft := draft
-	return view.Named[state.Model]("add-model/create", views.RowAction("create model", "", "create", func() []update.Action {
+	return retained.Named[state.Model]("add-model/create", views.RowAction("create model", "", "create", func() []update.Action {
 		panel.setOpen(false)
 		panel.setCredentialUI(closeAddModelCredentialUIState(panel.credentialUI))
 		return []update.Action{
@@ -631,7 +631,7 @@ func isEmptyFileCredentialRef(ref string) bool {
 	return strings.HasPrefix(strings.ToLower(trimmed), fileCredentialRefPrefix) && strings.TrimSpace(credentialFilePath(trimmed)) == ""
 }
 
-func buildAddModelModelChoiceRow(ctx *view.Context[state.Model], panel addModelPanelState) view.ViewSpec[state.Model] {
+func buildAddModelModelChoiceRow(ctx *retained.Context[state.Model], panel addModelPanelState) retained.ViewSpec[state.Model] {
 	return buildDraftModelChoiceRow(ctx, draftModelRowSpec{
 		Binding: addDraftModelBinding{
 			draft:    panel.draft,

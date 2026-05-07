@@ -2,6 +2,7 @@ package cli
 
 import (
 	"io"
+	"log/slog"
 
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	appstate "github.com/swobuforge/swobu/internal/terminalui/apps/cli/app/state"
@@ -44,9 +45,44 @@ func NewStartupConsolePresenter(out io.Writer) *StartupConsolePresenter {
 }
 
 func (t *StartupConsolePresenter) Emit(event StartupEvent) {
+	if isStartupPhaseLogEvent(event.Kind) {
+		logStartupPhaseEvent(event)
+		return
+	}
 	t.state = appstate.Apply(t.state, event)
 	t.renderer.SetMode(t.state.Mode)
 	t.renderer.Render(appviews.Build(t.state))
+}
+
+func isStartupPhaseLogEvent(kind StartupEventKind) bool {
+	switch kind {
+	case StartupEventDaemonNotReachable,
+		StartupEventStartingDaemon,
+		StartupEventWaitingReadiness,
+		StartupEventDaemonReady,
+		StartupEventDaemonRuntimeStop,
+		StartupEventHandoffToInteractive:
+		return true
+	default:
+		return false
+	}
+}
+
+func logStartupPhaseEvent(event StartupEvent) {
+	switch event.Kind {
+	case StartupEventDaemonNotReachable:
+		slog.Info("startup phase", "phase", "checking", "message", "daemon not reachable", "daemon_url", event.DaemonURL)
+	case StartupEventStartingDaemon:
+		slog.Info("startup phase", "phase", "starting", "message", "starting daemon")
+	case StartupEventWaitingReadiness:
+		slog.Info("startup phase", "phase", "waiting", "message", "waiting for daemon readiness")
+	case StartupEventDaemonReady:
+		slog.Info("startup phase", "phase", "ready", "message", "daemon ready", "state", event.State)
+	case StartupEventDaemonRuntimeStop:
+		slog.Info("startup phase", "phase", "stopped", "message", "daemon runtime stopped")
+	case StartupEventHandoffToInteractive:
+		slog.Info("startup phase", "phase", "handoff", "message", "entering interactive cockpit")
+	}
 }
 
 // EmitDaemonLifecycle renders daemonlifecycle startup events without
@@ -65,25 +101,18 @@ func (t *StartupConsolePresenter) EmitDaemonLifecycle(event daemonlifecycle.Star
 }
 
 type daemonLifecycleStartupReporter struct {
-	transcript *StartupTranscript
+	presenter *StartupConsolePresenter
 }
 
 func (r daemonLifecycleStartupReporter) Report(event daemonlifecycle.StartupEvent) {
-	if r.transcript == nil {
+	if r.presenter == nil {
 		return
 	}
-	r.transcript.EmitDaemonLifecycle(event)
+	r.presenter.EmitDaemonLifecycle(event)
 }
 
 // DaemonLifecycleReporter returns a daemon lifecycle reporter that writes
 // directly into this transcript.
 func (t *StartupConsolePresenter) DaemonLifecycleReporter() daemonlifecycle.StartupReporter {
-	return daemonLifecycleStartupReporter{transcript: t}
-}
-
-// Backward compatibility shims.
-type StartupTranscript = StartupConsolePresenter
-
-func NewStartupTranscript(out io.Writer) *StartupTranscript {
-	return NewStartupConsolePresenter(out)
+	return daemonLifecycleStartupReporter{presenter: t}
 }

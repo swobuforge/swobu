@@ -1,20 +1,13 @@
 package views
 
 import (
-	"strings"
-	"unicode"
 	"unicode/utf8"
+
+	"github.com/swobuforge/swobu/internal/terminalui/view/textmetrics"
 )
 
 func padRight(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	n := runeLen(s)
-	if n >= width {
-		return trimToWidth(s, width)
-	}
-	return s + strings.Repeat(" ", width-n)
+	return textmetrics.PadRight(s, width)
 }
 
 // PadRight right-pads or truncates text to width using toolkit grammar.
@@ -23,27 +16,7 @@ func PadRight(s string, width int) string {
 }
 
 func trimToWidth(s string, width int) string {
-	s = sanitizeTextForTerminal(s)
-	if width <= 0 {
-		return ""
-	}
-	if runeLen(s) <= width {
-		return s
-	}
-	if width == 1 {
-		return "…"
-	}
-	var b strings.Builder
-	count := 0
-	for _, r := range s {
-		if count >= width-1 {
-			break
-		}
-		b.WriteRune(r)
-		count++
-	}
-	b.WriteRune('…')
-	return b.String()
+	return textmetrics.TrimToWidth(s, width)
 }
 
 // TrimToWidth trims text to width with ellipsis when needed.
@@ -55,15 +28,7 @@ func TrimToWidth(s string, width int) string {
 // an ellipsis. Callers that want visual truncation indicators should use
 // trimToWidth instead.
 func trimToWidthRaw(s string, width int) string {
-	s = sanitizeTextForTerminal(s)
-	if width <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= width {
-		return s
-	}
-	return string(r[:width])
+	return textmetrics.TrimToWidthRaw(s, width)
 }
 
 // trimLastRune removes the last rune from s.
@@ -79,33 +44,16 @@ func trimLastRune(value string) string {
 }
 
 func runeLen(s string) int {
-	return utf8.RuneCountInString(s)
+	return textmetrics.Width(s)
 }
 
 // RuneLen returns rune-aware text width.
 func RuneLen(s string) int {
-	return runeLen(sanitizeTextForTerminal(s))
+	return runeLen(textmetrics.SanitizeTerminalText(s))
 }
 
 func sanitizeTextForTerminal(s string) string {
-	if s == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '\n' || r == '\r' || r == '\t':
-			b.WriteRune(' ')
-		case r == 0x1b:
-			// Strip ESC to block terminal control-sequence injection.
-		case unicode.IsControl(r):
-			// Drop other control characters.
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return textmetrics.SanitizeTerminalText(s)
 }
 
 func max(a, b int) int {

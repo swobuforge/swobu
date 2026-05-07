@@ -1,6 +1,10 @@
 package layout
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/swobuforge/swobu/internal/terminalui/view/textmetrics"
+)
 
 // WrapLinePreserveIndent wraps long text while preserving leading indentation.
 // Blank lines return nil so callers can skip rendering empty rows.
@@ -9,7 +13,7 @@ func WrapLinePreserveIndent(line string, width int) []string {
 	if strings.TrimSpace(line) == "" {
 		return nil
 	}
-	if width <= 0 || len([]rune(line)) <= width {
+	if width <= 0 || textmetrics.Width(line) <= width {
 		return []string{line}
 	}
 	leading := line[:len(line)-len(strings.TrimLeft(line, " "))]
@@ -17,7 +21,7 @@ func WrapLinePreserveIndent(line string, width int) []string {
 	if strings.TrimSpace(content) == "" {
 		return []string{line}
 	}
-	usable := width - len([]rune(leading))
+	usable := width - textmetrics.Width(leading)
 	if usable < 12 {
 		usable = width
 		leading = ""
@@ -32,7 +36,7 @@ func WrapLinePreserveIndent(line string, width int) []string {
 		remaining := word
 		for remaining != "" {
 			if current == "" {
-				if len([]rune(remaining)) <= usable {
+				if textmetrics.Width(remaining) <= usable {
 					current = remaining
 					remaining = ""
 					continue
@@ -49,7 +53,7 @@ func WrapLinePreserveIndent(line string, width int) []string {
 				continue
 			}
 			candidate := current + " " + remaining
-			if len([]rune(candidate)) <= usable {
+			if textmetrics.Width(candidate) <= usable {
 				current = candidate
 				remaining = ""
 				continue
@@ -68,17 +72,27 @@ func splitByRuneWidth(value string, width int) []string {
 	if width <= 0 {
 		return []string{value}
 	}
-	runes := []rune(value)
-	if len(runes) <= width {
+	if textmetrics.Width(value) <= width {
 		return []string{value}
 	}
-	chunks := make([]string, 0, len(runes)/width+1)
-	for len(runes) > width {
-		chunks = append(chunks, string(runes[:width]))
-		runes = runes[width:]
+	chunks := make([]string, 0, 4)
+	var b strings.Builder
+	cells := 0
+	for _, r := range value {
+		rw := textmetrics.Width(string(r))
+		if rw <= 0 {
+			rw = 1
+		}
+		if cells+rw > width && b.Len() > 0 {
+			chunks = append(chunks, b.String())
+			b.Reset()
+			cells = 0
+		}
+		b.WriteRune(r)
+		cells += rw
 	}
-	if len(runes) > 0 {
-		chunks = append(chunks, string(runes))
+	if b.Len() > 0 {
+		chunks = append(chunks, b.String())
 	}
 	return chunks
 }

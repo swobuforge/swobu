@@ -19,7 +19,7 @@ func TestRunOnProviderChooseActions_ReselectionClosesWithoutSave(t *testing.T) {
 		state.SetInteractionMode{Mode: state.InteractionModeNAV},
 		interaction.FocusKeyAction{Key: "run_on"},
 	}
-	got := runOnProviderChooseActions(snapshot, "backend-a", func() []update.Action {
+	got := primaryModelChooseActions(snapshot, "backend-a", func() []update.Action {
 		return closeActions
 	})
 
@@ -41,7 +41,7 @@ func TestRunOnProviderChooseActions_SelectionQueuesSaveThenClose(t *testing.T) {
 		Name:                      "acme",
 		SelectedProviderConfigRef: "backend-a",
 	}
-	got := runOnProviderChooseActions(snapshot, "backend-b", func() []update.Action {
+	got := primaryModelChooseActions(snapshot, "backend-b", func() []update.Action {
 		return []update.Action{
 			state.SetInteractionMode{Mode: state.InteractionModeNAV},
 			interaction.FocusKeyAction{Key: "run_on"},

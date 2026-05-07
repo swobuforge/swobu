@@ -22,9 +22,11 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/swobuforge/swobu/internal/bootstrap"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	platformlogging "github.com/swobuforge/swobu/internal/platform/logging"
 	"github.com/swobuforge/swobu/internal/telemetry"
 	uicli "github.com/swobuforge/swobu/internal/terminalui/apps/cli"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit"
+	tuisession "github.com/swobuforge/swobu/internal/terminalui/session"
 )
 
 // ExitCode is contract-bearing for `swobu status`: healthy=0, reachable but
@@ -95,28 +97,65 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if sleep == nil {
 		sleep = time.Sleep
 	}
+	session := tuisession.New(tuisession.ModeTranscript)
+	stdout = session.BindWriter(tuisession.ModeTranscript, stdout)
+	stderr = session.BindWriter(tuisession.ModeTranscript, stderr)
 
 	if len(args) == 0 {
 		if isInteractive() {
-			versionDecision := emitVersionNoticeIfConfigured(stdout)
+			startupOut := session.BindWriter(tuisession.ModeTranscript, r.Stdout)
+			if startupOut == nil {
+				startupOut = session.BindWriter(tuisession.ModeTranscript, os.Stdout)
+			}
+			startupErr := session.BindWriter(tuisession.ModeTranscript, r.Stderr)
+			if startupErr == nil {
+				startupErr = session.BindWriter(tuisession.ModeTranscript, os.Stderr)
+			}
+			versionDecision := emitVersionNoticeIfConfigured(startupOut)
 			if versionDecision.show {
-				if err := waitForVersionNoticeContinue(stdin, stdout); err != nil {
-					_, _ = fmt.Fprintln(stderr, err.Error())
+				if err := waitForVersionNoticeContinue(stdin, startupOut); err != nil {
+					_, _ = fmt.Fprintln(startupErr, err.Error())
 					return ExitDown
 				}
 			}
-			if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
-				_, _ = fmt.Fprintln(stderr, err.Error())
+			if err := ensureTelemetryNoticeBeforeDaemonStart(startupOut); err != nil {
+				_, _ = fmt.Fprintln(startupErr, err.Error())
 				return ExitDown
 			}
-			if err := attachOrStart(ctx, stdout, stderr, client); err != nil {
-				_, _ = fmt.Fprintln(stderr, err.Error())
+			if err := attachOrStart(ctx, startupOut, startupErr, client); err != nil {
+				_, _ = fmt.Fprintln(startupErr, err.Error())
 				return ExitDown
 			}
 			sleep(startupHandoffFloor)
-			uicli.NewStartupTranscript(stdout).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
-			if err := launchInteractive(ctx, stdin, stdout, stderr); err != nil {
-				_, _ = fmt.Fprintln(stderr, err.Error())
+			uicli.NewStartupConsolePresenter(startupOut).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
+			if err := session.SetMode(tuisession.ModeInteractive); err != nil {
+				_, _ = fmt.Fprintln(startupErr, err.Error())
+				return ExitDown
+			}
+			// Always return to transcript mode, even on cockpit failure, so any
+			// buffered log policy bound to the session can flush deterministically.
+			defer func() {
+				_ = session.SetMode(tuisession.ModeTranscript)
+			}()
+
+			cockpitOut := session.BindWriter(tuisession.ModeInteractive, r.Stdout)
+			if cockpitOut == nil {
+				cockpitOut = session.BindWriter(tuisession.ModeInteractive, os.Stdout)
+			}
+			cockpitErr := session.BindWriter(tuisession.ModeInteractive, r.Stderr)
+			if cockpitErr == nil {
+				cockpitErr = session.BindWriter(tuisession.ModeInteractive, os.Stderr)
+			}
+
+			prevLogger := slog.Default()
+			// Logging behavior during cockpit is selected by the slog bridge
+			// policy, not by terminal session internals.
+			bridgedLogger := slog.New(platformlogging.NewSessionBufferedHandler(prevLogger.Handler(), session))
+			slog.SetDefault(bridgedLogger)
+			defer slog.SetDefault(prevLogger)
+
+			if err := launchInteractive(ctx, stdin, cockpitOut, cockpitErr); err != nil {
+				_, _ = fmt.Fprintln(cockpitErr, err.Error())
 				return ExitDown
 			}
 			return ExitHealthy
@@ -178,7 +217,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	transcript := uicli.NewStartupTranscript(stdout)
+	transcript := uicli.NewStartupConsolePresenter(stdout)
 	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventSplash})
 	_ = emitVersionNoticeIfConfigured(stdout)
 	if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
@@ -246,7 +285,7 @@ func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
 	if state.NoticeShown {
 		return nil
 	}
-	uicli.NewStartupTranscript(out).Emit(uicli.StartupEvent{
+	uicli.NewStartupConsolePresenter(out).Emit(uicli.StartupEvent{
 		Kind: uicli.StartupEventTelemetryDisclosure,
 		Text: telemetry.FirstRunNoticeText(),
 	})
@@ -438,5 +477,5 @@ func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, cl
 }
 
 func startupReporterFromWriter(out io.Writer) daemonlifecycle.StartupReporter {
-	return uicli.NewStartupTranscript(out).DaemonLifecycleReporter()
+	return uicli.NewStartupConsolePresenter(out).DaemonLifecycleReporter()
 }

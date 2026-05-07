@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // providerEnvKeyRowSpec owns env-key selection when env-backed credentials are selected.
@@ -16,13 +16,13 @@ type providerEnvKeyRowSpec struct {
 	CreateMode     bool
 }
 
-func providerEnvKeyRow(spec providerEnvKeyRowSpec) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func providerEnvKeyRow(spec providerEnvKeyRowSpec) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderEnvKeyRow(ctx, spec)
 	})
 }
 
-func buildProviderEnvKeyRow(ctx *view.Context[state.Model], spec providerEnvKeyRowSpec) view.ViewSpec[state.Model] {
+func buildProviderEnvKeyRow(ctx *retained.Context[state.Model], spec providerEnvKeyRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	pc := selectedProvider(model, spec.ProviderConfig, spec.CreateMode)
 	if pc == nil || !strings.EqualFold(credentialSource(pc.CredentialRef), "env") {

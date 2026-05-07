@@ -1,4 +1,4 @@
-package view
+package retained
 
 type localStateChangedAction struct{}
 

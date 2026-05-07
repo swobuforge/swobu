@@ -8,21 +8,21 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
-func providerSpecRow(providerConfig *state.ProviderConfigSnapshot) view.ViewSpec[state.Model] {
+func providerSpecRow(providerConfig *state.ProviderConfigSnapshot) retained.ViewSpec[state.Model] {
 	if providerConfig == nil {
 		return views.RowStatic("provider", "not set")
 	}
 	return views.RowStatic("provider", providercatalog.DisplayName(strings.TrimSpace(providerConfig.ProviderSpec)))
 }
 
-func providerDeleteRow(endpointName string, providerConfig *state.ProviderConfigSnapshot) view.ViewSpec[state.Model] {
+func providerDeleteRow(endpointName string, providerConfig *state.ProviderConfigSnapshot) retained.ViewSpec[state.Model] {
 	if providerConfig == nil {
 		return views.RowStatic("delete model", "")
 	}
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		model := ctx.Model()
 		snapshot := currentSnapshotByName(model, endpointName)
 		if snapshot == nil || len(snapshot.ProviderConfigs) <= 1 {

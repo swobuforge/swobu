@@ -82,19 +82,15 @@ type ClientAccessCheckStarted struct{}
 // EndpointCopyRequested asks the reducer to copy an endpoint value.
 type EndpointCopyRequested struct{ Value string }
 
-// ClientBaseURLCopyRequestedAction asks the reducer to copy a client base URL.
-type ClientBaseURLCopyRequestedAction struct{ Value string }
+// ClientBaseURLCopyRequested asks the reducer to copy a client base URL.
+type ClientBaseURLCopyRequested struct{ Value string }
 
-// ClientLaunchRequestedAction asks the reducer to launch a local client preset.
-type ClientLaunchRequestedAction struct {
+// ClientLaunchRequested asks the reducer to launch a local client preset.
+type ClientLaunchRequested struct {
 	BaseURL string
 	Preset  string
 	ModelID string
 }
-
-// Back-compat aliases for existing call sites.
-type ClientBaseURLCopyRequested = ClientBaseURLCopyRequestedAction
-type ClientLaunchRequested = ClientLaunchRequestedAction
 
 // RefreshStatusProjectionRequested asks the reducer to refresh traffic data.
 type RefreshStatusProjectionRequested struct{}

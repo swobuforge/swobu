@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // FollowUp returns the channel through which async effects report results.
@@ -80,7 +80,7 @@ func firstFocusableByKey(root *layout.LayoutNode, key string) *layout.LayoutNode
 		if node == nil || found != nil {
 			return
 		}
-		_, nodeKey, _ := view.NamedNodeMetadata(layout.UnwrapIdentity(node.RenderNode))
+		_, nodeKey, _ := retained.NamedNodeMetadata(layout.UnwrapIdentity(node.RenderNode))
 		if nodeKey == key {
 			if canFocus(node) {
 				found = node

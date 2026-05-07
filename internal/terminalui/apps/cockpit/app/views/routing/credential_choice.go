@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -19,13 +19,13 @@ type providerCredentialChoiceRowSpec struct {
 	CreateMode     bool
 }
 
-func providerCredentialChoiceRow(spec providerCredentialChoiceRowSpec) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func providerCredentialChoiceRow(spec providerCredentialChoiceRowSpec) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderCredentialChoiceRow(ctx, spec)
 	})
 }
 
-func buildProviderCredentialChoiceRow(ctx *view.Context[state.Model], spec providerCredentialChoiceRowSpec) view.ViewSpec[state.Model] {
+func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec providerCredentialChoiceRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	pc := selectedProvider(ctx.Model(), spec.ProviderConfig, spec.CreateMode)
 	currentRef := ""
@@ -36,7 +36,7 @@ func buildProviderCredentialChoiceRow(ctx *view.Context[state.Model], spec provi
 	if current == "" {
 		current = selectors.CredentialSummaryFromProviderConfig(pc)
 	}
-	open, setOpen := view.UseState(ctx, func() bool { return false })
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	parent := views.RowChoiceWithCancel(views.RowUseKeyFrom, current, func() []update.Action {
 		nextOpen := !open
 		setOpen(nextOpen)
@@ -52,7 +52,7 @@ func buildProviderCredentialChoiceRow(ctx *view.Context[state.Model], spec provi
 		}
 		return nil
 	})
-	var out view.ViewSpec[state.Model]
+	var out retained.ViewSpec[state.Model]
 	if !open {
 		out = parent
 		if current == "missing" {
@@ -104,13 +104,13 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 	}
 }
 
-func credentialOptionRows(current string, onChoose func(string) []update.Action, onCancel func() []update.Action) []view.ViewSpec[state.Model] {
+func credentialOptionRows(current string, onChoose func(string) []update.Action, onCancel func() []update.Action) []retained.ViewSpec[state.Model] {
 	options := []string{"env", "keychain", "file"}
 	current = strings.TrimSpace(current)
 	if current != "" && current != "missing" && !containsString(options, current) {
 		options = append([]string{current}, options...)
 	}
-	rows := make([]view.ViewSpec[state.Model], 0, len(options))
+	rows := make([]retained.ViewSpec[state.Model], 0, len(options))
 	for _, option := range options {
 		choice := option
 		rows = append(rows, toolkitviews.NewChoiceOptionWithCancel[state.Model](choice, choice == current, func() []update.Action {

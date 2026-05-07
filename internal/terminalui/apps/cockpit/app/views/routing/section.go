@@ -10,15 +10,15 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // BuildSection is the top-level routing section builder.
 // It routes to create or workspace variants based on whether an endpoint is selected.
-func BuildSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	var out view.ViewSpec[state.Model]
+	var out retained.ViewSpec[state.Model]
 	if model.CurrentEndpoint == "" {
 		out = createSection(ctx)
 	} else {
@@ -27,7 +27,7 @@ func BuildSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 	return out
 }
 
-func createSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	nameSet := model.CreateDraftName != ""
 	provider := model.CreateDraftProviderConfig.ProviderSpec
@@ -37,20 +37,20 @@ func createSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 	credSummary := firstRunCredentialSummary(provider, baseURL, cred)
 
 	defaultOpen := provider != "" || nameSet
-	runPickerOpen, setRunPickerOpen := view.UseState(ctx, func() bool { return false })
-	pickerState, setPickerState := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	keyPickerState, setKeyPickerState := view.UseState(ctx, func() string { return "" })
-	modelPickerOpen, setModelPickerOpen := view.UseState(ctx, func() bool { return false })
+	runPickerOpen, setRunPickerOpen := retained.UseState(ctx, func() bool { return false })
+	pickerState, setPickerState := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	keyPickerState, setKeyPickerState := retained.UseState(ctx, func() string { return "" })
+	modelPickerOpen, setModelPickerOpen := retained.UseState(ctx, func() bool { return false })
 
 	runOn := buildCreateRunOnRow(ctx, provider, runPickerOpen, setRunPickerOpen, pickerState, setPickerState)
-	rows := []view.ViewSpec[state.Model]{view.Named[state.Model]("run_on", runOn)}
+	rows := []retained.ViewSpec[state.Model]{retained.Named[state.Model]("run_on", runOn)}
 
 	useKeyFrom := buildCreateUseKeyFromRow(provider, credSummary, baseURL, cred, keyPickerState, setKeyPickerState)
-	rows = append(rows, view.Named[state.Model]("use_key_from", useKeyFrom))
+	rows = append(rows, retained.Named[state.Model]("use_key_from", useKeyFrom))
 
 	rows = appendCreateCredentialRows(rows, provider, credentialSource(cred))
 	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState)
-	rows = append(rows, view.Named[state.Model]("model", modelRow))
+	rows = append(rows, retained.Named[state.Model]("model", modelRow))
 
 	summary := firstRunRunOnSummary(provider)
 	if provider != "" {
@@ -59,7 +59,7 @@ func createSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 			summary += " · " + modelID
 		}
 	}
-	return view.Named[state.Model](
+	return retained.Named[state.Model](
 		"routing-create",
 		views.NewCollapsibleSection(
 			views.SectionRouting,
@@ -72,13 +72,13 @@ func createSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 }
 
 func buildCreateRunOnRow(
-	ctx *view.Context[state.Model],
+	ctx *retained.Context[state.Model],
 	provider string,
 	runPickerOpen bool,
 	setRunPickerOpen func(bool),
 	pickerState views.FilterablePickerState,
 	setPickerState func(views.FilterablePickerState),
-) view.ViewSpec[state.Model] {
+) retained.ViewSpec[state.Model] {
 	runOn := views.RowChoiceWithHooks(views.RowRunOn, firstRunRunOnSummary(provider), func() []update.Action {
 		nextOpen := !runPickerOpen
 		setRunPickerOpen(nextOpen)
@@ -147,7 +147,7 @@ func buildCreateUseKeyFromRow(
 	credentialRef string,
 	keyPickerState string,
 	setKeyPickerState func(string),
-) view.ViewSpec[state.Model] {
+) retained.ViewSpec[state.Model] {
 	if provider == "" {
 		return views.RowChoiceWithHooks(views.RowUseKeyFrom, credSummary, func() []update.Action { return nil }, nil, views.FocusAffordance("choose", false))
 	}
@@ -165,7 +165,7 @@ func buildCreateUseKeyFromRow(
 		return useKeyFrom
 	}
 
-	optionRows := make([]view.ViewSpec[state.Model], 0, 3)
+	optionRows := make([]retained.ViewSpec[state.Model], 0, 3)
 	for _, choice := range []string{"env", "keychain", "file"} {
 		keySource := choice
 		optionRows = append(optionRows, firstRunProviderChoiceRow(keySource, func() []update.Action {
@@ -194,29 +194,29 @@ func buildCreateUseKeyFromRow(
 	return toolkitviews.NewAnchoredDisclosure(useKeyFrom, optionRows...)
 }
 
-func appendCreateCredentialRows(rows []view.ViewSpec[state.Model], provider string, credSource string) []view.ViewSpec[state.Model] {
+func appendCreateCredentialRows(rows []retained.ViewSpec[state.Model], provider string, credSource string) []retained.ViewSpec[state.Model] {
 	if provider == "" {
 		return rows
 	}
 	if strings.EqualFold(credSource, "env") {
-		rows = append(rows, view.Named[state.Model]("env-key", providerEnvKeyRow(providerEnvKeyRowSpec{CreateMode: true})))
+		rows = append(rows, retained.Named[state.Model]("env-key", providerEnvKeyRow(providerEnvKeyRowSpec{CreateMode: true})))
 	}
 	if strings.EqualFold(credSource, "keychain") {
-		rows = append(rows, view.Named[state.Model]("keychain-key-name", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{CreateMode: true})))
+		rows = append(rows, retained.Named[state.Model]("keychain-key-name", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{CreateMode: true})))
 	}
 	if strings.EqualFold(credSource, "file") {
-		rows = append(rows, view.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{CreateMode: true})))
+		rows = append(rows, retained.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{CreateMode: true})))
 	}
 	return rows
 }
 
 func buildCreateModelRow(
-	ctx *view.Context[state.Model],
+	ctx *retained.Context[state.Model],
 	modelPickerOpen bool,
 	setModelPickerOpen func(bool),
 	pickerState views.FilterablePickerState,
 	setPickerState func(views.FilterablePickerState),
-) view.ViewSpec[state.Model] {
+) retained.ViewSpec[state.Model] {
 	return buildDraftModelChoiceRow(ctx, draftModelRowSpec{
 		Binding:        createDraftModelBinding{},
 		PickerOpen:     modelPickerOpen,
@@ -228,7 +228,7 @@ func buildCreateModelRow(
 	})
 }
 
-func workspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func workspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	snapshot := selectors.CurrentEndpointSnapshot(model)
 	if snapshot == nil {
@@ -252,12 +252,12 @@ func workspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model]
 		false,
 		"choose",
 		views.SummaryRow(summary),
-		view.Named[state.Model]("run_on", view.Build[state.Model](BuildRunOnWorkspaceRow)),
-		view.Named[state.Model]("providers", view.Build[state.Model](BuildProvidersWorkspacePanel)),
+		retained.Named[state.Model]("run_on", retained.Build[state.Model](BuildRunOnWorkspaceRow)),
+		retained.Named[state.Model]("providers", retained.Build[state.Model](BuildProvidersWorkspacePanel)),
 	)
 }
 
-func firstRunProviderChoiceRow(label string, onActivate func() []update.Action) view.ViewSpec[state.Model] {
+func firstRunProviderChoiceRow(label string, onActivate func() []update.Action) retained.ViewSpec[state.Model] {
 	return toolkitviews.ListItemRow[state.Model](
 		toolkitviews.InsetLabel(strings.TrimSpace(label), 4),
 		false,

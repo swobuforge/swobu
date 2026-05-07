@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 func TestKeyValueActionRow_MeasureTracksSharedPresentation(t *testing.T) {
@@ -35,6 +35,79 @@ func TestKeyValueActionRow_PaintUsesSharedPresentation(t *testing.T) {
 
 	if got, want := buf.String(), newRowParts("daemon", "up", "test enter", true).render(40, DefaultRowLayoutPolicy()); got != want {
 		t.Fatalf("paint = %q, want %q", got, want)
+	}
+}
+
+func TestKeyValueActionRow_FixedActionColumnFallsBackOnNarrowViewport(t *testing.T) {
+	t.Parallel()
+
+	policy := DefaultRowLayoutPolicy()
+	line := newRowParts("endpoint", "/c/test/", "copy ↵", true).render(22, policy)
+	if !strings.Contains(line, "endpoint") {
+		t.Fatalf("render=%q missing label under narrow viewport", line)
+	}
+	if strings.Contains(line, "copy ↵") {
+		t.Fatalf("render=%q should prioritize left content over action under narrow viewport", line)
+	}
+}
+
+func TestKeyValueActionRow_DropsActionBeforeLeftContentOnTightWidth(t *testing.T) {
+	t.Parallel()
+
+	policy := DefaultRowLayoutPolicy()
+	line := newRowParts("credential file", "/home/user/openai.key", "browse ↵", true).render(14, policy)
+	if strings.Contains(line, "↵") {
+		t.Fatalf("render=%q must drop action on tight width", line)
+	}
+}
+
+func TestKeyValueActionRow_LabelOnlyRowKeepsPrimaryContent(t *testing.T) {
+	t.Parallel()
+
+	policy := DefaultRowLayoutPolicy()
+	line := newRowParts("delete workspace", "", "delete ↵", false).render(28, policy)
+	if strings.TrimSpace(strings.Trim(line, " ")) == "" {
+		t.Fatalf("render=%q should not collapse to blank", line)
+	}
+	if !strings.Contains(line, "delete") {
+		t.Fatalf("render=%q missing primary label prefix", line)
+	}
+	if action := strings.Index(line, "delete ↵"); action >= 0 {
+		left := strings.TrimSpace(line[:action])
+		if left == "" {
+			t.Fatalf("render=%q collapsed to action-only row", line)
+		}
+	}
+}
+
+func TestKeyValueActionRow_ActionAnchoredRightButLeftAligned(t *testing.T) {
+	t.Parallel()
+
+	policy := DefaultRowLayoutPolicy()
+	line := newRowParts("name", "test", "edit ↵", false).render(44, policy)
+	idx := strings.Index(line, "edit ↵")
+	if idx < 0 {
+		t.Fatalf("render=%q missing action text", line)
+	}
+	// Anchored right means trailing padding only, no extra lead padding inside action text.
+	if !strings.HasSuffix(strings.TrimRight(line, " "), "edit ↵") {
+		t.Fatalf("render=%q action should anchor to right edge", line)
+	}
+}
+
+func TestKeyValueActionRow_ActionColumnHasStableStart(t *testing.T) {
+	t.Parallel()
+
+	policy := DefaultRowLayoutPolicy()
+	lineA := newRowParts("name", "test", "edit ↵", false).render(64, policy)
+	lineB := newRowParts("credential file", "/home/user/openai.key", "browse ↵", false).render(64, policy)
+	idxA := strings.Index(lineA, "edit ↵")
+	idxB := strings.Index(lineB, "browse ↵")
+	if idxA < 0 || idxB < 0 {
+		t.Fatalf("missing action text: A=%q B=%q", lineA, lineB)
+	}
+	if idxA != idxB {
+		t.Fatalf("action column misaligned: idxA=%d idxB=%d A=%q B=%q", idxA, idxB, lineA, lineB)
 	}
 }
 
@@ -117,7 +190,7 @@ func TestInlineEditor_PaintUsesSharedRowLayout(t *testing.T) {
 	buf := paint.NewBuffer(geom.Rect{W: 48, H: 1})
 	editor.Paint(buf, node, &layout.PaintContext{FocusedID: 12})
 
-	if got, want := buf.String(), newRowParts("name", "ac_", "save ↵", true).render(48, DefaultRowLayoutPolicy()); got != want {
+	if got, want := strings.TrimRight(buf.String(), " "), strings.TrimRight(newRowParts("name", "ac_", "save ↵", true).render(48, DefaultRowLayoutPolicy()), " "); got != want {
 		t.Fatalf("paint = %q, want %q", got, want)
 	}
 }
@@ -142,7 +215,7 @@ func TestInlineEditor_EmptyActiveUsesCaretOnly(t *testing.T) {
 	if strings.Contains(got, "choose a workspace name_") {
 		t.Fatalf("focused empty editor must hide placeholder, got %q", got)
 	}
-	if want := newRowParts("name", "_", "save ↵", true).render(64, DefaultRowLayoutPolicy()); got != want {
+	if want := strings.TrimRight(newRowParts("name", "_", "save ↵", true).render(64, DefaultRowLayoutPolicy()), " "); strings.TrimRight(got, " ") != want {
 		t.Fatalf("paint = %q, want %q", got, want)
 	}
 }
@@ -211,7 +284,7 @@ func TestWrapLineRowsPreserveIndent_MapsSegmentsToRows(t *testing.T) {
 	line := "  alpha beta gamma"
 	segments := WrapLinePreserveIndent(line, 10)
 	var mapped []string
-	rows := WrapLineRowsPreserveIndent[struct{}](line, 10, func(segment string) view.ViewSpec[struct{}] {
+	rows := WrapLineRowsPreserveIndent[struct{}](line, 10, func(segment string) retained.ViewSpec[struct{}] {
 		mapped = append(mapped, segment)
 		return NewStaticValueRow[struct{}]("", segment)
 	})
@@ -262,7 +335,7 @@ func TestRenderEvidenceRow_SanitizesControlSequences(t *testing.T) {
 	}
 }
 
-func build(w view.ViewSpec[struct{}]) layout.RenderNode { return view.Materialize(nil, w) }
+func build(w retained.ViewSpec[struct{}]) layout.RenderNode { return retained.Materialize(nil, w) }
 
 func noopActions() []update.Action { return nil }
 

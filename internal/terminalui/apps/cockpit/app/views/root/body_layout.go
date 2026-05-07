@@ -4,7 +4,7 @@ package root
 import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 const (
@@ -30,15 +30,15 @@ var WorkspaceLayoutPreset = ScreenLayoutPreset{
 }
 
 // buildBodyCanvas renders the cockpit body area with responsive layout.
-func buildBodyCanvas(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func buildBodyCanvas(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	preset := activeLayoutPreset(model)
 	wide, narrow := BuildBody(ctx, preset)
 	if preset.ContentMaxWidth > 0 {
-		wide = view.WithMaxWidth[state.Model](preset.ContentMaxWidth)(wide)
-		narrow = view.WithMaxWidth[state.Model](preset.ContentMaxWidth)(narrow)
+		wide = retained.WithMaxWidth[state.Model](preset.ContentMaxWidth)(wide)
+		narrow = retained.WithMaxWidth[state.Model](preset.ContentMaxWidth)(narrow)
 	}
-	return view.ResponsiveView[state.Model]{
+	return retained.ResponsiveView[state.Model]{
 		Threshold: splitViewportWidth - shellHorizontalPadding,
 		Wide:      wide,
 		Narrow:    narrow,

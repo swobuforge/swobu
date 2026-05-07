@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -18,16 +18,16 @@ type providerBackendURLRowSpec struct {
 	CreateMode     bool
 }
 
-func providerBackendURLRow(spec providerBackendURLRowSpec) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func providerBackendURLRow(spec providerBackendURLRowSpec) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderBackendURLRow(ctx, spec)
 	})
 }
 
-func buildProviderBackendURLRow(ctx *view.Context[state.Model], spec providerBackendURLRowSpec) view.ViewSpec[state.Model] {
+func buildProviderBackendURLRow(ctx *retained.Context[state.Model], spec providerBackendURLRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	pc := selectedProvider(model, spec.ProviderConfig, spec.CreateMode)
-	var out view.ViewSpec[state.Model]
+	var out retained.ViewSpec[state.Model]
 	if pc == nil || strings.TrimSpace(pc.ProviderSpec) != "custom" {
 		return nil
 	}
@@ -44,9 +44,9 @@ func buildProviderBackendURLRow(ctx *view.Context[state.Model], spec providerBac
 	return out
 }
 
-func backendURLEditorRow(ctx *view.Context[state.Model], label, summary, currentValue, emptyStateLabel string, save func(string) []update.Action) view.ViewSpec[state.Model] {
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	draft, setDraft := view.UseState(ctx, func() string { return currentValue })
+func backendURLEditorRow(ctx *retained.Context[state.Model], label, summary, currentValue, emptyStateLabel string, save func(string) []update.Action) retained.ViewSpec[state.Model] {
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	draft, setDraft := retained.UseState(ctx, func() string { return currentValue })
 	parent := views.RowEditWithCancel(label, summary, func() []update.Action {
 		setDraft(currentValue)
 		nextOpen := !open
@@ -67,7 +67,7 @@ func backendURLEditorRow(ctx *view.Context[state.Model], label, summary, current
 	if !open {
 		return parent
 	}
-	return toolkitviews.NewAnchoredDisclosure(parent, view.Named[state.Model]("editor", views.InlineEditor(
+	return toolkitviews.NewAnchoredDisclosure(parent, retained.Named[state.Model]("editor", views.InlineEditor(
 		label,
 		draft,
 		emptyStateLabel,

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/model"
+	"github.com/swobuforge/swobu/internal/terminalui/view"
 )
 
 type EventKind = daemonlifecycle.StartupEventKind
@@ -37,18 +37,16 @@ type SectionRow struct {
 	Kind  string
 	Title string
 	Rows  []string
-	Phase string
 }
 
 type StartupState struct {
 	SplashPrinted bool
 	Sections      []SectionRow
-	Status        string
-	Mode          model.Mode
+	Mode          view.RenderMode
 }
 
 func Initial() StartupState {
-	return StartupState{Mode: model.ModeAppend}
+	return StartupState{Mode: view.RenderModeAppend}
 }
 
 func Apply(current StartupState, event Event) StartupState {
@@ -60,12 +58,14 @@ func Apply(current StartupState, event Event) StartupState {
 		}
 		next.SplashPrinted = true
 		next.Sections = append(next.Sections, SectionRow{Kind: "splash", Rows: []string{
+			" ",
 			"                     ___.          ",
 			"  ________  _  ______\\_ |__  __ __ ",
 			" /  ___/\\ \\/ \\/ /  _ \\| __ \\|  |  \\",
 			" \\___  \\ \\     (  <_> ) \\_\\ \\  |  /",
 			"/____  /  \\/\\_/ \\____/|___  /____/ ",
 			"     \\/                   \\/",
+			" ",
 		}})
 	case EventTelemetryDisclosure:
 		rows := make([]string, 0)
@@ -82,38 +82,26 @@ func Apply(current StartupState, event Event) StartupState {
 				rows = append(rows, line)
 			}
 		}
-		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "version update notice", Rows: rows})
+		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "Update Available", Rows: rows})
 	case EventDaemonNotReachable:
-		next.Mode = model.ModeAppend
-		next.Status = ""
-		next.Sections = append(next.Sections, SectionRow{Kind: "status", Phase: "checking", Rows: []string{"daemon not reachable at " + strings.TrimSpace(event.DaemonURL)}})
+		next.Mode = view.RenderModeAppend
 	case EventStartingDaemon:
-		next.Mode = model.ModeAppend
-		next.Status = ""
-		next.Sections = append(next.Sections, SectionRow{Kind: "status", Phase: "starting", Rows: []string{"starting daemon"}})
+		next.Mode = view.RenderModeAppend
 	case EventWaitingReadiness:
-		next.Mode = model.ModeLive
-		next.Status = "waiting for daemon readiness"
-		next.Sections = append(next.Sections, SectionRow{Kind: "status", Phase: "waiting", Rows: []string{"waiting for daemon readiness"}})
+		next.Mode = view.RenderModeAppend
 	case EventDaemonReady:
-		next.Mode = model.ModeAppend
-		next.Status = ""
-		next.Sections = append(next.Sections, SectionRow{Kind: "status", Phase: "ready", Rows: []string{"daemon ready (" + strings.TrimSpace(event.State) + ")"}})
+		next.Mode = view.RenderModeAppend
 	case EventDaemonRuntimeStart:
-		next.Mode = model.ModeAppend
-		next.Status = ""
+		next.Mode = view.RenderModeAppend
 		rows := []string{"starting daemon runtime"}
 		if path := strings.TrimSpace(event.ConfigPath); path != "" {
 			rows = append(rows, "config path: "+path)
 		}
-		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "daemon runtime", Rows: rows})
+		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "Daemon Runtime", Rows: rows})
 	case EventDaemonRuntimeStop:
-		next.Mode = model.ModeAppend
-		next.Status = ""
-		next.Sections = append(next.Sections, SectionRow{Kind: "status", Phase: "stopped", Rows: []string{"daemon runtime stopped"}})
+		next.Mode = view.RenderModeAppend
 	case EventStartupFailed:
-		next.Mode = model.ModeAppend
-		next.Status = ""
+		next.Mode = view.RenderModeAppend
 		rows := []string{strings.TrimSpace(event.Text)}
 		for _, n := range event.NextAction {
 			if strings.TrimSpace(n) != "" {
@@ -122,8 +110,7 @@ func Apply(current StartupState, event Event) StartupState {
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "startup failed", Rows: rows})
 	case EventStartupTimedOut:
-		next.Mode = model.ModeAppend
-		next.Status = ""
+		next.Mode = view.RenderModeAppend
 		rows := []string{strings.TrimSpace(event.Text)}
 		for _, n := range event.NextAction {
 			if strings.TrimSpace(n) != "" {
@@ -132,9 +119,7 @@ func Apply(current StartupState, event Event) StartupState {
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "startup timed out", Rows: rows})
 	case EventHandoffToInteractive:
-		next.Mode = model.ModeAppend
-		next.Status = ""
-		next.Sections = append(next.Sections, SectionRow{Kind: "status", Phase: "handoff", Rows: []string{"entering interactive cockpit"}})
+		next.Mode = view.RenderModeAppend
 	}
 	return next
 }

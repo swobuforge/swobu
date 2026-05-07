@@ -5,7 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -13,21 +13,21 @@ func NewCollapsibleSection(
 	title string,
 	defaultOpen bool,
 	firstVerb string,
-	summary view.ViewSpec[state.Model],
-	body ...view.ViewSpec[state.Model],
-) view.ViewSpec[state.Model] {
+	summary retained.ViewSpec[state.Model],
+	body ...retained.ViewSpec[state.Model],
+) retained.ViewSpec[state.Model] {
 	cleanTitle := strings.TrimSpace(title)
-	return view.Named[state.Model](cleanTitle, view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
-		open, setOpen := view.UseState(ctx, func() bool { return defaultOpen })
-		var out view.ViewSpec[state.Model]
+	return retained.Named[state.Model](cleanTitle, retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
+		open, setOpen := retained.UseState(ctx, func() bool { return defaultOpen })
+		var out retained.ViewSpec[state.Model]
 		if len(body) == 0 {
-			children := []view.ViewSpec[state.Model]{
-				view.Named[state.Model]("title", sectionStaticTitleRow(cleanTitle, defaultOpen)),
+			children := []retained.ViewSpec[state.Model]{
+				retained.Named[state.Model]("title", sectionStaticTitleRow(cleanTitle, defaultOpen)),
 			}
 			if summary != nil {
 				children = append(children, summary)
 			}
-			out = view.VStack(ctx, children...)
+			out = retained.VStack(ctx, children...)
 		} else {
 			closeSection := func() []update.Action {
 				if !open {
@@ -39,7 +39,7 @@ func NewCollapsibleSection(
 					state.SetFocusedRowAffordance{Verb: "open"},
 				}
 			}
-			titleRow := view.Named[state.Model]("title", sectionToggleTitleRow(cleanTitle, open, func() []update.Action {
+			titleRow := retained.Named[state.Model]("title", sectionToggleTitleRow(cleanTitle, open, func() []update.Action {
 				if open {
 					return closeSection()
 				}
@@ -54,19 +54,19 @@ func NewCollapsibleSection(
 				}
 			}))
 
-			children := []view.ViewSpec[state.Model]{titleRow}
+			children := []retained.ViewSpec[state.Model]{titleRow}
 			if open {
 				children = append(children, body...)
 			} else if summary != nil {
 				children = append(children, summary)
 			}
-			out = EscClosableDisclosure(view.VStack(ctx, children...), open, closeSection)
+			out = EscClosableDisclosure(retained.VStack(ctx, children...), open, closeSection)
 		}
 		return out
 	}))
 }
 
-func sectionToggleTitleRow(title string, expanded bool, onToggle func() []update.Action) view.ViewSpec[state.Model] {
+func sectionToggleTitleRow(title string, expanded bool, onToggle func() []update.Action) retained.ViewSpec[state.Model] {
 	title = strings.TrimSpace(title)
 	indicator := "▸"
 	if expanded {
@@ -87,7 +87,7 @@ func sectionToggleTitleRow(title string, expanded bool, onToggle func() []update
 	)
 }
 
-func sectionStaticTitleRow(title string, expanded bool) view.ViewSpec[state.Model] {
+func sectionStaticTitleRow(title string, expanded bool) retained.ViewSpec[state.Model] {
 	title = strings.TrimSpace(title)
 	indicator := "▸"
 	if expanded {
@@ -96,8 +96,8 @@ func sectionStaticTitleRow(title string, expanded bool) view.ViewSpec[state.Mode
 	return IndentLeft[state.Model](StaticTextLine[state.Model](title+" "+indicator), InsetSection)
 }
 
-func staticSectionSummary(ctx *view.Context[state.Model], title, summary string) view.ViewSpec[state.Model] {
-	return view.VStack(ctx,
+func staticSectionSummary(ctx *retained.Context[state.Model], title, summary string) retained.ViewSpec[state.Model] {
+	return retained.VStack(ctx,
 		sectionStaticTitleRow(title, false),
 		SummaryRow(summary),
 	)

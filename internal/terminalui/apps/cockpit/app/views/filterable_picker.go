@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -28,13 +28,13 @@ type FilterablePickerState struct {
 
 type FilterablePickerConfig struct {
 	KeyPrefix         string
-	BuildOptionRow    func(item FilterablePickerItem, onCancel func() []update.Action) view.ViewSpec[state.Model]
+	BuildOptionRow    func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model]
 	WindowSize        int
 	MinOptionsForFind int
 	ShowSelected      bool
 	FindLabel         string
 	NoMatchesLabel    string
-	HeaderRows        []view.ViewSpec[state.Model]
+	HeaderRows        []retained.ViewSpec[state.Model]
 	OnCancel          func() []update.Action
 	OnNoMatchFocus    func() []update.Action
 }
@@ -59,19 +59,19 @@ func FilterablePickerFocusKey(prefix string, filteredIndex int) string {
 }
 
 func RenderFilterablePickerDisclosure(
-	ctx *view.Context[state.Model],
-	parent view.ViewSpec[state.Model],
+	ctx *retained.Context[state.Model],
+	parent retained.ViewSpec[state.Model],
 	currentState FilterablePickerState,
 	setState func(FilterablePickerState),
 	items []FilterablePickerItem,
 	cfg FilterablePickerConfig,
-) view.ViewSpec[state.Model] {
+) retained.ViewSpec[state.Model] {
 	rows, _, nextState := filterablePickerRows(currentState, items, cfg)
 	if nextState != currentState {
 		setState(nextState)
 	}
 	disclosure := toolkitviews.NewAnchoredDisclosure(parent, rows...)
-	return toolkitviews.KeyScope(disclosure, func(_ *view.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
+	return toolkitviews.KeyScope(disclosure, func(_ *retained.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
 		if ev.Kind != interaction.EventKey {
 			return false, nil
 		}
@@ -149,7 +149,7 @@ func filterablePickerRows(
 	current FilterablePickerState,
 	items []FilterablePickerItem,
 	cfg FilterablePickerConfig,
-) ([]view.ViewSpec[state.Model], []FilterablePickerItem, FilterablePickerState) {
+) ([]retained.ViewSpec[state.Model], []FilterablePickerItem, FilterablePickerState) {
 	next := current
 	filtered := filterablePickerItems(items, next.Query)
 	if len(filtered) == 0 {
@@ -170,7 +170,7 @@ func filterablePickerRows(
 			next.Offset = next.Cursor - window + 1
 		}
 	}
-	rows := make([]view.ViewSpec[state.Model], 0, len(cfg.HeaderRows)+ListMaxHeight+4)
+	rows := make([]retained.ViewSpec[state.Model], 0, len(cfg.HeaderRows)+ListMaxHeight+4)
 	rows = append(rows, cfg.HeaderRows...)
 	if filterablePickerShowFindRow(cfg, len(items), next.Query) {
 		findLabel := strings.TrimSpace(cfg.FindLabel)
@@ -203,7 +203,7 @@ func filterablePickerRows(
 		if buildRow == nil {
 			buildRow = defaultFilterablePickerOptionRow(cfg.ShowSelected)
 		}
-		rows = append(rows, view.Named[state.Model](key, buildRow(itemCopy, cfg.OnCancel)))
+		rows = append(rows, retained.Named[state.Model](key, buildRow(itemCopy, cfg.OnCancel)))
 	}
 	if end < len(filtered) {
 		rows = append(rows, RowStatic("", fmt.Sprintf("… %d more", len(filtered)-end)))
@@ -306,8 +306,8 @@ func filterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg Filterabl
 	return FilterablePickerFocusKey(cfg.KeyPrefix, index)
 }
 
-func defaultFilterablePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) view.ViewSpec[state.Model] {
-	return func(item FilterablePickerItem, onCancel func() []update.Action) view.ViewSpec[state.Model] {
+func defaultFilterablePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
+	return func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 		return toolkitviews.ListItemRow[state.Model](
 			toolkitviews.InsetLabel(strings.TrimSpace(item.Label), 3),
 			item.Selected,
@@ -319,6 +319,6 @@ func defaultFilterablePickerOptionRow(showSelected bool) func(item FilterablePic
 	}
 }
 
-func ChoicePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) view.ViewSpec[state.Model] {
+func ChoicePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 	return defaultFilterablePickerOptionRow(showSelected)
 }

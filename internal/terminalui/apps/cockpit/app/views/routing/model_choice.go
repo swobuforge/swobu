@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -21,14 +21,14 @@ type providerModelChoiceRowSpec struct {
 	CreateMode     bool
 }
 
-func providerModelChoiceRow(spec providerModelChoiceRowSpec) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func providerModelChoiceRow(spec providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderModelChoiceRow(ctx, spec)
 	})
 }
 
-func buildProviderModelChoiceRow(ctx *view.Context[state.Model], spec providerModelChoiceRowSpec) view.ViewSpec[state.Model] {
-	var out view.ViewSpec[state.Model]
+func buildProviderModelChoiceRow(ctx *retained.Context[state.Model], spec providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
+	var out retained.ViewSpec[state.Model]
 	if providerModelCatalogChoicesAvailable(spec) {
 		out = buildProviderModelCatalogChoiceRow(ctx, spec)
 	} else {
@@ -41,11 +41,11 @@ func providerModelCatalogChoicesAvailable(w providerModelChoiceRowSpec) bool {
 	return !w.CreateMode && w.Catalog != nil && len(w.Catalog.ModelIDs) > 0
 }
 
-func buildProviderModelCatalogChoiceRow(ctx *view.Context[state.Model], w providerModelChoiceRowSpec) view.ViewSpec[state.Model] {
+func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	current := modelSummary(model, w.Catalog)
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	closeMode := state.InteractionModeManageList
 	if w.CreateMode {
 		closeMode = state.InteractionModeNAV
@@ -116,7 +116,7 @@ func buildProviderModelCatalogChoiceRow(ctx *view.Context[state.Model], w provid
 	})
 }
 
-func buildProviderModelManualEditorRow(ctx *view.Context[state.Model], w providerModelChoiceRowSpec) view.ViewSpec[state.Model] {
+func buildProviderModelManualEditorRow(ctx *retained.Context[state.Model], w providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
 	current := selectedModelID(ctx.Model(), w.ProviderConfig, w.CreateMode)
 	summary := selectors.EmptyOr(current, "not set")
 	parent := backendURLEditorRow(

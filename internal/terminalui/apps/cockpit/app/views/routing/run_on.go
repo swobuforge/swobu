@@ -9,15 +9,15 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // BuildRunOnCreateRow shows the run-on summary in create mode with disclosure when no provider is configured.
-func BuildRunOnCreateRow(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildRunOnCreateRow(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	var cancelFn func() []update.Action
 	if open {
 		cancelFn = func() []update.Action {
@@ -132,19 +132,13 @@ func primaryModelChooseActions(snapshot *state.EndpointSnapshot, providerRef str
 	return append(actions, closeActions...)
 }
 
-// Back-compat helper for existing unit tests and call-sites that still use the
-// historical naming.
-func runOnProviderChooseActions(snapshot *state.EndpointSnapshot, providerRef string, onCancel func() []update.Action) []update.Action {
-	return primaryModelChooseActions(snapshot, providerRef, onCancel)
-}
-
 // BuildRunOnWorkspaceRow shows the primary model chooser in workspace mode.
-func BuildRunOnWorkspaceRow(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildRunOnWorkspaceRow(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	snapshot := selectors.CurrentEndpointSnapshot(model)
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	var out view.ViewSpec[state.Model]
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	var out retained.ViewSpec[state.Model]
 	if snapshot == nil {
 		out = views.RowStatic("primary", "not selected")
 	} else {

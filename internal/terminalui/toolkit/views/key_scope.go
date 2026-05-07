@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // KeyScopeRenderNode is a transparent wrapper that can intercept key events for a
@@ -26,9 +26,9 @@ func NewKeyScope(child layout.RenderNode, handle func(interaction.Event) (bool, 
 	}
 }
 
-func KeyScope[M any](child view.ViewSpec[M], handle func(*view.Context[M], interaction.Event) (bool, []update.Action)) view.ViewSpec[M] {
-	return view.View[M](func(ctx *view.Context[M]) view.RenderNode {
-		return NewKeyScope(view.Materialize(ctx, child), func(ev interaction.Event) (bool, []update.Action) {
+func KeyScope[M any](child retained.ViewSpec[M], handle func(*retained.Context[M], interaction.Event) (bool, []update.Action)) retained.ViewSpec[M] {
+	return retained.View[M](func(ctx *retained.Context[M]) retained.RenderNode {
+		return NewKeyScope(retained.Materialize(ctx, child), func(ev interaction.Event) (bool, []update.Action) {
 			if handle == nil {
 				return false, nil
 			}

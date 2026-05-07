@@ -123,7 +123,7 @@ func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
 	if exitCode != ExitHealthy {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
 	}
-	if got := stdout.String(); !bytes.Contains([]byte(got), []byte("[HANDOFF] entering interactive cockpit")) {
-		t.Fatalf("stdout missing handoff event; stdout=%q", got)
+	if got := stdout.String(); bytes.Contains([]byte(got), []byte("entering interactive cockpit")) {
+		t.Fatalf("stdout should not include slog phase log event; stdout=%q", got)
 	}
 }
