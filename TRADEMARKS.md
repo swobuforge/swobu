@@ -6,6 +6,6 @@ The following marks are reserved and are not granted under the software license:
 - swobuforge
 - Swobu logos and brand assets
 
-No trademark license is granted by LGPL-3.0-only.
+No trademark license is granted by AGPL-3.0-only.
 
 For permissions, contact contact@swobu.com.
