@@ -10,4 +10,3 @@ type ScrollSpec struct {
 	Axis   ScrollAxis
 	Offset int
 }
-

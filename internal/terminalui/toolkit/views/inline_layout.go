@@ -14,13 +14,13 @@ const (
 
 // InlineItemSpec defines one horizontal slot in a row.
 type InlineItemSpec struct {
-	Text      string
-	Basis     int
-	Grow      int
-	Shrink    int
-	Min       int
-	Max       int
-	Priority  OverflowPriority
+	Text       string
+	Basis      int
+	Grow       int
+	Shrink     int
+	Min        int
+	Max        int
+	Priority   OverflowPriority
 	AlignRight bool
 }
 

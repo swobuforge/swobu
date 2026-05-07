@@ -47,27 +47,27 @@ type StatusCounters struct {
 }
 
 type RecentTrafficRow struct {
-	RequestID           string                           `json:"request_id"`
-	Endpoint            string                           `json:"endpoint"`
-	ClientHandler       string                           `json:"client_handler,omitempty"`
-	ClientProtocol      string                           `json:"client_protocol,omitempty"`
-	IngressFamily       string                           `json:"ingress_family,omitempty"`
-	NormalizedOp        string                           `json:"normalized_op,omitempty"`
-	Route               string                           `json:"route"`
-	Result              string                           `json:"result"`
-	StatusCode          int                              `json:"status_code"`
-	ObservedAt          string                           `json:"observed_at,omitempty"`
-	Timing              *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
-	TokenUsage          *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
+	RequestID      string                           `json:"request_id"`
+	Endpoint       string                           `json:"endpoint"`
+	ClientHandler  string                           `json:"client_handler,omitempty"`
+	ClientProtocol string                           `json:"client_protocol,omitempty"`
+	IngressFamily  string                           `json:"ingress_family,omitempty"`
+	NormalizedOp   string                           `json:"normalized_op,omitempty"`
+	Route          string                           `json:"route"`
+	Result         string                           `json:"result"`
+	StatusCode     int                              `json:"status_code"`
+	ObservedAt     string                           `json:"observed_at,omitempty"`
+	Timing         *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
+	TokenUsage     *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
 	// Legacy flattened token fields preserved for compatibility with existing
 	// runtimeevidence integration tests and older readers.
-	InputTokens      *int `json:"-"`
-	OutputTokens     *int `json:"-"`
-	CacheReadTokens  *int `json:"-"`
-	CacheWriteTokens *int `json:"-"`
-	ModelRequested      string                           `json:"model_requested,omitempty"`
-	ModelResolved       string                           `json:"model_resolved,omitempty"`
-	ModelResolutionMode string                           `json:"model_resolution_mode,omitempty"`
+	InputTokens         *int   `json:"-"`
+	OutputTokens        *int   `json:"-"`
+	CacheReadTokens     *int   `json:"-"`
+	CacheWriteTokens    *int   `json:"-"`
+	ModelRequested      string `json:"model_requested,omitempty"`
+	ModelResolved       string `json:"model_resolved,omitempty"`
+	ModelResolutionMode string `json:"model_resolution_mode,omitempty"`
 }
 
 type RecentTrafficTimingSnapshot struct {

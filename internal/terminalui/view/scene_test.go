@@ -17,4 +17,3 @@ func TestProject_SplitsDurableAndEphemeral(t *testing.T) {
 		t.Fatalf("ephemeral=%#v", scene.Ephemeral)
 	}
 }
-

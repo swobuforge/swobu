@@ -235,12 +235,12 @@ func (r rowParts) render(width int, policy RowLayoutPolicy) string {
 	}
 	if strings.TrimSpace(r.Action) != "" {
 		items = append(items, InlineItemSpec{
-			Text:      r.Action,
-			Basis:     actionBasis,
-			Grow:      0,
-			Shrink:    1,
-			Min:       0,
-			Priority:  OverflowSacrifice,
+			Text:     r.Action,
+			Basis:    actionBasis,
+			Grow:     0,
+			Shrink:   1,
+			Min:      0,
+			Priority: OverflowSacrifice,
 			// Action slot is anchored to the right by preceding growable content,
 			// but text remains left-aligned within the slot for stable scanability.
 			AlignRight: false,
