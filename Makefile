@@ -40,3 +40,4 @@ fmt-check:
 
 lint:
 	CGO_ENABLED=0 $(GO) build ./...
+	CGO_ENABLED=0 $(GO) test ./internal/terminalui/apps/cockpit/app/views/lint -count=1

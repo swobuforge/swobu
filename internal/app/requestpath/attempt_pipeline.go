@@ -2,8 +2,11 @@ package requestpath
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -109,6 +112,7 @@ func (o RequestHandler) runtimeEvidenceMiddleware() AttemptMiddleware {
 					attempt.Intent.RequestedModel,
 					attempt.Route.EffectiveModel,
 					attempt.Route.ResolutionMode,
+					runtimeevidence.NewUnknownTiming(),
 					tokenUsageFromExecuteResponse(outcome.Response),
 				)
 				emitEvidenceEventIfValid(ctx, o.evidence, event, eventErr)
@@ -156,6 +160,7 @@ func continuationMiddleware() AttemptMiddleware {
 			if err != nil {
 				return AttemptOutcome{Err: err}
 			}
+			logContinuationPreparation(attempt, prepared)
 			executedRequest := prepared
 			preparedAttempt := attempt
 			preparedAttempt.Request = prepared
@@ -209,6 +214,41 @@ func continuationMiddleware() AttemptMiddleware {
 			}
 			return outcome
 		}
+	}
+}
+
+func logContinuationPreparation(attempt ExecutionAttempt, prepared compatibility.CanonicalRequest) {
+	typed, ok := prepared.(compatibility.GenerationCanonicalRequest)
+	if !ok {
+		return
+	}
+	thread := typed.Thread()
+	lastTurn := typed.LastTurn()
+	slog.Debug("continuation prepare",
+		"component", "requestpath",
+		"event", "continuation_prepare",
+		"request_id", attempt.Intent.RequestID,
+		"endpoint", attempt.Intent.EndpointName.String(),
+		"target_protocol", string(attempt.Route.Target.ProtocolKind),
+		"has_previous_response_id", strings.TrimSpace(typed.PreviousResponseID()) != "",
+		"thread_item_count", len(thread),
+		"last_turn_item_count", len(lastTurn),
+		"last_turn_tail_role", continuationTailRole(lastTurn),
+		"thread_tail_role", continuationTailRole(thread),
+	)
+}
+
+func continuationTailRole(items []compatibility.CanonicalItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	switch items[len(items)-1].Author {
+	case compatibility.ItemAuthorAssistant:
+		return "assistant"
+	case compatibility.ItemAuthorTool:
+		return "tool"
+	default:
+		return "user"
 	}
 }
 

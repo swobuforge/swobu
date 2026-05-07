@@ -18,6 +18,7 @@ func NewCollapsibleSection(
 ) view.ViewSpec[state.Model] {
 	cleanTitle := strings.TrimSpace(title)
 	return view.Named[state.Model](cleanTitle, view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+		open, setOpen := view.UseState(ctx, func() bool { return defaultOpen })
 		var out view.ViewSpec[state.Model]
 		if len(body) == 0 {
 			children := []view.ViewSpec[state.Model]{
@@ -28,7 +29,6 @@ func NewCollapsibleSection(
 			}
 			out = view.VStack(ctx, children...)
 		} else {
-			open, setOpen := view.UseState(ctx, func() bool { return defaultOpen })
 			closeSection := func() []update.Action {
 				if !open {
 					return nil

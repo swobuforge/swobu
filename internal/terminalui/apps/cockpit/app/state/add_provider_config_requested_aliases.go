@@ -35,3 +35,4 @@ type AddProviderConfigRequested = stateIntent.AddProviderConfigRequested
 type DeleteProviderConfigRequested = stateIntent.DeleteProviderConfigRequested
 type StoreKeychainCredentialRequested = stateIntent.StoreKeychainCredentialRequested
 type LoadCreateDraftModelCatalogRequested = stateIntent.LoadCreateDraftModelCatalogRequested
+type LoadAddModelDraftModelCatalogRequested = stateIntent.LoadAddModelDraftModelCatalogRequested

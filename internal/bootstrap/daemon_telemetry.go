@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	embeddedTelemetryEndpoint = "https://api.swobu.com/v1/metrics"
+	embeddedTelemetryEndpoint = "https://swobu.com"
 	embeddedTelemetryInterval = 6 * time.Hour
 )
 
@@ -102,7 +102,7 @@ func (d *Daemon) initTelemetryEmitter(ctx context.Context) bool {
 		return true
 	}
 	emitter, err := telemetry.NewMetricsEmitter(ctx, telemetry.MetricsEmitterConfig{
-		EndpointURL: embeddedTelemetryEndpoint,
+		EndpointURL: platformconfig.ResolveTelemetryEndpoint(embeddedTelemetryEndpoint),
 		Timeout:     5 * time.Second,
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func nonNegativeDelta(current, previous int) int64 {
 }
 
 func telemetryInterval() time.Duration {
-	return embeddedTelemetryInterval
+	return platformconfig.ResolveTelemetryInterval(embeddedTelemetryInterval)
 }
 
 func (d *Daemon) emitErrorTracesBestEffort(ctx context.Context, projection evidencestore.StatusProjection) {
@@ -207,7 +207,9 @@ func (d *Daemon) emitErrorTracesBestEffort(ctx context.Context, projection evide
 			ResultClass:   strings.TrimSpace(row.Result),
 			ProviderRoute: strings.TrimSpace(row.Route),
 			Operation:     strings.TrimSpace(row.NormalizedOp),
-			DurationMS:    row.DurMillis,
+		}
+		if row.Timing != nil {
+			trace.DurationMS = row.Timing.DurationMillisValue()
 		}
 		if debugStacks {
 			trace.DebugRawStack = string(debug.Stack())

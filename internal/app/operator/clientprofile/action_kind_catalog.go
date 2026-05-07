@@ -241,11 +241,6 @@ func opencodeClientSpec() capabilityClientSpec {
 		},
 		Run: &capabilityRunSpec{
 			Binary: "opencode",
-			Args: []string{
-				"run",
-				"--model", "swobu/{{primary_model}}",
-				"Explain this codebase",
-			},
 			Env: map[string]string{
 				"OPENAI_API_KEY": "swobu-placeholder",
 			},

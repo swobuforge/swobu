@@ -484,6 +484,149 @@ func TestRoot_EscClosesAddModelProviderDrawer(t *testing.T) {
 	}
 }
 
+func TestRoot_WorkspaceAddModelSelectingFileCredentialShowsFileRow(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		Endpoints:       []string{"acme"},
+		CurrentEndpoint: "acme",
+		EndpointSnapshots: []state.EndpointSnapshot{
+			{
+				Name:                      "acme",
+				SelectedProviderConfigRef: "ollama:gemma4",
+				ProviderConfigs: []state.ProviderConfigSnapshot{
+					{
+						Ref:          "ollama:gemma4",
+						ProviderSpec: "ollama",
+						ModelID:      "gemma4:e4b",
+						ProtocolKind: "chat_completions",
+					},
+				},
+			},
+		},
+	})
+	viewport := geom.Rect{W: 110, H: 32}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "models")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "add model")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "provider")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	// Move focus into picker options and select the first provider option.
+	rt.DispatchEvent(updateKey(interaction.KeyDown))
+	rt.Rebuild(Root(), viewport)
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	selectAddModelFileCredential(t, rt, viewport)
+	out := rt.Render(viewport).String()
+	if !strings.Contains(out, "credential file") {
+		t.Fatalf("expected credential file row after choosing file credentials; render=%q", out)
+	}
+	focusRowContaining(t, rt, viewport, "model              not set")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	out = rt.Render(viewport).String()
+	if strings.Contains(out, "save ↵") && strings.Contains(out, "model             _") {
+		t.Fatalf("add-model model row regressed to inline editor instead of picker flow; render=%q", out)
+	}
+	if !strings.Contains(out, "set credential file before loading models") {
+		t.Fatalf("expected add-model model row to block model-loading until credential file is set; render=%q", out)
+	}
+	if !(strings.Contains(out, "create model") && strings.Contains(out, "not ready")) {
+		t.Fatalf("expected create model to remain blocked while file path unset; render=%q", out)
+	}
+}
+
+func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoherent(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		Endpoints:       []string{"acme"},
+		CurrentEndpoint: "acme",
+		EndpointSnapshots: []state.EndpointSnapshot{
+			{
+				Name:                      "acme",
+				SelectedProviderConfigRef: "ollama:gemma4",
+				ProviderConfigs: []state.ProviderConfigSnapshot{
+					{
+						Ref:          "ollama:gemma4",
+						ProviderSpec: "ollama",
+						ModelID:      "gemma4:e4b",
+						ProtocolKind: "chat_completions",
+					},
+				},
+			},
+		},
+	})
+	viewport := geom.Rect{W: 110, H: 32}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "models")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "add model")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "provider")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	rt.DispatchEvent(updateKey(interaction.KeyDown))
+	rt.Rebuild(Root(), viewport)
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	chooseCredential := func(option string) string {
+		focusRowContaining(t, rt, viewport, "credentials")
+		rt.DispatchEvent(updateKey(interaction.KeyEnter))
+		rt.Rebuild(Root(), viewport)
+		focusRowContaining(t, rt, viewport, option)
+		rt.DispatchEvent(updateKey(interaction.KeyEnter))
+		rt.Rebuild(Root(), viewport)
+		return rt.Render(viewport).String()
+	}
+
+	out := chooseCredential("env")
+	if !strings.Contains(out, "env key") {
+		t.Fatalf("expected env key row after selecting env credentials; render=%q", out)
+	}
+
+	out = chooseCredential("keychain")
+	if !strings.Contains(out, "key slot") || !strings.Contains(out, "key value") {
+		t.Fatalf("expected keychain rows after selecting keychain credentials; render=%q", out)
+	}
+
+	out = chooseCredential("file")
+	if !strings.Contains(out, "credential file") {
+		t.Fatalf("expected credential file row after selecting file credentials; render=%q", out)
+	}
+
+	out = chooseCredential("env")
+	if !strings.Contains(out, "env key") {
+		t.Fatalf("expected env key row after toggling back to env credentials; render=%q", out)
+	}
+}
+
 func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 	t.Parallel()
 
@@ -971,6 +1114,43 @@ func selectClientFromChooser(t *testing.T, rt *loop.AppLoop[state.Model], viewpo
 	focusRowContaining(t, rt, viewport, label)
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
+}
+
+func currentCredentialPickerPath(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "path") {
+			continue
+		}
+		idx := strings.Index(line, "path")
+		if idx < 0 {
+			continue
+		}
+		return strings.TrimSpace(line[idx+len("path"):])
+	}
+	return ""
+}
+
+func selectAddModelFileCredential(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
+	t.Helper()
+
+	for attempt := 0; attempt < 3; attempt++ {
+		focusRowContaining(t, rt, viewport, "credentials")
+		rt.DispatchEvent(updateKey(interaction.KeyEnter))
+		rt.Rebuild(Root(), viewport)
+
+		for i := 0; i < attempt; i++ {
+			rt.DispatchEvent(updateKey(interaction.KeyDown))
+			rt.Rebuild(Root(), viewport)
+		}
+
+		rt.DispatchEvent(updateKey(interaction.KeyEnter))
+		rt.Rebuild(Root(), viewport)
+		if strings.Contains(rt.Render(viewport).String(), "credential file") {
+			return
+		}
+	}
+
+	t.Fatalf("unable to select file credential option in add-model flow; render=%q", rt.Render(viewport).String())
 }
 
 func assertUseKeyFromRow(t *testing.T, out, summary string, chooser bool) {

@@ -61,6 +61,7 @@ func newSuccessEvidenceEvent(
 	requestedModel string,
 	resolvedModel string,
 	resolutionMode string,
+	timing runtimeevidence.Timing,
 	tokenUsage runtimeevidence.TokenUsage,
 ) (runtimeevidence.TrafficEvent, error) {
 	id, err := runtimeevidence.ParseRequestID(requestID)
@@ -87,6 +88,7 @@ func newSuccessEvidenceEvent(
 		ModelRequested:            requestedModel,
 		ModelResolved:             resolvedModel,
 		ModelResolutionMode:       resolutionMode,
+		Timing:                    timing,
 		TokenUsage:                tokenUsage,
 	})
 }

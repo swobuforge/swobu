@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -41,14 +40,7 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 		ResolveDefaultConfig: func() (string, error) {
 			return "/tmp/swobu-test-config.yaml", nil
 		},
-		OpenDaemonLogSink: func() (string, *os.File, error) {
-			file, openErr := os.CreateTemp("", "swobu-daemon-log-*.log")
-			if openErr != nil {
-				return "", nil, openErr
-			}
-			return file.Name(), file, nil
-		},
-		SpawnForegroundDaemon: func(context.Context, string, *os.File) error {
+		SpawnForegroundDaemon: func(context.Context, string) error {
 			return nil
 		},
 		ReadinessTimeout: 2 * time.Second,
@@ -62,8 +54,7 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 
 	out := stdout.String()
 	assertOrderedContains(t, out,
-		"|              SWOBU               |",
-		"== startup disclosure ==",
+		" ___ ___ ___   __ _____ ___",
 		"[CHECKING] daemon not reachable at",
 		"[STARTING] starting daemon",
 		"[WAITING] waiting for daemon readiness",
@@ -101,7 +92,7 @@ func TestAttachOrStart_AcceptsReachableDegradedState(t *testing.T) {
 		DaemonURL: srv.URL,
 		Client:    &http.Client{Timeout: 500 * time.Millisecond},
 		Report:    startupReporterForTests(io.Discard),
-		SpawnForegroundDaemon: func(context.Context, string, *os.File) error {
+		SpawnForegroundDaemon: func(context.Context, string) error {
 			calledSpawn = true
 			return nil
 		},
@@ -168,14 +159,7 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 		ResolveDefaultConfig: func() (string, error) {
 			return "/tmp/swobu-test-config.json", nil
 		},
-		OpenDaemonLogSink: func() (string, *os.File, error) {
-			file, err := os.CreateTemp("", "swobu-daemon-log-*.log")
-			if err != nil {
-				return "", nil, err
-			}
-			return file.Name(), file, nil
-		},
-		SpawnForegroundDaemon: func(context.Context, string, *os.File) error {
+		SpawnForegroundDaemon: func(context.Context, string) error {
 			if !downRequested.Load() {
 				t.Fatalf("spawn called before down request")
 			}
@@ -249,14 +233,7 @@ func TestRestart_PropagatesAttachStartFailureAfterDown(t *testing.T) {
 		ResolveDefaultConfig: func() (string, error) {
 			return "/tmp/swobu-test-config.json", nil
 		},
-		OpenDaemonLogSink: func() (string, *os.File, error) {
-			file, openErr := os.CreateTemp("", "swobu-daemon-log-*.log")
-			if openErr != nil {
-				return "", nil, openErr
-			}
-			return file.Name(), file, nil
-		},
-		SpawnForegroundDaemon: func(context.Context, string, *os.File) error {
+		SpawnForegroundDaemon: func(context.Context, string) error {
 			return errors.New("spawn failed")
 		},
 		ReadinessTimeout: 500 * time.Millisecond,
@@ -280,7 +257,7 @@ func TestAttachOrStart_StartupFailureRendersNextActions(t *testing.T) {
 		t.Fatal("AttachOrStart returned nil error, want failure")
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "== startup failed ==") {
+	if !strings.Contains(out, "╭─ startup failed ") {
 		t.Fatalf("stdout missing startup failed block; stdout=%q", out)
 	}
 	if !strings.Contains(out, "next: run `swobu status`") {
@@ -308,14 +285,7 @@ func TestAttachOrStart_StartupTimeoutRendersNextActions(t *testing.T) {
 		ResolveDefaultConfig: func() (string, error) {
 			return "/tmp/swobu-test-config.yaml", nil
 		},
-		OpenDaemonLogSink: func() (string, *os.File, error) {
-			file, openErr := os.CreateTemp("", "swobu-daemon-log-*.log")
-			if openErr != nil {
-				return "", nil, openErr
-			}
-			return file.Name(), file, nil
-		},
-		SpawnForegroundDaemon: func(context.Context, string, *os.File) error {
+		SpawnForegroundDaemon: func(context.Context, string) error {
 			return nil
 		},
 		ReadinessTimeout: 50 * time.Millisecond,
@@ -324,7 +294,7 @@ func TestAttachOrStart_StartupTimeoutRendersNextActions(t *testing.T) {
 		t.Fatal("AttachOrStart returned nil error, want timeout")
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "== startup timed out ==") {
+	if !strings.Contains(out, "╭─ startup timed out ") {
 		t.Fatalf("stdout missing startup timed out block; stdout=%q", out)
 	}
 	if !strings.Contains(out, "next: run `swobu status`") {
@@ -336,9 +306,7 @@ func startupReporterForTests(out io.Writer) StartupReporter {
 	return startupReporterFunc(func(ev StartupEvent) {
 		switch ev.Kind {
 		case StartupEventSplash:
-			_, _ = io.WriteString(out, "|              SWOBU               |\n")
-		case StartupEventDisclosure:
-			_, _ = io.WriteString(out, "== startup disclosure ==\n")
+			_, _ = io.WriteString(out, " ___ ___ ___   __ _____ ___\n")
 		case StartupEventDaemonNotReachable:
 			_, _ = io.WriteString(out, fmt.Sprintf("[CHECKING] daemon not reachable at %s\n", ev.DaemonURL))
 		case StartupEventStartingDaemon:
@@ -348,12 +316,12 @@ func startupReporterForTests(out io.Writer) StartupReporter {
 		case StartupEventDaemonReady:
 			_, _ = io.WriteString(out, fmt.Sprintf("[READY] daemon ready (%s)\n", ev.State))
 		case StartupEventStartupFailed:
-			_, _ = io.WriteString(out, "== startup failed ==\n")
+			_, _ = io.WriteString(out, "╭─ startup failed \n")
 			for _, next := range ev.NextAction {
 				_, _ = io.WriteString(out, "next: "+next+"\n")
 			}
 		case StartupEventStartupTimedOut:
-			_, _ = io.WriteString(out, "== startup timed out ==\n")
+			_, _ = io.WriteString(out, "╭─ startup timed out \n")
 			for _, next := range ev.NextAction {
 				_, _ = io.WriteString(out, "next: "+next+"\n")
 			}

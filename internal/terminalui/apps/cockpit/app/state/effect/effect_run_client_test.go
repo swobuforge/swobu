@@ -141,8 +141,8 @@ func TestClientRunSpecForID(t *testing.T) {
 	if opencode.prepare == nil {
 		t.Fatal("opencode prepare missing")
 	}
-	if got := strings.Join(opencode.args, " "); got != `run --model swobu/`+compatibility.PrimaryTargetSelector+` Explain this codebase` {
-		t.Fatalf("opencode args=%q", got)
+	if got := strings.Join(opencode.args, " "); got != "" {
+		t.Fatalf("opencode args=%q want empty for interactive launch", got)
 	}
 	continueSpec, ok := clientRunSpecForID("continue", "http://127.0.0.1:7926/c/acme/", "")
 	if !ok || continueSpec.binary != "cn" {
@@ -182,7 +182,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode command missing")
 	}
-	if want := `opencode -p Explain this codebase -q`; opencode != want {
+	if want := `opencode`; opencode != want {
 		t.Fatalf("opencode command=%q want=%q", opencode, want)
 	}
 	assertNoTestHarnessArtifacts(t, opencode)

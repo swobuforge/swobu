@@ -130,6 +130,60 @@ func TestHandle_StreamingEvidenceDoesNotReconcileUsageWhenClosedBeforeCompleted(
 	}
 }
 
+func TestHandle_StreamingEvidenceReconcilesTimingWithoutUsage(t *testing.T) {
+	endpoint := testChatCompletionsEndpoint(t)
+	reader := endpointReaderStub{endpoint: endpoint}
+	evidence := &capturingRequestpathEvidenceSink{}
+
+	stream := compatibility.NewSliceEventStream([]compatibility.OutputEvent{
+		{Kind: compatibility.OutputEventStarted, ResultID: "resp_1", Model: "m"},
+		{Kind: compatibility.OutputEventCompleted, FinishReason: "completed"},
+	})
+
+	providers := &scriptedProviderExecutor{
+		steps: []providerStep{
+			{resp: ports.NewStreamingExecuteResponse(stream)},
+		},
+	}
+
+	handler := NewRequestHandler(reader, providers, evidence, nil)
+	out, err := handler.Handle(context.Background(), HandleInput{
+		EndpointName: endpoint.Name(),
+		RequestID:    "req-stream-timing-only",
+		Request: compatibility.NewDialogRequest(
+			"m",
+			[]compatibility.CanonicalItem{compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi")},
+		),
+		Contract: NewExecutionContract(compatibility.DeliveryModeStreaming),
+	})
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	for {
+		_, readErr := out.Response.Stream().Next()
+		if readErr == nil {
+			continue
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		t.Fatalf("stream Next returned error: %v", readErr)
+	}
+	if got := len(evidence.events); got != 3 {
+		t.Fatalf("evidence events after stream completion = %d, want 3", got)
+	}
+	last := evidence.events[2]
+	if _, ok := last.Timing().DurationMillis(); !ok {
+		t.Fatal("last timing duration missing, want present")
+	}
+	if _, ok := last.Timing().TTFBMillis(); !ok {
+		t.Fatal("last timing ttfb missing, want present")
+	}
+	if !last.TokenUsage().IsZero() {
+		t.Fatal("last usage should remain unknown when stream completed without usage payload")
+	}
+}
+
 type capturingRequestpathEvidenceSink struct {
 	events []runtimeevidence.TrafficEvent
 }

@@ -50,9 +50,8 @@ func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) Provider
 	if defaultBaseURL != "" {
 		next.BaseURL = defaultBaseURL
 	}
-	if strings.TrimSpace(spec) == "ollama" {
-		next.CredentialRef = ""
-	}
+	// Provider switches must always force explicit credential re-selection.
+	next.CredentialRef = ""
 	return next
 }
 

@@ -45,7 +45,10 @@ func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
 	if stdout.String() == "" {
 		t.Fatal("stdout is empty, want first-run notice")
 	}
-	if !strings.Contains(stdout.String(), "== startup disclosure ==") {
-		t.Fatalf("stdout missing startup disclosure block; stdout=%q", stdout.String())
+	out := stdout.String()
+	if splash := strings.Index(out, "___.          "); splash < 0 {
+		t.Fatalf("stdout missing splash; stdout=%q", out)
+	} else if notice := strings.Index(out, "╭─ telemetry disclosure "); notice >= 0 && splash > notice {
+		t.Fatalf("splash must render before telemetry disclosure; stdout=%q", out)
 	}
 }

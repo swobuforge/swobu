@@ -31,7 +31,6 @@ type StartupEventKind string
 
 const (
 	StartupEventSplash             StartupEventKind = "splash"
-	StartupEventDisclosure         StartupEventKind = "disclosure"
 	StartupEventDaemonReady        StartupEventKind = "daemon_ready"
 	StartupEventDaemonNotReachable StartupEventKind = "daemon_not_reachable"
 	StartupEventStartingDaemon     StartupEventKind = "starting_daemon"
@@ -66,8 +65,7 @@ type AttachOrStartInput struct {
 	Client                *http.Client
 	ReadinessTimeout      time.Duration
 	ResolveDefaultConfig  func() (string, error)
-	OpenDaemonLogSink     func() (string, *os.File, error)
-	SpawnForegroundDaemon func(ctx context.Context, configPath string, sink *os.File) error
+	SpawnForegroundDaemon func(ctx context.Context, configPath string) error
 	Report                StartupReporter
 }
 
@@ -82,8 +80,7 @@ type RestartInput struct {
 	Client                *http.Client
 	ReadinessTimeout      time.Duration
 	ResolveDefaultConfig  func() (string, error)
-	OpenDaemonLogSink     func() (string, *os.File, error)
-	SpawnForegroundDaemon func(ctx context.Context, configPath string, sink *os.File) error
+	SpawnForegroundDaemon func(ctx context.Context, configPath string) error
 	Report                StartupReporter
 }
 
@@ -137,7 +134,6 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 		report = startupReporterFunc(nil)
 	}
 	report.Report(StartupEvent{Kind: StartupEventSplash})
-	report.Report(StartupEvent{Kind: StartupEventDisclosure})
 
 	payload, class := FetchStatus(ctx, client, daemonURL)
 	if class != StatusClassDown {
@@ -163,39 +159,21 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 		return StatusPayload{}, fmt.Errorf("resolve daemon config: %w", err)
 	}
 
-	openSink := in.OpenDaemonLogSink
-	if openSink == nil {
-		openSink = openDaemonLogSink
-	}
-	logPath, sink, err := openSink()
-	if err != nil {
-		report.Report(StartupEvent{
-			Kind: StartupEventStartupFailed,
-			Text: fmt.Sprintf("open daemon log sink: %v", err),
-			NextAction: []string{
-				"check local cache/log directory permissions",
-				"run `swobu status`",
-			},
-		})
-		return StatusPayload{}, fmt.Errorf("open daemon log sink: %w", err)
-	}
 	spawn := in.SpawnForegroundDaemon
 	if spawn == nil {
 		spawn = defaultSpawnForegroundDaemon
 	}
-	if err := spawn(ctx, configPath, sink); err != nil {
-		_ = sink.Close()
+	if err := spawn(ctx, configPath); err != nil {
 		report.Report(StartupEvent{
 			Kind: StartupEventStartupFailed,
 			Text: fmt.Sprintf("start daemon: %v", err),
 			NextAction: []string{
-				"inspect daemon log path: " + logPath,
+				"run `swobu daemon --config <path>` for foreground diagnostics",
 				"run `swobu status`",
 			},
 		})
 		return StatusPayload{}, fmt.Errorf("start daemon: %w", err)
 	}
-	_ = sink.Close()
 	report.Report(StartupEvent{Kind: StartupEventStartingDaemon})
 	report.Report(StartupEvent{Kind: StartupEventWaitingReadiness})
 
@@ -213,7 +191,7 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 				Text: "daemon readiness timed out",
 				NextAction: []string{
 					"run `swobu status`",
-					"inspect daemon log path: " + logPath,
+					"run `swobu daemon --config <path>` for foreground diagnostics",
 				},
 			})
 		} else {
@@ -222,11 +200,11 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 				Text: fmt.Sprintf("daemon readiness failed: %v", err),
 				NextAction: []string{
 					"run `swobu status`",
-					"inspect daemon log path: " + logPath,
+					"run `swobu daemon --config <path>` for foreground diagnostics",
 				},
 			})
 		}
-		return StatusPayload{}, fmt.Errorf("daemon readiness failed (check `swobu status` and logs at %s): %w", logPath, err)
+		return StatusPayload{}, fmt.Errorf("daemon readiness failed (check `swobu status` and foreground daemon diagnostics): %w", err)
 	}
 	report.Report(StartupEvent{Kind: StartupEventDaemonReady, State: status.State})
 	return status, nil
@@ -302,7 +280,6 @@ func Restart(ctx context.Context, in RestartInput) error {
 		Client:                client,
 		ReadinessTimeout:      in.ReadinessTimeout,
 		ResolveDefaultConfig:  in.ResolveDefaultConfig,
-		OpenDaemonLogSink:     in.OpenDaemonLogSink,
 		SpawnForegroundDaemon: in.SpawnForegroundDaemon,
 		Report:                in.Report,
 	})
@@ -334,13 +311,11 @@ func isReadinessState(state string) bool {
 	}
 }
 
-func defaultSpawnForegroundDaemon(_ context.Context, configPath string, sink *os.File) error {
+func defaultSpawnForegroundDaemon(_ context.Context, configPath string) error {
 	executablePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve swobu executable: %w", err)
 	}
 	command := exec.Command(executablePath, "daemon", "--config", configPath)
-	command.Stdout = sink
-	command.Stderr = sink
 	return command.Start()
 }

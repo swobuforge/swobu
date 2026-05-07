@@ -66,6 +66,34 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
 		model.CreateDraftModelError = strings.TrimSpace(value.Error)
 		return nil
+	case LoadAddModelDraftModelCatalogRequested:
+		spec := strings.TrimSpace(value.ProviderSpec)
+		if spec == "" {
+			model.AddModelDraftModelIDs = nil
+			model.AddModelDraftModelError = ""
+			model.AddModelDraftProviderSpec = ""
+			model.AddModelDraftBaseURL = ""
+			model.AddModelDraftCredentialRef = ""
+			return nil
+		}
+		model.AddModelDraftProviderSpec = spec
+		model.AddModelDraftBaseURL = strings.TrimSpace(value.BaseURL)
+		model.AddModelDraftCredentialRef = strings.TrimSpace(value.CredentialRef)
+		model.AddModelDraftModelIDs = nil
+		model.AddModelDraftModelError = ""
+		return []update.Effect{stateeffect.LoadAddModelDraftModelCatalogEffect{
+			ProviderSpec:  spec,
+			BaseURL:       strings.TrimSpace(value.BaseURL),
+			CredentialRef: strings.TrimSpace(value.CredentialRef),
+			ProtocolKind:  strings.TrimSpace(value.ProtocolKind),
+		}}
+	case stateeffect.AddModelDraftModelCatalogLoaded:
+		if !matchesAddModelDraftModelCatalogLoad(model, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) {
+			return nil
+		}
+		model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
+		model.AddModelDraftModelError = strings.TrimSpace(value.Error)
+		return nil
 	case FocusNextAfterRebuildRequested:
 		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
 	case EndpointCopyRequested:
@@ -224,6 +252,19 @@ func matchesCreateDraftModelCatalogLoad(model *Model, providerSpec, baseURL, cre
 		return false
 	}
 	if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef {
+		return false
+	}
+	return true
+}
+
+func matchesAddModelDraftModelCatalogLoad(model *Model, providerSpec, baseURL, credentialRef string) bool {
+	if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec {
+		return false
+	}
+	if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL {
+		return false
+	}
+	if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef {
 		return false
 	}
 	return true

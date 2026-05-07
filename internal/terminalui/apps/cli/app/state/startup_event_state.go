@@ -11,7 +11,6 @@ type EventKind = daemonlifecycle.StartupEventKind
 
 const (
 	EventSplash               EventKind = daemonlifecycle.StartupEventSplash
-	EventDisclosure           EventKind = daemonlifecycle.StartupEventDisclosure
 	EventTelemetryDisclosure  EventKind = "telemetry_disclosure"
 	EventVersionNotice        EventKind = "version_notice"
 	EventDaemonNotReachable   EventKind = daemonlifecycle.StartupEventDaemonNotReachable
@@ -42,11 +41,10 @@ type SectionRow struct {
 }
 
 type StartupState struct {
-	SplashPrinted     bool
-	DisclosurePrinted bool
-	Sections          []SectionRow
-	Status            string
-	Mode              model.Mode
+	SplashPrinted bool
+	Sections      []SectionRow
+	Status        string
+	Mode          model.Mode
 }
 
 func Initial() StartupState {
@@ -61,16 +59,13 @@ func Apply(current StartupState, event Event) StartupState {
 			return next
 		}
 		next.SplashPrinted = true
-		next.Sections = append(next.Sections, SectionRow{Kind: "splash", Title: "SWOBU", Rows: []string{"unbundle clients from model backends"}})
-	case EventDisclosure:
-		if next.DisclosurePrinted {
-			return next
-		}
-		next.DisclosurePrinted = true
-		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "startup disclosure", Rows: []string{
-			"operator startup output is append-only",
-			"machine status remains `swobu status` JSON",
-			"daemon logs remain in the daemon log sink",
+		next.Sections = append(next.Sections, SectionRow{Kind: "splash", Rows: []string{
+			"                     ___.          ",
+			"  ________  _  ______\\_ |__  __ __ ",
+			" /  ___/\\ \\/ \\/ /  _ \\| __ \\|  |  \\",
+			" \\___  \\ \\     (  <_> ) \\_\\ \\  |  /",
+			"/____  /  \\/\\_/ \\____/|___  /____/ ",
+			"     \\/                   \\/",
 		}})
 	case EventTelemetryDisclosure:
 		rows := make([]string, 0)

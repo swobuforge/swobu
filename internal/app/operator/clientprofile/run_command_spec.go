@@ -58,9 +58,6 @@ func runActionContentTemplate(run *capabilityRunSpec) string {
 	if run == nil {
 		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(run.Binary), "opencode") {
-		return "opencode -p Explain this codebase -q"
-	}
 	parts := make([]string, 0, 1+len(run.Args)+len(run.Env))
 	if len(run.Env) > 0 {
 		keys := make([]string, 0, len(run.Env))

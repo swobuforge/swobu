@@ -55,7 +55,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "opencode",
 			binary:   "opencode",
-			contains: []string{"run", "--model", "swobu/" + compatibility.PrimaryTargetSelector, "Explain this codebase"},
+			contains: []string{},
 			envChecks: map[string]string{
 				"OPENAI_API_KEY": "swobu-placeholder",
 			},
@@ -74,6 +74,9 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 				t.Fatalf("binary=%q want=%q", command.Binary, tc.binary)
 			}
 			joined := strings.Join(command.Args, " ")
+			if tc.clientID == "opencode" && strings.TrimSpace(joined) != "" {
+				t.Fatalf("opencode args=%q want empty for interactive launch", joined)
+			}
 			for _, fragment := range tc.contains {
 				if !strings.Contains(joined, fragment) {
 					t.Fatalf("args=%q missing fragment=%q", joined, fragment)

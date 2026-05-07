@@ -19,3 +19,5 @@ type RefreshDaemonStatusEffect = stateeffect.RefreshDaemonStatusEffect
 type RefreshEndpointsEffect = stateeffect.RefreshEndpointsEffect
 type RefreshCatalogEffect = stateeffect.RefreshCatalogEffect
 type RefreshStatusProjectionEffect = stateeffect.RefreshStatusProjectionEffect
+type LoadAddModelDraftModelCatalogEffect = stateeffect.LoadAddModelDraftModelCatalogEffect
+type AddModelDraftModelCatalogLoaded = stateeffect.AddModelDraftModelCatalogLoaded

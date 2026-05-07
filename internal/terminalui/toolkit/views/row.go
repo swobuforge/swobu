@@ -226,12 +226,12 @@ func (r rowParts) render(width int, policy RowLayoutPolicy) string {
 			line += " " + trimToWidth(r.Action, actionWidth)
 			return padRight(trimToWidth(line, width), width)
 		}
-		prefixWidth := actionStartCol - 1
-		if prefixWidth > width-actionWidth {
-			prefixWidth = max(0, width-actionWidth)
+		prefixWidth := actionStartCol - 2
+		if prefixWidth > width-1-actionWidth {
+			prefixWidth = max(0, width-1-actionWidth)
 		}
 		line = padRight(trimToWidth(line, prefixWidth), prefixWidth)
-		line += trimToWidth(r.Action, actionWidth)
+		line += " " + trimToWidth(r.Action, actionWidth)
 	}
 	return padRight(trimToWidth(line, width), width)
 }

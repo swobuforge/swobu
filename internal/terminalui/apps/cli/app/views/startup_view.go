@@ -13,11 +13,7 @@ func Build(startup state.StartupState) model.Node {
 		var node model.Node
 		switch section.Kind {
 		case "splash":
-			subtitle := ""
-			if len(section.Rows) > 0 {
-				subtitle = section.Rows[0]
-			}
-			node = Frame(section.Title, subtitle, 36)
+			node = SplashBlock(section.Rows)
 		case "status":
 			message := ""
 			if len(section.Rows) > 0 {

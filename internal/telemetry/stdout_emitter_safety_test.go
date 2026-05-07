@@ -21,14 +21,7 @@ func TestStdoutEmitter_ErrorTracePayload_DoesNotContainForbiddenTelemetryTokens(
 	})
 
 	payload := strings.ToLower(sink.String())
-	for _, forbidden := range []string{
-		"authorization",
-		"api_key",
-		"prompt",
-		"content",
-		"messages",
-		"tool_call",
-	} {
+	for _, forbidden := range loadForbiddenTokensFixture(t) {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("payload leaked forbidden token %q: %s", forbidden, sink.String())
 		}

@@ -97,6 +97,36 @@ func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T)
 	}
 }
 
+func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
+	encoder := newResponsesClientStreamEncoderWire()
+	input, output := 5, 2
+	cacheRead, cacheWrite := 0, 0
+	usage, err := compatibility.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
+	if err != nil {
+		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
+	}
+
+	frames := encodeAllFrames(t, &encoder, []compatibility.OutputEvent{
+		{Kind: compatibility.OutputEventStarted, ResultID: "resp_usage_1", Model: "m"},
+		{Kind: compatibility.OutputEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: compatibility.OutputEventCompleted, Usage: usage},
+	})
+
+	completed := frames[len(frames)-1]
+	response := objectAt(completed, "response")
+	usageDTO, ok := response["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("response.usage = %#v, want object", response["usage"])
+	}
+	inputDetails, ok := usageDTO["input_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("usage.input_tokens_details = %#v, want object", usageDTO["input_tokens_details"])
+	}
+	if got := inputDetails["cached_tokens"]; got != float64(0) {
+		t.Fatalf("usage.input_tokens_details.cached_tokens = %#v, want 0", got)
+	}
+}
+
 func encodeAllFrames(t *testing.T, encoder *responsesClientStreamEncoderWire, events []compatibility.OutputEvent) []map[string]any {
 	t.Helper()
 	out := make([]map[string]any, 0, len(events))

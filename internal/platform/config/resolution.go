@@ -1,6 +1,11 @@
 package config
 
-import "strings"
+import (
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // ResolveDaemonURL applies standard CLI precedence: flag > env > default.
 func ResolveDaemonURL(flagValue string) string {
@@ -25,6 +30,27 @@ func ResolveTelemetryStatePath(flagValue string) string {
 		return trimmed
 	}
 	return defaultTelemetryStatePath()
+}
+
+// ResolveTelemetryEndpoint applies env override over the built-in endpoint.
+func ResolveTelemetryEndpoint(defaultValue string) string {
+	if explicit := strings.TrimSpace(os.Getenv(EnvTelemetryEndpoint)); explicit != "" {
+		return explicit
+	}
+	return strings.TrimSpace(defaultValue)
+}
+
+// ResolveTelemetryInterval applies env override over a built-in interval.
+func ResolveTelemetryInterval(defaultValue time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(EnvTelemetryIntervalSeconds))
+	if raw == "" {
+		return defaultValue
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return defaultValue
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // ResolveDaemonRuntimeConfigPath resolves the config path for `swobu daemon`.

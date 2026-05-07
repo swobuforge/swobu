@@ -2,9 +2,11 @@ package requestpath
 
 import (
 	"context"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/compatibility"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -34,6 +36,7 @@ func wrapEvidenceStreamWithUsageReconciliation(
 		ctx:                       ctx,
 		sink:                      sink,
 		inner:                     stream,
+		startedAt:                 time.Now(),
 		requestID:                 requestID,
 		endpointName:              endpointName,
 		target:                    target,
@@ -51,6 +54,9 @@ type evidenceUsageReconcilingCanonicalOutputEventStream struct {
 	ctx   context.Context
 	sink  ports.RequestEvidenceSink
 	inner compatibility.CanonicalOutputEventStream
+
+	startedAt time.Time
+	firstAt   time.Time
 
 	requestID                 string
 	endpointName              endpointintent.EndpointName
@@ -70,12 +76,25 @@ func (s *evidenceUsageReconcilingCanonicalOutputEventStream) Next() (compatibili
 	if err != nil {
 		return compatibility.OutputEvent{}, err
 	}
+	if s.firstAt.IsZero() {
+		s.firstAt = time.Now()
+	}
 	if event.Kind != compatibility.OutputEventCompleted || s.reconciled {
 		return event, nil
 	}
 	usage := tokenUsageFromOutputEvent(event)
-	if usage.IsZero() {
-		return event, nil
+	now := time.Now()
+	timing := runtimeevidence.NewUnknownTiming()
+	if !s.startedAt.IsZero() {
+		durationMS := elapsedMillisAtLeastOne(s.startedAt, now)
+		ttfbStart := s.firstAt
+		if ttfbStart.IsZero() {
+			ttfbStart = now
+		}
+		ttfbMS := elapsedMillisAtLeastOne(s.startedAt, ttfbStart)
+		if mapped, timingErr := runtimeevidence.NewTimingWithOptional(&ttfbMS, &durationMS); timingErr == nil {
+			timing = mapped
+		}
 	}
 	terminal, terminalErr := newSuccessEvidenceEvent(
 		s.requestID,
@@ -88,6 +107,7 @@ func (s *evidenceUsageReconcilingCanonicalOutputEventStream) Next() (compatibili
 		s.requestedModel,
 		s.resolvedModel,
 		s.resolutionMode,
+		timing,
 		usage,
 	)
 	emitEvidenceEventIfValid(s.ctx, s.sink, terminal, terminalErr)
@@ -99,4 +119,18 @@ func (s *evidenceUsageReconcilingCanonicalOutputEventStream) Close() error {
 	// Closing without a completed event preserves already-emitted evidence.
 	// We do not synthesize usage reconciliation on close.
 	return s.inner.Close()
+}
+
+func elapsedMillisAtLeastOne(start time.Time, end time.Time) int {
+	if start.IsZero() {
+		return 1
+	}
+	if end.Before(start) {
+		return 1
+	}
+	elapsed := int(end.Sub(start).Milliseconds())
+	if elapsed < 1 {
+		return 1
+	}
+	return elapsed
 }

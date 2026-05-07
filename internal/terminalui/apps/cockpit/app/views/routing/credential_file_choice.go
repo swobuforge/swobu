@@ -16,7 +16,7 @@ import (
 func credentialFileRow(value string, onActivate func() []update.Action, onCancel func() []update.Action) view.ViewSpec[state.Model] {
 	summary := strings.TrimSpace(value)
 	if summary == "" {
-		summary = "not set"
+		summary = "required"
 	}
 	return views.RowActionWithCancel("credential file", summary, "browse", onActivate, onCancel)
 }

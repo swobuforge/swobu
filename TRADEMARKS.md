@@ -8,4 +8,4 @@ The following marks are reserved and are not granted under the software license:
 
 No trademark license is granted by LGPL-3.0-only.
 
-For permissions, contact legal@swobu.com.
+For permissions, contact contact@swobu.com.

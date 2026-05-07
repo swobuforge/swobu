@@ -53,6 +53,31 @@ func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cache_write_tokens", 2)
 }
 
+func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
+	input, output := 12, 3
+	cacheRead, cacheWrite := 0, 0
+	usage, err := compatibility.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
+	if err != nil {
+		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
+	}
+	outputValue := compatibility.NewConversationOutputWithUsage(
+		"resp_compat",
+		"m",
+		[]compatibility.CanonicalItem{compatibility.NewTextOutputItem("text_0", "ok")},
+		"completed",
+		usage,
+	)
+	raw, err := (responsesFamilyCodec{}).encodeBuffered(outputValue)
+	if err != nil {
+		t.Fatalf("encodeBuffered returned error: %v", err)
+	}
+	var dto map[string]any
+	if err := json.Unmarshal(raw, &dto); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cached_tokens", 0)
+}
+
 func TestMessagesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 51, 4, 20, 10)
 	output := compatibility.NewConversationOutputWithUsage(

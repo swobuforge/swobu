@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestResolveDaemonURL_Preference(t *testing.T) {
@@ -40,6 +41,40 @@ func TestResolveTelemetryStatePath_Preference(t *testing.T) {
 	}
 	if got := ResolveTelemetryStatePath(""); got != envPath {
 		t.Fatalf("env state path = %q, want %q", got, envPath)
+	}
+}
+
+func TestResolveTelemetryEndpoint_Preference(t *testing.T) {
+	t.Setenv(EnvTelemetryEndpoint, "http://127.0.0.1:8787")
+
+	if got := ResolveTelemetryEndpoint("https://swobu.com"); got != "http://127.0.0.1:8787" {
+		t.Fatalf("env telemetry endpoint = %q, want %q", got, "http://127.0.0.1:8787")
+	}
+}
+
+func TestResolveTelemetryEndpoint_DefaultWhenEnvMissing(t *testing.T) {
+	if got := ResolveTelemetryEndpoint("https://swobu.com"); got != "https://swobu.com" {
+		t.Fatalf("default telemetry endpoint = %q, want %q", got, "https://swobu.com")
+	}
+}
+
+func TestResolveTelemetryInterval_DefaultWhenEnvMissing(t *testing.T) {
+	if got := ResolveTelemetryInterval(6 * time.Hour); got != 6*time.Hour {
+		t.Fatalf("default telemetry interval = %s, want %s", got, 6*time.Hour)
+	}
+}
+
+func TestResolveTelemetryInterval_OverrideSeconds(t *testing.T) {
+	t.Setenv(EnvTelemetryIntervalSeconds, "45")
+	if got := ResolveTelemetryInterval(6 * time.Hour); got != 45*time.Second {
+		t.Fatalf("telemetry interval override = %s, want %s", got, 45*time.Second)
+	}
+}
+
+func TestResolveTelemetryInterval_InvalidFallsBackToDefault(t *testing.T) {
+	t.Setenv(EnvTelemetryIntervalSeconds, "abc")
+	if got := ResolveTelemetryInterval(6 * time.Hour); got != 6*time.Hour {
+		t.Fatalf("invalid telemetry interval = %s, want %s", got, 6*time.Hour)
 	}
 }
 

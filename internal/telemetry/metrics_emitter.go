@@ -40,6 +40,7 @@ func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsE
 		return nil, fmt.Errorf("otel endpoint is required")
 	}
 	opts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(endpoint)}
+	opts = append(opts, otlpmetrichttp.WithURLPath("/api/v1/metrics"))
 	if len(cfg.Headers) > 0 {
 		opts = append(opts, otlpmetrichttp.WithHeaders(cfg.Headers))
 	}
@@ -58,6 +59,7 @@ func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsE
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader), sdkmetric.WithResource(res))
 	meter := provider.Meter("github.com/swobuforge/swobu/internal/telemetry")
 	traceOpts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(endpoint)}
+	traceOpts = append(traceOpts, otlptracehttp.WithURLPath("/api/v1/traces"))
 	if len(cfg.Headers) > 0 {
 		traceOpts = append(traceOpts, otlptracehttp.WithHeaders(cfg.Headers))
 	}
@@ -165,7 +167,7 @@ func (e *MetricsEmitter) EmitErrorTrace(ctx context.Context, errorTrace ErrorTra
 	span.SetAttributes(
 		attribute.Int("http.status_code", errorTrace.StatusCode),
 		attribute.String("result.class", strings.TrimSpace(errorTrace.ResultClass)),
-		attribute.String("provider.route", strings.TrimSpace(errorTrace.ProviderRoute)),
+		attribute.String("provider.family", normalizeProviderFamily(errorTrace.ProviderRoute)),
 		attribute.String("operation", strings.TrimSpace(errorTrace.Operation)),
 	)
 	if errorTrace.DurationMS != nil {

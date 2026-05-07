@@ -8,9 +8,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/swobuforge/swobu/internal/adapters/inbound/cli"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	"github.com/swobuforge/swobu/internal/platform/logging"
 )
 
 func main() {
+	logging.ConfigureDefaultLogger(os.Stderr)
+
 	runner := cli.Runner{
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,

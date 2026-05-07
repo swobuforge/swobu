@@ -246,7 +246,7 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 		},
 		{
 			profileID: "opencode",
-			contains:  []string{"opencode -p Explain this codebase -q"},
+			contains:  []string{"opencode"},
 		},
 	}
 

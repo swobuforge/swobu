@@ -17,6 +17,7 @@ const trafficVisibleWindow = 5
 // BuildTrafficSection composes the traffic section rows.
 func BuildTrafficSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 	model := ctx.Model()
+	offset, setOffset := view.UseState(ctx, func() int { return 0 })
 	var section view.ViewSpec[state.Model]
 	if model.CurrentEndpoint == "" {
 		if model.InteractionMode == state.InteractionModeBusySave {
@@ -43,7 +44,6 @@ func BuildTrafficSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Mod
 			} else {
 				rows := normalizeTrafficRows(model.TrafficRows)
 				rowKeys := buildTrafficRowKeys(rows)
-				offset, setOffset := view.UseState(ctx, func() int { return 0 })
 				start, end := ListWindowBounds(len(rows), offset, trafficVisibleWindow)
 				visibleRows := rows[start:end]
 				visibleKeys := rowKeys[start:end]

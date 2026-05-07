@@ -11,11 +11,12 @@ import (
 	"testing"
 	"time"
 
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
 func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing.T) {
-	t.Parallel()
+	t.Setenv(platformconfig.EnvSkipVersionNotice, "1")
 
 	var launched bool
 	var stderr bytes.Buffer
@@ -41,6 +42,7 @@ func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing
 }
 
 func TestRunner_InteractiveShowsNoticeBeforeAttachOrStart(t *testing.T) {
+	t.Setenv(platformconfig.EnvSkipVersionNotice, "1")
 	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
 	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
 
@@ -102,6 +104,7 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 }
 
 func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
+	t.Setenv(platformconfig.EnvSkipVersionNotice, "1")
 	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
 	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
 

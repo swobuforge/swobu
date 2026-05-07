@@ -154,9 +154,6 @@ func RunClientDisplayCommand(clientID, baseURL, modelID string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if strings.EqualFold(strings.TrimSpace(spec.clientID), "opencode") {
-		return "opencode -p Explain this codebase -q", true
-	}
 	parts := make([]string, 0, len(spec.env)+1+len(spec.args))
 	if len(spec.env) > 0 {
 		keys := make([]string, 0, len(spec.env))
