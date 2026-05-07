@@ -15,3 +15,18 @@ func providerCredentialSelectionRequired(provider, baseURL, credentialRef string
 	}
 	return state.ProviderRequiresCredential(provider, baseURL)
 }
+
+func providerModelCatalogLoadBlocked(provider, baseURL, credentialRef string) bool {
+	if !providerCredentialSelectionRequired(provider, baseURL, credentialRef) {
+		return false
+	}
+	ref := strings.TrimSpace(credentialRef)
+	if ref == "" {
+		return true
+	}
+	source := credentialSource(ref)
+	if strings.EqualFold(source, "file") && strings.TrimSpace(credentialFilePath(ref)) == "" {
+		return true
+	}
+	return false
+}

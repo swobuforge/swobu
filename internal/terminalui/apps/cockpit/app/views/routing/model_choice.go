@@ -164,6 +164,9 @@ func selectedModelID(model state.Model, providerConfig *state.ProviderConfigSnap
 
 func selectedProvider(model state.Model, providerConfig *state.ProviderConfigSnapshot, createMode bool) *state.ProviderConfigSnapshot {
 	if createMode {
+		if providerConfig != nil {
+			return providerConfig
+		}
 		return selectors.CreateDraftProviderConfig(model)
 	}
 	return providerConfig

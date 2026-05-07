@@ -2,7 +2,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/compatibility"
@@ -15,6 +17,7 @@ func (responsesFamilyCodec) decodeRequest(raw []byte) (compatibility.CanonicalRe
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, "", compatibility.BadRequest("responses request body is invalid JSON")
 	}
+	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID))
 	inputText, conversation, err := decodeResponsesInput(dto.Input)
 	if err != nil {
 		return nil, "", err
@@ -45,6 +48,24 @@ func (responsesFamilyCodec) decodeRequest(raw []byte) (compatibility.CanonicalRe
 		return nil, "", err
 	}
 	return request, deliveryModeFromStream(dto.Stream), nil
+}
+
+func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
+	raw := strings.TrimSpace(string(input))
+	if raw == "" {
+		raw = "null"
+	}
+	normalized := raw
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(raw)); err == nil {
+		normalized = compact.String()
+	}
+	slog.Debug("responses raw input",
+		"component", "httpapi",
+		"event", "responses_raw_input",
+		"has_previous_response_id", previousResponseID != "",
+		"raw_input_json", normalized,
+	)
 }
 
 // decodeResponsesToolMode is intentionally permissive for unknown enum/object
@@ -114,7 +135,7 @@ func (responsesFamilyCodec) encodeBuffered(output compatibility.CanonicalOutput)
 			})
 		}
 	}
-	return json.Marshal(responsesResponseDTO{
+	encodedBody, err := json.Marshal(responsesResponseDTO{
 		ID:         fallbackID(output.ResultID(), "resp_swobu"),
 		Object:     "response",
 		Model:      output.Model(),
@@ -123,6 +144,11 @@ func (responsesFamilyCodec) encodeBuffered(output compatibility.CanonicalOutput)
 		Output:     encoded,
 		Usage:      responsesUsageFromCanonical(output.Usage()),
 	})
+	if err != nil {
+		return nil, err
+	}
+	logResponsesEgressBuffered(encodedBody)
+	return encodedBody, nil
 }
 
 func (responsesFamilyCodec) newStreamState() clientStreamEncoder {
@@ -227,6 +253,9 @@ func (s *responsesClientStreamEncoder) Encode(event compatibility.OutputEvent) (
 	if err != nil {
 		return nil, err
 	}
+	for _, raw := range rawFrames {
+		logResponsesEgressStreamFrame(raw)
+	}
 	frames := make([][]byte, 0, len(rawFrames))
 	for _, raw := range rawFrames {
 		frames = append(frames, sseData(raw))
@@ -239,6 +268,9 @@ func (s *responsesClientStreamEncoder) Finish() ([][]byte, error) {
 	rawFrames, err := encoder.Finish()
 	if err != nil {
 		return nil, err
+	}
+	for _, raw := range rawFrames {
+		logResponsesEgressStreamFrame(raw)
 	}
 	frames := make([][]byte, 0, len(rawFrames))
 	for _, raw := range rawFrames {

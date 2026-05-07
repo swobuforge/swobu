@@ -49,7 +49,7 @@ func createSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 	rows = append(rows, view.Named[state.Model]("use_key_from", useKeyFrom))
 
 	rows = appendCreateCredentialRows(rows, provider, credentialSource(cred))
-	modelRow := buildCreateModelRow(ctx, model, provider, modelID, cred, baseURL, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState)
+	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState)
 	rows = append(rows, view.Named[state.Model]("model", modelRow))
 
 	summary := firstRunRunOnSummary(provider)
@@ -212,79 +212,20 @@ func appendCreateCredentialRows(rows []view.ViewSpec[state.Model], provider stri
 
 func buildCreateModelRow(
 	ctx *view.Context[state.Model],
-	model state.Model,
-	provider string,
-	modelID string,
-	cred string,
-	baseURL string,
 	modelPickerOpen bool,
 	setModelPickerOpen func(bool),
 	pickerState views.FilterablePickerState,
 	setPickerState func(views.FilterablePickerState),
 ) view.ViewSpec[state.Model] {
-	modelSummary := "not set"
-	if modelPickerOpen && modelID == "" {
-		modelSummary = "choose a model"
-	}
-	if modelID != "" {
-		modelSummary = modelID
-	}
-	modelRow := views.RowChoiceWithHooks(views.RowModel, modelSummary, func() []update.Action {
-		if provider == "" {
-			return nil
-		}
-		setModelPickerOpen(true)
-		views.ResetFilterablePickerState(setPickerState)
-		return []update.Action{
-			state.LoadCreateDraftModelCatalogRequested{
-				ProviderSpec:  provider,
-				BaseURL:       baseURL,
-				CredentialRef: cred,
-				ProtocolKind:  defaultProtocolKindForProvider(provider),
-			},
-			state.SetInteractionMode{Mode: state.InteractionModePickOne},
-			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("create-model-option", 0)},
-		}
-	}, nil, views.FocusAffordance("choose", false))
-	if provider == "" || !modelPickerOpen {
-		return modelRow
-	}
-
-	items := make([]views.FilterablePickerItem, 0, len(model.CreateDraftModelIDs))
-	for _, choice := range model.CreateDraftModelIDs {
-		modelChoice := choice
-		items = append(items, views.FilterablePickerItem{
-			Label: modelChoice,
-			OnChoose: func() []update.Action {
-				setModelPickerOpen(false)
-				return []update.Action{
-					state.SetCreateDraftModelID{ModelID: modelChoice},
-					state.SetInteractionMode{Mode: state.InteractionModeNAV},
-					interaction.FocusKeyAction{Key: "model"},
-				}
-			},
-		})
-	}
-	if len(items) > 0 {
-		return views.RenderFilterablePickerDisclosure(ctx, modelRow, pickerState, setPickerState, items, views.FilterablePickerConfig{
-			KeyPrefix:      "create-model-option",
-			BuildOptionRow: views.ChoicePickerOptionRow(false),
-			WindowSize:     6,
-			FindLabel:      "find",
-			OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: "model"}} },
-			OnCancel: func() []update.Action {
-				setModelPickerOpen(false)
-				return []update.Action{
-					state.SetInteractionMode{Mode: state.InteractionModeNAV},
-					interaction.FocusKeyAction{Key: "model"},
-				}
-			},
-		})
-	}
-	if model.CreateDraftModelError != "" {
-		return toolkitviews.NewAnchoredDisclosure(modelRow, views.DisclosureNoteRows(model.CreateDraftModelError)...)
-	}
-	return toolkitviews.NewAnchoredDisclosure(modelRow, views.RowStatic("", "loading models…"))
+	return buildDraftModelChoiceRow(ctx, draftModelRowSpec{
+		Binding:        createDraftModelBinding{},
+		PickerOpen:     modelPickerOpen,
+		SetPickerOpen:  setModelPickerOpen,
+		PickerState:    pickerState,
+		SetPickerState: setPickerState,
+		KeyPrefix:      "create-model-option",
+		FocusKey:       "model",
+	})
 }
 
 func workspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {

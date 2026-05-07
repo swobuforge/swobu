@@ -182,7 +182,6 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.BindAddr)
 	if err != nil {
 		logger.Error("daemon lifecycle", "component", "daemon", "event", "bind_failure", "bind_addr", cfg.BindAddr, "error", err.Error())
-		logger.Error("daemon lifecycle", "component", "daemon", "event", "initialization_failed", "error", err.Error())
 		return nil, fmt.Errorf("listen: %w", err)
 	}
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_success", "bind_addr", listener.Addr().String())

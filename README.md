@@ -26,6 +26,6 @@ Installers must always verify release archive integrity via `checksums.txt`.
 This project is licensed under GNU Lesser General Public License v3.0 only (`LGPL-3.0-only`).
 See `COPYING.LESSER` and `COPYING`.
 
-Commercial licensing is available via licensing@swobu.com.
+Commercial licensing is available via contact@swobu.com.
 
 Copyright (c) 2026 Dmytrii Shchadei.

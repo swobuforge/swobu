@@ -3,8 +3,10 @@ package effect
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -22,6 +24,13 @@ func httpClient() *http.Client {
 	return &http.Client{Timeout: 2 * time.Second}
 }
 
+func httpClientWithTimeout(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		return httpClient()
+	}
+	return &http.Client{Timeout: timeout}
+}
+
 func operatorClient() *operatorclient.Client {
 	return operatorclient.New(httpClient(), daemonURL())
 }
@@ -30,14 +39,29 @@ func loadJSON[T any](ctx context.Context, rawURL string) (T, error) {
 	return loadJSONValidated[T](ctx, rawURL, nil)
 }
 
+func loadJSONWithTimeout[T any](ctx context.Context, rawURL string, timeout time.Duration) (T, error) {
+	return loadJSONValidatedWithClient[T](ctx, rawURL, nil, httpClientWithTimeout(timeout))
+}
+
 func loadJSONValidated[T any](ctx context.Context, rawURL string, validate func(T) error) (T, error) {
+	return loadJSONValidatedWithClient[T](ctx, rawURL, validate, httpClient())
+}
+
+func loadJSONValidatedWithClient[T any](ctx context.Context, rawURL string, validate func(T) error, client *http.Client) (T, error) {
 	var zero T
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return zero, fmt.Errorf("request could not be built")
 	}
-	resp, err := httpClient().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return zero, fmt.Errorf("request timed out")
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return zero, fmt.Errorf("request timed out")
+		}
 		return zero, fmt.Errorf("request failed")
 	}
 	defer func() { _ = resp.Body.Close() }()

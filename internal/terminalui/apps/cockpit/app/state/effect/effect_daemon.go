@@ -13,22 +13,32 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
+const modelCatalogPreviewLoadTimeout = 8 * time.Second
+
 type daemonRawTrafficRow struct {
-	RequestID        string `json:"request_id"`
-	ClientHandler    string `json:"client_handler,omitempty"`
-	ClientProtocol   string `json:"client_protocol,omitempty"`
-	IngressFamily    string `json:"ingress_family,omitempty"`
-	NormalizedOp     string `json:"normalized_op,omitempty"`
-	Route            string `json:"route"`
-	Result           string `json:"result"`
-	StatusCode       int    `json:"status_code"`
-	ObservedAt       string `json:"observed_at,omitempty"`
-	TTFBMillis       *int   `json:"ttfb_millis,omitempty"`
-	DurMillis        *int   `json:"dur_millis,omitempty"`
-	InputTokens      *int   `json:"input_tokens,omitempty"`
-	OutputTokens     *int   `json:"output_tokens,omitempty"`
-	CacheReadTokens  *int   `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens *int   `json:"cache_write_tokens,omitempty"`
+	RequestID      string               `json:"request_id"`
+	ClientHandler  string               `json:"client_handler,omitempty"`
+	ClientProtocol string               `json:"client_protocol,omitempty"`
+	IngressFamily  string               `json:"ingress_family,omitempty"`
+	NormalizedOp   string               `json:"normalized_op,omitempty"`
+	Route          string               `json:"route"`
+	Result         string               `json:"result"`
+	StatusCode     int                  `json:"status_code"`
+	ObservedAt     string               `json:"observed_at,omitempty"`
+	Timing         *daemonRawTiming     `json:"timing,omitempty"`
+	TokenUsage     *daemonRawTokenUsage `json:"token_usage,omitempty"`
+}
+
+type daemonRawTiming struct {
+	TTFBMillis *int `json:"ttfb_millis,omitempty"`
+	DurMillis  *int `json:"dur_millis,omitempty"`
+}
+
+type daemonRawTokenUsage struct {
+	InputTokens      *int `json:"input_tokens,omitempty"`
+	OutputTokens     *int `json:"output_tokens,omitempty"`
+	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
 }
 
 type statusProjectionDoc struct {
@@ -188,6 +198,22 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 	}
 	rows := make([]stateModel.TrafficRow, 0, len(result.RecentTraffic))
 	for _, r := range result.RecentTraffic {
+		var ttfbMillis *int
+		var durMillis *int
+		if r.Timing != nil {
+			ttfbMillis = r.Timing.TTFBMillis
+			durMillis = r.Timing.DurMillis
+		}
+		var inputTokens *int
+		var outputTokens *int
+		var cacheReadTokens *int
+		var cacheWriteTokens *int
+		if r.TokenUsage != nil {
+			inputTokens = r.TokenUsage.InputTokens
+			outputTokens = r.TokenUsage.OutputTokens
+			cacheReadTokens = r.TokenUsage.CacheReadTokens
+			cacheWriteTokens = r.TokenUsage.CacheWriteTokens
+		}
 		rows = append(rows, stateModel.TrafficRow{
 			RequestID:        r.RequestID,
 			OperationFamily:  trafficOperationFamily(r.IngressFamily, r.Result, r.StatusCode),
@@ -195,12 +221,12 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 			Result:           r.Result,
 			StatusCode:       r.StatusCode,
 			ObservedAt:       r.ObservedAt,
-			TTFBMillis:       r.TTFBMillis,
-			DurMillis:        r.DurMillis,
-			InputTokens:      r.InputTokens,
-			OutputTokens:     r.OutputTokens,
-			CacheReadTokens:  r.CacheReadTokens,
-			CacheWriteTokens: r.CacheWriteTokens,
+			TTFBMillis:       ttfbMillis,
+			DurMillis:        durMillis,
+			InputTokens:      inputTokens,
+			OutputTokens:     outputTokens,
+			CacheReadTokens:  cacheReadTokens,
+			CacheWriteTokens: cacheWriteTokens,
 		})
 	}
 	return []update.Action{ReplaceStatusProjection{Rows: rows}}
@@ -288,9 +314,9 @@ func (eff LoadCreateDraftModelCatalogEffect) Execute(ctx context.Context) []upda
 		ModelIDs []string `json:"model_ids,omitempty"`
 		Error    string   `json:"error,omitempty"`
 	}
-	result, err := loadJSON[preview](ctx, daemonURL()+"/_swobu/model-catalog/preview?"+query.Encode())
+	result, err := loadJSONWithTimeout[preview](ctx, daemonURL()+"/_swobu/model-catalog/preview?"+query.Encode(), modelCatalogPreviewLoadTimeout)
 	if err != nil {
-		normalized := normalizeOperatorSurfaceError(err)
+		normalized := normalizeModelCatalogPreviewLoadError(err)
 		return []update.Action{CreateDraftModelCatalogLoaded{
 			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
 			BaseURL:       strings.TrimSpace(eff.BaseURL),
@@ -309,6 +335,59 @@ func (eff LoadCreateDraftModelCatalogEffect) Execute(ctx context.Context) []upda
 
 // CreateDraftModelCatalogLoaded carries first-run draft model catalog choices.
 type CreateDraftModelCatalogLoaded struct {
+	ProviderSpec  string
+	BaseURL       string
+	CredentialRef string
+	ModelIDs      []string
+	Error         string
+}
+
+// LoadAddModelDraftModelCatalogEffect queries provider-backed model catalog for
+// workspace add-model draft routing state.
+type LoadAddModelDraftModelCatalogEffect struct {
+	ProviderSpec  string
+	BaseURL       string
+	CredentialRef string
+	ProtocolKind  string
+}
+
+func (eff LoadAddModelDraftModelCatalogEffect) Execute(ctx context.Context) []update.Action {
+	query := url.Values{}
+	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec))
+	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {
+		query.Set("base_url", baseURL)
+	}
+	if credentialRef := strings.TrimSpace(eff.CredentialRef); credentialRef != "" {
+		query.Set("credential_ref", credentialRef)
+	}
+	if protocolKind := strings.TrimSpace(eff.ProtocolKind); protocolKind != "" {
+		query.Set("protocol_kind", protocolKind)
+	}
+	type preview struct {
+		ModelIDs []string `json:"model_ids,omitempty"`
+		Error    string   `json:"error,omitempty"`
+	}
+	result, err := loadJSONWithTimeout[preview](ctx, daemonURL()+"/_swobu/model-catalog/preview?"+query.Encode(), modelCatalogPreviewLoadTimeout)
+	if err != nil {
+		normalized := normalizeModelCatalogPreviewLoadError(err)
+		return []update.Action{AddModelDraftModelCatalogLoaded{
+			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
+			BaseURL:       strings.TrimSpace(eff.BaseURL),
+			CredentialRef: strings.TrimSpace(eff.CredentialRef),
+			Error:         normalized,
+		}}
+	}
+	return []update.Action{AddModelDraftModelCatalogLoaded{
+		ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
+		BaseURL:       strings.TrimSpace(eff.BaseURL),
+		CredentialRef: strings.TrimSpace(eff.CredentialRef),
+		ModelIDs:      append([]string(nil), result.ModelIDs...),
+		Error:         strings.TrimSpace(result.Error),
+	}}
+}
+
+// AddModelDraftModelCatalogLoaded carries workspace add-model draft model catalog choices.
+type AddModelDraftModelCatalogLoaded struct {
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string
@@ -335,4 +414,12 @@ func normalizeOperatorSurfaceError(err error) string {
 
 func daemonUnavailableHint() string {
 	return "unavailable at " + daemonURL()
+}
+
+func normalizeModelCatalogPreviewLoadError(err error) string {
+	normalized := normalizeOperatorSurfaceError(err)
+	if strings.Contains(strings.ToLower(normalized), "request timed out") {
+		return "model preview timed out at " + daemonURL() + " (retry)"
+	}
+	return normalized
 }

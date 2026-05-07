@@ -60,3 +60,42 @@ func TestCredentialFilePickerItems_DirectoryChoiceDelegatesResetAndFocus(t *test
 		t.Fatalf("action[0]=%T want interaction.FocusKeyAction", actions[0])
 	}
 }
+
+func TestCredentialFilePickerItems_ParentEntryNavigatesUp(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	child := filepath.Join(tmp, "child")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatalf("mkdir child: %v", err)
+	}
+
+	browse := credentialFileBrowseState{Dir: child}
+	updated := browse
+
+	items, err := credentialFilePickerItems(
+		browse,
+		func(next credentialFileBrowseState) { updated = next },
+		nil,
+		"",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("credentialFilePickerItems err: %v", err)
+	}
+	var parentFound bool
+	for _, item := range items {
+		if item.Label != "../" {
+			continue
+		}
+		parentFound = true
+		_ = item.OnChoose()
+		break
+	}
+	if !parentFound {
+		t.Fatalf("missing parent entry ../ in %#v", items)
+	}
+	if updated.Dir != tmp {
+		t.Fatalf("updated dir=%q want parent %q", updated.Dir, tmp)
+	}
+}

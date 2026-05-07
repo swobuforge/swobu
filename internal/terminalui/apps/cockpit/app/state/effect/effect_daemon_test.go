@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeOperatorSurfaceError_MapsTransportUnavailabilityToOperatorHint(t *testing.T) {
@@ -67,6 +68,44 @@ func TestLoadJSON_AllowsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadAddModelDraftModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_swobu/model-catalog/preview" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model_ids":["openrouter/m1"]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	actions := (LoadAddModelDraftModelCatalogEffect{
+		ProviderSpec:  "openrouter",
+		BaseURL:       "https://openrouter.ai/api/v1",
+		CredentialRef: "file:/tmp/openrouter.key",
+		ProtocolKind:  "chat_completions",
+	}).Execute(ctx)
+
+	if len(actions) != 1 {
+		t.Fatalf("actions length = %d, want 1", len(actions))
+	}
+	loaded, ok := actions[0].(AddModelDraftModelCatalogLoaded)
+	if !ok {
+		t.Fatalf("action type = %T, want AddModelDraftModelCatalogLoaded", actions[0])
+	}
+	want := "model preview timed out at " + srv.URL + " (retry)"
+	if loaded.Error != want {
+		t.Fatalf("error = %q, want %q", loaded.Error, want)
+	}
+	if len(loaded.ModelIDs) != 0 {
+		t.Fatalf("model ids = %#v, want empty on timeout", loaded.ModelIDs)
+	}
+}
+
 func TestRefreshStatusProjectionEffect_MissingObservedAt_FailsFast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/_swobu/status-projection" {
@@ -78,7 +117,7 @@ func TestRefreshStatusProjectionEffect_MissingObservedAt_FailsFast(t *testing.T)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","result":"backend_error","status_code":400,"dur_millis":0}]}`))
+		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","result":"backend_error","status_code":400,"timing":{"dur_millis":0}}]}`))
 	}))
 	defer srv.Close()
 
@@ -136,7 +175,7 @@ func TestRefreshStatusProjectionEffect_MapsTokenAndCacheUsageFields(t *testing.T
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","input_tokens":120,"output_tokens":9,"cache_read_tokens":70,"cache_write_tokens":5}]}`))
+		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","token_usage":{"input_tokens":120,"output_tokens":9,"cache_read_tokens":70,"cache_write_tokens":5}}]}`))
 	}))
 	defer srv.Close()
 

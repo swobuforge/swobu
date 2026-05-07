@@ -6,22 +6,17 @@ import (
 	"testing"
 )
 
-func TestStartupTranscript_SplashAndDisclosurePrintOnce(t *testing.T) {
+func TestStartupTranscript_SplashPrintOnce(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
 	tr := NewStartupTranscript(&out)
 	tr.Emit(StartupEvent{Kind: StartupEventSplash})
 	tr.Emit(StartupEvent{Kind: StartupEventSplash})
-	tr.Emit(StartupEvent{Kind: StartupEventDisclosure})
-	tr.Emit(StartupEvent{Kind: StartupEventDisclosure})
 
 	text := out.String()
-	if strings.Count(text, "|              SWOBU               |") != 1 {
+	if strings.Count(text, "___.          ") != 1 {
 		t.Fatalf("splash printed more than once; output=%q", text)
-	}
-	if strings.Count(text, "== startup disclosure ==") != 1 {
-		t.Fatalf("disclosure printed more than once; output=%q", text)
 	}
 }
 
@@ -37,7 +32,7 @@ func TestStartupTranscript_EventRendering(t *testing.T) {
 
 	text := out.String()
 	assertContains(t, text, "daemon not reachable at http://127.0.0.1:8080")
-	assertContains(t, text, "== version update notice ==")
+	assertContains(t, text, "╭─ version update notice ")
 	assertContains(t, text, "update now: curl -fsSL https://swobu.com/install.sh | sh")
 	assertContains(t, text, "starting daemon runtime")
 	assertContains(t, text, "config path: /tmp/swobu.yaml")

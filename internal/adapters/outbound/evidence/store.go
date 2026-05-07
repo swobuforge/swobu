@@ -47,25 +47,41 @@ type StatusCounters struct {
 }
 
 type RecentTrafficRow struct {
-	RequestID           string `json:"request_id"`
-	Endpoint            string `json:"endpoint"`
-	ClientHandler       string `json:"client_handler,omitempty"`
-	ClientProtocol      string `json:"client_protocol,omitempty"`
-	IngressFamily       string `json:"ingress_family,omitempty"`
-	NormalizedOp        string `json:"normalized_op,omitempty"`
-	Route               string `json:"route"`
-	Result              string `json:"result"`
-	StatusCode          int    `json:"status_code"`
-	ObservedAt          string `json:"observed_at,omitempty"`
-	TTFBMillis          *int   `json:"ttfb_millis,omitempty"`
-	DurMillis           *int   `json:"dur_millis,omitempty"`
-	InputTokens         *int   `json:"input_tokens,omitempty"`
-	OutputTokens        *int   `json:"output_tokens,omitempty"`
-	CacheReadTokens     *int   `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens    *int   `json:"cache_write_tokens,omitempty"`
-	ModelRequested      string `json:"model_requested,omitempty"`
-	ModelResolved       string `json:"model_resolved,omitempty"`
-	ModelResolutionMode string `json:"model_resolution_mode,omitempty"`
+	RequestID           string                           `json:"request_id"`
+	Endpoint            string                           `json:"endpoint"`
+	ClientHandler       string                           `json:"client_handler,omitempty"`
+	ClientProtocol      string                           `json:"client_protocol,omitempty"`
+	IngressFamily       string                           `json:"ingress_family,omitempty"`
+	NormalizedOp        string                           `json:"normalized_op,omitempty"`
+	Route               string                           `json:"route"`
+	Result              string                           `json:"result"`
+	StatusCode          int                              `json:"status_code"`
+	ObservedAt          string                           `json:"observed_at,omitempty"`
+	Timing              *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
+	TokenUsage          *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
+	ModelRequested      string                           `json:"model_requested,omitempty"`
+	ModelResolved       string                           `json:"model_resolved,omitempty"`
+	ModelResolutionMode string                           `json:"model_resolution_mode,omitempty"`
+}
+
+type RecentTrafficTimingSnapshot struct {
+	TTFBMillis *int `json:"ttfb_millis,omitempty"`
+	DurMillis  *int `json:"dur_millis,omitempty"`
+}
+
+func (s RecentTrafficTimingSnapshot) TTFBMillisValue() *int {
+	return s.TTFBMillis
+}
+
+func (s RecentTrafficTimingSnapshot) DurationMillisValue() *int {
+	return s.DurMillis
+}
+
+type RecentTrafficTokenUsageSnapshot struct {
+	InputTokens      *int `json:"input_tokens,omitempty"`
+	OutputTokens     *int `json:"output_tokens,omitempty"`
+	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
 }
 
 type ProjectionInput struct {
@@ -223,23 +239,31 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 	if !event.observedAt.IsZero() {
 		row.ObservedAt = event.observedAt.Format("15:04:05")
 	}
+	timing := RecentTrafficTimingSnapshot{}
 	if ttfbMS, ok := evidence.Timing().TTFBMillis(); ok {
-		row.TTFBMillis = &ttfbMS
+		timing.TTFBMillis = &ttfbMS
 	}
 	if durMS, ok := evidence.Timing().DurationMillis(); ok {
-		row.DurMillis = &durMS
+		timing.DurMillis = &durMS
 	}
+	if timing.TTFBMillis != nil || timing.DurMillis != nil {
+		row.Timing = &timing
+	}
+	usage := RecentTrafficTokenUsageSnapshot{}
 	if inputTokens, ok := evidence.TokenUsage().InputTokens(); ok {
-		row.InputTokens = &inputTokens
+		usage.InputTokens = &inputTokens
 	}
 	if outputTokens, ok := evidence.TokenUsage().OutputTokens(); ok {
-		row.OutputTokens = &outputTokens
+		usage.OutputTokens = &outputTokens
 	}
 	if cacheReadTokens, ok := evidence.TokenUsage().CacheReadTokens(); ok {
-		row.CacheReadTokens = &cacheReadTokens
+		usage.CacheReadTokens = &cacheReadTokens
 	}
 	if cacheWriteTokens, ok := evidence.TokenUsage().CacheWriteTokens(); ok {
-		row.CacheWriteTokens = &cacheWriteTokens
+		usage.CacheWriteTokens = &cacheWriteTokens
+	}
+	if usage.InputTokens != nil || usage.OutputTokens != nil || usage.CacheReadTokens != nil || usage.CacheWriteTokens != nil {
+		row.TokenUsage = &usage
 	}
 	return row
 }

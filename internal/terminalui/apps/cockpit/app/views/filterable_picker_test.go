@@ -2,6 +2,9 @@ package views
 
 import (
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func TestFilterablePickerItems_FiltersBySearchOrLabel(t *testing.T) {
@@ -101,5 +104,19 @@ func TestTrimLastRune(t *testing.T) {
 	}
 	if got := trimLastRune(""); got != "" {
 		t.Fatalf("trimLastRune(empty)=%q want empty", got)
+	}
+}
+
+func TestFocusActionsAfterQueryChange_NoMatchesDoesNotStealFocus(t *testing.T) {
+	actions := focusActionsAfterQueryChange([]FilterablePickerItem{
+		{Label: "openai"},
+	}, FilterablePickerConfig{
+		KeyPrefix: "opt",
+		OnNoMatchFocus: func() []update.Action {
+			return []update.Action{interaction.FocusKeyAction{Key: "outside"}}
+		},
+	}, "zzz")
+	if len(actions) != 0 {
+		t.Fatalf("actions len=%d want 0 when query has no matches", len(actions))
 	}
 }

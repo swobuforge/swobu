@@ -160,3 +160,12 @@ type LoadCreateDraftModelCatalogRequested struct {
 	CredentialRef string
 	ProtocolKind  string
 }
+
+// LoadAddModelDraftModelCatalogRequested asks reducer to load provider-backed
+// model catalog choices for workspace add-model draft routing composition.
+type LoadAddModelDraftModelCatalogRequested struct {
+	ProviderSpec  string
+	BaseURL       string
+	CredentialRef string
+	ProtocolKind  string
+}

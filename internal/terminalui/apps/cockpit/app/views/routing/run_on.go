@@ -142,12 +142,12 @@ func runOnProviderChooseActions(snapshot *state.EndpointSnapshot, providerRef st
 func BuildRunOnWorkspaceRow(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 	model := ctx.Model()
 	snapshot := selectors.CurrentEndpointSnapshot(model)
+	open, setOpen := view.UseState(ctx, func() bool { return false })
+	picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	var out view.ViewSpec[state.Model]
 	if snapshot == nil {
 		out = views.RowStatic("primary", "not selected")
 	} else {
-		open, setOpen := view.UseState(ctx, func() bool { return false })
-		picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 		var cancelFn func() []update.Action
 		if open {
 			cancelFn = func() []update.Action {

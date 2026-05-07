@@ -13,7 +13,6 @@ type StartupEventKind = appstate.EventKind
 
 const (
 	StartupEventSplash               StartupEventKind = appstate.EventSplash
-	StartupEventDisclosure           StartupEventKind = appstate.EventDisclosure
 	StartupEventTelemetryDisclosure  StartupEventKind = appstate.EventTelemetryDisclosure
 	StartupEventVersionNotice        StartupEventKind = appstate.EventVersionNotice
 	StartupEventDaemonNotReachable   StartupEventKind = appstate.EventDaemonNotReachable

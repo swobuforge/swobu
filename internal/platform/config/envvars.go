@@ -7,6 +7,8 @@ const (
 	EnvConfigPath   = "SWOBU_CONFIG_PATH"
 	EnvXDGStateHome = "XDG_STATE_HOME"
 
+	EnvTelemetryEndpoint             = "SWOBU_TELEMETRY_ENDPOINT_URL"
+	EnvTelemetryIntervalSeconds      = "SWOBU_TELEMETRY_INTERVAL_SECONDS"
 	EnvTelemetryDebugStdoutSink      = "SWOBU_TELEMETRY_STDOUT_SINK_DEBUG"
 	EnvTelemetryDebugTraceStack      = "SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG"
 	EnvTelemetryErrorTraceMaxPerTick = "SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK"

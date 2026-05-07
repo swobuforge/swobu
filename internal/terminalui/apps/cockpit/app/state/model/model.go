@@ -15,25 +15,30 @@ type Model struct {
 	EndpointSnapshots []EndpointSnapshot
 	CurrentEndpoint   string
 
-	Catalog                   []CatalogEntry
-	CatalogError              string
-	StreamEnabled             bool
-	CreateDraftName           string
-	CreateDraftProviderConfig ProviderConfigSnapshot
-	CreateDraftModelIDs       []string
-	CreateDraftModelError     string
-	WorkspaceSaveError        string
-	WorkspaceCopyNote         string
-	ClientCopyNote            string
-	ClientLaunchNote          string
-	ClientAccessStatus        string
-	ClientAccessNote          string
-	RoutingSaveError          string
-	LastStoredKeyProviderSpec string
-	LastStoredKeySlotName     string
-	TrafficRows               []TrafficRow
-	TrafficError              string
-	HelpNote                  string
+	Catalog                    []CatalogEntry
+	CatalogError               string
+	StreamEnabled              bool
+	CreateDraftName            string
+	CreateDraftProviderConfig  ProviderConfigSnapshot
+	CreateDraftModelIDs        []string
+	CreateDraftModelError      string
+	AddModelDraftModelIDs      []string
+	AddModelDraftModelError    string
+	AddModelDraftProviderSpec  string
+	AddModelDraftBaseURL       string
+	AddModelDraftCredentialRef string
+	WorkspaceSaveError         string
+	WorkspaceCopyNote          string
+	ClientCopyNote             string
+	ClientLaunchNote           string
+	ClientAccessStatus         string
+	ClientAccessNote           string
+	RoutingSaveError           string
+	LastStoredKeyProviderSpec  string
+	LastStoredKeySlotName      string
+	TrafficRows                []TrafficRow
+	TrafficError               string
+	HelpNote                   string
 }
 
 type ControlPlaneMismatch struct {

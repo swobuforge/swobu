@@ -288,9 +288,6 @@ func focusActionsAfterQueryChange(items []FilterablePickerItem, cfg FilterablePi
 	if len(filtered) > 0 {
 		return []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filtered, cfg, 0)}}
 	}
-	if cfg.OnNoMatchFocus != nil {
-		return cfg.OnNoMatchFocus()
-	}
 	return nil
 }
 

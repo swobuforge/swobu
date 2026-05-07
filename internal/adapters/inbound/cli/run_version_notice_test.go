@@ -44,7 +44,7 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 		t.Fatal("attach/start was not called")
 	}
 	text := stdout.String()
-	if !strings.Contains(text, "== version update notice ==") {
+	if !strings.Contains(text, "╭─ version update notice ") {
 		t.Fatalf("missing version notice block; stdout=%q", text)
 	}
 	if !strings.Contains(text, installCommand) {
@@ -52,6 +52,9 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 	}
 	if !strings.Contains(text, "SWOBU_SKIP_VERSION_NOTICE") {
 		t.Fatalf("missing skip env hint; stdout=%q", text)
+	}
+	if !strings.Contains(text, "press Enter to continue") {
+		t.Fatalf("missing continue prompt; stdout=%q", text)
 	}
 }
 
@@ -180,7 +183,41 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 	if !attachCalled {
 		t.Fatal("attach/start was not called")
 	}
-	if strings.Contains(stdout.String(), "== version update notice ==") {
+	if strings.Contains(stdout.String(), "╭─ version update notice ") {
 		t.Fatalf("unexpected version notice on fetch error; stdout=%q", stdout.String())
+	}
+}
+
+func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputFailsBeforeAttach(t *testing.T) {
+	originalFetch := fetchLatestVersion
+	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
+	t.Cleanup(func() { fetchLatestVersion = originalFetch })
+
+	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
+	t.Setenv(platformconfig.EnvTelemetryStatePath, statePath)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	attachCalled := false
+	runner := Runner{
+		Stdout:        &stdout,
+		Stderr:        &stderr,
+		Stdin:         strings.NewReader(""),
+		IsInteractive: func() bool { return true },
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+			attachCalled = true
+			return nil
+		},
+	}
+
+	exitCode := runner.Run(context.Background(), nil)
+	if exitCode != ExitDown {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
+	}
+	if attachCalled {
+		t.Fatal("attach/start called despite missing notice acknowledgment")
+	}
+	if !strings.Contains(stderr.String(), "version notice acknowledgment failed") {
+		t.Fatalf("stderr missing acknowledgement error: %q", stderr.String())
 	}
 }

@@ -284,6 +284,14 @@ func TestProviderConfigForSpecUsesLegacyProviderDefaults(t *testing.T) {
 	if got := switching.ProtocolKind; got != "messages" {
 		t.Fatalf("switching protocol kind = %q, want %q", got, "messages")
 	}
+
+	cleared := ProviderConfigForSpec("openrouter", ProviderConfigSnapshot{
+		ProtocolKind:  "chat_completions",
+		CredentialRef: "env:OLD_KEY",
+	})
+	if got := cleared.CredentialRef; got != "" {
+		t.Fatalf("switching provider should clear credential ref, got %q", got)
+	}
 }
 
 func TestReduce_DaemonRefreshTickSchedulesFullSyncAndReschedule(t *testing.T) {
@@ -309,6 +317,47 @@ func TestReduce_DaemonRefreshTickSchedulesFullSyncAndReschedule(t *testing.T) {
 		t.Fatalf("effect[4] = %T, want ScheduleDaemonRefreshEffect", effects[4])
 	} else if schedule.Delay <= 0 {
 		t.Fatalf("schedule delay = %s, want positive interval", schedule.Delay)
+	}
+}
+
+func TestReduce_LoadAddModelDraftModelCatalogTracksTupleAndAppliesMatchingResult(t *testing.T) {
+	t.Parallel()
+
+	model := Model{}
+	effects := Reduce(&model, LoadAddModelDraftModelCatalogRequested{
+		ProviderSpec:  "openrouter",
+		BaseURL:       "https://openrouter.ai/api/v1",
+		CredentialRef: "env:OPENROUTER_API_KEY",
+		ProtocolKind:  "chat_completions",
+	})
+	if len(effects) != 1 {
+		t.Fatalf("effect count=%d want 1", len(effects))
+	}
+	if _, ok := effects[0].(LoadAddModelDraftModelCatalogEffect); !ok {
+		t.Fatalf("effect type=%T want LoadAddModelDraftModelCatalogEffect", effects[0])
+	}
+	if got := model.AddModelDraftProviderSpec; got != "openrouter" {
+		t.Fatalf("provider spec=%q", got)
+	}
+
+	Reduce(&model, AddModelDraftModelCatalogLoaded{
+		ProviderSpec:  "openrouter",
+		BaseURL:       "https://openrouter.ai/api/v1",
+		CredentialRef: "env:OPENROUTER_API_KEY",
+		ModelIDs:      []string{"openai/gpt-4.1"},
+	})
+	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "openai/gpt-4.1" {
+		t.Fatalf("model ids=%v", model.AddModelDraftModelIDs)
+	}
+
+	Reduce(&model, AddModelDraftModelCatalogLoaded{
+		ProviderSpec:  "anthropic",
+		BaseURL:       "https://api.anthropic.com",
+		CredentialRef: "env:ANTHROPIC_API_KEY",
+		ModelIDs:      []string{"claude-sonnet-4"},
+	})
+	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "openai/gpt-4.1" {
+		t.Fatalf("mismatched tuple should be ignored; model ids=%v", model.AddModelDraftModelIDs)
 	}
 }
 

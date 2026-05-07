@@ -3,6 +3,7 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -73,6 +74,7 @@ func Encode(req compatibility.GenerationCanonicalRequest, deliveryMode compatibi
 	if err != nil {
 		return protocols.WireRequest{}, err
 	}
+	logResponsesEncodeShape(req, input, deliveryMode)
 
 	raw, err := json.Marshal(requestBody{
 		Model:                req.Model(),
@@ -95,6 +97,47 @@ func Encode(req compatibility.GenerationCanonicalRequest, deliveryMode compatibi
 	}, nil
 }
 
+func logResponsesEncodeShape(req compatibility.GenerationCanonicalRequest, input any, deliveryMode compatibility.DeliveryMode) {
+	thread := req.Thread()
+	lastTurn := req.LastTurn()
+	inputType := "nil"
+	if input != nil {
+		switch input.(type) {
+		case string:
+			inputType = "string"
+		case []any:
+			inputType = "array"
+		default:
+			inputType = "other"
+		}
+	}
+	slog.Debug("responses encode",
+		"component", "protocol.responses",
+		"event", "outbound_request_shape",
+		"delivery_mode", string(deliveryMode),
+		"has_previous_response_id", strings.TrimSpace(req.PreviousResponseID()) != "",
+		"thread_item_count", len(thread),
+		"last_turn_item_count", len(lastTurn),
+		"thread_tail_role", responsesTailRole(thread),
+		"last_turn_tail_role", responsesTailRole(lastTurn),
+		"input_type", inputType,
+	)
+}
+
+func responsesTailRole(items []compatibility.CanonicalItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	switch items[len(items)-1].Author {
+	case compatibility.ItemAuthorAssistant:
+		return "assistant"
+	case compatibility.ItemAuthorTool:
+		return "tool"
+	default:
+		return "user"
+	}
+}
+
 func encodeToolChoice(mode compatibility.ToolMode) any {
 	switch mode {
 	case compatibility.ToolModeAuto:
@@ -107,6 +150,12 @@ func encodeToolChoice(mode compatibility.ToolMode) any {
 }
 
 func encodeInput(req compatibility.GenerationCanonicalRequest) (any, error) {
+	// Native continuation-only calls should rely on previous_response_id without
+	// replaying anchor thread input. Replaying can end with assistant output and
+	// violate backend prefill constraints.
+	if strings.TrimSpace(req.PreviousResponseID()) != "" && !req.HasLastTurn() {
+		return nil, nil
+	}
 	if input, ok, err := encodeSimpleInput(req); ok || err != nil {
 		return input, err
 	}

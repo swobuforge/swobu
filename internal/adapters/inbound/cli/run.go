@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,7 +98,13 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 
 	if len(args) == 0 {
 		if isInteractive() {
-			_ = emitVersionNoticeIfConfigured(stdout)
+			versionDecision := emitVersionNoticeIfConfigured(stdout)
+			if versionDecision.show {
+				if err := waitForVersionNoticeContinue(stdin, stdout); err != nil {
+					_, _ = fmt.Fprintln(stderr, err.Error())
+					return ExitDown
+				}
+			}
 			if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
 				_, _ = fmt.Fprintln(stderr, err.Error())
 				return ExitDown
@@ -135,6 +143,18 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	}
 }
 
+func waitForVersionNoticeContinue(in io.Reader, out io.Writer) error {
+	if in == nil {
+		return errors.New("version notice acknowledgment requires stdin")
+	}
+	_, _ = fmt.Fprintln(out, "press Enter to continue")
+	reader := bufio.NewReader(in)
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		return fmt.Errorf("version notice acknowledgment failed: %w", err)
+	}
+	return nil
+}
+
 func defaultIsInteractive() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
@@ -158,30 +178,33 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
+	transcript := uicli.NewStartupTranscript(stdout)
+	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventSplash})
 	_ = emitVersionNoticeIfConfigured(stdout)
 	if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	transcript := uicli.NewStartupTranscript(stdout)
-	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventSplash})
-	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDisclosure})
 	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStart, ConfigPath: resolvedConfigPath})
 
 	logger := slog.Default()
-	logger.Info("daemon lifecycle", "component", "daemon", "event", "process_start", "config_path", resolvedConfigPath)
 	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, Logger: logger})
 	if err != nil {
-		transcript.Emit(uicli.StartupEvent{
-			Kind: uicli.StartupEventStartupFailed,
-			Text: err.Error(),
-			NextAction: []string{
-				"check daemon config path and values",
+		next := []string{
+			"check daemon config path and values",
+			"run `swobu status`",
+		}
+		if strings.Contains(err.Error(), "bind: address already in use") {
+			next = []string{
+				"stop existing daemon or run `swobu down`",
 				"run `swobu status`",
-			},
+			}
+		}
+		transcript.Emit(uicli.StartupEvent{
+			Kind:       uicli.StartupEventStartupFailed,
+			Text:       err.Error(),
+			NextAction: next,
 		})
-		logger.Error("daemon lifecycle", "component", "daemon", "event", "initialization_failed", "error", err.Error())
-		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
 	defer func() {

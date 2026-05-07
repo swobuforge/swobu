@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -93,6 +94,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeCompatibilityError(w, err)
 		return
 	}
+	requestID := requestIDFromRequest(r)
+	logIngressRequestShape(requestID, endpoint.String(), family, normalizedPath, request, deliveryMode)
 
 	if h.requests == nil {
 		writeSwobuError(w, compatibility.InternalError("request orchestrator is not configured"))
@@ -101,12 +104,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	out, err := h.requests.Handle(r.Context(), requestpath.HandleInput{
 		EndpointName: endpoint,
-		RequestID:    requestIDFromRequest(r),
+		RequestID:    requestID,
 		Request:      request,
 		Contract:     requestpath.NewExecutionContract(deliveryMode),
 		Provenance:   ingressProvenance(r, family, normalizedPath),
 	})
 	if err != nil {
+		logRequestOutcome(requestID, endpoint.String(), family, "", "", "", err)
 		writeCompatibilityError(w, err)
 		return
 	}
@@ -114,6 +118,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = out.Response.Close()
 	}()
 	writeModelResolutionHeaders(w, out.Response.Metadata())
+	metadata := out.Response.Metadata()
+	logRequestOutcome(requestID, endpoint.String(), family, metadata.ModelRequested, metadata.ModelResolved, metadata.ModelResolutionMode, nil)
 
 	if err := writeSuccessResponse(w, family, out.Response); err != nil {
 		writeCompatibilityError(w, err)
@@ -238,6 +244,101 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	connection := strings.ToLower(strings.TrimSpace(r.Header.Get("Connection")))
 	upgrade := strings.ToLower(strings.TrimSpace(r.Header.Get("Upgrade")))
 	return strings.Contains(connection, "upgrade") && upgrade == "websocket"
+}
+
+func logIngressRequestShape(
+	requestID string,
+	endpoint string,
+	family compatibility.IngressFamily,
+	normalizedPath compatibility.NormalizedPath,
+	request compatibility.CanonicalRequest,
+	deliveryMode compatibility.DeliveryMode,
+) {
+	threadCount, lastRole, hasPreviousResponseID := requestShapeSummary(request)
+	slog.Debug("compatibility ingress request",
+		"component", "httpapi",
+		"event", "ingress_request_shape",
+		"request_id", requestID,
+		"endpoint", endpoint,
+		"ingress_family", string(family),
+		"normalized_op", string(normalizedPath),
+		"delivery_mode", string(deliveryMode),
+		"item_count", threadCount,
+		"last_input_role", lastRole,
+		"has_previous_response_id", hasPreviousResponseID,
+	)
+}
+
+func requestShapeSummary(request compatibility.CanonicalRequest) (int, string, bool) {
+	switch typed := request.(type) {
+	case compatibility.DialogCanonicalRequest:
+		items := typed.Items()
+		return len(items), lastRoleFromItems(items), false
+	case compatibility.GenerationCanonicalRequest:
+		items := typed.Thread()
+		return len(items), lastRoleFromItems(items), strings.TrimSpace(typed.PreviousResponseID()) != ""
+	case compatibility.PromptCanonicalRequest:
+		return 1, "user", false
+	default:
+		return 0, "", false
+	}
+}
+
+func lastRoleFromItems(items []compatibility.CanonicalItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	switch items[len(items)-1].Author {
+	case compatibility.ItemAuthorAssistant:
+		return "assistant"
+	case compatibility.ItemAuthorTool:
+		return "tool"
+	default:
+		return "user"
+	}
+}
+
+func logRequestOutcome(
+	requestID string,
+	endpoint string,
+	family compatibility.IngressFamily,
+	modelRequested string,
+	modelResolved string,
+	modelResolutionMode string,
+	err error,
+) {
+	result := "success"
+	statusCode := http.StatusOK
+	if err != nil {
+		result = "swobu_error"
+		var backendErr compatibility.BackendError
+		if errors.As(err, &backendErr) {
+			result = "backend_error"
+			statusCode = backendErr.StatusCode
+		} else {
+			statusCode = statusCodeForCompatibilityError(err)
+		}
+	}
+	slog.Debug("compatibility request outcome",
+		"component", "httpapi",
+		"event", "request_outcome",
+		"request_id", requestID,
+		"endpoint", endpoint,
+		"ingress_family", string(family),
+		"result", result,
+		"status_code", statusCode,
+		"model_requested", strings.TrimSpace(modelRequested),
+		"model_resolved", strings.TrimSpace(modelResolved),
+		"model_resolution_mode", strings.TrimSpace(modelResolutionMode),
+	)
+}
+
+func statusCodeForCompatibilityError(err error) int {
+	var swobuErr compatibility.Error
+	if errors.As(err, &swobuErr) {
+		return statusCodeForSwobuError(swobuErr.Code)
+	}
+	return http.StatusInternalServerError
 }
 
 func writeCompatibilityError(w http.ResponseWriter, err error) {
