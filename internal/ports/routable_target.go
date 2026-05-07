@@ -8,7 +8,10 @@ type RoutableTarget struct {
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string
-	// ProtocolKind is the concrete selected target protocol surface, not a vendor umbrella.
+	// ProtocolKind is the concrete selected provider-side egress protocol
+	// surface, not a vendor umbrella and not a client-ingress selector.
+	// Client ingress is normalized to canonical operations before provider
+	// encoding.
 	ProtocolKind protocolsurface.Kind
 	AuthKind     string
 	EndpointMode string

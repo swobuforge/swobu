@@ -315,12 +315,19 @@ func SupportsModelCatalog(spec string) bool {
 
 type RouteProfile struct {
 	ProviderSpec string
+	// ProtocolKind is the concrete provider-side egress protocol family that the
+	// selected adapter will encode to for this target.
 	ProtocolKind protocolsurface.Kind
 	AuthKind     AuthKind
 	EndpointMode EndpointMode
 	Adapter      string
 }
 
+// ResolveRouteProfile resolves one execution-route profile from durable target
+// intent.
+//
+// The protocolKind input is an egress codec selection for the provider target,
+// not an ingress-family discriminator.
 func ResolveRouteProfile(spec string, protocolKind protocolsurface.Kind, baseURL, credentialRef string) (RouteProfile, bool) {
 	spec = strings.TrimSpace(strings.ToLower(spec))
 	if !SupportsSpec(spec) {

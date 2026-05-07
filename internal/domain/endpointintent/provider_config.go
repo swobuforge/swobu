@@ -67,6 +67,13 @@ var targetAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 // NewProviderConfig validates the explicit provider-config declaration used by
 // endpoint intent. It does not guess provider family or protocol semantics.
+//
+// protocolKind here is the selected provider-side egress wire family for this
+// target (for example `responses` vs `chat_completions`). It is not a claim
+// about which client ingress family can be accepted at request time.
+//
+// Ingress-family admissibility is owned by request-path compatibility rules;
+// this constructor owns durable target-route validity.
 func NewProviderConfig(
 	ref ProviderConfigRef,
 	spec ProviderSpec,
