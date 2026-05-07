@@ -9,7 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 type StateKey struct {
@@ -25,7 +25,7 @@ func NewLocalStore() *LocalStore {
 	return &LocalStore{values: make(map[StateKey]any)}
 }
 
-func (s *LocalStore) Scope(nodeID layout.NodeID) view.LocalScope {
+func (s *LocalStore) Scope(nodeID layout.NodeID) retained.LocalScope {
 	return localScope{store: s, nodeID: nodeID, prefix: ""}
 }
 
@@ -65,7 +65,7 @@ func (s localScope) Set(slot int, value any) {
 	s.store.values[StateKey{NodeID: s.nodeID, SlotKey: key}] = value
 }
 
-func (s localScope) WithPrefix(prefix string) view.LocalScope {
+func (s localScope) WithPrefix(prefix string) retained.LocalScope {
 	return localScope{store: s.store, nodeID: s.nodeID, prefix: s.prefix + prefix + "/"}
 }
 
@@ -96,7 +96,7 @@ type RetainedRenderNode struct {
 	ID        layout.NodeID
 	Hint      string
 	Key       string
-	Lifecycle view.LifecycleEffects
+	Lifecycle retained.LifecycleEffects
 	Children  []*RetainedRenderNode
 }
 
@@ -109,7 +109,7 @@ func New[M any](locals *LocalStore) *Reconciler[M] {
 
 // component builds, and local-state carryover in one ordered pass.
 func (r *Reconciler[M]) Reconcile(
-	root view.ViewSpec[M],
+	root retained.ViewSpec[M],
 	model *M,
 	dispatch func(update.Action),
 	emit func(update.Action),
@@ -122,10 +122,10 @@ func (r *Reconciler[M]) Reconcile(
 			reused[previous.ID] = struct{}{}
 			return &RetainedRenderNode{ID: previous.ID, Hint: hint, Key: key}
 		}
-		retained := &RetainedRenderNode{ID: r.nextID, Hint: hint, Key: key}
+		retainedNode := &RetainedRenderNode{ID: r.nextID, Hint: hint, Key: key}
 		r.nextID++
-		mounts = append(mounts, retained.ID)
-		return retained
+		mounts = append(mounts, retainedNode.ID)
+		return retainedNode
 	}
 
 	tag := func(retained *RetainedRenderNode, renderNode layout.RenderNode) layout.RenderNode {
@@ -135,36 +135,36 @@ func (r *Reconciler[M]) Reconcile(
 		return layout.WithIdentity(retained.ID, renderNode)
 	}
 
-	var buildComponent func(previous *RetainedRenderNode, hint string, root view.ViewSpec[M]) *ViewRenderNode
+	var buildComponent func(previous *RetainedRenderNode, hint string, root retained.ViewSpec[M]) *ViewRenderNode
 	var buildNode func(previous *RetainedRenderNode, hint string, renderNode layout.RenderNode) *ViewRenderNode
 	var buildResolved func(previous *RetainedRenderNode, retained *RetainedRenderNode, hint string, renderNode layout.RenderNode) *ViewRenderNode
 	var materialize func(node *ViewRenderNode) layout.RenderNode
 
-	buildComponent = func(previous *RetainedRenderNode, hint string, root view.ViewSpec[M]) *ViewRenderNode {
-		retained := claim(previous, hint, "")
-		renderNode := view.BuildViewRootNode(root, r.locals.Scope(retained.ID), dispatch, emit, func() M { return *model })
-		_, key, lifecycle := view.NamedNodeMetadata(renderNode)
-		retained.Key = key
-		retained.Lifecycle = lifecycle
-		rootLifecycle := view.CaptureLifecycle(root)
-		retained.Lifecycle.OnMount = append(rootLifecycle.OnMount, retained.Lifecycle.OnMount...)
-		retained.Lifecycle.OnUnmount = append(rootLifecycle.OnUnmount, retained.Lifecycle.OnUnmount...)
-		return buildResolved(previous, retained, hint, renderNode)
+	buildComponent = func(previous *RetainedRenderNode, hint string, root retained.ViewSpec[M]) *ViewRenderNode {
+		retainedNode := claim(previous, hint, "")
+		renderNode := retained.BuildViewRootNode(root, r.locals.Scope(retainedNode.ID), dispatch, emit, func() M { return *model })
+		_, key, lifecycle := retained.NamedNodeMetadata(renderNode)
+		retainedNode.Key = key
+		retainedNode.Lifecycle = lifecycle
+		rootLifecycle := retained.CaptureLifecycle(root)
+		retainedNode.Lifecycle.OnMount = append(rootLifecycle.OnMount, retainedNode.Lifecycle.OnMount...)
+		retainedNode.Lifecycle.OnUnmount = append(rootLifecycle.OnUnmount, retainedNode.Lifecycle.OnUnmount...)
+		return buildResolved(previous, retainedNode, hint, renderNode)
 	}
 
 	buildNode = func(previous *RetainedRenderNode, hint string, renderNode layout.RenderNode) *ViewRenderNode {
-		_, key, lifecycle := view.NamedNodeMetadata(renderNode)
-		retained := claim(previous, hint, key)
-		retained.Lifecycle = lifecycle
-		return buildResolved(previous, retained, hint, renderNode)
+		_, key, lifecycle := retained.NamedNodeMetadata(renderNode)
+		retainedNode := claim(previous, hint, key)
+		retainedNode.Lifecycle = lifecycle
+		return buildResolved(previous, retainedNode, hint, renderNode)
 	}
 
-	buildResolved = func(previous *RetainedRenderNode, retained *RetainedRenderNode, hint string, renderNode layout.RenderNode) *ViewRenderNode {
-		tagged := tag(retained, renderNode)
+	buildResolved = func(previous *RetainedRenderNode, retainedNode *RetainedRenderNode, hint string, renderNode layout.RenderNode) *ViewRenderNode {
+		tagged := tag(retainedNode, renderNode)
 		viewNode := &ViewRenderNode{
 			Hint:       hint,
 			RenderNode: tagged,
-			Retained:   retained,
+			Retained:   retainedNode,
 		}
 
 		composite, ok := renderNode.(layout.Composite)
@@ -175,7 +175,7 @@ func (r *Reconciler[M]) Reconcile(
 		matcher := newSiblingMatcher(previous)
 		seenKeys := make(map[string]struct{})
 		composite.VisitChildren(func(childHint string, child layout.RenderNode) {
-			_, key, _ := view.NamedNodeMetadata(child)
+			_, key, _ := retained.NamedNodeMetadata(child)
 			if key != "" {
 				if _, exists := seenKeys[key]; exists {
 					panic(fmt.Sprintf("duplicate sibling key %q under %q", key, hint))
@@ -187,7 +187,7 @@ func (r *Reconciler[M]) Reconcile(
 				Hint: childHint,
 				Node: childNode,
 			})
-			retained.Children = append(retained.Children, childNode.Retained)
+			retainedNode.Children = append(retainedNode.Children, childNode.Retained)
 		})
 		return viewNode
 	}

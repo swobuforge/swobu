@@ -11,12 +11,12 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 type Runner[M any] struct {
 	Screen   tcell.Screen
-	Root     view.ViewSpec[M]
+	Root     retained.ViewSpec[M]
 	Loop     *loop.AppLoop[M]
 	OnQuit   func()
 	previous *paint.BufferPainter
@@ -27,7 +27,7 @@ type Runner[M any] struct {
 }
 
 // New wires one retained root view to a real tcell screen.
-func New[M any](screen tcell.Screen, root view.ViewSpec[M], model M, reduce loop.Reducer[M]) *Runner[M] {
+func New[M any](screen tcell.Screen, root retained.ViewSpec[M], model M, reduce loop.Reducer[M]) *Runner[M] {
 	runner := &Runner[M]{
 		Screen:             screen,
 		Root:               root,

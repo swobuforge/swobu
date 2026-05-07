@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
+	"github.com/swobuforge/swobu/internal/terminalui/view/textmetrics"
 )
 
 // TextRenderNode is the minimal intrinsic leaf node.
@@ -24,8 +25,8 @@ func (t *TextRenderNode) Measure(c geom.Constraints, _ *LayoutContext) geom.Size
 	lines := strings.Split(t.Value, "\n")
 	width := 0
 	for _, line := range lines {
-		if len([]rune(line)) > width {
-			width = len([]rune(line))
+		if textmetrics.Width(line) > width {
+			width = textmetrics.Width(line)
 		}
 	}
 	return t.ResolveSize(geom.Size{W: width, H: len(lines)}, c)

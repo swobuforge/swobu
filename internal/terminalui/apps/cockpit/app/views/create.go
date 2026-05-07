@@ -4,17 +4,17 @@ package views
 import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // BuildCreateSection renders the explicit first-run commit row.
-func BuildCreateSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildCreateSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	if model.CurrentEndpoint != "" {
 		return nil
 	}
-	var row view.ViewSpec[state.Model]
+	var row retained.ViewSpec[state.Model]
 	// Use a key-value row so blocked state is truthful and non-focusable when prerequisites are missing.
 	if model.InteractionMode == state.InteractionModeBusySave {
 		row = toolkitviews.NewKeyValueActionRow[state.Model]("create workspace", "creating...", "", nil)

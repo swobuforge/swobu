@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // FocusScopeRenderNode provides generic focus traversal for its subtree.
@@ -24,9 +24,9 @@ func NewFocusScope(child layout.RenderNode) *FocusScopeRenderNode {
 	}
 }
 
-func FocusScope[M any](child view.ViewSpec[M]) view.ViewSpec[M] {
-	return view.View[M](func(ctx *view.Context[M]) view.RenderNode {
-		return NewFocusScope(view.Materialize(ctx, child))
+func FocusScope[M any](child retained.ViewSpec[M]) retained.ViewSpec[M] {
+	return retained.View[M](func(ctx *retained.Context[M]) retained.RenderNode {
+		return NewFocusScope(retained.Materialize(ctx, child))
 	})
 }
 

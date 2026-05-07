@@ -11,21 +11,21 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // BuildProvidersCreatePanel shows provider setup in create mode.
-func BuildProvidersCreatePanel(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildProvidersCreatePanel(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	configured := 0
 	draftProvider := selectors.CreateDraftProviderConfig(model)
 	if draftProvider != nil {
 		configured = 1
 	}
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	expanded, setExpanded := view.UseState(ctx, func() bool { return false })
-	picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	expanded, setExpanded := retained.UseState(ctx, func() bool { return false })
+	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	var cancelFn func() []update.Action
 	if open || expanded {
 		cancelFn = func() []update.Action {
@@ -47,7 +47,7 @@ func BuildProvidersCreatePanel(ctx *view.Context[state.Model]) view.ViewSpec[sta
 			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("providers-create-option", 0)},
 		}
 	}, cancelFn, views.FocusAffordance("manage", false))
-	var out view.ViewSpec[state.Model]
+	var out retained.ViewSpec[state.Model]
 	if !open {
 		out = parent
 	} else {
@@ -83,7 +83,7 @@ func BuildProvidersCreatePanel(ctx *view.Context[state.Model]) view.ViewSpec[sta
 				},
 				onClose,
 			)
-			rows := []view.ViewSpec[state.Model]{providerRow}
+			rows := []retained.ViewSpec[state.Model]{providerRow}
 			if expanded {
 				rows = append(rows, createProviderPropertyRows("", nil, draftProvider, true)...)
 			}
@@ -94,7 +94,7 @@ func BuildProvidersCreatePanel(ctx *view.Context[state.Model]) view.ViewSpec[sta
 }
 
 // BuildProvidersWorkspacePanel shows provider setup in workspace mode.
-func BuildProvidersWorkspacePanel(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildProvidersWorkspacePanel(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	snapshot := selectors.CurrentEndpointSnapshot(model)
 	if snapshot == nil {
@@ -136,16 +136,16 @@ func createProviderSpecItems(model state.Model, onCancel func() []update.Action)
 	return items
 }
 
-func createProviderPropertyRows(endpointName string, catalog *state.CatalogEntry, providerConfig *state.ProviderConfigSnapshot, createMode bool) []view.ViewSpec[state.Model] {
-	rows := []view.ViewSpec[state.Model]{
-		view.Named[state.Model]("provider", providerSpecRow(providerConfig)),
-		view.Named[state.Model]("model", providerModelChoiceRow(providerModelChoiceRowSpec{
+func createProviderPropertyRows(endpointName string, catalog *state.CatalogEntry, providerConfig *state.ProviderConfigSnapshot, createMode bool) []retained.ViewSpec[state.Model] {
+	rows := []retained.ViewSpec[state.Model]{
+		retained.Named[state.Model]("provider", providerSpecRow(providerConfig)),
+		retained.Named[state.Model]("model", providerModelChoiceRow(providerModelChoiceRowSpec{
 			Catalog:        catalog,
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		})),
-		view.Named[state.Model]("alias", providerTargetAliasRow(providerTargetAliasRowSpec{
+		retained.Named[state.Model]("alias", providerTargetAliasRow(providerTargetAliasRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
@@ -153,7 +153,7 @@ func createProviderPropertyRows(endpointName string, catalog *state.CatalogEntry
 	}
 	if providerConfig != nil {
 		if providerCredentialSelectionRequired(providerConfig.ProviderSpec, providerConfig.BaseURL, providerConfig.CredentialRef) {
-			rows = append(rows, view.Named[state.Model]("credential", providerCredentialChoiceRow(providerCredentialChoiceRowSpec{
+			rows = append(rows, retained.Named[state.Model]("credential", providerCredentialChoiceRow(providerCredentialChoiceRowSpec{
 				ProviderConfig: providerConfig,
 				EndpointName:   endpointName,
 				CreateMode:     createMode,
@@ -161,28 +161,28 @@ func createProviderPropertyRows(endpointName string, catalog *state.CatalogEntry
 		}
 	}
 	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "keychain") {
-		rows = append(rows, view.Named[state.Model]("key-name", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{
+		rows = append(rows, retained.Named[state.Model]("key-name", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		})))
 	}
 	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "env") {
-		rows = append(rows, view.Named[state.Model]("env-key", providerEnvKeyRow(providerEnvKeyRowSpec{
+		rows = append(rows, retained.Named[state.Model]("env-key", providerEnvKeyRow(providerEnvKeyRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		})))
 	}
 	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "file") {
-		rows = append(rows, view.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{
+		rows = append(rows, retained.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		})))
 	}
 	if providerConfig != nil && strings.TrimSpace(providerConfig.ProviderSpec) == "custom" {
-		rows = append(rows, view.Named[state.Model]("backend-url", providerBackendURLRow(providerBackendURLRowSpec{
+		rows = append(rows, retained.Named[state.Model]("backend-url", providerBackendURLRow(providerBackendURLRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
@@ -190,26 +190,26 @@ func createProviderPropertyRows(endpointName string, catalog *state.CatalogEntry
 	}
 	if !createMode && providerConfig != nil {
 		rows = append(rows,
-			view.Named[state.Model]("delete", providerDeleteRow(endpointName, providerConfig)),
+			retained.Named[state.Model]("delete", providerDeleteRow(endpointName, providerConfig)),
 		)
 	}
 	return rows
 }
 
-func newProviderSummaryRow(provider state.ProviderConfigSnapshot, selected, expanded bool, onActivate func() []update.Action, onCancel func() []update.Action) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func newProviderSummaryRow(provider state.ProviderConfigSnapshot, selected, expanded bool, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return providerSummaryRow(ctx, provider, selected, expanded, onActivate, onCancel)
 	})
 }
 
 func providerSummaryRow(
-	_ *view.Context[state.Model],
+	_ *retained.Context[state.Model],
 	provider state.ProviderConfigSnapshot,
 	_ bool,
 	expanded bool,
 	onActivate func() []update.Action,
 	onCancel func() []update.Action,
-) view.ViewSpec[state.Model] {
+) retained.ViewSpec[state.Model] {
 	label := providerDisplayLabel(provider)
 	verb := "edit"
 	if expanded {

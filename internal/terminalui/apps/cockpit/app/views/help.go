@@ -5,7 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 const (
@@ -13,17 +13,17 @@ const (
 	helpFileIssueURL   = "https://github.com/swobuforge/swobu/issues"
 )
 
-func BuildHelpSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildHelpSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	note := model.HelpNote
-	rows := []view.ViewSpec[state.Model]{
+	rows := []retained.ViewSpec[state.Model]{
 		helpActionRow("ask question", helpAskQuestionURL, note),
 		helpActionRow("file issue", helpFileIssueURL, note),
 	}
 	return Section("help & feedback", rows...)
 }
 
-func helpActionRow(label string, url string, note string) view.ViewSpec[state.Model] {
+func helpActionRow(label string, url string, note string) retained.ViewSpec[state.Model] {
 	row := RowActionWithHooks(label, "", "open", func() []update.Action {
 		return []update.Action{state.OpenSupportLinkRequested{Label: label, URL: url}}
 	}, nil, focusAffordance("open", false))

@@ -1,7 +1,8 @@
-package view
+package retained
 
 import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	viewlayout "github.com/swobuforge/swobu/internal/terminalui/view/layout"
 )
 
 type ConstrainSpec struct {
@@ -63,15 +64,10 @@ func (w constrainedView[M]) BuildRenderNode(ctx *Context[M]) RenderNode {
 	return box
 }
 
-type Insets struct {
-	Top    int
-	Right  int
-	Bottom int
-	Left   int
-}
+type Insets = viewlayout.Insets
 
 func Inset[M any](child ViewSpec[M], in Insets) ViewSpec[M] {
-	return Padded(child, in.Top, in.Right, in.Bottom, in.Left)
+	return Padded(child, int(in.Top), int(in.Right), int(in.Bottom), int(in.Left))
 }
 
 func ScrollY[M any](child ViewSpec[M], offset int) ViewSpec[M] {

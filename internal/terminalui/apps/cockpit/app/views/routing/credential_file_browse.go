@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -18,13 +18,13 @@ type providerCredentialFileBrowseRowSpec struct {
 	CreateMode     bool
 }
 
-func providerCredentialFileBrowseRow(spec providerCredentialFileBrowseRowSpec) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func providerCredentialFileBrowseRow(spec providerCredentialFileBrowseRowSpec) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderCredentialFileBrowseRow(ctx, spec)
 	})
 }
 
-func buildProviderCredentialFileBrowseRow(ctx *view.Context[state.Model], spec providerCredentialFileBrowseRowSpec) view.ViewSpec[state.Model] {
+func buildProviderCredentialFileBrowseRow(ctx *retained.Context[state.Model], spec providerCredentialFileBrowseRowSpec) retained.ViewSpec[state.Model] {
 	pc := selectedProvider(ctx.Model(), spec.ProviderConfig, spec.CreateMode)
 	if pc == nil || !strings.EqualFold(credentialSource(pc.CredentialRef), "file") {
 		return nil
@@ -34,9 +34,9 @@ func buildProviderCredentialFileBrowseRow(ctx *view.Context[state.Model], spec p
 		closeMode = state.InteractionModeNAV
 	}
 	currentPath := credentialFilePath(pc.CredentialRef)
-	open, setOpen := view.UseState(ctx, func() bool { return false })
-	browse, setBrowse := view.UseState(ctx, func() credentialFileBrowseState { return initialCredentialFileBrowseState(currentPath) })
-	picker, setPicker := view.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	browse, setBrowse := retained.UseState(ctx, func() credentialFileBrowseState { return initialCredentialFileBrowseState(currentPath) })
+	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	parent := credentialFileRow(currentPath, func() []update.Action {
 		nextOpen := !open
 		setOpen(nextOpen)
@@ -89,7 +89,7 @@ func buildProviderCredentialFileBrowseRow(ctx *view.Context[state.Model], spec p
 				WindowSize:     6,
 				FindLabel:      "find",
 				NoMatchesLabel: "no files",
-				HeaderRows: []view.ViewSpec[state.Model]{
+				HeaderRows: []retained.ViewSpec[state.Model]{
 					views.RowStatic("path", credentialFileBrowserPath(browse.Dir)),
 				},
 				OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: "credential-file"}} },

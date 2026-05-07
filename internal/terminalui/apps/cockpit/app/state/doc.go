@@ -7,5 +7,5 @@
 //   - ports: narrow effect-facing runtime service interfaces
 //
 // This root package preserves ergonomic imports for userspace code by exposing
-// aliases and the Reduce entrypoint.
+// a stable public surface and the Reduce entrypoint.
 package state

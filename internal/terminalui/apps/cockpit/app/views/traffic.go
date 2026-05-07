@@ -1,4 +1,4 @@
-// Traffic section view.
+// Traffic section retained.
 package views
 
 import (
@@ -8,17 +8,17 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 const trafficVisibleWindow = 5
 
 // BuildTrafficSection composes the traffic section rows.
-func BuildTrafficSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildTrafficSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	offset, setOffset := view.UseState(ctx, func() int { return 0 })
-	var section view.ViewSpec[state.Model]
+	offset, setOffset := retained.UseState(ctx, func() int { return 0 })
+	var section retained.ViewSpec[state.Model]
 	if model.CurrentEndpoint == "" {
 		if model.InteractionMode == state.InteractionModeBusySave {
 			section = staticSectionSummary(ctx, SectionTraffic, "empty")
@@ -36,29 +36,29 @@ func BuildTrafficSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Mod
 			summary = "no traffic yet"
 			section = staticSectionSummary(ctx, SectionTraffic, summary)
 		} else {
-			body := make([]view.ViewSpec[state.Model], 0, len(model.TrafficRows)+3)
+			body := make([]retained.ViewSpec[state.Model], 0, len(model.TrafficRows)+3)
 			if model.TrafficError != "" {
-				body = append(body, view.Named[state.Model]("error", RowStatic("", "-> "+model.TrafficError)))
+				body = append(body, retained.Named[state.Model]("error", RowStatic("", "-> "+model.TrafficError)))
 			} else if len(model.TrafficRows) == 0 {
-				body = append(body, view.Named[state.Model]("empty", SummaryRow("no traffic yet")))
+				body = append(body, retained.Named[state.Model]("empty", SummaryRow("no traffic yet")))
 			} else {
 				rows := normalizeTrafficRows(model.TrafficRows)
 				rowKeys := buildTrafficRowKeys(rows)
 				start, end := ListWindowBounds(len(rows), offset, trafficVisibleWindow)
 				visibleRows := rows[start:end]
 				visibleKeys := rowKeys[start:end]
-				children := make([]view.ViewSpec[state.Model], 0, len(visibleRows))
+				children := make([]retained.ViewSpec[state.Model], 0, len(visibleRows))
 				for idx, row := range visibleRows {
 					absIdx := start + idx
 					key := fmt.Sprintf("%s-%d", visibleKeys[idx], absIdx)
 					rowItem := row
 					isFirstVisible := idx == 0
 					isLastVisible := idx == len(visibleRows)-1
-					children = append(children, view.Named[state.Model]("traffic/"+key, view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+					children = append(children, retained.Named[state.Model]("traffic/"+key, retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 						base := trafficRow(ctx, rowItem, func() []update.Action {
 							return []update.Action{state.SetFocusedRowAffordance{Verb: "open"}}
 						})
-						return toolkitviews.KeyScope(base, func(_ *view.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
+						return toolkitviews.KeyScope(base, func(_ *retained.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
 							if ev.Kind != interaction.EventKey {
 								return false, nil
 							}
@@ -99,7 +99,7 @@ func BuildTrafficSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Mod
 						})
 					})))
 				}
-				list := view.VStack(ctx, children...)
+				list := retained.VStack(ctx, children...)
 				body = append(body, list)
 			}
 			section = NewCollapsibleSection(
@@ -114,8 +114,8 @@ func BuildTrafficSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Mod
 	return section
 }
 
-func trafficRow(ctx *view.Context[state.Model], row state.TrafficRow, onFocus func() []update.Action) view.ViewSpec[state.Model] {
-	open, setOpen := view.UseState(ctx, func() bool { return false })
+func trafficRow(ctx *retained.Context[state.Model], row state.TrafficRow, onFocus func() []update.Action) retained.ViewSpec[state.Model] {
+	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	parent := toolkitviews.NewAction(64, true, false, func(focused bool, width int) string {
 		return renderTrafficListRow(width, focused, row, open)
 	}, func(string) []update.Action {
@@ -134,7 +134,7 @@ func trafficRow(ctx *view.Context[state.Model], row state.TrafficRow, onFocus fu
 		return []update.Action{state.SetFocusedRowAffordance{Verb: "open"}}
 	})
 	parent.OnFocusAction = onFocus
-	var out view.ViewSpec[state.Model] = view.FromRenderNode[state.Model](parent)
+	var out retained.ViewSpec[state.Model] = retained.FromRenderNode[state.Model](parent)
 	if open {
 		out = toolkitviews.NewAnchoredDisclosure(out, trafficOpenDetailRows(row)...)
 	}
@@ -166,8 +166,8 @@ func renderTrafficListRow(width int, focused bool, row state.TrafficRow, open bo
 	})
 }
 
-func trafficOpenDetailRows(row state.TrafficRow) []view.ViewSpec[state.Model] {
-	rows := []view.ViewSpec[state.Model]{
+func trafficOpenDetailRows(row state.TrafficRow) []retained.ViewSpec[state.Model] {
+	rows := []retained.ViewSpec[state.Model]{
 		trafficDetailLine("request id", strings.TrimSpace(row.RequestID)),
 		trafficDetailLine("outcome", trafficOutcome(row)),
 		trafficDetailLine("family", trafficKind(row)),
@@ -180,7 +180,7 @@ func trafficOpenDetailRows(row state.TrafficRow) []view.ViewSpec[state.Model] {
 	return append(rows, trafficTokenDetailLines(row)...)
 }
 
-func trafficDetailLine(label string, value string) view.ViewSpec[state.Model] {
+func trafficDetailLine(label string, value string) retained.ViewSpec[state.Model] {
 	line := toolkitviews.FormatKeyValueTextLine(strings.TrimSpace(label), strings.TrimSpace(value), 24)
 	return IndentLeft[state.Model](StaticTextLine[state.Model](line), InsetDetail)
 }
@@ -209,9 +209,9 @@ func errorOrigin(row state.TrafficRow) string {
 	return "backend"
 }
 
-func trafficTokenDetailLines(row state.TrafficRow) []view.ViewSpec[state.Model] {
+func trafficTokenDetailLines(row state.TrafficRow) []retained.ViewSpec[state.Model] {
 	usage := deriveTrafficUsageStats(row)
-	out := make([]view.ViewSpec[state.Model], 0, 6)
+	out := make([]retained.ViewSpec[state.Model], 0, 6)
 	if usage.hasCoverage() {
 		out = append(out, trafficDetailLine("usage", fmt.Sprintf("in %s · out %s", compactTokenCount(usage.input), compactTokenCount(usage.output))))
 		out = append(out, trafficDetailLine("cache", fmt.Sprintf("read %s / in %s · %s · write %s", compactTokenCount(usage.cacheRead), compactTokenCount(usage.input), trafficCacheSummary(row), compactTokenCount(usage.cacheWrite))))

@@ -55,10 +55,10 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 	out := stdout.String()
 	assertOrderedContains(t, out,
 		" ___ ___ ___   __ _____ ___",
-		"[CHECKING] daemon not reachable at",
-		"[STARTING] starting daemon",
-		"[WAITING] waiting for daemon readiness",
-		"[READY] daemon ready (healthy)",
+		"checking: daemon not reachable at",
+		"starting: starting daemon",
+		"waiting: waiting for daemon readiness",
+		"ready: daemon ready (healthy)",
 	)
 }
 
@@ -308,13 +308,13 @@ func startupReporterForTests(out io.Writer) StartupReporter {
 		case StartupEventSplash:
 			_, _ = io.WriteString(out, " ___ ___ ___   __ _____ ___\n")
 		case StartupEventDaemonNotReachable:
-			_, _ = io.WriteString(out, fmt.Sprintf("[CHECKING] daemon not reachable at %s\n", ev.DaemonURL))
+			_, _ = io.WriteString(out, fmt.Sprintf("checking: daemon not reachable at %s\n", ev.DaemonURL))
 		case StartupEventStartingDaemon:
-			_, _ = io.WriteString(out, "[STARTING] starting daemon\n")
+			_, _ = io.WriteString(out, "starting: starting daemon\n")
 		case StartupEventWaitingReadiness:
-			_, _ = io.WriteString(out, "[WAITING] waiting for daemon readiness\n")
+			_, _ = io.WriteString(out, "waiting: waiting for daemon readiness\n")
 		case StartupEventDaemonReady:
-			_, _ = io.WriteString(out, fmt.Sprintf("[READY] daemon ready (%s)\n", ev.State))
+			_, _ = io.WriteString(out, fmt.Sprintf("ready: daemon ready (%s)\n", ev.State))
 		case StartupEventStartupFailed:
 			_, _ = io.WriteString(out, "╭─ startup failed \n")
 			for _, next := range ev.NextAction {

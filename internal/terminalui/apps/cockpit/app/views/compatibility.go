@@ -6,18 +6,18 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // BuildCompatibilityScreen renders the hard-stop cockpit body used when the
 // daemon control plane does not match the local TUI protocol contract.
-func BuildCompatibilityScreen(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildCompatibilityScreen(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	mismatch := model.ControlPlane
 	if mismatch == nil {
-		return view.VStack(ctx)
+		return retained.VStack(ctx)
 	}
-	compatibilityRows := []view.ViewSpec[state.Model]{
+	compatibilityRows := []retained.ViewSpec[state.Model]{
 		RowActionWithHooks(
 			"status",
 			"TUI and daemon are incompatible",
@@ -32,7 +32,7 @@ func BuildCompatibilityScreen(ctx *view.Context[state.Model]) view.ViewSpec[stat
 	}
 	const restartDaemonLabel = "restart daemon"
 	recoveryCommand := compatibilityRecoveryCommand(*mismatch)
-	recoverRows := []view.ViewSpec[state.Model]{
+	recoverRows := []retained.ViewSpec[state.Model]{
 		RowActionWithHooks(restartDaemonLabel, "", "run", func() []update.Action {
 			return []update.Action{state.CompatibilityRestartRequested{}}
 		}, nil, focusAffordance("run/copy", false)),
@@ -55,7 +55,7 @@ func BuildCompatibilityScreen(ctx *view.Context[state.Model]) view.ViewSpec[stat
 	if strings.TrimSpace(mismatch.Note) != "" && strings.TrimSpace(mismatch.NoteAction) == "copy" {
 		recoverRows = append(recoverRows, compatibilityDetailLine("-> "+strings.TrimSpace(mismatch.Note)))
 	}
-	return view.VStackGap(ctx, StackGap,
+	return retained.VStackGap(ctx, StackGap,
 		Section[state.Model]("compatibility", compatibilityRows...),
 		Section[state.Model]("recover", recoverRows...),
 	)
@@ -83,7 +83,7 @@ func compatibilityProtocolMismatchLine(mismatch state.ControlPlaneMismatch) stri
 	return fmt.Sprintf("protocol mismatch: expected %d, got %d", mismatch.ExpectedProtocol, mismatch.DaemonProtocol)
 }
 
-func compatibilityDetailLine(value string) view.ViewSpec[state.Model] {
+func compatibilityDetailLine(value string) retained.ViewSpec[state.Model] {
 	return IndentLeft[state.Model](StaticTextLine[state.Model](strings.TrimSpace(value)), InsetSection+InsetDetail)
 }
 

@@ -9,23 +9,23 @@ import (
 	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // Root assembles the current Swobu cockpit page from app state, app-owned
 // views, and generic toolkit batteries.
-func Root() view.ViewSpec[state.Model] {
-	return view.BuildWithLifecycle[state.Model](buildRoot, rootOnMountEffects, nil)
+func Root() retained.ViewSpec[state.Model] {
+	return retained.BuildWithLifecycle[state.Model](buildRoot, rootOnMountEffects, nil)
 }
 
-func buildRoot(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func buildRoot(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	bodyContent := view.Named[state.Model]("workspace/"+workspaceBodyKey(model), view.Build[state.Model](buildBodyCanvas))
+	bodyContent := retained.Named[state.Model]("workspace/"+workspaceBodyKey(model), retained.Build[state.Model](buildBodyCanvas))
 	// Keep shell rails pinned: header/footer remain visible while only body
 	// content scrolls.
-	body := view.WithGrow[state.Model]()(view.Named[state.Model]("body", view.WithScrollY[state.Model](0)(bodyContent)))
-	chrome := view.VStack(ctx,
+	body := retained.WithGrow[state.Model]()(retained.Named[state.Model]("body", retained.WithScrollY[state.Model](0)(bodyContent)))
+	chrome := retained.VStack(ctx,
 		appviews.HeaderBar("Swobu! 🧌", selectors.HeaderShell(model)),
 		appviews.HorizontalRule(),
 		body,
@@ -59,7 +59,7 @@ func rootOnMountEffects() []update.Effect {
 	}
 }
 
-func workspaceRailKeyHandler(ctx *view.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
+func workspaceRailKeyHandler(ctx *retained.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
 	if ev.Kind != interaction.EventKey {
 		return false, nil
 	}

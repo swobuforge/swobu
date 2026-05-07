@@ -8,12 +8,12 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // BuildWorkspaceSection composes the workspace section rows.
-func BuildWorkspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildWorkspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	name := model.CurrentEndpoint
 	isCreate := name == ""
@@ -23,15 +23,15 @@ func BuildWorkspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 	} else if name != "" {
 		endpoint = "/c/" + name + "/"
 	}
-	var out view.ViewSpec[state.Model]
+	var out retained.ViewSpec[state.Model]
 	if !isCreate {
 		endpointSummary := selectors.EmptyOr(endpoint, "none")
 		if strings.TrimSpace(endpointSummary) == "" {
 			endpointSummary = "none"
 		}
-		nameRow := view.Named[state.Model]("name", view.Build[state.Model](buildWorkspaceNameRow))
+		nameRow := retained.Named[state.Model]("name", retained.Build[state.Model](buildWorkspaceNameRow))
 		if model.HeaderStatus == "saved" {
-			nameRow = view.Named[state.Model]("name", RowKVWithHooks(RowName, name, "edit ↵", nil, nil, nil))
+			nameRow = retained.Named[state.Model]("name", RowKVWithHooks(RowName, name, "edit ↵", nil, nil, nil))
 		}
 		endpointRow := RowActionWithHooks(RowEndpoint, endpointSummary, "copy", func() []update.Action {
 			if endpoint == "" || endpoint == "not set" || endpoint == "invalid" {
@@ -43,14 +43,14 @@ func BuildWorkspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 			endpointRow = toolkitviews.NewAnchoredDisclosure(endpointRow, RowStatic("", "-> "+model.WorkspaceCopyNote))
 		}
 
-		rows := []view.ViewSpec[state.Model]{
+		rows := []retained.ViewSpec[state.Model]{
 			nameRow,
-			view.Named[state.Model]("endpoint", endpointRow),
+			retained.Named[state.Model]("endpoint", endpointRow),
 		}
 		if model.HeaderStatus == "saved" {
-			rows = append(rows, view.Named[state.Model]("delete", RowStatic("delete workspace", "")))
+			rows = append(rows, retained.Named[state.Model]("delete", RowStatic("delete workspace", "")))
 		} else {
-			rows = append(rows, view.Named[state.Model]("delete", workspaceDeleteRow(name)))
+			rows = append(rows, retained.Named[state.Model]("delete", workspaceDeleteRow(name)))
 		}
 		out = NewCollapsibleSection(
 			SectionWorkspace,
@@ -60,12 +60,12 @@ func BuildWorkspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 			rows...,
 		)
 	} else {
-		rows := []view.ViewSpec[state.Model]{
-			view.Named[state.Model]("name", view.Build[state.Model](buildWorkspaceNameRow)),
+		rows := []retained.ViewSpec[state.Model]{
+			retained.Named[state.Model]("name", retained.Build[state.Model](buildWorkspaceNameRow)),
 			RowStatic(RowEndpoint, selectors.EmptyOr(endpoint, "none")),
 		}
 		if selectors.InteractionMode(model) == state.InteractionModeBusySave {
-			rows = []view.ViewSpec[state.Model]{
+			rows = []retained.ViewSpec[state.Model]{
 				RowStatic(RowName, selectors.EmptyOr(currentCreateName(model), "choose a workspace name")),
 				RowStatic(RowEndpoint, selectors.EmptyOr(endpoint, "none")),
 				busyCreateRow("creating…"),
@@ -77,7 +77,7 @@ func BuildWorkspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 				return createWorkspaceActions(model)
 			}, nil, focusAffordance("create", false)))
 		}
-		out = view.Named[state.Model](
+		out = retained.Named[state.Model](
 			"workspace-create",
 			NewCollapsibleSection(
 				SectionWorkspace,
@@ -92,7 +92,7 @@ func BuildWorkspaceSection(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 }
 
 // buildWorkspaceNameRow owns the workspace name editing interaction.
-func buildWorkspaceNameRow(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func buildWorkspaceNameRow(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	current := model.CurrentEndpoint
 	isCreate := current == ""
@@ -101,9 +101,9 @@ func buildWorkspaceNameRow(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 		currentValue = selectors.CreateDraftName(model)
 	}
 
-	editing, setEditing := view.UseState(ctx, func() bool { return false })
-	draft, setDraft := view.UseState(ctx, func() string { return currentValue })
-	errMsg, setErrMsg := view.UseState(ctx, func() string { return "" })
+	editing, setEditing := retained.UseState(ctx, func() bool { return false })
+	draft, setDraft := retained.UseState(ctx, func() string { return currentValue })
+	errMsg, setErrMsg := retained.UseState(ctx, func() string { return "" })
 
 	parent := RowEditWithHooks(RowName, selectors.EmptyOr(currentValue, "choose a workspace name"), func() []update.Action {
 		seed := currentValue
@@ -125,7 +125,7 @@ func buildWorkspaceNameRow(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 		setEditing(false)
 		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
 	}, focusAffordance("edit", false))
-	var out view.ViewSpec[state.Model]
+	var out retained.ViewSpec[state.Model]
 	if !editing {
 		if message := selectors.EmptyOr(model.WorkspaceSaveError, ""); message != "" {
 			out = toolkitviews.NewAnchoredDisclosure(parent, RowStatic("", "-> "+message))
@@ -133,7 +133,7 @@ func buildWorkspaceNameRow(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 			out = parent
 		}
 	} else {
-		editor := view.Named[state.Model]("name-editor", InlineEditor(
+		editor := retained.Named[state.Model]("name-editor", InlineEditor(
 			RowName, draft, "choose a workspace name",
 			func(value string) []update.Action {
 				setDraft(value)
@@ -175,7 +175,7 @@ func buildWorkspaceNameRow(ctx *view.Context[state.Model]) view.ViewSpec[state.M
 			},
 		))
 		if errMsg != "" {
-			out = toolkitviews.NewAnchoredDisclosure(editor, view.Named[state.Model]("name-error", RowStatic("", "-> "+errMsg)))
+			out = toolkitviews.NewAnchoredDisclosure(editor, retained.Named[state.Model]("name-error", RowStatic("", "-> "+errMsg)))
 		} else {
 			out = editor
 		}
@@ -219,7 +219,7 @@ func currentCreateName(model state.Model) string {
 	return strings.TrimSpace(selectors.CreateDraftName(model))
 }
 
-func workspaceDeleteRow(endpoint string) view.ViewSpec[state.Model] {
+func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
 	endpoint = strings.TrimSpace(endpoint)
 	return RowActionWithHooks("delete workspace", "", "delete", func() []update.Action {
 		if endpoint == "" {
@@ -229,9 +229,9 @@ func workspaceDeleteRow(endpoint string) view.ViewSpec[state.Model] {
 	}, nil, focusAffordance("delete", false))
 }
 
-func busyCreateRow(value string) view.ViewSpec[state.Model] {
+func busyCreateRow(value string) retained.ViewSpec[state.Model] {
 	value = strings.TrimSpace(value)
-	return view.FromRenderNode[state.Model](toolkitviews.NewAction(6+toolkitviews.RuneLen(value), true, false, func(_ bool, width int) string {
+	return retained.FromRenderNode[state.Model](toolkitviews.NewAction(6+toolkitviews.RuneLen(value), true, false, func(_ bool, width int) string {
 		line := ">   create"
 		if value != "" {
 			line += "            " + value

@@ -1,5 +1,5 @@
 // Package view defines the app-facing view contract and composition primitives.
-package view
+package retained
 
 import (
 	"strconv"

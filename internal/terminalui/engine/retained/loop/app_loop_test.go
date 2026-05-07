@@ -10,22 +10,22 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 type testAction struct{ N int }
 type testEffect struct{ N int }
 
 type renderNodeBuilder interface {
-	BuildRenderNode(*view.Context[struct{}]) layout.RenderNode
+	BuildRenderNode(*retained.Context[struct{}]) layout.RenderNode
 }
 
 type statelessBuilderAdapter struct {
 	builder renderNodeBuilder
 }
 
-func (s statelessBuilderAdapter) BuildView(ctx *view.Context[struct{}]) view.ViewSpec[struct{}] {
-	return view.View[struct{}](func(ctx *view.Context[struct{}]) layout.RenderNode {
+func (s statelessBuilderAdapter) BuildView(ctx *retained.Context[struct{}]) retained.ViewSpec[struct{}] {
+	return retained.View[struct{}](func(ctx *retained.Context[struct{}]) layout.RenderNode {
 		return s.builder.BuildRenderNode(ctx)
 	})
 }
@@ -44,9 +44,9 @@ func (s statelessBuilderAdapter) OnUnmountEffects() []update.Effect {
 	return nil
 }
 
-func asView(builder renderNodeBuilder) view.ViewSpec[struct{}] {
+func asView(builder renderNodeBuilder) retained.ViewSpec[struct{}] {
 	adapter := statelessBuilderAdapter{builder: builder}
-	return view.BuildWithLifecycle[struct{}](adapter.BuildView, adapter.OnMountEffects, adapter.OnUnmountEffects)
+	return retained.BuildWithLifecycle[struct{}](adapter.BuildView, adapter.OnMountEffects, adapter.OnUnmountEffects)
 }
 
 func (e testEffect) Execute(ctx context.Context) []update.Action {
@@ -90,8 +90,8 @@ type childComponent struct {
 	init string
 }
 
-func (c childComponent) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
-	value, _ := view.UseState(ctx, func() string { return c.init })
+func (c childComponent) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
+	value, _ := retained.UseState(ctx, func() string { return c.init })
 	return layout.NewText(value)
 }
 
@@ -99,10 +99,10 @@ type namedRoot struct {
 	order []string
 }
 
-func (r namedRoot) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
+func (r namedRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
 	children := make([]layout.FlowChild, 0, len(r.order))
 	for _, item := range r.order {
-		children = append(children, layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named(item, asView(childComponent{init: item})))})
+		children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named(item, asView(childComponent{init: item})))})
 	}
 	return layout.NewColumn(children...)
 }
@@ -123,7 +123,7 @@ func TestRebuild_PreservesNamedChildStateAcrossRebuilds(t *testing.T) {
 
 type focusRoot struct{}
 
-func (focusRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (focusRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return layout.NewColumn(
 		layout.FlowChild{RenderNode: focusLeaf{id: "first"}},
 		layout.FlowChild{RenderNode: focusLeaf{id: "second"}},
@@ -159,7 +159,7 @@ type scrollFocusRoot struct {
 	rows int
 }
 
-func (r scrollFocusRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (r scrollFocusRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	children := make([]layout.FlowChild, 0, r.rows)
 	for i := 0; i < r.rows; i++ {
 		children = append(children, layout.FlowChild{RenderNode: focusLeaf{id: "row"}})
@@ -171,7 +171,7 @@ type overlayRoot struct {
 	events *[]string
 }
 
-func (r overlayRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (r overlayRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return layout.NewOverlay(
 		overlayLeaf{name: "base", events: r.events},
 		layout.OverlayChild{RenderNode: overlayLeaf{name: "top", events: r.events},
@@ -221,12 +221,12 @@ type lifecycleRoot struct {
 	events *[]string
 }
 
-func (r lifecycleRoot) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
+func (r lifecycleRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
 	children := []layout.FlowChild{}
 	if !r.show {
 		return layout.NewColumn(children...)
 	}
-	children = append(children, layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named("life", asView(lifecycleComponent{events: r.events})))})
+	children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named("life", asView(lifecycleComponent{events: r.events})))})
 	return layout.NewColumn(children...)
 }
 
@@ -234,7 +234,7 @@ type lifecycleComponent struct {
 	events *[]string
 }
 
-func (l lifecycleComponent) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (l lifecycleComponent) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return lifecycleLeaf(l)
 }
 
@@ -315,7 +315,7 @@ type focusEventRoot struct {
 	show   bool
 }
 
-func (r focusEventRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (r focusEventRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	if !r.show {
 		return layout.NewText("hidden")
 	}
@@ -326,14 +326,14 @@ type focusRepairRoot struct {
 	showMiddle bool
 }
 
-func (r focusRepairRoot) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
+func (r focusRepairRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
 	children := []layout.FlowChild{
-		{RenderNode: view.Materialize(ctx, view.Named("first", asView(focusLeafComponent{id: "first"})))},
+		{RenderNode: retained.Materialize(ctx, retained.Named("first", asView(focusLeafComponent{id: "first"})))},
 	}
 	if r.showMiddle {
-		children = append(children, layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named("middle", asView(focusLeafComponent{id: "middle"})))})
+		children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named("middle", asView(focusLeafComponent{id: "middle"})))})
 	}
-	children = append(children, layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named("last", asView(focusLeafComponent{id: "last"})))})
+	children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named("last", asView(focusLeafComponent{id: "last"})))})
 	return layout.NewColumn(children...)
 }
 
@@ -341,7 +341,7 @@ type focusLeafComponent struct {
 	id string
 }
 
-func (c focusLeafComponent) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (c focusLeafComponent) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return focusLeaf(c)
 }
 
@@ -349,12 +349,12 @@ type focusKeyRoot struct {
 	showTarget bool
 }
 
-func (r focusKeyRoot) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
+func (r focusKeyRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
 	children := []layout.FlowChild{
-		{RenderNode: view.Materialize(ctx, view.Named("other", asView(focusLeafComponent{id: "other"})))},
+		{RenderNode: retained.Materialize(ctx, retained.Named("other", asView(focusLeafComponent{id: "other"})))},
 	}
 	if r.showTarget {
-		children = append(children, layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named("target", asView(focusLeafComponent{id: "target"})))})
+		children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named("target", asView(focusLeafComponent{id: "target"})))})
 	}
 	return layout.NewColumn(children...)
 }
@@ -373,16 +373,16 @@ type lifecycleHookRoot struct {
 	show bool
 }
 
-func (r lifecycleHookRoot) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
+func (r lifecycleHookRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
 	if !r.show {
 		return layout.NewColumn()
 	}
-	return layout.NewColumn(layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named("hook", asView(lifecycleHookView{})))})
+	return layout.NewColumn(layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named("hook", asView(lifecycleHookView{})))})
 }
 
 type lifecycleHookView struct{}
 
-func (lifecycleHookView) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (lifecycleHookView) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return layout.NewText("hook")
 }
 
@@ -571,7 +571,7 @@ type focusParentChildRoot struct {
 	showChild bool
 }
 
-func (r focusParentChildRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (r focusParentChildRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return layout.NewColumn(layout.FlowChild{RenderNode: focusParentChildLeaf(r)})
 }
 
@@ -632,7 +632,7 @@ type focusSiblingRepairRoot struct {
 	showDetail bool
 }
 
-func (r focusSiblingRepairRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (r focusSiblingRepairRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return layout.NewColumn(layout.FlowChild{RenderNode: focusSiblingRepairLeaf(r)})
 }
 
@@ -742,7 +742,7 @@ func TestDispatch_FocusKeyAction_DefersUntilKeyAppearsAfterRebuild(t *testing.T)
 	if rt.Focused == nil {
 		t.Fatalf("expected focus after target appears")
 	}
-	_, key, _ := view.NamedNodeMetadata(layout.UnwrapIdentity(rt.Focused.RenderNode))
+	_, key, _ := retained.NamedNodeMetadata(layout.UnwrapIdentity(rt.Focused.RenderNode))
 	if key != "target" {
 		t.Fatalf("focused key=%q want target", key)
 	}
@@ -775,7 +775,7 @@ type bubbleRoot struct {
 	childHandles bool
 }
 
-func (r bubbleRoot) BuildRenderNode(_ *view.Context[struct{}]) layout.RenderNode {
+func (r bubbleRoot) BuildRenderNode(_ *retained.Context[struct{}]) layout.RenderNode {
 	return layout.NewColumn(layout.FlowChild{RenderNode: bubbleParent{
 		calls: r.calls,
 		child: bubbleChild{calls: r.calls, handles: r.childHandles},

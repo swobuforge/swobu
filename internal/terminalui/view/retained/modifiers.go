@@ -1,4 +1,4 @@
-package view
+package retained
 
 // WithPadding applies explicit edge insets.
 func WithPadding[M any](top, right, bottom, left int) func(ViewSpec[M]) ViewSpec[M] {

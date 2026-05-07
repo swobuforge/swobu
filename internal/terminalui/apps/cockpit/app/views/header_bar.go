@@ -6,19 +6,19 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
 // HeaderBar renders the shell title/status row.
-func HeaderBar(left, right string) view.ViewSpec[state.Model] {
-	return view.FromRenderNode[state.Model](toolkitviews.NewAction(headerIntrinsicWidth(left, right), false, false, func(_ bool, width int) string {
+func HeaderBar(left, right string) retained.ViewSpec[state.Model] {
+	return retained.FromRenderNode[state.Model](toolkitviews.NewAction(headerIntrinsicWidth(left, right), false, false, func(_ bool, width int) string {
 		return renderHeaderLine(width, left, right)
 	}, nil, nil))
 }
 
 func headerIntrinsicWidth(left, right string) int {
-	return len([]rune(strings.TrimSpace(left))) + len([]rune(strings.TrimSpace(right))) + 1
+	return toolkitviews.RuneLen(strings.TrimSpace(left)) + toolkitviews.RuneLen(strings.TrimSpace(right)) + 1
 }
 
 func renderHeaderLine(width int, left, right string) string {
@@ -26,7 +26,7 @@ func renderHeaderLine(width int, left, right string) string {
 }
 
 // WorkspaceRail renders the endpoint tab strip.
-func WorkspaceRail(endpoints []string, current string) view.ViewSpec[state.Model] {
+func WorkspaceRail(endpoints []string, current string) retained.ViewSpec[state.Model] {
 	items := append([]string(nil), endpoints...)
 	items = append(items, "+")
 	selected := len(items) - 1
@@ -38,7 +38,7 @@ func WorkspaceRail(endpoints []string, current string) view.ViewSpec[state.Model
 		}
 	}
 	endpointNames := endpoints
-	return view.FromRenderNode[state.Model](toolkitviews.NewChoiceListWithFocusable(items, selected, toolkitviews.ChoiceListAxisHorizontal, false, func(label string, selected bool) string {
+	return retained.FromRenderNode[state.Model](toolkitviews.NewChoiceListWithFocusable(items, selected, toolkitviews.ChoiceListAxisHorizontal, false, func(label string, selected bool) string {
 		label = strings.TrimSpace(label)
 		if selected {
 			return "[› " + label + "]"
@@ -54,7 +54,7 @@ func WorkspaceRail(endpoints []string, current string) view.ViewSpec[state.Model
 }
 
 // FooterBar renders the operator hint line.
-func FooterBar(hints string) view.ViewSpec[state.Model] {
+func FooterBar(hints string) retained.ViewSpec[state.Model] {
 	line := strings.TrimSpace(hints)
 	if line == "" {
 		line = "tab/shift+tab workspace   up/down move   enter act   esc back"
@@ -64,16 +64,16 @@ func FooterBar(hints string) view.ViewSpec[state.Model] {
 
 // --- SectionHeader ---
 
-func NewSectionHeader[M any](title string) view.ViewSpec[M] {
+func NewSectionHeader[M any](title string) retained.ViewSpec[M] {
 	text := strings.Repeat(" ", max(0, InsetSection)) + strings.TrimSpace(title) + " ▾"
-	return view.FromRenderNode[M](toolkitviews.NewAction(toolkitviews.RuneLen(text), false, false, func(_ bool, width int) string {
+	return retained.FromRenderNode[M](toolkitviews.NewAction(toolkitviews.RuneLen(text), false, false, func(_ bool, width int) string {
 		return toolkitviews.PadRight(toolkitviews.TrimToWidth(text, width), width)
 	}, nil, nil))
 }
 
 // HorizontalRule renders one full-width separator line.
-func HorizontalRule() view.ViewSpec[state.Model] {
-	return view.FromRenderNode[state.Model](toolkitviews.NewAction(1, false, false, func(_ bool, width int) string {
+func HorizontalRule() retained.ViewSpec[state.Model] {
+	return retained.FromRenderNode[state.Model](toolkitviews.NewAction(1, false, false, func(_ bool, width int) string {
 		if width <= 0 {
 			return ""
 		}

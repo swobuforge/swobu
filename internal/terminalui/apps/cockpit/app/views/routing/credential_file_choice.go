@@ -10,10 +10,10 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
-func credentialFileRow(value string, onActivate func() []update.Action, onCancel func() []update.Action) view.ViewSpec[state.Model] {
+func credentialFileRow(value string, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 	summary := strings.TrimSpace(value)
 	if summary == "" {
 		summary = "required"

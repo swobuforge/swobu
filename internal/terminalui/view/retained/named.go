@@ -1,4 +1,4 @@
-package view
+package retained
 
 import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"

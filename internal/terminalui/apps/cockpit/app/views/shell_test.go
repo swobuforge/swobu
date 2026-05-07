@@ -7,14 +7,14 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 func TestHeaderBar_MeasureTracksSharedPresentation(t *testing.T) {
 	t.Parallel()
 
 	w := HeaderBar("ready", "127.0.0.1")
-	layoutNode := view.Materialize(&view.Context[state.Model]{Model: func() state.Model { return state.Model{} }}, w)
+	layoutNode := retained.Materialize(&retained.Context[state.Model]{Model: func() state.Model { return state.Model{} }}, w)
 	size := layoutNode.Measure(geom.Unbounded(), &layout.LayoutContext{})
 	want := headerIntrinsicWidth("ready", "127.0.0.1")
 
@@ -30,7 +30,7 @@ func TestHeaderBar_PaintUsesSharedPresentation(t *testing.T) {
 	t.Parallel()
 
 	w := HeaderBar("ready", "127.0.0.1")
-	layoutNode := view.Materialize(&view.Context[state.Model]{Model: func() state.Model { return state.Model{} }}, w)
+	layoutNode := retained.Materialize(&retained.Context[state.Model]{Model: func() state.Model { return state.Model{} }}, w)
 	node := &layout.LayoutNode{
 		ID:         1,
 		BorderRect: geom.Rect{W: 40, H: 1},

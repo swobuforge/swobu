@@ -21,7 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 func TestRunner_RendersCockpitAndHandlesTabAndEscStepBackThenQuit(t *testing.T) {
@@ -126,14 +126,14 @@ type bootEffectTrigger struct{}
 type bootRoot struct{}
 
 func asView(builder interface {
-	BuildRenderNode(*view.Context[struct{}]) layout.RenderNode
-}) view.ViewSpec[struct{}] {
-	return view.View[struct{}](func(ctx *view.Context[struct{}]) layout.RenderNode {
+	BuildRenderNode(*retained.Context[struct{}]) layout.RenderNode
+}) retained.ViewSpec[struct{}] {
+	return retained.View[struct{}](func(ctx *retained.Context[struct{}]) layout.RenderNode {
 		return builder.BuildRenderNode(ctx)
 	})
 }
 
-func (bootRoot) BuildRenderNode(*view.Context[struct{}]) layout.RenderNode {
+func (bootRoot) BuildRenderNode(*retained.Context[struct{}]) layout.RenderNode {
 	return bootLeaf{}
 }
 

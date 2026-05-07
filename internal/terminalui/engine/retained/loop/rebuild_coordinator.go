@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 func (loop *AppLoop[M]) Invalidate() {
@@ -19,7 +19,7 @@ func (loop *AppLoop[M]) NeedsRebuild() bool {
 
 // Rebuild reconciles the typed root view into a retained structural tree
 // and then resolves layout from the given terminal bounds.
-func (loop *AppLoop[M]) Rebuild(root view.ViewSpec[M], bounds geom.Rect) {
+func (loop *AppLoop[M]) Rebuild(root retained.ViewSpec[M], bounds geom.Rect) {
 	effects := loop.RebuildPending(root, bounds)
 	for _, eff := range effects {
 		loop.executeEffect(eff)
@@ -28,7 +28,7 @@ func (loop *AppLoop[M]) Rebuild(root view.ViewSpec[M], bounds geom.Rect) {
 
 // RebuildPending reconciles and lays out the retained tree, and returns
 // lifecycle effects from mount/unmount hooks.
-func (loop *AppLoop[M]) RebuildPending(root view.ViewSpec[M], bounds geom.Rect) []update.Effect {
+func (loop *AppLoop[M]) RebuildPending(root retained.ViewSpec[M], bounds geom.Rect) []update.Effect {
 	if !loop.invalidated && loop.Tree != nil {
 		return nil
 	}

@@ -1,21 +1,18 @@
-package view
+package retained
 
 import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	retainedlayout "github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
+	viewlayout "github.com/swobuforge/swobu/internal/terminalui/view/layout"
 )
 
-type Axis uint8
+type Axis = viewlayout.Axis
+type FlexProps = viewlayout.FlexProps
 
 const (
-	AxisColumn Axis = iota
-	AxisRow
+	AxisColumn = viewlayout.AxisColumn
+	AxisRow    = viewlayout.AxisRow
 )
-
-type FlexProps struct {
-	Axis Axis
-	Gap  int
-}
 
 // Flex composes children along one axis with deterministic spacing.
 func Flex[M any](_ *Context[M], props FlexProps, kids ...ViewSpec[M]) ViewSpec[M] {
@@ -29,7 +26,7 @@ func VStack[M any](ctx *Context[M], kids ...ViewSpec[M]) ViewSpec[M] {
 
 // VStackGap composes children vertically with explicit gap.
 func VStackGap[M any](ctx *Context[M], gap int, kids ...ViewSpec[M]) ViewSpec[M] {
-	return Flex(ctx, FlexProps{Axis: AxisColumn, Gap: gap}, kids...)
+	return Flex(ctx, FlexProps{Axis: AxisColumn, Gap: viewlayout.Cell(gap)}, kids...)
 }
 
 // HStack composes children horizontally.
@@ -39,7 +36,7 @@ func HStack[M any](ctx *Context[M], kids ...ViewSpec[M]) ViewSpec[M] {
 
 // HStackGap composes children horizontally with explicit gap.
 func HStackGap[M any](ctx *Context[M], gap int, kids ...ViewSpec[M]) ViewSpec[M] {
-	return Flex(ctx, FlexProps{Axis: AxisRow, Gap: gap}, kids...)
+	return Flex(ctx, FlexProps{Axis: AxisRow, Gap: viewlayout.Cell(gap)}, kids...)
 }
 
 type flexView[M any] struct {
@@ -48,22 +45,22 @@ type flexView[M any] struct {
 }
 
 func (f flexView[M]) BuildRenderNode(ctx *Context[M]) RenderNode {
-	nodes := make([]layout.FlowChild, 0, len(f.kids))
+	nodes := make([]retainedlayout.FlowChild, 0, len(f.kids))
 	for _, w := range f.kids {
 		el := w.BuildRenderNode(ctx)
 		if el == nil {
 			continue
 		}
-		nodes = append(nodes, layout.FlowChild{RenderNode: el, Grow: inferGrow(el)})
+		nodes = append(nodes, retainedlayout.FlowChild{RenderNode: el, Grow: inferGrow(el)})
 	}
 	switch f.props.Axis {
 	case AxisRow:
-		row := layout.NewRow(nodes...)
-		row.Gap = max(0, f.props.Gap)
+		row := retainedlayout.NewRow(nodes...)
+		row.Gap = max(0, int(f.props.Gap))
 		return row
 	default:
-		col := layout.NewColumn(nodes...)
-		col.Gap = max(0, f.props.Gap)
+		col := retainedlayout.NewColumn(nodes...)
+		col.Gap = max(0, int(f.props.Gap))
 		return col
 	}
 }
@@ -94,7 +91,7 @@ func (p paddedView[M]) BuildRenderNode(ctx *Context[M]) RenderNode {
 	if el == nil {
 		return nil
 	}
-	box := layout.NewBox(el)
+	box := retainedlayout.NewBox(el)
 	box.Padding = geom.Insets{Top: p.top, Right: p.right, Bottom: p.bottom, Left: p.left}
 	return box
 }
@@ -121,31 +118,45 @@ func inferGrow(el RenderNode) int {
 	return 0
 }
 
-type ScrollAxis uint8
+type ScrollAxis = viewlayout.ScrollAxis
+type ScrollProps = viewlayout.ScrollProps
 
 const (
-	ScrollAxisY ScrollAxis = iota
+	ScrollAxisY = viewlayout.ScrollAxisY
 )
 
-type ScrollProps struct {
-	Axis   ScrollAxis
-	Offset int
-}
+type Placement = viewlayout.Placement
+type PlacementRef = viewlayout.PlacementRef
+type Anchor = viewlayout.Anchor
+type Point = viewlayout.Point
+
+const (
+	RefSlot           = viewlayout.RefSlot
+	AnchorTopLeft     = viewlayout.AnchorTopLeft
+	AnchorTop         = viewlayout.AnchorTop
+	AnchorTopRight    = viewlayout.AnchorTopRight
+	AnchorLeft        = viewlayout.AnchorLeft
+	AnchorCenter      = viewlayout.AnchorCenter
+	AnchorRight       = viewlayout.AnchorRight
+	AnchorBottomLeft  = viewlayout.AnchorBottomLeft
+	AnchorBottom      = viewlayout.AnchorBottom
+	AnchorBottomRight = viewlayout.AnchorBottomRight
+)
 
 // Scroll applies viewport semantics. v0 supports vertical scrolling.
 func Scroll[M any](child ViewSpec[M], props ScrollProps) ViewSpec[M] {
 	switch props.Axis {
 	case ScrollAxisY:
-		return ScrollY(child, props.Offset)
+		return ScrollY(child, int(props.Offset))
 	default:
-		return ScrollY(child, props.Offset)
+		return ScrollY(child, int(props.Offset))
 	}
 }
 
 type StackChild[M any] struct {
 	Child     ViewSpec[M]
-	Placement layout.Placement
-	Z         int
+	Placement Placement
+	Z         viewlayout.Cell
 }
 
 // Stack overlays children relative to a base child.
@@ -163,19 +174,27 @@ func (s stackView[M]) BuildRenderNode(ctx *Context[M]) RenderNode {
 	if baseEl == nil {
 		return nil
 	}
-	items := make([]layout.OverlayChild, 0, len(s.extras))
+	items := make([]retainedlayout.OverlayChild, 0, len(s.extras))
 	for _, extra := range s.extras {
 		childEl := extra.Child.BuildRenderNode(ctx)
 		if childEl == nil {
 			continue
 		}
-		items = append(items, layout.OverlayChild{
+		items = append(items, retainedlayout.OverlayChild{
 			RenderNode: childEl,
-			Placement:  extra.Placement,
-			Z:          extra.Z,
+			Placement:  toRetainedPlacement(extra.Placement),
+			Z:          int(extra.Z),
 		})
 	}
-	return layout.NewOverlay(baseEl, items...)
+	return retainedlayout.NewOverlay(baseEl, items...)
+}
+
+func toRetainedPlacement(p viewlayout.Placement) retainedlayout.Placement {
+	return retainedlayout.Placement{
+		Ref:    retainedlayout.PlacementRef(p.Ref),
+		Anchor: retainedlayout.Anchor(p.Anchor),
+		Offset: geom.Point{X: int(p.Offset.X), Y: int(p.Offset.Y)},
+	}
 }
 
 func max(a, b int) int {

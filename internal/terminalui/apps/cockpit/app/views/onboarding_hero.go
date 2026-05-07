@@ -5,13 +5,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // FirstRunHero renders first-run setup framing lines.
-func FirstRunHero(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func FirstRunHero(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	children := []view.ViewSpec[state.Model]{
+	children := []retained.ViewSpec[state.Model]{
 		headerTextLine("unbundle your ai stack"),
 	}
 	if strings.TrimSpace(selectors.CreateDraftName(model)) == "" {
@@ -20,14 +20,14 @@ func FirstRunHero(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
 		// Keep hero block height stable while name edits stream to avoid focus drift.
 		children = append(children, StaticTextLine[state.Model](""))
 	}
-	return view.VStack(ctx, children...)
+	return retained.VStack(ctx, children...)
 }
 
-func headerTextLine(text string) view.ViewSpec[state.Model] {
+func headerTextLine(text string) retained.ViewSpec[state.Model] {
 	return IndentLeft[state.Model](StaticTextLine[state.Model](text), InsetSection)
 }
 
 // EmptyLine renders one blank spacer line.
-func EmptyLine() view.ViewSpec[state.Model] {
+func EmptyLine() retained.ViewSpec[state.Model] {
 	return StaticTextLine[state.Model]("")
 }

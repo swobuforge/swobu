@@ -29,7 +29,7 @@ func emitVersionNoticeIfConfigured(out io.Writer) versionNoticeDecision {
 	if !decision.show {
 		return decision
 	}
-	uicli.NewStartupTranscript(out).Emit(uicli.StartupEvent{
+	uicli.NewStartupConsolePresenter(out).Emit(uicli.StartupEvent{
 		Kind: uicli.StartupEventVersionNotice,
 		Text: strings.Join(decision.rows, "\n"),
 	})

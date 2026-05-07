@@ -1,4 +1,4 @@
-// Clients section view.
+// Clients section retained.
 package views
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -27,7 +27,7 @@ type clientsSectionState struct {
 	setPayloadScrollOffset func(int)
 }
 
-func BuildClientsSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func BuildClientsSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	if spec, ok := maybeStaticClientsSection(ctx, model); ok {
 		return spec
@@ -40,8 +40,8 @@ func BuildClientsSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Mod
 
 	clientRow := buildClientRow(profiles, summary, local)
 	actions := selectedClientActions(selected, baseURL)
-	rows := []view.ViewSpec[state.Model]{
-		view.Named[state.Model]("client", clientRow),
+	rows := []retained.ViewSpec[state.Model]{
+		retained.Named[state.Model]("client", clientRow),
 	}
 	rows = append(rows, buildActionRows(model, actions, baseURL, selected, local)...)
 
@@ -54,7 +54,7 @@ func BuildClientsSection(ctx *view.Context[state.Model]) view.ViewSpec[state.Mod
 	)
 }
 
-func maybeStaticClientsSection(ctx *view.Context[state.Model], model state.Model) (view.ViewSpec[state.Model], bool) {
+func maybeStaticClientsSection(ctx *retained.Context[state.Model], model state.Model) (retained.ViewSpec[state.Model], bool) {
 	if model.CurrentEndpoint == "" {
 		if model.InteractionMode == state.InteractionModeBusySave {
 			return staticSectionSummary(ctx, SectionClients, "not set"), true
@@ -72,12 +72,12 @@ func maybeStaticClientsSection(ctx *view.Context[state.Model], model state.Model
 	return nil, false
 }
 
-func bindClientsSectionState(ctx *view.Context[state.Model]) clientsSectionState {
-	selectedClientID, setSelectedClientID := view.UseState(ctx, func() string { return "" })
-	clientPickerOpen, setClientPickerOpen := view.UseState(ctx, func() bool { return false })
-	clientPickerCursor, setClientPickerCursor := view.UseState(ctx, func() int { return 0 })
-	expandedActionID, setExpandedActionID := view.UseState(ctx, func() string { return "" })
-	payloadScrollOffset, setPayloadScrollOffset := view.UseState(ctx, func() int { return 0 })
+func bindClientsSectionState(ctx *retained.Context[state.Model]) clientsSectionState {
+	selectedClientID, setSelectedClientID := retained.UseState(ctx, func() string { return "" })
+	clientPickerOpen, setClientPickerOpen := retained.UseState(ctx, func() bool { return false })
+	clientPickerCursor, setClientPickerCursor := retained.UseState(ctx, func() int { return 0 })
+	expandedActionID, setExpandedActionID := retained.UseState(ctx, func() string { return "" })
+	payloadScrollOffset, setPayloadScrollOffset := retained.UseState(ctx, func() int { return 0 })
 	return clientsSectionState{
 		selectedClientID:       selectedClientID,
 		setSelectedClientID:    setSelectedClientID,
@@ -124,7 +124,7 @@ func selectedClientActions(selected clientprofile.Profile, baseURL string) []cli
 	return configured
 }
 
-func buildClientRow(profiles []clientprofile.Profile, summary string, local clientsSectionState) view.ViewSpec[state.Model] {
+func buildClientRow(profiles []clientprofile.Profile, summary string, local clientsSectionState) retained.ViewSpec[state.Model] {
 	clientRow := RowChoiceWithHooks("client", summary, func() []update.Action {
 		return toggleClientPicker(local)
 	}, func() []update.Action {
@@ -134,12 +134,12 @@ func buildClientRow(profiles []clientprofile.Profile, summary string, local clie
 		return clientRow
 	}
 	options := buildClientPickerRows(profiles, local)
-	optionStack := view.VStack[state.Model](nil, options...)
-	optionViewport := view.WithConstrain[state.Model](view.ConstrainSpec{
+	optionStack := retained.VStack[state.Model](nil, options...)
+	optionViewport := retained.WithConstrain[state.Model](retained.ConstrainSpec{
 		GrowW: true,
 		MaxW:  ContentMaxWidth,
 		MaxH:  ListMaxHeight,
-	})(view.WithScrollY[state.Model](0)(optionStack))
+	})(retained.WithScrollY[state.Model](0)(optionStack))
 	disclosure := toolkitviews.NewAnchoredDisclosure(clientRow, optionViewport)
 	return toolkitviews.KeyScope(disclosure, clientPickerKeyHandler(profiles, local))
 }
@@ -165,17 +165,17 @@ func closeClientPicker(local clientsSectionState) []update.Action {
 	return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
 }
 
-func buildClientPickerRows(profiles []clientprofile.Profile, local clientsSectionState) []view.ViewSpec[state.Model] {
-	pickerRows := make([]view.ViewSpec[state.Model], 0, len(profiles))
+func buildClientPickerRows(profiles []clientprofile.Profile, local clientsSectionState) []retained.ViewSpec[state.Model] {
+	pickerRows := make([]retained.ViewSpec[state.Model], 0, len(profiles))
 	for i, profile := range profiles {
 		pickerRows = append(pickerRows, buildClientPickerRow(profile, i, local))
 	}
 	return pickerRows
 }
 
-func buildClientPickerRow(profile clientprofile.Profile, index int, local clientsSectionState) view.ViewSpec[state.Model] {
+func buildClientPickerRow(profile clientprofile.Profile, index int, local clientsSectionState) retained.ViewSpec[state.Model] {
 	choice := profile
-	return view.Named[state.Model](clientPickerFocusKey(index), toolkitviews.ListItemRowWithHooks[state.Model](
+	return retained.Named[state.Model](clientPickerFocusKey(index), toolkitviews.ListItemRowWithHooks[state.Model](
 		toolkitviews.InsetLabel(choice.Identity().Label, 4),
 		false,
 		false,
@@ -202,8 +202,8 @@ func buildClientPickerRow(profile clientprofile.Profile, index int, local client
 	))
 }
 
-func clientPickerKeyHandler(profiles []clientprofile.Profile, local clientsSectionState) func(*view.Context[state.Model], interaction.Event) (bool, []update.Action) {
-	return func(_ *view.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
+func clientPickerKeyHandler(profiles []clientprofile.Profile, local clientsSectionState) func(*retained.Context[state.Model], interaction.Event) (bool, []update.Action) {
+	return func(_ *retained.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
 		if !local.clientPickerOpen || ev.Kind != interaction.EventKey || len(profiles) == 0 {
 			return false, nil
 		}
@@ -226,13 +226,13 @@ func moveClientPickerCursor(local clientsSectionState, delta, optionCount int) (
 	return true, []update.Action{interaction.FocusKeyAction{Key: clientPickerFocusKey(next)}}
 }
 
-func buildActionRows(model state.Model, actions []clientprofile.Action, baseURL string, selected clientprofile.Profile, local clientsSectionState) []view.ViewSpec[state.Model] {
-	rows := make([]view.ViewSpec[state.Model], 0, len(actions))
+func buildActionRows(model state.Model, actions []clientprofile.Action, baseURL string, selected clientprofile.Profile, local clientsSectionState) []retained.ViewSpec[state.Model] {
+	rows := make([]retained.ViewSpec[state.Model], 0, len(actions))
 	seen := map[string]int{}
 	for index, action := range actions {
 		rowKey := actionRowFocusKey(action, index, seen)
 		row := buildActionRow(model, action, baseURL, selected, local)
-		rows = append(rows, view.Named[state.Model](rowKey, row))
+		rows = append(rows, retained.Named[state.Model](rowKey, row))
 	}
 	return rows
 }
@@ -250,7 +250,7 @@ func actionRowFocusKey(action clientprofile.Action, index int, seen map[string]i
 	return base + "/" + strconv.Itoa(index)
 }
 
-func buildActionRow(model state.Model, action clientprofile.Action, baseURL string, selected clientprofile.Profile, local clientsSectionState) view.ViewSpec[state.Model] {
+func buildActionRow(model state.Model, action clientprofile.Action, baseURL string, selected clientprofile.Profile, local clientsSectionState) retained.ViewSpec[state.Model] {
 	const payloadMaxHeight = 8
 	actionID := actionStableID(action)
 	row := RowActionWithHooks(action.RowLabel(), action.ActionSummary(), action.ActionVerb(), func() []update.Action {

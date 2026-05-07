@@ -4,22 +4,22 @@ package views
 import (
 	"fmt"
 
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // Section composes a titled column of row views.
-func Section[M any](title string, rows ...view.ViewSpec[M]) view.ViewSpec[M] {
-	return view.Build[M](func(ctx *view.Context[M]) view.ViewSpec[M] {
-		children := make([]view.ViewSpec[M], 0, len(rows)+1)
-		children = append(children, view.Named[M]("header", sectionHeader[M](title)))
+func Section[M any](title string, rows ...retained.ViewSpec[M]) retained.ViewSpec[M] {
+	return retained.Build[M](func(ctx *retained.Context[M]) retained.ViewSpec[M] {
+		children := make([]retained.ViewSpec[M], 0, len(rows)+1)
+		children = append(children, retained.Named[M]("header", sectionHeader[M](title)))
 		for i, row := range rows {
 			if row == nil {
 				continue
 			}
-			children = append(children, view.Named[M](fmt.Sprintf("row/%d", i), row))
+			children = append(children, retained.Named[M](fmt.Sprintf("row/%d", i), row))
 		}
-		return view.VStack(ctx, children...)
+		return retained.VStack(ctx, children...)
 	})
 }
 
-func sectionHeader[M any](title string) view.ViewSpec[M] { return NewSectionHeader[M](title) }
+func sectionHeader[M any](title string) retained.ViewSpec[M] { return NewSectionHeader[M](title) }

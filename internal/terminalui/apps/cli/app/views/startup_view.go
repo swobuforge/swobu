@@ -4,30 +4,21 @@ import (
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cli/app/state"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/model"
+	"github.com/swobuforge/swobu/internal/terminalui/view"
 )
 
-func Build(startup state.StartupState) model.Node {
-	children := make([]model.Node, 0, len(startup.Sections)+2)
+func Build(startup state.StartupState) view.ViewSpec {
+	children := make([]view.ViewSpec, 0, len(startup.Sections)+2)
 	for i, section := range startup.Sections {
-		var node model.Node
+		var node view.ViewSpec
 		switch section.Kind {
 		case "splash":
 			node = SplashBlock(section.Rows)
-		case "status":
-			message := ""
-			if len(section.Rows) > 0 {
-				message = section.Rows[0]
-			}
-			node = StatusLine(section.Phase, message)
 		default:
 			node = MessageBlock(section.Title, section.Rows, 72)
 		}
 		node.Key = fmt.Sprintf("startup-section-%d", i)
 		children = append(children, node)
 	}
-	if startup.Status != "" {
-		children = append(children, Status(startup.Status))
-	}
-	return model.Node{Kind: "startup", Children: children}
+	return view.FlowColumn("startup", 0, children...)
 }

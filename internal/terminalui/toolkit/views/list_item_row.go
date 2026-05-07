@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 func InsetLabel(label string, cols int) string {
@@ -22,7 +22,7 @@ func ListItemRow[M any](
 	allowSpace bool,
 	onActivate func() []update.Action,
 	onCancel func() []update.Action,
-) view.ViewSpec[M] {
+) retained.ViewSpec[M] {
 	return ListItemRowWithHooks[M](label, selected, showSelected, allowSpace, onActivate, onCancel, nil)
 }
 
@@ -35,7 +35,7 @@ func ListItemRowWithHooks[M any](
 	onActivate func() []update.Action,
 	onCancel func() []update.Action,
 	onFocus func() []update.Action,
-) view.ViewSpec[M] {
+) retained.ViewSpec[M] {
 	return newListItemRowViewSpec(listItemRowViewSpec[M]{
 		label:        label,
 		selected:     selected,
@@ -57,7 +57,7 @@ type listItemRowViewSpec[M any] struct {
 	onFocus      func() []update.Action
 }
 
-func listItemRowNode[M any](w listItemRowViewSpec[M]) view.RenderNode {
+func listItemRowNode[M any](w listItemRowViewSpec[M]) retained.RenderNode {
 	intrinsic := runeLen(w.label) + 2 + runeLen("   selected")
 	el := NewAction(intrinsic, true, w.allowSpace, func(focused bool, width int) string {
 		marker := " "
@@ -80,8 +80,8 @@ func listItemRowNode[M any](w listItemRowViewSpec[M]) view.RenderNode {
 	return el
 }
 
-func newListItemRowViewSpec[M any](w listItemRowViewSpec[M]) view.ViewSpec[M] {
-	return view.View[M](func(_ *view.Context[M]) view.RenderNode {
+func newListItemRowViewSpec[M any](w listItemRowViewSpec[M]) retained.ViewSpec[M] {
+	return retained.View[M](func(_ *retained.Context[M]) retained.RenderNode {
 		return listItemRowNode(w)
 	})
 }

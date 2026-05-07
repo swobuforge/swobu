@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 type childComponent struct {
@@ -15,15 +15,15 @@ type childComponent struct {
 }
 
 func asView(builder interface {
-	BuildRenderNode(*view.Context[struct{}]) layout.RenderNode
-}) view.ViewSpec[struct{}] {
-	return view.View[struct{}](func(ctx *view.Context[struct{}]) layout.RenderNode {
+	BuildRenderNode(*retained.Context[struct{}]) layout.RenderNode
+}) retained.ViewSpec[struct{}] {
+	return retained.View[struct{}](func(ctx *retained.Context[struct{}]) layout.RenderNode {
 		return builder.BuildRenderNode(ctx)
 	})
 }
 
-func (c childComponent) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
-	value, _ := view.UseState(ctx, func() string { return c.init })
+func (c childComponent) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
+	value, _ := retained.UseState(ctx, func() string { return c.init })
 	return layout.NewText(value)
 }
 
@@ -31,10 +31,10 @@ type namedListRoot struct {
 	order []string
 }
 
-func (r namedListRoot) BuildRenderNode(ctx *view.Context[struct{}]) layout.RenderNode {
+func (r namedListRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
 	children := make([]layout.FlowChild, 0, len(r.order))
 	for _, item := range r.order {
-		children = append(children, layout.FlowChild{RenderNode: view.Materialize(ctx, view.Named(item, asView(childComponent{init: item})))})
+		children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named(item, asView(childComponent{init: item})))})
 	}
 	return layout.NewColumn(children...)
 }

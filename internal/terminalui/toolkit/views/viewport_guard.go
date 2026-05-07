@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // ViewportGuardRenderNode swaps the cockpit body for a minimum-size message when the
@@ -27,9 +27,9 @@ func NewViewportGuard(minW, minH int, child layout.RenderNode) *ViewportGuardRen
 	}
 }
 
-func ViewportGuard[M any](minW, minH int, child view.ViewSpec[M]) view.ViewSpec[M] {
-	return view.View[M](func(ctx *view.Context[M]) view.RenderNode {
-		return NewViewportGuard(minW, minH, view.Materialize(ctx, child))
+func ViewportGuard[M any](minW, minH int, child retained.ViewSpec[M]) retained.ViewSpec[M] {
+	return retained.View[M](func(ctx *retained.Context[M]) retained.RenderNode {
+		return NewViewportGuard(minW, minH, retained.Materialize(ctx, child))
 	})
 }
 

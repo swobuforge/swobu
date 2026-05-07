@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 type providerTargetAliasRowSpec struct {
@@ -15,13 +15,13 @@ type providerTargetAliasRowSpec struct {
 	CreateMode     bool
 }
 
-func providerTargetAliasRow(spec providerTargetAliasRowSpec) view.ViewSpec[state.Model] {
-	return view.Build[state.Model](func(ctx *view.Context[state.Model]) view.ViewSpec[state.Model] {
+func providerTargetAliasRow(spec providerTargetAliasRowSpec) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderTargetAliasRow(ctx, spec)
 	})
 }
 
-func buildProviderTargetAliasRow(ctx *view.Context[state.Model], spec providerTargetAliasRowSpec) view.ViewSpec[state.Model] {
+func buildProviderTargetAliasRow(ctx *retained.Context[state.Model], spec providerTargetAliasRowSpec) retained.ViewSpec[state.Model] {
 	pc := selectedProvider(ctx.Model(), spec.ProviderConfig, spec.CreateMode)
 	if pc == nil {
 		return nil

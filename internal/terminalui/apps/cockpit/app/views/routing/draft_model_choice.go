@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/view"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 )
 
@@ -94,7 +94,7 @@ type draftModelRowSpec struct {
 	FocusKey       string
 }
 
-func buildDraftModelChoiceRow(ctx *view.Context[state.Model], spec draftModelRowSpec) view.ViewSpec[state.Model] {
+func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftModelRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	draft := spec.Binding.Snapshot(model)
 	provider := strings.TrimSpace(draft.ProviderSpec)
