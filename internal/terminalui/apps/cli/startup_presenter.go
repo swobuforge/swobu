@@ -31,6 +31,10 @@ type StartupEvent = appstate.Event
 
 type StartupState = appstate.StartupState
 
+// StartupTranscript is the legacy startup presenter noun kept as a type alias
+// for compatibility with external integration tests and callers.
+type StartupTranscript = StartupConsolePresenter
+
 // StartupConsolePresenter is a thin runtime adapter over cli app/state + app/views.
 type StartupConsolePresenter struct {
 	renderer *output.Renderer
@@ -42,6 +46,12 @@ func NewStartupConsolePresenter(out io.Writer) *StartupConsolePresenter {
 		renderer: output.NewRenderer(out, appstate.Initial().Mode),
 		state:    appstate.Initial(),
 	}
+}
+
+// NewStartupTranscript keeps the legacy constructor surface while delegating to
+// the canonical StartupConsolePresenter constructor.
+func NewStartupTranscript(out io.Writer) *StartupConsolePresenter {
+	return NewStartupConsolePresenter(out)
 }
 
 func (t *StartupConsolePresenter) Emit(event StartupEvent) {
