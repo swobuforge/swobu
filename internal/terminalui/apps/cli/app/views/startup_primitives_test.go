@@ -32,4 +32,3 @@ func TestSplashBlock_ProjectsRows(t *testing.T) {
 		t.Fatalf("unexpected lines=%#v", lines)
 	}
 }
-

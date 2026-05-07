@@ -11,4 +11,3 @@ type FlowSpec struct {
 	Axis FlowAxis
 	Gap  int
 }
-

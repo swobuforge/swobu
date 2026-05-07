@@ -3,8 +3,8 @@ package views
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // StaticTextLine renders one non-focusable line.

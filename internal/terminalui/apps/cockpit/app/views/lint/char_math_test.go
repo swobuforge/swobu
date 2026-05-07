@@ -123,4 +123,3 @@ func cliViewsRoot(t *testing.T) string {
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../../../../apps/cli/app/views"))
 }
-

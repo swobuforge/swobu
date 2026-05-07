@@ -42,4 +42,3 @@ func MessageBlock(title string, rows []string, wrapWidth int) view.ViewSpec {
 		},
 	})
 }
-

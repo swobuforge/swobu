@@ -9,8 +9,8 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 // BuildRunOnCreateRow shows the run-on summary in create mode with disclosure when no provider is configured.

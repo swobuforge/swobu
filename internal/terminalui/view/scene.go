@@ -11,4 +11,3 @@ func Project(root ViewSpec) Scene {
 		Ephemeral: EphemeralLines(root),
 	}
 }
-
