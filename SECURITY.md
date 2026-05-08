@@ -2,13 +2,11 @@
 
 ## Reporting a vulnerability
 
-Swobu is local-first, but security still matters at every boundary: protocol shape, streaming, auth, and error handling.
-
 Do not report vulnerabilities in public issues.
 
-Email: security@swobu.com
+Report privately: `security@swobu.com`
 
-Include:
+Include the following:
 
 - affected version or commit
 - impact

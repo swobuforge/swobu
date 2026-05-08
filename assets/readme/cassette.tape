@@ -1,4 +1,4 @@
-Output assets/demo.gif
+Output assets/readme/swobu-cli-demo.gif
 
 Set Shell zsh
 Set Width 960

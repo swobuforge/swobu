@@ -1,6 +1,6 @@
 # Swobu
 
-**Keep your AI client. Choose your backend.**
+![Swobu README hero](./assets/readme/swobu-readme-hero.png)
 
 Swobu is a local AI compatibility layer that unbundles AI clients from LLM backends.
 
@@ -40,7 +40,7 @@ Keep the client. Swap the backend. Control the boundary.
 
 ## Demo
 
-![Swobu first demo](./assets/demo.gif)
+![Swobu first demo](./assets/readme/swobu-cli-demo.gif)
 
 ---
 
