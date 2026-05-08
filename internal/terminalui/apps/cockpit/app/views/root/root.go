@@ -53,7 +53,6 @@ func rootOnMountEffects() []update.Effect {
 	return []update.Effect{
 		stateeffect.RefreshDaemonStatusEffect{},
 		stateeffect.RefreshEndpointsEffect{},
-		stateeffect.RefreshCatalogEffect{},
 		stateeffect.RefreshStatusProjectionEffect{},
 		state.ScheduleDaemonRefreshEffect{},
 	}

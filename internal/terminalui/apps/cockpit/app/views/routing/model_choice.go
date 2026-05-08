@@ -15,7 +15,6 @@ import (
 
 // providerModelChoiceRowSpec configures one provider-model row.
 type providerModelChoiceRowSpec struct {
-	Catalog        *state.CatalogEntry
 	ProviderConfig *state.ProviderConfigSnapshot
 	EndpointName   string
 	CreateMode     bool
@@ -38,12 +37,22 @@ func buildProviderModelChoiceRow(ctx *retained.Context[state.Model], spec provid
 }
 
 func providerModelCatalogChoicesAvailable(w providerModelChoiceRowSpec) bool {
-	return !w.CreateMode && w.Catalog != nil && len(w.Catalog.ModelIDs) > 0
+	if w.CreateMode || w.ProviderConfig == nil {
+		return false
+	}
+	spec := strings.TrimSpace(w.ProviderConfig.ProviderSpec)
+	if strings.EqualFold(spec, "custom") {
+		return false
+	}
+	return state.ProviderSupportsCatalog(spec)
 }
 
 func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	current := modelSummary(model, w.Catalog)
+	current := selectedModelID(model, w.ProviderConfig, w.CreateMode)
+	if current == "" {
+		current = "not set"
+	}
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	closeMode := state.InteractionModeManageList
@@ -62,6 +71,14 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		}
 		actions := []update.Action{state.SetInteractionMode{Mode: mode}}
 		if nextOpen {
+			pc := *w.ProviderConfig
+			actions = append(actions, state.LoadRoutingModelCatalogRequested{
+				Scope:         state.RoutingModelCatalogScopeAddModelDraft,
+				ProviderSpec:  strings.TrimSpace(pc.ProviderSpec),
+				BaseURL:       strings.TrimSpace(pc.BaseURL),
+				CredentialRef: strings.TrimSpace(pc.CredentialRef),
+				ProtocolKind:  defaultProtocolKindForProvider(strings.TrimSpace(pc.ProviderSpec)),
+			})
 			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("provider-model-option", 0)})
 		}
 		return actions
@@ -76,16 +93,19 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		return nil
 	})
 	if !open {
-		if w.Catalog != nil && strings.TrimSpace(w.Catalog.Error) != "" {
-			return toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(w.Catalog.Error)...)
-		}
 		return parent
 	}
-	items := make([]views.FilterablePickerItem, 0, len(w.Catalog.ModelIDs))
-	for _, modelID := range w.Catalog.ModelIDs {
+	if !workspaceModelCatalogTupleMatches(model, w.ProviderConfig) {
+		return toolkitviews.NewAnchoredDisclosure(parent, views.RowStatic("", "loading models…"))
+	}
+	if strings.TrimSpace(model.AddModelDraftModelError) != "" {
+		return toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(model.AddModelDraftModelError)...)
+	}
+	options := make([]modelPickerOption, 0, len(model.AddModelDraftModelIDs))
+	for _, modelID := range model.AddModelDraftModelIDs {
 		selected := selectedModelID(ctx.Model(), w.ProviderConfig, w.CreateMode) == modelID
 		choice := modelID
-		items = append(items, views.FilterablePickerItem{
+		options = append(options, modelPickerOption{
 			Label:    choice,
 			Selected: selected,
 			OnChoose: func() []update.Action {
@@ -99,14 +119,14 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 			},
 		})
 	}
-	return views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
-		KeyPrefix:      "provider-model-option",
-		BuildOptionRow: views.ChoicePickerOptionRow(true),
-		WindowSize:     6,
-		FindLabel:      "find",
-		ShowSelected:   true,
-		OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: "model"}} },
-		OnCancel: func() []update.Action {
+	return renderModelPickerDisclosure(ctx, modelPickerRenderSpec{
+		Parent:    parent,
+		Picker:    picker,
+		SetPicker: setPicker,
+		Options:   options,
+		KeyPrefix: "provider-model-option",
+		FocusKey:  "model",
+		CloseDisclosure: func() []update.Action {
 			setOpen(false)
 			return []update.Action{
 				state.SetInteractionMode{Mode: closeMode},
@@ -129,10 +149,23 @@ func buildProviderModelManualEditorRow(ctx *retained.Context[state.Model], w pro
 			return applyProviderModelSelection(value, w.ProviderConfig, w.EndpointName, w.CreateMode)
 		},
 	)
-	if w.Catalog != nil && strings.TrimSpace(w.Catalog.Error) != "" {
-		return toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(w.Catalog.Error)...)
-	}
 	return parent
+}
+
+func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.ProviderConfigSnapshot) bool {
+	if providerConfig == nil {
+		return false
+	}
+	if strings.TrimSpace(model.AddModelDraftProviderSpec) != strings.TrimSpace(providerConfig.ProviderSpec) {
+		return false
+	}
+	if strings.TrimSpace(model.AddModelDraftBaseURL) != strings.TrimSpace(providerConfig.BaseURL) {
+		return false
+	}
+	if strings.TrimSpace(model.AddModelDraftCredentialRef) != strings.TrimSpace(providerConfig.CredentialRef) {
+		return false
+	}
+	return true
 }
 
 func applyProviderModelSelection(modelID string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {

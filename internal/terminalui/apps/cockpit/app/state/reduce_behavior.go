@@ -27,7 +27,6 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		return []update.Effect{
 			stateeffect.RefreshDaemonStatusEffect{},
 			stateeffect.RefreshEndpointsEffect{},
-			stateeffect.RefreshCatalogEffect{},
 			refreshStatusProjectionEffectFor(model),
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: daemonRefreshInterval},
 		}
@@ -44,55 +43,57 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 	case SetFocusedRowAffordance:
 		applyFocusedRowFooterAffordance(model, value)
 		return nil
-	case LoadCreateDraftModelCatalogRequested:
+	case LoadRoutingModelCatalogRequested:
+		scope := strings.TrimSpace(value.Scope)
 		spec := strings.TrimSpace(value.ProviderSpec)
-		if spec == "" {
+		baseURL := strings.TrimSpace(value.BaseURL)
+		credentialRef := strings.TrimSpace(value.CredentialRef)
+		switch scope {
+		case RoutingModelCatalogScopeCreateDraft:
+			if spec == "" {
+				model.CreateDraftModelIDs = nil
+				model.CreateDraftModelError = ""
+				return nil
+			}
 			model.CreateDraftModelIDs = nil
 			model.CreateDraftModelError = ""
-			return nil
-		}
-		model.CreateDraftModelIDs = nil
-		model.CreateDraftModelError = ""
-		return []update.Effect{stateeffect.LoadCreateDraftModelCatalogEffect{
-			ProviderSpec:  spec,
-			BaseURL:       strings.TrimSpace(value.BaseURL),
-			CredentialRef: strings.TrimSpace(value.CredentialRef),
-			ProtocolKind:  strings.TrimSpace(value.ProtocolKind),
-		}}
-	case stateeffect.CreateDraftModelCatalogLoaded:
-		if !matchesCreateDraftModelCatalogLoad(model, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) {
-			return nil
-		}
-		model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
-		model.CreateDraftModelError = strings.TrimSpace(value.Error)
-		return nil
-	case LoadAddModelDraftModelCatalogRequested:
-		spec := strings.TrimSpace(value.ProviderSpec)
-		if spec == "" {
+		case RoutingModelCatalogScopeAddModelDraft:
+			if spec == "" {
+				model.AddModelDraftModelIDs = nil
+				model.AddModelDraftModelError = ""
+				model.AddModelDraftProviderSpec = ""
+				model.AddModelDraftBaseURL = ""
+				model.AddModelDraftCredentialRef = ""
+				return nil
+			}
+			model.AddModelDraftProviderSpec = spec
+			model.AddModelDraftBaseURL = baseURL
+			model.AddModelDraftCredentialRef = credentialRef
 			model.AddModelDraftModelIDs = nil
 			model.AddModelDraftModelError = ""
-			model.AddModelDraftProviderSpec = ""
-			model.AddModelDraftBaseURL = ""
-			model.AddModelDraftCredentialRef = ""
+		default:
 			return nil
 		}
-		model.AddModelDraftProviderSpec = spec
-		model.AddModelDraftBaseURL = strings.TrimSpace(value.BaseURL)
-		model.AddModelDraftCredentialRef = strings.TrimSpace(value.CredentialRef)
-		model.AddModelDraftModelIDs = nil
-		model.AddModelDraftModelError = ""
-		return []update.Effect{stateeffect.LoadAddModelDraftModelCatalogEffect{
+		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+			Scope:         scope,
 			ProviderSpec:  spec,
-			BaseURL:       strings.TrimSpace(value.BaseURL),
-			CredentialRef: strings.TrimSpace(value.CredentialRef),
+			BaseURL:       baseURL,
+			CredentialRef: credentialRef,
 			ProtocolKind:  strings.TrimSpace(value.ProtocolKind),
 		}}
-	case stateeffect.AddModelDraftModelCatalogLoaded:
-		if !matchesAddModelDraftModelCatalogLoad(model, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) {
+	case stateeffect.RoutingModelCatalogLoaded:
+		scope := strings.TrimSpace(value.Scope)
+		if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) {
 			return nil
 		}
-		model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
-		model.AddModelDraftModelError = strings.TrimSpace(value.Error)
+		switch scope {
+		case RoutingModelCatalogScopeCreateDraft:
+			model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
+			model.CreateDraftModelError = strings.TrimSpace(value.Error)
+		case RoutingModelCatalogScopeAddModelDraft:
+			model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
+			model.AddModelDraftModelError = strings.TrimSpace(value.Error)
+		}
 		return nil
 	case FocusNextAfterRebuildRequested:
 		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
@@ -244,30 +245,33 @@ func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
 	}, "\n")
 }
 
-func matchesCreateDraftModelCatalogLoad(model *Model, providerSpec, baseURL, credentialRef string) bool {
-	if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec {
+func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef string) bool {
+	switch strings.TrimSpace(scope) {
+	case RoutingModelCatalogScopeCreateDraft:
+		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec {
+			return false
+		}
+		if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL {
+			return false
+		}
+		if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef {
+			return false
+		}
+		return true
+	case RoutingModelCatalogScopeAddModelDraft:
+		if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec {
+			return false
+		}
+		if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL {
+			return false
+		}
+		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef {
+			return false
+		}
+		return true
+	default:
 		return false
 	}
-	if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL {
-		return false
-	}
-	if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef {
-		return false
-	}
-	return true
-}
-
-func matchesAddModelDraftModelCatalogLoad(model *Model, providerSpec, baseURL, credentialRef string) bool {
-	if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec {
-		return false
-	}
-	if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL {
-		return false
-	}
-	if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef {
-		return false
-	}
-	return true
 }
 
 func refreshStatusProjectionEffectFor(model *Model) stateeffect.RefreshStatusProjectionEffect {

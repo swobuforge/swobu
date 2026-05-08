@@ -37,7 +37,8 @@ func (createDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []
 func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
 	provider := strings.TrimSpace(next.ProviderSpec)
 	return []update.Action{
-		state.LoadCreateDraftModelCatalogRequested{
+		state.LoadRoutingModelCatalogRequested{
+			Scope:         state.RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:  provider,
 			BaseURL:       strings.TrimSpace(next.BaseURL),
 			CredentialRef: strings.TrimSpace(next.CredentialRef),
@@ -69,7 +70,8 @@ func (b addDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []u
 func (addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
 	provider := strings.TrimSpace(next.ProviderSpec)
 	return []update.Action{
-		state.LoadAddModelDraftModelCatalogRequested{
+		state.LoadRoutingModelCatalogRequested{
+			Scope:         state.RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:  provider,
 			BaseURL:       strings.TrimSpace(next.BaseURL),
 			CredentialRef: strings.TrimSpace(next.CredentialRef),
@@ -128,10 +130,10 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	}
 
 	modelIDs, modelErr := spec.Binding.Catalog(model)
-	items := make([]views.FilterablePickerItem, 0, len(modelIDs))
+	options := make([]modelPickerOption, 0, len(modelIDs))
 	for _, choice := range modelIDs {
 		modelChoice := choice
-		items = append(items, views.FilterablePickerItem{
+		options = append(options, modelPickerOption{
 			Label: modelChoice,
 			OnChoose: func() []update.Action {
 				next := draft
@@ -146,14 +148,15 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 			},
 		})
 	}
-	if len(items) > 0 {
-		return views.RenderFilterablePickerDisclosure(ctx, modelRow, spec.PickerState, spec.SetPickerState, items, views.FilterablePickerConfig{
-			KeyPrefix:      spec.KeyPrefix,
-			BuildOptionRow: views.ChoicePickerOptionRow(false),
-			WindowSize:     6,
-			FindLabel:      "find",
-			OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: spec.FocusKey}} },
-			OnCancel: func() []update.Action {
+	if len(options) > 0 {
+		return renderModelPickerDisclosure(ctx, modelPickerRenderSpec{
+			Parent:    modelRow,
+			Picker:    spec.PickerState,
+			SetPicker: spec.SetPickerState,
+			Options:   options,
+			KeyPrefix: spec.KeyPrefix,
+			FocusKey:  spec.FocusKey,
+			CloseDisclosure: func() []update.Action {
 				spec.SetPickerOpen(false)
 				return []update.Action{
 					state.SetInteractionMode{Mode: spec.Binding.CloseMode()},

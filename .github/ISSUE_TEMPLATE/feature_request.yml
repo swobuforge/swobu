@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a focused improvement.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep requests concrete. Explain behavior, not slogans.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete workflow problem are you solving?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the expected behavior and interface.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What did you try instead?
+    validations:
+      required: false
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Compatibility impact
+      description: Any protocol, streaming, auth, config, or error-model impact?
+    validations:
+      required: false

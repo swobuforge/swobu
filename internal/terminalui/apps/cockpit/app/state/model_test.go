@@ -298,8 +298,8 @@ func TestReduce_DaemonRefreshTickSchedulesFullSyncAndReschedule(t *testing.T) {
 	t.Parallel()
 
 	effects := Reduce(&Model{}, DaemonRefreshTick{})
-	if len(effects) != 5 {
-		t.Fatalf("effect count = %d, want 5", len(effects))
+	if len(effects) != 4 {
+		t.Fatalf("effect count = %d, want 4", len(effects))
 	}
 	if _, ok := effects[0].(RefreshDaemonStatusEffect); !ok {
 		t.Fatalf("effect[0] = %T, want RefreshDaemonStatusEffect", effects[0])
@@ -307,24 +307,22 @@ func TestReduce_DaemonRefreshTickSchedulesFullSyncAndReschedule(t *testing.T) {
 	if _, ok := effects[1].(RefreshEndpointsEffect); !ok {
 		t.Fatalf("effect[1] = %T, want RefreshEndpointsEffect", effects[1])
 	}
-	if _, ok := effects[2].(RefreshCatalogEffect); !ok {
-		t.Fatalf("effect[2] = %T, want RefreshCatalogEffect", effects[2])
+	if _, ok := effects[2].(RefreshStatusProjectionEffect); !ok {
+		t.Fatalf("effect[2] = %T, want RefreshStatusProjectionEffect", effects[2])
 	}
-	if _, ok := effects[3].(RefreshStatusProjectionEffect); !ok {
-		t.Fatalf("effect[3] = %T, want RefreshStatusProjectionEffect", effects[3])
-	}
-	if schedule, ok := effects[4].(ScheduleDaemonRefreshEffect); !ok {
-		t.Fatalf("effect[4] = %T, want ScheduleDaemonRefreshEffect", effects[4])
+	if schedule, ok := effects[3].(ScheduleDaemonRefreshEffect); !ok {
+		t.Fatalf("effect[3] = %T, want ScheduleDaemonRefreshEffect", effects[3])
 	} else if schedule.Delay <= 0 {
 		t.Fatalf("schedule delay = %s, want positive interval", schedule.Delay)
 	}
 }
 
-func TestReduce_LoadAddModelDraftModelCatalogTracksTupleAndAppliesMatchingResult(t *testing.T) {
+func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *testing.T) {
 	t.Parallel()
 
 	model := Model{}
-	effects := Reduce(&model, LoadAddModelDraftModelCatalogRequested{
+	effects := Reduce(&model, LoadRoutingModelCatalogRequested{
+		Scope:         RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",
 		CredentialRef: "env:OPENROUTER_API_KEY",
@@ -333,14 +331,15 @@ func TestReduce_LoadAddModelDraftModelCatalogTracksTupleAndAppliesMatchingResult
 	if len(effects) != 1 {
 		t.Fatalf("effect count=%d want 1", len(effects))
 	}
-	if _, ok := effects[0].(LoadAddModelDraftModelCatalogEffect); !ok {
-		t.Fatalf("effect type=%T want LoadAddModelDraftModelCatalogEffect", effects[0])
+	if _, ok := effects[0].(LoadRoutingModelCatalogEffect); !ok {
+		t.Fatalf("effect type=%T want LoadRoutingModelCatalogEffect", effects[0])
 	}
 	if got := model.AddModelDraftProviderSpec; got != "openrouter" {
 		t.Fatalf("provider spec=%q", got)
 	}
 
-	Reduce(&model, AddModelDraftModelCatalogLoaded{
+	Reduce(&model, RoutingModelCatalogLoaded{
+		Scope:         RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",
 		CredentialRef: "env:OPENROUTER_API_KEY",
@@ -350,7 +349,8 @@ func TestReduce_LoadAddModelDraftModelCatalogTracksTupleAndAppliesMatchingResult
 		t.Fatalf("model ids=%v", model.AddModelDraftModelIDs)
 	}
 
-	Reduce(&model, AddModelDraftModelCatalogLoaded{
+	Reduce(&model, RoutingModelCatalogLoaded{
+		Scope:         RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:  "anthropic",
 		BaseURL:       "https://api.anthropic.com",
 		CredentialRef: "env:ANTHROPIC_API_KEY",

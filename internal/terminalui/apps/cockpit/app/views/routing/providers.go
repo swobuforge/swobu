@@ -85,7 +85,7 @@ func BuildProvidersCreatePanel(ctx *retained.Context[state.Model]) retained.View
 			)
 			rows := []retained.ViewSpec[state.Model]{providerRow}
 			if expanded {
-				rows = append(rows, createProviderPropertyRows("", nil, draftProvider, true)...)
+				rows = append(rows, createProviderPropertyRows("", draftProvider, true)...)
 			}
 			out = toolkitviews.NewAnchoredDisclosure(parent, rows...)
 		}
@@ -136,11 +136,10 @@ func createProviderSpecItems(model state.Model, onCancel func() []update.Action)
 	return items
 }
 
-func createProviderPropertyRows(endpointName string, catalog *state.CatalogEntry, providerConfig *state.ProviderConfigSnapshot, createMode bool) []retained.ViewSpec[state.Model] {
+func createProviderPropertyRows(endpointName string, providerConfig *state.ProviderConfigSnapshot, createMode bool) []retained.ViewSpec[state.Model] {
 	rows := []retained.ViewSpec[state.Model]{
 		retained.Named[state.Model]("provider", providerSpecRow(providerConfig)),
 		retained.Named[state.Model]("model", providerModelChoiceRow(providerModelChoiceRowSpec{
-			Catalog:        catalog,
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
@@ -229,18 +228,6 @@ func providerDisplayLabel(pc state.ProviderConfigSnapshot) string {
 		return modelID
 	}
 	return providercatalog.DisplayName(providerSpec)
-}
-
-func catalogEntryForProvider(model state.Model, endpointName, providerRef string) *state.CatalogEntry {
-	endpointName = strings.TrimSpace(endpointName)
-	providerRef = strings.TrimSpace(providerRef)
-	for i := range model.Catalog {
-		entry := model.Catalog[i]
-		if strings.TrimSpace(entry.EndpointName) == endpointName && strings.TrimSpace(entry.ProviderConfigRef) == providerRef {
-			return &model.Catalog[i]
-		}
-	}
-	return nil
 }
 
 func providerRowKey(ref string) string {

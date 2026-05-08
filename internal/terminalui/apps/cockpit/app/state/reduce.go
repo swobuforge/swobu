@@ -120,17 +120,6 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 
 func reduceCatalogState(model *Model, action update.Action) bool {
 	switch value := action.(type) {
-	case stateeffect.ReplaceCatalog:
-		hadEndpoints := len(model.Endpoints) > 0
-		model.Catalog = cloneCatalogEntries(value.Entries)
-		model.CatalogError = ""
-		if len(model.EndpointSnapshots) == 0 {
-			model.Endpoints = endpointNames(model.Catalog)
-		}
-		model.CurrentEndpoint = reconcileCurrentEndpoint(model.CurrentEndpoint, model.Endpoints, hadEndpoints)
-		model.FooterShowTabs = strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0
-		refreshFirstRunFooterAffordance(model)
-		return true
 	case stateeffect.ReplaceEndpoints:
 		hadEndpoints := len(model.Endpoints) > 0
 		model.EndpointSnapshots = cloneEndpointSnapshots(value.Snapshots)
@@ -146,14 +135,6 @@ func reduceCatalogState(model *Model, action update.Action) bool {
 	case stateeffect.EndpointsLoadFailed:
 		if len(model.Endpoints) == 0 {
 			model.DaemonHint = strings.TrimSpace(value.Message)
-		}
-		return true
-	case stateeffect.CatalogLoadFailed:
-		model.Catalog = nil
-		model.CatalogError = value.Message
-		if len(model.EndpointSnapshots) == 0 {
-			model.Endpoints = nil
-			model.CurrentEndpoint = ""
 		}
 		return true
 	default:
@@ -256,7 +237,6 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		model.CreateDraftProviderConfig = ProviderConfigSnapshot{}
 		return []update.Effect{
 			stateeffect.RefreshEndpointsEffect{},
-			stateeffect.RefreshCatalogEffect{},
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: 350 * time.Millisecond},
 		}
 	case WorkspaceDeleteRequested:
@@ -279,7 +259,6 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		applyWorkspaceDelete(model, strings.TrimSpace(value.Name))
 		return []update.Effect{
 			stateeffect.RefreshEndpointsEffect{},
-			stateeffect.RefreshCatalogEffect{},
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: 350 * time.Millisecond},
 		}
 	case stateeffect.WorkspaceDeleteFailed:
@@ -312,12 +291,12 @@ func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect 
 		model.InteractionMode = InteractionModeNAV
 		model.RoutingSaveError = ""
 		applyRoutingSelection(model, strings.TrimSpace(value.EndpointName), strings.TrimSpace(value.ProviderRef))
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}, stateeffect.RefreshCatalogEffect{}}
+		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
 	case stateeffect.RoutingMutationSaved:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
 		model.RoutingSaveError = ""
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}, stateeffect.RefreshCatalogEffect{}}
+		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
 	case stateeffect.RoutingSaveFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV

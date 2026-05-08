@@ -18,9 +18,12 @@ func TestCreateDraftModelBinding_LoadCatalogUsesCreateAction(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}
-	load, ok := actions[0].(state.LoadCreateDraftModelCatalogRequested)
+	load, ok := actions[0].(state.LoadRoutingModelCatalogRequested)
 	if !ok {
-		t.Fatalf("action type=%T want state.LoadCreateDraftModelCatalogRequested", actions[0])
+		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequested", actions[0])
+	}
+	if load.Scope != state.RoutingModelCatalogScopeCreateDraft {
+		t.Fatalf("scope=%q want %q", load.Scope, state.RoutingModelCatalogScopeCreateDraft)
 	}
 	if load.ProviderSpec != "openrouter" || load.CredentialRef != "file:/tmp/openrouter.key" {
 		t.Fatalf("unexpected load action: %+v", load)
@@ -39,9 +42,12 @@ func TestAddDraftModelBinding_LoadCatalogUsesAddDraftAction(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}
-	load, ok := actions[0].(state.LoadAddModelDraftModelCatalogRequested)
+	load, ok := actions[0].(state.LoadRoutingModelCatalogRequested)
 	if !ok {
-		t.Fatalf("action type=%T want state.LoadAddModelDraftModelCatalogRequested", actions[0])
+		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequested", actions[0])
+	}
+	if load.Scope != state.RoutingModelCatalogScopeAddModelDraft {
+		t.Fatalf("scope=%q want %q", load.Scope, state.RoutingModelCatalogScopeAddModelDraft)
 	}
 	if load.ProviderSpec != "openrouter" || load.CredentialRef != "file:/tmp/openrouter.key" {
 		t.Fatalf("unexpected load action: %+v", load)

@@ -112,7 +112,8 @@ func buildCreateRunOnRow(
 					state.SetCreateDraftProviderSpec{ProviderSpec: specChoice},
 					state.SetCreateDraftCredentialRef{CredentialRef: ""},
 					state.SetCreateDraftModelID{ModelID: ""},
-					state.LoadCreateDraftModelCatalogRequested{
+					state.LoadRoutingModelCatalogRequested{
+						Scope:         state.RoutingModelCatalogScopeCreateDraft,
 						ProviderSpec:  specChoice,
 						BaseURL:       nextBaseURL,
 						CredentialRef: "",
@@ -180,7 +181,8 @@ func buildCreateUseKeyFromRow(
 			return []update.Action{
 				state.SetCreateDraftCredentialRef{CredentialRef: nextRef},
 				state.SetCreateDraftModelID{ModelID: ""},
-				state.LoadCreateDraftModelCatalogRequested{
+				state.LoadRoutingModelCatalogRequested{
+					Scope:         state.RoutingModelCatalogScopeCreateDraft,
 					ProviderSpec:  provider,
 					BaseURL:       baseURL,
 					CredentialRef: nextRef,

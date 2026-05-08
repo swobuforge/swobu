@@ -64,7 +64,8 @@ func applyProviderEnvKeySelection(providerSpec string, envKey string, providerCo
 		return []update.Action{
 			state.SetCreateDraftCredentialRef{CredentialRef: ref},
 			state.SetCreateDraftModelID{ModelID: ""},
-			state.LoadCreateDraftModelCatalogRequested{
+			state.LoadRoutingModelCatalogRequested{
+				Scope:         state.RoutingModelCatalogScopeCreateDraft,
 				ProviderSpec:  strings.TrimSpace(providerSpec),
 				BaseURL:       baseURL,
 				CredentialRef: ref,

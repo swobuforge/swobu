@@ -1,27 +1,48 @@
 # Swobu
-Local AI Gateway for connecting any AI client with any LLM backend through one controllable boundary.
 
-_Pst. Hey, you. Join da stargazers, okay? Work work :)_
+**Keep your AI client. Choose your backend.**
 
-<a href="https://github.com/firecrawl/firecrawl">
-  <img src="https://img.shields.io/github/stars/firecrawl/firecrawl.svg?style=social&label=Star&maxAge=2592000" alt="GitHub stars">
-</a>
+Swobu is a local AI compatibility layer that unbundles AI clients from LLM backends.
 
+Use Claude Code, Codex CLI, Continue, or an OpenAI/Anthropic-compatible client. Point it at Swobu. Connect it to OpenAI, Anthropic, OpenRouter, Ollama, or a custom OpenAI-compatible backend.
 
-## 🧌 Why Swobu
+The client is not the brain.
 
-Swapping clients and backends is where AI workflows usually break.
-One client expects one protocol shape, one streaming behavior, one auth style, and one error model.
-Another backend exposes different assumptions.
+---
 
-That interoperability gap forces teams to rewire configs, rewrite integration glue, or abandon the client/backend they want.
+## Why Swobu
 
-Swobu is the local boundary that absorbs that mismatch so you can:
+AI clients often come with backend assumptions baked in.
 
-- keep the client you already use
-- connect it to supported backends without workflow migration
-- keep endpoint behavior explicit and observable
-- preserve a local-first trust model
+That coupling gets painful when you want to:
+
+- switch providers
+- compare models
+- run local inference
+- use a cheaper backend
+- keep your existing workflow
+- avoid rewriting client-specific glue
+- keep one local control boundary for AI traffic
+
+Swobu sits between the client and the backend and absorbs the mismatch.
+
+It handles differences in:
+
+- protocol shape
+- streaming semantics
+- authentication assumptions
+- error models
+- client/backend quirks
+
+Keep the client. Swap the backend. Control the boundary.
+
+---
+
+## Demo
+
+![Swobu first demo](./assets/demo.gif)
+
+---
 
 ## Quickstart
 
@@ -31,52 +52,234 @@ Install:
 curl -fsSL https://swobu.com/install.sh | sh
 ```
 
-Setup:
+Start interactive setup:
 
 ```bash
-swobu 
+swobu
 ```
 
-## ⭐ What Works Today (Beta)
+Swobu will guide you through configuring a local gateway and connecting your client to a backend.
 
-### Protocol surfaces
+---
 
-- OpenAI-style: `/v1/chat/completions`, `/v1/responses`, `/v1/completions`
-- Anthropic-style: `/v1/messages`
-- Streaming: SSE, WebSocket
+## How It Works
 
-### Supported clients
+Swobu runs locally and exposes familiar API surfaces to AI clients.
 
-- Claude Code (`messages`)
-- Codex CLI (`chat_completions`, `responses`, `completions`)
-- Continue (`chat_completions`, `responses`, `completions`)
+Your client talks to Swobu.
+Swobu talks to the backend.
+Swobu shims the incompatibilities between them.
+
+```txt
+AI Client  ->  Swobu  ->  LLM Backend
+```
+
+Example:
+
+```txt
+Claude Code  ->  Swobu  ->  OpenRouter
+Codex CLI    ->  Swobu  ->  Ollama
+Continue     ->  Swobu  ->  Anthropic
+```
+
+The goal is not to replace your AI client.
+
+The goal is to stop your AI client from deciding your backend.
+
+---
+
+## Current Surface
+
+Swobu is currently in beta.
+
+### Protocol Families
+
+Supported API surfaces:
+
+- OpenAI-style:
+  - `/v1/chat/completions`
+  - `/v1/responses`
+  - `/v1/completions`
+- Anthropic-style:
+  - `/v1/messages`
+- Streaming:
+  - Server-Sent Events
+  - WebSocket
+
+### Supported Clients
+
+Currently tested with:
+
+- Claude Code
+- Codex CLI
+- Continue
 - OpenAI-compatible clients
 - Anthropic-compatible clients
 
-### Supported backends
+Supported clients today, designed for more.
+
+### Supported Backends
+
+Currently supported:
 
 - OpenAI
-- OpenRouter
 - Anthropic
+- OpenRouter
 - Ollama
-- Custom OpenAI-compatible backend
+- Custom OpenAI-compatible backends
 
-## 🔒 Security And Privacy
+---
 
-Swobu is local-first.  
-It runs on your machine, binds to loopback by default, and keeps control in your hands.
+## Client Configuration
 
-By default, Swobu does **not** send or store:
-- prompts or completions
-- request/response bodies
-- auth headers or API keys
+Swobu is designed to work through client configuration, not through a required SDK.
 
-Telemetry is opt-out and aggregate-only:
-- usage and reliability counters
-- bounded error signals (status/route/operation/duration)
-- no raw stack traces unless debug mode is explicitly enabled
+You point your client at the local Swobu endpoint, then choose the backend Swobu should use.
+
+Typical setup uses:
+
+- base URL configuration
+- environment variables
+- client config files
+- local backend profiles
+
+Example shape:
+
+```bash
+OPENAI_BASE_URL=http://localhost:PORT/v1
+OPENAI_API_KEY=swobu
+```
+
+Exact configuration depends on the client.
+
+Swobu's job is to make those client/backend combinations easier to wire together and easier to change later.
+
+---
+
+## What Swobu Is
+
+Swobu is:
+
+- a local compatibility layer
+- a protocol shim
+- a client/backend boundary
+- a way to hot-swap LLM backends behind existing AI clients
+
+## What Swobu Is Not
+
+Swobu is not currently:
+
+- an SDK
+- a hosted model marketplace
+- a new AI client
+- an observability platform
+- a prompt management system
+
+---
+
+## Security and Privacy
+
+Swobu is local-first.
+
+By default, Swobu:
+
+- binds to loopback
+- keeps control on your machine
+- avoids sending prompts, completions, and auth material through default telemetry
+
+Telemetry defaults to aggregate operational signals only and can be turned off.
+
+Check telemetry status:
 
 ```bash
 swobu telemetry status
+```
+
+Turn telemetry off:
+
+```bash
 swobu telemetry off
 ```
+
+Do not confuse local-first with "offline-only."
+
+If you configure Swobu to use a hosted backend, requests are still sent to that backend.
+
+Swobu gives you a local boundary. It does not magically make remote providers local.
+
+---
+
+## Example Use Cases
+
+### Use a preferred client with a different backend
+
+Keep the client experience you like while changing the model provider underneath.
+
+```txt
+Client stays the same.
+Backend changes.
+Workflow survives.
+```
+
+### Test local and hosted models behind one client
+
+Move between Ollama, OpenAI, Anthropic, OpenRouter, or compatible backends without rewriting client glue.
+
+### Reduce workflow lock-in
+
+Your AI client should be replaceable.
+Your backend should be replaceable.
+Your workflow should not be hostage to either.
+
+### Normalize incompatibilities
+
+Different clients and backends disagree on request shape, streaming behavior, authentication, and error handling.
+
+Swobu absorbs those differences at the local edge.
+
+---
+
+## Roadmap Direction
+
+Swobu's near-term focus is interoperability.
+
+Priorities include:
+
+- more client profiles
+- more backend profiles
+- better config generation
+- better compatibility diagnostics
+- clearer error translation
+- stronger streaming support
+- safer local defaults
+- easier backend hot-swapping
+
+The goal is simple:
+
+Make it boring to connect supported AI clients to the backend you choose.
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+Swobu uses a Contributor License Agreement.
+
+By submitting a pull request or other contribution, you agree to the terms in [`CLA.md`](./CLA.md). This allows Swobu to maintain, sublicense, dual-license, and relicense contributions in the future.
+
+Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a pull request.
+
+---
+
+## Security
+
+Do not report security vulnerabilities in public issues.
+
+See [`SECURITY.md`](./SECURITY.md).
+
+---
+
+## License
+
+See [`LICENSE`](./LICENSE).
