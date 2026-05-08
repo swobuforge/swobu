@@ -163,8 +163,7 @@ func buildWorkspaceProviderRows(
 			closeExpanded,
 		))
 		if isExpanded {
-			catalog := catalogEntryForProvider(model, endpointName, ref)
-			children := createProviderPropertyRows(endpointName, catalog, &pc, false)
+			children := createProviderPropertyRows(endpointName, &pc, false)
 			parent = views.EscClosableDisclosure(parent, true, closeExpanded, children...)
 		}
 		rows = append(rows, parent)
@@ -430,7 +429,8 @@ func buildAddModelEnvKeyRow(_ *retained.Context[state.Model], model state.Model,
 				next.ModelID = ""
 				panel.setDraft(next)
 				return []update.Action{
-					state.LoadAddModelDraftModelCatalogRequested{
+					state.LoadRoutingModelCatalogRequested{
+						Scope:         state.RoutingModelCatalogScopeAddModelDraft,
 						ProviderSpec:  strings.TrimSpace(next.ProviderSpec),
 						BaseURL:       strings.TrimSpace(next.BaseURL),
 						CredentialRef: strings.TrimSpace(next.CredentialRef),

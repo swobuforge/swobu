@@ -68,7 +68,7 @@ func TestLoadJSON_AllowsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestLoadAddModelDraftModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *testing.T) {
+func TestLoadRoutingModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/_swobu/model-catalog/preview" {
 			http.NotFound(w, r)
@@ -83,7 +83,8 @@ func TestLoadAddModelDraftModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *tes
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	actions := (LoadAddModelDraftModelCatalogEffect{
+	actions := (LoadRoutingModelCatalogEffect{
+		Scope:         "add_model_draft",
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",
 		CredentialRef: "file:/tmp/openrouter.key",
@@ -93,9 +94,9 @@ func TestLoadAddModelDraftModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *tes
 	if len(actions) != 1 {
 		t.Fatalf("actions length = %d, want 1", len(actions))
 	}
-	loaded, ok := actions[0].(AddModelDraftModelCatalogLoaded)
+	loaded, ok := actions[0].(RoutingModelCatalogLoaded)
 	if !ok {
-		t.Fatalf("action type = %T, want AddModelDraftModelCatalogLoaded", actions[0])
+		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
 	}
 	want := "model preview timed out at " + srv.URL + " (retry)"
 	if loaded.Error != want {

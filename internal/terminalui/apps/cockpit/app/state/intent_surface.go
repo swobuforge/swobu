@@ -2,6 +2,11 @@ package state
 
 import stateIntent "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/intent"
 
+const (
+	RoutingModelCatalogScopeCreateDraft   = stateIntent.RoutingModelCatalogScopeCreateDraft
+	RoutingModelCatalogScopeAddModelDraft = stateIntent.RoutingModelCatalogScopeAddModelDraft
+)
+
 type SelectEndpoint = stateIntent.SelectEndpoint
 type CreateEndpoint = stateIntent.CreateEndpoint
 type SetCreateDraftName = stateIntent.SetCreateDraftName
@@ -34,5 +39,4 @@ type SaveProviderConfigRequested = stateIntent.SaveProviderConfigRequested
 type AddProviderConfigRequested = stateIntent.AddProviderConfigRequested
 type DeleteProviderConfigRequested = stateIntent.DeleteProviderConfigRequested
 type StoreKeychainCredentialRequested = stateIntent.StoreKeychainCredentialRequested
-type LoadCreateDraftModelCatalogRequested = stateIntent.LoadCreateDraftModelCatalogRequested
-type LoadAddModelDraftModelCatalogRequested = stateIntent.LoadAddModelDraftModelCatalogRequested
+type LoadRoutingModelCatalogRequested = stateIntent.LoadRoutingModelCatalogRequested

@@ -33,9 +33,6 @@ func TestRunner_RendersCockpitAndHandlesTabAndEscStepBackThenQuit(t *testing.T) 
 		case "/_swobu/endpoints":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"endpoints":[]}`))
-		case "/_swobu/model-catalog":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"entries":[]}`))
 		case "/_swobu/status-projection":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[]}`))

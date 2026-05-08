@@ -122,39 +122,6 @@ func (RefreshDaemonStatusEffect) Execute(ctx context.Context) []update.Action {
 	}}
 }
 
-// RefreshCatalogEffect queries the model catalog and reports it back to the UI.
-type RefreshCatalogEffect struct{}
-
-func (RefreshCatalogEffect) Execute(ctx context.Context) []update.Action {
-	type rawEntry struct {
-		EndpointName      string   `json:"endpoint_name"`
-		ProviderConfigRef string   `json:"provider_config_ref"`
-		ProviderSpec      string   `json:"provider_spec"`
-		ProtocolKind      string   `json:"protocol_kind"`
-		ModelIDs          []string `json:"model_ids,omitempty"`
-		Error             string   `json:"error,omitempty"`
-	}
-	type catalogResult struct {
-		Entries []rawEntry `json:"entries"`
-	}
-	result, err := loadJSON[catalogResult](ctx, daemonURL()+"/_swobu/model-catalog")
-	if err != nil {
-		return []update.Action{CatalogLoadFailed{Message: normalizeOperatorSurfaceError(err)}}
-	}
-	entries := make([]stateModel.CatalogEntry, 0, len(result.Entries))
-	for _, e := range result.Entries {
-		entries = append(entries, stateModel.CatalogEntry{
-			EndpointName:      e.EndpointName,
-			ProviderConfigRef: e.ProviderConfigRef,
-			ProviderSpec:      e.ProviderSpec,
-			ProtocolKind:      e.ProtocolKind,
-			ModelIDs:          append([]string(nil), e.ModelIDs...),
-			Error:             e.Error,
-		})
-	}
-	return []update.Action{ReplaceCatalog{Entries: entries}}
-}
-
 // RefreshEndpointsEffect queries endpoint list and reports it back to the UI.
 type RefreshEndpointsEffect struct{}
 
@@ -271,12 +238,6 @@ type ReplaceDaemonStatus struct {
 	EndpointCount int
 }
 
-// CatalogLoadFailed reports that model catalog could not be loaded.
-type CatalogLoadFailed struct{ Message string }
-
-// ReplaceCatalog carries the new model catalog.
-type ReplaceCatalog struct{ Entries []stateModel.CatalogEntry }
-
 // EndpointsLoadFailed reports that endpoint list could not be loaded.
 type EndpointsLoadFailed struct{ Message string }
 
@@ -289,16 +250,17 @@ type TrafficLoadFailed struct{ Message string }
 // ReplaceStatusProjection carries the new traffic projection.
 type ReplaceStatusProjection struct{ Rows []stateModel.TrafficRow }
 
-// LoadCreateDraftModelCatalogEffect queries provider-backed model catalog for
-// first-run draft routing state.
-type LoadCreateDraftModelCatalogEffect struct {
+// LoadRoutingModelCatalogEffect queries provider-backed model catalog for
+// routing model selection across create/add scopes.
+type LoadRoutingModelCatalogEffect struct {
+	Scope         string
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string
 	ProtocolKind  string
 }
 
-func (eff LoadCreateDraftModelCatalogEffect) Execute(ctx context.Context) []update.Action {
+func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.Action {
 	query := url.Values{}
 	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec))
 	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {
@@ -317,14 +279,16 @@ func (eff LoadCreateDraftModelCatalogEffect) Execute(ctx context.Context) []upda
 	result, err := loadJSONWithTimeout[preview](ctx, daemonURL()+"/_swobu/model-catalog/preview?"+query.Encode(), modelCatalogPreviewLoadTimeout)
 	if err != nil {
 		normalized := normalizeModelCatalogPreviewLoadError(err)
-		return []update.Action{CreateDraftModelCatalogLoaded{
+		return []update.Action{RoutingModelCatalogLoaded{
+			Scope:         strings.TrimSpace(eff.Scope),
 			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
 			BaseURL:       strings.TrimSpace(eff.BaseURL),
 			CredentialRef: strings.TrimSpace(eff.CredentialRef),
 			Error:         normalized,
 		}}
 	}
-	return []update.Action{CreateDraftModelCatalogLoaded{
+	return []update.Action{RoutingModelCatalogLoaded{
+		Scope:         strings.TrimSpace(eff.Scope),
 		ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
 		BaseURL:       strings.TrimSpace(eff.BaseURL),
 		CredentialRef: strings.TrimSpace(eff.CredentialRef),
@@ -333,61 +297,9 @@ func (eff LoadCreateDraftModelCatalogEffect) Execute(ctx context.Context) []upda
 	}}
 }
 
-// CreateDraftModelCatalogLoaded carries first-run draft model catalog choices.
-type CreateDraftModelCatalogLoaded struct {
-	ProviderSpec  string
-	BaseURL       string
-	CredentialRef string
-	ModelIDs      []string
-	Error         string
-}
-
-// LoadAddModelDraftModelCatalogEffect queries provider-backed model catalog for
-// workspace add-model draft routing state.
-type LoadAddModelDraftModelCatalogEffect struct {
-	ProviderSpec  string
-	BaseURL       string
-	CredentialRef string
-	ProtocolKind  string
-}
-
-func (eff LoadAddModelDraftModelCatalogEffect) Execute(ctx context.Context) []update.Action {
-	query := url.Values{}
-	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec))
-	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {
-		query.Set("base_url", baseURL)
-	}
-	if credentialRef := strings.TrimSpace(eff.CredentialRef); credentialRef != "" {
-		query.Set("credential_ref", credentialRef)
-	}
-	if protocolKind := strings.TrimSpace(eff.ProtocolKind); protocolKind != "" {
-		query.Set("protocol_kind", protocolKind)
-	}
-	type preview struct {
-		ModelIDs []string `json:"model_ids,omitempty"`
-		Error    string   `json:"error,omitempty"`
-	}
-	result, err := loadJSONWithTimeout[preview](ctx, daemonURL()+"/_swobu/model-catalog/preview?"+query.Encode(), modelCatalogPreviewLoadTimeout)
-	if err != nil {
-		normalized := normalizeModelCatalogPreviewLoadError(err)
-		return []update.Action{AddModelDraftModelCatalogLoaded{
-			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
-			BaseURL:       strings.TrimSpace(eff.BaseURL),
-			CredentialRef: strings.TrimSpace(eff.CredentialRef),
-			Error:         normalized,
-		}}
-	}
-	return []update.Action{AddModelDraftModelCatalogLoaded{
-		ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
-		BaseURL:       strings.TrimSpace(eff.BaseURL),
-		CredentialRef: strings.TrimSpace(eff.CredentialRef),
-		ModelIDs:      append([]string(nil), result.ModelIDs...),
-		Error:         strings.TrimSpace(result.Error),
-	}}
-}
-
-// AddModelDraftModelCatalogLoaded carries workspace add-model draft model catalog choices.
-type AddModelDraftModelCatalogLoaded struct {
+// RoutingModelCatalogLoaded carries routing model catalog choices for one scope.
+type RoutingModelCatalogLoaded struct {
+	Scope         string
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string

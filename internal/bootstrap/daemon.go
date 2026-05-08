@@ -144,10 +144,6 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		return nil
 	}))
 	if catalog, ok := providers.(ports.ProviderModelCatalog); ok {
-		modelCatalog := operatormodelcatalog.NewLoader(daemon.endpoints, catalog)
-		mux.Handle("/_swobu/model-catalog", httpapi.NewModelCatalogHandler(func(ctx context.Context) (operatormodelcatalog.Snapshot, error) {
-			return modelCatalog.Load(ctx)
-		}))
 		modelCatalogPreview := operatormodelcatalog.NewPreviewLoader(catalog)
 		mux.Handle("/_swobu/model-catalog/preview", httpapi.NewModelCatalogPreviewHandler(
 			func(ctx context.Context, req operatormodelcatalog.PreviewRequest) (operatormodelcatalog.PreviewSnapshot, error) {

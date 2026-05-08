@@ -148,18 +148,15 @@ type StoreKeychainCredentialRequested struct {
 	Secret       string
 }
 
-// LoadCreateDraftModelCatalogRequested asks reducer to load provider-backed
-// model catalog choices for first-run draft routing composition.
-type LoadCreateDraftModelCatalogRequested struct {
-	ProviderSpec  string
-	BaseURL       string
-	CredentialRef string
-	ProtocolKind  string
-}
+const (
+	RoutingModelCatalogScopeCreateDraft   = "create_draft"
+	RoutingModelCatalogScopeAddModelDraft = "add_model_draft"
+)
 
-// LoadAddModelDraftModelCatalogRequested asks reducer to load provider-backed
-// model catalog choices for workspace add-model draft routing composition.
-type LoadAddModelDraftModelCatalogRequested struct {
+// LoadRoutingModelCatalogRequested asks reducer to load provider-backed
+// model catalog choices for routing composition across scopes.
+type LoadRoutingModelCatalogRequested struct {
+	Scope         string
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string
