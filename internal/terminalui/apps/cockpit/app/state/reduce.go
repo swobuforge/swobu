@@ -6,6 +6,7 @@ import (
 	"time"
 
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
@@ -296,11 +297,22 @@ func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect 
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
 		model.RoutingSaveError = ""
+		clearAuthLoginState(model)
+		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
+	case stateeffect.ProviderConfigAddedSaved:
+		model.HeaderStatus = "ready"
+		model.InteractionMode = InteractionModeNAV
+		model.RoutingSaveError = ""
+		clearAuthLoginState(model)
 		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
 	case stateeffect.RoutingSaveFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
 		model.RoutingSaveError = strings.TrimSpace(value.Message)
+		if model.AuthLoginSessionID != "" && model.AuthLoginURL == "" {
+			// Preserve interactive login row only when we still have a URL to open.
+			clearAuthLoginState(model)
+		}
 		return nil
 	case SaveSelectedTargetRequested:
 		return []update.Effect{stateeffect.SaveSelectedTargetEffect(value)}
@@ -315,6 +327,102 @@ func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect 
 		model.InteractionMode = InteractionModeBusySave
 		model.RoutingSaveError = ""
 		return []update.Effect{stateeffect.StoreKeychainCredentialEffect(value)}
+	case StartProviderAuthSessionRequested:
+		model.HeaderStatus = "waiting for login…"
+		model.InteractionMode = InteractionModeBusySave
+		model.RoutingSaveError = ""
+		clearAuthLoginState(model)
+		return []update.Effect{stateeffect.StartProviderAuthSessionEffect{
+			EndpointName:   strings.TrimSpace(value.EndpointName),
+			ProviderConfig: value.ProviderConfig,
+			AuthSubject:    strings.TrimSpace(value.AuthSubject),
+			AuthScope:      strings.TrimSpace(value.AuthScope),
+		}}
+	case ResetAuthLoginUIRequested:
+		clearAuthLoginState(model)
+		return nil
+	case stateeffect.ProviderAuthSessionStarted:
+		model.HeaderStatus = "waiting for login…"
+		// Pending auth must keep auth rows actionable (open/copy/switch),
+		// so keep operator in manage mode instead of busy-save lockout.
+		model.InteractionMode = InteractionModeManageList
+		model.AuthLoginEndpointName = strings.TrimSpace(value.EndpointName)
+		model.AuthLoginProviderRef = strings.TrimSpace(value.ProviderConfig.Ref)
+		model.AuthLoginSessionID = strings.TrimSpace(value.SessionID)
+		model.AuthLoginURL = strings.TrimSpace(value.AuthorizeURL)
+		model.AuthLoginUserCode = strings.TrimSpace(value.UserCode)
+		model.AuthLoginSessionState = strings.TrimSpace(value.State)
+		model.AuthLoginSessionError = ""
+		model.AuthLoginCopyNote = ""
+		if model.AuthLoginURL != "" {
+			return []update.Effect{stateeffect.OpenSupportLinkEffect{
+				Label: "login",
+				URL:   model.AuthLoginURL,
+			}}
+		}
+		return nil
+	case stateeffect.ProviderAuthSessionFailed:
+		model.HeaderStatus = "ready"
+		model.InteractionMode = InteractionModeManageList
+		model.RoutingSaveError = ""
+		model.AuthLoginEndpointName = strings.TrimSpace(value.EndpointName)
+		model.AuthLoginProviderRef = strings.TrimSpace(value.ProviderConfig.Ref)
+		model.AuthLoginSessionID = ""
+		model.AuthLoginURL = ""
+		model.AuthLoginUserCode = ""
+		model.AuthLoginSessionState = "failed"
+		model.AuthLoginSessionError = strings.TrimSpace(value.Message)
+		model.AuthLoginCopyNote = ""
+		return nil
+	case stateeffect.ProviderAuthSessionPolled:
+		if strings.TrimSpace(model.AuthLoginSessionID) == strings.TrimSpace(value.SessionID) {
+			model.AuthLoginSessionState = strings.TrimSpace(value.State)
+			model.AuthLoginSessionError = strings.TrimSpace(value.ErrorMessage)
+		}
+		return nil
+	case stateeffect.AuthLoginCopyNoted:
+		model.AuthLoginCopyNote = strings.TrimSpace(value.Message)
+		return nil
+	case stateeffect.PollProviderAuthSessionRequested:
+		return []update.Effect{stateeffect.PollProviderAuthSessionEffect{
+			EndpointName:   strings.TrimSpace(value.EndpointName),
+			ProviderConfig: value.ProviderConfig,
+			AuthSubject:    strings.TrimSpace(value.AuthSubject),
+			AuthScope:      strings.TrimSpace(value.AuthScope),
+			SessionID:      strings.TrimSpace(value.SessionID),
+			AttemptsLeft:   value.AttemptsLeft,
+		}}
+	case stateeffect.ProviderAuthSessionCredentialResolved:
+		if strings.TrimSpace(value.AuthScope) == stateModel.AuthScopeCreateDraft {
+			model.HeaderStatus = "login complete"
+			model.InteractionMode = InteractionModeManageList
+			model.RoutingSaveError = ""
+			model.CreateDraftProviderConfig.ProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec)
+			model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)
+			model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef)
+			clearAuthLoginState(model)
+			return nil
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(value.AuthSubject)), "subject:") {
+			model.HeaderStatus = "login complete"
+			model.InteractionMode = InteractionModeManageList
+			model.RoutingSaveError = ""
+			model.AddModelDraftProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec)
+			model.AddModelDraftBaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)
+			model.AddModelDraftCredentialRef = strings.TrimSpace(value.CredentialRef)
+			clearAuthLoginState(model)
+			return nil
+		}
+		next := value.ProviderConfig
+		next.CredentialRef = strings.TrimSpace(value.CredentialRef)
+		model.HeaderStatus = "saving…"
+		model.InteractionMode = InteractionModeBusySave
+		model.RoutingSaveError = ""
+		clearAuthLoginState(model)
+		return []update.Effect{stateeffect.SaveProviderConfigEffect(SaveProviderConfigRequested{
+			EndpointName:   strings.TrimSpace(value.EndpointName),
+			ProviderConfig: next,
+		})}
 	case stateeffect.KeychainCredentialStored:
 		model.HeaderStatus = "saved"
 		model.InteractionMode = InteractionModeNAV
@@ -325,6 +433,17 @@ func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect 
 	default:
 		return nil
 	}
+}
+
+func clearAuthLoginState(model *Model) {
+	model.AuthLoginEndpointName = ""
+	model.AuthLoginProviderRef = ""
+	model.AuthLoginSessionID = ""
+	model.AuthLoginURL = ""
+	model.AuthLoginUserCode = ""
+	model.AuthLoginSessionState = ""
+	model.AuthLoginSessionError = ""
+	model.AuthLoginCopyNote = ""
 }
 
 func currentEndpoint(model *Model) string {

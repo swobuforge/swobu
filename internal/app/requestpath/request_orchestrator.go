@@ -130,13 +130,13 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 		BackendModelID: route.EffectiveModel,
 	}
 	outcome := o.executeAttempt(ctx, ExecutionAttempt{
-		Intent:       intent,
-		Route:        route,
-		Index:        1,
-		Contract:     in.Contract,
-		Request:      resolvedRequest,
-		Capabilities: o.capabilityCatalog.SnapshotFor(backendModel),
-		Continuation: compatibility.NewContinuationRuntime(o.continuity),
+		Intent:               intent,
+		Route:                route,
+		Index:                1,
+		Contract:             in.Contract,
+		Request:              resolvedRequest,
+		DeclaredCapabilities: o.capabilityCatalog.SnapshotFor(backendModel),
+		Continuation:         compatibility.NewContinuationRuntime(o.continuity),
 	})
 	if outcome.Err != nil {
 		return HandleOutput{}, outcome.Err

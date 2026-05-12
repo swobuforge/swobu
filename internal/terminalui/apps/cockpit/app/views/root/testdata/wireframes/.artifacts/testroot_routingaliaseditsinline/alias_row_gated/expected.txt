@@ -1,0 +1,30 @@
+SWOBU! 🧌                                                               ready   [ ? ] [› acme] [ + ]
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name               acme                                                              edit ↵
+     endpoint           /c/acme/                                                          copy ↵
+     delete workspace                                                                     delete ↵
+
+  routing ▾
+     run on             gpt-5.3                                                           choose ↵
+     models             1 configured                                                      manage ↵
+       gpt-5.3                                                                            edit ↵
+  >    add model                                                                          close ↵
+         provider          Provider                                                       choose ↵
+         auth              missing                                                        choose ↵
+
+  clients ▸
+    not set
+
+  traffic ▸
+    no traffic yet
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   esc close   ? help

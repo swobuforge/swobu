@@ -27,6 +27,28 @@ type AccessCheckResult struct {
 	Message string
 }
 
+type AuthSessionStartResult struct {
+	ProviderSpec string
+	SessionID    string
+	AuthorizeURL string
+	UserCode     string
+	State        string
+}
+
+type AuthSessionStatusResult struct {
+	ProviderSpec  string
+	SessionID     string
+	State         string
+	CredentialRef string
+	ErrorMessage  string
+}
+
+type AuthSessionRetryResult struct {
+	SessionID    string
+	AuthorizeURL string
+	State        string
+}
+
 // New creates a client that talks to the daemon at the given base URL
 // (e.g. "http://127.0.0.1:9876").
 func New(httpClient *http.Client, baseURL string) *Client {
@@ -170,6 +192,135 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 	return AccessCheckResult{
 		Status:  fmt.Sprintf("backend %d", resp.StatusCode),
 		Message: message,
+	}, nil
+}
+
+func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endpointRef string, authMode string) (AuthSessionStartResult, error) {
+	body, err := json.Marshal(map[string]string{
+		"provider_spec": strings.TrimSpace(providerSpec),
+		"endpoint_ref":  strings.TrimSpace(endpointRef),
+		"auth_mode":     strings.TrimSpace(authMode),
+	})
+	if err != nil {
+		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session payload could not be encoded")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions", bytes.NewReader(body))
+	if err != nil {
+		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start request could not be built")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return AuthSessionStartResult{}, errorFromResponse(resp, "operator client: auth session start failed")
+	}
+	var doc struct {
+		ProviderSpec string `json:"provider_spec"`
+		SessionID    string `json:"session_id"`
+		AuthorizeURL string `json:"authorize_url"`
+		UserCode     string `json:"user_code"`
+		State        string `json:"state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start response could not be decoded")
+	}
+	return AuthSessionStartResult{
+		ProviderSpec: strings.TrimSpace(doc.ProviderSpec),
+		SessionID:    strings.TrimSpace(doc.SessionID),
+		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL),
+		UserCode:     strings.TrimSpace(doc.UserCode),
+		State:        strings.TrimSpace(doc.State),
+	}, nil
+}
+
+func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (AuthSessionStatusResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session id is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/auth/sessions/"+sessionID, nil)
+	if err != nil {
+		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status request could not be built")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return AuthSessionStatusResult{}, errorFromResponse(resp, "operator client: auth session status failed")
+	}
+	var doc struct {
+		ProviderSpec  string `json:"provider_spec"`
+		SessionID     string `json:"session_id"`
+		State         string `json:"state"`
+		CredentialRef string `json:"credential_ref"`
+		ErrorMessage  string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status response could not be decoded")
+	}
+	return AuthSessionStatusResult{
+		ProviderSpec:  strings.TrimSpace(doc.ProviderSpec),
+		SessionID:     strings.TrimSpace(doc.SessionID),
+		State:         strings.TrimSpace(doc.State),
+		CredentialRef: strings.TrimSpace(doc.CredentialRef),
+		ErrorMessage:  strings.TrimSpace(doc.ErrorMessage),
+	}, nil
+}
+
+func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("operator client: auth session id is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/cancel", nil)
+	if err != nil {
+		return fmt.Errorf("operator client: auth session cancel request could not be built")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("operator client: auth session cancel is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return errorFromResponse(resp, "operator client: auth session cancel failed")
+	}
+	return nil
+}
+
+func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSessionRetryResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session id is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/retry", nil)
+	if err != nil {
+		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry request could not be built")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return AuthSessionRetryResult{}, errorFromResponse(resp, "operator client: auth session retry failed")
+	}
+	var doc struct {
+		SessionID    string `json:"session_id"`
+		AuthorizeURL string `json:"authorize_url"`
+		State        string `json:"state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry response could not be decoded")
+	}
+	return AuthSessionRetryResult{
+		SessionID:    strings.TrimSpace(doc.SessionID),
+		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL),
+		State:        strings.TrimSpace(doc.State),
 	}, nil
 }
 

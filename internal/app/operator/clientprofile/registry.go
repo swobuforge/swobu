@@ -13,7 +13,6 @@ func Catalog() []Profile {
 }
 
 // FindByLabel returns the matching profile by exact trimmed label.
-// TODO this is only used in view, so it should own it as well
 func FindByLabel(profiles []Profile, label string) Profile {
 	label = strings.TrimSpace(label)
 	if label == "" {

@@ -124,6 +124,15 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		Picker:    picker,
 		SetPicker: setPicker,
 		Options:   options,
+		OnChooseRawID: func(rawID string) []update.Action {
+			setOpen(false)
+			actions := applyProviderModelSelection(strings.TrimSpace(rawID), w.ProviderConfig, w.EndpointName, w.CreateMode)
+			actions = append(actions, []update.Action{
+				state.SetInteractionMode{Mode: closeMode},
+				interaction.FocusKeyAction{Key: "model"},
+			}...)
+			return actions
+		},
 		KeyPrefix: "provider-model-option",
 		FocusKey:  "model",
 		CloseDisclosure: func() []update.Action {

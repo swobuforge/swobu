@@ -2,11 +2,13 @@ package routing
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -54,7 +56,7 @@ func closeAddModelCredentialUIState(ui addModelCredentialUIState) addModelCreden
 }
 
 func buildProvidersWorkspaceConfiguredPanel(ctx *retained.Context[state.Model], model state.Model, snapshot *state.EndpointSnapshot) retained.ViewSpec[state.Model] {
-	expandedRef, setExpandedRef := retained.UseState(ctx, func() string { return strings.TrimSpace(snapshot.SelectedProviderConfigRef) })
+	expandedRef, setExpandedRef := retained.UseState(ctx, func() string { return "" })
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	addOpen, setAddOpen := retained.UseState(ctx, func() bool { return false })
 	addDraft, setAddDraft := retained.UseState(ctx, func() state.ProviderConfigSnapshot {
@@ -163,7 +165,7 @@ func buildWorkspaceProviderRows(
 			closeExpanded,
 		))
 		if isExpanded {
-			children := createProviderPropertyRows(endpointName, &pc, false)
+			children := createProviderPropertyRows(endpointName, &pc, false, model)
 			parent = views.EscClosableDisclosure(parent, true, closeExpanded, children...)
 		}
 		rows = append(rows, parent)
@@ -246,20 +248,37 @@ func buildWorkspaceAddModelDetailRows(
 	if strings.TrimSpace(draft.Ref) == "" {
 		draft.Ref = nextProviderRef(snapshot)
 	}
+	providerSpec := strings.TrimSpace(draft.ProviderSpec)
 	rows := []retained.ViewSpec[state.Model]{
-		retained.Named[state.Model]("add-model/provider", buildAddModelProviderRow(ctx, model, draft, panel)),
-		retained.Named[state.Model]("add-model/credentials", buildAddModelCredentialRow(draft, panel)),
+		retained.Named[state.Model]("add-model/provider", buildAddModelProviderRow(ctx, model, strings.TrimSpace(snapshot.Name), draft, panel)),
+		retained.Named[state.Model]("add-model/credentials", buildAddModelCredentialRow(model, strings.TrimSpace(snapshot.Name), draft, panel)),
 	}
-	rows = appendWorkspaceAddModelCredentialRows(ctx, model, rows, draft, panel)
-	rows = append(rows,
-		retained.Named[state.Model]("add-model/model", buildAddModelModelChoiceRow(ctx, panel)),
-		retained.Named[state.Model]("add-model/id", backendURLEditorRow(ctx, views.RowTargetAlias, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), "not set"), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action {
+	effectiveCredentialRef := effectiveAddModelCredentialRef(model, draft)
+	authVariant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(strings.TrimSpace(draft.CredentialRef)))))
+	authViewState := addModelChatGPTAuthViewNone
+	if strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(authVariant) {
+		authViewState = classifyAddModelChatGPTAuthViewState(model, strings.TrimSpace(snapshot.Name), draft, authVariant)
+	}
+	modelCatalogBlocked := providerModelCatalogLoadBlocked(
+		providerSpec,
+		strings.TrimSpace(draft.BaseURL),
+		effectiveCredentialRef,
+	)
+	rows = appendWorkspaceAddModelCredentialRows(ctx, model, strings.TrimSpace(snapshot.Name), modelCatalogBlocked, rows, draft, panel)
+	if providerSpec != "" && !modelCatalogBlocked {
+		rows = append(rows, retained.Named[state.Model]("add-model/model", buildAddModelModelChoiceRow(ctx, model, panel)))
+	} else if providerSpec != "" && modelCatalogBlocked &&
+		!(strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(authVariant) && authViewState != addModelChatGPTAuthViewSignedIn) {
+		rows = append(rows, retained.Named[state.Model]("add-model/model-blocked", views.RowStatic("model", "choose after auth")))
+	}
+	if providerSpec != "" && !modelCatalogBlocked && strings.TrimSpace(draft.ModelID) != "" {
+		rows = append(rows, retained.Named[state.Model]("add-model/id", backendURLEditorRow(ctx, views.RowTargetAlias, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), "not set"), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action {
 			next := draft
 			next.TargetAlias = strings.TrimSpace(strings.ToLower(value))
 			panel.setDraft(next)
 			return nil
-		})),
-	)
+		})))
+	}
 	if strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "custom") {
 		rows = append(rows, retained.Named[state.Model]("add-model/backend-url", backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(draft.BaseURL), "missing"), strings.TrimSpace(draft.BaseURL), "https://host/v1", func(value string) []update.Action {
 			next := draft
@@ -268,26 +287,67 @@ func buildWorkspaceAddModelDetailRows(
 			return nil
 		})))
 	}
-	rows = append(rows, buildAddModelCreateRow(snapshot, draft, panel))
+	if createRow := buildAddModelCreateRow(model, snapshot, draft, panel); createRow != nil {
+		rows = append(rows, createRow)
+	}
 	return rows
 }
 
 func appendWorkspaceAddModelCredentialRows(
 	ctx *retained.Context[state.Model],
 	model state.Model,
+	endpointName string,
+	modelCatalogBlocked bool,
 	rows []retained.ViewSpec[state.Model],
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
 ) []retained.ViewSpec[state.Model] {
+	providerSpec := strings.TrimSpace(draft.ProviderSpec)
 	source := credentialSource(strings.TrimSpace(draft.CredentialRef))
+	authViewState := addModelChatGPTAuthViewNone
+	if strings.EqualFold(providerSpec, "chatgpt") {
+		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))
+		if providercatalog.IsInteractiveAuthVariant(variant) {
+			authViewState = classifyAddModelChatGPTAuthViewState(model, strings.TrimSpace(endpointName), draft, variant)
+		}
+	}
+	rows = append(rows, interactiveAddModelCredentialRows(model, providerSpec, endpointName, draft, source)...)
 	if strings.EqualFold(source, "env") {
 		rows = append(rows, retained.Named[state.Model]("add-model/env-key", buildAddModelEnvKeyRow(ctx, model, draft, panel)))
+		key := strings.TrimSpace(envCredentialKey(draft.CredentialRef))
+		if key == "" {
+			key = strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec))
+		}
+		if key != "" {
+			rows = append(rows, retained.Named[state.Model]("add-model/env-expected", views.RowStatic("expected", key)))
+		}
 	}
 	if strings.EqualFold(source, "keychain") {
 		rows = append(rows, retained.Named[state.Model]("add-model/keychain-key-name", buildAddModelKeychainKeyNameRow(ctx, model, draft, panel)))
+		effective := keychainEffectiveName(providerSpec, keychainCredentialName(draft.CredentialRef))
+		if strings.TrimSpace(keychainValueSummary(model, providerSpec, effective)) == "missing" {
+			rows = append(rows, retained.Named[state.Model]("add-model/keychain-missing", views.RowStatic("keychain", "no key found")))
+		}
 	}
 	if strings.EqualFold(source, "file") {
 		rows = append(rows, retained.Named[state.Model]("add-model/credential-file", buildAddModelCredentialFileRow(ctx, draft, panel)))
+		path := strings.TrimSpace(credentialFilePath(draft.CredentialRef))
+		if path == "" {
+			rows = append(rows, retained.Named[state.Model]("add-model/file-missing", views.RowStatic("key file", "not found")))
+		} else if _, err := os.Stat(path); err != nil {
+			rows = append(rows, retained.Named[state.Model]("add-model/file-missing", views.RowStatic("key file", "not found")))
+		}
+	}
+	if modelCatalogBlocked && strings.TrimSpace(source) != "" &&
+		!(strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))) && authViewState != addModelChatGPTAuthViewSignedIn) {
+		authFailed := strings.TrimSpace(model.AuthLoginEndpointName) == strings.TrimSpace(endpointName) &&
+			strings.TrimSpace(model.AuthLoginProviderRef) == strings.TrimSpace(draft.Ref) &&
+			strings.EqualFold(strings.TrimSpace(model.AuthLoginSessionState), "failed")
+		if !authFailed {
+			if message := strings.TrimSpace(providerModelCatalogBlockedMessage(providerSpec, strings.TrimSpace(draft.BaseURL), strings.TrimSpace(draft.CredentialRef))); message != "" {
+				rows = append(rows, views.DisclosureNoteRows(message)...)
+			}
+		}
 	}
 	return rows
 }
@@ -295,10 +355,11 @@ func appendWorkspaceAddModelCredentialRows(
 func buildAddModelProviderRow(
 	ctx *retained.Context[state.Model],
 	model state.Model,
+	endpointName string,
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
 ) retained.ViewSpec[state.Model] {
-	providerRow := views.RowChoiceWithCancel("provider", selectors.EmptyOr(providercatalog.DisplayName(strings.TrimSpace(draft.ProviderSpec)), "choose a provider"), func() []update.Action {
+	providerRow := views.RowActionWithCancel("provider", selectors.EmptyOr(providercatalog.DisplayName(strings.TrimSpace(draft.ProviderSpec)), "choose a provider"), "change", func() []update.Action {
 		panel.setProviderPickerOpen(true)
 		views.ResetFilterablePickerState(panel.setProviderPicker)
 		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
@@ -316,7 +377,7 @@ func buildAddModelProviderRow(
 	if !panel.providerPickerOpen {
 		return providerRowNamed
 	}
-	items := buildAddModelProviderItems(model, draft, panel)
+	items := buildAddModelProviderItems(model, endpointName, draft, panel)
 	return views.RenderFilterablePickerDisclosure(ctx, providerRowNamed, panel.providerPicker, panel.setProviderPicker, items, views.FilterablePickerConfig{
 		KeyPrefix:      "add-provider-option",
 		BuildOptionRow: views.ChoicePickerOptionRow(true),
@@ -336,7 +397,7 @@ func buildAddModelProviderRow(
 	})
 }
 
-func buildAddModelProviderItems(model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) []views.FilterablePickerItem {
+func buildAddModelProviderItems(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, panel addModelPanelState) []views.FilterablePickerItem {
 	items := createProviderSpecItems(model, nil)
 	for i := range items {
 		item := items[i]
@@ -346,6 +407,9 @@ func buildAddModelProviderItems(model state.Model, draft state.ProviderConfigSna
 			next.Ref = draft.Ref
 			next.ModelID = ""
 			next.TargetAlias = ""
+			if strings.EqualFold(spec, "chatgpt") {
+				next.CredentialRef = string(providercatalog.AuthVariantChatGPTLogin)
+			}
 			panel.setDraft(next)
 			panel.setProviderPickerOpen(false)
 			panel.setModelPickerOpen(false)
@@ -354,10 +418,14 @@ func buildAddModelProviderItems(model state.Model, draft state.ProviderConfigSna
 			if providerCredentialSelectionRequired(strings.TrimSpace(next.ProviderSpec), strings.TrimSpace(next.BaseURL), strings.TrimSpace(next.CredentialRef)) {
 				focusKey = "add-model/credentials"
 			}
-			return []update.Action{
+			actions := []update.Action{
 				state.SetInteractionMode{Mode: state.InteractionModeManageList},
 				interaction.FocusKeyAction{Key: focusKey},
 			}
+			if strings.EqualFold(spec, "chatgpt") && strings.TrimSpace(endpointName) != "" {
+				actions = append(startAuthActionsForAddModel(endpointName, next), actions...)
+			}
+			return actions
 		}
 	}
 	return items
@@ -382,9 +450,9 @@ func workspaceModelsCountSummary(snapshot *state.EndpointSnapshot) string {
 	return fmt.Sprintf("%d configured", count)
 }
 
-func buildAddModelCredentialRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
-	summary := selectors.CredentialSummaryFromProviderConfig(&draft)
-	row := views.RowChoiceWithCancel("credentials", selectors.EmptyOr(summary, "not set"), func() []update.Action {
+func buildAddModelCredentialRow(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+	summary := addModelCredentialSummary(model, draft)
+	row := views.RowActionWithCancel("auth", selectors.EmptyOr(summary, "not set"), "change", func() []update.Action {
 		next := panel.credentialUI
 		next.SourcePickerOpen = !next.SourcePickerOpen
 		panel.setCredentialUI(next)
@@ -403,14 +471,258 @@ func buildAddModelCredentialRow(draft state.ProviderConfigSnapshot, panel addMod
 			nextUI.FilePicker = views.DefaultFilterablePickerState()
 		}
 		panel.setCredentialUI(nextUI)
+		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(choice)))
+		if providercatalog.IsInteractiveAuthVariant(variant) {
+			next.CredentialRef = string(variant)
+			// Browser flow starts only when operator activates "sign in".
+			if strings.EqualFold(string(variant), "chatgpt_login") {
+				return []update.Action{state.ResetAuthLoginUIRequested{}}
+			}
+			// Device-code flow starts immediately to generate link+code.
+			return startAuthActionsForAddModel(endpointName, next)
+		}
 		return nil
 	}, func() []update.Action {
 		next := panel.credentialUI
 		next.SourcePickerOpen = false
 		panel.setCredentialUI(next)
 		return nil
-	})
+	}, strings.TrimSpace(draft.ProviderSpec), false)
 	return toolkitviews.NewAnchoredDisclosure(row, options...)
+}
+
+func addModelCredentialSummary(model state.Model, draft state.ProviderConfigSnapshot) string {
+	resolvedRef := strings.TrimSpace(effectiveAddModelCredentialRef(model, draft))
+	draftRef := strings.TrimSpace(draft.CredentialRef)
+	providerSpec := strings.TrimSpace(draft.ProviderSpec)
+	draftVariant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(draftRef))))
+	if providercatalog.SupportsAuthVariant(providerSpec, draftVariant) &&
+		providercatalog.IsInteractiveAuthVariant(draftVariant) &&
+		resolvedRef != "" &&
+		!strings.EqualFold(resolvedRef, draftRef) {
+		return "signed in"
+	}
+	source := strings.TrimSpace(credentialSource(resolvedRef))
+	if source == "" {
+		return "missing"
+	}
+	variant := providercatalog.AuthVariant(strings.ToLower(source))
+	if providercatalog.SupportsAuthVariant(providerSpec, variant) && providercatalog.IsInteractiveAuthVariant(variant) {
+		if resolvedRef != "" && !strings.EqualFold(resolvedRef, string(variant)) {
+			return "signed in"
+		}
+		return providercatalog.AuthVariantDisplayLabel(providerSpec, variant)
+	}
+	if strings.EqualFold(source, "env") {
+		key := strings.TrimSpace(envCredentialKey(resolvedRef))
+		if key == "" {
+			key = strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec))
+		}
+		if key != "" {
+			if _, ok := os.LookupEnv(key); !ok {
+				return "env var missing"
+			}
+		}
+		return "env var"
+	}
+	if strings.EqualFold(source, "file") {
+		path := strings.TrimSpace(credentialFilePath(resolvedRef))
+		if path == "" {
+			return "file missing"
+		}
+		if _, err := os.Stat(path); err != nil {
+			return "file missing"
+		}
+		return "file"
+	}
+	if strings.EqualFold(source, "keychain") {
+		effective := keychainEffectiveName(providerSpec, keychainCredentialName(resolvedRef))
+		if strings.TrimSpace(keychainValueSummary(model, providerSpec, effective)) == "missing" {
+			return "keychain missing"
+		}
+		return "keychain"
+	}
+	if providercatalog.SupportsAuthVariant(providerSpec, variant) {
+		return providercatalog.AuthVariantDisplayLabel(providerSpec, variant)
+	}
+	return selectors.CredentialSummaryFromProviderConfig(&draft)
+}
+
+func interactiveAddModelCredentialRows(
+	model state.Model,
+	providerSpec string,
+	endpointName string,
+	draft state.ProviderConfigSnapshot,
+	source string,
+) []retained.ViewSpec[state.Model] {
+	variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))
+	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(providerSpec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) {
+		return nil
+	}
+	return interactiveAuthStatusRows(model, interactiveAuthRenderConfig{
+		EndpointName: strings.TrimSpace(endpointName),
+		Draft:        draft,
+		Variant:      variant,
+		StartAuth: func(next state.ProviderConfigSnapshot) []update.Action {
+			return startAuthActionsForAddModel(endpointName, next)
+		},
+		SwitchToDeviceAuth: func(next state.ProviderConfigSnapshot) []update.Action {
+			return append([]update.Action{state.ResetAuthLoginUIRequested{}}, startAuthActionsForAddModel(endpointName, next)...)
+		},
+	})
+}
+
+type addModelChatGPTAuthViewState string
+
+const (
+	addModelChatGPTAuthViewNone               addModelChatGPTAuthViewState = "none"
+	addModelChatGPTAuthViewBrowserNotStarted  addModelChatGPTAuthViewState = "browser_not_started"
+	addModelChatGPTAuthViewInProgress         addModelChatGPTAuthViewState = "in_progress"
+	addModelChatGPTAuthViewBrowserUnavailable addModelChatGPTAuthViewState = "browser_unavailable"
+	addModelChatGPTAuthViewExpired            addModelChatGPTAuthViewState = "expired"
+	addModelChatGPTAuthViewSignedIn           addModelChatGPTAuthViewState = "signed_in"
+)
+
+func classifyAddModelChatGPTAuthViewState(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, variant providercatalog.AuthVariant) addModelChatGPTAuthViewState {
+	if strings.EqualFold(addModelCredentialSummary(model, draft), "signed in") {
+		return addModelChatGPTAuthViewSignedIn
+	}
+	if strings.EqualFold(strings.TrimSpace(model.AuthLoginSessionState), "expired") {
+		return addModelChatGPTAuthViewExpired
+	}
+	if variant == providercatalog.AuthVariantChatGPTLogin &&
+		strings.EqualFold(strings.TrimSpace(model.AuthLoginSessionState), "failed") &&
+		strings.TrimSpace(model.AuthLoginSessionID) != "" {
+		return addModelChatGPTAuthViewBrowserUnavailable
+	}
+	sessionActive := strings.TrimSpace(model.AuthLoginEndpointName) == strings.TrimSpace(endpointName) &&
+		strings.TrimSpace(model.AuthLoginProviderRef) == strings.TrimSpace(draft.Ref) &&
+		strings.TrimSpace(model.AuthLoginSessionID) != ""
+	if sessionActive {
+		return addModelChatGPTAuthViewInProgress
+	}
+	if variant == providercatalog.AuthVariantChatGPTLogin {
+		return addModelChatGPTAuthViewBrowserNotStarted
+	}
+	return addModelChatGPTAuthViewNone
+}
+
+type interactiveAuthRenderConfig struct {
+	EndpointName       string
+	Draft              state.ProviderConfigSnapshot
+	Variant            providercatalog.AuthVariant
+	StartAuth          func(next state.ProviderConfigSnapshot) []update.Action
+	SwitchToDeviceAuth func(next state.ProviderConfigSnapshot) []update.Action
+}
+
+func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfig) []retained.ViewSpec[state.Model] {
+	rows := make([]retained.ViewSpec[state.Model], 0, 6)
+	endpointName := strings.TrimSpace(cfg.EndpointName)
+	draft := cfg.Draft
+	variant := cfg.Variant
+	viewState := classifyAddModelChatGPTAuthViewState(model, endpointName, draft, variant)
+	if viewState == addModelChatGPTAuthViewInProgress || viewState == addModelChatGPTAuthViewBrowserUnavailable {
+		stateValue := strings.TrimSpace(model.AuthLoginSessionState)
+		loginURL := strings.TrimSpace(model.AuthLoginURL)
+		userCode := strings.TrimSpace(model.AuthLoginUserCode)
+		if variant == providercatalog.AuthVariantChatGPTLogin {
+			if viewState == addModelChatGPTAuthViewBrowserUnavailable {
+				rows = append(rows, views.RowStatic("", "could not open default browser"))
+			}
+		}
+		if loginURL != "" {
+			rows = append(rows, interactiveAuthLinkRows(loginURL)...)
+		}
+		if shouldRenderInteractiveAuthCode(variant, userCode) {
+			rows = append(rows, views.RowAction("code", userCode, "copy", func() []update.Action {
+				return []update.Action{
+					state.AuthLoginURLCopyRequested{Value: userCode},
+				}
+			}))
+		}
+		if strings.EqualFold(stateValue, "pending") {
+			rows = append(rows, views.RowStatic("", "waiting for sign-in..."))
+		}
+	} else if viewState == addModelChatGPTAuthViewBrowserNotStarted {
+		rows = append(rows, views.RowAction("sign in", "open default browser", "open", func() []update.Action {
+			if cfg.StartAuth == nil {
+				return nil
+			}
+			return cfg.StartAuth(draft)
+		}))
+		loginURL := strings.TrimSpace(model.AuthLoginURL)
+		if loginURL != "" {
+			rows = append(rows, interactiveAuthLinkRows(loginURL)...)
+		}
+	}
+	if viewState == addModelChatGPTAuthViewExpired {
+		rows = append(rows, views.RowAction("code expired", "", "refresh", func() []update.Action {
+			if cfg.StartAuth == nil {
+				return nil
+			}
+			return cfg.StartAuth(draft)
+		}))
+	}
+	if variant == providercatalog.AuthVariantChatGPTLogin &&
+		(viewState == addModelChatGPTAuthViewBrowserNotStarted || viewState == addModelChatGPTAuthViewInProgress || viewState == addModelChatGPTAuthViewBrowserUnavailable) {
+		rows = append(rows, views.RowAction("fallback", "use device code", "switch", func() []update.Action {
+			next := draft
+			next.CredentialRef = string(providercatalog.AuthVariantChatGPTDeviceAuth)
+			if cfg.SwitchToDeviceAuth != nil {
+				return cfg.SwitchToDeviceAuth(next)
+			}
+			if cfg.StartAuth != nil {
+				return cfg.StartAuth(next)
+			}
+			return nil
+		}))
+	}
+	if strings.TrimSpace(model.AuthLoginSessionError) != "" {
+		rows = append(rows, views.DisclosureNoteRows(model.AuthLoginSessionError)...)
+	}
+	if strings.TrimSpace(model.AuthLoginSessionError) != "" && strings.TrimSpace(model.AuthLoginSessionID) == "" {
+		rows = append(rows, views.DisclosureNoteRows("auth start failed; retry or switch auth method")...)
+	}
+	return rows
+}
+
+func shouldRenderInteractiveAuthCode(variant providercatalog.AuthVariant, userCode string) bool {
+	return variant == providercatalog.AuthVariantChatGPTDeviceAuth && strings.TrimSpace(userCode) != ""
+}
+
+func interactiveAuthLinkRows(loginURL string) []retained.ViewSpec[state.Model] {
+	url := strings.TrimSpace(loginURL)
+	if url == "" {
+		return nil
+	}
+	rows := []retained.ViewSpec[state.Model]{
+		views.RowActionWideValue("link", "", "copy", func() []update.Action {
+			return []update.Action{
+				state.AuthLoginURLCopyRequested{Value: url},
+			}
+		}),
+	}
+	rows = append(rows, views.WrappedDetailRows(url)...)
+	return rows
+}
+
+func startAuthActionsForAddModel(endpointName string, providerConfig state.ProviderConfigSnapshot) []update.Action {
+	return startAuthActionsForFlow(endpointName, providerConfig, stateModel.AuthScopeEndpointProvider)
+}
+
+func startAuthActionsForCreateDraft(providerConfig state.ProviderConfigSnapshot) []update.Action {
+	return startAuthActionsForFlow("", providerConfig, stateModel.AuthScopeCreateDraft)
+}
+
+func startAuthActionsForFlow(endpointName string, providerConfig state.ProviderConfigSnapshot, authScope string) []update.Action {
+	return []update.Action{
+		state.StartProviderAuthSessionRequested{
+			EndpointName:   strings.TrimSpace(endpointName),
+			ProviderConfig: providerConfig,
+			AuthSubject:    stateModel.EncodeAuthTransientSubjectLocator(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)),
+			AuthScope:      strings.TrimSpace(authScope),
+		},
+	}
 }
 
 func buildAddModelEnvKeyRow(_ *retained.Context[state.Model], model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
@@ -600,16 +912,14 @@ func applyAddModelCredentialFilePathChoice(draft state.ProviderConfigSnapshot, p
 	return next
 }
 
-func buildAddModelCreateRow(snapshot *state.EndpointSnapshot, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
-	ready := strings.TrimSpace(draft.ProviderSpec) != "" &&
-		strings.TrimSpace(draft.ModelID) != "" &&
-		(!providerCredentialSelectionRequired(draft.ProviderSpec, draft.BaseURL, draft.CredentialRef) || strings.TrimSpace(draft.CredentialRef) != "") &&
-		!isEmptyFileCredentialRef(draft.CredentialRef) &&
-		(!strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "custom") || strings.TrimSpace(draft.BaseURL) != "")
+func buildAddModelCreateRow(model state.Model, snapshot *state.EndpointSnapshot, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+	resolvedDraft := draft
+	resolvedDraft.CredentialRef = effectiveAddModelCredentialRef(model, draft)
+	ready := addModelCreateReady(resolvedDraft)
 	if !ready {
-		return retained.Named[state.Model]("add-model/create", views.RowStatic("create model", "not ready"))
+		return nil
 	}
-	createDraft := draft
+	createDraft := resolvedDraft
 	return retained.Named[state.Model]("add-model/create", views.RowAction("create model", "", "create", func() []update.Action {
 		panel.setOpen(false)
 		panel.setCredentialUI(closeAddModelCredentialUIState(panel.credentialUI))
@@ -631,9 +941,55 @@ func isEmptyFileCredentialRef(ref string) bool {
 	return strings.HasPrefix(strings.ToLower(trimmed), fileCredentialRefPrefix) && strings.TrimSpace(credentialFilePath(trimmed)) == ""
 }
 
-func buildAddModelModelChoiceRow(ctx *retained.Context[state.Model], panel addModelPanelState) retained.ViewSpec[state.Model] {
+func addModelCreateReady(draft state.ProviderConfigSnapshot) bool {
+	requiresInteractiveAuth := false
+	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(draft.ProviderSpec)) {
+		if providercatalog.IsInteractiveAuthVariant(variant) {
+			requiresInteractiveAuth = true
+			break
+		}
+	}
+	return strings.TrimSpace(draft.ProviderSpec) != "" &&
+		strings.TrimSpace(draft.ModelID) != "" &&
+		(requiresInteractiveAuth || !providerCredentialSelectionRequired(draft.ProviderSpec, draft.BaseURL, draft.CredentialRef) || strings.TrimSpace(draft.CredentialRef) != "") &&
+		!isEmptyFileCredentialRef(draft.CredentialRef) &&
+		(!strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "custom") || strings.TrimSpace(draft.BaseURL) != "")
+}
+
+func effectiveAddModelCredentialRef(model state.Model, draft state.ProviderConfigSnapshot) string {
+	ref := strings.TrimSpace(draft.CredentialRef)
+	providerSpec := strings.TrimSpace(draft.ProviderSpec)
+	interactiveVariants := make(map[string]struct{}, 2)
+	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(providerSpec) {
+		if providercatalog.IsInteractiveAuthVariant(variant) {
+			interactiveVariants[strings.ToLower(strings.TrimSpace(string(variant)))] = struct{}{}
+		}
+	}
+	if len(interactiveVariants) == 0 {
+		return ref
+	}
+	if ref != "" {
+		if _, ok := interactiveVariants[strings.ToLower(ref)]; !ok {
+			return ref
+		}
+	}
+	if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec {
+		return ref
+	}
+	if strings.TrimSpace(model.AddModelDraftBaseURL) != strings.TrimSpace(draft.BaseURL) {
+		return ref
+	}
+	resolved := strings.TrimSpace(model.AddModelDraftCredentialRef)
+	if resolved == "" {
+		return ref
+	}
+	return resolved
+}
+
+func buildAddModelModelChoiceRow(ctx *retained.Context[state.Model], model state.Model, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	return buildDraftModelChoiceRow(ctx, draftModelRowSpec{
 		Binding: addDraftModelBinding{
+			model:    model,
 			draft:    panel.draft,
 			setDraft: panel.setDraft,
 		},

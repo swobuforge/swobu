@@ -1,0 +1,18 @@
+line 1
+- SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
++ SWOBU 🧌                                                                          ready   [ ? ] [› acme] [ + ]
+line 13
+-          provider           OpenRouter                                                              choose ↵
++          provider           OpenAI                                                                  change ↵
+line 14
+-          auth               env var missing                                                         choose ↵
++          auth               env var missing                                                         change ↵
+line 15
+-     >    env key            OPENROUTER_API_KEY                                                      edit ↵
++     >    env key            OPENAI_API_KEY                                                          edit ↵
+line 16
+-          expected           OPENROUTER_API_KEY
++          expected           OPENAI_API_KEY
+line 17
+-          model              not set                                                                 choose ↵
++          model              not selected                                                            choose ↵

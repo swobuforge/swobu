@@ -31,7 +31,7 @@ type StartupEvent = appstate.Event
 
 type StartupState = appstate.StartupState
 
-// StartupTranscript is the legacy startup presenter noun kept as a type alias
+// TODO(execution-system): StartupTranscript is a legacy startup presenter noun kept as a type alias
 // for compatibility with external integration tests and callers.
 type StartupTranscript = StartupConsolePresenter
 
@@ -48,7 +48,7 @@ func NewStartupConsolePresenter(out io.Writer) *StartupConsolePresenter {
 	}
 }
 
-// NewStartupTranscript keeps the legacy constructor surface while delegating to
+// TODO(execution-system): NewStartupTranscript keeps a legacy constructor surface while delegating to
 // the canonical StartupConsolePresenter constructor.
 func NewStartupTranscript(out io.Writer) *StartupConsolePresenter {
 	return NewStartupConsolePresenter(out)

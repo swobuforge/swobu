@@ -82,6 +82,10 @@ type ClientAccessCheckStarted struct{}
 // EndpointCopyRequested asks the reducer to copy an endpoint value.
 type EndpointCopyRequested struct{ Value string }
 
+// AuthLoginURLCopyRequested asks reducer to copy auth login URL and report
+// status near auth rows.
+type AuthLoginURLCopyRequested struct{ Value string }
+
 // ClientBaseURLCopyRequested asks the reducer to copy a client base URL.
 type ClientBaseURLCopyRequested struct{ Value string }
 
@@ -147,6 +151,18 @@ type StoreKeychainCredentialRequested struct {
 	KeyName      string
 	Secret       string
 }
+
+// StartProviderAuthSessionRequested asks reducer to start provider login/auth
+// session for one provider config and resolve a credential reference.
+type StartProviderAuthSessionRequested struct {
+	EndpointName   string
+	ProviderConfig stateModel.ProviderConfigSnapshot
+	AuthSubject    string
+	AuthScope      string
+}
+
+// ResetAuthLoginUIRequested clears transient auth-login presentation state.
+type ResetAuthLoginUIRequested struct{}
 
 const (
 	RoutingModelCatalogScopeCreateDraft   = "create_draft"

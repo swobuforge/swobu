@@ -18,7 +18,7 @@ type RunPrepareFileSpec struct {
 	Path    string
 	Content string
 	Mode    fs.FileMode
-	// TODO are both true and false values used? otherwise just use default ie true
+	// WriteIfMissing preserves explicit per-profile intent when preparing files.
 	WriteIfMissing bool
 }
 

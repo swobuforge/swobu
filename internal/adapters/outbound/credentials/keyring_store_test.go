@@ -54,7 +54,7 @@ func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
 	}
 }
 
-func TestStoreKeychainCredential_NormalizesBackendError(t *testing.T) {
+func TestStoreKeychainCredential_FallsBackToMemoryWhenKeyringUnavailable(t *testing.T) {
 	t.Parallel()
 
 	orig := keyringSet
@@ -64,11 +64,14 @@ func TestStoreKeychainCredential_NormalizesBackendError(t *testing.T) {
 		return fmt.Errorf("backend unavailable")
 	}
 
-	err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123")
-	if err == nil {
-		t.Fatal("err = nil, want failure")
+	if err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123"); err != nil {
+		t.Fatalf("StoreKeychainCredential returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "keyring write failed for \"openrouter/default\"") {
-		t.Fatalf("err = %v, want normalized failure", err)
+	token, ok := getMemoryFallbackSecret("openrouter", "openrouter/default")
+	if !ok {
+		t.Fatal("expected in-memory fallback secret to be set")
+	}
+	if token != "token-123" {
+		t.Fatalf("fallback token = %q", token)
 	}
 }

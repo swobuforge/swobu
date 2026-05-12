@@ -88,3 +88,20 @@ func TestProviderModelCatalogLoadBlocked_FileCredentialGate(t *testing.T) {
 		t.Fatalf("expected resolved file credential to allow model catalog load")
 	}
 }
+
+func TestProviderModelCatalogLoadBlocked_ChatGPTLoginGate(t *testing.T) {
+	t.Parallel()
+
+	if !providerModelCatalogLoadBlocked("chatgpt", "", "") {
+		t.Fatalf("expected missing chatgpt login to block model catalog load")
+	}
+	if !providerModelCatalogLoadBlocked("chatgpt", "", "chatgpt_login") {
+		t.Fatalf("expected pre-login marker to block model catalog load")
+	}
+	if providerModelCatalogLoadBlocked("chatgpt", "", "keychain:chatgpt/default") {
+		t.Fatalf("expected resolved chatgpt credential ref to allow model catalog load")
+	}
+	if got := providerModelCatalogBlockedMessage("chatgpt", "", ""); got != "" {
+		t.Fatalf("blocked message=%q", got)
+	}
+}

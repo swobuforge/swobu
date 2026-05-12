@@ -2,30 +2,14 @@ package bootstrap
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
-
-type fakeTelemetryProjectionSource struct {
-	calls int
-	scope evidencestore.ProjectionScope
-	out   evidencestore.StatusProjection
-	err   error
-}
-
-func (s *fakeTelemetryProjectionSource) StatusProjectionForScope(scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
-	s.calls++
-	s.scope = scope
-	if s.err != nil {
-		return evidencestore.StatusProjection{}, s.err
-	}
-	return s.out, nil
-}
 
 type fakeTelemetryEmitter struct {
 	installCalls int
@@ -57,72 +41,45 @@ func (e *fakeTelemetryEmitter) EmitErrorTrace(_ context.Context, trace telemetry
 	e.errorTraces = append(e.errorTraces, trace)
 }
 
-func TestEmitProjectionTelemetryBestEffort_UsesProjectionSource(t *testing.T) {
+func TestEmitEventTelemetryBestEffort_UsesTerminalEventAndDeduplicatesByRequestID(t *testing.T) {
 	statePath := writeTelemetryStateFixture(t)
-	source := &fakeTelemetryProjectionSource{
-		out: evidencestore.StatusProjection{
-			State: "healthy",
-			Counters: evidencestore.StatusCounters{
-				Count2xx: 4,
-				Count429: 1,
-				Count4xx: 2,
-				Count5xx: 3,
-			},
-		},
-	}
 	emitter := &fakeTelemetryEmitter{}
 	daemon := &Daemon{
 		telemetry: embeddedTelemetryRuntimeState{
-			store:          telemetry.Store{StatePath: statePath},
-			emitter:        emitter,
-			projectionLoad: source.StatusProjectionForScope,
+			store:                 telemetry.Store{StatePath: statePath},
+			emitter:               emitter,
+			now:                   time.Now,
+			seenTerminalRequestID: make(map[string]struct{}),
 		},
 	}
 
-	daemon.emitProjectionTelemetryBestEffort(context.Background(), true)
+	event := mustTerminalTrafficEvent(t, "req_1", runtimeevidence.ResultClassSuccess, 200)
+	daemon.emitEventTelemetryBestEffort(context.Background(), event)
+	daemon.emitEventTelemetryBestEffort(context.Background(), event)
 
-	if source.calls != 1 {
-		t.Fatalf("projection source calls=%d, want 1", source.calls)
-	}
-	if source.scope.Kind != evidencestore.ProjectionScopeAll {
-		t.Fatalf("projection scope kind=%q, want %q", source.scope.Kind, evidencestore.ProjectionScopeAll)
-	}
-	if emitter.installCalls != 1 {
-		t.Fatalf("install calls=%d, want 1", emitter.installCalls)
-	}
 	if emitter.countCalls != 1 {
-		t.Fatalf("count calls=%d, want 1", emitter.countCalls)
+		t.Fatalf("count calls=%d, want 1 after duplicate terminal event", emitter.countCalls)
 	}
-	if emitter.lastState != "healthy" || emitter.last2xx != 4 || emitter.last429 != 1 || emitter.last4xx != 2 || emitter.last5xx != 3 {
-		t.Fatalf("counts state=%q 2xx=%d 429=%d 4xx=%d 5xx=%d", emitter.lastState, emitter.last2xx, emitter.last429, emitter.last4xx, emitter.last5xx)
+	if emitter.last2xx != 1 || emitter.last429 != 0 || emitter.last4xx != 0 || emitter.last5xx != 0 {
+		t.Fatalf("counts 2xx=%d 429=%d 4xx=%d 5xx=%d", emitter.last2xx, emitter.last429, emitter.last4xx, emitter.last5xx)
 	}
 }
 
-func TestEmitProjectionTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStackByDefault(t *testing.T) {
+func TestEmitEventTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStackByDefault(t *testing.T) {
 	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK", "1")
 	statePath := writeTelemetryStateFixture(t)
-	source := &fakeTelemetryProjectionSource{
-		out: evidencestore.StatusProjection{
-			State: "degraded",
-			Counters: evidencestore.StatusCounters{
-				Count4xx: 1,
-				Count5xx: 1,
-			},
-			RecentTraffic: []evidencestore.RecentTrafficRow{
-				{RequestID: "req-1", Route: "openai:gpt-4.1", Result: "backend_error", StatusCode: 500, NormalizedOp: "responses.create"},
-				{RequestID: "req-2", Route: "openai:gpt-4.1", Result: "backend_error", StatusCode: 500, NormalizedOp: "responses.create"},
-			},
-		},
-	}
 	emitter := &fakeTelemetryEmitter{}
 	daemon := &Daemon{
 		telemetry: embeddedTelemetryRuntimeState{
-			store:          telemetry.Store{StatePath: statePath},
-			emitter:        emitter,
-			projectionLoad: source.StatusProjectionForScope,
+			store:                 telemetry.Store{StatePath: statePath},
+			emitter:               emitter,
+			now:                   time.Now,
+			seenTerminalRequestID: make(map[string]struct{}),
 		},
 	}
-	daemon.emitProjectionTelemetryBestEffort(context.Background(), false)
+	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_a", runtimeevidence.ResultClassBackendError, 500))
+	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_b", runtimeevidence.ResultClassBackendError, 500))
+
 	if got := len(emitter.errorTraces); got != 1 {
 		t.Fatalf("error traces=%d, want 1 (capped)", got)
 	}
@@ -131,30 +88,20 @@ func TestEmitProjectionTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStack
 	}
 }
 
-func TestEmitProjectionTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *testing.T) {
+func TestEmitEventTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *testing.T) {
 	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK", "2")
 	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG", "1")
 	statePath := writeTelemetryStateFixture(t)
-	source := &fakeTelemetryProjectionSource{
-		out: evidencestore.StatusProjection{
-			State: "degraded",
-			Counters: evidencestore.StatusCounters{
-				Count5xx: 1,
-			},
-			RecentTraffic: []evidencestore.RecentTrafficRow{
-				{RequestID: "req-1", Route: "openai:gpt-4.1", Result: "backend_error", StatusCode: 500, NormalizedOp: "responses.create"},
-			},
-		},
-	}
 	emitter := &fakeTelemetryEmitter{}
 	daemon := &Daemon{
 		telemetry: embeddedTelemetryRuntimeState{
-			store:          telemetry.Store{StatePath: statePath},
-			emitter:        emitter,
-			projectionLoad: source.StatusProjectionForScope,
+			store:                 telemetry.Store{StatePath: statePath},
+			emitter:               emitter,
+			now:                   time.Now,
+			seenTerminalRequestID: make(map[string]struct{}),
 		},
 	}
-	daemon.emitProjectionTelemetryBestEffort(context.Background(), false)
+	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_1", runtimeevidence.ResultClassBackendError, 500))
 	if len(emitter.errorTraces) != 1 {
 		t.Fatalf("error traces=%d, want 1", len(emitter.errorTraces))
 	}
@@ -163,26 +110,31 @@ func TestEmitProjectionTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *
 	}
 }
 
-func TestEmitProjectionTelemetryBestEffort_ProjectionFailureIsIsolated(t *testing.T) {
-	statePath := writeTelemetryStateFixture(t)
-	source := &fakeTelemetryProjectionSource{err: fmt.Errorf("projection down")}
-	emitter := &fakeTelemetryEmitter{}
-	daemon := &Daemon{
-		telemetry: embeddedTelemetryRuntimeState{
-			store:          telemetry.Store{StatePath: statePath},
-			emitter:        emitter,
-			projectionLoad: source.StatusProjectionForScope,
-		},
+func mustTerminalTrafficEvent(t *testing.T, requestID string, result runtimeevidence.ResultClass, statusCode int) runtimeevidence.TrafficEvent {
+	t.Helper()
+	id, err := runtimeevidence.ParseRequestID(requestID)
+	if err != nil {
+		t.Fatalf("ParseRequestID returned error: %v", err)
 	}
-
-	daemon.emitProjectionTelemetryBestEffort(context.Background(), false)
-
-	if source.calls != 1 {
-		t.Fatalf("projection source calls=%d, want 1", source.calls)
+	route, err := runtimeevidence.NewRoute("openai", "gpt-4.1")
+	if err != nil {
+		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	if emitter.countCalls != 0 {
-		t.Fatalf("count calls=%d, want 0 on projection error", emitter.countCalls)
+	event, err := runtimeevidence.NewTerminalTrafficEvent(runtimeevidence.TrafficEventInput{
+		RequestID:      id,
+		Endpoint:       "default",
+		ClientProtocol: runtimeevidence.ClientProtocol("responses"),
+		ClientHandler:  runtimeevidence.ClientHandler("http"),
+		IngressFamily:  runtimeevidence.IngressFamily("openai"),
+		NormalizedOp:   runtimeevidence.NormalizedOp("responses.create"),
+		Route:          route,
+		Result:         result,
+		StatusCode:     statusCode,
+	})
+	if err != nil {
+		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}
+	return event
 }
 
 func writeTelemetryStateFixture(t *testing.T) string {

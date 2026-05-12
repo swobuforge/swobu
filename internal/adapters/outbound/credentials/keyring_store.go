@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	keyringcommodity "github.com/zalando/go-keyring"
@@ -24,7 +25,13 @@ func StoreKeychainCredential(providerSpec string, keyName string, secret string)
 		return fmt.Errorf("keychain key value is required")
 	}
 	if err := keyringSet(KeyringScopeForProvider(spec), name, token); err != nil {
-		return fmt.Errorf("keyring write failed for %q", name)
+		setMemoryFallbackSecret(spec, name, token)
+		slog.Warn("keychain unavailable, falling back to in-memory credential storage",
+			"component", "credentials",
+			"provider_spec", strings.ToLower(spec),
+			"credential_slot", name,
+		)
+		return nil
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 )
 
 func TestReduce_CreateAndRenameEndpointUpdatesCurrentSelectionAndCatalog(t *testing.T) {
@@ -211,6 +212,44 @@ func TestReduce_WorkspaceAndRoutingSaveTrackAnchoredErrors(t *testing.T) {
 	}
 }
 
+func TestReduce_ProviderAuthSessionFailedAnchorsAuthErrorOnly(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		HeaderStatus:          "waiting for login…",
+		InteractionMode:       InteractionModeBusySave,
+		RoutingSaveError:      "previous routing failure",
+		AuthLoginEndpointName: "testname",
+		AuthLoginProviderRef:  "openai/main",
+		AuthLoginSessionID:    "sess-1",
+		AuthLoginURL:          "https://auth.openai.com",
+		AuthLoginSessionState: "pending",
+	}
+
+	Reduce(&model, stateeffect.ProviderAuthSessionFailed{
+		EndpointName: "testname",
+		ProviderConfig: ProviderConfigSnapshot{
+			Ref:          "openai/main",
+			ProviderSpec: "openai",
+		},
+		AuthSubject: "subject:testname:openai/main",
+		Message:     "login timed out; retry",
+	})
+
+	if got := model.RoutingSaveError; got != "" {
+		t.Fatalf("routing save error = %q, want cleared", got)
+	}
+	if got := model.AuthLoginSessionError; got != "login timed out; retry" {
+		t.Fatalf("auth login session error = %q, want timeout message", got)
+	}
+	if got := model.AuthLoginSessionID; got != "" {
+		t.Fatalf("auth login session id = %q, want cleared", got)
+	}
+	if got := model.InteractionMode; got != InteractionModeManageList {
+		t.Fatalf("interaction mode = %q, want %q", got, InteractionModeManageList)
+	}
+}
+
 func TestReduce_StoreKeychainCredentialTransitionsThroughBusyAndSaved(t *testing.T) {
 	t.Parallel()
 
@@ -291,6 +330,26 @@ func TestProviderConfigForSpecUsesLegacyProviderDefaults(t *testing.T) {
 	})
 	if got := cleared.CredentialRef; got != "" {
 		t.Fatalf("switching provider should clear credential ref, got %q", got)
+	}
+}
+
+func TestProviderOptions_UsesCanonicalDisplayOrder(t *testing.T) {
+	t.Parallel()
+
+	options := ProviderOptions()
+	order := make([]string, 0, len(options))
+	for _, option := range options {
+		order = append(order, option.Spec)
+	}
+
+	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "custom"}
+	if len(order) < len(wantPrefix) {
+		t.Fatalf("provider options=%v want at least %v", order, wantPrefix)
+	}
+	for i, want := range wantPrefix {
+		if order[i] != want {
+			t.Fatalf("provider order=%v want prefix=%v", order, wantPrefix)
+		}
 	}
 }
 

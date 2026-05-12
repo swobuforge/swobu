@@ -13,7 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-const modelCatalogPreviewLoadTimeout = 8 * time.Second
+const modelCatalogProbeLoadTimeout = 8 * time.Second
 
 type daemonRawTrafficRow struct {
 	RequestID      string               `json:"request_id"`
@@ -272,13 +272,13 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 	if protocolKind := strings.TrimSpace(eff.ProtocolKind); protocolKind != "" {
 		query.Set("protocol_kind", protocolKind)
 	}
-	type preview struct {
+	type probeResult struct {
 		ModelIDs []string `json:"model_ids,omitempty"`
 		Error    string   `json:"error,omitempty"`
 	}
-	result, err := loadJSONWithTimeout[preview](ctx, daemonURL()+"/_swobu/model-catalog/preview?"+query.Encode(), modelCatalogPreviewLoadTimeout)
+	result, err := loadJSONWithTimeout[probeResult](ctx, daemonURL()+"/_swobu/model-catalog/probe?"+query.Encode(), modelCatalogProbeLoadTimeout)
 	if err != nil {
-		normalized := normalizeModelCatalogPreviewLoadError(err)
+		normalized := normalizeModelCatalogProbeLoadError(err)
 		return []update.Action{RoutingModelCatalogLoaded{
 			Scope:         strings.TrimSpace(eff.Scope),
 			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
@@ -328,10 +328,10 @@ func daemonUnavailableHint() string {
 	return "unavailable at " + daemonURL()
 }
 
-func normalizeModelCatalogPreviewLoadError(err error) string {
+func normalizeModelCatalogProbeLoadError(err error) string {
 	normalized := normalizeOperatorSurfaceError(err)
 	if strings.Contains(strings.ToLower(normalized), "request timed out") {
-		return "model preview timed out at " + daemonURL() + " (retry)"
+		return "model probe timed out at " + daemonURL() + " (retry)"
 	}
 	return normalized
 }

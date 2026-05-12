@@ -26,7 +26,7 @@ func buildRoot(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model
 	// content scrolls.
 	body := retained.WithGrow[state.Model]()(retained.Named[state.Model]("body", retained.WithScrollY[state.Model](0)(bodyContent)))
 	chrome := retained.VStack(ctx,
-		appviews.HeaderBar("Swobu! 🧌", selectors.HeaderShell(model)),
+		appviews.HeaderBar("SWOBU 🧌", selectors.HeaderShell(model)),
 		appviews.HorizontalRule(),
 		body,
 		appviews.HorizontalRule(),

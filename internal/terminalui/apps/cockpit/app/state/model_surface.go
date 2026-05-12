@@ -24,3 +24,6 @@ var ProviderConfigForSpec = stateModel.ProviderConfigForSpec
 var ProviderRequiresCredential = stateModel.ProviderRequiresCredential
 var ProviderSupportsCatalog = stateModel.ProviderSupportsCatalog
 var ProviderOptions = stateModel.ProviderOptions
+var ProviderCredentialSelectionRequired = stateModel.ProviderCredentialSelectionRequired
+var ProviderModelCatalogLoadBlocked = stateModel.ProviderModelCatalogLoadBlocked
+var ProviderModelCatalogBlockedMessage = stateModel.ProviderModelCatalogBlockedMessage

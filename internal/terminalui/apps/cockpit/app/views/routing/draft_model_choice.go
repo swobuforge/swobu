@@ -54,6 +54,7 @@ func (createDraftModelBinding) Catalog(model state.Model) ([]string, string) {
 func (createDraftModelBinding) CloseMode() string { return state.InteractionModeNAV }
 
 type addDraftModelBinding struct {
+	model    state.Model
 	draft    state.ProviderConfigSnapshot
 	setDraft func(state.ProviderConfigSnapshot)
 }
@@ -67,14 +68,16 @@ func (b addDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []u
 	return nil
 }
 
-func (addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
+func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
 	provider := strings.TrimSpace(next.ProviderSpec)
+	credentialRef := strings.TrimSpace(next.CredentialRef)
+	credentialRef = effectiveAddModelCredentialRef(b.model, next)
 	return []update.Action{
 		state.LoadRoutingModelCatalogRequested{
 			Scope:         state.RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:  provider,
 			BaseURL:       strings.TrimSpace(next.BaseURL),
-			CredentialRef: strings.TrimSpace(next.CredentialRef),
+			CredentialRef: credentialRef,
 			ProtocolKind:  defaultProtocolKindForProvider(provider),
 		},
 	}
@@ -102,14 +105,21 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	provider := strings.TrimSpace(draft.ProviderSpec)
 	baseURL := strings.TrimSpace(draft.BaseURL)
 	cred := strings.TrimSpace(draft.CredentialRef)
+	if addBinding, ok := spec.Binding.(addDraftModelBinding); ok {
+		cred = effectiveAddModelCredentialRef(addBinding.model, draft)
+	}
 	modelID := strings.TrimSpace(draft.ModelID)
 
 	modelSummary := selectors.EmptyOr(modelID, "not set")
+	if _, ok := spec.Binding.(addDraftModelBinding); ok && modelID == "" {
+		modelSummary = "not selected"
+	}
 	if spec.PickerOpen && modelID == "" {
 		modelSummary = "choose a model"
 	}
+	blocked := providerModelCatalogLoadBlocked(provider, baseURL, cred)
 	modelRow := views.RowChoiceWithHooks(views.RowModel, modelSummary, func() []update.Action {
-		if provider == "" || providerModelCatalogLoadBlocked(provider, baseURL, cred) {
+		if provider == "" || blocked {
 			return nil
 		}
 		spec.SetPickerOpen(true)
@@ -121,9 +131,12 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		)
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
-
-	if providerModelCatalogLoadBlocked(provider, baseURL, cred) {
-		return toolkitviews.NewAnchoredDisclosure(modelRow, views.DisclosureNoteRows("set credential file before loading models")...)
+	if blocked {
+		if message := strings.TrimSpace(providerModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" {
+			notes := views.DisclosureNoteRows(message)
+			return retained.VStack(ctx, notes...)
+		}
+		return modelRow
 	}
 	if provider == "" || !spec.PickerOpen {
 		return modelRow
@@ -154,6 +167,17 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 			Picker:    spec.PickerState,
 			SetPicker: spec.SetPickerState,
 			Options:   options,
+			OnChooseRawID: func(rawID string) []update.Action {
+				next := draft
+				next.ModelID = strings.TrimSpace(rawID)
+				actions := spec.Binding.SetSnapshot(next)
+				spec.SetPickerOpen(false)
+				actions = append(actions,
+					state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
+					interaction.FocusKeyAction{Key: spec.FocusKey},
+				)
+				return actions
+			},
 			KeyPrefix: spec.KeyPrefix,
 			FocusKey:  spec.FocusKey,
 			CloseDisclosure: func() []update.Action {

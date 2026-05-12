@@ -261,7 +261,7 @@ func (o RequestHandler) toolChoicePolicyMiddleware() AttemptMiddleware {
 			}
 			outcome := next(ctx, attempt)
 			if outcome.Err != nil &&
-				attempt.Capabilities.ToolChoice.ImmediateDowngradeRetry &&
+				attempt.DeclaredCapabilities.ToolChoice.ImmediateDowngradeRetry &&
 				typed.ToolMode() == compatibility.ToolModeRequired &&
 				compatibility.IsBackendErrorClass(outcome.Err, compatibility.BackendErrorClassToolChoiceUnsupported) {
 				retryAttempt := attempt

@@ -3,6 +3,7 @@ package credentials
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -64,6 +65,14 @@ func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec str
 		return "", fmt.Errorf("keyring lookup timed out for %q", keyName)
 	}
 	if err != nil {
+		if fallback, ok := getMemoryFallbackSecret(providerSpec, keyName); ok {
+			slog.Warn("keychain unavailable, using in-memory credential fallback",
+				"component", "credentials",
+				"provider_spec", strings.ToLower(strings.TrimSpace(providerSpec)),
+				"credential_slot", keyName,
+			)
+			return fallback, nil
+		}
 		return "", fmt.Errorf("keyring lookup failed for %q", keyName)
 	}
 	if strings.TrimSpace(token) == "" {

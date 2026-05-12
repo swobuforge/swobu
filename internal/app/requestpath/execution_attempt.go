@@ -27,13 +27,13 @@ type RouteDecision struct {
 
 // ExecutionAttempt is the executable unit for one provider execution try.
 type ExecutionAttempt struct {
-	Intent       ClientIntent
-	Route        RouteDecision
-	Index        int
-	Contract     ExecutionContract
-	Request      compatibility.CanonicalRequest
-	Capabilities CapabilitySnapshot
-	Continuation compatibility.ContinuationRuntime
+	Intent               ClientIntent
+	Route                RouteDecision
+	Index                int
+	Contract             ExecutionContract
+	Request              compatibility.CanonicalRequest
+	DeclaredCapabilities CapabilitySnapshot
+	Continuation         compatibility.ContinuationRuntime
 }
 
 // AttemptOutcome is one attempt result consumed by requestpath policy middleware.

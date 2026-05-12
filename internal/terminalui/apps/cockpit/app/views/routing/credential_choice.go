@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
@@ -26,7 +27,6 @@ func providerCredentialChoiceRow(spec providerCredentialChoiceRowSpec) retained.
 }
 
 func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec providerCredentialChoiceRowSpec) retained.ViewSpec[state.Model] {
-	model := ctx.Model()
 	pc := selectedProvider(ctx.Model(), spec.ProviderConfig, spec.CreateMode)
 	currentRef := ""
 	if pc != nil {
@@ -57,8 +57,6 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 		out = parent
 		if current == "missing" {
 			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("authentication needed - choose a credential ref to save")...)
-		} else if model.RoutingSaveError != "" {
-			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(model.RoutingSaveError)...)
 		}
 	} else {
 		providerSpec := ""
@@ -73,7 +71,7 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 		}, func() []update.Action {
 			setOpen(false)
 			return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeManageList}}
-		})
+		}, providerSpec, spec.CreateMode)
 		out = toolkitviews.NewAnchoredDisclosure(parent, rows...)
 	}
 	return out
@@ -81,6 +79,24 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 
 func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
 	credentialRef = strings.TrimSpace(credentialRef)
+	variant := providercatalog.AuthVariant(strings.ToLower(credentialRef))
+	if providercatalog.IsInteractiveAuthVariant(variant) {
+		if createMode {
+			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
+		}
+		if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+			return nil
+		}
+		return []update.Action{state.StartProviderAuthSessionRequested{
+			EndpointName:   strings.TrimSpace(endpointName),
+			ProviderConfig: *providerConfig,
+			AuthSubject: stateModel.EncodeAuthEndpointProviderLocator(
+				strings.TrimSpace(endpointName),
+				strings.TrimSpace(providerConfig.Ref),
+			),
+			AuthScope: stateModel.AuthScopeEndpointProvider,
+		}}
+	}
 	if strings.EqualFold(credentialRef, "env") {
 		credentialRef = encodeCredentialEnvRef(providercatalog.DefaultEnvKeyForSpec(providerSpec))
 	}
@@ -104,30 +120,53 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 	}
 }
 
-func credentialOptionRows(current string, onChoose func(string) []update.Action, onCancel func() []update.Action) []retained.ViewSpec[state.Model] {
-	options := []string{"env", "keychain", "file"}
+func credentialOptionRows(
+	current string,
+	onChoose func(string) []update.Action,
+	onCancel func() []update.Action,
+	providerSpec string,
+	createMode bool,
+) []retained.ViewSpec[state.Model] {
+	type option struct {
+		Value string
+		Label string
+	}
+	containsOptionValue := func(values []option, value string) bool {
+		for _, item := range values {
+			if strings.TrimSpace(item.Value) == strings.TrimSpace(value) {
+				return true
+			}
+		}
+		return false
+	}
+	variants := providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec))
+	options := make([]option, 0, len(variants))
+	for _, v := range variants {
+		options = append(options, option{
+			Value: string(v),
+			Label: providercatalog.AuthVariantDisplayLabel(strings.TrimSpace(providerSpec), v),
+		})
+	}
 	current = strings.TrimSpace(current)
-	if current != "" && current != "missing" && !containsString(options, current) {
-		options = append([]string{current}, options...)
+	if current != "" && current != "missing" && !containsOptionValue(options, current) {
+		options = append([]option{{Value: current, Label: current}}, options...)
 	}
 	rows := make([]retained.ViewSpec[state.Model], 0, len(options))
 	for _, option := range options {
 		choice := option
-		rows = append(rows, toolkitviews.NewChoiceOptionWithCancel[state.Model](choice, choice == current, func() []update.Action {
-			if onChoose != nil {
-				return onChoose(choice)
-			}
-			return nil
-		}, onCancel))
+		rows = append(rows, toolkitviews.ListItemRow[state.Model](
+			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3),
+			choice.Value == current,
+			true,
+			true,
+			func() []update.Action {
+				if onChoose != nil {
+					return onChoose(choice.Value)
+				}
+				return nil
+			},
+			onCancel,
+		))
 	}
 	return rows
-}
-
-func containsString(values []string, value string) bool {
-	for _, item := range values {
-		if strings.TrimSpace(item) == strings.TrimSpace(value) {
-			return true
-		}
-	}
-	return false
 }

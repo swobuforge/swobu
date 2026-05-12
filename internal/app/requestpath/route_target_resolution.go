@@ -35,6 +35,6 @@ func routableTargetFromResolved(resolved routetarget.ResolvedRoutableTarget) por
 		providerConfig.CredentialRef(),
 		providerConfig.ProtocolKind(),
 		string(resolved.RouteProfile.AuthKind),
-		string(resolved.RouteProfile.EndpointMode),
+		string(resolved.RouteProfile.APIFamily),
 	)
 }

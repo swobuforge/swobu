@@ -15,7 +15,7 @@ const (
 	RowRunOn        = "run on"
 	RowProviders    = "models"
 	RowModel        = "model"
-	RowUseKeyFrom   = "credentials"
+	RowUseKeyFrom   = "auth"
 	RowBackendURL   = "backend url"
 	RowTargetAlias  = "id"
 	RowBaseURL      = "base url"
