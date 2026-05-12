@@ -1,0 +1,9 @@
+line 1
+- SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
++ SWOBU 🧌                                                                          ready   [ ? ] [› acme] [ + ]
+line 13
+-          provider           OpenRouter                                                              choose ↵
++          provider           OpenAI                                                                  change ↵
+line 14
+-     >    auth               file missing                                                            choose ↵
++     >    auth               file missing                                                            change ↵

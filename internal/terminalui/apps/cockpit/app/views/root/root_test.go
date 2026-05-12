@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/loop"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func TestRoot_RendersShellAndCanonicalSectionOrder(t *testing.T) {
@@ -23,7 +25,7 @@ func TestRoot_RendersShellAndCanonicalSectionOrder(t *testing.T) {
 	out := rt.Render(geom.Rect{W: 80, H: 24}).String()
 
 	assertContainsInOrder(t, out,
-		"Swobu",
+		"SWOBU",
 		"[› acme] [ + ]",
 		"workspace",
 		"routing",
@@ -174,12 +176,7 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, "routing ▸") {
-		t.Fatalf("expected routing section to collapse on esc; render=%q", out)
-	}
-	if strings.Contains(out, "run on") {
-		t.Fatalf("expected routing child rows hidden after esc collapse; render=%q", out)
-	}
+	assertVisualByKey(t, out, "routing_collapsed_by_esc")
 }
 
 func TestRoot_ClientActionPayloadDisclosure_CopyRevealsOnActivateOnly(t *testing.T) {
@@ -313,7 +310,7 @@ func TestRoot_OpenCodePayloadKeepsFooterVisibleInCompactViewport(t *testing.T) {
 	if !strings.Contains(out, "↑↓ move") || !strings.Contains(out, "tab tabs") {
 		t.Fatalf("expected footer hints visible in compact viewport during long payload disclosure; render=%q", out)
 	}
-	if !strings.Contains(out, "Swobu! 🧌") {
+	if !strings.Contains(out, "SWOBU 🧌") {
 		t.Fatalf("expected header rail visible in compact viewport during long payload disclosure; render=%q", out)
 	}
 }
@@ -532,23 +529,7 @@ func TestRoot_WorkspaceAddModelSelectingFileCredentialShowsFileRow(t *testing.T)
 
 	selectAddModelFileCredential(t, rt, viewport)
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, "credential file") {
-		t.Fatalf("expected credential file row after choosing file credentials; render=%q", out)
-	}
-	focusRowContaining(t, rt, viewport, "model              not set")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	out = rt.Render(viewport).String()
-	if strings.Contains(out, "save ↵") && strings.Contains(out, "model             _") {
-		t.Fatalf("add-model model row regressed to inline editor instead of picker flow; render=%q", out)
-	}
-	if !strings.Contains(out, "set credential file before loading models") {
-		t.Fatalf("expected add-model model row to block model-loading until credential file is set; render=%q", out)
-	}
-	if !(strings.Contains(out, "create model") && strings.Contains(out, "not ready")) {
-		t.Fatalf("expected create model to remain blocked while file path unset; render=%q", out)
-	}
+	assertVisualByKey(t, out, "file_auth_blocked")
 }
 
 func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoherent(t *testing.T) {
@@ -597,7 +578,7 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 	rt.Rebuild(Root(), viewport)
 
 	chooseCredential := func(option string) string {
-		focusRowContaining(t, rt, viewport, "credentials")
+		focusRowContaining(t, rt, viewport, "auth")
 		rt.DispatchEvent(updateKey(interaction.KeyEnter))
 		rt.Rebuild(Root(), viewport)
 		focusRowContaining(t, rt, viewport, option)
@@ -607,24 +588,16 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 	}
 
 	out := chooseCredential("env")
-	if !strings.Contains(out, "env key") {
-		t.Fatalf("expected env key row after selecting env credentials; render=%q", out)
-	}
+	assertVisualByKey(t, out, "env_selected")
 
 	out = chooseCredential("keychain")
-	if !strings.Contains(out, "key slot") || !strings.Contains(out, "key value") {
-		t.Fatalf("expected keychain rows after selecting keychain credentials; render=%q", out)
-	}
+	assertVisualByKey(t, out, "keychain_selected")
 
 	out = chooseCredential("file")
-	if !strings.Contains(out, "credential file") {
-		t.Fatalf("expected credential file row after selecting file credentials; render=%q", out)
-	}
+	assertVisualByKey(t, out, "file_selected")
 
 	out = chooseCredential("env")
-	if !strings.Contains(out, "env key") {
-		t.Fatalf("expected env key row after toggling back to env credentials; render=%q", out)
-	}
+	assertVisualByKey(t, out, "env_reselected")
 }
 
 func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
@@ -683,12 +656,7 @@ func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 	rt.Rebuild(Root(), viewport)
 
 	out = rt.Render(viewport).String()
-	if !strings.Contains(out, "model             not set") {
-		t.Fatalf("expected add-model model row in create lane; render=%q", out)
-	}
-	if strings.Contains(out, "primary            yes") {
-		t.Fatalf("unexpected static primary row in add-model create lane; render=%q", out)
-	}
+	assertVisualByKey(t, out, "add_model_open")
 }
 
 func TestRoot_RoutingAliasEditsInline(t *testing.T) {
@@ -731,9 +699,183 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, "id                not set") || !strings.Contains(out, "edit ↵") {
-		t.Fatalf("expected id row edit affordance in models disclosure; render=%q", out)
+	assertVisualByKey(t, out, "alias_row_gated")
+}
+
+func TestRoot_FirstRunRunOnChooser_IncludesChatGPT(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus: "ready",
+		DaemonState:  "up",
+	})
+	viewport := geom.Rect{W: 100, H: 30}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "run on")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	out := rt.Render(viewport).String()
+	if !strings.Contains(out, "ChatGPT") {
+		t.Fatalf("run-on provider chooser missing ChatGPT option: %q", out)
 	}
+}
+
+func TestRoot_FirstRunChatGPTBrowserLogin_ShowsAuthFlowRows(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus: "ready",
+		DaemonState:  "up",
+	})
+	viewport := geom.Rect{W: 100, H: 30}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "run on")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "ChatGPT")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "auth")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "browser login")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	out := rt.Render(viewport).String()
+	if !strings.Contains(out, "sign in") || !strings.Contains(out, "open default browser") {
+		t.Fatalf("first-run browser login rows missing: %q", out)
+	}
+	if !strings.Contains(out, "use device code") {
+		t.Fatalf("first-run browser login fallback missing: %q", out)
+	}
+}
+
+func TestRoot_FirstRunChatGPTSignedIn_HidesKeychainEditRows(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus: "ready",
+		DaemonState:  "up",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec:  "chatgpt",
+			CredentialRef: "keychain:chatgpt/sess_abc",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 30}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	out := rt.Render(viewport).String()
+	if !strings.Contains(out, "signed in") {
+		t.Fatalf("expected signed-in auth summary in first run: %q", out)
+	}
+	if strings.Contains(out, "key slot") || strings.Contains(out, "key value") {
+		t.Fatalf("unexpected keychain edit rows for chatgpt signed-in first run: %q", out)
+	}
+}
+
+func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
+	t.Parallel()
+
+	base := state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		Endpoints:       []string{"acme"},
+		CurrentEndpoint: "acme",
+		EndpointSnapshots: []state.EndpointSnapshot{
+			{
+				Name:                      "acme",
+				SelectedProviderConfigRef: "openai:gpt-3.5-turbo",
+				ProviderConfigs: []state.ProviderConfigSnapshot{
+					{
+						Ref:           "openai:gpt-3.5-turbo",
+						ProviderSpec:  "openai",
+						ModelID:       "gpt-3.5-turbo",
+						ProtocolKind:  "chat_completions",
+						CredentialRef: "env:OPENAI_API_KEY",
+					},
+				},
+			},
+		},
+	}
+
+	viewport := geom.Rect{W: 100, H: 30}
+
+	t.Run("browser_not_started", func(t *testing.T) {
+		rt := newTestRuntime(base)
+		rt.Rebuild(Root(), viewport)
+		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
+		chooseAddModelAuthOption(t, rt, viewport, "browser login")
+		out := rt.Render(viewport).String()
+		assertVisualByKey(t, out, "browser_not_started")
+	})
+
+	t.Run("device_in_progress", func(t *testing.T) {
+		rt := newTestRuntime(base)
+		rt.Rebuild(Root(), viewport)
+		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
+		chooseAddModelAuthOption(t, rt, viewport, "device code")
+		rt.Dispatch([]update.Action{
+			stateeffect.ProviderAuthSessionStarted{
+				EndpointName: "acme",
+				ProviderConfig: state.ProviderConfigSnapshot{
+					Ref:           "model-2",
+					ProviderSpec:  "chatgpt",
+					BaseURL:       "https://api.openai.com/v1",
+					CredentialRef: "chatgpt_device_auth",
+				},
+				AuthSubject:  "subject:acme#model-2",
+				SessionID:    "sess-1",
+				AuthorizeURL: "https://chatgpt.com/activate",
+				UserCode:     "VBMS-V2R4K",
+				State:        "pending",
+			},
+		})
+		rt.Model.HeaderStatus = "ready"
+		rt.Model.InteractionMode = state.InteractionModeManageList
+		rt.Rebuild(Root(), viewport)
+		out := rt.Render(viewport).String()
+		assertVisualByKey(t, out, "device_in_progress")
+	})
+
+	t.Run("signed_in", func(t *testing.T) {
+		rt := newTestRuntime(base)
+		rt.Rebuild(Root(), viewport)
+		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
+		chooseAddModelAuthOption(t, rt, viewport, "browser login")
+		rt.Dispatch([]update.Action{
+			stateeffect.ProviderAuthSessionCredentialResolved{
+				EndpointName: "acme",
+				ProviderConfig: state.ProviderConfigSnapshot{
+					Ref:           "model-2",
+					ProviderSpec:  "chatgpt",
+					BaseURL:       "https://api.openai.com/v1",
+					CredentialRef: "chatgpt_login",
+				},
+				AuthSubject:   "subject:acme#model-2",
+				CredentialRef: "keychain:chatgpt/default",
+			},
+		})
+		rt.Rebuild(Root(), viewport)
+		out := rt.Render(viewport).String()
+		assertVisualByKey(t, out, "signed_in")
+	})
 }
 
 func TestRoot_EscOnExpandedRoutingModelClosesNearestModelDisclosure(t *testing.T) {
@@ -778,18 +920,14 @@ func TestRoot_EscOnExpandedRoutingModelClosesNearestModelDisclosure(t *testing.T
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, "opus") {
-		t.Fatalf("expected models disclosure rows visible before esc; render=%q", out)
-	}
+	assertVisualByKey(t, out, "models_disclosure_open")
 
 	focusRowContaining(t, rt, viewport, "models")
 	rt.DispatchEvent(updateKey(interaction.KeyEsc))
 	rt.Rebuild(Root(), viewport)
 
 	out = rt.Render(viewport).String()
-	if strings.Contains(out, "opus") {
-		t.Fatalf("expected esc to close models disclosure rows; render=%q", out)
-	}
+	assertVisualByKey(t, out, "models_disclosure_closed_by_esc")
 }
 
 func TestRoot_WorkspaceSavedStatusDoesNotRenderCopyEndpointHintRows(t *testing.T) {
@@ -1046,7 +1184,7 @@ func TestRoot_FirstRunRoutingCredentialChooserMatrix(t *testing.T) {
 			viewport := geom.Rect{W: 80, H: 24}
 			rt.Rebuild(Root(), viewport)
 			out := rt.Render(viewport).String()
-			assertUseKeyFromRow(t, out, tt.summary, tt.chooser)
+			assertVisualByKey(t, out, "credential_matrix_"+normalizeVisualToken(tt.name))
 		})
 	}
 }
@@ -1097,8 +1235,40 @@ func focusRowContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport ge
 			}
 		}
 		rt.DispatchEvent(updateKey(interaction.KeyDown))
+		rt.Rebuild(Root(), viewport)
 	}
 	t.Fatalf("could not focus row containing %q; render=%q", pattern, rt.Render(viewport).String())
+}
+
+func openAddModelAndChooseProvider(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, providerName string) {
+	t.Helper()
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "models")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "add model")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "provider")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	rt.DispatchEvent(updateKey(interaction.KeyDown))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, providerName)
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+}
+
+func chooseAddModelAuthOption(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, option string) {
+	t.Helper()
+	focusRowContaining(t, rt, viewport, "auth")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, option)
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
 }
 
 func selectClientFromChooser(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, label string) {
@@ -1133,46 +1303,14 @@ func currentCredentialPickerPath(out string) string {
 func selectAddModelFileCredential(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
 	t.Helper()
 
-	for attempt := 0; attempt < 3; attempt++ {
-		focusRowContaining(t, rt, viewport, "credentials")
-		rt.DispatchEvent(updateKey(interaction.KeyEnter))
-		rt.Rebuild(Root(), viewport)
-
-		for i := 0; i < attempt; i++ {
-			rt.DispatchEvent(updateKey(interaction.KeyDown))
-			rt.Rebuild(Root(), viewport)
-		}
-
-		rt.DispatchEvent(updateKey(interaction.KeyEnter))
-		rt.Rebuild(Root(), viewport)
-		if strings.Contains(rt.Render(viewport).String(), "credential file") {
-			return
-		}
+	focusRowContaining(t, rt, viewport, "auth")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "file")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	if strings.Contains(rt.Render(viewport).String(), "credential file") {
+		return
 	}
-
 	t.Fatalf("unable to select file credential option in add-model flow; render=%q", rt.Render(viewport).String())
-}
-
-func assertUseKeyFromRow(t *testing.T, out, summary string, chooser bool) {
-	t.Helper()
-
-	found := false
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "credentials") {
-			continue
-		}
-		found = true
-		if !strings.Contains(line, summary) {
-			t.Fatalf("credentials row missing summary %q: %q", summary, line)
-		}
-		if chooser && !strings.Contains(line, "choose ↵") {
-			t.Fatalf("credentials row should advertise chooser: %q", line)
-		}
-		if !chooser && strings.Contains(line, "choose ↵") {
-			t.Fatalf("credentials row should hide chooser: %q", line)
-		}
-	}
-	if !found {
-		t.Fatalf("render missing credentials row: %q", out)
-	}
 }

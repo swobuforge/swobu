@@ -1,0 +1,24 @@
+SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
+────────────────────────────────────────────────────────────────────────────────
+> workspace ▾
+     name              acme                                           edit ↵
+     endpoint          /c/acme/
+     create            not ready
+
+  routing ▾
+     run on            Custom                                         choose ↵
+     credentials       choose a key source                            choose ↵
+      -> set credential file before loading models
+
+  clients ▸
+    not set
+
+  traffic ▸
+    empty
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   ? help   esc back

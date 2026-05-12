@@ -36,6 +36,12 @@ func TestCatalog_AdapterAndBindingSupport(t *testing.T) {
 func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	t.Parallel()
 
+	if got := DefaultBaseURL("chatgpt"); got != "https://api.openai.com/v1" {
+		t.Fatalf("chatgpt default base URL = %q", got)
+	}
+	if !RequiresCredential("chatgpt", DefaultBaseURL("chatgpt")) {
+		t.Fatal("chatgpt should require credential")
+	}
 	if got := DefaultBaseURL("openrouter"); got != "https://openrouter.ai/api/v1" {
 		t.Fatalf("openrouter default base URL = %q", got)
 	}
@@ -67,6 +73,14 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if protocol != protocolsurface.ChatCompletions {
 		t.Fatalf("openrouter default protocol = %q, want %q", protocol, protocolsurface.ChatCompletions)
 	}
+
+	chatgptVariants := SupportedAuthVariantsForSpec("chatgpt")
+	if len(chatgptVariants) < 2 {
+		t.Fatalf("chatgpt auth variants=%v want at least 2", chatgptVariants)
+	}
+	if chatgptVariants[0] != AuthVariantChatGPTLogin {
+		t.Fatalf("chatgpt default auth variant=%q want=%q", chatgptVariants[0], AuthVariantChatGPTLogin)
+	}
 }
 
 func TestCatalog_ResolveRouteProfile(t *testing.T) {
@@ -76,14 +90,14 @@ func TestCatalog_ResolveRouteProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("openai route profile should resolve")
 	}
-	if profile.Adapter != AdapterCustomOpenAICompatible {
-		t.Fatalf("adapter = %q", profile.Adapter)
+	if profile.ExecutionAdapterID != AdapterCustomOpenAICompatible {
+		t.Fatalf("adapter = %q", profile.ExecutionAdapterID)
 	}
 	if profile.AuthKind != AuthCredentialRef {
 		t.Fatalf("auth kind = %q", profile.AuthKind)
 	}
-	if profile.EndpointMode != EndpointModeOpenAICompatible {
-		t.Fatalf("endpoint mode = %q", profile.EndpointMode)
+	if profile.APIFamily != EndpointModeOpenAICompatible {
+		t.Fatalf("endpoint mode = %q", profile.APIFamily)
 	}
 
 	if _, ok := ResolveRouteProfile("custom", protocolsurface.Messages, "https://example.test/v1", "cred-1"); ok {

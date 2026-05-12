@@ -58,23 +58,23 @@ func TestResolveTelemetryEndpoint_DefaultWhenEnvMissing(t *testing.T) {
 	}
 }
 
-func TestResolveTelemetryInterval_DefaultWhenEnvMissing(t *testing.T) {
-	if got := ResolveTelemetryInterval(6 * time.Hour); got != 6*time.Hour {
-		t.Fatalf("default telemetry interval = %s, want %s", got, 6*time.Hour)
+func TestResolveTelemetryExportInterval_DefaultWhenEnvMissing(t *testing.T) {
+	if got := ResolveTelemetryExportInterval(15 * time.Minute); got != 15*time.Minute {
+		t.Fatalf("default telemetry export interval = %s, want %s", got, 15*time.Minute)
 	}
 }
 
-func TestResolveTelemetryInterval_OverrideSeconds(t *testing.T) {
-	t.Setenv(EnvTelemetryIntervalSeconds, "45")
-	if got := ResolveTelemetryInterval(6 * time.Hour); got != 45*time.Second {
-		t.Fatalf("telemetry interval override = %s, want %s", got, 45*time.Second)
+func TestResolveTelemetryExportInterval_OverrideSeconds(t *testing.T) {
+	t.Setenv(EnvTelemetryExportIntervalSeconds, "90")
+	if got := ResolveTelemetryExportInterval(15 * time.Minute); got != 90*time.Second {
+		t.Fatalf("telemetry export interval override = %s, want %s", got, 90*time.Second)
 	}
 }
 
-func TestResolveTelemetryInterval_InvalidFallsBackToDefault(t *testing.T) {
-	t.Setenv(EnvTelemetryIntervalSeconds, "abc")
-	if got := ResolveTelemetryInterval(6 * time.Hour); got != 6*time.Hour {
-		t.Fatalf("invalid telemetry interval = %s, want %s", got, 6*time.Hour)
+func TestResolveTelemetryExportInterval_InvalidFallsBackToDefault(t *testing.T) {
+	t.Setenv(EnvTelemetryExportIntervalSeconds, "abc")
+	if got := ResolveTelemetryExportInterval(15 * time.Minute); got != 15*time.Minute {
+		t.Fatalf("invalid telemetry export interval = %s, want %s", got, 15*time.Minute)
 	}
 }
 

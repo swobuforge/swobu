@@ -14,6 +14,14 @@ func (cmd CopyEndpointValueEffect) Execute(ctx context.Context) []update.Action 
 	return []update.Action{EndpointCopyNoted{Message: msg}}
 }
 
+// CopyAuthLoginURLEffect copies auth login URL and reports auth-local note.
+type CopyAuthLoginURLEffect struct{ Value string }
+
+func (cmd CopyAuthLoginURLEffect) Execute(ctx context.Context) []update.Action {
+	msg := copyValueNote(cmd.Value)
+	return []update.Action{AuthLoginCopyNoted{Message: msg}}
+}
+
 // CopyClientBaseURLEffect copies a client base URL to the clipboard.
 type CopyClientBaseURLEffect struct{ Value string }
 
@@ -36,6 +44,9 @@ func (cmd LaunchClientEffect) Execute(ctx context.Context) []update.Action {
 
 // EndpointCopyNoted reports the result of an endpoint copy operation.
 type EndpointCopyNoted struct{ Message string }
+
+// AuthLoginCopyNoted reports the result of copying auth login URL.
+type AuthLoginCopyNoted struct{ Message string }
 
 // ClientCopyNoted reports the result of a client URL copy operation.
 type ClientCopyNoted struct{ Message string }

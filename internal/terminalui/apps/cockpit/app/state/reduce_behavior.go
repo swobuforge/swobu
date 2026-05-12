@@ -99,6 +99,8 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
 	case EndpointCopyRequested:
 		return []update.Effect{stateeffect.CopyEndpointValueEffect(value)}
+	case AuthLoginURLCopyRequested:
+		return []update.Effect{stateeffect.CopyAuthLoginURLEffect{Value: strings.TrimSpace(value.Value)}}
 	case ClientBaseURLCopyRequested:
 		return []update.Effect{stateeffect.CopyClientBaseURLEffect(value)}
 	case ClientLaunchRequested:

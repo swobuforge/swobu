@@ -167,7 +167,7 @@ func TestBuildAddModelProviderItems_SelectProviderFocusesCredentialsWhenRequired
 		setModelPickerOpen:    func(bool) {},
 		setCredentialUI:       func(addModelCredentialUIState) {},
 	}
-	items := buildAddModelProviderItems(state.Model{}, state.ProviderConfigSnapshot{Ref: "provider-a"}, panel)
+	items := buildAddModelProviderItems(state.Model{}, "acme", state.ProviderConfigSnapshot{Ref: "provider-a"}, panel)
 	item := findProviderItemBySearch(t, items, "openrouter")
 	actions := item.OnChoose()
 	focus := findFocusAction(t, actions)
@@ -186,12 +186,42 @@ func TestBuildAddModelProviderItems_SelectProviderFocusesModelWhenCredentialsNot
 		setModelPickerOpen:    func(bool) {},
 		setCredentialUI:       func(addModelCredentialUIState) {},
 	}
-	items := buildAddModelProviderItems(state.Model{}, state.ProviderConfigSnapshot{Ref: "provider-a"}, panel)
+	items := buildAddModelProviderItems(state.Model{}, "acme", state.ProviderConfigSnapshot{Ref: "provider-a"}, panel)
 	item := findProviderItemBySearch(t, items, "ollama")
 	actions := item.OnChoose()
 	focus := findFocusAction(t, actions)
 	if focus.Key != "add-model/model" {
 		t.Fatalf("focus key=%q want add-model/model for no-auth provider", focus.Key)
+	}
+}
+
+func TestBuildAddModelProviderItems_SelectChatGPTDefaultsBrowserLoginAndStartsAuth(t *testing.T) {
+	t.Parallel()
+
+	var savedDraft state.ProviderConfigSnapshot
+	panel := addModelPanelState{
+		credentialUI:          defaultAddModelCredentialUIState(""),
+		setDraft:              func(next state.ProviderConfigSnapshot) { savedDraft = next },
+		setProviderPickerOpen: func(bool) {},
+		setModelPickerOpen:    func(bool) {},
+		setCredentialUI:       func(addModelCredentialUIState) {},
+	}
+	items := buildAddModelProviderItems(state.Model{}, "acme", state.ProviderConfigSnapshot{Ref: "provider-a"}, panel)
+	item := findProviderItemBySearch(t, items, "chatgpt")
+	actions := item.OnChoose()
+
+	if got := savedDraft.CredentialRef; got != "chatgpt_login" {
+		t.Fatalf("chatgpt default auth=%q want chatgpt_login", got)
+	}
+	var started bool
+	for _, action := range actions {
+		if _, ok := action.(state.StartProviderAuthSessionRequested); ok {
+			started = true
+			break
+		}
+	}
+	if !started {
+		t.Fatalf("actions %#v missing StartProviderAuthSessionRequested", actions)
 	}
 }
 

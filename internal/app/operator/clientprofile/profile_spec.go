@@ -8,8 +8,7 @@ import (
 )
 
 // TemplateVars carries string substitutions for profile spec templates.
-// FIXME do not introduce templating engine, that's too much for concatenating some strings.
-// We have ViewSpec/ViewBuilder for anything complex as well.
+// Keep template rendering intentionally small and string-substitution only.
 type TemplateVars map[string]string
 
 // ProfileSpec is a declarative client profile definition compiled into actions.

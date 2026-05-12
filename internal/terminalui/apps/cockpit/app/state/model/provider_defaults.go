@@ -18,14 +18,14 @@ type ProviderOption struct {
 func ProviderOptions() []ProviderOption {
 	out := make([]ProviderOption, 0, len(providercatalog.All()))
 	for _, profile := range providercatalog.All() {
-		if !profile.OperatorVisible {
+		if !profile.VisibleInOperatorUI {
 			continue
 		}
-		label := strings.TrimSpace(profile.OperatorSetupLabel)
+		label := strings.TrimSpace(profile.SetupHint)
 		if label == "" {
-			label = strings.TrimSpace(profile.Spec)
+			label = strings.TrimSpace(profile.ProviderID)
 		}
-		out = append(out, ProviderOption{Spec: profile.Spec, Label: label})
+		out = append(out, ProviderOption{Spec: profile.ProviderID, Label: label})
 	}
 	return out
 }
@@ -60,5 +60,5 @@ func ProviderRequiresCredential(spec, baseURL string) bool {
 }
 
 func ProviderSupportsCatalog(spec string) bool {
-	return providercatalog.SupportsModelCatalog(spec)
+	return providercatalog.HasModelCatalog(spec)
 }

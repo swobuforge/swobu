@@ -36,6 +36,14 @@ type Model struct {
 	RoutingSaveError           string
 	LastStoredKeyProviderSpec  string
 	LastStoredKeySlotName      string
+	AuthLoginEndpointName      string
+	AuthLoginProviderRef       string
+	AuthLoginSessionID         string
+	AuthLoginURL               string
+	AuthLoginUserCode          string
+	AuthLoginSessionState      string
+	AuthLoginSessionError      string
+	AuthLoginCopyNote          string
 	TrafficRows                []TrafficRow
 	TrafficError               string
 	HelpNote                   string

@@ -24,11 +24,11 @@ func ToolChoiceCapabilityFacts() []ToolChoiceCapabilityFact {
 	// Baseline: responses protocol supports strict->auto immediate downgrade
 	// retry across provider specs that expose responses protocol in catalog.
 	for _, profile := range catalog() {
-		if !supportsProtocol(profile.SupportedProtocols, protocolsurface.Responses) {
+		if !supportsProtocol(profile.SupportedEgressProtocols, protocolsurface.Responses) {
 			continue
 		}
 		out = append(out, ToolChoiceCapabilityFact{
-			ProviderSpec:            profile.Spec,
+			ProviderSpec:            profile.ProviderID,
 			ProtocolKind:            protocolsurface.Responses,
 			ModelID:                 "*",
 			ImmediateDowngradeRetry: true,

@@ -85,7 +85,7 @@ func BuildProvidersCreatePanel(ctx *retained.Context[state.Model]) retained.View
 			)
 			rows := []retained.ViewSpec[state.Model]{providerRow}
 			if expanded {
-				rows = append(rows, createProviderPropertyRows("", draftProvider, true)...)
+				rows = append(rows, createProviderPropertyRows("", draftProvider, true, model)...)
 			}
 			out = toolkitviews.NewAnchoredDisclosure(parent, rows...)
 		}
@@ -136,7 +136,12 @@ func createProviderSpecItems(model state.Model, onCancel func() []update.Action)
 	return items
 }
 
-func createProviderPropertyRows(endpointName string, providerConfig *state.ProviderConfigSnapshot, createMode bool) []retained.ViewSpec[state.Model] {
+func createProviderPropertyRows(
+	endpointName string,
+	providerConfig *state.ProviderConfigSnapshot,
+	createMode bool,
+	model state.Model,
+) []retained.ViewSpec[state.Model] {
 	rows := []retained.ViewSpec[state.Model]{
 		retained.Named[state.Model]("provider", providerSpecRow(providerConfig)),
 		retained.Named[state.Model]("model", providerModelChoiceRow(providerModelChoiceRowSpec{
@@ -158,6 +163,14 @@ func createProviderPropertyRows(endpointName string, providerConfig *state.Provi
 				CreateMode:     createMode,
 			})))
 		}
+	}
+	if !createMode &&
+		providerConfig != nil &&
+		strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "chatgpt") &&
+		strings.TrimSpace(model.AuthLoginEndpointName) == strings.TrimSpace(endpointName) &&
+		strings.TrimSpace(model.AuthLoginProviderRef) == strings.TrimSpace(providerConfig.Ref) &&
+		strings.TrimSpace(model.AuthLoginURL) != "" {
+		rows = append(rows, retained.Named[state.Model]("provider-login", providerLoginURLRow(endpointName, providerConfig)))
 	}
 	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "keychain") {
 		rows = append(rows, retained.Named[state.Model]("key-name", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{
@@ -193,6 +206,37 @@ func createProviderPropertyRows(endpointName string, providerConfig *state.Provi
 		)
 	}
 	return rows
+}
+
+func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConfigSnapshot) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
+		if providerConfig == nil {
+			return views.RowStatic("login", "not available")
+		}
+		model := ctx.Model()
+		loginURL := strings.TrimSpace(model.AuthLoginURL)
+		summary := "pending browser auth"
+		if s := strings.TrimSpace(model.AuthLoginSessionState); s != "" {
+			summary = "login " + s
+		}
+		if strings.TrimSpace(model.AuthLoginSessionError) != "" {
+			summary = "login error"
+		}
+		return views.RowActionWithCancel(
+			"login",
+			summary,
+			"open",
+			func() []update.Action {
+				return []update.Action{
+					state.OpenSupportLinkRequested{
+						Label: "login",
+						URL:   loginURL,
+					},
+				}
+			},
+			nil,
+		)
+	})
 }
 
 func newProviderSummaryRow(provider state.ProviderConfigSnapshot, selected, expanded bool, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {

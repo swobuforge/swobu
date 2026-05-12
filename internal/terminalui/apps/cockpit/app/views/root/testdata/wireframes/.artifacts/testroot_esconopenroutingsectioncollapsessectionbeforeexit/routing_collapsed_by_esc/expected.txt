@@ -1,0 +1,24 @@
+SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
+────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name              acme                                           edit ↵
+     endpoint          /c/acme/
+     create            ready                                          create ↵
+
+> routing ▸
+    OpenAI · env · gpt-5.3
+
+  clients ▸
+    not set
+
+  traffic ▸
+    empty
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ create   ? help   esc back

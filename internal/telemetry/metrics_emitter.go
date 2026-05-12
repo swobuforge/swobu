@@ -17,9 +17,10 @@ import (
 )
 
 type MetricsEmitterConfig struct {
-	EndpointURL string
-	Headers     map[string]string
-	Timeout     time.Duration
+	EndpointURL    string
+	Headers        map[string]string
+	Timeout        time.Duration
+	ExportInterval time.Duration
 }
 
 type MetricsEmitter struct {
@@ -51,7 +52,11 @@ func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsE
 	if err != nil {
 		return nil, fmt.Errorf("create otel metric exporter: %w", err)
 	}
-	reader := sdkmetric.NewPeriodicReader(exporter)
+	readerOpts := []sdkmetric.PeriodicReaderOption{}
+	if cfg.ExportInterval > 0 {
+		readerOpts = append(readerOpts, sdkmetric.WithInterval(cfg.ExportInterval))
+	}
+	reader := sdkmetric.NewPeriodicReader(exporter, readerOpts...)
 	res, err := resource.New(ctx, resource.WithAttributes(attribute.String("service.name", "swobu-telemetry")))
 	if err != nil {
 		return nil, fmt.Errorf("create otel metric resource: %w", err)

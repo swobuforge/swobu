@@ -1,0 +1,30 @@
+SWOBU 🧌                                                                ready   [ ? ] [› acme] [ + ]
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name               acme                                                              edit ↵
+     endpoint           /c/acme/                                                          copy ↵
+     delete workspace                                                                     delete ↵
+
+  routing ▾
+     run on             gpt-3.5-turbo                                                     choose ↵
+     models             1 configured                                                      manage ↵
+       gpt-3.5-turbo                                                                      edit ↵
+       add model                                                                          close ↵
+         provider          ChatGPT                                                        change ↵
+         auth              device code                                                    change ↵
+
+  clients ▸
+    not set
+
+> traffic ▸
+    no traffic yet
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   esc close   ? help

@@ -59,6 +59,18 @@ func TestKeyringResolver_ResolveCredential_LookupFailure(t *testing.T) {
 	}
 }
 
+func TestKeyringResolver_ResolveCredential_UsesMemoryFallback(t *testing.T) {
+	setMemoryFallbackSecret("openai", "openai/default", "token-memory")
+	resolver := NewKeyringResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
+	token, err := resolver.ResolveCredential(context.Background(), "openai", "keychain:openai/default")
+	if err != nil {
+		t.Fatalf("ResolveCredential returned error: %v", err)
+	}
+	if token != "token-memory" {
+		t.Fatalf("token = %q, want token-memory", token)
+	}
+}
+
 func TestResolver_ResolveCredential_UnsupportedRef(t *testing.T) {
 	resolver := NewResolver()
 	_, err := resolver.ResolveCredential(context.Background(), "openai", "vault:/tmp/token")

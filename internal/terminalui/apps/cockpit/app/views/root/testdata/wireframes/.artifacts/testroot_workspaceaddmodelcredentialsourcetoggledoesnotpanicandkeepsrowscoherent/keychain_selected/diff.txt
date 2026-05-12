@@ -1,0 +1,15 @@
+line 1
+- SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
++ SWOBU 🧌                                                                          ready   [ ? ] [› acme] [ + ]
+line 13
+-          provider           OpenRouter                                                              choose ↵
++          provider           OpenAI                                                                  change ↵
+line 14
+-          auth               keychain missing                                                        choose ↵
++          auth               keychain missing                                                        change ↵
+line 15
+-          key slot           openrouter/default                                                      edit ↵
++          key slot           openai/default                                                          edit ↵
+line 18
+-          model              not set                                                                 choose ↵
++          model              not selected                                                            choose ↵

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,9 +16,10 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
+	"github.com/swobuforge/swobu/internal/app/operator/authplane"
+	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
-	operatormodelcatalog "github.com/swobuforge/swobu/internal/app/operator/modelcatalog"
 	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
@@ -91,6 +93,10 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		endpoints: newEndpointCatalog(in.ConfigPath, cfg, loaded.Endpoints),
 		logger:    logger,
 		done:      make(chan struct{}),
+		telemetry: embeddedTelemetryRuntimeState{
+			store: telemetry.NewStore(),
+			now:   time.Now,
+		},
 	}
 
 	providers := in.Providers
@@ -106,6 +112,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	} else if store, ok := evidence.(*evidencestore.RequestEvidenceSinkStore); ok {
 		daemon.evidence = store
 	}
+	evidence = newTelemetryObservedEvidenceSink(evidence, daemon.observeTelemetryEvent)
 	continuity := in.Continuity
 	if continuity == nil {
 		// The shipped daemon must own the same continuity semantics as the in-process
@@ -144,14 +151,41 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		return nil
 	}))
 	if catalog, ok := providers.(ports.ProviderModelCatalog); ok {
-		modelCatalogPreview := operatormodelcatalog.NewPreviewLoader(catalog)
-		mux.Handle("/_swobu/model-catalog/preview", httpapi.NewModelCatalogPreviewHandler(
-			func(ctx context.Context, req operatormodelcatalog.PreviewRequest) (operatormodelcatalog.PreviewSnapshot, error) {
-				return modelCatalogPreview.Load(ctx, req)
-			},
-		))
+		mux.Handle("/_swobu/model-catalog/probe", httpapi.NewModelCatalogProbeHandler(catalog))
 	}
 	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
+	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
+		PublicBaseURL: daemonPublicBaseURLFromBindAddr(cfg.BindAddr),
+		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) error {
+			return credentialsadapter.StoreKeychainCredential(providerSpec, keyName, secret)
+		}),
+	})
+	authDriver, err := authplane.NewChatGPTMethodDriver(chatGPTLogin)
+	if err != nil {
+		return nil, fmt.Errorf("auth session driver: %w", err)
+	}
+	authStore := authplane.NewEndpointCredentialRefStore(endpointIntent)
+	authManager, err := authplane.NewManager(authDriver, authStore)
+	if err != nil {
+		return nil, fmt.Errorf("auth session manager: %w", err)
+	}
+	authSessionHandler := httpapi.NewAuthSessionHandler(
+		func(ctx context.Context, in authplane.StartInput) (authplane.StartOutput, error) {
+			return authManager.Start(ctx, in)
+		},
+		func(ctx context.Context, sessionID string) (authplane.SessionOutput, error) {
+			return authManager.Poll(ctx, sessionID)
+		},
+		func(ctx context.Context, sessionID string) error {
+			return authManager.Cancel(ctx, sessionID)
+		},
+		func(ctx context.Context, sessionID string) (authplane.StartOutput, error) {
+			return authManager.Retry(ctx, sessionID)
+		},
+	)
+	mux.Handle("/_swobu/auth/sessions", authSessionHandler)
+	mux.Handle("/_swobu/auth/sessions/", authSessionHandler)
+	mux.HandleFunc("/_swobu/auth/chatgpt/callback", chatGPTLogin.HandleCallback)
 	mux.Handle("/_swobu/endpoints", httpapi.NewEndpointControlHandler(
 		func(ctx context.Context) ([]endpointintent.Endpoint, error) { return endpointIntent.List(ctx) },
 		func(ctx context.Context, name string) (endpointintent.Endpoint, error) {
@@ -183,12 +217,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_success", "bind_addr", listener.Addr().String())
 	daemon.server = server
 	daemon.listener = listener
-	daemon.telemetry = embeddedTelemetryRuntimeState{
-		store:          telemetry.NewStore(),
-		now:            time.Now,
-		projectionLoad: daemon.StatusProjectionForScope,
-	}
-
+	chatGPTLogin.SetPublicBaseURL("http://" + listener.Addr().String())
 	go func() {
 		defer close(daemon.done)
 		err := server.Serve(listener)
@@ -224,6 +253,25 @@ func newProviderHTTPClient() *http.Client {
 	transport := baseTransport.Clone()
 	transport.ResponseHeaderTimeout = providerResponseHeaderTimeout
 	return &http.Client{Transport: transport}
+}
+
+func daemonPublicBaseURLFromBindAddr(bindAddr string) string {
+	addr := strings.TrimSpace(bindAddr)
+	if addr == "" {
+		return "http://127.0.0.1:7926"
+	}
+	if strings.HasPrefix(strings.ToLower(addr), "http://") || strings.HasPrefix(strings.ToLower(addr), "https://") {
+		return strings.TrimRight(addr, "/")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://127.0.0.1:7926"
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 func (d *Daemon) Close(ctx context.Context) error {

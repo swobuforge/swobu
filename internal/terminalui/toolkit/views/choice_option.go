@@ -13,14 +13,12 @@ func NewChoiceOption[M any](label string, selected bool, onChoose func() []updat
 }
 
 func NewChoiceOptionWithCancel[M any](label string, selected bool, onChoose func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[M] {
-	return retained.View[M](func(ctx *retained.Context[M]) retained.RenderNode {
-		return retained.Materialize(ctx, ListItemRow[M](
-			"- "+strings.TrimSpace(label),
-			selected,
-			true,
-			true,
-			onChoose,
-			onCancel,
-		))
-	})
+	return ListItemRow[M](
+		InsetLabel(strings.TrimSpace(label), 3),
+		selected,
+		true,
+		true,
+		onChoose,
+		onCancel,
+	)
 }

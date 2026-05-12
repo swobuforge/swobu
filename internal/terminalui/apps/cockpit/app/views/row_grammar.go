@@ -31,6 +31,14 @@ func RowAction(label, value, verb string, onActivate func() []update.Action) ret
 	return RowKV(label, value, verb+" ↵", onActivate)
 }
 
+func RowActionWideValue(label, value, verb string, onActivate func() []update.Action) retained.ViewSpec[state.Model] {
+	policy := cockpitRowPolicy()
+	policy.StandardLabelWidth = 8
+	policy.WideLabelWidth = 8
+	policy.MinLabelWidth = 4
+	return toolkitviews.NewKeyValueActionRowWithPolicy[state.Model](label, value, verb+" ↵", policy, onActivate)
+}
+
 func RowActionWithCancel(label, value, verb string, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 	return RowKVWithCancel(label, value, verb+" ↵", onActivate, onCancel)
 }

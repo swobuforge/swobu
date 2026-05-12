@@ -1,0 +1,32 @@
+SWOBU 🧌                                                                          ready   [ ? ] [› acme] [ + ]
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name               acme                                                                        edit ↵
+     endpoint           /c/acme/                                                                    copy ↵
+     delete workspace                                                                               delete ↵
+
+  routing ▾
+     run on             gemma4:e4b                                                                  choose ↵
+     models             1 configured                                                                manage ↵
+       gemma4:e4b                                                                                   edit ↵
+       add model                                                                                    close ↵
+         provider           OpenAI                                                                  change ↵
+         auth               keychain missing                                                        change ↵
+         key slot           openai/default                                                          edit ↵
+    >    key value          missing                                                                 edit ↵
+         keychain           no key found
+         model              not selected                                                            choose ↵
+
+  clients ▸
+    not set
+
+  traffic ▸
+    no traffic yet
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   esc close   ? help

@@ -1,0 +1,32 @@
+SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name               acme                                                                        edit ↵
+     endpoint           /c/acme/                                                                    copy ↵
+     delete workspace                                                                               delete ↵
+
+  routing ▾
+     run on             gemma4:e4b                                                                  choose ↵
+     models             1 configured                                                                manage ↵
+       gemma4:e4b                                                                                   edit ↵
+       add model                                                                                    close ↵
+         provider           OpenRouter                                                              choose ↵
+    >    auth               file missing                                                            choose ↵
+         credential file    required                                                                browse ↵
+         key file           not found
+          -> set credential file before loading models
+         model              choose after auth
+
+  clients ▸
+    not set
+
+  traffic ▸
+    no traffic yet
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   esc close   ? help

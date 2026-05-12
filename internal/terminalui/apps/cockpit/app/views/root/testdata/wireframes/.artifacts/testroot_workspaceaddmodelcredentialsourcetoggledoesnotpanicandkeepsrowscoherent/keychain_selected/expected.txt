@@ -1,0 +1,32 @@
+SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name               acme                                                                        edit ↵
+     endpoint           /c/acme/                                                                    copy ↵
+     delete workspace                                                                               delete ↵
+
+  routing ▾
+     run on             gemma4:e4b                                                                  choose ↵
+     models             1 configured                                                                manage ↵
+       gemma4:e4b                                                                                   edit ↵
+       add model                                                                                    close ↵
+         provider           OpenRouter                                                              choose ↵
+         auth               keychain missing                                                        choose ↵
+         key slot           openrouter/default                                                      edit ↵
+    >    key value          missing                                                                 edit ↵
+         keychain           no key found
+         model              not set                                                                 choose ↵
+
+  clients ▸
+    not set
+
+  traffic ▸
+    no traffic yet
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   esc close   ? help

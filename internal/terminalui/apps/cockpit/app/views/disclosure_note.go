@@ -16,3 +16,12 @@ func DisclosureNoteRows(note string) []retained.ViewSpec[state.Model] {
 	}
 	return wrappedPayloadTextRows("-> " + note)
 }
+
+// WrappedDetailRows renders wrapped subordinate copy without a leading marker.
+func WrappedDetailRows(note string) []retained.ViewSpec[state.Model] {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return nil
+	}
+	return wrappedPayloadTextRows(note)
+}

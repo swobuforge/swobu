@@ -30,7 +30,7 @@ func TestNormalizeOperatorSurfaceError_PreservesNonTransportMessageWithoutIntern
 	}
 }
 
-func TestLoadJSON_ModelPreview404_HasStaleDaemonHint(t *testing.T) {
+func TestLoadJSON_ModelProbe404_HasStaleDaemonHint(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,12 +38,12 @@ func TestLoadJSON_ModelPreview404_HasStaleDaemonHint(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := loadJSON[map[string]any](context.Background(), srv.URL+"/_swobu/model-catalog/preview?provider_spec=openai")
+	_, err := loadJSON[map[string]any](context.Background(), srv.URL+"/_swobu/model-catalog/probe?provider_spec=openai")
 	if err == nil {
 		t.Fatal("loadJSON returned nil error, want stale-daemon hint")
 	}
-	if !strings.Contains(err.Error(), "/_swobu/model-catalog/preview") {
-		t.Fatalf("error = %q, want preview route hint", err.Error())
+	if !strings.Contains(err.Error(), "/_swobu/model-catalog/probe") {
+		t.Fatalf("error = %q, want probe route hint", err.Error())
 	}
 }
 
@@ -68,9 +68,9 @@ func TestLoadJSON_AllowsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestLoadRoutingModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *testing.T) {
+func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/_swobu/model-catalog/preview" {
+		if r.URL.Path != "/_swobu/model-catalog/probe" {
 			http.NotFound(w, r)
 			return
 		}
@@ -98,7 +98,7 @@ func TestLoadRoutingModelCatalogEffect_SlowPreviewMapsToTimeoutHint(t *testing.T
 	if !ok {
 		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
 	}
-	want := "model preview timed out at " + srv.URL + " (retry)"
+	want := "model probe timed out at " + srv.URL + " (retry)"
 	if loaded.Error != want {
 		t.Fatalf("error = %q, want %q", loaded.Error, want)
 	}

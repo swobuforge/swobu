@@ -40,9 +40,9 @@ func ResolveTelemetryEndpoint(defaultValue string) string {
 	return strings.TrimSpace(defaultValue)
 }
 
-// ResolveTelemetryInterval applies env override over a built-in interval.
-func ResolveTelemetryInterval(defaultValue time.Duration) time.Duration {
-	raw := strings.TrimSpace(os.Getenv(EnvTelemetryIntervalSeconds))
+// ResolveTelemetryExportInterval applies env override over a built-in export interval.
+func ResolveTelemetryExportInterval(defaultValue time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(EnvTelemetryExportIntervalSeconds))
 	if raw == "" {
 		return defaultValue
 	}

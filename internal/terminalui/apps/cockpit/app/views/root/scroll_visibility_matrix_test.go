@@ -61,7 +61,7 @@ func TestRoot_ScrollVisibilityProofMatrix(t *testing.T) {
 				dispatchKeys(rt, viewport, interaction.KeyEnter)
 			},
 			assert: []string{
-				"Swobu! 🧌",
+				"SWOBU 🧌",
 				"↑↓ move",
 				"tab tabs",
 				"↓ more",

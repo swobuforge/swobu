@@ -1,0 +1,9 @@
+line 1
+- SWOBU! 🧌                                                               ready   [ ? ] [› acme] [ + ]
++ SWOBU 🧌                                                                ready   [ ? ] [› acme] [ + ]
+line 13
+-          provider          Provider                                                       choose ↵
++          provider          Provider                                                       change ↵
+line 14
+-          auth              missing                                                        choose ↵
++          auth              missing                                                        change ↵

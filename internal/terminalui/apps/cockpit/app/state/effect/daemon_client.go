@@ -35,6 +35,10 @@ func operatorClient() *operatorclient.Client {
 	return operatorclient.New(httpClient(), daemonURL())
 }
 
+func operatorClientWithTimeout(timeout time.Duration) *operatorclient.Client {
+	return operatorclient.New(httpClientWithTimeout(timeout), daemonURL())
+}
+
 func loadJSON[T any](ctx context.Context, rawURL string) (T, error) {
 	return loadJSONValidated[T](ctx, rawURL, nil)
 }
@@ -67,8 +71,8 @@ func loadJSONValidatedWithClient[T any](ctx context.Context, rawURL string, vali
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			if parsed, parseErr := neturl.Parse(rawURL); parseErr == nil && strings.HasPrefix(parsed.Path, "/_swobu/model-catalog/preview") {
-				return zero, fmt.Errorf("daemon is missing /_swobu/model-catalog/preview (404); restart daemon with current swobu binary")
+			if parsed, parseErr := neturl.Parse(rawURL); parseErr == nil && strings.HasPrefix(parsed.Path, "/_swobu/model-catalog/probe") {
+				return zero, fmt.Errorf("daemon is missing /_swobu/model-catalog/probe (404); restart daemon with current swobu binary")
 			}
 		}
 		return zero, fmt.Errorf("returned status %d", resp.StatusCode)
