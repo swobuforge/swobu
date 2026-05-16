@@ -1,7 +1,7 @@
 // Package requestpath owns the application-layer orchestration for one client
-// compatibility request lifecycle.
+// protocol request lifecycle.
 //
-// It coordinates endpoint intent, compatibility-owned continuation semantics,
+// It coordinates endpoint intent, canonical continuation semantics,
 // provider execution, model-resolution defaults for endpoint routing, normalized
 // ingress provenance carried from adapters, and runtime evidence emission.
 //
@@ -13,7 +13,7 @@
 // canonical request meaning. Capability truth is resolved from a startup-built
 // backend-model capability catalog keyed by provider/protocol/model identity,
 // sourced from domain provider/model capability facts.
-// It also owns endpoint-qualified compatibility model listing truth for
+// It also owns endpoint-qualified model listing truth for
 // configured routes without redefining the domain meaning of requests,
 // outputs, or errors.
 package requestpath

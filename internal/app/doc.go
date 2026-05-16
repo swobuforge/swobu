@@ -2,7 +2,7 @@
 //
 // The real ownership lives in child packages:
 //
-// - `app/requestpath`: one compatibility request lifecycle
+// - `app/requestpath`: one protocol request lifecycle
 // - `app/operator/endpoints`: daemon-owned endpoint-intent control use cases
 // - `app/operator/modelcatalog`: daemon-owned operator model-catalog query
 //

@@ -26,8 +26,8 @@ func InferFamily(method string, normalizedPath NormalizedPath, hasAnthropicVersi
 	}
 }
 
-// ValidateIngressTransport enforces compatibility-route transport law before
-// family decoding.
+// ValidateIngressTransport enforces protocol-route transport law before family
+// decoding.
 func ValidateIngressTransport(method string, normalizedPath NormalizedPath, websocketUpgrade bool) error {
 	if normalizedPath == NormalizedPathModels {
 		return nil
@@ -36,10 +36,10 @@ func ValidateIngressTransport(method string, normalizedPath NormalizedPath, webs
 		if method == "GET" && normalizedPath == NormalizedPathResponses {
 			return nil
 		}
-		return UnsupportedEndpoint("websocket ingress is not supported on compatibility routes; use HTTP POST and SSE streaming semantics")
+		return UnsupportedEndpoint("websocket ingress is not supported on protocol routes; use HTTP POST and SSE streaming semantics")
 	}
 	if method != "POST" {
-		return UnsupportedEndpoint("compatibility family operations require HTTP POST")
+		return UnsupportedEndpoint("protocol family operations require HTTP POST")
 	}
 	return nil
 }

@@ -9,7 +9,7 @@ import (
 // ResponseContinuityStore owns the minimal canonical continuation state
 // required for truthful responses-style continuity across protocol boundaries.
 // It supports native previous_response_id lookup and chain prefix matching inside
-// one namespace so compatibility can derive canonical last turns for
+// one namespace so request-path orchestration can derive canonical last turns for
 // * -> responses realization without pushing diff logic into adapters.
 //
 // MatchPrefix returns one deterministic best representative when several

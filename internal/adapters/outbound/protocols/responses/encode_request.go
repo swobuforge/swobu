@@ -161,7 +161,7 @@ func encodeInput(req canonical.GenerationCanonicalRequest) (any, error) {
 	}
 	switch {
 	case req.HasLastTurn():
-		// When compatibility derived a truthful suffix against a known prefix
+		// When continuation derivation produced a truthful suffix against a known prefix
 		// anchor, responses can use that cheaper incremental view directly.
 		return encodeConversation(req.LastTurn())
 	case req.HasThread():

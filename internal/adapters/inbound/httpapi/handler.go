@@ -40,13 +40,13 @@ func NewHandler(requests RequestHandler) Handler {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	endpointName, operationPath, err := splitCompatibilityPath(r.URL.Path)
+	endpointName, operationPath, err := splitProtocolPath(r.URL.Path)
 	if err != nil {
 		writeSwobuError(w, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
 		return
 	}
 	if operationPath == "" {
-		writeSwobuError(w, canonical.UnsupportedEndpoint("compatibility operation path is required"))
+		writeSwobuError(w, canonical.UnsupportedEndpoint("protocol operation path is required"))
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.serveResponsesWebsocket(w, r, endpointName, normalizedPath)
 			return
 		}
-		writeCompatibilityError(w, canonical.UnsupportedEndpoint("websocket ingress is supported only on compatibility /responses routes"))
+		writeCompatibilityError(w, canonical.UnsupportedEndpoint("websocket ingress is supported only on protocol /responses routes"))
 		return
 	}
 	if normalizedPath == canonical.NormalizedPathModels {
@@ -150,9 +150,9 @@ func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, end
 }
 
 // This path split is intentionally small and local to the HTTP edge.
-// It parses endpoint-qualified compatibility routes only; it is not a second
+// It parses endpoint-qualified protocol routes only; it is not a second
 // routing layer and must not absorb family-specific semantics.
-func splitCompatibilityPath(raw string) (string, string, error) {
+func splitProtocolPath(raw string) (string, string, error) {
 	if !strings.HasPrefix(raw, "/c/") {
 		return "", "", errors.New("missing /c/ prefix")
 	}
@@ -237,7 +237,7 @@ func logIngressRequestShape(
 	streaming bool,
 ) {
 	threadCount, lastRole, hasPreviousResponseID := requestShapeSummary(request)
-	slog.Debug("compatibility ingress request",
+	slog.Debug("protocol ingress request",
 		"component", "httpapi",
 		"event", "ingress_request_shape",
 		"request_id", requestID,
@@ -301,7 +301,7 @@ func logRequestOutcome(
 			statusCode = statusCodeForCompatibilityError(err)
 		}
 	}
-	slog.Debug("compatibility request outcome",
+	slog.Debug("protocol request outcome",
 		"component", "httpapi",
 		"event", "request_outcome",
 		"request_id", requestID,

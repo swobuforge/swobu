@@ -35,7 +35,7 @@ type CanonicalOutput interface {
 	CloneOutput() CanonicalOutput
 }
 
-// CanonicalOutputValue is the fully materialized canonical success value in the compatibility core.
+// CanonicalOutputValue is the fully materialized canonical success value in the canonical core.
 // Streaming is modeled as ordered assembly of this object rather than as a separate semantic path.
 type CanonicalOutputValue struct {
 	semanticKind SemanticKind

@@ -41,7 +41,7 @@ func (e Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// NewSwobuError builds a typed Swobu-originated failure for the compatibility contract.
+// NewSwobuError builds a typed Swobu-originated failure for the protocol contract.
 func NewSwobuError(code ErrorCode, message string) Error {
 	return Error{
 		Code:    code,

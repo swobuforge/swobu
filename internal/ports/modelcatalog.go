@@ -7,7 +7,7 @@ import (
 )
 
 // ProviderModelCatalog reads operator-support model catalogs for one selected
-// provider target. It is separate from compatibility-path semantic execution.
+// provider target. It is separate from protocol-path semantic execution.
 type ProviderModelCatalog interface {
 	ListModels(ctx context.Context, target RoutableTarget) ([]string, error)
 }

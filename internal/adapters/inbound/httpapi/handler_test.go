@@ -350,7 +350,7 @@ func TestHandler_RejectsWebSocketIngressWithGuidance(t *testing.T) {
 	if !strings.Contains(body, `"code":"UNSUPPORTED_ENDPOINT"`) {
 		t.Fatalf("body = %q, want UNSUPPORTED_ENDPOINT", body)
 	}
-	if !strings.Contains(body, "supported only on compatibility /responses routes") {
+	if !strings.Contains(body, "supported only on protocol /responses routes") {
 		t.Fatalf("body = %q, want /responses guidance", body)
 	}
 }
@@ -475,7 +475,7 @@ func TestHandler_RejectsNonPOSTCompatibilityFamilyOperations(t *testing.T) {
 	if !strings.Contains(body, `"code":"UNSUPPORTED_ENDPOINT"`) {
 		t.Fatalf("body = %q, want UNSUPPORTED_ENDPOINT", body)
 	}
-	if !strings.Contains(body, "compatibility family operations require HTTP POST") {
+	if !strings.Contains(body, "protocol family operations require HTTP POST") {
 		t.Fatalf("body = %q, want POST guidance", body)
 	}
 }

@@ -14,7 +14,7 @@ type statusProjectionReadFunc func(context.Context, evidencestore.ProjectionScop
 
 // StatusProjectionHandler renders the daemon-owned recent-traffic and counter
 // projection for operator surfaces. It stays on the internal `_swobu/*` family
-// so machine status and client compatibility routes remain separate.
+// so machine status and client protocol routes remain separate.
 type StatusProjectionHandler struct {
 	read statusProjectionReadFunc
 }
