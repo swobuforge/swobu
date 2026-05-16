@@ -14,8 +14,8 @@ import (
 	"time"
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt/codexwire"
 	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt/codexwire"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
