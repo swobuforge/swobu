@@ -1,6 +1,3 @@
-line 1
-- SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
-+ SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
-line 10
--      credentials       choose a key source                            choose ↵
-+      auth              missing                                        choose ↵
+line 11
+-      frame             http_json_body                                 next ↵
++      delivery          request-response (HTTP JSON)                   next ↵

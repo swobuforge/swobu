@@ -1,4 +1,4 @@
-SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
+SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
 ────────────────────────────────────────────────────────────────────────────────
 > workspace ▾
      name              acme                                           edit ↵
@@ -7,7 +7,8 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   routing ▾
      run on            OpenRouter                                     choose ↵
-     credentials       choose a key source                            choose ↵
+     auth              missing                                        choose ↵
+     frame             http_json_body                                 next ↵
       -> set credential file before loading models
 
   clients ▸
@@ -15,7 +16,6 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   traffic ▸
     empty
-
 
 
 

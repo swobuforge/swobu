@@ -8,11 +8,12 @@ SWOBU 🧌                                                                      
   routing ▾
      run on             ollama:gemma4:e4b:e3b0c442                                                  choose ↵
      models             1 configured                                                                manage ↵
-       ollama:gemma4:e4b:                                                                           edit ↵
+       model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
        add model                                                                                    close ↵
          provider           OpenAI                                                                  change ↵
-    >    auth               file missing                                                            change ↵
-         credential file    required                                                                browse ↵
+         auth               file missing                                                            change ↵
+         delivery           streaming (SSE) (default)                                               next ↵
+    >    credential file    required                                                                browse ↵
          key file           not found
           -> set credential file before loading models
          model              choose after auth
@@ -22,7 +23,6 @@ SWOBU 🧌                                                                      
 
   traffic ▸
     no traffic yet
-
 
 
 

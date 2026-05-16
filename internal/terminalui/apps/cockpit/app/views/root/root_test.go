@@ -692,11 +692,8 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
-	focusRowContaining(t, rt, viewport, "gpt-5.3-codex")
-	// The selected-summary row is read-only; model properties open from the model row.
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "gpt-5.3-c")
+	// Open the editable model row (not the run-on summary row).
+	focusRowContaining(t, rt, viewport, "c57d7a7c                                            edit ↵")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
@@ -772,6 +769,71 @@ func TestRoot_FirstRunChatGPTBrowserLogin_ShowsAuthFlowRows(t *testing.T) {
 	}
 }
 
+func TestRoot_FirstRunChatGPTBrowserLogin_LongURLVisualRoundTrip_NoEllipsisNoLoss(t *testing.T) {
+	t.Parallel()
+
+	longURL := "https://auth.openai.com/oauth/authorize?client_id=app_EMoamEEZ73f0CkXaXp7hrann&code_challenge=D2PFtaHyPdOn2qqnmR4HsI4r6cai8uWAYJgaJm4GdTw&code_challenge_method=S256&code_simplified_flow=true&id_token_add_organizations=true&originator=codex_cli_rs&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&response_type=code&scope=openid+email+offline_access+api.connectors.read+api.connectors.invoke&state=qBBX8qSY-WyEkOMpHdQCJkj4A"
+	rt := newTestRuntime(state.Model{
+		HeaderStatus: "ready",
+		DaemonState:  "up",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           "create-draft",
+			ProviderSpec:  "chatgpt",
+			CredentialRef: "chatgpt_login",
+		},
+		AuthSessions: map[string]stateModel.AuthSessionView{
+			stateModel.CreateDraftAuthOwnerKey("create-draft").String(): {
+				SessionID:    "sess-1",
+				URL:          longURL,
+				SessionState: "pending",
+			},
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 30}
+	rt.Rebuild(Root(), viewport)
+	out := rt.Render(viewport).String()
+	if strings.Contains(out, "…") {
+		t.Fatalf("expected no ellipsis in wrapped auth link rows; render=%q", out)
+	}
+	normalizedRender := normalizeVisualText(out)
+	normalizedURL := normalizeVisualText(longURL)
+	if !strings.Contains(normalizedRender, normalizedURL) {
+		t.Fatalf("rendered auth url lost characters across wraps; render=%q", out)
+	}
+}
+
+func TestRoot_FirstRunChatGPTBrowserLogin_LongURLNarrowViewport_NoLoss(t *testing.T) {
+	t.Parallel()
+
+	longURL := "https://auth.openai.com/oauth/authorize?client_id=app_EMoamEEZ73f0CkXaXp7hrann&code_challenge=D2PFtaHyPdOn2qqnmR4HsI4r6cai8uWAYJgaJm4GdTw&code_challenge_method=S256&code_simplified_flow=true&id_token_add_organizations=true&originator=codex_cli_rs&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&response_type=code&scope=openid+email+offline_access+api.connectors.read+api.connectors.invoke&state=qBBX8qSY-WyEkOMpHdQCJkj4A"
+	rt := newTestRuntime(state.Model{
+		HeaderStatus: "ready",
+		DaemonState:  "up",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           "create-draft",
+			ProviderSpec:  "chatgpt",
+			CredentialRef: "chatgpt_login",
+		},
+		AuthSessions: map[string]stateModel.AuthSessionView{
+			stateModel.CreateDraftAuthOwnerKey("create-draft").String(): {
+				SessionID:    "sess-1",
+				URL:          longURL,
+				SessionState: "pending",
+			},
+		},
+	})
+	viewport := geom.Rect{W: 80, H: 24}
+	rt.Rebuild(Root(), viewport)
+	out := rt.Render(viewport).String()
+	normalizedRender := normalizeVisualText(out)
+	if !strings.Contains(normalizedRender, "code_challenge_method=S256") {
+		t.Fatalf("expected code_challenge_method token in narrow viewport render; render=%q", out)
+	}
+	if !strings.Contains(normalizedRender, "redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback") {
+		t.Fatalf("expected redirect_uri token in narrow viewport render; render=%q", out)
+	}
+}
+
 func TestRoot_FirstRunChatGPTSignedIn_HidesKeychainEditRows(t *testing.T) {
 	t.Parallel()
 
@@ -797,6 +859,10 @@ func TestRoot_FirstRunChatGPTSignedIn_HidesKeychainEditRows(t *testing.T) {
 	if strings.Contains(out, "key slot") || strings.Contains(out, "key value") {
 		t.Fatalf("unexpected keychain edit rows for chatgpt signed-in first run: %q", out)
 	}
+}
+
+func normalizeVisualText(value string) string {
+	return strings.Join(strings.Fields(value), "")
 }
 
 func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
@@ -863,7 +929,6 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		out := rt.Render(viewport).String()
 		assertVisualByKey(t, out, "device_in_progress")
 	})
-
 	t.Run("signed_in", func(t *testing.T) {
 		rt := newTestRuntime(base)
 		rt.Rebuild(Root(), viewport)

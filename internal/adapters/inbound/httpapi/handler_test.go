@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,6 +48,63 @@ func TestHandler_PropagatesRequestID(t *testing.T) {
 	}
 	if got := capturing.got.Provenance.NormalizedOp; got != canonical.NormalizedPathChatCompletions {
 		t.Fatalf("normalized op = %q, want %q", got, canonical.NormalizedPathChatCompletions)
+	}
+}
+
+func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
+	setDefaultLogger, logs := testDebugLogger()
+	defer setDefaultLogger()
+
+	success := NewHandler(staticRequestHandler{
+		out: requestpath.HandleOutput{
+			Response: ports.NewBufferedProviderResponse(
+				canonical.NewConversationOutput(
+					"chatcmpl_1",
+					"m",
+					[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+					"stop",
+				),
+			),
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("User-Agent", "Codex/1.0")
+	req.Header.Set("X-Request-Id", "req_success")
+	rec := httptest.NewRecorder()
+	success.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("success status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	fail := NewHandler(staticRequestHandler{
+		err: canonical.NewBackendError("openai", http.StatusBadGateway, `{"error":"upstream failed"}`, ""),
+	})
+	reqFail := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
+	reqFail.Header.Set("User-Agent", "Claude-Code/2.0")
+	reqFail.Header.Set("X-Request-Id", "req_fail")
+	recFail := httptest.NewRecorder()
+	fail.ServeHTTP(recFail, reqFail)
+	if recFail.Code != http.StatusBadGateway {
+		t.Fatalf("failure status = %d, want %d", recFail.Code, http.StatusBadGateway)
+	}
+
+	out := logs.String()
+	for _, want := range []string{
+		"event=ingress_request_shape",
+		"event=request_outcome",
+		"request_id=req_success",
+		"client_handler=codex",
+		"client_protocol=openai_compat",
+		"request_id=req_fail",
+		"client_handler=claude_code",
+		"result=backend_error",
+		"error_origin=backend",
+		"backend_ref=openai",
+		"status_code=502",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
+		}
 	}
 }
 
@@ -616,6 +674,16 @@ func (h staticRequestHandler) Handle(_ context.Context, _ requestpath.HandleInpu
 
 func testStreamingEmptyResponse() ports.ProviderResponse {
 	return ports.NewEnvelopeStreamingProviderResponse(canonical.NewSliceEventReader(nil))
+}
+
+func testDebugLogger() (restore func(), out *bytes.Buffer) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	next := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	slog.SetDefault(next)
+	return func() {
+		slog.SetDefault(prev)
+	}, &buf
 }
 
 func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) ports.ProviderResponse {

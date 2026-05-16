@@ -5,13 +5,14 @@ import (
 	"errors"
 	"github.com/swobuforge/swobu/internal/adapters/protocolsurface"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
-func writeSuccessResponse(w http.ResponseWriter, family canonical.IngressFamily, resp ports.ProviderResponse, streaming bool) error {
+func writeSuccessResponse(w http.ResponseWriter, requestID string, family canonical.IngressFamily, resp ports.ProviderResponse, streaming bool) error {
 	if !streaming {
 		envelope := resp.EnvelopeStream()
 		if envelope == nil {
@@ -27,7 +28,7 @@ func writeSuccessResponse(w http.ResponseWriter, family canonical.IngressFamily,
 	if envelope == nil {
 		return canonical.InternalError("streaming provider response is missing a canonical envelope stream")
 	}
-	return writeStreamingSuccess(w, family, envelope)
+	return writeStreamingSuccess(w, requestID, family, envelope)
 }
 
 func projectBufferedOutputFromEnvelope(envelope canonical.EventReader) (canonical.CanonicalOutput, error) {
@@ -70,7 +71,7 @@ func writeBufferedSuccess(w http.ResponseWriter, family canonical.IngressFamily,
 // writeStreamingSuccess delegates stream-frame encoding to the selected
 // client-family codec so provider SSE shapes never leak through this boundary.
 // family-specific codecs and terminal transport conditions at one choke point.
-func writeStreamingSuccess(w http.ResponseWriter, family canonical.IngressFamily, envelope canonical.EventReader) error {
+func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canonical.IngressFamily, envelope canonical.EventReader) error {
 	if envelope == nil {
 		return canonical.InternalError("streaming provider response is missing an envelope event stream")
 	}
@@ -85,12 +86,23 @@ func writeStreamingSuccess(w http.ResponseWriter, family canonical.IngressFamily
 	w.WriteHeader(http.StatusOK)
 
 	sink := httpFrameSink{w: w}
-	if err := drainEncodedFrames(context.Background(), envelope, codec.NewStreamState(), sink); err != nil {
+	stats, err := drainEncodedFramesWithStats(context.Background(), envelope, codec.NewStreamState(), sink)
+	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		return canonical.InternalError("stream decoding failed")
 	}
+	slog.Debug("protocol response stream emitted",
+		"component", "httpapi",
+		"event", "stream_emit_complete",
+		"request_id", requestID,
+		"ingress_family", string(family),
+		"event_count", stats.EventCount,
+		"frame_count", stats.FrameCount,
+		"frame_bytes", stats.FrameBytes,
+		"frame_sha256", stats.FrameSHA256,
+	)
 	return nil
 }
 

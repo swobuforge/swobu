@@ -95,8 +95,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeCompatibilityError(w, err)
 		return
 	}
+	provenance := ingressProvenance(r, family, normalizedPath)
 	requestID := requestIDFromRequest(r)
-	logIngressRequestShape(requestID, endpoint.String(), family, normalizedPath, request, streaming)
+	logIngressRequestShape(requestID, endpoint.String(), provenance, request, streaming)
 
 	if h.requests == nil {
 		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
@@ -108,10 +109,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RequestID:    requestID,
 		Request:      request,
 		Contract:     requestpath.NewExecutionContract(streaming),
-		Provenance:   ingressProvenance(r, family, normalizedPath),
+		Provenance:   provenance,
 	})
 	if err != nil {
-		logRequestOutcome(requestID, endpoint.String(), family, "", "", "", err)
+		logRequestOutcome(requestID, endpoint.String(), provenance, "", "", "", "", "", "", err)
 		writeCompatibilityError(w, err)
 		return
 	}
@@ -120,9 +121,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 	writeModelResolutionHeaders(w, out.Response.Metadata())
 	metadata := out.Response.Metadata()
-	logRequestOutcome(requestID, endpoint.String(), family, metadata.ModelRequested, metadata.ModelResolved, metadata.ModelResolutionMode, nil)
+	logRequestOutcome(
+		requestID,
+		endpoint.String(),
+		provenance,
+		metadata.ModelRequested,
+		metadata.ModelResolved,
+		metadata.ModelResolutionMode,
+		metadata.ClientResponseMode,
+		metadata.ProviderCallMode,
+		metadata.ConversionKind,
+		nil,
+	)
 
-	if err := writeSuccessResponse(w, family, out.Response, streaming); err != nil {
+	if err := writeSuccessResponse(w, requestID, family, out.Response, streaming); err != nil {
 		writeCompatibilityError(w, err)
 	}
 }
@@ -231,8 +243,7 @@ func isWebSocketUpgrade(r *http.Request) bool {
 func logIngressRequestShape(
 	requestID string,
 	endpoint string,
-	family canonical.IngressFamily,
-	normalizedPath canonical.NormalizedPath,
+	provenance requestpath.IngressProvenance,
 	request canonical.CanonicalRequest,
 	streaming bool,
 ) {
@@ -242,8 +253,10 @@ func logIngressRequestShape(
 		"event", "ingress_request_shape",
 		"request_id", requestID,
 		"endpoint", endpoint,
-		"ingress_family", string(family),
-		"normalized_op", string(normalizedPath),
+		"ingress_family", string(provenance.IngressFamily),
+		"normalized_op", string(provenance.NormalizedOp),
+		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // trimlowerlint:allow boundary canonicalization
+		"client_handler", strings.TrimSpace(provenance.ClientHandler),   // trimlowerlint:allow boundary canonicalization
 		"streaming", streaming,
 		"item_count", threadCount,
 		"last_input_role", lastRole,
@@ -283,20 +296,28 @@ func lastRoleFromItems(items []canonical.CanonicalItem) string {
 func logRequestOutcome(
 	requestID string,
 	endpoint string,
-	family canonical.IngressFamily,
+	provenance requestpath.IngressProvenance,
 	modelRequested string,
 	modelResolved string,
 	modelResolutionMode string,
+	clientResponseMode string,
+	providerCallMode string,
+	conversionKind string,
 	err error,
 ) {
 	result := "success"
 	statusCode := http.StatusOK
+	errorOrigin := ""
+	backendRef := ""
 	if err != nil {
 		result = "swobu_error"
+		errorOrigin = string(canonical.ErrorOriginSwobu)
 		var backendErr canonical.BackendError
 		if errors.As(err, &backendErr) {
 			result = "backend_error"
 			statusCode = backendErr.StatusCode
+			errorOrigin = string(canonical.ErrorOriginBackend)
+			backendRef = strings.TrimSpace(backendErr.BackendRef) // trimlowerlint:allow boundary canonicalization
 		} else {
 			statusCode = statusCodeForCompatibilityError(err)
 		}
@@ -306,12 +327,20 @@ func logRequestOutcome(
 		"event", "request_outcome",
 		"request_id", requestID,
 		"endpoint", endpoint,
-		"ingress_family", string(family),
+		"ingress_family", string(provenance.IngressFamily),
+		"normalized_op", string(provenance.NormalizedOp),
+		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // trimlowerlint:allow boundary canonicalization
+		"client_handler", strings.TrimSpace(provenance.ClientHandler),   // trimlowerlint:allow boundary canonicalization
 		"result", result,
 		"status_code", statusCode,
+		"error_origin", errorOrigin,
+		"backend_ref", backendRef,
 		"model_requested", strings.TrimSpace(modelRequested), // trimlowerlint:allow boundary canonicalization
 		"model_resolved", strings.TrimSpace(modelResolved), // trimlowerlint:allow boundary canonicalization
 		"model_resolution_mode", strings.TrimSpace(modelResolutionMode), // trimlowerlint:allow boundary canonicalization
+		"client_response_mode", strings.TrimSpace(clientResponseMode), // trimlowerlint:allow boundary canonicalization
+		"provider_call_mode", strings.TrimSpace(providerCallMode),     // trimlowerlint:allow boundary canonicalization
+		"conversion_kind", strings.TrimSpace(conversionKind),          // trimlowerlint:allow boundary canonicalization
 	)
 }
 

@@ -97,13 +97,13 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 			}
 		}
 		if loginURL != "" {
-			rows = append(rows, interactiveAuthLinkRows(loginURL, stateModel.AddModelDraftAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)).String())...) // trimlowerlint:allow boundary canonicalization
+			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // trimlowerlint:allow boundary canonicalization
 		}
 		if shouldRenderInteractiveAuthCode(variant, userCode) {
 			rows = append(rows, views.RowAction("code", userCode, "copy", func() []update.Action {
 				return []update.Action{
 					state.AuthSessionURLCopyScopedRequested{
-						OwnerKey: stateModel.AddModelDraftAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)).String(), // trimlowerlint:allow boundary canonicalization
+						OwnerKey: interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)), // trimlowerlint:allow boundary canonicalization
 						Value:    userCode,
 					},
 				}
@@ -121,7 +121,7 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 		}))
 		loginURL := strings.TrimSpace(authState.URL) // trimlowerlint:allow boundary canonicalization
 		if loginURL != "" {
-			rows = append(rows, interactiveAuthLinkRows(loginURL, stateModel.AddModelDraftAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)).String())...) // trimlowerlint:allow boundary canonicalization
+			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // trimlowerlint:allow boundary canonicalization
 		}
 	} else if viewState == interactiveAuthPhaseResolved && variant == providercatalog.AuthVariantChatGPTLogin {
 		rows = append(rows, views.RowAction("sign in", "sign in another account", "open", func() []update.Action {
@@ -171,7 +171,7 @@ type addModelAuthState struct {
 }
 
 func addModelAuthStateForDraft(model state.Model, endpointName string, draft state.ProviderConfigSnapshot) addModelAuthState {
-	ownerKey := stateModel.AddModelDraftAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(draft.Ref)).String() // trimlowerlint:allow boundary canonicalization
+	ownerKey := interactiveAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(draft.Ref)) // trimlowerlint:allow boundary canonicalization
 	if model.AuthSessions == nil {
 		return addModelAuthState{}
 	}
@@ -186,6 +186,13 @@ func addModelAuthStateForDraft(model state.Model, endpointName string, draft sta
 		SessionState: session.SessionState,
 		SessionError: session.SessionError,
 	}
+}
+
+func interactiveAuthOwnerKey(endpointName string, providerRef string) string {
+	if strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+		return stateModel.CreateDraftAuthOwnerKey(strings.TrimSpace(providerRef)).String() // trimlowerlint:allow boundary canonicalization
+	}
+	return stateModel.AddModelDraftAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerRef)).String() // trimlowerlint:allow boundary canonicalization
 }
 
 func shouldShowAuthStartRetryHint(sessionError string, sessionID string) bool {

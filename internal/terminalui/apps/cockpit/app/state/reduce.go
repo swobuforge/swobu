@@ -368,10 +368,22 @@ func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect 
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeManageList
 		clearSaveErrors(model)
+		ownerKey := strings.TrimSpace(value.OwnerKey) // trimlowerlint:allow boundary canonicalization
+		previous, hadPrevious := authSession(model, ownerKey)
+		// Keep any previously issued login URL/session visible so operators can
+		// retry in another browser or copy the link when auto-open fails.
+		url := ""
+		userCode := ""
+		sessionID := ""
+		if hadPrevious {
+			url = strings.TrimSpace(previous.URL)           // trimlowerlint:allow boundary canonicalization
+			userCode = strings.TrimSpace(previous.UserCode) // trimlowerlint:allow boundary canonicalization
+			sessionID = strings.TrimSpace(previous.SessionID)
+		}
 		setAuthSession(model, strings.TrimSpace(value.OwnerKey), stateModel.AuthSessionView{ // trimlowerlint:allow boundary canonicalization
-			SessionID:    "",
-			URL:          "",
-			UserCode:     "",
+			SessionID:    sessionID,
+			URL:          url,
+			UserCode:     userCode,
 			SessionState: "failed",
 			SessionError: strings.TrimSpace(value.Message), // trimlowerlint:allow boundary canonicalization
 			CopyNote:     "",

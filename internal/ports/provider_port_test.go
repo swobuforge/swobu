@@ -30,8 +30,11 @@ func TestNewExecuteRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 	requestItems[0].Text = "changed"
 	requestItems[1].Input["expr"] = "changed"
 
-	if got := req.Contract.Streaming; got != true {
-		t.Fatalf("streaming = %t, want %t", got, true)
+	if got := req.Contract.ClientResponseMode; got != ResponseModeStreaming {
+		t.Fatalf("client response mode = %v, want %v", got, ResponseModeStreaming)
+	}
+	if got := req.Contract.ProviderCallMode; got != ResponseModeStreaming {
+		t.Fatalf("provider call mode = %v, want %v", got, ResponseModeStreaming)
 	}
 	if req.Contract.AllowPreCommitFallback {
 		t.Fatal("allow_pre_commit_fallback = true, want false by default")
@@ -64,8 +67,21 @@ func TestExecutionContract_WithPreCommitFallbackEnabled_SetsFlag(t *testing.T) {
 	if !enabled.AllowPreCommitFallback {
 		t.Fatal("allow_pre_commit_fallback = false, want true after opt-in")
 	}
-	if enabled.Streaming != false {
-		t.Fatalf("streaming = %t, want %t", enabled.Streaming, false)
+	if enabled.ClientResponseMode != ResponseModeBuffered {
+		t.Fatalf("client response mode = %v, want %v", enabled.ClientResponseMode, ResponseModeBuffered)
+	}
+	if enabled.ProviderCallMode != ResponseModeBuffered {
+		t.Fatalf("provider call mode = %v, want %v", enabled.ProviderCallMode, ResponseModeBuffered)
+	}
+}
+
+func TestExecutionContract_WithProviderCallMode_OverridesProviderModeOnly(t *testing.T) {
+	contract := NewExecutionContract(false).WithProviderCallMode(ResponseModeStreaming)
+	if contract.ClientResponseMode != ResponseModeBuffered {
+		t.Fatalf("client response mode = %v, want %v", contract.ClientResponseMode, ResponseModeBuffered)
+	}
+	if contract.ProviderCallMode != ResponseModeStreaming {
+		t.Fatalf("provider call mode = %v, want %v", contract.ProviderCallMode, ResponseModeStreaming)
 	}
 }
 

@@ -33,3 +33,15 @@ func TestCopyValueNote_ClipboardPanicFallsBack(t *testing.T) {
 		t.Fatalf("copyValueNote message=%q", message)
 	}
 }
+
+func TestNormalizeAuthSessionCopyValue_StripsEmbeddedWhitespace(t *testing.T) {
+	t.Parallel()
+	in := " https://auth.openai.com/oauth/authorize?client_id=abc \n&code_challenge=xyz\t&scope=openid+email "
+	got := normalizeAuthSessionCopyValue(in)
+	if strings.ContainsAny(got, " \n\t\r") {
+		t.Fatalf("normalized value still contains whitespace: %q", got)
+	}
+	if !strings.Contains(got, "client_id=abc&code_challenge=xyz&scope=openid+email") {
+		t.Fatalf("normalized value missing expected query shape: %q", got)
+	}
+}

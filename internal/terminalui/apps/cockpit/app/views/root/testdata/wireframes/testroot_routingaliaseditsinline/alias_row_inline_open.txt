@@ -8,9 +8,9 @@ SWOBU 🧌                                                                ready 
   routing ▾
      run on             chatgpt:gpt-5.3-codex:c57d7a7c                                    choose ↵
      models             1 configured                                                      manage ↵
-       chatgpt:gpt-5.3-c                                                                  close ↵
+       model    chatgpt:gpt-5.3-codex:c57d7a7c                                            close ↵
          provider          ChatGPT
-         frame             http_json_body                                                 next ↵
+         delivery          request-response (HTTP JSON)                                   next ↵
          model             gpt-5.3-codex                                                  choose ↵
     >    alias             _                                                              save ↵
          auth              chatgpt_login                                                  choose ↵

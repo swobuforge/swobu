@@ -160,7 +160,7 @@ func (e ProviderExecutorAdapter) executeOnce(ctx context.Context, req ports.Prov
 		return ports.ProviderResponse{}, canonical.BadEndpoint("OpenAI-compatible provider base URL is required")
 	}
 
-	wireReq, err := e.encodeRequest(req.Target, req.Request, req.Contract.Streaming)
+	wireReq, err := e.encodeRequest(req.Target, req.Request, req.Contract.ProviderCallMode.Streaming())
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -198,7 +198,7 @@ func (e ProviderExecutorAdapter) executeOnce(ctx context.Context, req ports.Prov
 		return ports.ProviderResponse{}, classifyBackendError(backendErr)
 	}
 
-	if req.Contract.Streaming == true {
+	if req.Contract.ProviderCallMode.Streaming() {
 		return e.decodeStreamingResponse(req.Target, resp.Body)
 	}
 	defer func() {

@@ -24,6 +24,11 @@ func TrimToWidth(s string, width int) string {
 	return trimToWidth(s, width)
 }
 
+// TrimToWidthRaw trims text to width without adding ellipsis.
+func TrimToWidthRaw(s string, width int) string {
+	return trimToWidthRaw(s, width)
+}
+
 // trimToWidthRaw truncates a string to at most `width` runes without adding
 // an ellipsis. Callers that want visual truncation indicators should use
 // trimToWidth instead.

@@ -8,11 +8,12 @@ SWOBU 🧌                                                   waiting for login�
   routing ▾
      run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       gpt-3.5-turbo:231                                                                  edit ↵
+                openai:gpt-3.5-turbo:2310255c                                             edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
          auth              browser login                                                  change ↵
-    >    sign in           open default browser                                           open ↵
+    >    delivery          streaming (SSE) (default)                                      next ↵
+         sign in           open default browser                                           open ↵
          fallback          use device code                                                switch ↵
 
   clients ▸
@@ -20,7 +21,6 @@ SWOBU 🧌                                                   waiting for login�
 
   traffic ▸
     no traffic yet
-
 
 
 

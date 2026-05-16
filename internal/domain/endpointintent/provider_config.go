@@ -110,7 +110,6 @@ func NewProviderConfig(
 	spec ProviderSpec,
 	baseURL string,
 	credentialRef string,
-	legacyProtocolKind ...protocolkind.ProtocolKind,
 ) (ProviderConfig, error) {
 	if ref.value == "" {
 		return ProviderConfig{}, fmt.Errorf("%w: provider config ref is required", ErrInvalidProviderConfig)
@@ -121,16 +120,9 @@ func NewProviderConfig(
 	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // trimlowerlint:allow domain canonicalization
 		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-compatible provider configs require a base URL", ErrInvalidProviderConfig)
 	}
-	protocolKind := protocolkind.ProtocolKind("")
-	if len(legacyProtocolKind) > 0 {
-		protocolKind = legacyProtocolKind[0]
-	}
-	if protocolKind == "" {
-		defaultProtocol, ok := providercatalog.DefaultExecutionProtocolForSpec(spec.value)
-		if !ok {
-			return ProviderConfig{}, fmt.Errorf("%w: provider spec has no supported execution protocols", ErrInvalidProviderConfig)
-		}
-		protocolKind = defaultProtocol
+	protocolKind, ok := providercatalog.DefaultExecutionProtocolForSpec(spec.value)
+	if !ok {
+		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no supported execution protocols", ErrInvalidProviderConfig)
 	}
 	selectedFrame, ok := providercatalog.DefaultFrameForSpecProtocol(spec.value, protocolKind)
 	if !ok {

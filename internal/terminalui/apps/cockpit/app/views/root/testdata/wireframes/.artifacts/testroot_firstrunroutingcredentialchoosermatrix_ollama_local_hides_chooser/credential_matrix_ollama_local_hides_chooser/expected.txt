@@ -1,4 +1,4 @@
-SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
+SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
 ────────────────────────────────────────────────────────────────────────────────
 > workspace ▾
      name              acme                                           edit ↵
@@ -7,7 +7,8 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   routing ▾
      run on            Ollama                                         choose ↵
-     credentials       not required
+     auth              not required
+     frame             http_json_body                                 next ↵
      model             not set                                        choose ↵
 
   clients ▸
@@ -15,7 +16,6 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   traffic ▸
     empty
-
 
 
 

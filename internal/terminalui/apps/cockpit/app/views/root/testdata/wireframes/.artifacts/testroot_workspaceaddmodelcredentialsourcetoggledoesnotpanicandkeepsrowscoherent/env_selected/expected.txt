@@ -8,10 +8,11 @@ SWOBU 🧌                                                                      
   routing ▾
      run on             ollama:gemma4:e4b:e3b0c442                                                  choose ↵
      models             1 configured                                                                manage ↵
-       gemma4:e4b:e3b0                                                                              edit ↵
+                ollama:gemma4:e4b:e3b0c442                                                          edit ↵
        add model                                                                                    close ↵
          provider           OpenAI                                                                  change ↵
          auth               env var missing                                                         change ↵
+         delivery           streaming (SSE) (default)                                               next ↵
     >    env key            OPENAI_API_KEY                                                          edit ↵
          expected           OPENAI_API_KEY
          model              not selected                                                            choose ↵
@@ -21,7 +22,6 @@ SWOBU 🧌                                                                      
 
   traffic ▸
     no traffic yet
-
 
 
 

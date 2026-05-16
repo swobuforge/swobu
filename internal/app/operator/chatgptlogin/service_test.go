@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -93,8 +94,11 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 	if !strings.HasPrefix(status.CredentialRef, "secret:chatgpt/sess_") {
 		t.Fatalf("credential ref=%q", status.CredentialRef)
 	}
-	if store.provider != "chatgpt" || store.secret != "at_test" {
-		t.Fatalf("stored credential mismatch provider=%q secret=%q", store.provider, store.secret)
+	if store.provider != "chatgpt" {
+		t.Fatalf("stored provider=%q", store.provider)
+	}
+	if !strings.Contains(store.secret, "\"access_token\":\"at_test\"") {
+		t.Fatalf("stored credential payload=%q", store.secret)
 	}
 }
 
@@ -526,4 +530,129 @@ func TestServiceDefaults_DoNotEmbedTimeSignedAuthArtifacts(t *testing.T) {
 			t.Fatalf("defaults contain forbidden signed fragment %q", fragment)
 		}
 	}
+}
+
+func TestServiceStartBrowser_WhenPrimaryCallbackPortBusy_FallsBackToSecondaryPort(t *testing.T) {
+	ln1455, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Skipf("primary callback port already occupied externally: %v", err)
+	}
+	defer func() { _ = ln1455.Close() }()
+
+	svc := NewService(nil, ServiceConfig{
+		CallbackListenAddr: "127.0.0.1:1455",
+	})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err == nil {
+		u, parseErr := url.Parse(start.AuthorizeURL)
+		if parseErr != nil {
+			t.Fatalf("parse authorize url: %v", parseErr)
+		}
+		if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://localhost:1457"+callbackPath {
+			t.Fatalf("redirect_uri=%q", got)
+		}
+		return
+	}
+	t.Fatalf("expected fallback to secondary callback port, got error: %v", err)
+}
+
+func TestServiceStartBrowser_WhenCallbackPortsBusy_ReturnsDeviceHint(t *testing.T) {
+	ln1455, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Skipf("primary callback port already occupied externally: %v", err)
+	}
+	defer func() { _ = ln1455.Close() }()
+	ln1457, err := net.Listen("tcp", "127.0.0.1:1457")
+	if err != nil {
+		t.Skipf("secondary callback port already occupied externally: %v", err)
+	}
+	defer func() { _ = ln1457.Close() }()
+
+	svc := NewService(nil, ServiceConfig{
+		CallbackListenAddr: "127.0.0.1:1455",
+	})
+	_, err = svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err == nil {
+		t.Fatal("expected callback listener unavailable error")
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "use device auth mode") {
+		t.Fatalf("error missing device hint: %v", err)
+	}
+}
+
+func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T) {
+	now := time.Now().UTC()
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"at_test"}`))
+	}))
+	defer tokenSrv.Close()
+
+	availabilityProbe, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Skipf("callback port already occupied externally: %v", err)
+	} else {
+		_ = availabilityProbe.Close()
+	}
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "127.0.0.1:1455",
+		CallbackIdleTTL:    20 * time.Millisecond,
+		Now:                func() time.Time { return now },
+		CredentialOut:      &captureWriter{},
+	})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start browser auth: %v", err)
+	}
+	u, _ := url.Parse(start.AuthorizeURL)
+	state := strings.TrimSpace(u.Query().Get("state"))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=ok", nil)
+	svc.HandleCallback(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("callback status=%d", rec.Code)
+	}
+	if _, err := svc.Session(context.Background(), start.SessionID); err != nil {
+		t.Fatalf("session poll: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	ln, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Fatalf("expected callback port released, listen failed: %v", err)
+	}
+	_ = ln.Close()
+}
+
+func TestServiceCallbackServer_ShutsDownAfterAbandonedBrowserSessionExpiry(t *testing.T) {
+	now := time.Now().UTC()
+
+	availabilityProbe, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Skipf("callback port already occupied externally: %v", err)
+	} else {
+		_ = availabilityProbe.Close()
+	}
+
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		CallbackListenAddr: "127.0.0.1:1455",
+		CallbackIdleTTL:    15 * time.Millisecond,
+		SessionEvictEvery:  10 * time.Millisecond,
+		Now:                func() time.Time { return now },
+	})
+
+	// Start browser login but never complete callback/poll (abandoned flow).
+	if _, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"}); err != nil {
+		t.Fatalf("start browser auth: %v", err)
+	}
+
+	// Advance logical time past ttl so eviction loop reclaims stale session.
+	now = now.Add(authSessionTTL + 2*time.Second)
+	time.Sleep(80 * time.Millisecond)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Fatalf("expected callback port released after abandoned session expiry, listen failed: %v", err)
+	}
+	_ = ln.Close()
 }

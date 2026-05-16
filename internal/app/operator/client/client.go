@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 // Client talks to the daemon's operator control plane at /_swobu/endpoints.
@@ -387,7 +386,7 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef, protocolkind.ProtocolKind(strings.TrimSpace(pc.ProtocolKind))) // trimlowerlint:allow boundary canonicalization
+		config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}

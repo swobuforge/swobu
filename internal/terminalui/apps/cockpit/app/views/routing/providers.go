@@ -142,24 +142,25 @@ func createProviderPropertyRows(
 	createMode bool,
 	model state.Model,
 ) []retained.ViewSpec[state.Model] {
-	rows := []retained.ViewSpec[state.Model]{
-		retained.Named[state.Model]("provider", providerSpecRow(providerConfig)),
-		retained.Named[state.Model]("frame", providerFrameChoiceRow(providerFrameChoiceRowSpec{
+	rows := make([]retained.ViewSpec[state.Model], 0, 8)
+	rows = appendCanonicalProviderConfigRows(rows, "", canonicalProviderConfigRows{
+		Provider: providerSpecRow(providerConfig),
+		Frame: providerFrameChoiceRow(providerFrameChoiceRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
-		})),
-		retained.Named[state.Model]("model", providerModelChoiceRow(providerModelChoiceRowSpec{
+		}),
+		Model: providerModelChoiceRow(providerModelChoiceRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
-		})),
-		retained.Named[state.Model]("alias", providerTargetAliasRow(providerTargetAliasRowSpec{
+		}),
+	})
+	rows = append(rows, retained.Named[state.Model]("alias", providerTargetAliasRow(providerTargetAliasRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
-		})),
-	}
+		})))
 	if providerConfig != nil {
 		if providerCredentialSelectionRequired(providerConfig.ProviderSpec, providerConfig.BaseURL, providerConfig.CredentialRef) {
 			rows = append(rows, retained.Named[state.Model]("credential", providerCredentialChoiceRow(providerCredentialChoiceRowSpec{
@@ -266,7 +267,9 @@ func providerSummaryRow(
 	if expanded {
 		verb = "close"
 	}
-	return views.RowActionWithCancel(label, "", verb, onActivate, onCancel)
+	// Provider/model identifiers can be long; keep declarative row grammar and
+	// place them in wide value column with an explicit label for alignment.
+	return views.RowActionWideValueWithCancel("model", label, verb, onActivate, onCancel)
 }
 
 func providerDisplayLabel(pc state.ProviderConfigSnapshot) string {

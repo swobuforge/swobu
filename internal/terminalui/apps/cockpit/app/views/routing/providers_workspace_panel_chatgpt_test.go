@@ -138,6 +138,23 @@ func TestClassifyInteractiveAuthPhase_BrowserInProgress(t *testing.T) {
 	}
 }
 
+func TestClassifyInteractiveAuthPhase_CreateDraftBrowserInProgress(t *testing.T) {
+	t.Parallel()
+	model := state.Model{
+		AuthSessions: map[string]stateModel.AuthSessionView{
+			stateModel.CreateDraftAuthOwnerKey("create-draft").String(): {
+				SessionID:    "sess-1",
+				SessionState: "pending",
+				URL:          "https://chatgpt.com/activate",
+			},
+		},
+	}
+	draft := state.ProviderConfigSnapshot{Ref: "create-draft", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "", draft, providercatalog.AuthVariantChatGPTLogin); got != interactiveAuthPhaseInProgress {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseInProgress)
+	}
+}
+
 func TestClassifyInteractiveAuthPhase_IgnoresSessionFromOtherProviderRef(t *testing.T) {
 	t.Parallel()
 	model := addModelAuthSessionModel("acme", "cfg-other", stateModel.AuthSessionView{

@@ -64,6 +64,43 @@ func TestReduce_ProviderAuthSessionStarted_AutoOpensLoginURL(t *testing.T) {
 	}
 }
 
+func TestReduce_ProviderAuthSessionFailed_PreservesExistingLoginURLAndSessionID(t *testing.T) {
+	model := Model{
+		AuthSessions: map[string]stateModel.AuthSessionView{
+			stateModel.EndpointProviderAuthOwnerKey("acme", "chatgpt/main").String(): {
+				SessionID:    "s-1",
+				URL:          "https://auth.example/login",
+				SessionState: "pending",
+			},
+		},
+	}
+	effects := Reduce(&model, stateeffect.ProviderAuthSessionFailed{
+		EndpointName: "acme",
+		ProviderConfig: ProviderConfigSnapshot{
+			Ref:          "chatgpt/main",
+			ProviderSpec: "chatgpt",
+		},
+		OwnerKey: stateModel.EndpointProviderAuthOwnerKey("acme", "chatgpt/main").String(),
+		Message:  "could not open default browser",
+	})
+	if len(effects) != 0 {
+		t.Fatalf("effects len=%d want 0", len(effects))
+	}
+	session := model.AuthSessions[stateModel.EndpointProviderAuthOwnerKey("acme", "chatgpt/main").String()]
+	if session.SessionID != "s-1" {
+		t.Fatalf("auth session id=%q", session.SessionID)
+	}
+	if session.URL != "https://auth.example/login" {
+		t.Fatalf("auth login url=%q", session.URL)
+	}
+	if session.SessionState != "failed" {
+		t.Fatalf("auth session state=%q", session.SessionState)
+	}
+	if session.SessionError != "could not open default browser" {
+		t.Fatalf("auth session error=%q", session.SessionError)
+	}
+}
+
 func TestReduce_AuthSessionCopyNoted_ScopedToAuthRows(t *testing.T) {
 	t.Parallel()
 	model := Model{

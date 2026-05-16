@@ -1,3 +1,3 @@
 line 11
--        gpt-3.5-turbo:231                                                                  edit ↵
-+        openai:gpt-3.5-tu                                                                  edit ↵
+-                 openai:gpt-3.5-turbo:2310255c                                             edit ↵
++        model    openai:gpt-3.5-turbo:2310255c                                             edit ↵

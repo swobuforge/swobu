@@ -49,6 +49,10 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 	useKeyFrom := buildCreateUseKeyFromRow(provider, credSummary, baseURL, cred, keyPickerState, setKeyPickerState)
 	rows = append(rows, retained.Named[state.Model]("use_key_from", useKeyFrom))
 	rows = append(rows, buildCreateInteractiveAuthRows(model)...)
+	rows = append(rows, retained.Named[state.Model]("frame", providerFrameChoiceRow(providerFrameChoiceRowSpec{
+		ProviderConfig: &model.CreateDraftProviderConfig,
+		CreateMode:     true,
+	})))
 
 	rows = appendCreateCredentialRows(rows, provider, cred)
 	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState)

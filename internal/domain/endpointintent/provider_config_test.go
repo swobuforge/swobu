@@ -3,6 +3,8 @@ package endpointintent
 import (
 	"errors"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestProviderConfig_RequiresExplicitRef(t *testing.T) {
@@ -83,5 +85,23 @@ func TestProviderConfig_TargetAliasValidation(t *testing.T) {
 	}
 	if _, err := cfg.WithTargetAlias("gpt.5"); !errors.Is(err, ErrInvalidProviderConfig) {
 		t.Fatalf("WithTargetAlias(gpt.5) error = %v, want ErrInvalidProviderConfig", err)
+	}
+}
+
+func TestProviderConfig_DerivesProtocolFromProviderSpec(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-anthropic")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("anthropic")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "https://api.anthropic.com/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if got := cfg.ProtocolKind(); got != protocolkind.Messages {
+		t.Fatalf("protocol kind = %q, want %q", got, protocolkind.Messages)
 	}
 }

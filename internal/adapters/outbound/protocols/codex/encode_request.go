@@ -11,11 +11,10 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func EncodeRequest(request canonical.CanonicalRequest, deliveryMode bool) (protocols.WireRequest, error) {
-	if deliveryMode != true {
-		return protocols.WireRequest{}, canonical.UnsupportedDelivery("codex protocol requires streaming delivery variant")
-	}
-	wireReq, err := responses.EncodeRequest(request, deliveryMode)
+func EncodeRequest(request canonical.CanonicalRequest, _ bool) (protocols.WireRequest, error) {
+	// Codex execute path is stream-native; batch clients are handled via
+	// stream->batch projection outside this protocol encoder.
+	wireReq, err := responses.EncodeRequest(request, true)
 	if err != nil {
 		return protocols.WireRequest{}, err
 	}
@@ -44,7 +43,7 @@ func normalizeCodexRequest(wireReq protocols.WireRequest) (protocols.WireRequest
 				"role": "user",
 				"content": []any{
 					map[string]any{
-						"type": "input_text",
+						"type": "output_text",
 						"text": inputText,
 					},
 				},

@@ -10,7 +10,6 @@ import (
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)
@@ -245,8 +244,7 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		protocolKind := protocolkind.ProtocolKind(strings.TrimSpace(encoded.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
-		providerConfig, err := endpointintent.NewProviderConfig(ref, spec, encoded.BaseURL, encoded.CredentialRef, protocolKind)
+		providerConfig, err := endpointintent.NewProviderConfig(ref, spec, encoded.BaseURL, encoded.CredentialRef)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}

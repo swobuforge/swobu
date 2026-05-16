@@ -8,6 +8,7 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
   routing ▾
      run on            Ollama                                         choose ↵
      auth              not required
+     delivery          request-response (HTTP JSON)                   next ↵
      model             not set                                        choose ↵
 
   clients ▸
@@ -15,7 +16,6 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
 
   traffic ▸
     empty
-
 
 
 

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	keyringcommodity "github.com/zalando/go-keyring"
 )
 
 var keyringSet = keyringcommodity.Set
+var keyringGet = keyringcommodity.Get
 
 // StoreKeychainCredential writes a provider-scoped keychain secret.
 func StoreKeychainCredential(providerSpec string, keyName string, secret string) error {
@@ -29,15 +31,26 @@ func StoreMaterializedCredential(providerSpec string, keyName string, secret str
 	if token == "" {
 		return "", fmt.Errorf("keychain key value is required")
 	}
+	encoded := token
+	if _, _, decodeErr := DecodeTokenBundle(token); decodeErr != nil {
+		wrapped, wrapErr := EncodeTokenBundle(TokenBundle{
+			AccessToken: token,
+			IssuedAt:    time.Now().UTC(),
+		})
+		if wrapErr != nil {
+			return "", wrapErr
+		}
+		encoded = wrapped
+	}
 	selectedPolicy := NormalizeCredentialWritePolicy(string(policy))
 	switch selectedPolicy {
 	case CredentialWritePolicyFile:
-		if err := (&secretFileStore{}).Store(name, token); err != nil {
+		if err := (&secretFileStore{}).Store(name, encoded); err != nil {
 			return "", err
 		}
 		return "secretfile:" + name, nil
 	case CredentialWritePolicyAuto:
-		if err := keyringSet(KeyringScopeForProvider(spec), name, token); err == nil {
+		if err := keyringSet(KeyringScopeForProvider(spec), name, encoded); err == nil {
 			return "secret:" + name, nil
 		} else {
 			slog.Warn("keyring write failed, falling back to credential file store",
@@ -48,14 +61,68 @@ func StoreMaterializedCredential(providerSpec string, keyName string, secret str
 				"error", err.Error(),
 			)
 		}
-		if err := (&secretFileStore{}).Store(name, token); err != nil {
+		if err := (&secretFileStore{}).Store(name, encoded); err != nil {
 			return "", err
 		}
 		return "secretfile:" + name, nil
 	default:
-		if err := keyringSet(KeyringScopeForProvider(spec), name, token); err != nil {
+		if err := keyringSet(KeyringScopeForProvider(spec), name, encoded); err != nil {
 			return "", fmt.Errorf("keyring write failed for %q: %w", name, err)
 		}
 		return "secret:" + name, nil
 	}
+}
+
+func StoreSecretByRef(providerSpec string, credentialRef string, secret string) error {
+	name, kind, err := parseStoredSecretRef(providerSpec, credentialRef)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case "secret":
+		if err := keyringSet(KeyringScopeForProvider(providerSpec), name, secret); err != nil {
+			return fmt.Errorf("keyring write failed for %q: %w", name, err)
+		}
+		return nil
+	case "secretfile":
+		return (&secretFileStore{}).Store(name, secret)
+	default:
+		return fmt.Errorf("unsupported credential ref kind for refresh")
+	}
+}
+
+func ResolveStoredSecretByRef(providerSpec string, credentialRef string) (string, error) {
+	name, kind, err := parseStoredSecretRef(providerSpec, credentialRef)
+	if err != nil {
+		return "", err
+	}
+	switch kind {
+	case "secret":
+		token, err := keyringGet(KeyringScopeForProvider(providerSpec), name)
+		if err != nil {
+			return "", fmt.Errorf("keyring lookup failed for %q: %w", name, err)
+		}
+		token = strings.TrimSpace(token) // trimlowerlint:allow boundary canonicalization
+		if token == "" {
+			return "", fmt.Errorf("keyring token for %q is empty", name)
+		}
+		return token, nil
+	case "secretfile":
+		return (&secretFileStore{}).ResolveRaw(name)
+	default:
+		return "", fmt.Errorf("unsupported credential ref kind for refresh")
+	}
+}
+
+func parseStoredSecretRef(providerSpec string, credentialRef string) (name string, kind string, err error) {
+	ref := strings.TrimSpace(credentialRef)                                 // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+		name, err := secretCredentialName(providerSpec, ref)
+		return name, "secret", err
+	}
+	if strings.HasPrefix(strings.ToLower(ref), secretFileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+		name, err := secretFileCredentialName(ref)
+		return name, "secretfile", err
+	}
+	return "", "", fmt.Errorf("credential ref %q is not refreshable stored secret", ref)
 }

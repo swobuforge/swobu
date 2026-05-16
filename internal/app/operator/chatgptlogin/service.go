@@ -40,6 +40,8 @@ const (
 	maxHTTPBodyBytes             = 128 * 1024
 	authSessionTTL               = 15 * time.Minute
 	defaultHTTPTimeout           = 15 * time.Second
+	defaultSessionEvictInterval  = 1 * time.Minute
+	defaultCallbackIdleTTL       = 3 * time.Minute
 	defaultCredentialKeychainTag = "chatgpt"
 	defaultOriginator            = "codex_cli_rs"
 	defaultUserAgent             = "swobu/0"
@@ -73,6 +75,8 @@ type ServiceConfig struct {
 	UserAgent          string
 	Now                func() time.Time
 	CredentialOut      CredentialWriter
+	SessionEvictEvery  time.Duration
+	CallbackIdleTTL    time.Duration
 }
 
 type Service struct {
@@ -83,8 +87,12 @@ type Service struct {
 	sessions       map[string]*sessionRecord
 	sessionByState map[string]string
 
-	callbackOnce     sync.Once
-	callbackStartErr error
+	callbackServer      *http.Server
+	callbackListener    net.Listener
+	callbackActiveCount int
+	callbackIdleTimer   *time.Timer
+	callbackIdleTTL     time.Duration
+	evictOnce           sync.Once
 }
 
 type sessionRecord struct {
@@ -121,8 +129,10 @@ type SessionOutput struct {
 }
 
 type tokenResponse struct {
-	AccessToken string `json:"access_token"`
-	IDToken     string `json:"id_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
+	ExpiresIn    int64  `json:"expires_in"`
 }
 
 type deviceUserCodeResponse struct {
@@ -164,18 +174,43 @@ func NewService(httpClient *http.Client, cfg ServiceConfig) *Service {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.SessionEvictEvery <= 0 {
+		cfg.SessionEvictEvery = defaultSessionEvictInterval
+	}
+	if cfg.CallbackIdleTTL <= 0 {
+		cfg.CallbackIdleTTL = defaultCallbackIdleTTL
+	}
 	if strings.TrimSpace(cfg.Originator) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.Originator = defaultOriginator
 	}
 	if strings.TrimSpace(cfg.UserAgent) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.UserAgent = defaultUserAgent
 	}
-	return &Service{
-		httpClient:     httpClient,
-		config:         cfg,
-		sessions:       map[string]*sessionRecord{},
-		sessionByState: map[string]string{},
+	svc := &Service{
+		httpClient:      httpClient,
+		config:          cfg,
+		sessions:        map[string]*sessionRecord{},
+		sessionByState:  map[string]string{},
+		callbackIdleTTL: cfg.CallbackIdleTTL,
 	}
+	svc.startEvictionLoop()
+	return svc
+}
+
+func (s *Service) startEvictionLoop() {
+	s.evictOnce.Do(func() {
+		interval := s.config.SessionEvictEvery
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for range ticker.C {
+				now := s.config.Now()
+				s.mu.Lock()
+				s.evictExpiredLocked(now)
+				s.mu.Unlock()
+			}
+		}()
+	})
 }
 
 func (s *Service) SetPublicBaseURL(raw string) {
@@ -191,7 +226,10 @@ func (s *Service) Start(ctx context.Context, in StartInput) (StartOutput, error)
 		"auth_mode", authMode,
 	)
 	if authMode == "browser" {
-		if err := s.ensureCallbackServerStarted(); err != nil {
+		s.mu.Lock()
+		err := s.ensureCallbackServerStartedLocked()
+		s.mu.Unlock()
+		if err != nil {
 			return StartOutput{}, err
 		}
 	}
@@ -238,6 +276,13 @@ func (s *Service) Start(ctx context.Context, in StartInput) (StartOutput, error)
 	}
 
 	s.mu.Lock()
+	if authMode == "browser" {
+		s.callbackActiveCount++
+		if s.callbackIdleTimer != nil {
+			s.callbackIdleTimer.Stop()
+			s.callbackIdleTimer = nil
+		}
+	}
 	s.sessions[sessionID] = rec
 	if oauthState != "" {
 		s.sessionByState[oauthState] = sessionID
@@ -267,17 +312,13 @@ func (s *Service) Session(ctx context.Context, sessionID string) (SessionOutput,
 	}
 	now := s.config.Now()
 	if now.Sub(rec.createdAt) > authSessionTTL {
-		rec.state = SessionExpired
-		rec.errorMessage = "login session expired"
-		rec.terminal = true
+		s.setTerminalStateLocked(rec, SessionExpired, "login session expired")
 	}
 
 	if rec.state == SessionPending && rec.deviceAuthID != "" && rec.oauthCode == "" {
 		authCode, verifier, done, err := s.pollDeviceToken(ctx, rec.deviceAuthID, rec.deviceUserCode, rec.deviceInterval)
 		if err != nil {
-			rec.state = SessionFailed
-			rec.errorMessage = err.Error()
-			rec.terminal = true
+			s.setTerminalStateLocked(rec, SessionFailed, err.Error())
 		} else if done {
 			rec.oauthCode = authCode
 			if strings.TrimSpace(verifier) != "" { // trimlowerlint:allow boundary canonicalization
@@ -310,19 +351,15 @@ func (s *Service) Session(ctx context.Context, sessionID string) (SessionOutput,
 				"session_id", sessionID,
 				"error", err.Error(),
 			)
-			rec.state = SessionFailed
-			rec.errorMessage = err.Error()
-			rec.terminal = true
+			s.setTerminalStateLocked(rec, SessionFailed, err.Error())
 		} else {
 			slog.Info("chatgpt auth session succeeded",
 				"component", "chatgpt_login",
 				"session_id", sessionID,
 				"credential_ref", credentialRef,
 			)
-			rec.state = SessionSucceeded
 			rec.credentialRef = credentialRef
-			rec.errorMessage = ""
-			rec.terminal = true
+			s.setTerminalStateLocked(rec, SessionSucceeded, "")
 		}
 	}
 
@@ -389,12 +426,11 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 			"session_id", sid,
 			"oauth_error", errValue,
 		)
-		rec.state = SessionFailed
-		rec.errorMessage = "oauth error: " + errValue
+		message := "oauth error: " + errValue
 		if requestID := callbackRequestID(q); requestID != "" {
-			rec.errorMessage += " (request_id: " + requestID + ")"
+			message += " (request_id: " + requestID + ")"
 		}
-		rec.terminal = true
+		s.setTerminalStateLocked(rec, SessionFailed, message)
 		s.mu.Unlock()
 		writeAuthenticationErrorPage(w, http.StatusBadRequest, callbackRequestID(q))
 		return
@@ -405,12 +441,11 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 			"component", "chatgpt_login",
 			"session_id", sid,
 		)
-		rec.state = SessionFailed
-		rec.errorMessage = "oauth callback missing code"
+		message := "oauth callback missing code"
 		if requestID := callbackRequestID(q); requestID != "" {
-			rec.errorMessage += " (request_id: " + requestID + ")"
+			message += " (request_id: " + requestID + ")"
 		}
-		rec.terminal = true
+		s.setTerminalStateLocked(rec, SessionFailed, message)
 		s.mu.Unlock()
 		writeAuthenticationErrorPage(w, http.StatusBadRequest, callbackRequestID(q))
 		return
@@ -549,9 +584,30 @@ func (s *Service) exchangeAndPersist(ctx context.Context, sessionID string, code
 	if err := json.Unmarshal(body, &token); err != nil {
 		return "", fmt.Errorf("token exchange response could not be decoded")
 	}
-	access := strings.TrimSpace(token.AccessToken) // trimlowerlint:allow boundary canonicalization
+	access := strings.TrimSpace(token.AccessToken)   // trimlowerlint:allow boundary canonicalization
+	refresh := strings.TrimSpace(token.RefreshToken) // trimlowerlint:allow boundary canonicalization
 	if access == "" {
 		return "", fmt.Errorf("token exchange returned empty access token")
+	}
+	issuedAt := s.config.Now().UTC()
+	expiresAt := time.Time{}
+	if token.ExpiresIn > 0 {
+		expiresAt = issuedAt.Add(time.Duration(token.ExpiresIn) * time.Second)
+	}
+	secretPayload := map[string]any{
+		"access_token": access,
+		"id_token":     strings.TrimSpace(token.IDToken), // trimlowerlint:allow boundary canonicalization
+		"issued_at":    issuedAt,
+	}
+	if refresh != "" {
+		secretPayload["refresh_token"] = refresh
+	}
+	if !expiresAt.IsZero() {
+		secretPayload["expires_at"] = expiresAt
+	}
+	encodedSecret, err := json.Marshal(secretPayload)
+	if err != nil {
+		return "", fmt.Errorf("token exchange response could not be encoded for storage")
 	}
 
 	keyName := defaultCredentialKeychainTag + "/" + sessionID
@@ -560,7 +616,7 @@ func (s *Service) exchangeAndPersist(ctx context.Context, sessionID string, code
 	}
 	credentialRef := "secret:" + keyName
 	if s.config.CredentialOut != nil {
-		persistedRef, err := s.config.CredentialOut.Store("chatgpt", keyName, access)
+		persistedRef, err := s.config.CredentialOut.Store("chatgpt", keyName, string(encodedSecret))
 		if err != nil {
 			slog.Warn("chatgpt auth credential persistence failed",
 				"component", "chatgpt_login",
@@ -814,51 +870,62 @@ func (s *Service) evictExpiredLocked(now time.Time) {
 		if now.Sub(rec.createdAt) <= authSessionTTL {
 			continue
 		}
+		// Browser-mode sessions hold callback server liveness via
+		// callbackActiveCount. Expiry must release that lease even if the
+		// operator abandoned login and never polled to terminal state.
+		if !rec.terminal && strings.TrimSpace(rec.oauthState) != "" && s.callbackActiveCount > 0 { // trimlowerlint:allow boundary canonicalization
+			s.callbackActiveCount--
+		}
 		delete(s.sessions, sid)
 		delete(s.sessionByState, rec.oauthState)
 	}
+	if s.callbackActiveCount == 0 {
+		s.scheduleCallbackShutdownLocked()
+	}
 }
 
-func (s *Service) ensureCallbackServerStarted() error {
+func (s *Service) ensureCallbackServerStartedLocked() error {
 	addr := strings.TrimSpace(s.config.CallbackListenAddr) // trimlowerlint:allow boundary canonicalization
 	if addr == "" {
 		return nil
 	}
-	s.callbackOnce.Do(func() {
-		mux := http.NewServeMux()
-		mux.HandleFunc(callbackPath, s.HandleCallback)
-		server := &http.Server{
-			Addr:              addr,
-			Handler:           mux,
-			ReadHeaderTimeout: 10 * time.Second,
+	if s.callbackServer != nil && s.callbackListener != nil {
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc(callbackPath, s.HandleCallback)
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	var (
+		ln  net.Listener
+		err error
+	)
+	for _, candidate := range callbackListenCandidates(addr) {
+		server.Addr = candidate
+		ln, err = net.Listen("tcp", candidate)
+		if err == nil {
+			break
 		}
-		var (
-			ln  net.Listener
-			err error
-		)
-		for _, candidate := range callbackListenCandidates(addr) {
-			server.Addr = candidate
-			ln, err = net.Listen("tcp", candidate)
-			if err == nil {
-				break
-			}
-		}
-		if err != nil {
-			s.callbackStartErr = fmt.Errorf("chatgpt login callback listener unavailable at %s: %w", addr, err)
-			return
-		}
-		actualPort := ""
-		if tcp, ok := ln.Addr().(*net.TCPAddr); ok && tcp.Port > 0 {
-			actualPort = fmt.Sprintf("%d", tcp.Port)
-		}
-		if strings.TrimSpace(s.config.OAuthRedirectBase) == "" && actualPort != "" { // trimlowerlint:allow boundary canonicalization
-			s.config.OAuthRedirectBase = "http://localhost:" + actualPort
-		}
-		go func() {
-			_ = server.Serve(ln)
-		}()
-	})
-	return s.callbackStartErr
+	}
+	if err != nil {
+		return fmt.Errorf("chatgpt login callback listener unavailable at %s: %w (use device auth mode if callback ports are in use)", addr, err)
+	}
+	s.callbackServer = server
+	s.callbackListener = ln
+	actualPort := ""
+	if tcp, ok := ln.Addr().(*net.TCPAddr); ok && tcp.Port > 0 {
+		actualPort = fmt.Sprintf("%d", tcp.Port)
+	}
+	if strings.TrimSpace(s.config.OAuthRedirectBase) == "" && actualPort != "" { // trimlowerlint:allow boundary canonicalization
+		s.config.OAuthRedirectBase = "http://localhost:" + actualPort
+	}
+	go func() {
+		_ = server.Serve(ln)
+	}()
+	return nil
 }
 
 func callbackListenCandidates(addr string) []string {
@@ -867,4 +934,37 @@ func callbackListenCandidates(addr string) []string {
 		return []string{defaultCallbackListenAddr, fallbackCallbackListenAddr}
 	}
 	return []string{addr}
+}
+
+func (s *Service) setTerminalStateLocked(rec *sessionRecord, state SessionState, message string) {
+	wasTerminal := rec.terminal
+	rec.state = state
+	rec.errorMessage = message
+	rec.terminal = true
+	if wasTerminal || strings.TrimSpace(rec.oauthState) == "" { // trimlowerlint:allow boundary canonicalization
+		return
+	}
+	if s.callbackActiveCount > 0 {
+		s.callbackActiveCount--
+	}
+	if s.callbackActiveCount == 0 {
+		s.scheduleCallbackShutdownLocked()
+	}
+}
+
+func (s *Service) scheduleCallbackShutdownLocked() {
+	if s.callbackIdleTimer != nil {
+		s.callbackIdleTimer.Stop()
+	}
+	s.callbackIdleTimer = time.AfterFunc(s.callbackIdleTTL, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.callbackActiveCount > 0 || s.callbackServer == nil {
+			return
+		}
+		_ = s.callbackServer.Close()
+		s.callbackServer = nil
+		s.callbackListener = nil
+		s.callbackIdleTimer = nil
+	})
 }
