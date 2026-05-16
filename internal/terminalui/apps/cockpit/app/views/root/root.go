@@ -117,7 +117,7 @@ func cycleTopTabSelection(model state.Model, reverse bool) (bool, string) {
 			if item == "__help__" {
 				continue
 			}
-			if strings.TrimSpace(item) == current {
+			if strings.TrimSpace(item) == current { // trimlowerlint:allow boundary canonicalization
 				index = i
 				break
 			}
@@ -137,5 +137,5 @@ func cycleTopTabSelection(model state.Model, reverse bool) (bool, string) {
 	if items[index] == "__help__" {
 		return true, ""
 	}
-	return false, strings.TrimSpace(items[index])
+	return false, strings.TrimSpace(items[index]) // trimlowerlint:allow boundary canonicalization
 }

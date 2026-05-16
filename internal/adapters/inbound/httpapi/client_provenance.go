@@ -6,7 +6,7 @@ import (
 	"unicode"
 
 	"github.com/swobuforge/swobu/internal/app/requestpath"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 const (
@@ -16,7 +16,7 @@ const (
 	clientHandlerUnknown          = "unknown"
 )
 
-func ingressProvenance(r *http.Request, family compatibility.IngressFamily, normalizedPath compatibility.NormalizedPath) requestpath.IngressProvenance {
+func ingressProvenance(r *http.Request, family canonical.IngressFamily, normalizedPath canonical.NormalizedPath) requestpath.IngressProvenance {
 	return requestpath.IngressProvenance{
 		ClientProtocol: classifyClientProtocol(family),
 		IngressFamily:  family,
@@ -25,11 +25,11 @@ func ingressProvenance(r *http.Request, family compatibility.IngressFamily, norm
 	}
 }
 
-func classifyClientProtocol(family compatibility.IngressFamily) string {
+func classifyClientProtocol(family canonical.IngressFamily) string {
 	switch family {
-	case compatibility.IngressFamilyChatCompletions, compatibility.IngressFamilyResponses, compatibility.IngressFamilyCompletions:
+	case canonical.IngressFamilyChatCompletions, canonical.IngressFamilyResponses, canonical.IngressFamilyCompletions:
 		return clientProtocolOpenAICompat
-	case compatibility.IngressFamilyMessages:
+	case canonical.IngressFamilyMessages:
 		return clientProtocolAnthropicCompat
 	default:
 		return clientProtocolUnknown
@@ -40,23 +40,23 @@ func classifyClientHandler(r *http.Request) string {
 	if r == nil {
 		return clientHandlerUnknown
 	}
-	ua := strings.ToLower(strings.TrimSpace(r.Header.Get("User-Agent")))
+	ua := strings.ToLower(strings.TrimSpace(r.Header.Get("User-Agent"))) // trimlowerlint:allow boundary canonicalization
 	if ua != "" {
 		token := strings.Fields(ua)[0]
-		token = strings.TrimSpace(strings.SplitN(token, "/", 2)[0])
+		token = strings.TrimSpace(strings.SplitN(token, "/", 2)[0]) // trimlowerlint:allow boundary canonicalization
 		normalized := normalizeHandlerToken(token)
 		if normalized != "" {
 			return normalized
 		}
 	}
-	if lang := normalizeHandlerToken(strings.TrimSpace(r.Header.Get("X-Stainless-Lang"))); lang != "" {
+	if lang := normalizeHandlerToken(strings.TrimSpace(r.Header.Get("X-Stainless-Lang"))); lang != "" { // trimlowerlint:allow boundary canonicalization
 		return "stainless_" + lang
 	}
 	return clientHandlerUnknown
 }
 
 func normalizeHandlerToken(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
+	raw = strings.TrimSpace(strings.ToLower(raw)) // trimlowerlint:allow boundary canonicalization
 	if raw == "" {
 		return ""
 	}

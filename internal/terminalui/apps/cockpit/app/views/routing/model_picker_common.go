@@ -21,6 +21,7 @@ type modelPickerRenderSpec struct {
 	Picker          views.FilterablePickerState
 	SetPicker       func(views.FilterablePickerState)
 	Options         []modelPickerOption
+	HeaderRows      []retained.ViewSpec[state.Model]
 	OnChooseRawID   func(string) []update.Action
 	KeyPrefix       string
 	FocusKey        string
@@ -34,6 +35,7 @@ func renderModelPickerDisclosure(ctx *retained.Context[state.Model], spec modelP
 		BuildOptionRow: views.ChoicePickerOptionRow(false),
 		WindowSize:     6,
 		FindLabel:      "find",
+		HeaderRows:     append([]retained.ViewSpec[state.Model](nil), spec.HeaderRows...),
 		OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: spec.FocusKey}} },
 		OnCancel:       spec.CloseDisclosure,
 	})
@@ -49,12 +51,12 @@ func buildModelPickerItems(options []modelPickerOption, query string, onChooseRa
 			OnChoose: option.OnChoose,
 		})
 	}
-	rawID := strings.TrimSpace(query)
+	rawID := strings.TrimSpace(query) // trimlowerlint:allow boundary canonicalization
 	if rawID == "" || onChooseRawID == nil {
 		return items
 	}
 	for _, opt := range options {
-		if strings.EqualFold(strings.TrimSpace(opt.Label), rawID) {
+		if strings.EqualFold(strings.TrimSpace(opt.Label), rawID) { // trimlowerlint:allow boundary canonicalization
 			return items
 		}
 	}

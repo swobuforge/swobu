@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestLocalResponseContinuityStore_MaterializesLinkedThread(t *testing.T) {
@@ -15,21 +15,21 @@ func TestLocalResponseContinuityStore_MaterializesLinkedThread(t *testing.T) {
 		Now: func() time.Time { return now },
 	})
 
-	namespace := compatibility.NewContinuationNamespace("alpha")
-	parent := compatibility.NewContinuitySnapshot("resp_parent", "m", []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi"),
-		compatibility.NewTextItem(compatibility.ItemAuthorAssistant, "hello"),
+	namespace := canonical.NewContinuationNamespace("alpha")
+	parent := canonical.NewContinuitySnapshot("resp_parent", "m", []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+		canonical.NewTextItem(canonical.ItemAuthorAssistant, "hello"),
 	})
 	if err := store.Store(context.Background(), namespace, parent); err != nil {
 		t.Fatalf("Store(parent) returned error: %v", err)
 	}
 
 	now = now.Add(10 * time.Minute)
-	child := compatibility.NewContinuitySnapshot("resp_child", "m", []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi"),
-		compatibility.NewTextItem(compatibility.ItemAuthorAssistant, "hello"),
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "continue"),
-		compatibility.NewTextItem(compatibility.ItemAuthorAssistant, "done"),
+	child := canonical.NewContinuitySnapshot("resp_child", "m", []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+		canonical.NewTextItem(canonical.ItemAuthorAssistant, "hello"),
+		canonical.NewTextItem(canonical.ItemAuthorUser, "continue"),
+		canonical.NewTextItem(canonical.ItemAuthorAssistant, "done"),
 	})
 	if err := store.Store(context.Background(), namespace, child); err != nil {
 		t.Fatalf("Store(child) returned error: %v", err)
@@ -57,22 +57,22 @@ func TestLocalResponseContinuityStore_MatchPrefixChoosesLatestEquivalentCandidat
 		Now: func() time.Time { return now },
 	})
 
-	namespace := compatibility.NewContinuationNamespace("alpha")
-	thread := []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "shared"),
+	namespace := canonical.NewContinuationNamespace("alpha")
+	thread := []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "shared"),
 	}
-	if err := store.Store(context.Background(), namespace, compatibility.NewContinuitySnapshot("resp_old", "m", thread)); err != nil {
+	if err := store.Store(context.Background(), namespace, canonical.NewContinuitySnapshot("resp_old", "m", thread)); err != nil {
 		t.Fatalf("Store(old) returned error: %v", err)
 	}
 
 	now = now.Add(30 * time.Minute)
-	if err := store.Store(context.Background(), namespace, compatibility.NewContinuitySnapshot("resp_new", "m", thread)); err != nil {
+	if err := store.Store(context.Background(), namespace, canonical.NewContinuitySnapshot("resp_new", "m", thread)); err != nil {
 		t.Fatalf("Store(new) returned error: %v", err)
 	}
 
-	match, ok, err := store.MatchPrefix(context.Background(), namespace, []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "shared"),
-		compatibility.NewTextItem(compatibility.ItemAuthorAssistant, "branch"),
+	match, ok, err := store.MatchPrefix(context.Background(), namespace, []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "shared"),
+		canonical.NewTextItem(canonical.ItemAuthorAssistant, "branch"),
 	})
 	if err != nil {
 		t.Fatalf("MatchPrefix returned error: %v", err)
@@ -95,9 +95,9 @@ func TestLocalResponseContinuityStore_EvictsExpiredRecentWindow(t *testing.T) {
 		Now: func() time.Time { return now },
 	})
 
-	namespace := compatibility.NewContinuationNamespace("alpha")
-	if err := store.Store(context.Background(), namespace, compatibility.NewContinuitySnapshot("resp_1", "m", []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi"),
+	namespace := canonical.NewContinuationNamespace("alpha")
+	if err := store.Store(context.Background(), namespace, canonical.NewContinuitySnapshot("resp_1", "m", []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
 	})); err != nil {
 		t.Fatalf("Store returned error: %v", err)
 	}
@@ -119,17 +119,17 @@ func TestLocalResponseContinuityStore_TouchKeepsActiveAncestorsAlive(t *testing.
 		Now: func() time.Time { return now },
 	})
 
-	namespace := compatibility.NewContinuationNamespace("alpha")
-	if err := store.Store(context.Background(), namespace, compatibility.NewContinuitySnapshot("resp_1", "m", []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi"),
+	namespace := canonical.NewContinuationNamespace("alpha")
+	if err := store.Store(context.Background(), namespace, canonical.NewContinuitySnapshot("resp_1", "m", []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
 	})); err != nil {
 		t.Fatalf("Store(resp_1) returned error: %v", err)
 	}
 
 	now = now.Add(2 * time.Hour)
-	if err := store.Store(context.Background(), namespace, compatibility.NewContinuitySnapshot("resp_2", "m", []compatibility.CanonicalItem{
-		compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi"),
-		compatibility.NewTextItem(compatibility.ItemAuthorAssistant, "hello"),
+	if err := store.Store(context.Background(), namespace, canonical.NewContinuitySnapshot("resp_2", "m", []canonical.CanonicalItem{
+		canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+		canonical.NewTextItem(canonical.ItemAuthorAssistant, "hello"),
 	})); err != nil {
 		t.Fatalf("Store(resp_2) returned error: %v", err)
 	}

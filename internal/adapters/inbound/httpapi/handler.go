@@ -11,8 +11,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/adapters/protocolsurface"
 	"github.com/swobuforge/swobu/internal/app/requestpath"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
 )
@@ -41,43 +42,43 @@ func NewHandler(requests RequestHandler) Handler {
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	endpointName, operationPath, err := splitCompatibilityPath(r.URL.Path)
 	if err != nil {
-		writeSwobuError(w, compatibility.UnsupportedEndpoint("unsupported endpoint URL"))
+		writeSwobuError(w, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
 		return
 	}
 	if operationPath == "" {
-		writeSwobuError(w, compatibility.UnsupportedEndpoint("compatibility operation path is required"))
+		writeSwobuError(w, canonical.UnsupportedEndpoint("compatibility operation path is required"))
 		return
 	}
 
 	endpoint, err := endpointintent.ParseEndpointName(endpointName)
 	if err != nil {
-		writeSwobuError(w, compatibility.BadEndpoint("endpoint name is invalid"))
+		writeSwobuError(w, canonical.BadEndpoint("endpoint name is invalid"))
 		return
 	}
 
-	normalizedPath, err := compatibility.NormalizePath(operationPath)
+	normalizedPath, err := canonical.NormalizePath(operationPath)
 	if err != nil {
 		writeCompatibilityError(w, err)
 		return
 	}
 	if isWebSocketUpgrade(r) {
-		if normalizedPath == compatibility.NormalizedPathResponses {
+		if normalizedPath == canonical.NormalizedPathResponses {
 			h.serveResponsesWebsocket(w, r, endpointName, normalizedPath)
 			return
 		}
-		writeCompatibilityError(w, compatibility.UnsupportedEndpoint("websocket ingress is supported only on compatibility /responses routes"))
+		writeCompatibilityError(w, canonical.UnsupportedEndpoint("websocket ingress is supported only on compatibility /responses routes"))
 		return
 	}
-	if normalizedPath == compatibility.NormalizedPathModels {
+	if normalizedPath == canonical.NormalizedPathModels {
 		h.serveModelsEndpoint(w, r, endpoint)
 		return
 	}
-	if err := compatibility.ValidateIngressTransport(r.Method, normalizedPath, false); err != nil {
+	if err := canonical.ValidateIngressTransport(r.Method, normalizedPath, false); err != nil {
 		writeCompatibilityError(w, err)
 		return
 	}
 
-	family, err := compatibility.InferFamily(r.Method, normalizedPath, strings.TrimSpace(r.Header.Get("anthropic-version")) != "")
+	family, err := canonical.InferFamily(r.Method, normalizedPath, strings.TrimSpace(r.Header.Get("anthropic-version")) != "") // trimlowerlint:allow boundary canonicalization
 	if err != nil {
 		writeCompatibilityError(w, err)
 		return
@@ -89,16 +90,16 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request, deliveryMode, err := decodeCanonicalRequest(family, requestBody)
+	request, streaming, err := decodeCanonicalRequest(family, requestBody)
 	if err != nil {
 		writeCompatibilityError(w, err)
 		return
 	}
 	requestID := requestIDFromRequest(r)
-	logIngressRequestShape(requestID, endpoint.String(), family, normalizedPath, request, deliveryMode)
+	logIngressRequestShape(requestID, endpoint.String(), family, normalizedPath, request, streaming)
 
 	if h.requests == nil {
-		writeSwobuError(w, compatibility.InternalError("request orchestrator is not configured"))
+		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
 		return
 	}
 
@@ -106,7 +107,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		EndpointName: endpoint,
 		RequestID:    requestID,
 		Request:      request,
-		Contract:     requestpath.NewExecutionContract(deliveryMode),
+		Contract:     requestpath.NewExecutionContract(streaming),
 		Provenance:   ingressProvenance(r, family, normalizedPath),
 	})
 	if err != nil {
@@ -121,23 +122,23 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metadata := out.Response.Metadata()
 	logRequestOutcome(requestID, endpoint.String(), family, metadata.ModelRequested, metadata.ModelResolved, metadata.ModelResolutionMode, nil)
 
-	if err := writeSuccessResponse(w, family, out.Response); err != nil {
+	if err := writeSuccessResponse(w, family, out.Response, streaming); err != nil {
 		writeCompatibilityError(w, err)
 	}
 }
 
 func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, endpoint endpointintent.EndpointName) {
 	if r.Method != http.MethodGet {
-		writeSwobuError(w, compatibility.UnsupportedOperation("models endpoint only supports GET"))
+		writeSwobuError(w, canonical.UnsupportedOperation("models endpoint only supports GET"))
 		return
 	}
 	if h.requests == nil {
-		writeSwobuError(w, compatibility.InternalError("request orchestrator is not configured"))
+		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
 		return
 	}
 	modelsHandler, ok := h.requests.(ModelsHandler)
 	if !ok {
-		writeSwobuError(w, compatibility.InternalError("models query is not configured"))
+		writeSwobuError(w, canonical.InternalError("models query is not configured"))
 		return
 	}
 	out, err := modelsHandler.ListModels(r.Context(), requestpath.ListModelsInput{EndpointName: endpoint})
@@ -180,41 +181,29 @@ func decodeRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			return nil, compatibility.BadRequest("request body exceeds maximum allowed size")
+			return nil, canonical.BadRequest("request body exceeds maximum allowed size")
 		}
-		return nil, compatibility.BadRequest("request body could not be read")
+		return nil, canonical.BadRequest("request body could not be read")
 	}
 	decoded, err := httpcontent.DecodeBytesLimited(r.Header.Get("Content-Encoding"), raw, maxDecodedRequestBodyBytes)
 	if err != nil {
-		return nil, compatibility.BadRequest("request content encoding is unsupported, invalid, or exceeds size limits")
+		return nil, canonical.BadRequest("request content encoding is unsupported, invalid, or exceeds size limits")
 	}
 	return decoded, nil
 }
 
-func decodeCanonicalRequest(family compatibility.IngressFamily, raw []byte) (compatibility.CanonicalRequest, compatibility.DeliveryMode, error) {
-	codec, err := codecForFamily(family)
+func decodeCanonicalRequest(family canonical.IngressFamily, raw []byte) (canonical.CanonicalRequest, bool, error) {
+	codec, err := protocolsurface.ForIngressFamily(family)
 	if err != nil {
-		return nil, "", err
+		return nil, false, err
 	}
-	return codec.decodeRequest(raw)
-}
-
-func decodeJSONObject(raw json.RawMessage, message string) (map[string]any, error) {
-	raw = json.RawMessage(strings.TrimSpace(string(raw)))
-	if len(raw) == 0 || string(raw) == "null" {
-		return map[string]any{}, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, compatibility.BadRequest(message)
-	}
-	return out, nil
+	return codec.DecodeRequest(raw)
 }
 
 func requestIDFromRequest(r *http.Request) string {
-	requestID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+	requestID := strings.TrimSpace(r.Header.Get("X-Request-Id")) // trimlowerlint:allow boundary canonicalization
 	if requestID == "" {
-		requestID = strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		requestID = strings.TrimSpace(r.Header.Get("X-Request-ID")) // trimlowerlint:allow boundary canonicalization
 	}
 	if requestID == "" {
 		requestID = newRequestID()
@@ -230,29 +219,22 @@ func newRequestID() string {
 	return hex.EncodeToString(raw[:])
 }
 
-func deliveryModeFromStream(stream bool) compatibility.DeliveryMode {
-	if stream {
-		return compatibility.DeliveryModeStreaming
-	}
-	return compatibility.DeliveryModeBuffered
-}
-
 func isWebSocketUpgrade(r *http.Request) bool {
 	if r == nil {
 		return false
 	}
-	connection := strings.ToLower(strings.TrimSpace(r.Header.Get("Connection")))
-	upgrade := strings.ToLower(strings.TrimSpace(r.Header.Get("Upgrade")))
+	connection := strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))) // trimlowerlint:allow boundary canonicalization
+	upgrade := strings.ToLower(strings.TrimSpace(r.Header.Get("Upgrade")))       // trimlowerlint:allow boundary canonicalization
 	return strings.Contains(connection, "upgrade") && upgrade == "websocket"
 }
 
 func logIngressRequestShape(
 	requestID string,
 	endpoint string,
-	family compatibility.IngressFamily,
-	normalizedPath compatibility.NormalizedPath,
-	request compatibility.CanonicalRequest,
-	deliveryMode compatibility.DeliveryMode,
+	family canonical.IngressFamily,
+	normalizedPath canonical.NormalizedPath,
+	request canonical.CanonicalRequest,
+	streaming bool,
 ) {
 	threadCount, lastRole, hasPreviousResponseID := requestShapeSummary(request)
 	slog.Debug("compatibility ingress request",
@@ -262,36 +244,36 @@ func logIngressRequestShape(
 		"endpoint", endpoint,
 		"ingress_family", string(family),
 		"normalized_op", string(normalizedPath),
-		"delivery_mode", string(deliveryMode),
+		"streaming", streaming,
 		"item_count", threadCount,
 		"last_input_role", lastRole,
 		"has_previous_response_id", hasPreviousResponseID,
 	)
 }
 
-func requestShapeSummary(request compatibility.CanonicalRequest) (int, string, bool) {
+func requestShapeSummary(request canonical.CanonicalRequest) (int, string, bool) {
 	switch typed := request.(type) {
-	case compatibility.DialogCanonicalRequest:
+	case canonical.DialogCanonicalRequest:
 		items := typed.Items()
 		return len(items), lastRoleFromItems(items), false
-	case compatibility.GenerationCanonicalRequest:
+	case canonical.GenerationCanonicalRequest:
 		items := typed.Thread()
-		return len(items), lastRoleFromItems(items), strings.TrimSpace(typed.PreviousResponseID()) != ""
-	case compatibility.PromptCanonicalRequest:
+		return len(items), lastRoleFromItems(items), strings.TrimSpace(typed.PreviousResponseID()) != "" // trimlowerlint:allow boundary canonicalization
+	case canonical.PromptCanonicalRequest:
 		return 1, "user", false
 	default:
 		return 0, "", false
 	}
 }
 
-func lastRoleFromItems(items []compatibility.CanonicalItem) string {
+func lastRoleFromItems(items []canonical.CanonicalItem) string {
 	if len(items) == 0 {
 		return ""
 	}
 	switch items[len(items)-1].Author {
-	case compatibility.ItemAuthorAssistant:
+	case canonical.ItemAuthorAssistant:
 		return "assistant"
-	case compatibility.ItemAuthorTool:
+	case canonical.ItemAuthorTool:
 		return "tool"
 	default:
 		return "user"
@@ -301,7 +283,7 @@ func lastRoleFromItems(items []compatibility.CanonicalItem) string {
 func logRequestOutcome(
 	requestID string,
 	endpoint string,
-	family compatibility.IngressFamily,
+	family canonical.IngressFamily,
 	modelRequested string,
 	modelResolved string,
 	modelResolutionMode string,
@@ -311,7 +293,7 @@ func logRequestOutcome(
 	statusCode := http.StatusOK
 	if err != nil {
 		result = "swobu_error"
-		var backendErr compatibility.BackendError
+		var backendErr canonical.BackendError
 		if errors.As(err, &backendErr) {
 			result = "backend_error"
 			statusCode = backendErr.StatusCode
@@ -327,14 +309,14 @@ func logRequestOutcome(
 		"ingress_family", string(family),
 		"result", result,
 		"status_code", statusCode,
-		"model_requested", strings.TrimSpace(modelRequested),
-		"model_resolved", strings.TrimSpace(modelResolved),
-		"model_resolution_mode", strings.TrimSpace(modelResolutionMode),
+		"model_requested", strings.TrimSpace(modelRequested), // trimlowerlint:allow boundary canonicalization
+		"model_resolved", strings.TrimSpace(modelResolved), // trimlowerlint:allow boundary canonicalization
+		"model_resolution_mode", strings.TrimSpace(modelResolutionMode), // trimlowerlint:allow boundary canonicalization
 	)
 }
 
 func statusCodeForCompatibilityError(err error) int {
-	var swobuErr compatibility.Error
+	var swobuErr canonical.Error
 	if errors.As(err, &swobuErr) {
 		return statusCodeForSwobuError(swobuErr.Code)
 	}
@@ -342,13 +324,13 @@ func statusCodeForCompatibilityError(err error) int {
 }
 
 func writeCompatibilityError(w http.ResponseWriter, err error) {
-	var swobuErr compatibility.Error
+	var swobuErr canonical.Error
 	if errors.As(err, &swobuErr) {
 		writeSwobuError(w, swobuErr)
 		return
 	}
 
-	var backendErr compatibility.BackendError
+	var backendErr canonical.BackendError
 	if errors.As(err, &backendErr) {
 		if backendErr.RetryAfterHeaderValue != "" {
 			w.Header().Set("Retry-After", backendErr.RetryAfterHeaderValue)
@@ -363,10 +345,10 @@ func writeCompatibilityError(w http.ResponseWriter, err error) {
 		return
 	}
 
-	writeSwobuError(w, compatibility.InternalError("request handling failed"))
+	writeSwobuError(w, canonical.InternalError("request handling failed"))
 }
 
-func writeSwobuError(w http.ResponseWriter, err compatibility.Error) {
+func writeSwobuError(w http.ResponseWriter, err canonical.Error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCodeForSwobuError(err.Code))
 	errorBody := map[string]any{
@@ -382,17 +364,17 @@ func writeSwobuError(w http.ResponseWriter, err compatibility.Error) {
 	})
 }
 
-func statusCodeForSwobuError(code compatibility.ErrorCode) int {
+func statusCodeForSwobuError(code canonical.ErrorCode) int {
 	switch code {
-	case compatibility.ErrorCodeInternal:
+	case canonical.ErrorCodeInternal:
 		return http.StatusInternalServerError
-	case compatibility.ErrorCodeBadRequest:
+	case canonical.ErrorCodeBadRequest:
 		return http.StatusBadRequest
-	case compatibility.ErrorCodeUnknownTarget:
+	case canonical.ErrorCodeUnknownTarget:
 		return http.StatusBadRequest
-	case compatibility.ErrorCodeBadEndpoint:
+	case canonical.ErrorCodeBadEndpoint:
 		return 502
-	case compatibility.ErrorCodeUnsupportedEndpoint, compatibility.ErrorCodeUnsupportedOperation, compatibility.ErrorCodeUnsupportedDelivery:
+	case canonical.ErrorCodeUnsupportedEndpoint, canonical.ErrorCodeUnsupportedOperation, canonical.ErrorCodeUnsupportedDelivery:
 		return http.StatusNotFound
 	default:
 		return http.StatusInternalServerError

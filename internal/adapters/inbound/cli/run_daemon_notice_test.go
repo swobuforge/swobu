@@ -13,8 +13,7 @@ import (
 )
 
 func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

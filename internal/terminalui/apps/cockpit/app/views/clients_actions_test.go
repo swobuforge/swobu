@@ -27,7 +27,7 @@ func TestSelectedClientActions_UsesProfileActionsForOther(t *testing.T) {
 	if got := actions[0].ActionVerb(); got != "view" {
 		t.Fatalf("verb=%q", got)
 	}
-	if got := actions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    primary" {
+	if got := actions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    swobu" {
 		t.Fatalf("copy values payload=%q", got)
 	}
 }

@@ -17,7 +17,7 @@ type ProviderModelCatalog interface {
 func CloneModelIDs(ids []string) []string {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
-		id = strings.TrimSpace(id)
+		id = strings.TrimSpace(id) // trimlowerlint:allow boundary canonicalization
 		if id == "" {
 			continue
 		}

@@ -2,6 +2,8 @@ package chatgptlogin
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,14 +17,21 @@ type captureWriter struct {
 	provider string
 	key      string
 	secret   string
+	ref      string
 	err      error
 }
 
-func (w *captureWriter) Store(providerSpec string, keyName string, secret string) error {
+func (w *captureWriter) Store(providerSpec string, keyName string, secret string) (string, error) {
 	w.provider = providerSpec
 	w.key = keyName
 	w.secret = secret
-	return w.err
+	if w.err != nil {
+		return "", w.err
+	}
+	if strings.TrimSpace(w.ref) != "" {
+		return strings.TrimSpace(w.ref), nil
+	}
+	return "secret:" + keyName, nil
 }
 
 func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
@@ -43,10 +52,11 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 
 	store := &captureWriter{}
 	svc := NewService(http.DefaultClient, ServiceConfig{
-		PublicBaseURL: "http://127.0.0.1:7926",
-		AuthorizeURL:  "https://auth.openai.com/oauth/authorize",
-		TokenURL:      tokenSrv.URL,
-		CredentialOut: store,
+		PublicBaseURL:      "http://127.0.0.1:7926",
+		AuthorizeURL:       "https://auth.openai.com/oauth/authorize",
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "off",
+		CredentialOut:      store,
 	})
 
 	start, err := svc.Start(context.Background(), StartInput{})
@@ -80,7 +90,7 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 	if status.State != SessionSucceeded {
 		t.Fatalf("state=%s", status.State)
 	}
-	if !strings.HasPrefix(status.CredentialRef, "keychain:chatgpt/sess_") {
+	if !strings.HasPrefix(status.CredentialRef, "secret:chatgpt/sess_") {
 		t.Fatalf("credential ref=%q", status.CredentialRef)
 	}
 	if store.provider != "chatgpt" || store.secret != "at_test" {
@@ -90,7 +100,7 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 
 func TestServiceCallbackUnknownState(t *testing.T) {
 	t.Parallel()
-	svc := NewService(http.DefaultClient, ServiceConfig{})
+	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state=missing&code=x", nil)
 	svc.HandleCallback(rec, req)
@@ -108,7 +118,7 @@ func TestServiceCallbackUnknownState(t *testing.T) {
 
 func TestServiceCallbackOAuthErrorMarksSessionFailed(t *testing.T) {
 	t.Parallel()
-	svc := NewService(http.DefaultClient, ServiceConfig{})
+	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -145,7 +155,7 @@ func TestServiceCallbackOAuthErrorMarksSessionFailed(t *testing.T) {
 
 func TestServiceCallbackStateWithAppendedURLStillResolvesSession(t *testing.T) {
 	t.Parallel()
-	svc := NewService(http.DefaultClient, ServiceConfig{})
+	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -188,7 +198,7 @@ func TestServiceTokenExchangeFailureMarksFailed(t *testing.T) {
 	}))
 	defer tokenSrv.Close()
 
-	svc := NewService(http.DefaultClient, ServiceConfig{TokenURL: tokenSrv.URL})
+	svc := NewService(http.DefaultClient, ServiceConfig{TokenURL: tokenSrv.URL, CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -210,6 +220,42 @@ func TestServiceTokenExchangeFailureMarksFailed(t *testing.T) {
 	}
 }
 
+func TestServiceCredentialStoreFailureMarksFailed(t *testing.T) {
+	t.Parallel()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at_test"}`))
+	}))
+	defer tokenSrv.Close()
+
+	store := &captureWriter{err: errors.New("keyring write failed for \"chatgpt/sess_x\": backend unavailable")}
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "off",
+		CredentialOut:      store,
+	})
+	start, err := svc.Start(context.Background(), StartInput{})
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	u, _ := url.Parse(start.AuthorizeURL)
+	state := u.Query().Get("state")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=abc", nil)
+	svc.HandleCallback(rec, req)
+	out, err := svc.Session(context.Background(), start.SessionID)
+	if err != nil {
+		t.Fatalf("Session error: %v", err)
+	}
+	if out.State != SessionFailed {
+		t.Fatalf("state=%s", out.State)
+	}
+	if !strings.Contains(strings.ToLower(out.ErrorMessage), "credential store failed: os keyring unavailable") {
+		t.Fatalf("error=%q", out.ErrorMessage)
+	}
+}
+
 func TestServiceSessionRequiresKnownSession(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, ServiceConfig{})
@@ -222,7 +268,8 @@ func TestServiceSessionExpires(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.May, 10, 12, 0, 0, 0, time.UTC)
 	svc := NewService(nil, ServiceConfig{
-		Now: func() time.Time { return now },
+		CallbackListenAddr: "off",
+		Now:                func() time.Time { return now },
 	})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
@@ -240,7 +287,7 @@ func TestServiceSessionExpires(t *testing.T) {
 
 func TestServiceStartAuthorizeURLIncludesOriginator(t *testing.T) {
 	t.Parallel()
-	svc := NewService(nil, ServiceConfig{Originator: "swobu_test"})
+	svc := NewService(nil, ServiceConfig{Originator: "swobu_test", CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -256,7 +303,7 @@ func TestServiceStartAuthorizeURLIncludesOriginator(t *testing.T) {
 
 func TestServiceStartAuthorizeURL_DefaultScopeMatchesCodexContract(t *testing.T) {
 	t.Parallel()
-	svc := NewService(nil, ServiceConfig{})
+	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -272,7 +319,7 @@ func TestServiceStartAuthorizeURL_DefaultScopeMatchesCodexContract(t *testing.T)
 
 func TestServiceStartAuthorizeURL_DefaultOriginatorMatchesCodex(t *testing.T) {
 	t.Parallel()
-	svc := NewService(nil, ServiceConfig{})
+	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -288,7 +335,7 @@ func TestServiceStartAuthorizeURL_DefaultOriginatorMatchesCodex(t *testing.T) {
 
 func TestServiceStartAuthorizeURL_MatchesCodexQueryShape(t *testing.T) {
 	t.Parallel()
-	svc := NewService(nil, ServiceConfig{})
+	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -319,9 +366,9 @@ func TestServiceStartAuthorizeURL_MatchesCodexQueryShape(t *testing.T) {
 	}
 }
 
-func TestServiceStartAuthorizeURL_UsesDaemonCallbackPath(t *testing.T) {
+func TestServiceStartAuthorizeURL_UsesCodexCallbackPath(t *testing.T) {
 	t.Parallel()
-	svc := NewService(nil, ServiceConfig{PublicBaseURL: "http://127.0.0.1:7926"})
+	svc := NewService(nil, ServiceConfig{PublicBaseURL: "http://127.0.0.1:7926", CallbackListenAddr: "off"})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -330,12 +377,12 @@ func TestServiceStartAuthorizeURL_UsesDaemonCallbackPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://127.0.0.1:7926"+daemonCallbackPath {
+	if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://localhost:1455"+callbackPath {
 		t.Fatalf("redirect_uri=%q", got)
 	}
 }
 
-func TestServiceTokenExchange_UsesDaemonCallbackRedirectURI(t *testing.T) {
+func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 	t.Parallel()
 	var gotRedirectURI string
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -348,9 +395,10 @@ func TestServiceTokenExchange_UsesDaemonCallbackRedirectURI(t *testing.T) {
 	defer tokenSrv.Close()
 
 	svc := NewService(http.DefaultClient, ServiceConfig{
-		PublicBaseURL: "http://127.0.0.1:7926",
-		TokenURL:      tokenSrv.URL,
-		CredentialOut: &captureWriter{},
+		PublicBaseURL:      "http://127.0.0.1:7926",
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "off",
+		CredentialOut:      &captureWriter{},
 	})
 	start, err := svc.Start(context.Background(), StartInput{})
 	if err != nil {
@@ -367,9 +415,56 @@ func TestServiceTokenExchange_UsesDaemonCallbackRedirectURI(t *testing.T) {
 	if _, err := svc.Session(context.Background(), start.SessionID); err != nil {
 		t.Fatalf("Session error: %v", err)
 	}
-	if gotRedirectURI != "http://127.0.0.1:7926"+daemonCallbackPath {
+	if gotRedirectURI != "http://localhost:1455"+callbackPath {
 		t.Fatalf("redirect_uri=%q", gotRedirectURI)
 	}
+}
+
+func TestServiceSessionSuccess_PlanTierIncludedInCredentialRefWhenPresent(t *testing.T) {
+	t.Parallel()
+
+	idToken := testJWTWithPlanType("plus")
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at_test","id_token":"` + idToken + `"}`))
+	}))
+	defer tokenSrv.Close()
+
+	store := &captureWriter{}
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		PublicBaseURL:      "http://127.0.0.1:7926",
+		AuthorizeURL:       "https://auth.openai.com/oauth/authorize",
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "off",
+		CredentialOut:      store,
+	})
+
+	start, err := svc.Start(context.Background(), StartInput{})
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	u, _ := url.Parse(start.AuthorizeURL)
+	state := strings.TrimSpace(u.Query().Get("state"))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
+	svc.HandleCallback(rec, req)
+
+	status, err := svc.Session(context.Background(), start.SessionID)
+	if err != nil {
+		t.Fatalf("Session error: %v", err)
+	}
+	if status.State != SessionSucceeded {
+		t.Fatalf("state=%s", status.State)
+	}
+	if !strings.HasPrefix(status.CredentialRef, "secret:chatgpt/plus/sess_") {
+		t.Fatalf("credential ref=%q", status.CredentialRef)
+	}
+}
+
+func testJWTWithPlanType(plan string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_plan_type":"` + plan + `"}}`))
+	return header + "." + payload + ".sig"
 }
 
 func TestServiceDeviceAuthStartSetsUserAgentHeader(t *testing.T) {
@@ -404,5 +499,31 @@ func TestServiceDeviceAuthStartSetsUserAgentHeader(t *testing.T) {
 	}
 	if seenUA != "swobu-test/1" {
 		t.Fatalf("user-agent=%q", seenUA)
+	}
+}
+
+func TestServiceDefaults_DoNotEmbedTimeSignedAuthArtifacts(t *testing.T) {
+	t.Parallel()
+	joined := strings.Join([]string{
+		defaultAuthorizeURL,
+		defaultTokenURL,
+		deviceUserCodeURL,
+		deviceTokenURL,
+		deviceVerifyURL,
+		defaultOpenAIClientID,
+		defaultOriginator,
+	}, " ")
+	forbiddenFragments := []string{
+		"payload=",
+		"session_id=",
+		"verifier_id=",
+		"expires=",
+		"sig=",
+	}
+	lower := strings.ToLower(joined)
+	for _, fragment := range forbiddenFragments {
+		if strings.Contains(lower, fragment) {
+			t.Fatalf("defaults contain forbidden signed fragment %q", fragment)
+		}
 	}
 }

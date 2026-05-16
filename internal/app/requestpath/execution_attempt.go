@@ -3,7 +3,7 @@ package requestpath
 import (
 	"context"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -12,7 +12,7 @@ import (
 type ClientIntent struct {
 	EndpointName   endpointintent.EndpointName
 	RequestID      string
-	Request        compatibility.CanonicalRequest
+	Request        canonical.CanonicalRequest
 	RequestedModel string
 	Provenance     IngressProvenance
 }
@@ -31,14 +31,14 @@ type ExecutionAttempt struct {
 	Route                RouteDecision
 	Index                int
 	Contract             ExecutionContract
-	Request              compatibility.CanonicalRequest
+	Request              canonical.CanonicalRequest
 	DeclaredCapabilities CapabilitySnapshot
-	Continuation         compatibility.ContinuationRuntime
+	Continuation         canonical.ContinuationRuntime
 }
 
 // AttemptOutcome is one attempt result consumed by requestpath policy middleware.
 type AttemptOutcome struct {
-	Response ports.ExecuteResponse
+	Response ports.ProviderResponse
 	Err      error
 }
 

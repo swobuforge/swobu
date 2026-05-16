@@ -3,13 +3,6 @@ package providercatalog
 import (
 	"slices"
 	"strings"
-
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
-)
-
-const (
-	AdapterCustomOpenAICompatible = "custom_openai_compatible"
-	AdapterAnthropicMessages      = "anthropic_messages"
 )
 
 type AuthKind string
@@ -23,183 +16,152 @@ type AuthVariant string
 
 const (
 	AuthVariantEnv               AuthVariant = "env"
-	AuthVariantKeychain          AuthVariant = "keychain"
 	AuthVariantFile              AuthVariant = "file"
 	AuthVariantChatGPTLogin      AuthVariant = "chatgpt_login"
 	AuthVariantChatGPTDeviceAuth AuthVariant = "chatgpt_device_auth"
 )
 
-type APIFamily string
+type AuthModeID string
 
 const (
-	APIFamilyOpenAICompatible APIFamily = "openai_compatible"
-	APIFamilyAnthropic        APIFamily = "anthropic_api"
-
-	// Backward-compatible aliases; new code should prefer APIFamily* names.
-	EndpointModeOpenAICompatible = APIFamilyOpenAICompatible
-	EndpointModeAnthropic        = APIFamilyAnthropic
+	AuthModeNone               AuthModeID = "none"
+	AuthModeTokenEnv           AuthModeID = "token_env"
+	AuthModeTokenFile          AuthModeID = "token_file"
+	AuthModeInteractiveBrowser AuthModeID = "interactive_browser"
+	AuthModeInteractiveDevice  AuthModeID = "interactive_device"
 )
+
+type AuthModeRequirement string
+
+const (
+	AuthModeRequirementAlways                AuthModeRequirement = "always"
+	AuthModeRequirementNever                 AuthModeRequirement = "never"
+	AuthModeRequirementExceptLoopbackExecute AuthModeRequirement = "except_loopback_execute_origin"
+)
+
+type AuthModeSpec struct {
+	ID          AuthModeID
+	Variant     AuthVariant
+	Kind        AuthKind
+	Requirement AuthModeRequirement
+	Interactive bool
+}
 
 type Capability string
 
 const (
+	ProviderSpecOllama           ProviderID = "ollama"
+	ProviderSpecOpenAI           ProviderID = "openai"
+	ProviderSpecChatGPT          ProviderID = "chatgpt"
+	ProviderSpecAnthropic        ProviderID = "anthropic"
+	ProviderSpecOpenRouter       ProviderID = "openrouter"
+	ProviderSpecOpenAICompatible ProviderID = "openai_compatible"
+
 	CapabilityModelCatalog Capability = "model_catalog"
 	CapabilityStreaming    Capability = "streaming"
-)
-
-type credentialRequirementPolicy uint8
-
-const (
-	credentialRequiredAlways credentialRequirementPolicy = iota
-	credentialNeverRequired
-	credentialRequiredExceptLoopbackCustom
 )
 
 // Profile is one canonical provider declaration.
 //
 // Add/remove/evolve provider specs in this catalog only.
 type Profile struct {
-	ProviderID               string
-	ProviderDisplayName      string
-	SetupHint                string
-	DefaultBaseURL           string
-	DefaultCredentialEnvVar  string
-	HasModelCatalog          bool
-	VisibleInOperatorUI      bool
-	ExecutionAdapterID       string
-	APIFamily                APIFamily
-	SupportedCredentialKinds []AuthKind
-	SupportedAuthVariants    []AuthVariant
-	DeclaredCapabilities     []Capability
-	SupportedEgressProtocols []protocolsurface.Kind
-
-	credentialRequirementPolicy credentialRequirementPolicy
+	ProviderID              ProviderID
+	ProviderDisplayName     string
+	SetupHint               string
+	DefaultBaseURL          string
+	DefaultCredentialEnvVar string
+	VisibleInOperatorUI     bool
+	AllowedAuthModes        []AuthModeSpec
+	DeclaredCapabilities    []Capability
 }
 
 func catalog() []Profile {
 	return []Profile{
 		{
-			ProviderID:               "ollama",
-			ProviderDisplayName:      "Ollama",
-			SetupHint:                "ollama",
-			DefaultBaseURL:           "http://127.0.0.1:11434/v1",
-			HasModelCatalog:          true,
-			VisibleInOperatorUI:      true,
-			ExecutionAdapterID:       AdapterCustomOpenAICompatible,
-			APIFamily:                APIFamilyOpenAICompatible,
-			SupportedCredentialKinds: []AuthKind{AuthNone},
-			SupportedAuthVariants:    []AuthVariant{},
-			DeclaredCapabilities:     []Capability{CapabilityModelCatalog, CapabilityStreaming},
-			SupportedEgressProtocols: []protocolsurface.Kind{
-				protocolsurface.ChatCompletions,
-				protocolsurface.Responses,
-				protocolsurface.Completions,
+			ProviderID:          ProviderSpecOllama,
+			ProviderDisplayName: "Ollama",
+			SetupHint:           string(ProviderSpecOllama),
+			DefaultBaseURL:      "http://127.0.0.1:11434/v1",
+			VisibleInOperatorUI: true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeNone, Variant: "", Kind: AuthNone, Requirement: AuthModeRequirementNever},
 			},
-			credentialRequirementPolicy: credentialNeverRequired,
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:               "openai",
-			ProviderDisplayName:      "OpenAI",
-			SetupHint:                "openai",
-			DefaultBaseURL:           "https://api.openai.com/v1",
-			DefaultCredentialEnvVar:  "OPENAI_API_KEY",
-			HasModelCatalog:          true,
-			VisibleInOperatorUI:      true,
-			ExecutionAdapterID:       AdapterCustomOpenAICompatible,
-			APIFamily:                APIFamilyOpenAICompatible,
-			SupportedCredentialKinds: []AuthKind{AuthCredentialRef},
-			SupportedAuthVariants:    []AuthVariant{AuthVariantEnv, AuthVariantKeychain, AuthVariantFile},
-			DeclaredCapabilities:     []Capability{CapabilityModelCatalog, CapabilityStreaming},
-			SupportedEgressProtocols: []protocolsurface.Kind{
-				protocolsurface.ChatCompletions,
-				protocolsurface.Responses,
-				protocolsurface.Completions,
+			ProviderID:              ProviderSpecOpenAI,
+			ProviderDisplayName:     "OpenAI",
+			SetupHint:               string(ProviderSpecOpenAI),
+			DefaultBaseURL:          "https://api.openai.com/v1",
+			DefaultCredentialEnvVar: "OPENAI_API_KEY",
+			VisibleInOperatorUI:     true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
-			credentialRequirementPolicy: credentialRequiredAlways,
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:               "chatgpt",
-			ProviderDisplayName:      "ChatGPT",
-			SetupHint:                "chatgpt",
-			DefaultBaseURL:           "https://api.openai.com/v1",
-			HasModelCatalog:          true,
-			VisibleInOperatorUI:      true,
-			ExecutionAdapterID:       AdapterCustomOpenAICompatible,
-			APIFamily:                APIFamilyOpenAICompatible,
-			SupportedCredentialKinds: []AuthKind{AuthCredentialRef},
-			SupportedAuthVariants:    []AuthVariant{AuthVariantChatGPTLogin, AuthVariantChatGPTDeviceAuth},
-			DeclaredCapabilities:     []Capability{CapabilityModelCatalog, CapabilityStreaming},
-			SupportedEgressProtocols: []protocolsurface.Kind{
-				protocolsurface.ChatCompletions,
-				protocolsurface.Responses,
-				protocolsurface.Completions,
+			ProviderID:          ProviderSpecChatGPT,
+			ProviderDisplayName: "ChatGPT",
+			SetupHint:           string(ProviderSpecChatGPT),
+			DefaultBaseURL:      "https://api.openai.com/v1",
+			VisibleInOperatorUI: true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeInteractiveBrowser, Variant: AuthVariantChatGPTLogin, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
+				{ID: AuthModeInteractiveDevice, Variant: AuthVariantChatGPTDeviceAuth, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
 			},
-			credentialRequirementPolicy: credentialRequiredAlways,
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:               "anthropic",
-			ProviderDisplayName:      "Anthropic",
-			SetupHint:                "anthropic",
-			DefaultBaseURL:           "https://api.anthropic.com/v1",
-			DefaultCredentialEnvVar:  "ANTHROPIC_API_KEY",
-			HasModelCatalog:          true,
-			VisibleInOperatorUI:      true,
-			ExecutionAdapterID:       AdapterAnthropicMessages,
-			APIFamily:                APIFamilyAnthropic,
-			SupportedCredentialKinds: []AuthKind{AuthCredentialRef},
-			SupportedAuthVariants:    []AuthVariant{AuthVariantEnv, AuthVariantKeychain, AuthVariantFile},
-			DeclaredCapabilities:     []Capability{CapabilityModelCatalog, CapabilityStreaming},
-			SupportedEgressProtocols: []protocolsurface.Kind{
-				protocolsurface.Messages,
+			ProviderID:              ProviderSpecAnthropic,
+			ProviderDisplayName:     "Anthropic",
+			SetupHint:               string(ProviderSpecAnthropic),
+			DefaultBaseURL:          "https://api.anthropic.com/v1",
+			DefaultCredentialEnvVar: "ANTHROPIC_API_KEY",
+			VisibleInOperatorUI:     true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
-			credentialRequirementPolicy: credentialRequiredAlways,
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:               "openrouter",
-			ProviderDisplayName:      "OpenRouter",
-			SetupHint:                "openrouter",
-			DefaultBaseURL:           "https://openrouter.ai/api/v1",
-			DefaultCredentialEnvVar:  "OPENROUTER_API_KEY",
-			HasModelCatalog:          true,
-			VisibleInOperatorUI:      true,
-			ExecutionAdapterID:       AdapterCustomOpenAICompatible,
-			APIFamily:                APIFamilyOpenAICompatible,
-			SupportedCredentialKinds: []AuthKind{AuthCredentialRef},
-			SupportedAuthVariants:    []AuthVariant{AuthVariantEnv, AuthVariantKeychain, AuthVariantFile},
-			DeclaredCapabilities:     []Capability{CapabilityModelCatalog, CapabilityStreaming},
-			SupportedEgressProtocols: []protocolsurface.Kind{
-				protocolsurface.ChatCompletions,
-				protocolsurface.Responses,
-				protocolsurface.Completions,
+			ProviderID:              ProviderSpecOpenRouter,
+			ProviderDisplayName:     "OpenRouter",
+			SetupHint:               string(ProviderSpecOpenRouter),
+			DefaultBaseURL:          "https://openrouter.ai/api/v1",
+			DefaultCredentialEnvVar: "OPENROUTER_API_KEY",
+			VisibleInOperatorUI:     true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
-			credentialRequirementPolicy: credentialRequiredAlways,
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:               "custom",
-			ProviderDisplayName:      "Custom",
-			SetupHint:                "custom   openai-compatible URL (https://host/v1)",
-			DefaultBaseURL:           "",
-			HasModelCatalog:          true,
-			VisibleInOperatorUI:      true,
-			ExecutionAdapterID:       AdapterCustomOpenAICompatible,
-			APIFamily:                APIFamilyOpenAICompatible,
-			SupportedCredentialKinds: []AuthKind{AuthNone, AuthCredentialRef},
-			SupportedAuthVariants:    []AuthVariant{AuthVariantEnv, AuthVariantKeychain, AuthVariantFile},
-			DeclaredCapabilities:     []Capability{CapabilityModelCatalog, CapabilityStreaming},
-			SupportedEgressProtocols: []protocolsurface.Kind{
-				protocolsurface.ChatCompletions,
-				protocolsurface.Responses,
-				protocolsurface.Completions,
+			ProviderID:          ProviderSpecOpenAICompatible,
+			ProviderDisplayName: "OpenAI Compatible",
+			SetupHint:           string(ProviderSpecOpenAICompatible) + "   OpenAI-compatible URL (https://host/v1)",
+			DefaultBaseURL:      "",
+			VisibleInOperatorUI: true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeNone, Variant: "", Kind: AuthNone, Requirement: AuthModeRequirementExceptLoopbackExecute},
+				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
-			credentialRequirementPolicy: credentialRequiredExceptLoopbackCustom,
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 	}
 }
 
 func profileFor(spec string) (Profile, bool) {
-	spec = strings.TrimSpace(strings.ToLower(spec))
+	providerID, ok := ParseProviderID(spec)
+	if !ok {
+		return Profile{}, false
+	}
 	for _, profile := range catalog() {
-		if profile.ProviderID == spec {
+		if profile.ProviderID == providerID {
 			return profile, true
 		}
 	}
@@ -214,7 +176,7 @@ func SupportedSpecs() []string {
 	entries := catalog()
 	specs := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		specs = append(specs, entry.ProviderID)
+		specs = append(specs, string(entry.ProviderID))
 	}
 	slices.Sort(specs)
 	return specs
@@ -225,35 +187,9 @@ func SupportsSpec(spec string) bool {
 	return ok
 }
 
-func SupportsRoute(spec string, protocolKind protocolsurface.Kind) bool {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return false
-	}
-	for _, supported := range profile.SupportedEgressProtocols {
-		if supported == protocolKind {
-			return true
-		}
-	}
-	return false
-}
-
-// DefaultProtocolForSpec returns the canonical default protocol kind for one
-// provider spec.
-func DefaultProtocolForSpec(spec string) (protocolsurface.Kind, bool) {
-	profile, ok := profileFor(spec)
-	if !ok || len(profile.SupportedEgressProtocols) == 0 {
-		return "", false
-	}
-	return profile.SupportedEgressProtocols[0], true
-}
-
 func SupportsAuth(spec string, authKind AuthKind) bool {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return false
-	}
-	for _, supported := range profile.SupportedCredentialKinds {
+	for _, mode := range AllowedAuthModesForSpec(spec) {
+		supported := mode.Kind
 		if supported == authKind {
 			return true
 		}
@@ -261,20 +197,29 @@ func SupportsAuth(spec string, authKind AuthKind) bool {
 	return false
 }
 
-func SupportedAuthVariantsForSpec(spec string) []AuthVariant {
+func AllowedAuthModesForSpec(spec string) []AuthModeSpec {
 	profile, ok := profileFor(spec)
 	if !ok {
 		return nil
 	}
-	return slices.Clone(profile.SupportedAuthVariants)
+	return slices.Clone(profile.AllowedAuthModes)
+}
+
+func SupportedAuthVariantsForSpec(spec string) []AuthVariant {
+	modes := AllowedAuthModesForSpec(spec)
+	out := make([]AuthVariant, 0, len(modes))
+	for _, mode := range modes {
+		variant := mode.Variant
+		if strings.TrimSpace(string(variant)) == "" { // trimlowerlint:allow domain canonicalization
+			continue
+		}
+		out = append(out, variant)
+	}
+	return slices.Compact(out)
 }
 
 func SupportsAuthVariant(spec string, variant AuthVariant) bool {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return false
-	}
-	for _, supported := range profile.SupportedAuthVariants {
+	for _, supported := range SupportedAuthVariantsForSpec(spec) {
 		if supported == variant {
 			return true
 		}
@@ -283,43 +228,12 @@ func SupportsAuthVariant(spec string, variant AuthVariant) bool {
 }
 
 func IsInteractiveAuthVariant(variant AuthVariant) bool {
-	return variant == AuthVariantChatGPTLogin || variant == AuthVariantChatGPTDeviceAuth
-}
-
-func AuthVariantStartAction(spec string, variant AuthVariant) (label string, verb string, ok bool) {
-	if !SupportsAuthVariant(spec, variant) || !IsInteractiveAuthVariant(variant) {
-		return "", "", false
-	}
 	switch variant {
-	case AuthVariantChatGPTDeviceAuth:
-		return "start device auth", "start", true
-	case AuthVariantChatGPTLogin:
-		return "start login", "login", true
+	case AuthVariantChatGPTLogin, AuthVariantChatGPTDeviceAuth:
+		return true
 	default:
-		return "start login", "login", true
+		return false
 	}
-}
-
-func AuthVariantDisplayLabel(spec string, variant AuthVariant) string {
-	switch variant {
-	case AuthVariantChatGPTLogin:
-		return "browser login"
-	case AuthVariantChatGPTDeviceAuth:
-		return "device code"
-	case AuthVariantEnv:
-		return "env var"
-	case AuthVariantKeychain:
-		return "keychain"
-	case AuthVariantFile:
-		return "file"
-	default:
-		return string(variant)
-	}
-}
-
-func SupportsEndpointMode(spec string, endpointMode APIFamily) bool {
-	profile, ok := profileFor(spec)
-	return ok && profile.APIFamily == endpointMode
 }
 
 func SupportsCapability(spec string, capability Capability) bool {
@@ -335,41 +249,12 @@ func SupportsCapability(spec string, capability Capability) bool {
 	return false
 }
 
-func ProviderDisplayName(spec string) string {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return "Provider"
-	}
-	return profile.ProviderDisplayName
-}
-
-// TODO(execution-system): DisplayName is a compatibility wrapper. New code should call ProviderDisplayName.
-func DisplayName(spec string) string {
-	return ProviderDisplayName(spec)
-}
-
-func DefaultBaseURL(spec string) string {
+func DefaultExecuteBaseURL(spec string) string {
 	profile, ok := profileFor(spec)
 	if !ok {
 		return ""
 	}
 	return profile.DefaultBaseURL
-}
-
-func AdapterForSpec(spec string) (string, bool) {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return "", false
-	}
-	return profile.ExecutionAdapterID, true
-}
-
-func EndpointModeForSpec(spec string) (APIFamily, bool) {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return "", false
-	}
-	return profile.APIFamily, true
 }
 
 // DefaultEnvKeyForSpec returns the canonical environment variable name for a
@@ -389,23 +274,35 @@ func DefaultCredentialEnvVarForSpec(spec string) string {
 }
 
 func RequiresCredential(spec, baseURL string) bool {
-	profile, ok := profileFor(spec)
-	if !ok {
+	return requiresCredentialFromModes(AllowedAuthModesForSpec(spec), baseURL)
+}
+
+func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {
+	if len(modes) == 0 {
 		return false
 	}
-	switch profile.credentialRequirementPolicy {
-	case credentialNeverRequired:
+	normalizedBaseURL := baseURL
+	hasNeverMode := false
+	hasLoopbackConditional := false
+	for _, mode := range modes {
+		switch mode.Requirement {
+		case AuthModeRequirementNever:
+			hasNeverMode = true
+		case AuthModeRequirementExceptLoopbackExecute:
+			hasLoopbackConditional = true
+		}
+	}
+	if hasNeverMode {
 		return false
-	case credentialRequiredExceptLoopbackCustom:
-		normalizedBaseURL := strings.TrimSpace(strings.ToLower(baseURL))
+	}
+	if hasLoopbackConditional {
 		return !(strings.HasPrefix(normalizedBaseURL, "http://127.0.0.1") || strings.HasPrefix(normalizedBaseURL, "http://localhost"))
-	default:
-		return true
 	}
+	return true
 }
 
 func InferAuthKind(spec, baseURL, credentialRef string) AuthKind {
-	if strings.TrimSpace(credentialRef) != "" {
+	if strings.TrimSpace(credentialRef) != "" { // trimlowerlint:allow domain canonicalization
 		return AuthCredentialRef
 	}
 	if RequiresCredential(spec, baseURL) {
@@ -414,56 +311,23 @@ func InferAuthKind(spec, baseURL, credentialRef string) AuthKind {
 	return AuthNone
 }
 
-func HasModelCatalog(spec string) bool {
-	profile, ok := profileFor(spec)
-	return ok && profile.HasModelCatalog
-}
-
-// TODO(execution-system): SupportsModelCatalog is a compatibility wrapper. New code should call HasModelCatalog.
-func SupportsModelCatalog(spec string) bool {
-	return HasModelCatalog(spec)
-}
-
 type RouteProfile struct {
 	ProviderSpec string
-	// ProtocolKind is the concrete provider-side egress protocol family that the
-	// selected adapter will encode to for this target.
-	ProtocolKind       protocolsurface.Kind
-	AuthKind           AuthKind
-	APIFamily          APIFamily
-	ExecutionAdapterID string
+	AuthKind     AuthKind
 }
 
 // ResolveRouteProfile resolves one execution-route profile from durable target
 // intent.
-//
-// The protocolKind input is an egress codec selection for the provider target,
-// not an ingress-family discriminator.
-func ResolveRouteProfile(spec string, protocolKind protocolsurface.Kind, baseURL, credentialRef string) (RouteProfile, bool) {
-	spec = strings.TrimSpace(strings.ToLower(spec))
+func ResolveRouteProfile(spec string, baseURL, credentialRef string) (RouteProfile, bool) {
 	if !SupportsSpec(spec) {
-		return RouteProfile{}, false
-	}
-	if !SupportsRoute(spec, protocolKind) {
-		return RouteProfile{}, false
-	}
-	endpointMode, ok := EndpointModeForSpec(spec)
-	if !ok {
 		return RouteProfile{}, false
 	}
 	authKind := InferAuthKind(spec, baseURL, credentialRef)
 	if !SupportsAuth(spec, authKind) {
 		return RouteProfile{}, false
 	}
-	adapter, ok := AdapterForSpec(spec)
-	if !ok {
-		return RouteProfile{}, false
-	}
 	return RouteProfile{
-		ProviderSpec:       spec,
-		ProtocolKind:       protocolKind,
-		AuthKind:           authKind,
-		APIFamily:          endpointMode,
-		ExecutionAdapterID: adapter,
+		ProviderSpec: spec,
+		AuthKind:     authKind,
 	}, true
 }

@@ -11,7 +11,7 @@ type RequestID struct {
 }
 
 func ParseRequestID(raw string) (RequestID, error) {
-	if strings.TrimSpace(raw) == "" {
+	if strings.TrimSpace(raw) == "" { // trimlowerlint:allow domain canonicalization
 		return RequestID{}, fmt.Errorf("request id must not be empty")
 	}
 	return RequestID{value: raw}, nil

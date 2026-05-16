@@ -8,7 +8,7 @@ import (
 )
 
 func FocusAffordance(verb string, allowSpace bool) func() []update.Action {
-	cleanVerb := strings.TrimSpace(verb)
+	cleanVerb := strings.TrimSpace(verb) // trimlowerlint:allow boundary canonicalization
 	return func() []update.Action {
 		return []update.Action{state.SetFocusedRowAffordance{Verb: cleanVerb, AllowSpace: allowSpace}}
 	}

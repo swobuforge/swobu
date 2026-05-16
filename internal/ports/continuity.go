@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 // ResponseContinuityStore owns the minimal canonical continuation state
@@ -20,7 +20,7 @@ import (
 // Store implementations may reconstruct full threads recursively from persisted
 // turns and parent links; that mechanics stays behind this port.
 type ResponseContinuityStore interface {
-	Load(ctx context.Context, previousResponseID string) (compatibility.ContinuitySnapshot, bool, error)
-	MatchPrefix(ctx context.Context, namespace compatibility.ContinuationNamespace, thread []compatibility.CanonicalItem) (compatibility.ContinuationPrefixMatch, bool, error)
-	Store(ctx context.Context, namespace compatibility.ContinuationNamespace, snapshot compatibility.ContinuitySnapshot) error
+	Load(ctx context.Context, previousResponseID string) (canonical.ContinuitySnapshot, bool, error)
+	MatchPrefix(ctx context.Context, namespace canonical.ContinuationNamespace, thread []canonical.CanonicalItem) (canonical.ContinuationPrefixMatch, bool, error)
+	Store(ctx context.Context, namespace canonical.ContinuationNamespace, snapshot canonical.ContinuitySnapshot) error
 }

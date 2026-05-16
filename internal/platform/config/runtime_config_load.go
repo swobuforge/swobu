@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 //go:embed runtime.cue
@@ -56,12 +56,13 @@ type providerConfigDTO struct {
 	CredentialRef string `json:"credential_ref" yaml:"credential_ref"`
 	ModelID       string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
 	TargetAlias   string `json:"target_alias,omitempty" yaml:"target_alias,omitempty"`
-	ProtocolKind  string `json:"protocol_kind" yaml:"protocol_kind"`
+	SelectedFrame string `json:"selected_frame,omitempty" yaml:"selected_frame,omitempty"`
+	ProtocolKind  string `json:"protocol_kind,omitempty" yaml:"protocol_kind,omitempty"`
 }
 
 func (c RuntimeConfig) WithDefaults() RuntimeConfig {
 	out := c
-	if strings.TrimSpace(out.BindAddr) == "" {
+	if strings.TrimSpace(out.BindAddr) == "" { // trimlowerlint:allow boundary canonicalization
 		out.BindAddr = DefaultBindAddr()
 	}
 	return out
@@ -74,18 +75,21 @@ func DefaultBindAddr() string {
 }
 
 func DefaultDaemonURL() string {
-	if daemonURL := strings.TrimSpace(os.Getenv(EnvDaemonURL)); daemonURL != "" {
+	if daemonURL := strings.TrimSpace(os.Getenv(EnvDaemonURL)); daemonURL != "" { // trimlowerlint:allow boundary canonicalization
 		return daemonURL
 	}
 	return "http://" + DefaultBindAddr()
 }
 
 func DefaultConfigPath() string {
-	if configPath := strings.TrimSpace(os.Getenv(EnvConfigPath)); configPath != "" {
+	if configPath := strings.TrimSpace(os.Getenv(EnvConfigPath)); configPath != "" { // trimlowerlint:allow boundary canonicalization
 		return configPath
 	}
+	if home := defaultSwobuHome(); strings.TrimSpace(home) != "" { // trimlowerlint:allow boundary canonicalization
+		return filepath.Join(home, "config", "swobu.yaml")
+	}
 	configDir, err := os.UserConfigDir()
-	if err != nil || strings.TrimSpace(configDir) == "" {
+	if err != nil || strings.TrimSpace(configDir) == "" { // trimlowerlint:allow boundary canonicalization
 		return "swobu.yaml"
 	}
 	return filepath.Join(configDir, "swobu", "swobu.yaml")
@@ -101,7 +105,7 @@ func EnsureDefaultConfigFile() (string, error) {
 		return "", fmt.Errorf("stat default config: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return "", fmt.Errorf("create config dir: %w", err)
 	}
 	runtime := RuntimeConfig{BindAddr: defaultBindAddrForDaemonURL()}
@@ -113,21 +117,21 @@ func EnsureDefaultConfigFile() (string, error) {
 
 func defaultBindAddrForDaemonURL() string {
 	parsedURL, err := url.Parse(DefaultDaemonURL())
-	if err != nil || strings.TrimSpace(parsedURL.Host) == "" {
+	if err != nil || strings.TrimSpace(parsedURL.Host) == "" { // trimlowerlint:allow boundary canonicalization
 		return DefaultBindAddr()
 	}
 	return parsedURL.Host
 }
 
 func (c RuntimeConfig) Validate() error {
-	if strings.TrimSpace(c.BindAddr) == "" {
+	if strings.TrimSpace(c.BindAddr) == "" { // trimlowerlint:allow boundary canonicalization
 		return fmt.Errorf("bind address is required")
 	}
 	return nil
 }
 
 func Load(path string) (LoadedConfig, error) {
-	if strings.TrimSpace(path) == "" {
+	if strings.TrimSpace(path) == "" { // trimlowerlint:allow boundary canonicalization
 		return LoadedConfig{}, fmt.Errorf("config path is required")
 	}
 	raw, err := os.ReadFile(path)
@@ -179,7 +183,7 @@ func Load(path string) (LoadedConfig, error) {
 }
 
 func Save(path string, runtime RuntimeConfig, endpoints []endpointintent.Endpoint) error {
-	if strings.TrimSpace(path) == "" {
+	if strings.TrimSpace(path) == "" { // trimlowerlint:allow boundary canonicalization
 		return fmt.Errorf("config path is required")
 	}
 	runtime = runtime.WithDefaults()
@@ -199,11 +203,11 @@ func Save(path string, runtime RuntimeConfig, endpoints []endpointintent.Endpoin
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o644)
+	return os.WriteFile(path, raw, 0o600)
 }
 
 func compileConfigData(ctx *cue.Context, path string, raw []byte) (cue.Value, error) {
-	switch strings.ToLower(filepath.Ext(path)) {
+	switch strings.ToLower(filepath.Ext(path)) { // trimlowerlint:allow boundary canonicalization
 	case ".yaml", ".yml":
 		file, err := cueyaml.Extract(path, raw)
 		if err != nil {
@@ -226,7 +230,7 @@ func compileConfigData(ctx *cue.Context, path string, raw []byte) (cue.Value, er
 }
 
 func marshalConfigData(path string, dto runtimeFileDTO) ([]byte, error) {
-	switch strings.ToLower(filepath.Ext(path)) {
+	switch strings.ToLower(filepath.Ext(path)) { // trimlowerlint:allow boundary canonicalization
 	case ".yaml", ".yml":
 		raw, err := yaml.Marshal(dto)
 		if err != nil {
@@ -268,7 +272,7 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 			spec,
 			encoded.BaseURL,
 			encoded.CredentialRef,
-			protocolsurface.Kind(encoded.ProtocolKind),
+			protocolkind.ProtocolKind(strings.TrimSpace(encoded.ProtocolKind)), // trimlowerlint:allow boundary canonicalization
 		)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
@@ -276,6 +280,12 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		providerConfig, err = providerConfig.WithModelID(encoded.ModelID)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
+		}
+		if strings.TrimSpace(encoded.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
+			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
 		}
 		providerConfig, err = providerConfig.WithTargetAlias(encoded.TargetAlias)
 		if err != nil {
@@ -297,6 +307,7 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 			CredentialRef: providerConfig.CredentialRef(),
 			ModelID:       providerConfig.ModelID(),
 			TargetAlias:   providerConfig.TargetAlias(),
+			SelectedFrame: providerConfig.SelectedFrame(),
 			ProtocolKind:  providerConfig.ProtocolKind().String(),
 		})
 	}

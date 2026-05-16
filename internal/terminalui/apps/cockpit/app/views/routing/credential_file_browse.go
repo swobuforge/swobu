@@ -111,16 +111,10 @@ func applyProviderCredentialFileSelection(path string, providerConfig *state.Pro
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	return []update.Action{
-		state.RoutingSaveStartedAction{},
-		state.SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName),
-			ProviderConfig: next,
-		},
-	}
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/file") // trimlowerlint:allow boundary canonicalization
 }

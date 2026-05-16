@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
@@ -18,9 +19,19 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if err != nil {
 		return endpointintent.ProviderConfig{}, fmt.Errorf("provider spec: %w", err)
 	}
-	config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef, protocolsurface.Kind(pc.ProtocolKind))
+	protocolKind := protocolkind.ProtocolKind(strings.TrimSpace(pc.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
+	if !providercatalog.SupportsExecutionProtocolForSpec(spec.String(), protocolKind) {
+		protocolKind = ""
+	}
+	config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef, protocolKind)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
+	}
+	if strings.TrimSpace(pc.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
+		config, err = config.WithSelectedFrame(pc.SelectedFrame)
+		if err != nil {
+			return endpointintent.ProviderConfig{}, err
+		}
 	}
 	config, err = config.WithModelID(pc.ModelID)
 	if err != nil {
@@ -48,6 +59,7 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 			CredentialRef: pc.CredentialRef(),
 			ModelID:       pc.ModelID(),
 			TargetAlias:   pc.TargetAlias(),
+			SelectedFrame: pc.SelectedFrame(),
 			ProtocolKind:  pc.ProtocolKind().String(),
 		})
 	}
@@ -55,7 +67,7 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 }
 
 func trafficOperationFamily(ingressFamily string, result string, statusCode int) string {
-	switch strings.TrimSpace(strings.ToLower(ingressFamily)) {
+	switch strings.TrimSpace(strings.ToLower(ingressFamily)) { // trimlowerlint:allow boundary canonicalization
 	case "responses":
 		return "responses"
 	case "chat_completions":

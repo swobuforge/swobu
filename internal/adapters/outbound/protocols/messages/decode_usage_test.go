@@ -2,7 +2,7 @@ package messages
 
 import "testing"
 
-func TestDecodeBufferedResult_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
+func TestDecodeResponseBuffered_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
 	raw := []byte(`{
 		"id":"msg_1",
 		"model":"claude-x",
@@ -11,9 +11,9 @@ func TestDecodeBufferedResult_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
 		"usage":{"input_tokens":40,"output_tokens":5,"cache_read_input_tokens":28,"cache_creation_input_tokens":12}
 	}`)
 
-	out, err := DecodeBufferedResult(raw)
+	out, err := DecodeResponseBuffered(raw)
 	if err != nil {
-		t.Fatalf("DecodeBufferedResult returned error: %v", err)
+		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
 	input, ok := out.Usage().InputTokens()
 	if !ok || input != 40 {

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -44,7 +44,7 @@ func (o RequestHandler) defaultAttemptPipeline() AttemptPipeline {
 func (o RequestHandler) executeAttempt(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
 	if o.attemptPipeline == nil {
 		return AttemptOutcome{
-			Err: compatibility.InternalError("attempt pipeline is not configured"),
+			Err: canonical.InternalError("attempt pipeline is not configured"),
 		}
 	}
 	return o.attemptPipeline.Execute(ctx, attempt)
@@ -52,7 +52,7 @@ func (o RequestHandler) executeAttempt(ctx context.Context, attempt ExecutionAtt
 
 func (o RequestHandler) terminalAttempt() AttemptExecutorFn {
 	return func(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
-		req := ports.NewExecuteRequest(attempt.Request, attempt.Contract, attempt.Route.Target)
+		req := ports.NewProviderRequest(attempt.Request, attempt.Contract, attempt.Route.Target)
 		resp, err := o.providers.Execute(ctx, req)
 		return AttemptOutcome{
 			Response: resp,
@@ -116,11 +116,11 @@ func (o RequestHandler) runtimeEvidenceMiddleware() AttemptMiddleware {
 					tokenUsageFromExecuteResponse(outcome.Response),
 				)
 				emitEvidenceEventIfValid(ctx, o.evidence, event, eventErr)
-				if outcome.Response.DeliveryMode() == compatibility.DeliveryModeStreaming && outcome.Response.Stream() != nil {
-					wrapped := wrapEvidenceStreamWithUsageReconciliation(
+				if outcome.Response.EnvelopeStream() != nil {
+					wrapped := wrapEvidenceEnvelopeWithUsageReconciliation(
 						ctx,
 						o.evidence,
-						outcome.Response.Stream(),
+						outcome.Response.EnvelopeStream(),
 						attempt.Intent.RequestID,
 						attempt.Intent.EndpointName,
 						attempt.Route.Target,
@@ -132,7 +132,7 @@ func (o RequestHandler) runtimeEvidenceMiddleware() AttemptMiddleware {
 						attempt.Route.EffectiveModel,
 						attempt.Route.ResolutionMode,
 					)
-					outcome.Response = ports.NewStreamingExecuteResponse(wrapped).WithMetadata(outcome.Response.Metadata())
+					outcome.Response = ports.NewEnvelopeStreamingProviderResponse(wrapped).WithMetadata(outcome.Response.Metadata())
 				}
 			}
 			return outcome
@@ -153,7 +153,7 @@ func continuationMiddleware() AttemptMiddleware {
 		return func(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
 			prepared, err := attempt.Continuation.PrepareRequest(
 				ctx,
-				compatibility.NewContinuationNamespace(attempt.Intent.EndpointName.String()),
+				canonical.NewContinuationNamespace(attempt.Intent.EndpointName.String()),
 				attempt.Route.Target.ProtocolKind,
 				attempt.Request,
 			)
@@ -168,8 +168,8 @@ func continuationMiddleware() AttemptMiddleware {
 
 			outcome := next(ctx, preparedAttempt)
 			if outcome.Err != nil {
-				typed, ok := prepared.(compatibility.GenerationCanonicalRequest)
-				if !ok || !compatibility.IsPreviousResponseNotFoundBackendError(outcome.Err) {
+				typed, ok := prepared.(canonical.GenerationCanonicalRequest)
+				if !ok || !canonical.IsPreviousResponseNotFoundBackendError(outcome.Err) {
 					return outcome
 				}
 				fallback, ok := fullThreadResponsesRequest(typed)
@@ -199,26 +199,23 @@ func continuationMiddleware() AttemptMiddleware {
 				outcome.Response = outcome.Response.WithMetadata(metadata)
 			}
 
-			namespace := compatibility.NewContinuationNamespace(attempt.Intent.EndpointName.String())
-			switch outcome.Response.DeliveryMode() {
-			case compatibility.DeliveryModeBuffered:
-				if err := attempt.Continuation.CaptureBuffered(ctx, namespace, executedRequest, outcome.Response.Output()); err != nil {
-					return AttemptOutcome{Err: err}
-				}
-			case compatibility.DeliveryModeStreaming:
-				stream, wrapErr := attempt.Continuation.WrapStream(ctx, namespace, executedRequest, outcome.Response.Stream())
-				if wrapErr != nil {
-					return AttemptOutcome{Err: wrapErr}
-				}
-				outcome.Response = ports.NewStreamingExecuteResponse(stream).WithMetadata(outcome.Response.Metadata())
+			namespace := canonical.NewContinuationNamespace(attempt.Intent.EndpointName.String())
+			envelope := outcome.Response.EnvelopeStream()
+			if envelope == nil {
+				return AttemptOutcome{Err: canonical.InternalError("provider response is missing a canonical envelope stream")}
 			}
+			wrappedEnvelope, wrapErr := attempt.Continuation.WrapEnvelopeStream(ctx, namespace, executedRequest, envelope)
+			if wrapErr != nil {
+				return AttemptOutcome{Err: wrapErr}
+			}
+			outcome.Response = ports.NewEnvelopeStreamingProviderResponse(wrappedEnvelope).WithMetadata(outcome.Response.Metadata())
 			return outcome
 		}
 	}
 }
 
-func logContinuationPreparation(attempt ExecutionAttempt, prepared compatibility.CanonicalRequest) {
-	typed, ok := prepared.(compatibility.GenerationCanonicalRequest)
+func logContinuationPreparation(attempt ExecutionAttempt, prepared canonical.CanonicalRequest) {
+	typed, ok := prepared.(canonical.GenerationCanonicalRequest)
 	if !ok {
 		return
 	}
@@ -230,7 +227,7 @@ func logContinuationPreparation(attempt ExecutionAttempt, prepared compatibility
 		"request_id", attempt.Intent.RequestID,
 		"endpoint", attempt.Intent.EndpointName.String(),
 		"target_protocol", string(attempt.Route.Target.ProtocolKind),
-		"has_previous_response_id", strings.TrimSpace(typed.PreviousResponseID()) != "",
+		"has_previous_response_id", strings.TrimSpace(typed.PreviousResponseID()) != "", // trimlowerlint:allow boundary canonicalization
 		"thread_item_count", len(thread),
 		"last_turn_item_count", len(lastTurn),
 		"last_turn_tail_role", continuationTailRole(lastTurn),
@@ -238,14 +235,14 @@ func logContinuationPreparation(attempt ExecutionAttempt, prepared compatibility
 	)
 }
 
-func continuationTailRole(items []compatibility.CanonicalItem) string {
+func continuationTailRole(items []canonical.CanonicalItem) string {
 	if len(items) == 0 {
 		return ""
 	}
 	switch items[len(items)-1].Author {
-	case compatibility.ItemAuthorAssistant:
+	case canonical.ItemAuthorAssistant:
 		return "assistant"
-	case compatibility.ItemAuthorTool:
+	case canonical.ItemAuthorTool:
 		return "tool"
 	default:
 		return "user"
@@ -255,17 +252,17 @@ func continuationTailRole(items []compatibility.CanonicalItem) string {
 func (o RequestHandler) toolChoicePolicyMiddleware() AttemptMiddleware {
 	return func(next AttemptExecutorFn) AttemptExecutorFn {
 		return func(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
-			typed, ok := attempt.Request.(compatibility.GenerationCanonicalRequest)
+			typed, ok := attempt.Request.(canonical.GenerationCanonicalRequest)
 			if !ok {
 				return next(ctx, attempt)
 			}
 			outcome := next(ctx, attempt)
 			if outcome.Err != nil &&
 				attempt.DeclaredCapabilities.ToolChoice.ImmediateDowngradeRetry &&
-				typed.ToolMode() == compatibility.ToolModeRequired &&
-				compatibility.IsBackendErrorClass(outcome.Err, compatibility.BackendErrorClassToolChoiceUnsupported) {
+				typed.ToolMode() == canonical.ToolModeRequired &&
+				canonical.IsBackendErrorClass(outcome.Err, canonical.BackendErrorClassToolChoiceUnsupported) {
 				retryAttempt := attempt
-				retryAttempt.Request = withResponseToolChoiceMode(typed, compatibility.ToolModeAuto)
+				retryAttempt.Request = withResponseToolChoiceMode(typed, canonical.ToolModeAuto)
 				retryAttempt.Index = attempt.Index + 1
 				retryOutcome := next(ctx, retryAttempt)
 				if retryOutcome.Err != nil {
@@ -286,8 +283,8 @@ func (o RequestHandler) toolChoicePolicyMiddleware() AttemptMiddleware {
 	}
 }
 
-func withResponseToolChoiceMode(request compatibility.GenerationCanonicalRequest, mode compatibility.ToolMode) compatibility.GenerationCanonicalRequest {
-	return compatibility.NewGenerationRequest(compatibility.GenerationRequestParams{
+func withResponseToolChoiceMode(request canonical.GenerationCanonicalRequest, mode canonical.ToolMode) canonical.GenerationCanonicalRequest {
+	return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
 		Model:                request.Model(),
 		Thread:               request.Thread(),
 		LastTurn:             request.LastTurn(),
@@ -299,12 +296,12 @@ func withResponseToolChoiceMode(request compatibility.GenerationCanonicalRequest
 	})
 }
 
-func fullThreadResponsesRequest(request compatibility.GenerationCanonicalRequest) (compatibility.GenerationCanonicalRequest, bool) {
+func fullThreadResponsesRequest(request canonical.GenerationCanonicalRequest) (canonical.GenerationCanonicalRequest, bool) {
 	thread := request.Thread()
 	if len(thread) == 0 {
-		return compatibility.GenerationCanonicalRequest{}, false
+		return canonical.GenerationCanonicalRequest{}, false
 	}
-	return compatibility.NewGenerationRequest(compatibility.GenerationRequestParams{
+	return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
 		Model:                request.Model(),
 		Thread:               thread,
 		ToolMode:             request.ToolMode(),

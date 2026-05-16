@@ -11,7 +11,7 @@ import (
 	"sort"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 const endpointIntentSchemaVersion = 1
@@ -44,7 +44,8 @@ type providerConfigDTO struct {
 	BaseURL       string `json:"base_url,omitempty"`
 	CredentialRef string `json:"credential_ref,omitempty"`
 	ModelID       string `json:"model_id,omitempty"`
-	ProtocolKind  string `json:"protocol_kind"`
+	SelectedFrame string `json:"selected_frame,omitempty"`
+	ProtocolKind  string `json:"protocol_kind,omitempty"`
 }
 
 func NewEndpointIntentStore(cfg EndpointIntentStoreConfig) (EndpointIntentStore, error) {
@@ -143,7 +144,7 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 			spec,
 			encoded.BaseURL,
 			encoded.CredentialRef,
-			protocolsurface.Kind(encoded.ProtocolKind),
+			protocolkind.ProtocolKind(encoded.ProtocolKind),
 		)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
@@ -151,6 +152,12 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		providerConfig, err = providerConfig.WithModelID(encoded.ModelID)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
+		}
+		if encoded.SelectedFrame != "" {
+			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
 		}
 		providerConfigs = append(providerConfigs, providerConfig)
 	}
@@ -171,6 +178,7 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 			BaseURL:       providerConfig.BaseURL(),
 			CredentialRef: providerConfig.CredentialRef(),
 			ModelID:       providerConfig.ModelID(),
+			SelectedFrame: providerConfig.SelectedFrame(),
 			ProtocolKind:  providerConfig.ProtocolKind().String(),
 		})
 	}

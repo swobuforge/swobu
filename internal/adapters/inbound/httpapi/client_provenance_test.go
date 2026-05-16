@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestClassifyClientHandler_KnownSignatures(t *testing.T) {
@@ -40,7 +40,7 @@ func TestClassifyClientHandler_KnownSignatures(t *testing.T) {
 func TestIngressProvenance_MapsProtocolAndOperation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", nil)
 	req.Header.Set("User-Agent", "Claude-Code/2.0")
-	provenance := ingressProvenance(req, compatibility.IngressFamilyMessages, compatibility.NormalizedPathMessages)
+	provenance := ingressProvenance(req, canonical.IngressFamilyMessages, canonical.NormalizedPathMessages)
 	if provenance.ClientProtocol != "anthropic_compat" {
 		t.Fatalf("client protocol = %q, want %q", provenance.ClientProtocol, "anthropic_compat")
 	}

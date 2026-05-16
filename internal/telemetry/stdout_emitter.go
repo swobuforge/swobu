@@ -34,9 +34,9 @@ func (e *stdoutEmitter) EmitInstall(_ context.Context, state State, swobuVersion
 	e.write(map[string]any{
 		"telemetry_debug":   true,
 		"kind":              "install",
-		"swobu_version":     strings.TrimSpace(swobuVersion),
-		"os":                strings.TrimSpace(osFamily),
-		"arch":              strings.TrimSpace(arch),
+		"swobu_version":     strings.TrimSpace(swobuVersion), // trimlowerlint:allow boundary canonicalization
+		"os":                strings.TrimSpace(osFamily),     // trimlowerlint:allow boundary canonicalization
+		"arch":              strings.TrimSpace(arch),         // trimlowerlint:allow boundary canonicalization
 		"telemetry_enabled": state.Enabled && !DoNotTrackEnabled(),
 	})
 }
@@ -45,7 +45,7 @@ func (e *stdoutEmitter) EmitCounts(_ context.Context, state string, count2xx, co
 	e.write(map[string]any{
 		"telemetry_debug": true,
 		"kind":            "counts",
-		"state":           strings.TrimSpace(state),
+		"state":           strings.TrimSpace(state), // trimlowerlint:allow boundary canonicalization
 		"count_2xx":       count2xx,
 		"count_429":       count429,
 		"count_4xx":       count4xx,
@@ -58,11 +58,11 @@ func (e *stdoutEmitter) EmitErrorTrace(_ context.Context, trace ErrorTrace) {
 		"telemetry_debug":    true,
 		"kind":               "error_trace",
 		"status_code":        trace.StatusCode,
-		"result_class":       strings.TrimSpace(trace.ResultClass),
-		"provider_route":     strings.TrimSpace(trace.ProviderRoute),
-		"operation":          strings.TrimSpace(trace.Operation),
+		"result_class":       strings.TrimSpace(trace.ResultClass),   // trimlowerlint:allow boundary canonicalization
+		"provider_route":     strings.TrimSpace(trace.ProviderRoute), // trimlowerlint:allow boundary canonicalization
+		"operation":          strings.TrimSpace(trace.Operation),     // trimlowerlint:allow boundary canonicalization
 		"duration_ms":        trace.DurationMS,
-		"debug_raw_stack_on": strings.TrimSpace(trace.DebugRawStack) != "",
+		"debug_raw_stack_on": strings.TrimSpace(trace.DebugRawStack) != "", // trimlowerlint:allow boundary canonicalization
 	})
 }
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/ports"
@@ -38,10 +38,10 @@ func newInflightEvidenceEvent(
 	return runtimeevidence.NewInflightTrafficEvent(runtimeevidence.TrafficEventInput{
 		RequestID:           id,
 		Endpoint:            endpointName.String(),
-		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),
-		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))),
-		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),
-		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),
+		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // trimlowerlint:allow boundary canonicalization
+		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // trimlowerlint:allow boundary canonicalization
+		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // trimlowerlint:allow boundary canonicalization
+		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // trimlowerlint:allow boundary canonicalization
 		Route:               route,
 		AttemptCount:        1,
 		ModelRequested:      requestedModel,
@@ -75,10 +75,10 @@ func newSuccessEvidenceEvent(
 	return runtimeevidence.NewTerminalTrafficEvent(runtimeevidence.TrafficEventInput{
 		RequestID:                 id,
 		Endpoint:                  endpointName.String(),
-		ClientProtocol:            runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),
-		IngressFamily:             runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))),
-		NormalizedOp:              runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),
-		ClientHandler:             runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),
+		ClientProtocol:            runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // trimlowerlint:allow boundary canonicalization
+		IngressFamily:             runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // trimlowerlint:allow boundary canonicalization
+		NormalizedOp:              runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // trimlowerlint:allow boundary canonicalization
+		ClientHandler:             runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // trimlowerlint:allow boundary canonicalization
 		Route:                     route,
 		Result:                    runtimeevidence.ResultClassSuccess,
 		StatusCode:                200,
@@ -114,10 +114,10 @@ func newErrorEvidenceEvent(
 	input := runtimeevidence.TrafficEventInput{
 		RequestID:           id,
 		Endpoint:            endpointName.String(),
-		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),
-		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))),
-		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),
-		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),
+		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // trimlowerlint:allow boundary canonicalization
+		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // trimlowerlint:allow boundary canonicalization
+		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // trimlowerlint:allow boundary canonicalization
+		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // trimlowerlint:allow boundary canonicalization
 		Route:               route,
 		Result:              runtimeevidence.ResultClassSwobuError,
 		AttemptCount:        1,
@@ -126,12 +126,12 @@ func newErrorEvidenceEvent(
 		ModelResolutionMode: resolutionMode,
 	}
 
-	var backendErr compatibility.BackendError
+	var backendErr canonical.BackendError
 	if errors.As(err, &backendErr) {
 		input.Result = runtimeevidence.ResultClassBackendError
 		input.StatusCode = backendErr.StatusCode
 	} else {
-		var compatibilityErr compatibility.Error
+		var compatibilityErr canonical.Error
 		if errors.As(err, &compatibilityErr) {
 			input.Result = resultClassForSwobuError(compatibilityErr.Code)
 		}
@@ -139,77 +139,18 @@ func newErrorEvidenceEvent(
 	return runtimeevidence.NewTerminalTrafficEvent(input)
 }
 
-func resultClassForSwobuError(code compatibility.ErrorCode) runtimeevidence.ResultClass {
+func resultClassForSwobuError(code canonical.ErrorCode) runtimeevidence.ResultClass {
 	switch code {
-	case compatibility.ErrorCodeUnsupportedOperation:
+	case canonical.ErrorCodeUnsupportedOperation:
 		return runtimeevidence.ResultClassUnsupportedOperation
-	case compatibility.ErrorCodeUnsupportedDelivery:
-		return runtimeevidence.ResultClassUnsupportedDeliveryMode
+	case canonical.ErrorCodeUnsupportedDelivery:
+		return runtimeevidence.ResultClassUnsupportedDeliveryVariant
 	default:
 		return runtimeevidence.ResultClassSwobuError
 	}
 }
 
-func tokenUsageFromExecuteResponse(response ports.ExecuteResponse) runtimeevidence.TokenUsage {
-	output := response.Output()
-	if output == nil {
-		return runtimeevidence.NewUnknownTokenUsage()
-	}
-	usage := output.Usage()
-	input, hasInput := usage.InputTokens()
-	outputTokens, hasOutput := usage.OutputTokens()
-	cacheRead, hasCacheRead := usage.CacheReadTokens()
-	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-
-	var inputPtr *int
-	var outputPtr *int
-	var cacheReadPtr *int
-	var cacheWritePtr *int
-	if hasInput {
-		inputPtr = &input
-	}
-	if hasOutput {
-		outputPtr = &outputTokens
-	}
-	if hasCacheRead {
-		cacheReadPtr = &cacheRead
-	}
-	if hasCacheWrite {
-		cacheWritePtr = &cacheWrite
-	}
-	mapped, err := runtimeevidence.NewTokenUsageWithOptional(inputPtr, outputPtr, cacheReadPtr, cacheWritePtr)
-	if err != nil {
-		return runtimeevidence.NewUnknownTokenUsage()
-	}
-	return mapped
-}
-
-func tokenUsageFromOutputEvent(event compatibility.OutputEvent) runtimeevidence.TokenUsage {
-	usage := event.Usage
-	input, hasInput := usage.InputTokens()
-	outputTokens, hasOutput := usage.OutputTokens()
-	cacheRead, hasCacheRead := usage.CacheReadTokens()
-	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-
-	var inputPtr *int
-	var outputPtr *int
-	var cacheReadPtr *int
-	var cacheWritePtr *int
-	if hasInput {
-		inputPtr = &input
-	}
-	if hasOutput {
-		outputPtr = &outputTokens
-	}
-	if hasCacheRead {
-		cacheReadPtr = &cacheRead
-	}
-	if hasCacheWrite {
-		cacheWritePtr = &cacheWrite
-	}
-	mapped, err := runtimeevidence.NewTokenUsageWithOptional(inputPtr, outputPtr, cacheReadPtr, cacheWritePtr)
-	if err != nil {
-		return runtimeevidence.NewUnknownTokenUsage()
-	}
-	return mapped
+func tokenUsageFromExecuteResponse(response ports.ProviderResponse) runtimeevidence.TokenUsage {
+	_ = response
+	return runtimeevidence.NewUnknownTokenUsage()
 }

@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 // Client talks to the daemon's operator control plane at /_swobu/endpoints.
@@ -86,7 +86,7 @@ func (c *Client) List(ctx context.Context) ([]endpointintent.Endpoint, error) {
 
 // Get returns a single endpoint intent by name.
 func (c *Client) Get(ctx context.Context, name string) (endpointintent.Endpoint, error) {
-	name = strings.TrimSpace(name)
+	name = strings.TrimSpace(name) // trimlowerlint:allow boundary canonicalization
 	if name == "" {
 		return endpointintent.Endpoint{}, fmt.Errorf("operator client: name is required")
 	}
@@ -138,7 +138,7 @@ func (c *Client) Put(ctx context.Context, ep endpointintent.Endpoint) (endpointi
 
 // Delete removes an endpoint intent by name.
 func (c *Client) Delete(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
+	name = strings.TrimSpace(name) // trimlowerlint:allow boundary canonicalization
 	if name == "" {
 		return fmt.Errorf("operator client: name is required")
 	}
@@ -159,11 +159,11 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 
 // CheckClientAccess sends a minimal compatibility probe through one endpoint.
 func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, modelID string) (AccessCheckResult, error) {
-	endpointName = strings.TrimSpace(endpointName)
+	endpointName = strings.TrimSpace(endpointName) // trimlowerlint:allow boundary canonicalization
 	if endpointName == "" {
 		return AccessCheckResult{}, fmt.Errorf("operator client: endpoint name is required")
 	}
-	modelID = strings.TrimSpace(modelID)
+	modelID = strings.TrimSpace(modelID) // trimlowerlint:allow boundary canonicalization
 	if modelID == "" {
 		modelID = "healthcheck"
 	}
@@ -185,7 +185,7 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 		}, nil
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	message := strings.TrimSpace(string(raw))
+	message := strings.TrimSpace(string(raw)) // trimlowerlint:allow boundary canonicalization
 	if message == "" {
 		message = fmt.Sprintf("compatibility request returned status %d", resp.StatusCode)
 	}
@@ -197,9 +197,9 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 
 func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endpointRef string, authMode string) (AuthSessionStartResult, error) {
 	body, err := json.Marshal(map[string]string{
-		"provider_spec": strings.TrimSpace(providerSpec),
-		"endpoint_ref":  strings.TrimSpace(endpointRef),
-		"auth_mode":     strings.TrimSpace(authMode),
+		"provider_spec": strings.TrimSpace(providerSpec), // trimlowerlint:allow boundary canonicalization
+		"endpoint_ref":  strings.TrimSpace(endpointRef),  // trimlowerlint:allow boundary canonicalization
+		"auth_mode":     strings.TrimSpace(authMode),     // trimlowerlint:allow boundary canonicalization
 	})
 	if err != nil {
 		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session payload could not be encoded")
@@ -228,16 +228,16 @@ func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endp
 		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start response could not be decoded")
 	}
 	return AuthSessionStartResult{
-		ProviderSpec: strings.TrimSpace(doc.ProviderSpec),
-		SessionID:    strings.TrimSpace(doc.SessionID),
-		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL),
-		UserCode:     strings.TrimSpace(doc.UserCode),
-		State:        strings.TrimSpace(doc.State),
+		ProviderSpec: strings.TrimSpace(doc.ProviderSpec), // trimlowerlint:allow boundary canonicalization
+		SessionID:    strings.TrimSpace(doc.SessionID),    // trimlowerlint:allow boundary canonicalization
+		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
+		UserCode:     strings.TrimSpace(doc.UserCode),     // trimlowerlint:allow boundary canonicalization
+		State:        strings.TrimSpace(doc.State),        // trimlowerlint:allow boundary canonicalization
 	}, nil
 }
 
 func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (AuthSessionStatusResult, error) {
-	sessionID = strings.TrimSpace(sessionID)
+	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
 	if sessionID == "" {
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session id is required")
 	}
@@ -264,16 +264,16 @@ func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (Au
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status response could not be decoded")
 	}
 	return AuthSessionStatusResult{
-		ProviderSpec:  strings.TrimSpace(doc.ProviderSpec),
-		SessionID:     strings.TrimSpace(doc.SessionID),
-		State:         strings.TrimSpace(doc.State),
-		CredentialRef: strings.TrimSpace(doc.CredentialRef),
-		ErrorMessage:  strings.TrimSpace(doc.ErrorMessage),
+		ProviderSpec:  strings.TrimSpace(doc.ProviderSpec),  // trimlowerlint:allow boundary canonicalization
+		SessionID:     strings.TrimSpace(doc.SessionID),     // trimlowerlint:allow boundary canonicalization
+		State:         strings.TrimSpace(doc.State),         // trimlowerlint:allow boundary canonicalization
+		CredentialRef: strings.TrimSpace(doc.CredentialRef), // trimlowerlint:allow boundary canonicalization
+		ErrorMessage:  strings.TrimSpace(doc.ErrorMessage),  // trimlowerlint:allow boundary canonicalization
 	}, nil
 }
 
 func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error {
-	sessionID = strings.TrimSpace(sessionID)
+	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
 	if sessionID == "" {
 		return fmt.Errorf("operator client: auth session id is required")
 	}
@@ -293,7 +293,7 @@ func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error 
 }
 
 func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSessionRetryResult, error) {
-	sessionID = strings.TrimSpace(sessionID)
+	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
 	if sessionID == "" {
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session id is required")
 	}
@@ -318,9 +318,9 @@ func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSe
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry response could not be decoded")
 	}
 	return AuthSessionRetryResult{
-		SessionID:    strings.TrimSpace(doc.SessionID),
-		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL),
-		State:        strings.TrimSpace(doc.State),
+		SessionID:    strings.TrimSpace(doc.SessionID),    // trimlowerlint:allow boundary canonicalization
+		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
+		State:        strings.TrimSpace(doc.State),        // trimlowerlint:allow boundary canonicalization
 	}, nil
 }
 
@@ -338,7 +338,8 @@ type providerConfigDocument struct {
 	CredentialRef string `json:"credential_ref,omitempty"`
 	ModelID       string `json:"model_id,omitempty"`
 	TargetAlias   string `json:"target_alias,omitempty"`
-	ProtocolKind  string `json:"protocol_kind"`
+	SelectedFrame string `json:"selected_frame,omitempty"`
+	ProtocolKind  string `json:"protocol_kind,omitempty"`
 }
 
 type endpointListDocument struct {
@@ -360,6 +361,7 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 			CredentialRef: pc.CredentialRef(),
 			ModelID:       pc.ModelID(),
 			TargetAlias:   pc.TargetAlias(),
+			SelectedFrame: pc.SelectedFrame(),
 			ProtocolKind:  pc.ProtocolKind().String(),
 		})
 	}
@@ -385,9 +387,15 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef, protocolsurface.Kind(pc.ProtocolKind))
+		config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef, protocolkind.ProtocolKind(strings.TrimSpace(pc.ProtocolKind))) // trimlowerlint:allow boundary canonicalization
 		if err != nil {
 			return endpointintent.Endpoint{}, err
+		}
+		if strings.TrimSpace(pc.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
+			config, err = config.WithSelectedFrame(pc.SelectedFrame)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
 		}
 		config, err = config.WithModelID(pc.ModelID)
 		if err != nil {
@@ -410,7 +418,7 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-		if msg := strings.TrimSpace(payload.Error.Message); msg != "" {
+		if msg := strings.TrimSpace(payload.Error.Message); msg != "" { // trimlowerlint:allow boundary canonicalization
 			return fmt.Errorf("operator client: %s (code=%s)", msg, payload.Error.Code)
 		}
 	}

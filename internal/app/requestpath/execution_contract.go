@@ -1,7 +1,6 @@
 package requestpath
 
 import (
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -9,6 +8,10 @@ import (
 // invocation and maps directly to provider-port execution contract shape.
 type ExecutionContract = ports.ExecutionContract
 
-func NewExecutionContract(deliveryMode compatibility.DeliveryMode) ExecutionContract {
+func NewExecutionContract(deliveryMode bool) ExecutionContract {
 	return ports.NewExecutionContract(deliveryMode)
+}
+
+func NewExecutionContractWithPreCommitFallback(deliveryMode bool) ExecutionContract {
+	return ports.NewExecutionContract(deliveryMode).WithPreCommitFallbackEnabled()
 }

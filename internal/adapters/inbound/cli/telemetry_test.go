@@ -11,7 +11,7 @@ import (
 )
 
 func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", t.TempDir()+"/telemetry/state.json")
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -66,7 +66,7 @@ func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
 }
 
 func TestRunner_TelemetryCommand_DoNotTrackOverride(t *testing.T) {
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", t.TempDir()+"/telemetry/state.json")
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	t.Setenv("DO_NOT_TRACK", "true")
 
 	var stdout bytes.Buffer
@@ -117,57 +117,35 @@ func TestRunner_TelemetryCommand_UnknownSubcommandFails(t *testing.T) {
 	}
 }
 
-func TestRunner_TelemetryCommand_StatePathFlagControlsLocation(t *testing.T) {
-	envStatePath := filepath.Join(t.TempDir(), "env", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", envStatePath)
-
-	flagRoot := t.TempDir()
-	flagStatePath := filepath.Join(flagRoot, "flag", "state.json")
-
+func TestRunner_TelemetryCommand_WritesStateUnderSwobuHome(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "swobu-home")
+	t.Setenv("SWOBU_HOME", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	runner := Runner{Stdout: &stdout, Stderr: &stderr}
 
-	exitCode := runner.Run(context.Background(), []string{"telemetry", "off", "--state-path", flagStatePath})
+	exitCode := runner.Run(context.Background(), []string{"telemetry", "off"})
 	if exitCode != ExitHealthy {
 		t.Fatalf("off exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
 	}
-	if _, err := os.Stat(flagStatePath); err != nil {
-		t.Fatalf("flag state path not written: %v", err)
-	}
-	if _, err := os.Stat(envStatePath); !os.IsNotExist(err) {
-		t.Fatalf("env state path should remain untouched; stat err=%v", err)
+	statePath := filepath.Join(root, "state", "telemetry", "state.json")
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("state path not written under SWOBU_HOME: %v", err)
 	}
 }
 
-func TestRunner_TelemetryCommand_StatusStatePathReadsFlagPath(t *testing.T) {
-	envStatePath := filepath.Join(t.TempDir(), "env", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", envStatePath)
-	flagStatePath := filepath.Join(t.TempDir(), "flag", "state.json")
-
+func TestRunner_TelemetryCommand_StatePathFlagRejected(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	runner := Runner{Stdout: &stdout, Stderr: &stderr}
 
-	exitCode := runner.Run(context.Background(), []string{"telemetry", "off", "--state-path", flagStatePath})
-	if exitCode != ExitHealthy {
-		t.Fatalf("off exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
+	exitCode := runner.Run(context.Background(), []string{"telemetry", "off", "--state-path", "/tmp/state.json"})
+	if exitCode != ExitDown {
+		t.Fatalf("off exit code = %d, want %d", exitCode, ExitDown)
 	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runner.Run(context.Background(), []string{"telemetry", "status", "--state-path", flagStatePath})
-	if exitCode != ExitHealthy {
-		t.Fatalf("status exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
-	}
-	var statusPayload struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &statusPayload); err != nil {
-		t.Fatalf("status output is not JSON: %v; raw=%q", err, stdout.String())
-	}
-	if statusPayload.Enabled {
-		t.Fatal("status enabled = true, want false from flag state path")
+	if got := stderr.String(); !strings.Contains(got, "flag provided but not defined") {
+		t.Fatalf("stderr missing unknown flag error; stderr=%q", got)
 	}
 }
 

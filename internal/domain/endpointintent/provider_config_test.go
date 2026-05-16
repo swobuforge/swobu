@@ -3,12 +3,10 @@ package endpointintent
 import (
 	"errors"
 	"testing"
-
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 func TestProviderConfig_RequiresExplicitRef(t *testing.T) {
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -18,7 +16,6 @@ func TestProviderConfig_RequiresExplicitRef(t *testing.T) {
 		spec,
 		"https://example.test/v1",
 		"cred-1",
-		"chat_completions",
 	)
 	if !errors.Is(err, ErrInvalidProviderConfig) {
 		t.Fatalf("expected ErrInvalidProviderConfig, got %v", err)
@@ -30,7 +27,7 @@ func TestProviderConfig_RejectsIncompleteCustomConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -40,7 +37,6 @@ func TestProviderConfig_RejectsIncompleteCustomConfig(t *testing.T) {
 		spec,
 		"",
 		"cred-1",
-		"chat_completions",
 	)
 	if !errors.Is(err, ErrInvalidProviderConfig) {
 		t.Fatalf("expected ErrInvalidProviderConfig, got %v", err)
@@ -54,25 +50,10 @@ func TestProviderSpec_RejectsUnknownProviderSpec(t *testing.T) {
 	}
 }
 
-func TestProviderConfig_RejectsUnsupportedProviderProtocolBinding(t *testing.T) {
-	ref, err := ParseProviderConfigRef("cfg-a")
-	if err != nil {
-		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
-	}
-	spec, err := ParseProviderSpec("custom")
-	if err != nil {
-		t.Fatalf("ParseProviderSpec returned error: %v", err)
-	}
-
-	_, err = NewProviderConfig(
-		ref,
-		spec,
-		"https://example.test/v1",
-		"cred-1",
-		"messages",
-	)
-	if !errors.Is(err, ErrInvalidProviderConfig) {
-		t.Fatalf("expected ErrInvalidProviderConfig, got %v", err)
+func TestProviderSpec_RejectsClaudeAlias(t *testing.T) {
+	_, err := ParseProviderSpec("claude")
+	if !errors.Is(err, ErrInvalidProviderSpec) {
+		t.Fatalf("expected ErrInvalidProviderSpec, got %v", err)
 	}
 }
 
@@ -81,11 +62,11 @@ func TestProviderConfig_TargetAliasValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
-	cfg, err := NewProviderConfig(ref, spec, "https://example.test/v1", "cred-1", "chat_completions")
+	cfg, err := NewProviderConfig(ref, spec, "https://example.test/v1", "cred-1")
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
@@ -97,8 +78,8 @@ func TestProviderConfig_TargetAliasValidation(t *testing.T) {
 	if got := cfg.TargetAlias(); got != "fast" {
 		t.Fatalf("target alias = %q, want %q", got, "fast")
 	}
-	if _, err := cfg.WithTargetAlias(compatibility.PrimaryTargetSelector); !errors.Is(err, ErrInvalidProviderConfig) {
-		t.Fatalf("WithTargetAlias(%s) error = %v, want ErrInvalidProviderConfig", compatibility.PrimaryTargetSelector, err)
+	if _, err := cfg.WithTargetAlias("primary"); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithTargetAlias(primary) error = %v, want ErrInvalidProviderConfig", err)
 	}
 	if _, err := cfg.WithTargetAlias("gpt.5"); !errors.Is(err, ErrInvalidProviderConfig) {
 		t.Fatalf("WithTargetAlias(gpt.5) error = %v, want ErrInvalidProviderConfig", err)

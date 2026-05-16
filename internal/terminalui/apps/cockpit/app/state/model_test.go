@@ -3,8 +3,9 @@ package state
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 func TestReduce_CreateAndRenameEndpointUpdatesCurrentSelectionAndCatalog(t *testing.T) {
@@ -16,7 +17,7 @@ func TestReduce_CreateAndRenameEndpointUpdatesCurrentSelectionAndCatalog(t *test
 		Catalog: []CatalogEntry{{
 			EndpointName:      "acme",
 			ProviderConfigRef: "backend-a",
-			ProviderSpec:      "custom",
+			ProviderSpec:      "openai_compatible",
 			ModelIDs:          []string{"gpt-4.1-mini"},
 		}},
 		EndpointSnapshots: []EndpointSnapshot{{
@@ -24,7 +25,7 @@ func TestReduce_CreateAndRenameEndpointUpdatesCurrentSelectionAndCatalog(t *test
 			SelectedProviderConfigRef: "backend-a",
 			ProviderConfigs: []ProviderConfigSnapshot{{
 				Ref:          "backend-a",
-				ProviderSpec: "custom",
+				ProviderSpec: "openai_compatible",
 				ModelID:      "gpt-4.1-mini",
 			}},
 		}},
@@ -54,7 +55,7 @@ func TestReduce_CreateDraftSelectionAndCreateSuccessClearsDraft(t *testing.T) {
 	model := Model{Endpoints: []string{"acme"}}
 
 	Reduce(&model, SetCreateDraftName{Name: "jobs"})
-	Reduce(&model, SetCreateDraftProviderSpec{ProviderSpec: "custom"})
+	Reduce(&model, SetCreateDraftProviderSpec{ProviderSpec: "openai_compatible"})
 	Reduce(&model, SetCreateDraftModelID{ModelID: "gpt-4.1-mini"})
 	Reduce(&model, SetCreateDraftCredentialRef{CredentialRef: "cred-a"})
 	Reduce(&model, SetCreateDraftBaseURL{BaseURL: "https://example.test/v1"})
@@ -78,11 +79,10 @@ func TestReduce_WorkspaceRequestActionsEmitSaveEffects(t *testing.T) {
 	model := Model{
 		CurrentEndpoint: "acme",
 		CreateDraftProviderConfig: ProviderConfigSnapshot{
-			Ref:          compatibility.PrimaryTargetSelector,
+			Ref:          canonical.PrimaryTargetSelector,
 			ProviderSpec: "ollama",
 			BaseURL:      "http://127.0.0.1:11434/v1",
 			ModelID:      "llama3.1",
-			ProtocolKind: "chat_completions",
 		},
 	}
 
@@ -113,7 +113,7 @@ func TestReduce_ReplaceEndpointsSeedsWorkspaceRailWithoutCatalog(t *testing.T) {
 		SelectedProviderConfigRef: "backend-b",
 		ProviderConfigs: []ProviderConfigSnapshot{{
 			Ref:          "backend-b",
-			ProviderSpec: "custom",
+			ProviderSpec: "openai_compatible",
 		}},
 	}}})
 
@@ -186,7 +186,7 @@ func TestReduce_WorkspaceAndRoutingSaveTrackAnchoredErrors(t *testing.T) {
 			SelectedProviderConfigRef: "backend-a",
 			ProviderConfigs: []ProviderConfigSnapshot{{
 				Ref:          "backend-a",
-				ProviderSpec: "custom",
+				ProviderSpec: "openai_compatible",
 				ModelID:      "gpt-4.1-mini",
 			}},
 		}},
@@ -206,8 +206,8 @@ func TestReduce_WorkspaceAndRoutingSaveTrackAnchoredErrors(t *testing.T) {
 	}
 
 	Reduce(&model, RoutingSaveStartedAction{})
-	Reduce(&model, RoutingSaveFailed{Message: "selected target could not be saved"})
-	if got := model.RoutingSaveError; got != "selected target could not be saved" {
+	Reduce(&model, RoutingSaveFailed{Message: "selected target could not be saved", ErrorAnchor: "routing-row/run_on"})
+	if got := model.SaveErrors["routing-row/run_on"]; got != "selected target could not be saved" {
 		t.Fatalf("routing save error = %q, want selected target could not be saved", got)
 	}
 }
@@ -216,14 +216,16 @@ func TestReduce_ProviderAuthSessionFailedAnchorsAuthErrorOnly(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		HeaderStatus:          "waiting for login…",
-		InteractionMode:       InteractionModeBusySave,
-		RoutingSaveError:      "previous routing failure",
-		AuthLoginEndpointName: "testname",
-		AuthLoginProviderRef:  "openai/main",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginURL:          "https://auth.openai.com",
-		AuthLoginSessionState: "pending",
+		HeaderStatus:    "waiting for login…",
+		InteractionMode: InteractionModeBusySave,
+		SaveErrors:      map[string]string{"routing-row/run_on": "previous routing failure"},
+		AuthSessions: map[string]stateModel.AuthSessionView{
+			stateModel.EndpointProviderAuthOwnerKey("testname", "openai/main").String(): {
+				SessionID:    "sess-1",
+				URL:          "https://auth.openai.com",
+				SessionState: "pending",
+			},
+		},
 	}
 
 	Reduce(&model, stateeffect.ProviderAuthSessionFailed{
@@ -232,17 +234,18 @@ func TestReduce_ProviderAuthSessionFailedAnchorsAuthErrorOnly(t *testing.T) {
 			Ref:          "openai/main",
 			ProviderSpec: "openai",
 		},
-		AuthSubject: "subject:testname:openai/main",
-		Message:     "login timed out; retry",
+		OwnerKey: stateModel.EndpointProviderAuthOwnerKey("testname", "openai/main").String(),
+		Message:  "login timed out; retry",
 	})
 
-	if got := model.RoutingSaveError; got != "" {
-		t.Fatalf("routing save error = %q, want cleared", got)
+	if len(model.SaveErrors) != 0 {
+		t.Fatalf("routing save errors = %#v, want cleared", model.SaveErrors)
 	}
-	if got := model.AuthLoginSessionError; got != "login timed out; retry" {
+	auth := model.AuthSessions[stateModel.EndpointProviderAuthOwnerKey("testname", "openai/main").String()]
+	if got := auth.SessionError; got != "login timed out; retry" {
 		t.Fatalf("auth login session error = %q, want timeout message", got)
 	}
-	if got := model.AuthLoginSessionID; got != "" {
+	if got := auth.SessionID; got != "" {
 		t.Fatalf("auth login session id = %q, want cleared", got)
 	}
 	if got := model.InteractionMode; got != InteractionModeManageList {
@@ -325,7 +328,6 @@ func TestProviderConfigForSpecUsesLegacyProviderDefaults(t *testing.T) {
 	}
 
 	cleared := ProviderConfigForSpec("openrouter", ProviderConfigSnapshot{
-		ProtocolKind:  "chat_completions",
 		CredentialRef: "env:OLD_KEY",
 	})
 	if got := cleared.CredentialRef; got != "" {
@@ -342,7 +344,7 @@ func TestProviderOptions_UsesCanonicalDisplayOrder(t *testing.T) {
 		order = append(order, option.Spec)
 	}
 
-	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "custom"}
+	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "openai_compatible"}
 	if len(order) < len(wantPrefix) {
 		t.Fatalf("provider options=%v want at least %v", order, wantPrefix)
 	}
@@ -385,7 +387,6 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",
 		CredentialRef: "env:OPENROUTER_API_KEY",
-		ProtocolKind:  "chat_completions",
 	})
 	if len(effects) != 1 {
 		t.Fatalf("effect count=%d want 1", len(effects))

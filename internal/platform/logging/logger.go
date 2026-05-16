@@ -28,7 +28,7 @@ func ConfigureDefaultLogger(out io.Writer) {
 }
 
 func configuredLogLevel() slog.Level {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLogLevel))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLogLevel))) { // trimlowerlint:allow boundary canonicalization
 	case "debug":
 		return slog.LevelDebug
 	case "warn", "warning":
@@ -77,7 +77,7 @@ func (h *CommonLineHandler) Handle(_ context.Context, r slog.Record) error {
 	b.WriteString(paddedLevel(r.Level))
 	b.WriteByte(' ')
 	b.WriteString(sourceString(r))
-	msg := strings.TrimSpace(r.Message)
+	msg := strings.TrimSpace(r.Message) // trimlowerlint:allow boundary canonicalization
 	if msg != "" && msg != "daemon lifecycle" {
 		b.WriteByte(' ')
 		b.WriteString(msg)
@@ -118,8 +118,8 @@ func (h *CommonLineHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h *CommonLineHandler) WithGroup(name string) slog.Handler {
 	next := *h
-	if strings.TrimSpace(name) != "" {
-		next.groups = append(append([]string{}, h.groups...), strings.TrimSpace(name))
+	if strings.TrimSpace(name) != "" { // trimlowerlint:allow boundary canonicalization
+		next.groups = append(append([]string{}, h.groups...), strings.TrimSpace(name)) // trimlowerlint:allow boundary canonicalization
 	}
 	return &next
 }
@@ -143,14 +143,14 @@ func sourceString(r slog.Record) string {
 	}
 	frames := runtime.CallersFrames([]uintptr{r.PC})
 	frame, _ := frames.Next()
-	if strings.TrimSpace(frame.File) == "" || frame.Line <= 0 {
+	if strings.TrimSpace(frame.File) == "" || frame.Line <= 0 { // trimlowerlint:allow boundary canonicalization
 		return "-:-"
 	}
 	return fmt.Sprintf("%s:%d", filepath.Base(frame.File), frame.Line)
 }
 
 func qualifyKey(groups []string, key string) string {
-	k := strings.TrimSpace(key)
+	k := strings.TrimSpace(key) // trimlowerlint:allow boundary canonicalization
 	if k == "" {
 		return ""
 	}
@@ -215,7 +215,7 @@ func (w *stdlibLogBridge) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		line := strings.TrimSpace(s[:i])
+		line := strings.TrimSpace(s[:i]) // trimlowerlint:allow boundary canonicalization
 		rest := s[i+1:]
 		w.buf.Reset()
 		w.buf.WriteString(rest)
@@ -225,7 +225,7 @@ func (w *stdlibLogBridge) Write(p []byte) (int, error) {
 }
 
 func (w *stdlibLogBridge) emit(line string) {
-	msg := strings.TrimSpace(stdlibPrefixRE.ReplaceAllString(line, ""))
+	msg := strings.TrimSpace(stdlibPrefixRE.ReplaceAllString(line, "")) // trimlowerlint:allow boundary canonicalization
 	if msg == "" {
 		return
 	}

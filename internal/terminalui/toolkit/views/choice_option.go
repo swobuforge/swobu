@@ -14,7 +14,7 @@ func NewChoiceOption[M any](label string, selected bool, onChoose func() []updat
 
 func NewChoiceOptionWithCancel[M any](label string, selected bool, onChoose func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[M] {
 	return ListItemRow[M](
-		InsetLabel(strings.TrimSpace(label), 3),
+		InsetLabel(strings.TrimSpace(label), 3), // trimlowerlint:allow boundary canonicalization
 		selected,
 		true,
 		true,

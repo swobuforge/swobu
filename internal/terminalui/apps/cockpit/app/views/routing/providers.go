@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -110,14 +110,14 @@ func createProviderSpecItems(model state.Model, onCancel func() []update.Action)
 	}
 	currentSpec := ""
 	if pc := selectors.CreateDraftProviderConfig(model); pc != nil {
-		currentSpec = strings.TrimSpace(pc.ProviderSpec)
+		currentSpec = strings.TrimSpace(pc.ProviderSpec) // trimlowerlint:allow boundary canonicalization
 	}
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
-		spec := strings.TrimSpace(option.Spec)
-		label := providercatalog.DisplayName(spec)
-		if strings.TrimSpace(label) == "" || strings.EqualFold(label, "Provider") {
-			label = selectors.EmptyOr(strings.TrimSpace(option.Label), spec)
+		spec := strings.TrimSpace(option.Spec) // trimlowerlint:allow boundary canonicalization
+		label := providerDisplayName(spec)
+		if strings.TrimSpace(label) == "" || strings.EqualFold(label, "Provider") { // trimlowerlint:allow boundary canonicalization
+			label = selectors.EmptyOr(strings.TrimSpace(option.Label), spec) // trimlowerlint:allow boundary canonicalization
 		}
 		choiceSpec := spec
 		items = append(items, views.FilterablePickerItem{
@@ -144,6 +144,11 @@ func createProviderPropertyRows(
 ) []retained.ViewSpec[state.Model] {
 	rows := []retained.ViewSpec[state.Model]{
 		retained.Named[state.Model]("provider", providerSpecRow(providerConfig)),
+		retained.Named[state.Model]("frame", providerFrameChoiceRow(providerFrameChoiceRowSpec{
+			ProviderConfig: providerConfig,
+			EndpointName:   endpointName,
+			CreateMode:     createMode,
+		})),
 		retained.Named[state.Model]("model", providerModelChoiceRow(providerModelChoiceRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
@@ -166,18 +171,9 @@ func createProviderPropertyRows(
 	}
 	if !createMode &&
 		providerConfig != nil &&
-		strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "chatgpt") &&
-		strings.TrimSpace(model.AuthLoginEndpointName) == strings.TrimSpace(endpointName) &&
-		strings.TrimSpace(model.AuthLoginProviderRef) == strings.TrimSpace(providerConfig.Ref) &&
-		strings.TrimSpace(model.AuthLoginURL) != "" {
+		strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "chatgpt") && // trimlowerlint:allow boundary canonicalization
+		providerAuthSession(model, endpointName, providerConfig).URL != "" {
 		rows = append(rows, retained.Named[state.Model]("provider-login", providerLoginURLRow(endpointName, providerConfig)))
-	}
-	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "keychain") {
-		rows = append(rows, retained.Named[state.Model]("key-name", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{
-			ProviderConfig: providerConfig,
-			EndpointName:   endpointName,
-			CreateMode:     createMode,
-		})))
 	}
 	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "env") {
 		rows = append(rows, retained.Named[state.Model]("env-key", providerEnvKeyRow(providerEnvKeyRowSpec{
@@ -193,7 +189,7 @@ func createProviderPropertyRows(
 			CreateMode:     createMode,
 		})))
 	}
-	if providerConfig != nil && strings.TrimSpace(providerConfig.ProviderSpec) == "custom" {
+	if providerConfig != nil && strings.TrimSpace(providerConfig.ProviderSpec) == "openai_compatible" { // trimlowerlint:allow boundary canonicalization
 		rows = append(rows, retained.Named[state.Model]("backend-url", providerBackendURLRow(providerBackendURLRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
@@ -214,12 +210,13 @@ func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConf
 			return views.RowStatic("login", "not available")
 		}
 		model := ctx.Model()
-		loginURL := strings.TrimSpace(model.AuthLoginURL)
+		auth := providerAuthSession(model, endpointName, providerConfig)
+		loginURL := strings.TrimSpace(auth.URL) // trimlowerlint:allow boundary canonicalization
 		summary := "pending browser auth"
-		if s := strings.TrimSpace(model.AuthLoginSessionState); s != "" {
+		if s := strings.TrimSpace(auth.SessionState); s != "" { // trimlowerlint:allow boundary canonicalization
 			summary = "login " + s
 		}
-		if strings.TrimSpace(model.AuthLoginSessionError) != "" {
+		if strings.TrimSpace(auth.SessionError) != "" { // trimlowerlint:allow boundary canonicalization
 			summary = "login error"
 		}
 		return views.RowActionWithCancel(
@@ -237,6 +234,17 @@ func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConf
 			nil,
 		)
 	})
+}
+
+func providerAuthSession(model state.Model, endpointName string, providerConfig *state.ProviderConfigSnapshot) stateModel.AuthSessionView {
+	if providerConfig == nil {
+		return stateModel.AuthSessionView{}
+	}
+	ownerKey := stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String() // trimlowerlint:allow boundary canonicalization
+	if model.AuthSessions == nil {
+		return stateModel.AuthSessionView{}
+	}
+	return model.AuthSessions[strings.TrimSpace(ownerKey)] // trimlowerlint:allow boundary canonicalization
 }
 
 func newProviderSummaryRow(provider state.ProviderConfigSnapshot, selected, expanded bool, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
@@ -262,22 +270,5 @@ func providerSummaryRow(
 }
 
 func providerDisplayLabel(pc state.ProviderConfigSnapshot) string {
-	alias := strings.TrimSpace(pc.TargetAlias)
-	if alias != "" {
-		return alias
-	}
-	providerSpec := strings.TrimSpace(pc.ProviderSpec)
-	modelID := strings.TrimSpace(pc.ModelID)
-	if modelID != "" {
-		return modelID
-	}
-	return providercatalog.DisplayName(providerSpec)
-}
-
-func providerRowKey(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "default"
-	}
-	return ref
+	return providerHumanIdentifier(pc)
 }

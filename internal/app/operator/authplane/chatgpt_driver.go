@@ -24,11 +24,11 @@ func NewChatGPTMethodDriver(service *chatgptlogin.Service) (*ChatGPTMethodDriver
 }
 
 func (d *ChatGPTMethodDriver) Start(ctx context.Context, in StartInput) (DriverStartResult, error) {
-	if strings.ToLower(strings.TrimSpace(in.ProviderSpec)) != ChatGPTProviderSpec {
-		return DriverStartResult{}, fmt.Errorf("provider spec %q is unsupported", strings.TrimSpace(in.ProviderSpec))
+	if strings.ToLower(strings.TrimSpace(in.ProviderSpec)) != ChatGPTProviderSpec { // trimlowerlint:allow boundary canonicalization
+		return DriverStartResult{}, fmt.Errorf("provider spec %q is unsupported", strings.TrimSpace(in.ProviderSpec)) // trimlowerlint:allow boundary canonicalization
 	}
 	start, err := d.service.Start(ctx, chatgptlogin.StartInput{
-		AuthMode: strings.TrimSpace(in.AuthMode),
+		AuthMode: strings.TrimSpace(in.AuthMode), // trimlowerlint:allow boundary canonicalization
 	})
 	if err != nil {
 		return DriverStartResult{}, err
@@ -36,7 +36,7 @@ func (d *ChatGPTMethodDriver) Start(ctx context.Context, in StartInput) (DriverS
 	return DriverStartResult{
 		SessionID:    start.SessionID,
 		AuthorizeURL: start.AuthorizeURL,
-		UserCode:     strings.TrimSpace(start.UserCode),
+		UserCode:     strings.TrimSpace(start.UserCode), // trimlowerlint:allow boundary canonicalization
 	}, nil
 }
 
@@ -45,11 +45,11 @@ func (d *ChatGPTMethodDriver) Poll(ctx context.Context, sessionID string) (Drive
 	if err != nil {
 		return DriverPollResult{}, err
 	}
-	state := SessionState(strings.ToLower(strings.TrimSpace(string(out.State))))
+	state := SessionState(strings.ToLower(strings.TrimSpace(string(out.State)))) // trimlowerlint:allow boundary canonicalization
 	return DriverPollResult{
 		State:         state,
-		CredentialRef: strings.TrimSpace(out.CredentialRef),
-		ErrorMessage:  strings.TrimSpace(out.ErrorMessage),
+		CredentialRef: strings.TrimSpace(out.CredentialRef), // trimlowerlint:allow boundary canonicalization
+		ErrorMessage:  strings.TrimSpace(out.ErrorMessage),  // trimlowerlint:allow boundary canonicalization
 	}, nil
 }
 

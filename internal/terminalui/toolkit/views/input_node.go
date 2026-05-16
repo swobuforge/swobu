@@ -26,9 +26,9 @@ type InputRenderNode struct {
 func NewInput(label, value, emptyValue string, policy RowLayoutPolicy, onChange func(string) []update.Action, onCommit func(string) []update.Action, onCancel func() []update.Action) *InputRenderNode {
 	return &InputRenderNode{
 		Sized:      layout.Sized{Sizing: layout.Sizing{W: layout.SizeGrow, H: layout.SizeFit}},
-		Label:      strings.TrimSpace(label),
+		Label:      strings.TrimSpace(label), // trimlowerlint:allow boundary canonicalization
 		Value:      value,
-		EmptyValue: strings.TrimSpace(emptyValue),
+		EmptyValue: strings.TrimSpace(emptyValue), // trimlowerlint:allow boundary canonicalization
 		Policy:     policy,
 		OnChange:   onChange,
 		OnCommit:   onCommit,

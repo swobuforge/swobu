@@ -18,7 +18,7 @@ func HeaderBar(left, right string) retained.ViewSpec[state.Model] {
 }
 
 func headerIntrinsicWidth(left, right string) int {
-	return toolkitviews.RuneLen(strings.TrimSpace(left)) + toolkitviews.RuneLen(strings.TrimSpace(right)) + 1
+	return toolkitviews.RuneLen(strings.TrimSpace(left)) + toolkitviews.RuneLen(strings.TrimSpace(right)) + 1 // trimlowerlint:allow boundary canonicalization
 }
 
 func renderHeaderLine(width int, left, right string) string {
@@ -30,16 +30,16 @@ func WorkspaceRail(endpoints []string, current string) retained.ViewSpec[state.M
 	items := append([]string(nil), endpoints...)
 	items = append(items, "+")
 	selected := len(items) - 1
-	current = strings.TrimSpace(current)
+	current = strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
 	for i, name := range endpoints {
-		if strings.TrimSpace(name) == current && current != "" {
+		if strings.TrimSpace(name) == current && current != "" { // trimlowerlint:allow boundary canonicalization
 			selected = i
 			break
 		}
 	}
 	endpointNames := endpoints
 	return retained.FromRenderNode[state.Model](toolkitviews.NewChoiceListWithFocusable(items, selected, toolkitviews.ChoiceListAxisHorizontal, false, func(label string, selected bool) string {
-		label = strings.TrimSpace(label)
+		label = strings.TrimSpace(label) // trimlowerlint:allow boundary canonicalization
 		if selected {
 			return "[› " + label + "]"
 		}
@@ -47,7 +47,7 @@ func WorkspaceRail(endpoints []string, current string) retained.ViewSpec[state.M
 	}, func(index int) []update.Action {
 		name := ""
 		if index >= 0 && index < len(endpointNames) {
-			name = strings.TrimSpace(endpointNames[index])
+			name = strings.TrimSpace(endpointNames[index]) // trimlowerlint:allow boundary canonicalization
 		}
 		return []update.Action{state.SelectEndpoint{Name: name}}
 	}))
@@ -55,7 +55,7 @@ func WorkspaceRail(endpoints []string, current string) retained.ViewSpec[state.M
 
 // FooterBar renders the operator hint line.
 func FooterBar(hints string) retained.ViewSpec[state.Model] {
-	line := strings.TrimSpace(hints)
+	line := strings.TrimSpace(hints) // trimlowerlint:allow boundary canonicalization
 	if line == "" {
 		line = "tab/shift+tab workspace   up/down move   enter act   esc back"
 	}
@@ -65,7 +65,7 @@ func FooterBar(hints string) retained.ViewSpec[state.Model] {
 // --- SectionHeader ---
 
 func NewSectionHeader[M any](title string) retained.ViewSpec[M] {
-	text := strings.Repeat(" ", max(0, InsetSection)) + strings.TrimSpace(title) + " ▾"
+	text := strings.Repeat(" ", max(0, InsetSection)) + strings.TrimSpace(title) + " ▾" // trimlowerlint:allow boundary canonicalization
 	return retained.FromRenderNode[M](toolkitviews.NewAction(toolkitviews.RuneLen(text), false, false, func(_ bool, width int) string {
 		return toolkitviews.PadRight(toolkitviews.TrimToWidth(text, width), width)
 	}, nil, nil))

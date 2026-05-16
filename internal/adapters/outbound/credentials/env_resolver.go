@@ -41,21 +41,21 @@ func (r EnvResolver) ResolveCredential(ctx context.Context, providerSpec string,
 }
 
 func envCredentialName(providerSpec string, credentialRef string) (string, error) {
-	ref := strings.TrimSpace(credentialRef)
+	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
 	if ref == "" {
 		return "", fmt.Errorf("credential ref must not be empty")
 	}
 	if ref == "env" {
-		envKey := strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec))
+		envKey := strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)) // trimlowerlint:allow boundary canonicalization
 		if envKey == "" {
 			return "", fmt.Errorf("provider %q has no default env key", providerSpec)
 		}
 		return envKey, nil
 	}
-	if !strings.HasPrefix(strings.ToLower(ref), envCredentialRefPrefix) {
+	if !strings.HasPrefix(strings.ToLower(ref), envCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
 		return "", fmt.Errorf("env resolver does not support credential ref %q", ref)
 	}
-	name := strings.TrimSpace(ref[len(envCredentialRefPrefix):])
+	name := strings.TrimSpace(ref[len(envCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
 	if name == "" {
 		return "", fmt.Errorf("env credential name must not be empty")
 	}

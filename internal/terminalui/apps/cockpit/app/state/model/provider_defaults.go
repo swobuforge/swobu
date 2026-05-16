@@ -3,12 +3,12 @@ package model
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
-const DraftProviderRef = compatibility.PrimaryTargetSelector
+const DraftProviderRef = canonical.PrimaryTargetSelector
 
 type ProviderOption struct {
 	Spec  string
@@ -21,32 +21,30 @@ func ProviderOptions() []ProviderOption {
 		if !profile.VisibleInOperatorUI {
 			continue
 		}
-		label := strings.TrimSpace(profile.SetupHint)
+		label := strings.TrimSpace(profile.SetupHint) // trimlowerlint:allow boundary canonicalization
 		if label == "" {
-			label = strings.TrimSpace(profile.ProviderID)
+			label = string(profile.ProviderID)
 		}
-		out = append(out, ProviderOption{Spec: profile.ProviderID, Label: label})
+		out = append(out, ProviderOption{Spec: string(profile.ProviderID), Label: label})
 	}
 	return out
 }
 
 func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) ProviderConfigSnapshot {
-	spec = strings.TrimSpace(spec)
+	spec = strings.TrimSpace(spec) // trimlowerlint:allow boundary canonicalization
 	next := current
-	if strings.TrimSpace(next.Ref) == "" {
+	if strings.TrimSpace(next.Ref) == "" { // trimlowerlint:allow boundary canonicalization
 		next.Ref = DraftProviderRef
 	}
-	currentProtocol := protocolsurface.Kind(strings.TrimSpace(next.ProtocolKind))
-	if currentProtocol == "" || !providercatalog.SupportsRoute(spec, currentProtocol) {
-		defaultProtocol, ok := providercatalog.DefaultProtocolForSpec(spec)
-		if ok {
-			next.ProtocolKind = defaultProtocol.String()
-		} else {
-			next.ProtocolKind = ""
-		}
+	currentProtocol := protocolkind.ProtocolKind(strings.TrimSpace(next.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
+	if currentProtocol == "" || !supportsDraftProtocolForSpec(spec, currentProtocol) {
+		next.ProtocolKind = defaultDraftProtocolForSpec(spec).String()
+	}
+	if frame, ok := providercatalog.DefaultFrameForSpecProtocol(spec, protocolkind.ProtocolKind(strings.TrimSpace(next.ProtocolKind))); ok {
+		next.SelectedFrame = frame
 	}
 	next.ProviderSpec = spec
-	defaultBaseURL := strings.TrimSpace(providercatalog.DefaultBaseURL(spec))
+	defaultBaseURL := strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(spec)) // trimlowerlint:allow boundary canonicalization
 	if defaultBaseURL != "" {
 		next.BaseURL = defaultBaseURL
 	}
@@ -60,5 +58,25 @@ func ProviderRequiresCredential(spec, baseURL string) bool {
 }
 
 func ProviderSupportsCatalog(spec string) bool {
-	return providercatalog.HasModelCatalog(spec)
+	return providercatalog.SupportsCapability(spec, providercatalog.CapabilityModelCatalog)
+}
+
+func defaultDraftProtocolForSpec(spec string) protocolkind.ProtocolKind {
+	if !providercatalog.SupportsSpec(spec) {
+		return protocolkind.ChatCompletions
+	}
+	if strings.EqualFold(strings.TrimSpace(spec), "anthropic") { // trimlowerlint:allow boundary canonicalization
+		return protocolkind.Messages
+	}
+	return protocolkind.ChatCompletions
+}
+
+func supportsDraftProtocolForSpec(spec string, protocol protocolkind.ProtocolKind) bool {
+	if !providercatalog.SupportsSpec(spec) {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(spec), "anthropic") { // trimlowerlint:allow boundary canonicalization
+		return protocol == protocolkind.Messages
+	}
+	return protocol == protocolkind.ChatCompletions || protocol == protocolkind.Responses || protocol == protocolkind.Completions
 }

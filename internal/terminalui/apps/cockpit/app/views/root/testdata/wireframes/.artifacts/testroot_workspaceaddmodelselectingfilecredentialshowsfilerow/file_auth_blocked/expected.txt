@@ -1,4 +1,4 @@
-SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
+SWOBU 🧌                                                                          ready   [ ? ] [› acme] [ + ]
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
      name               acme                                                                        edit ↵
@@ -6,12 +6,12 @@ SWOBU! 🧌                                                                     
      delete workspace                                                                               delete ↵
 
   routing ▾
-     run on             gemma4:e4b                                                                  choose ↵
+     run on             ollama:gemma4:e4b:e3b0c442                                                  choose ↵
      models             1 configured                                                                manage ↵
-       gemma4:e4b                                                                                   edit ↵
+       gemma4:e4b:e3b0                                                                              edit ↵
        add model                                                                                    close ↵
-         provider           OpenRouter                                                              choose ↵
-    >    auth               file missing                                                            choose ↵
+         provider           OpenAI                                                                  change ↵
+    >    auth               file missing                                                            change ↵
          credential file    required                                                                browse ↵
          key file           not found
           -> set credential file before loading models

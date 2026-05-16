@@ -3,6 +3,7 @@ package authplane
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
@@ -15,7 +16,7 @@ const subjectRefPrefix = "subject:"
 // EncodeEndpointCredentialLocator returns the canonical endpoint locator used by
 // authplane persistence: <endpoint-name>#<provider-config-ref>.
 func EncodeEndpointCredentialLocator(endpointName string, providerRef string) string {
-	return strings.TrimSpace(endpointName) + endpointRefDelimiter + strings.TrimSpace(providerRef)
+	return strings.TrimSpace(endpointName) + endpointRefDelimiter + strings.TrimSpace(providerRef) // trimlowerlint:allow boundary canonicalization
 }
 
 // EndpointCredentialRefStore persists resolved credential refs into endpoint
@@ -29,10 +30,15 @@ func NewEndpointCredentialRefStore(endpoints operatorendpoints.OperatorEndpointS
 }
 
 func (s EndpointCredentialRefStore) UpsertCredentialRef(ctx context.Context, providerSpec string, endpointRef string, credentialRef string) (string, error) {
+	slog.Debug("auth credential upsert requested",
+		"component", "authplane",
+		"provider_spec", strings.TrimSpace(strings.ToLower(providerSpec)), // trimlowerlint:allow boundary canonicalization
+		"endpoint_ref_kind", endpointRefKind(endpointRef),
+	)
 	if isTransientSubjectLocator(endpointRef) {
 		// Draft-scoped auth subjects are pre-create and intentionally do not
 		// mutate endpoint intent yet. The caller materializes this ref on create.
-		return strings.TrimSpace(credentialRef), nil
+		return strings.TrimSpace(credentialRef), nil // trimlowerlint:allow boundary canonicalization
 	}
 	endpointNameRaw, providerRefRaw, err := decodeEndpointCredentialLocator(endpointRef)
 	if err != nil {
@@ -49,6 +55,11 @@ func (s EndpointCredentialRefStore) UpsertCredentialRef(ctx context.Context, pro
 
 	ep, err := s.endpoints.Get(ctx, endpointName.String())
 	if err != nil {
+		slog.Warn("auth credential upsert endpoint lookup failed",
+			"component", "authplane",
+			"endpoint_name", endpointName.String(),
+			"error", err.Error(),
+		)
 		return "", err
 	}
 	configs := ep.ProviderConfigs()
@@ -66,6 +77,11 @@ func (s EndpointCredentialRefStore) UpsertCredentialRef(ctx context.Context, pro
 		break
 	}
 	if !updated {
+		slog.Warn("auth credential upsert provider ref unresolved",
+			"component", "authplane",
+			"endpoint_name", endpointName.String(),
+			"provider_ref", providerRef.String(),
+		)
 		return "", fmt.Errorf("provider config ref %q is unresolved in endpoint %q", providerRef.String(), endpointName.String())
 	}
 	updatedEndpoint, err := endpointintent.NewEndpoint(ep.Name(), configs, ep.SelectedProviderConfigRef())
@@ -73,17 +89,34 @@ func (s EndpointCredentialRefStore) UpsertCredentialRef(ctx context.Context, pro
 		return "", err
 	}
 	if _, err := s.endpoints.Put(ctx, updatedEndpoint); err != nil {
+		slog.Warn("auth credential upsert endpoint write failed",
+			"component", "authplane",
+			"endpoint_name", endpointName.String(),
+			"error", err.Error(),
+		)
 		return "", err
 	}
-	return strings.TrimSpace(credentialRef), nil
+	slog.Debug("auth credential upsert completed",
+		"component", "authplane",
+		"endpoint_name", endpointName.String(),
+		"provider_ref", providerRef.String(),
+	)
+	return strings.TrimSpace(credentialRef), nil // trimlowerlint:allow boundary canonicalization
+}
+
+func endpointRefKind(raw string) string {
+	if isTransientSubjectLocator(raw) {
+		return "transient_subject"
+	}
+	return "endpoint_locator"
 }
 
 func isTransientSubjectLocator(raw string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), subjectRefPrefix)
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), subjectRefPrefix) // trimlowerlint:allow boundary canonicalization
 }
 
 func decodeEndpointCredentialLocator(raw string) (endpointName string, providerRef string, err error) {
-	locator := strings.TrimSpace(raw)
+	locator := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
 	if locator == "" {
 		return "", "", fmt.Errorf("endpoint ref is required")
 	}
@@ -91,8 +124,8 @@ func decodeEndpointCredentialLocator(raw string) (endpointName string, providerR
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("endpoint ref must use %q separator", endpointRefDelimiter)
 	}
-	endpointName = strings.TrimSpace(parts[0])
-	providerRef = strings.TrimSpace(parts[1])
+	endpointName = strings.TrimSpace(parts[0]) // trimlowerlint:allow boundary canonicalization
+	providerRef = strings.TrimSpace(parts[1])  // trimlowerlint:allow boundary canonicalization
 	if endpointName == "" || providerRef == "" {
 		return "", "", fmt.Errorf("endpoint ref must include endpoint name and provider ref")
 	}
@@ -100,21 +133,25 @@ func decodeEndpointCredentialLocator(raw string) (endpointName string, providerR
 }
 
 func cloneProviderConfigWithCredentialRef(cfg endpointintent.ProviderConfig, providerSpec string, credentialRef string) (endpointintent.ProviderConfig, error) {
-	currentSpec := strings.TrimSpace(cfg.ProviderSpec().String())
-	if spec := strings.TrimSpace(strings.ToLower(providerSpec)); spec != "" && spec != strings.ToLower(currentSpec) {
+	currentSpec := strings.TrimSpace(cfg.ProviderSpec().String())                                                     // trimlowerlint:allow boundary canonicalization
+	if spec := strings.TrimSpace(strings.ToLower(providerSpec)); spec != "" && spec != strings.ToLower(currentSpec) { // trimlowerlint:allow boundary canonicalization
 		return endpointintent.ProviderConfig{}, fmt.Errorf("provider spec mismatch for credential persistence")
 	}
 	next, err := endpointintent.NewProviderConfig(
 		cfg.Ref(),
 		cfg.ProviderSpec(),
 		cfg.BaseURL(),
-		strings.TrimSpace(credentialRef),
+		strings.TrimSpace(credentialRef), // trimlowerlint:allow boundary canonicalization
 		cfg.ProtocolKind(),
 	)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}
 	next, err = next.WithModelID(cfg.ModelID())
+	if err != nil {
+		return endpointintent.ProviderConfig{}, err
+	}
+	next, err = next.WithSelectedFrame(cfg.SelectedFrame())
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}

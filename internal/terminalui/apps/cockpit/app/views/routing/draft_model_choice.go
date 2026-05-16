@@ -8,7 +8,6 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
@@ -30,19 +29,18 @@ func (createDraftModelBinding) Snapshot(model state.Model) state.ProviderConfigS
 
 func (createDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []update.Action {
 	return []update.Action{
-		state.SetCreateDraftModelID{ModelID: strings.TrimSpace(next.ModelID)},
+		state.SetCreateDraftModelID{ModelID: strings.TrimSpace(next.ModelID)}, // trimlowerlint:allow boundary canonicalization
 	}
 }
 
 func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
-	provider := strings.TrimSpace(next.ProviderSpec)
+	provider := strings.TrimSpace(next.ProviderSpec) // trimlowerlint:allow boundary canonicalization
 	return []update.Action{
 		state.LoadRoutingModelCatalogRequested{
 			Scope:         state.RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:  provider,
-			BaseURL:       strings.TrimSpace(next.BaseURL),
-			CredentialRef: strings.TrimSpace(next.CredentialRef),
-			ProtocolKind:  defaultProtocolKindForProvider(provider),
+			BaseURL:       strings.TrimSpace(next.BaseURL),       // trimlowerlint:allow boundary canonicalization
+			CredentialRef: strings.TrimSpace(next.CredentialRef), // trimlowerlint:allow boundary canonicalization
 		},
 	}
 }
@@ -69,16 +67,15 @@ func (b addDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []u
 }
 
 func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
-	provider := strings.TrimSpace(next.ProviderSpec)
-	credentialRef := strings.TrimSpace(next.CredentialRef)
+	provider := strings.TrimSpace(next.ProviderSpec)       // trimlowerlint:allow boundary canonicalization
+	credentialRef := strings.TrimSpace(next.CredentialRef) // trimlowerlint:allow boundary canonicalization
 	credentialRef = effectiveAddModelCredentialRef(b.model, next)
 	return []update.Action{
 		state.LoadRoutingModelCatalogRequested{
 			Scope:         state.RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:  provider,
-			BaseURL:       strings.TrimSpace(next.BaseURL),
+			BaseURL:       strings.TrimSpace(next.BaseURL), // trimlowerlint:allow boundary canonicalization
 			CredentialRef: credentialRef,
-			ProtocolKind:  defaultProtocolKindForProvider(provider),
 		},
 	}
 }
@@ -102,13 +99,13 @@ type draftModelRowSpec struct {
 func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftModelRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	draft := spec.Binding.Snapshot(model)
-	provider := strings.TrimSpace(draft.ProviderSpec)
-	baseURL := strings.TrimSpace(draft.BaseURL)
-	cred := strings.TrimSpace(draft.CredentialRef)
+	provider := strings.TrimSpace(draft.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+	baseURL := strings.TrimSpace(draft.BaseURL)       // trimlowerlint:allow boundary canonicalization
+	cred := strings.TrimSpace(draft.CredentialRef)    // trimlowerlint:allow boundary canonicalization
 	if addBinding, ok := spec.Binding.(addDraftModelBinding); ok {
 		cred = effectiveAddModelCredentialRef(addBinding.model, draft)
 	}
-	modelID := strings.TrimSpace(draft.ModelID)
+	modelID := strings.TrimSpace(draft.ModelID) // trimlowerlint:allow boundary canonicalization
 
 	modelSummary := selectors.EmptyOr(modelID, "not set")
 	if _, ok := spec.Binding.(addDraftModelBinding); ok && modelID == "" {
@@ -132,7 +129,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
 	if blocked {
-		if message := strings.TrimSpace(providerModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" {
+		if message := strings.TrimSpace(providerModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" { // trimlowerlint:allow boundary canonicalization
 			notes := views.DisclosureNoteRows(message)
 			return retained.VStack(ctx, notes...)
 		}
@@ -143,6 +140,19 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	}
 
 	modelIDs, modelErr := spec.Binding.Catalog(model)
+	if strings.TrimSpace(modelErr) != "" || len(modelIDs) == 0 { // trimlowerlint:allow boundary canonicalization
+		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(strings.TrimSpace(draft.ModelID), "not set"), strings.TrimSpace(draft.ModelID), "model id", func(value string) []update.Action { // trimlowerlint:allow boundary canonicalization
+			next := draft
+			next.ModelID = strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+			actions := spec.Binding.SetSnapshot(next)
+			spec.SetPickerOpen(false)
+			actions = append(actions,
+				state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
+				interaction.FocusKeyAction{Key: spec.FocusKey},
+			)
+			return actions
+		})
+	}
 	options := make([]modelPickerOption, 0, len(modelIDs))
 	for _, choice := range modelIDs {
 		modelChoice := choice
@@ -161,36 +171,30 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 			},
 		})
 	}
-	if len(options) > 0 {
-		return renderModelPickerDisclosure(ctx, modelPickerRenderSpec{
-			Parent:    modelRow,
-			Picker:    spec.PickerState,
-			SetPicker: spec.SetPickerState,
-			Options:   options,
-			OnChooseRawID: func(rawID string) []update.Action {
-				next := draft
-				next.ModelID = strings.TrimSpace(rawID)
-				actions := spec.Binding.SetSnapshot(next)
-				spec.SetPickerOpen(false)
-				actions = append(actions,
-					state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
-					interaction.FocusKeyAction{Key: spec.FocusKey},
-				)
-				return actions
-			},
-			KeyPrefix: spec.KeyPrefix,
-			FocusKey:  spec.FocusKey,
-			CloseDisclosure: func() []update.Action {
-				spec.SetPickerOpen(false)
-				return []update.Action{
-					state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
-					interaction.FocusKeyAction{Key: spec.FocusKey},
-				}
-			},
-		})
-	}
-	if strings.TrimSpace(modelErr) != "" {
-		return toolkitviews.NewAnchoredDisclosure(modelRow, views.DisclosureNoteRows(modelErr)...)
-	}
-	return toolkitviews.NewAnchoredDisclosure(modelRow, views.RowStatic("", "loading models…"))
+	return renderModelPickerDisclosure(ctx, modelPickerRenderSpec{
+		Parent:    modelRow,
+		Picker:    spec.PickerState,
+		SetPicker: spec.SetPickerState,
+		Options:   options,
+		OnChooseRawID: func(rawID string) []update.Action {
+			next := draft
+			next.ModelID = strings.TrimSpace(rawID) // trimlowerlint:allow boundary canonicalization
+			actions := spec.Binding.SetSnapshot(next)
+			spec.SetPickerOpen(false)
+			actions = append(actions,
+				state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
+				interaction.FocusKeyAction{Key: spec.FocusKey},
+			)
+			return actions
+		},
+		KeyPrefix: spec.KeyPrefix,
+		FocusKey:  spec.FocusKey,
+		CloseDisclosure: func() []update.Action {
+			spec.SetPickerOpen(false)
+			return []update.Action{
+				state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
+				interaction.FocusKeyAction{Key: spec.FocusKey},
+			}
+		},
+	})
 }

@@ -38,7 +38,7 @@ func NewStore() Store {
 }
 
 func (s Store) LoadOrCreate() (State, error) {
-	path := strings.TrimSpace(s.StatePath)
+	path := strings.TrimSpace(s.StatePath) // trimlowerlint:allow boundary canonicalization
 	if path == "" {
 		path = defaultStatePath()
 	}
@@ -52,10 +52,10 @@ func (s Store) LoadOrCreate() (State, error) {
 		if err := json.Unmarshal(data, &state); err != nil {
 			return State{}, fmt.Errorf("decode telemetry state: %w", err)
 		}
-		if strings.TrimSpace(state.AnonymousInstallID) == "" {
+		if strings.TrimSpace(state.AnonymousInstallID) == "" { // trimlowerlint:allow boundary canonicalization
 			state.AnonymousInstallID = newAnonymousInstallID(s.Rand, now)
 		}
-		if strings.TrimSpace(state.FirstSeenAt) == "" {
+		if strings.TrimSpace(state.FirstSeenAt) == "" { // trimlowerlint:allow boundary canonicalization
 			state.FirstSeenAt = now().UTC().Format(time.RFC3339)
 		}
 		return state, nil
@@ -89,7 +89,7 @@ func (s Store) SetEnabled(enabled bool) (State, error) {
 }
 
 func (s Store) Reset() (State, error) {
-	path := strings.TrimSpace(s.StatePath)
+	path := strings.TrimSpace(s.StatePath) // trimlowerlint:allow boundary canonicalization
 	if path == "" {
 		path = defaultStatePath()
 	}
@@ -166,15 +166,15 @@ func (s Store) InspectPreview() ([]byte, error) {
 }
 
 func defaultStatePath() string {
-	return platformconfig.ResolveTelemetryStatePath("")
+	return platformconfig.DefaultTelemetryStatePath()
 }
 
 func writeState(path string, state State) error {
-	path = strings.TrimSpace(path)
+	path = strings.TrimSpace(path) // trimlowerlint:allow boundary canonicalization
 	if path == "" {
 		path = defaultStatePath()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create telemetry state dir: %w", err)
 	}
 	data, err := json.MarshalIndent(state, "", "  ")

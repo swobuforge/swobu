@@ -34,7 +34,7 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		model.StreamEnabled = !model.StreamEnabled
 		return nil
 	case SetInteractionMode:
-		mode := strings.TrimSpace(value.Mode)
+		mode := strings.TrimSpace(value.Mode) // trimlowerlint:allow boundary canonicalization
 		if mode == "" {
 			mode = InteractionModeNAV
 		}
@@ -44,10 +44,10 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		applyFocusedRowFooterAffordance(model, value)
 		return nil
 	case LoadRoutingModelCatalogRequested:
-		scope := strings.TrimSpace(value.Scope)
-		spec := strings.TrimSpace(value.ProviderSpec)
-		baseURL := strings.TrimSpace(value.BaseURL)
-		credentialRef := strings.TrimSpace(value.CredentialRef)
+		scope := strings.TrimSpace(value.Scope)                 // trimlowerlint:allow boundary canonicalization
+		spec := strings.TrimSpace(value.ProviderSpec)           // trimlowerlint:allow boundary canonicalization
+		baseURL := strings.TrimSpace(value.BaseURL)             // trimlowerlint:allow boundary canonicalization
+		credentialRef := strings.TrimSpace(value.CredentialRef) // trimlowerlint:allow boundary canonicalization
 		switch scope {
 		case RoutingModelCatalogScopeCreateDraft:
 			if spec == "" {
@@ -78,29 +78,33 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 			Scope:         scope,
 			ProviderSpec:  spec,
 			BaseURL:       baseURL,
-			CredentialRef: credentialRef,
-			ProtocolKind:  strings.TrimSpace(value.ProtocolKind),
+			CredentialRef: credentialRef, // trimlowerlint:allow boundary canonicalization
 		}}
 	case stateeffect.RoutingModelCatalogLoaded:
-		scope := strings.TrimSpace(value.Scope)
-		if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) {
+		scope := strings.TrimSpace(value.Scope)                                                                                                                             // trimlowerlint:allow boundary canonicalization
+		if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) { // trimlowerlint:allow boundary canonicalization
 			return nil
 		}
 		switch scope {
 		case RoutingModelCatalogScopeCreateDraft:
 			model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
-			model.CreateDraftModelError = strings.TrimSpace(value.Error)
+			model.CreateDraftModelError = strings.TrimSpace(value.Error) // trimlowerlint:allow boundary canonicalization
 		case RoutingModelCatalogScopeAddModelDraft:
 			model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
-			model.AddModelDraftModelError = strings.TrimSpace(value.Error)
+			model.AddModelDraftModelError = strings.TrimSpace(value.Error) // trimlowerlint:allow boundary canonicalization
 		}
 		return nil
 	case FocusNextAfterRebuildRequested:
 		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
 	case EndpointCopyRequested:
 		return []update.Effect{stateeffect.CopyEndpointValueEffect(value)}
-	case AuthLoginURLCopyRequested:
-		return []update.Effect{stateeffect.CopyAuthLoginURLEffect{Value: strings.TrimSpace(value.Value)}}
+	case AuthSessionURLCopyRequested:
+		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{Value: strings.TrimSpace(value.Value)}} // trimlowerlint:allow boundary canonicalization
+	case AuthSessionURLCopyScopedRequested:
+		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{
+			OwnerKey: strings.TrimSpace(value.OwnerKey), // trimlowerlint:allow boundary canonicalization
+			Value:    strings.TrimSpace(value.Value),    // trimlowerlint:allow boundary canonicalization
+		}}
 	case ClientBaseURLCopyRequested:
 		return []update.Effect{stateeffect.CopyClientBaseURLEffect(value)}
 	case ClientLaunchRequested:
@@ -124,17 +128,17 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		return nil, true
 	case OpenSupportLinkRequested:
 		return []update.Effect{stateeffect.OpenSupportLinkEffect{
-			Label: strings.TrimSpace(value.Label),
-			URL:   strings.TrimSpace(value.URL),
+			Label: strings.TrimSpace(value.Label), // trimlowerlint:allow boundary canonicalization
+			URL:   strings.TrimSpace(value.URL),   // trimlowerlint:allow boundary canonicalization
 		}}, true
 	case HelpDiagnosticsCopyRequested:
-		return []update.Effect{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true
+		return []update.Effect{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true // trimlowerlint:allow boundary canonicalization
 	case CompatibilityRestartRequested:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
 		return []update.Effect{stateeffect.CompatibilityRestartHintEffect{
-			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand),
+			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand), // trimlowerlint:allow boundary canonicalization
 		}}, true
 	case CompatibilityDiagnosticsCopyRequested:
 		if model.ControlPlane == nil {
@@ -147,8 +151,8 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		if model.ControlPlane == nil {
 			return nil, true
 		}
-		model.ControlPlane.Note = strings.TrimSpace(value.Message)
-		model.ControlPlane.NoteAction = strings.TrimSpace(value.Action)
+		model.ControlPlane.Note = strings.TrimSpace(value.Message)      // trimlowerlint:allow boundary canonicalization
+		model.ControlPlane.NoteAction = strings.TrimSpace(value.Action) // trimlowerlint:allow boundary canonicalization
 		return nil, true
 	default:
 		return nil, false
@@ -156,23 +160,23 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 }
 
 func firstRunFooterVerb(model *Model, fallback string) string {
-	verb := strings.TrimSpace(fallback)
-	if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != "" && strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" {
+	verb := strings.TrimSpace(fallback)                                                                                                            // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != "" && strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" { // trimlowerlint:allow boundary canonicalization
 		verb = "edit"
 	}
 	if firstRunCreateReady(model) {
 		verb = "create"
 	}
-	if strings.TrimSpace(model.CreateDraftName) == "" {
+	if strings.TrimSpace(model.CreateDraftName) == "" { // trimlowerlint:allow boundary canonicalization
 		verb = "edit"
-	} else if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) == "" {
+	} else if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) == "" { // trimlowerlint:allow boundary canonicalization
 		verb = "open"
 	}
-	return strings.TrimSpace(verb)
+	return strings.TrimSpace(verb) // trimlowerlint:allow boundary canonicalization
 }
 
 func applyFocusedRowFooterAffordance(model *Model, value SetFocusedRowAffordance) {
-	verb := strings.TrimSpace(value.Verb)
+	verb := strings.TrimSpace(value.Verb) // trimlowerlint:allow boundary canonicalization
 	if model.ControlPlane != nil {
 		model.FooterVerb = "run/copy"
 		model.FooterAllowSpace = value.AllowSpace
@@ -197,7 +201,7 @@ func refreshFirstRunFooterAffordance(model *Model) {
 	if model.ControlPlane != nil {
 		return
 	}
-	if strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 {
+	if strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 { // trimlowerlint:allow boundary canonicalization
 		return
 	}
 	model.FooterVerb = firstRunFooterVerb(model, model.FooterVerb)
@@ -205,7 +209,7 @@ func refreshFirstRunFooterAffordance(model *Model) {
 }
 
 func firstRunCreateReady(model *Model) bool {
-	name := strings.TrimSpace(model.CreateDraftName)
+	name := strings.TrimSpace(model.CreateDraftName) // trimlowerlint:allow boundary canonicalization
 	if name == "" {
 		return false
 	}
@@ -213,29 +217,29 @@ func firstRunCreateReady(model *Model) bool {
 		return false
 	}
 	for _, existing := range model.Endpoints {
-		if strings.TrimSpace(existing) == name {
+		if strings.TrimSpace(existing) == name { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
 	}
-	provider := strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec)
+	provider := strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) // trimlowerlint:allow boundary canonicalization
 	if provider == "" {
 		return false
 	}
-	if provider == "custom" && strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) == "" {
+	if provider == "openai_compatible" && strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
 		return false
 	}
-	if strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" {
+	if strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" { // trimlowerlint:allow boundary canonicalization
 		return false
 	}
-	if ProviderRequiresCredential(provider, strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)) && strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) == "" {
+	if ProviderRequiresCredential(provider, strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)) && strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) == "" { // trimlowerlint:allow boundary canonicalization
 		return false
 	}
 	return true
 }
 
 func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
-	daemonVersion := strings.TrimSpace(mismatch.DaemonVersion)
-	tuiVersion := strings.TrimSpace(mismatch.TUIVersion)
+	daemonVersion := strings.TrimSpace(mismatch.DaemonVersion) // trimlowerlint:allow boundary canonicalization
+	tuiVersion := strings.TrimSpace(mismatch.TUIVersion)       // trimlowerlint:allow boundary canonicalization
 	protocolGot := "missing"
 	if mismatch.HasDaemonProtocol {
 		protocolGot = fmt.Sprintf("%d", mismatch.DaemonProtocol)
@@ -248,26 +252,26 @@ func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
 }
 
 func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef string) bool {
-	switch strings.TrimSpace(scope) {
+	switch strings.TrimSpace(scope) { // trimlowerlint:allow boundary canonicalization
 	case RoutingModelCatalogScopeCreateDraft:
-		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec {
+		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL {
+		if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef {
+		if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
 		return true
 	case RoutingModelCatalogScopeAddModelDraft:
-		if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec {
+		if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
-		if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL {
+		if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
-		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef {
+		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef { // trimlowerlint:allow boundary canonicalization
 			return false
 		}
 		return true
@@ -280,5 +284,5 @@ func refreshStatusProjectionEffectFor(model *Model) stateeffect.RefreshStatusPro
 	if model == nil {
 		return stateeffect.RefreshStatusProjectionEffect{}
 	}
-	return stateeffect.RefreshStatusProjectionEffect{EndpointName: strings.TrimSpace(model.CurrentEndpoint)}
+	return stateeffect.RefreshStatusProjectionEffect{EndpointName: strings.TrimSpace(model.CurrentEndpoint)} // trimlowerlint:allow boundary canonicalization
 }

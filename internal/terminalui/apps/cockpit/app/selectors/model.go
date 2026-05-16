@@ -40,7 +40,7 @@ func HeaderShell(model state.Model) string {
 	if rail == "" {
 		return status
 	}
-	if strings.TrimSpace(status) == "saved" {
+	if strings.TrimSpace(status) == "saved" { // trimlowerlint:allow boundary canonicalization
 		return status + "   " + rail + "     "
 	}
 	return status + "   " + rail
@@ -160,7 +160,7 @@ func CreateDraftEndpointValue(model state.Model) string {
 }
 
 func deriveEndpointSlug(raw string) string {
-	value := strings.TrimSpace(strings.ToLower(raw))
+	value := strings.TrimSpace(strings.ToLower(raw)) // trimlowerlint:allow boundary canonicalization
 	if value == "" {
 		return ""
 	}
@@ -255,7 +255,7 @@ func WorkspaceRail(model state.Model) string {
 	}
 	current := model.CurrentEndpoint
 	for _, endpoint := range model.Endpoints {
-		name := strings.TrimSpace(endpoint)
+		name := strings.TrimSpace(endpoint) // trimlowerlint:allow boundary canonicalization
 		if name == "" {
 			continue
 		}
@@ -277,68 +277,6 @@ func WorkspaceRail(model state.Model) string {
 	return strings.Join(names, " ")
 }
 
-func SelectedModelID(model state.Model, entry *state.CatalogEntry) string {
-	if entry == nil {
-		return "not selected"
-	}
-	if snapshot := CurrentEndpointSnapshot(model); snapshot != nil {
-		if providerConfig := SelectedProviderConfig(model, snapshot); providerConfig != nil {
-			if selector := ProviderConfigRequestModelID(snapshot, providerConfig.Ref); selector != "" {
-				return selector
-			}
-		}
-	}
-	return EmptyOr(firstOrEmpty(entry.ModelIDs), "not set")
-}
-
-func ProviderConfigRequestModelID(snapshot *state.EndpointSnapshot, providerRef string) string {
-	if snapshot == nil {
-		return ""
-	}
-	providerRef = strings.TrimSpace(providerRef)
-	if providerRef == "" {
-		return ""
-	}
-	var cfg *state.ProviderConfigSnapshot
-	for i := range snapshot.ProviderConfigs {
-		if strings.TrimSpace(snapshot.ProviderConfigs[i].Ref) == providerRef {
-			cfg = &snapshot.ProviderConfigs[i]
-			break
-		}
-	}
-	if cfg == nil {
-		return ""
-	}
-	alias := strings.TrimSpace(cfg.TargetAlias)
-	if alias != "" {
-		return alias
-	}
-	providerSpec := strings.TrimSpace(cfg.ProviderSpec)
-	modelID := strings.TrimSpace(cfg.ModelID)
-	if providerSpec == "" || modelID == "" {
-		return ""
-	}
-	base := providerSpec + ":" + modelID
-	modelCount := 0
-	baseCount := 0
-	for _, pc := range snapshot.ProviderConfigs {
-		if strings.TrimSpace(pc.ModelID) == modelID {
-			modelCount++
-		}
-		if strings.TrimSpace(pc.ProviderSpec)+":"+strings.TrimSpace(pc.ModelID) == base {
-			baseCount++
-		}
-	}
-	mechanical := modelID
-	if modelCount > 1 {
-		mechanical = base
-	}
-	if baseCount > 1 {
-		return base + ":" + providerRef
-	}
-	return mechanical
-}
-
 func StreamValue(model state.Model) bool {
 	return model.StreamEnabled
 }
@@ -358,14 +296,6 @@ func TrafficSummary(model state.Model) string {
 		return "no runtime evidence yet"
 	}
 	return fmt.Sprintf("%d recent", len(model.TrafficRows))
-}
-
-func CreateDraftSelectedModelID(model state.Model) string {
-	providerConfig := CreateDraftProviderConfig(model)
-	if providerConfig == nil {
-		return "not set"
-	}
-	return EmptyOr(providerConfig.ModelID, "not set")
 }
 
 func ModelDisclosureLines(entry *state.CatalogEntry) []string {

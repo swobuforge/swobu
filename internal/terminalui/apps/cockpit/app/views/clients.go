@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -32,7 +33,7 @@ func BuildClientsSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 	if spec, ok := maybeStaticClientsSection(ctx, model); ok {
 		return spec
 	}
-	baseURL := strings.TrimSpace(selectors.ClientBaseURL(model))
+	baseURL := strings.TrimSpace(selectors.ClientBaseURL(model)) // trimlowerlint:allow boundary canonicalization
 	profiles := clientprofile.Catalog()
 	local := bindClientsSectionState(ctx)
 	selected := selectedClientProfile(profiles, local.selectedClientID)
@@ -317,7 +318,7 @@ func activateClientAction(model state.Model, action clientprofile.Action, action
 			})
 		}
 	case "copy":
-		copyValue := strings.TrimSpace(action.Content)
+		copyValue := strings.TrimSpace(action.Content) // trimlowerlint:allow boundary canonicalization
 		if copyValue != "" {
 			actions = append(actions, state.ClientBaseURLCopyRequested{Value: copyValue})
 		}
@@ -333,8 +334,8 @@ func selectedClientRunModelID(model state.Model) string {
 	if snapshot == nil {
 		return ""
 	}
-	if strings.TrimSpace(snapshot.Name) == "" {
+	if strings.TrimSpace(snapshot.Name) == "" { // trimlowerlint:allow boundary canonicalization
 		return ""
 	}
-	return "primary"
+	return requestpath.PublicModelIDSwobu
 }

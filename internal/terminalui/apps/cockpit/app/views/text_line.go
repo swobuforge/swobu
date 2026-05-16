@@ -9,7 +9,7 @@ import (
 
 // StaticTextLine renders one non-focusable line.
 func StaticTextLine[M any](text string) retained.ViewSpec[M] {
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(text) // trimlowerlint:allow boundary canonicalization
 	return retained.FromRenderNode[M](toolkitviews.NewAction(toolkitviews.RuneLen(text), false, false, func(_ bool, width int) string {
 		return toolkitviews.PadRight(toolkitviews.TrimToWidth(text, width), width)
 	}, nil, nil))

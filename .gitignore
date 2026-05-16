@@ -1,3 +1,9 @@
 dist
 .out
 .aider*
+
+# Local scratch/repro files used during iterative debugging.
+.tmp_*.go
+
+# Generated cockpit wireframe artifacts; source wireframes live outside .artifacts.
+internal/terminalui/apps/cockpit/app/views/root/testdata/wireframes/.artifacts/

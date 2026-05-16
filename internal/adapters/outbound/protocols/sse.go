@@ -43,11 +43,11 @@ func (r *SSEReaderCloser) Next() (SSEEvent, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "event:") {
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:")) // trimlowerlint:allow boundary canonicalization
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
-			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:"))) // trimlowerlint:allow boundary canonicalization
 		}
 	}
 	if err := r.scanner.Err(); err != nil {

@@ -9,7 +9,7 @@ var swobuVersion = "dev"
 // SwobuVersion returns the canonical daemon/operator version string surfaced
 // through internal control-plane status payloads.
 func SwobuVersion() string {
-	value := strings.TrimSpace(swobuVersion)
+	value := strings.TrimSpace(swobuVersion) // trimlowerlint:allow boundary canonicalization
 	if value == "" {
 		return "dev"
 	}

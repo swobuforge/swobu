@@ -43,8 +43,7 @@ func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing
 
 func TestRunner_InteractiveShowsNoticeBeforeAttachOrStart(t *testing.T) {
 	t.Setenv(platformconfig.EnvSkipVersionNotice, "1")
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -105,8 +104,7 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 
 func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
 	t.Setenv(platformconfig.EnvSkipVersionNotice, "1")
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
 	runner := Runner{

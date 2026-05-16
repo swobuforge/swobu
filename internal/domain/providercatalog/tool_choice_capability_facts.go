@@ -1,6 +1,10 @@
 package providercatalog
 
-import "github.com/swobuforge/swobu/internal/domain/protocolsurface"
+import (
+	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+)
 
 // ToolChoiceCapabilityFact declares one provider/model/protocol capability fact
 // for tool-choice policy behavior.
@@ -11,7 +15,7 @@ import "github.com/swobuforge/swobu/internal/domain/protocolsurface"
 // policy behavior. Add new fields only with a concrete downstream consumer.
 type ToolChoiceCapabilityFact struct {
 	ProviderSpec            string
-	ProtocolKind            protocolsurface.Kind
+	ProtocolKind            protocolkind.ProtocolKind
 	ModelID                 string
 	ImmediateDowngradeRetry bool
 }
@@ -22,14 +26,14 @@ func ToolChoiceCapabilityFacts() []ToolChoiceCapabilityFact {
 	out := make([]ToolChoiceCapabilityFact, 0, len(catalog())+4)
 
 	// Baseline: responses protocol supports strict->auto immediate downgrade
-	// retry across provider specs that expose responses protocol in catalog.
+	// retry across OpenAI-compatible adapters.
 	for _, profile := range catalog() {
-		if !supportsProtocol(profile.SupportedEgressProtocols, protocolsurface.Responses) {
+		if strings.EqualFold(string(profile.ProviderID), "anthropic") {
 			continue
 		}
 		out = append(out, ToolChoiceCapabilityFact{
-			ProviderSpec:            profile.ProviderID,
-			ProtocolKind:            protocolsurface.Responses,
+			ProviderSpec:            string(profile.ProviderID),
+			ProtocolKind:            protocolkind.Responses,
 			ModelID:                 "*",
 			ImmediateDowngradeRetry: true,
 		})
@@ -41,26 +45,17 @@ func ToolChoiceCapabilityFacts() []ToolChoiceCapabilityFact {
 	out = append(out,
 		ToolChoiceCapabilityFact{
 			ProviderSpec:            "openrouter",
-			ProtocolKind:            protocolsurface.ChatCompletions,
+			ProtocolKind:            protocolkind.ChatCompletions,
 			ModelID:                 "nvidia/nemotron-3-super-120b-a12b",
 			ImmediateDowngradeRetry: true,
 		},
 		ToolChoiceCapabilityFact{
 			ProviderSpec:            "openrouter",
-			ProtocolKind:            protocolsurface.ChatCompletions,
+			ProtocolKind:            protocolkind.ChatCompletions,
 			ModelID:                 "arcee-ai/trinity-large-preview:free",
 			ImmediateDowngradeRetry: true,
 		},
 	)
 
 	return out
-}
-
-func supportsProtocol(kinds []protocolsurface.Kind, target protocolsurface.Kind) bool {
-	for _, kind := range kinds {
-		if kind == target {
-			return true
-		}
-	}
-	return false
 }

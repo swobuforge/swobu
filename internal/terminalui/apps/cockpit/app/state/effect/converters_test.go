@@ -1,13 +1,12 @@
 package effect
 
 import (
-	"strings"
 	"testing"
 
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
-func TestArgsToProviderConfig_RejectsUnsupportedProviderProtocolTuple(t *testing.T) {
+func TestArgsToProviderConfig_IgnoresLegacyProtocolTupleInput(t *testing.T) {
 	t.Parallel()
 
 	_, err := argsToProviderConfig(stateModel.ProviderConfigSnapshot{
@@ -17,10 +16,7 @@ func TestArgsToProviderConfig_RejectsUnsupportedProviderProtocolTuple(t *testing
 		ModelID:       "claude-sonnet",
 		CredentialRef: "env:ANTHROPIC_API_KEY",
 	})
-	if err == nil {
-		t.Fatal("argsToProviderConfig returned nil error, want validation failure")
-	}
-	if !strings.Contains(err.Error(), `unsupported provider route "anthropic" + "chat_completions"`) {
-		t.Fatalf("error = %q, want unsupported provider route message", err.Error())
+	if err != nil {
+		t.Fatalf("argsToProviderConfig returned error: %v", err)
 	}
 }

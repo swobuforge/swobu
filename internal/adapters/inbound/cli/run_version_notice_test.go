@@ -19,8 +19,7 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
 	t.Cleanup(func() { fetchLatestVersion = originalFetch })
 
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv(platformconfig.EnvTelemetryStatePath, statePath)
+	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -160,8 +159,7 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 	fetchLatestVersion = func() (string, error) { return "", errors.New("timeout") }
 	t.Cleanup(func() { fetchLatestVersion = originalFetch })
 
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv(platformconfig.EnvTelemetryStatePath, statePath)
+	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -193,8 +191,7 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputFailsBeforeAttac
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
 	t.Cleanup(func() { fetchLatestVersion = originalFetch })
 
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv(platformconfig.EnvTelemetryStatePath, statePath)
+	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

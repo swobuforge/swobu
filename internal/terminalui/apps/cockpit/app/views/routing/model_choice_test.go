@@ -40,10 +40,10 @@ func TestProviderModelCatalogChoicesAvailable_CustomProviderUsesManualEditor(t *
 	spec := providerModelChoiceRowSpec{
 		CreateMode: false,
 		ProviderConfig: &state.ProviderConfigSnapshot{
-			ProviderSpec: "custom",
+			ProviderSpec: "openai_compatible",
 		},
 	}
 	if providerModelCatalogChoicesAvailable(spec) {
-		t.Fatalf("custom provider should use manual model editor")
+		t.Fatalf("OpenAI-compatible provider should use manual model editor")
 	}
 }

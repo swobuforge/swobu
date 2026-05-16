@@ -21,7 +21,7 @@ func TestRunner_DaemonHelp_PrintsConfigResolution(t *testing.T) {
 	}
 }
 
-func TestRunner_TelemetryStatusHelp_PrintsStatePathResolution(t *testing.T) {
+func TestRunner_TelemetryStatusHelp_DoesNotExposeStatePathKnobs(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	runner := Runner{Stdout: &stdout, Stderr: &stderr}
@@ -30,7 +30,7 @@ func TestRunner_TelemetryStatusHelp_PrintsStatePathResolution(t *testing.T) {
 	if exitCode != ExitHealthy {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
 	}
-	if !strings.Contains(stderr.String(), "telemetry state file path (env: SWOBU_TELEMETRY_STATE_PATH) (default:") {
-		t.Fatalf("telemetry status help missing env/default metadata; stderr=%q", stderr.String())
+	if strings.Contains(stderr.String(), "state-path") {
+		t.Fatalf("telemetry status help exposes deprecated state path override; stderr=%q", stderr.String())
 	}
 }

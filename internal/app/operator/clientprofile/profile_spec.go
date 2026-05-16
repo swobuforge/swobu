@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 )
 
 // TemplateVars carries string substitutions for profile spec templates.
@@ -72,7 +72,7 @@ func buildTemplateVars(baseURL string, varsFn func(baseURL string) TemplateVars)
 }
 
 func renderTemplate(raw string, vars TemplateVars) string {
-	if strings.TrimSpace(raw) == "" || len(vars) == 0 {
+	if strings.TrimSpace(raw) == "" || len(vars) == 0 { // trimlowerlint:allow boundary canonicalization
 		return raw
 	}
 	keys := make([]string, 0, len(vars))
@@ -91,10 +91,10 @@ func renderTemplate(raw string, vars TemplateVars) string {
 }
 
 func defaultTemplateVars(baseURL string) TemplateVars {
-	base := strings.TrimSpace(baseURL)
+	base := strings.TrimSpace(baseURL) // trimlowerlint:allow boundary canonicalization
 	return TemplateVars{
 		"base_url":        base,
 		"openai_base_url": openAIBaseURL(base),
-		"primary_model":   compatibility.PrimaryTargetSelector,
+		"primary_model":   requestpath.PublicModelIDSwobu,
 	}
 }

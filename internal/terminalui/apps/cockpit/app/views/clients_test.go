@@ -3,11 +3,11 @@ package views
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
-func TestSelectedClientRunModelID_AlwaysUsesPrimarySelector(t *testing.T) {
+func TestSelectedClientRunModelID_AlwaysUsesPublicSwobuModel(t *testing.T) {
 	model := state.Model{
 		CurrentEndpoint: "alpha",
 		EndpointSnapshots: []state.EndpointSnapshot{
@@ -25,8 +25,8 @@ func TestSelectedClientRunModelID_AlwaysUsesPrimarySelector(t *testing.T) {
 			},
 		},
 	}
-	if got := selectedClientRunModelID(model); got != compatibility.PrimaryTargetSelector {
-		t.Fatalf("run model id = %q, want %q", got, compatibility.PrimaryTargetSelector)
+	if got := selectedClientRunModelID(model); got != requestpath.PublicModelIDSwobu {
+		t.Fatalf("run model id = %q, want %q", got, requestpath.PublicModelIDSwobu)
 	}
 }
 

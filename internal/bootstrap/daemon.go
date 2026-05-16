@@ -67,11 +67,12 @@ var daemonIdleTimeout = 60 * time.Second
 // StartInput collects the one runtime config path plus the dependencies
 // bootstrap must wire into the live request path.
 type StartInput struct {
-	ConfigPath string
-	Providers  ports.ProviderExecutor
-	Evidence   ports.RequestEvidenceSink
-	Continuity ports.ResponseContinuityStore
-	Logger     *slog.Logger
+	ConfigPath   string
+	Providers    ports.ProviderExecutor
+	ModelCatalog ports.ProviderModelCatalog
+	Evidence     ports.RequestEvidenceSink
+	Continuity   ports.ResponseContinuityStore
+	Logger       *slog.Logger
 }
 
 // operator routes, and request-path dependencies in one bootstrap flow.
@@ -99,11 +100,26 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		},
 	}
 
+	if (in.Providers == nil) != (in.ModelCatalog == nil) {
+		return nil, fmt.Errorf("provider services must be wired together: providers and model catalog must both be set or both be nil")
+	}
+
 	providers := in.Providers
+	modelCatalog := in.ModelCatalog
+	authCredentialWritePolicy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
+	logger.Info("auth credential policy resolved",
+		"component", "daemon",
+		"write_policy", string(authCredentialWritePolicy),
+	)
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		providers = providersadapter.NewExecutor(newProviderHTTPClient(), credentialsadapter.NewResolver())
+		services := providersadapter.NewServices(
+			newProviderHTTPClient(),
+			credentialsadapter.NewResolver(),
+		)
+		providers = services.Execution
+		modelCatalog = services.ModelCatalog
 	}
 	evidence := in.Evidence
 	if evidence == nil {
@@ -150,14 +166,12 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		}()
 		return nil
 	}))
-	if catalog, ok := providers.(ports.ProviderModelCatalog); ok {
-		mux.Handle("/_swobu/model-catalog/probe", httpapi.NewModelCatalogProbeHandler(catalog))
-	}
+	mux.Handle("/_swobu/model-catalog/probe", httpapi.NewModelCatalogProbeHandler(modelCatalog))
 	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
 		PublicBaseURL: daemonPublicBaseURLFromBindAddr(cfg.BindAddr),
-		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) error {
-			return credentialsadapter.StoreKeychainCredential(providerSpec, keyName, secret)
+		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) (string, error) {
+			return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
 		}),
 	})
 	authDriver, err := authplane.NewChatGPTMethodDriver(chatGPTLogin)
@@ -256,18 +270,18 @@ func newProviderHTTPClient() *http.Client {
 }
 
 func daemonPublicBaseURLFromBindAddr(bindAddr string) string {
-	addr := strings.TrimSpace(bindAddr)
+	addr := strings.TrimSpace(bindAddr) // trimlowerlint:allow boundary canonicalization
 	if addr == "" {
 		return "http://127.0.0.1:7926"
 	}
-	if strings.HasPrefix(strings.ToLower(addr), "http://") || strings.HasPrefix(strings.ToLower(addr), "https://") {
+	if strings.HasPrefix(strings.ToLower(addr), "http://") || strings.HasPrefix(strings.ToLower(addr), "https://") { // trimlowerlint:allow boundary canonicalization
 		return strings.TrimRight(addr, "/")
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "http://127.0.0.1:7926"
 	}
-	host = strings.TrimSpace(host)
+	host = strings.TrimSpace(host) // trimlowerlint:allow boundary canonicalization
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}

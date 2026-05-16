@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestDecodeResponsesToolMode_KnownValues(t *testing.T) {
@@ -14,22 +15,22 @@ func TestDecodeResponsesToolMode_KnownValues(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
-		want compatibility.ToolMode
+		want canonical.ToolMode
 	}{
-		{name: "empty", raw: "", want: compatibility.ToolModeDefault},
-		{name: "null", raw: "null", want: compatibility.ToolModeDefault},
-		{name: "string none", raw: `"none"`, want: compatibility.ToolModeDefault},
-		{name: "string auto", raw: `"auto"`, want: compatibility.ToolModeAuto},
-		{name: "string required", raw: `"required"`, want: compatibility.ToolModeRequired},
-		{name: "object auto", raw: `{"type":"auto"}`, want: compatibility.ToolModeAuto},
-		{name: "object required", raw: `{"type":"required"}`, want: compatibility.ToolModeRequired},
-		{name: "object function", raw: `{"type":"function","name":"grep"}`, want: compatibility.ToolModeRequired},
+		{name: "empty", raw: "", want: canonical.ToolModeDefault},
+		{name: "null", raw: "null", want: canonical.ToolModeDefault},
+		{name: "string none", raw: `"none"`, want: canonical.ToolModeDefault},
+		{name: "string auto", raw: `"auto"`, want: canonical.ToolModeAuto},
+		{name: "string required", raw: `"required"`, want: canonical.ToolModeRequired},
+		{name: "object auto", raw: `{"type":"auto"}`, want: canonical.ToolModeAuto},
+		{name: "object required", raw: `{"type":"required"}`, want: canonical.ToolModeRequired},
+		{name: "object function", raw: `{"type":"function","name":"grep"}`, want: canonical.ToolModeRequired},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := decodeResponsesToolMode(rawJSON(tc.raw))
+			got, err := responses.DecodeResponsesToolMode(rawJSON(tc.raw))
 			if err != nil {
 				t.Fatalf("decodeResponsesToolMode returned error: %v", err)
 			}
@@ -50,12 +51,12 @@ func TestDecodeResponsesToolMode_UnknownValuesDowngradeToDefault(t *testing.T) {
 		`{"type":""}`,
 		`{}`,
 	} {
-		got, err := decodeResponsesToolMode(rawJSON(raw))
+		got, err := responses.DecodeResponsesToolMode(rawJSON(raw))
 		if err != nil {
 			t.Fatalf("raw=%s decodeResponsesToolMode returned error: %v", raw, err)
 		}
-		if got != compatibility.ToolModeDefault {
-			t.Fatalf("raw=%s tool mode = %q, want %q", raw, got, compatibility.ToolModeDefault)
+		if got != canonical.ToolModeDefault {
+			t.Fatalf("raw=%s tool mode = %q, want %q", raw, got, canonical.ToolModeDefault)
 		}
 	}
 }
@@ -71,7 +72,7 @@ func TestDecodeResponsesToolMode_InvalidShapesFailBadRequest(t *testing.T) {
 		`{"type":[]}`,
 		`{`,
 	} {
-		_, err := decodeResponsesToolMode(rawJSON(raw))
+		_, err := responses.DecodeResponsesToolMode(rawJSON(raw))
 		if !isBadRequestError(err) {
 			t.Fatalf("raw=%s err=%v, want BAD_REQUEST", raw, err)
 		}
@@ -86,6 +87,6 @@ func rawJSON(raw string) json.RawMessage {
 }
 
 func isBadRequestError(err error) bool {
-	var typed compatibility.Error
-	return errors.As(err, &typed) && typed.Code == compatibility.ErrorCodeBadRequest
+	var typed canonical.Error
+	return errors.As(err, &typed) && typed.Code == canonical.ErrorCodeBadRequest
 }

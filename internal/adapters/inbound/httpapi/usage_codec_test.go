@@ -4,19 +4,22 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	chatcompletions "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/chat_completions"
+	messages "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/messages"
+	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestChatCompletionsCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 100, 7, 64, 5)
-	output := compatibility.NewConversationOutputWithUsage(
+	output := canonical.NewConversationOutputWithUsage(
 		"chatcmpl_1",
 		"m",
-		[]compatibility.CanonicalItem{compatibility.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
 		"stop",
 		usage,
 	)
-	raw, err := (chatCompletionsFamilyCodec{}).encodeBuffered(output)
+	raw, err := (chatcompletions.ChatCompletionsCodec{}).EncodeBuffered(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -32,14 +35,14 @@ func TestChatCompletionsCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 
 func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 80, 9, 33, 2)
-	output := compatibility.NewConversationOutputWithUsage(
+	output := canonical.NewConversationOutputWithUsage(
 		"resp_1",
 		"m",
-		[]compatibility.CanonicalItem{compatibility.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
 		"completed",
 		usage,
 	)
-	raw, err := (responsesFamilyCodec{}).encodeBuffered(output)
+	raw, err := (responses.ResponsesCodec{}).EncodeBuffered(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -56,18 +59,18 @@ func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
 	input, output := 12, 3
 	cacheRead, cacheWrite := 0, 0
-	usage, err := compatibility.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
+	usage, err := canonical.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
-	outputValue := compatibility.NewConversationOutputWithUsage(
+	outputValue := canonical.NewConversationOutputWithUsage(
 		"resp_compat",
 		"m",
-		[]compatibility.CanonicalItem{compatibility.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
 		"completed",
 		usage,
 	)
-	raw, err := (responsesFamilyCodec{}).encodeBuffered(outputValue)
+	raw, err := (responses.ResponsesCodec{}).EncodeBuffered(outputValue)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -80,14 +83,14 @@ func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPrese
 
 func TestMessagesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 51, 4, 20, 10)
-	output := compatibility.NewConversationOutputWithUsage(
+	output := canonical.NewConversationOutputWithUsage(
 		"msg_1",
 		"claude",
-		[]compatibility.CanonicalItem{compatibility.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
 		"end_turn",
 		usage,
 	)
-	raw, err := (messagesFamilyCodec{}).encodeBuffered(output)
+	raw, err := (messages.MessagesCodec{}).EncodeBuffered(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -101,9 +104,9 @@ func TestMessagesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.cache_creation_input_tokens", 10)
 }
 
-func mustUsage(t *testing.T, input, output, cacheRead, cacheWrite int) compatibility.TokenUsage {
+func mustUsage(t *testing.T, input, output, cacheRead, cacheWrite int) canonical.TokenUsage {
 	t.Helper()
-	usage, err := compatibility.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
+	usage, err := canonical.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}

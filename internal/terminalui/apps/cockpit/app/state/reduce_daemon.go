@@ -31,7 +31,7 @@ func allowWhileControlPlaneIncompatible(action update.Action) bool {
 func reduceDaemonState(model *Model, action update.Action) bool {
 	switch value := action.(type) {
 	case stateeffect.ControlPlaneIncompatibleDetected:
-		reason := strings.TrimSpace(value.Reason)
+		reason := strings.TrimSpace(value.Reason) // trimlowerlint:allow boundary canonicalization
 		if reason == "" {
 			reason = "control-plane protocol mismatch"
 		}
@@ -39,8 +39,8 @@ func reduceDaemonState(model *Model, action update.Action) bool {
 			ExpectedProtocol:  value.ExpectedProtocol,
 			DaemonProtocol:    value.DaemonProtocol,
 			HasDaemonProtocol: value.HasDaemonProtocol,
-			TUIVersion:        strings.TrimSpace(value.TUIVersion),
-			DaemonVersion:     strings.TrimSpace(value.DaemonVersion),
+			TUIVersion:        strings.TrimSpace(value.TUIVersion),    // trimlowerlint:allow boundary canonicalization
+			DaemonVersion:     strings.TrimSpace(value.DaemonVersion), // trimlowerlint:allow boundary canonicalization
 			Reason:            reason,
 			RecoveryCommand:   "restart daemon",
 			Note:              "",
@@ -63,7 +63,7 @@ func reduceDaemonState(model *Model, action update.Action) bool {
 		model.HeaderStatus = daemonstate.HeaderReady
 		model.DaemonHint = ""
 		model.FooterShowTabs = true
-		switch strings.TrimSpace(value.State) {
+		switch strings.TrimSpace(value.State) { // trimlowerlint:allow boundary canonicalization
 		case "healthy":
 			model.DaemonState = daemonstate.DaemonStateUp
 		case "uninitialized":
@@ -80,13 +80,13 @@ func reduceDaemonState(model *Model, action update.Action) bool {
 			model.HeaderStatus = "incompatible"
 			model.DaemonState = "incompatible"
 			model.DaemonHint = "daemon mismatch"
-			model.ControlPlane.Note = strings.TrimSpace(value.Message)
+			model.ControlPlane.Note = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
 			model.ControlPlane.NoteAction = ""
 			return true
 		}
 		model.HeaderStatus = daemonstate.HeaderOfflineStale
 		model.DaemonState = daemonstate.DaemonStateUnreachable
-		model.DaemonHint = strings.TrimSpace(value.Message)
+		model.DaemonHint = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
 		return true
 	default:
 		return false

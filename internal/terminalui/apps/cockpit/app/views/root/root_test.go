@@ -7,6 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/loop"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
@@ -590,9 +591,6 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 	out := chooseCredential("env")
 	assertVisualByKey(t, out, "env_selected")
 
-	out = chooseCredential("keychain")
-	assertVisualByKey(t, out, "keychain_selected")
-
 	out = chooseCredential("file")
 	assertVisualByKey(t, out, "file_selected")
 
@@ -670,14 +668,14 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 		EndpointSnapshots: []state.EndpointSnapshot{
 			{
 				Name:                      "acme",
-				SelectedProviderConfigRef: "openai:gpt-5.3",
+				SelectedProviderConfigRef: "chatgpt:gpt-5.3-codex:model-1",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:           "openai:gpt-5.3",
-						ProviderSpec:  "openai",
-						ModelID:       "gpt-5.3",
+						Ref:           "chatgpt:gpt-5.3-codex:model-1",
+						ProviderSpec:  "chatgpt",
+						ModelID:       "gpt-5.3-codex",
 						ProtocolKind:  "chat_completions",
-						CredentialRef: "env:OPENAI_API_KEY",
+						CredentialRef: "chatgpt_login",
 					},
 				},
 			},
@@ -694,12 +692,23 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
-	focusRowContaining(t, rt, viewport, "add model")
+	focusRowContaining(t, rt, viewport, "gpt-5.3-codex")
+	// The selected-summary row is read-only; model properties open from the model row.
+	rt.DispatchEvent(updateKey(interaction.KeyDown))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "gpt-5.3-c")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	assertVisualByKey(t, out, "alias_row_gated")
+	assertVisualByKey(t, out, "alias_row_closed")
+
+	focusRowContaining(t, rt, viewport, "alias")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	out = rt.Render(viewport).String()
+	assertVisualByKey(t, out, "alias_row_inline_open")
 }
 
 func TestRoot_FirstRunRunOnChooser_IncludesChatGPT(t *testing.T) {
@@ -840,7 +849,8 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 					BaseURL:       "https://api.openai.com/v1",
 					CredentialRef: "chatgpt_device_auth",
 				},
-				AuthSubject:  "subject:acme#model-2",
+				AuthScope:    stateModel.AuthScopeEndpointProvider,
+				OwnerKey:     stateModel.AddModelDraftAuthOwnerKey("acme", "model-2").String(),
 				SessionID:    "sess-1",
 				AuthorizeURL: "https://chatgpt.com/activate",
 				UserCode:     "VBMS-V2R4K",
@@ -868,7 +878,8 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 					BaseURL:       "https://api.openai.com/v1",
 					CredentialRef: "chatgpt_login",
 				},
-				AuthSubject:   "subject:acme#model-2",
+				AuthScope:     stateModel.AuthScopeEndpointProvider,
+				OwnerKey:      stateModel.AddModelDraftAuthOwnerKey("acme", "model-2").String(),
 				CredentialRef: "keychain:chatgpt/default",
 			},
 		})
@@ -1143,15 +1154,15 @@ func TestRoot_FirstRunRoutingCredentialChooserMatrix(t *testing.T) {
 			chooser:  false,
 		},
 		{
-			name:     "custom remote requires chooser",
-			provider: "custom",
+			name:     "OpenAI-compatible remote requires chooser",
+			provider: "openai_compatible",
 			baseURL:  "https://api.example.com/v1",
 			summary:  "choose a key source",
 			chooser:  true,
 		},
 		{
-			name:     "custom local hides chooser",
-			provider: "custom",
+			name:     "OpenAI-compatible local hides chooser",
+			provider: "openai_compatible",
 			baseURL:  "http://localhost:11434/v1",
 			summary:  "not required",
 			chooser:  false,

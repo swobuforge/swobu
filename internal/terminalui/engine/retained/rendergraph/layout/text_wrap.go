@@ -10,7 +10,7 @@ import (
 // Blank lines return nil so callers can skip rendering empty rows.
 func WrapLinePreserveIndent(line string, width int) []string {
 	line = strings.TrimRight(line, " \t")
-	if strings.TrimSpace(line) == "" {
+	if strings.TrimSpace(line) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	if width <= 0 || textmetrics.Width(line) <= width {
@@ -18,7 +18,7 @@ func WrapLinePreserveIndent(line string, width int) []string {
 	}
 	leading := line[:len(line)-len(strings.TrimLeft(line, " "))]
 	content := strings.TrimLeft(line, " ")
-	if strings.TrimSpace(content) == "" {
+	if strings.TrimSpace(content) == "" { // trimlowerlint:allow boundary canonicalization
 		return []string{line}
 	}
 	usable := width - textmetrics.Width(leading)

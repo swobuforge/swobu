@@ -5,13 +5,13 @@ import "fmt"
 type ResultClass string
 
 const (
-	ResultClassInProgress              ResultClass = "in_progress"
-	ResultClassSuccess                 ResultClass = "success"
-	ResultClassSwobuError              ResultClass = "swobu_error"
-	ResultClassBackendError            ResultClass = "backend_error"
-	ResultClassCancelled               ResultClass = "cancelled"
-	ResultClassUnsupportedOperation    ResultClass = "unsupported_operation"
-	ResultClassUnsupportedDeliveryMode ResultClass = "unsupported_delivery_mode"
+	ResultClassInProgress                 ResultClass = "in_progress"
+	ResultClassSuccess                    ResultClass = "success"
+	ResultClassSwobuError                 ResultClass = "swobu_error"
+	ResultClassBackendError               ResultClass = "backend_error"
+	ResultClassCancelled                  ResultClass = "cancelled"
+	ResultClassUnsupportedOperation       ResultClass = "unsupported_operation"
+	ResultClassUnsupportedDeliveryVariant ResultClass = "unsupported_delivery_variant"
 )
 
 func ParseResultClass(raw string) (ResultClass, error) {
@@ -22,7 +22,7 @@ func ParseResultClass(raw string) (ResultClass, error) {
 		ResultClassBackendError,
 		ResultClassCancelled,
 		ResultClassUnsupportedOperation,
-		ResultClassUnsupportedDeliveryMode:
+		ResultClassUnsupportedDeliveryVariant:
 		return value, nil
 	default:
 		return "", fmt.Errorf("unknown result class %q", raw)

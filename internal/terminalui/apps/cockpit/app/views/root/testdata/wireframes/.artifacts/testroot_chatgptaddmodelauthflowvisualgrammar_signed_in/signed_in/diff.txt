@@ -1,3 +1,3 @@
-line 1
-- SWOBU! 🧌                                                      login complete   [ ? ] [› acme] [ + ]
-+ SWOBU 🧌                                                       login complete   [ ? ] [› acme] [ + ]
+line 11
+-        gpt-3.5-turbo:231                                                                  edit ↵
++        openai:gpt-3.5-tu                                                                  edit ↵

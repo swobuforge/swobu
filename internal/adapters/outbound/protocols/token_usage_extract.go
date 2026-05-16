@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 type TokenUsagePathSpec struct {
@@ -16,21 +16,21 @@ type TokenUsagePathSpec struct {
 
 // ExtractTokenUsage reads provider token accounting from one raw payload using
 // fallback path candidates for each normalized counter.
-func ExtractTokenUsage(raw []byte, spec TokenUsagePathSpec) compatibility.TokenUsage {
+func ExtractTokenUsage(raw []byte, spec TokenUsagePathSpec) canonical.TokenUsage {
 	if len(raw) == 0 {
-		return compatibility.NewUnknownTokenUsage()
+		return canonical.NewUnknownTokenUsage()
 	}
 	var payload any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return compatibility.NewUnknownTokenUsage()
+		return canonical.NewUnknownTokenUsage()
 	}
 	input := findFirstInt(payload, spec.InputPaths)
 	output := findFirstInt(payload, spec.OutputPaths)
 	cacheRead := findFirstInt(payload, spec.CacheReadPaths)
 	cacheWrite := findFirstInt(payload, spec.CacheWritePaths)
-	usage, err := compatibility.NewTokenUsageWithOptional(input, output, cacheRead, cacheWrite)
+	usage, err := canonical.NewTokenUsageWithOptional(input, output, cacheRead, cacheWrite)
 	if err != nil {
-		return compatibility.NewUnknownTokenUsage()
+		return canonical.NewUnknownTokenUsage()
 	}
 	return usage
 }

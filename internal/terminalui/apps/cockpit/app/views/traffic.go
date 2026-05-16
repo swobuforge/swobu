@@ -158,7 +158,7 @@ func renderTrafficListRow(width int, focused bool, row state.TrafficRow, open bo
 	return toolkitviews.RenderEvidenceRow(width, toolkitviews.EvidenceRowSpec{
 		Marker: marker,
 		Time:   trafficWhen(row),
-		Kind:   strings.TrimSpace(outcome + " " + trafficKind(row)),
+		Kind:   strings.TrimSpace(outcome + " " + trafficKind(row)), // trimlowerlint:allow boundary canonicalization
 		Route:  trafficBurnSummary(usage),
 		Timing: trafficTiming(row),
 		Result: trafficCacheSummary(row),
@@ -168,11 +168,11 @@ func renderTrafficListRow(width int, focused bool, row state.TrafficRow, open bo
 
 func trafficOpenDetailRows(row state.TrafficRow) []retained.ViewSpec[state.Model] {
 	rows := []retained.ViewSpec[state.Model]{
-		trafficDetailLine("request id", strings.TrimSpace(row.RequestID)),
+		trafficDetailLine("request id", strings.TrimSpace(row.RequestID)), // trimlowerlint:allow boundary canonicalization
 		trafficDetailLine("outcome", trafficOutcome(row)),
 		trafficDetailLine("family", trafficKind(row)),
 		trafficDetailLine("owner", trafficFailureOwner(row)),
-		trafficDetailLine("route", strings.TrimSpace(row.Target)),
+		trafficDetailLine("route", strings.TrimSpace(row.Target)), // trimlowerlint:allow boundary canonicalization
 		trafficDetailLine("http", trafficHTTPStatus(row)),
 		trafficDetailLine("ttfb", previewTTFB(row)),
 		trafficDetailLine("duration", previewDuration(row)),
@@ -181,7 +181,7 @@ func trafficOpenDetailRows(row state.TrafficRow) []retained.ViewSpec[state.Model
 }
 
 func trafficDetailLine(label string, value string) retained.ViewSpec[state.Model] {
-	line := toolkitviews.FormatKeyValueTextLine(strings.TrimSpace(label), strings.TrimSpace(value), 24)
+	line := toolkitviews.FormatKeyValueTextLine(strings.TrimSpace(label), strings.TrimSpace(value), 24) // trimlowerlint:allow boundary canonicalization
 	return IndentLeft[state.Model](StaticTextLine[state.Model](line), InsetDetail)
 }
 

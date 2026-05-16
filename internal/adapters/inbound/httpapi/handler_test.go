@@ -13,7 +13,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/app/requestpath"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -42,21 +42,21 @@ func TestHandler_PropagatesRequestID(t *testing.T) {
 	if got := capturing.got.Provenance.ClientProtocol; got != "openai_compat" {
 		t.Fatalf("client protocol = %q, want %q", got, "openai_compat")
 	}
-	if got := capturing.got.Provenance.IngressFamily; got != compatibility.IngressFamilyChatCompletions {
-		t.Fatalf("ingress family = %q, want %q", got, compatibility.IngressFamilyChatCompletions)
+	if got := capturing.got.Provenance.IngressFamily; got != canonical.IngressFamilyChatCompletions {
+		t.Fatalf("ingress family = %q, want %q", got, canonical.IngressFamilyChatCompletions)
 	}
-	if got := capturing.got.Provenance.NormalizedOp; got != compatibility.NormalizedPathChatCompletions {
-		t.Fatalf("normalized op = %q, want %q", got, compatibility.NormalizedPathChatCompletions)
+	if got := capturing.got.Provenance.NormalizedOp; got != canonical.NormalizedPathChatCompletions {
+		t.Fatalf("normalized op = %q, want %q", got, canonical.NormalizedPathChatCompletions)
 	}
 }
 
 func TestHandler_ServesEndpointModels(t *testing.T) {
 	handler := NewHandler(&modelsCapableHandler{
 		modelsOut: requestpath.ListModelsOutput{
-			DefaultModelID: "custom:gpt-4o",
+			DefaultModelID: "openai_compatible:gpt-4o",
 			Models: []requestpath.ModelOption{
-				{ID: "custom:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "custom", BackendRef: "backend-a"},
-				{ID: "custom:gpt-4.1", ModelID: "gpt-4.1", ProviderSpec: "custom", BackendRef: "backend-b"},
+				{ID: "openai_compatible:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "openai_compatible", BackendRef: "backend-a"},
+				{ID: "openai_compatible:gpt-4.1", ModelID: "gpt-4.1", ProviderSpec: "openai_compatible", BackendRef: "backend-b"},
 			},
 		},
 	})
@@ -72,7 +72,7 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	if !strings.Contains(body, `"object":"list"`) {
 		t.Fatalf("body = %q, want list object", body)
 	}
-	if !strings.Contains(body, `"id":"custom:gpt-4o"`) {
+	if !strings.Contains(body, `"id":"openai_compatible:gpt-4o"`) {
 		t.Fatalf("body = %q, want model id", body)
 	}
 	if strings.Contains(body, `"swobu_model"`) || strings.Contains(body, `"swobu_default"`) || strings.Contains(body, `"swobu_backend"`) || strings.Contains(body, `"swobu_provider"`) {
@@ -83,8 +83,8 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 	handler := NewHandler(&modelsCapableHandler{
 		modelsOut: requestpath.ListModelsOutput{
-			DefaultModelID: "custom:gpt-4o",
-			Models:         []requestpath.ModelOption{{ID: "custom:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "custom", BackendRef: "backend-a"}},
+			DefaultModelID: "openai_compatible:gpt-4o",
+			Models:         []requestpath.ModelOption{{ID: "openai_compatible:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "openai_compatible", BackendRef: "backend-a"}},
 		},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/c/alpha/models", nil)
@@ -95,7 +95,7 @@ func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if !strings.Contains(rec.Body.String(), `"id":"custom:gpt-4o"`) {
+	if !strings.Contains(rec.Body.String(), `"id":"openai_compatible:gpt-4o"`) {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
 }
@@ -115,15 +115,15 @@ func TestHandler_RejectsNonGETModelsRequests(t *testing.T) {
 	}
 }
 
-func TestHandler_WritesModelResolutionHeaders(t *testing.T) {
-	resp := ports.NewBufferedExecuteResponse(
-		compatibility.NewConversationOutput(
+func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
+	resp := ports.NewBufferedProviderResponse(
+		canonical.NewConversationOutput(
 			"chatcmpl_1",
 			"resolved-model",
-			[]compatibility.OutputItem{compatibility.NewTextOutputItem("text_0", "ok")},
+			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
 			"stop",
 		),
-	).WithMetadata(ports.ExecuteMetadata{
+	).WithMetadata(ports.ProviderResponseMetadata{
 		ModelRequested:      "requested-model",
 		ModelResolved:       "resolved-model",
 		ModelResolutionMode: "default_unknown",
@@ -141,14 +141,10 @@ func TestHandler_WritesModelResolutionHeaders(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if got := rec.Header().Get("X-Swobu-Model-Requested"); got != "requested-model" {
-		t.Fatalf("requested model header = %q", got)
-	}
-	if got := rec.Header().Get("X-Swobu-Model-Resolved"); got != "resolved-model" {
-		t.Fatalf("resolved model header = %q", got)
-	}
-	if got := rec.Header().Get("X-Swobu-Model-Resolution"); got != "default_unknown" {
-		t.Fatalf("resolution header = %q", got)
+	for _, key := range []string{"X-Swobu-Model-Requested", "X-Swobu-Model-Resolved", "X-Swobu-Model-Resolution"} {
+		if got := rec.Header().Get(key); got != "" {
+			t.Fatalf("header %s = %q, want empty", key, got)
+		}
 	}
 }
 
@@ -169,31 +165,31 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed, ok := capturing.got.Request.(compatibility.DialogCanonicalRequest)
+	typed, ok := capturing.got.Request.(canonical.DialogCanonicalRequest)
 	if !ok {
-		t.Fatalf("request type = %T, want compatibility.DialogCanonicalRequest", capturing.got.Request)
+		t.Fatalf("request type = %T, want canonical.DialogCanonicalRequest", capturing.got.Request)
 	}
 	items := typed.Items()
 	if len(items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind; got != compatibility.ItemKindToolUse {
-		t.Fatalf("item kind = %q, want %q", got, compatibility.ItemKindToolUse)
+	if got := items[1].Kind; got != canonical.ItemKindToolUse {
+		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolUse)
 	}
-	if got := items[0].Author; got != compatibility.ItemAuthorAssistant {
-		t.Fatalf("author = %q, want %q", got, compatibility.ItemAuthorAssistant)
+	if got := items[0].Author; got != canonical.ItemAuthorAssistant {
+		t.Fatalf("author = %q, want %q", got, canonical.ItemAuthorAssistant)
 	}
-	if got := items[2].Kind; got != compatibility.ItemKindToolResult {
-		t.Fatalf("item kind = %q, want %q", got, compatibility.ItemKindToolResult)
+	if got := items[2].Kind; got != canonical.ItemKindToolResult {
+		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
 	}
 	if got := capturing.got.Provenance.ClientProtocol; got != "anthropic_compat" {
 		t.Fatalf("client protocol = %q, want %q", got, "anthropic_compat")
 	}
-	if got := capturing.got.Provenance.IngressFamily; got != compatibility.IngressFamilyMessages {
-		t.Fatalf("ingress family = %q, want %q", got, compatibility.IngressFamilyMessages)
+	if got := capturing.got.Provenance.IngressFamily; got != canonical.IngressFamilyMessages {
+		t.Fatalf("ingress family = %q, want %q", got, canonical.IngressFamilyMessages)
 	}
-	if got := capturing.got.Provenance.NormalizedOp; got != compatibility.NormalizedPathMessages {
-		t.Fatalf("normalized op = %q, want %q", got, compatibility.NormalizedPathMessages)
+	if got := capturing.got.Provenance.NormalizedOp; got != canonical.NormalizedPathMessages {
+		t.Fatalf("normalized op = %q, want %q", got, canonical.NormalizedPathMessages)
 	}
 }
 
@@ -248,9 +244,9 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed, ok := capturing.got.Request.(compatibility.GenerationCanonicalRequest)
+	typed, ok := capturing.got.Request.(canonical.GenerationCanonicalRequest)
 	if !ok {
-		t.Fatalf("request type = %T, want compatibility.GenerationCanonicalRequest", capturing.got.Request)
+		t.Fatalf("request type = %T, want canonical.GenerationCanonicalRequest", capturing.got.Request)
 	}
 	if got := typed.PreviousResponseID(); got != "resp_123" {
 		t.Fatalf("previous_response_id = %q, want %q", got, "resp_123")
@@ -262,11 +258,11 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("conversation len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind; got != compatibility.ItemKindToolUse {
-		t.Fatalf("item kind = %q, want %q", got, compatibility.ItemKindToolUse)
+	if got := items[1].Kind; got != canonical.ItemKindToolUse {
+		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolUse)
 	}
-	if got := items[2].Kind; got != compatibility.ItemKindToolResult {
-		t.Fatalf("item kind = %q, want %q", got, compatibility.ItemKindToolResult)
+	if got := items[2].Kind; got != canonical.ItemKindToolResult {
+		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
 	}
 }
 
@@ -281,12 +277,12 @@ func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolMode(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed, ok := capturing.got.Request.(compatibility.GenerationCanonicalRequest)
+	typed, ok := capturing.got.Request.(canonical.GenerationCanonicalRequest)
 	if !ok {
-		t.Fatalf("request type = %T, want compatibility.GenerationCanonicalRequest", capturing.got.Request)
+		t.Fatalf("request type = %T, want canonical.GenerationCanonicalRequest", capturing.got.Request)
 	}
-	if got := typed.ToolMode(); got != compatibility.ToolModeRequired {
-		t.Fatalf("tool mode = %q, want %q", got, compatibility.ToolModeRequired)
+	if got := typed.ToolMode(); got != canonical.ToolModeRequired {
+		t.Fatalf("tool mode = %q, want %q", got, canonical.ToolModeRequired)
 	}
 }
 
@@ -362,11 +358,7 @@ func TestHandler_RejectsWebSocketIngressWithGuidance(t *testing.T) {
 func TestHandler_AcceptsResponsesWebSocketIngress(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewStreamingExecuteResponse(compatibility.NewSliceEventStream([]compatibility.OutputEvent{
-				{Kind: compatibility.OutputEventStarted, ResultID: "resp_1", Model: "m"},
-				{Kind: compatibility.OutputEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-				{Kind: compatibility.OutputEventCompleted, FinishReason: "completed"},
-			})),
+			Response: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
 		},
 	})
 	server := httptest.NewServer(handler)
@@ -434,7 +426,7 @@ func TestHandler_AcceptsResponsesWebSocketIngress(t *testing.T) {
 func TestHandler_ResponsesWebSocketRejectsUnsupportedMessageType(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewStreamingExecuteResponse(compatibility.NewSliceEventStream(nil)),
+			Response: testStreamingEmptyResponse(),
 		},
 	})
 	server := httptest.NewServer(handler)
@@ -507,14 +499,7 @@ func TestHandler_RejectsUnsupportedAnthropicMessagePartType(t *testing.T) {
 func TestHandler_EncodesToolCallStreamingForResponses(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewStreamingExecuteResponse(compatibility.NewSliceEventStream([]compatibility.OutputEvent{
-				{Kind: compatibility.OutputEventStarted, ResultID: "resp_1", Model: "m"},
-				{Kind: compatibility.OutputEventItemStarted, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-				{Kind: compatibility.OutputEventToolUseArgumentsDelta, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TO"},
-				{Kind: compatibility.OutputEventToolUseArgumentsDelta, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "DO\"}"},
-				{Kind: compatibility.OutputEventItemCompleted, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-				{Kind: compatibility.OutputEventCompleted, FinishReason: "completed"},
-			})),
+			Response: testStreamingToolResponse("resp_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TO`, `DO"}`}, "completed"),
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
@@ -540,11 +525,7 @@ func TestHandler_EncodesToolCallStreamingForResponses(t *testing.T) {
 func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewStreamingExecuteResponse(compatibility.NewSliceEventStream([]compatibility.OutputEvent{
-				{Kind: compatibility.OutputEventStarted, ResultID: "resp_1", Model: "m"},
-				{Kind: compatibility.OutputEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-				{Kind: compatibility.OutputEventCompleted, FinishReason: "completed"},
-			})),
+			Response: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
@@ -579,13 +560,7 @@ func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
 func TestHandler_EncodesToolCallStreamingForMessages(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewStreamingExecuteResponse(compatibility.NewSliceEventStream([]compatibility.OutputEvent{
-				{Kind: compatibility.OutputEventStarted, ResultID: "msg_1", Model: "m"},
-				{Kind: compatibility.OutputEventItemStarted, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-				{Kind: compatibility.OutputEventToolUseArgumentsDelta, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
-				{Kind: compatibility.OutputEventItemCompleted, ItemKind: compatibility.OutputItemToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-				{Kind: compatibility.OutputEventCompleted, FinishReason: "tool_use"},
-			})),
+			Response: testStreamingToolResponse("msg_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TODO"}`}, "tool_use"),
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`))
@@ -616,17 +591,17 @@ type capturingRequestHandler struct {
 func (h *capturingRequestHandler) Handle(_ context.Context, in requestpath.HandleInput) (requestpath.HandleOutput, error) {
 	h.got = in
 	return requestpath.HandleOutput{
-		Response: ports.NewBufferedExecuteResponse(
-			compatibility.NewConversationOutput(
+		Response: ports.NewBufferedProviderResponse(
+			canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"m",
-				[]compatibility.OutputItem{
-					compatibility.NewTextOutputItem("text_0", "ok"),
+				[]canonical.OutputItem{
+					canonical.NewTextOutputItem("text_0", "ok"),
 				},
 				"stop",
 			),
 		),
-		Target: ports.NewRoutableTarget("backend-a", "custom", "https://example.test/v1", "cred-1", "chat_completions", "", ""),
+		Target: ports.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", ""),
 	}, nil
 }
 
@@ -639,6 +614,42 @@ func (h staticRequestHandler) Handle(_ context.Context, _ requestpath.HandleInpu
 	return h.out, h.err
 }
 
+func testStreamingEmptyResponse() ports.ProviderResponse {
+	return ports.NewEnvelopeStreamingProviderResponse(canonical.NewSliceEventReader(nil))
+}
+
+func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) ports.ProviderResponse {
+	events := []canonical.Event{
+		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
+		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
+		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventEnvelopeStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, Meta: canonical.EventMeta{NativeID: itemID}},
+		{ExchangeID: "test_exchange", Seq: 4, Kind: canonical.EventTextDelta, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.TextDeltaPayload{Text: text}},
+		{ExchangeID: "test_exchange", Seq: 5, Kind: canonical.EventEnvelopeEnd, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvMessage, Status: canonical.EnvelopeStatusCompleted}},
+		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
+		{ExchangeID: "test_exchange", Seq: 7, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
+	}
+	return ports.NewEnvelopeStreamingProviderResponse(canonical.NewSliceEventReader(events))
+}
+
+func testStreamingToolResponse(resultID string, model string, itemID string, toolUseID string, name string, argDeltas []string, finish string) ports.ProviderResponse {
+	events := []canonical.Event{
+		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
+		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
+		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventEnvelopeStart, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: name, ToolUseID: toolUseID}, Meta: canonical.EventMeta{NativeID: itemID}},
+	}
+	seq := int64(4)
+	for _, delta := range argDeltas {
+		events = append(events, canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventArgsDelta, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.ArgsDeltaPayload{Args: delta}})
+		seq++
+	}
+	events = append(events,
+		canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventEnvelopeEnd, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvToolCall, Status: canonical.EnvelopeStatusCompleted}},
+		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 1, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
+		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 2, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
+	)
+	return ports.NewEnvelopeStreamingProviderResponse(canonical.NewSliceEventReader(events))
+}
+
 type modelsCapableHandler struct {
 	modelsOut   requestpath.ListModelsOutput
 	modelsErr   error
@@ -647,12 +658,12 @@ type modelsCapableHandler struct {
 
 func (h *modelsCapableHandler) Handle(_ context.Context, _ requestpath.HandleInput) (requestpath.HandleOutput, error) {
 	return requestpath.HandleOutput{
-		Response: ports.NewBufferedExecuteResponse(
-			compatibility.NewConversationOutput(
+		Response: ports.NewBufferedProviderResponse(
+			canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"m",
-				[]compatibility.OutputItem{
-					compatibility.NewTextOutputItem("text_0", "ok"),
+				[]canonical.OutputItem{
+					canonical.NewTextOutputItem("text_0", "ok"),
 				},
 				"stop",
 			),

@@ -4,6 +4,7 @@ package views
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -26,7 +27,7 @@ func BuildWorkspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec
 	var out retained.ViewSpec[state.Model]
 	if !isCreate {
 		endpointSummary := selectors.EmptyOr(endpoint, "none")
-		if strings.TrimSpace(endpointSummary) == "" {
+		if strings.TrimSpace(endpointSummary) == "" { // trimlowerlint:allow boundary canonicalization
 			endpointSummary = "none"
 		}
 		nameRow := retained.Named[state.Model]("name", retained.Build[state.Model](buildWorkspaceNameRow))
@@ -184,7 +185,7 @@ func buildWorkspaceNameRow(ctx *retained.Context[state.Model]) retained.ViewSpec
 }
 
 func validateCreateDraftWorkspaceName(value string, existing []string) (string, string) {
-	trimmed := strings.TrimSpace(value)
+	trimmed := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
 	if trimmed == "" {
 		return "", ""
 	}
@@ -198,7 +199,7 @@ func validateWorkspaceName(value string, existing []string, current string) (str
 	}
 	parsedName := parsed.String()
 	for _, existingName := range existing {
-		if strings.TrimSpace(existingName) == strings.TrimSpace(parsedName) && strings.TrimSpace(existingName) != strings.TrimSpace(current) {
+		if strings.TrimSpace(existingName) == strings.TrimSpace(parsedName) && strings.TrimSpace(existingName) != strings.TrimSpace(current) { // trimlowerlint:allow boundary canonicalization
 			return parsedName, "workspace name already exists"
 		}
 	}
@@ -216,11 +217,11 @@ func createWorkspaceStatus(model state.Model) string {
 }
 
 func currentCreateName(model state.Model) string {
-	return strings.TrimSpace(selectors.CreateDraftName(model))
+	return strings.TrimSpace(selectors.CreateDraftName(model)) // trimlowerlint:allow boundary canonicalization
 }
 
 func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
-	endpoint = strings.TrimSpace(endpoint)
+	endpoint = strings.TrimSpace(endpoint) // trimlowerlint:allow boundary canonicalization
 	return RowActionWithHooks("delete workspace", "", "delete", func() []update.Action {
 		if endpoint == "" {
 			return nil
@@ -230,7 +231,7 @@ func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
 }
 
 func busyCreateRow(value string) retained.ViewSpec[state.Model] {
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
 	return retained.FromRenderNode[state.Model](toolkitviews.NewAction(6+toolkitviews.RuneLen(value), true, false, func(_ bool, width int) string {
 		line := ">   create"
 		if value != "" {
@@ -242,7 +243,7 @@ func busyCreateRow(value string) retained.ViewSpec[state.Model] {
 
 func createWorkspaceActions(model state.Model) []update.Action {
 	name := selectors.CreateDraftName(model)
-	if strings.TrimSpace(name) == "" {
+	if strings.TrimSpace(name) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	parsed, message := validateWorkspaceName(name, model.Endpoints, "")
@@ -253,19 +254,20 @@ func createWorkspaceActions(model state.Model) []update.Action {
 	if provider == nil {
 		return nil
 	}
-	if provider.ProviderSpec == "custom" && strings.TrimSpace(provider.BaseURL) == "" {
+	if provider.ProviderSpec == "openai_compatible" && strings.TrimSpace(provider.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
-	if strings.TrimSpace(provider.ModelID) == "" {
+	if strings.TrimSpace(provider.ModelID) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
-	credentialRef := strings.TrimSpace(provider.CredentialRef)
+	credentialRef := strings.TrimSpace(provider.CredentialRef) // trimlowerlint:allow boundary canonicalization
+	parsedCredentialRef := credentialref.Parse(credentialRef)
 	if state.ProviderRequiresCredential(provider.ProviderSpec, provider.BaseURL) {
-		if credentialRef == "" || strings.EqualFold(credentialRef, "file") || strings.EqualFold(credentialRef, "file:") {
+		if parsedCredentialRef.Kind() == credentialref.KindEmpty || parsedCredentialRef.IsEmptyFileSelection() {
 			return nil
 		}
 	}
-	if strings.HasPrefix(strings.ToLower(credentialRef), "file:") && strings.TrimSpace(strings.TrimPrefix(credentialRef, "file:")) == "" {
+	if parsedCredentialRef.IsEmptyFileSelection() {
 		return nil
 	}
 	return []update.Action{

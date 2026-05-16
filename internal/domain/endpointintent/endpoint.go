@@ -34,16 +34,7 @@ func NewEndpoint(
 	seenAlias := make(map[string]struct{}, len(configs))
 	seenProviderModelLiteral := make(map[string]struct{}, len(configs))
 	seenModelID := make(map[string]struct{}, len(configs))
-	providerModelCount := make(map[string]int, len(configs))
 	selectedFound := false
-	for _, providerConfig := range configs {
-		provider := strings.TrimSpace(providerConfig.ProviderSpec().String())
-		model := strings.TrimSpace(providerConfig.ModelID())
-		if provider != "" && model != "" {
-			providerModelCount[strings.ToLower(provider+":"+model)]++
-		}
-	}
-	seenMechanicalSelector := make(map[string]struct{}, len(configs))
 	for _, providerConfig := range configs {
 		ref := providerConfig.Ref().String()
 		if ref == "" {
@@ -53,21 +44,16 @@ func NewEndpoint(
 			return Endpoint{}, fmt.Errorf("%w: provider config ref must be unique", ErrInvalidEndpoint)
 		}
 		seen[ref] = struct{}{}
-		providerModelLiteral := strings.TrimSpace(providerConfig.ProviderSpec().String()) + ":" + strings.TrimSpace(providerConfig.ModelID())
-		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))
+		providerModelLiteral := strings.TrimSpace(providerConfig.ProviderSpec().String()) + ":" + strings.TrimSpace(providerConfig.ModelID()) // trimlowerlint:allow domain canonicalization
+		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))                                                        // trimlowerlint:allow domain canonicalization
 		if providerModelLiteral != ":" {
 			seenProviderModelLiteral[providerModelLiteral] = struct{}{}
-			mechanical := providerModelLiteral
-			if providerModelCount[providerModelLiteral] > 1 {
-				mechanical = providerModelLiteral + ":" + strings.ToLower(strings.TrimSpace(ref))
-			}
-			seenMechanicalSelector[mechanical] = struct{}{}
 		}
-		modelID := strings.ToLower(strings.TrimSpace(providerConfig.ModelID()))
+		modelID := strings.ToLower(strings.TrimSpace(providerConfig.ModelID())) // trimlowerlint:allow domain canonicalization
 		if modelID != "" {
 			seenModelID[modelID] = struct{}{}
 		}
-		alias := strings.ToLower(strings.TrimSpace(providerConfig.TargetAlias()))
+		alias := strings.ToLower(strings.TrimSpace(providerConfig.TargetAlias())) // trimlowerlint:allow domain canonicalization
 		if alias != "" {
 			if _, exists := seenAlias[alias]; exists {
 				return Endpoint{}, fmt.Errorf("%w: target alias must be unique per endpoint", ErrInvalidEndpoint)
@@ -81,9 +67,6 @@ func NewEndpoint(
 	for alias := range seenAlias {
 		if _, exists := seenProviderModelLiteral[alias]; exists {
 			return Endpoint{}, fmt.Errorf("%w: target alias must not collide with provider:model selectors", ErrInvalidEndpoint)
-		}
-		if _, exists := seenMechanicalSelector[alias]; exists {
-			return Endpoint{}, fmt.Errorf("%w: target alias must not collide with mechanical selectors", ErrInvalidEndpoint)
 		}
 		if _, exists := seenModelID[alias]; exists {
 			return Endpoint{}, fmt.Errorf("%w: target alias must not collide with model selectors", ErrInvalidEndpoint)

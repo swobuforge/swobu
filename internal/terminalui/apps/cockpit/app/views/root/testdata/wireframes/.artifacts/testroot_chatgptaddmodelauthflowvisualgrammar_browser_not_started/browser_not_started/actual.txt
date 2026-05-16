@@ -6,9 +6,9 @@ SWOBU 🧌                                                   waiting for login�
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             gpt-3.5-turbo                                                     choose ↵
+     run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       gpt-3.5-turbo                                                                      edit ↵
+       openai:gpt-3.5-tu                                                                  edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
          auth              browser login                                                  change ↵

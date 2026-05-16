@@ -3,7 +3,6 @@ package credentials
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -11,6 +10,8 @@ import (
 )
 
 const keychainCredentialRefPrefix = "keychain:"
+const secretCredentialRefPrefix = "secret:"
+const secretFileCredentialRefPrefix = "secretfile:"
 const keyringNamespace = "swobu"
 const keyringLookupTimeout = 500 * time.Millisecond
 
@@ -40,8 +41,8 @@ func NewKeyringResolver(client KeyringClient) KeyringResolver {
 
 func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	_ = ctx
-	ref := strings.TrimSpace(credentialRef)
-	keyName, parseErr := keychainCredentialName(providerSpec, ref)
+	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	keyName, parseErr := secretCredentialName(providerSpec, ref)
 	if parseErr != nil {
 		return "", parseErr
 	}
@@ -65,24 +66,16 @@ func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec str
 		return "", fmt.Errorf("keyring lookup timed out for %q", keyName)
 	}
 	if err != nil {
-		if fallback, ok := getMemoryFallbackSecret(providerSpec, keyName); ok {
-			slog.Warn("keychain unavailable, using in-memory credential fallback",
-				"component", "credentials",
-				"provider_spec", strings.ToLower(strings.TrimSpace(providerSpec)),
-				"credential_slot", keyName,
-			)
-			return fallback, nil
-		}
-		return "", fmt.Errorf("keyring lookup failed for %q", keyName)
+		return "", fmt.Errorf("keyring lookup failed for %q: %w", keyName, err)
 	}
-	if strings.TrimSpace(token) == "" {
+	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
 		return "", fmt.Errorf("keyring token for %q is empty", keyName)
 	}
 	return token, nil
 }
 
 func KeyringScopeForProvider(providerSpec string) string {
-	spec := strings.TrimSpace(strings.ToLower(providerSpec))
+	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
 	if spec == "" {
 		spec = "provider"
 	}
@@ -90,7 +83,7 @@ func KeyringScopeForProvider(providerSpec string) string {
 }
 
 func CanonicalKeychainCredentialName(providerSpec string) string {
-	spec := strings.TrimSpace(strings.ToLower(providerSpec))
+	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
 	if spec == "" {
 		return "default"
 	}
@@ -98,16 +91,42 @@ func CanonicalKeychainCredentialName(providerSpec string) string {
 }
 
 func keychainCredentialName(providerSpec, credentialRef string) (string, error) {
-	ref := strings.TrimSpace(credentialRef)
-	if ref == "keychain" {
+	return secretCredentialName(providerSpec, credentialRef)
+}
+
+func secretCredentialName(providerSpec, credentialRef string) (string, error) {
+	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	if ref == "keychain" || ref == "secret" {
 		return CanonicalKeychainCredentialName(providerSpec), nil
 	}
-	if !strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) {
-		return "", fmt.Errorf("keyring resolver does not support credential ref %q", ref)
+	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(ref[len(secretCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+		if name == "" {
+			return "", fmt.Errorf("secret credential name must not be empty")
+		}
+		return name, nil
 	}
-	name := strings.TrimSpace(ref[len(keychainCredentialRefPrefix):])
-	if name == "" {
-		return "", fmt.Errorf("keychain credential name must not be empty")
+	if strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(ref[len(keychainCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+		if name == "" {
+			return "", fmt.Errorf("keychain credential name must not be empty")
+		}
+		return name, nil
 	}
-	return name, nil
+	return "", fmt.Errorf("keyring resolver does not support credential ref %q", ref)
+}
+
+func secretFileCredentialName(credentialRef string) (string, error) {
+	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	if ref == "secretfile" {
+		return "", fmt.Errorf("secret file credential name must not be empty")
+	}
+	if strings.HasPrefix(strings.ToLower(ref), secretFileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(ref[len(secretFileCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+		if name == "" {
+			return "", fmt.Errorf("secret file credential name must not be empty")
+		}
+		return name, nil
+	}
+	return "", fmt.Errorf("file-backed secret resolver does not support credential ref %q", ref)
 }

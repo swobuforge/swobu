@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 func TestAddModelCreateReady_ChatGPTDoesNotRequireCredentialRef(t *testing.T) {
@@ -64,13 +65,11 @@ func TestInteractiveAddModelCredentialRows_RequireSessionState(t *testing.T) {
 		t.Fatal("expected no rows before auth session state exists")
 	}
 
-	sessionModel := state.Model{
-		AuthLoginEndpointName: "acme",
-		AuthLoginProviderRef:  "cfg-a",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginSessionState: "pending",
-		AuthLoginURL:          "https://example.com/verify",
-	}
+	sessionModel := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+		SessionID:    "sess-1",
+		SessionState: "pending",
+		URL:          "https://example.com/verify",
+	})
 	if got := interactiveAddModelCredentialRows(sessionModel, "chatgpt", "acme", draft, "chatgpt_login"); len(got) == 0 {
 		t.Fatal("expected status rows when auth session state exists")
 	}
@@ -118,98 +117,95 @@ func TestAddModelCredentialSummary_MissingWhenUnset(t *testing.T) {
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_BrowserNotStarted(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_BrowserNotStarted(t *testing.T) {
 	t.Parallel()
 	model := state.Model{}
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTLogin)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != addModelChatGPTAuthViewBrowserNotStarted {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewBrowserNotStarted)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != interactiveAuthPhaseStartRequired {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseStartRequired)
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_BrowserInProgress(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_BrowserInProgress(t *testing.T) {
 	t.Parallel()
-	model := state.Model{
-		AuthLoginEndpointName: "acme",
-		AuthLoginProviderRef:  "cfg-a",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginSessionState: "pending",
-	}
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+		SessionID:    "sess-1",
+		SessionState: "pending",
+	})
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTLogin)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != addModelChatGPTAuthViewInProgress {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewInProgress)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != interactiveAuthPhaseInProgress {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseInProgress)
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_IgnoresSessionFromOtherProviderRef(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_IgnoresSessionFromOtherProviderRef(t *testing.T) {
 	t.Parallel()
-	model := state.Model{
-		AuthLoginEndpointName: "acme",
-		AuthLoginProviderRef:  "cfg-other",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginSessionState: "pending",
-	}
+	model := addModelAuthSessionModel("acme", "cfg-other", stateModel.AuthSessionView{
+		SessionID:    "sess-1",
+		SessionState: "pending",
+	})
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTLogin)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != addModelChatGPTAuthViewBrowserNotStarted {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewBrowserNotStarted)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != interactiveAuthPhaseStartRequired {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseStartRequired)
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_DeviceCodeInProgress(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_DeviceCodeInProgress(t *testing.T) {
 	t.Parallel()
-	model := state.Model{
-		AuthLoginEndpointName: "acme",
-		AuthLoginProviderRef:  "cfg-a",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginSessionState: "pending",
-		AuthLoginURL:          "https://chatgpt.com/activate",
-		AuthLoginUserCode:     "VBMS-V2R4K",
-	}
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+		SessionID:    "sess-1",
+		SessionState: "pending",
+		URL:          "https://chatgpt.com/activate",
+		UserCode:     "VBMS-V2R4K",
+	})
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTDeviceAuth)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTDeviceAuth); got != addModelChatGPTAuthViewInProgress {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewInProgress)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTDeviceAuth); got != interactiveAuthPhaseInProgress {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseInProgress)
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_SignedIn(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_SignedIn(t *testing.T) {
 	t.Parallel()
 	model := state.Model{
 		AddModelDraftProviderSpec:  "chatgpt",
 		AddModelDraftCredentialRef: "keychain:chatgpt/default",
 	}
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTLogin)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != addModelChatGPTAuthViewSignedIn {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewSignedIn)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != interactiveAuthPhaseResolved {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseResolved)
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_Expired(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_Expired(t *testing.T) {
 	t.Parallel()
-	model := state.Model{
-		AuthLoginEndpointName: "acme",
-		AuthLoginProviderRef:  "cfg-a",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginSessionState: "expired",
-	}
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+		SessionID:    "sess-1",
+		SessionState: "expired",
+	})
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTDeviceAuth)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTDeviceAuth); got != addModelChatGPTAuthViewExpired {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewExpired)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTDeviceAuth); got != interactiveAuthPhaseExpired {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseExpired)
 	}
 }
 
-func TestClassifyAddModelChatGPTAuthViewState_BrowserUnavailable(t *testing.T) {
+func TestClassifyInteractiveAuthPhase_BrowserUnavailable(t *testing.T) {
 	t.Parallel()
-	model := state.Model{
-		AuthLoginEndpointName: "acme",
-		AuthLoginProviderRef:  "cfg-a",
-		AuthLoginSessionID:    "sess-1",
-		AuthLoginSessionState: "failed",
-		AuthLoginSessionError: "could not open default browser",
-	}
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+		SessionID:    "sess-1",
+		SessionState: "failed",
+		SessionError: "could not open default browser",
+	})
 	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(providercatalog.AuthVariantChatGPTLogin)}
-	if got := classifyAddModelChatGPTAuthViewState(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != addModelChatGPTAuthViewBrowserUnavailable {
-		t.Fatalf("state=%q want=%q", got, addModelChatGPTAuthViewBrowserUnavailable)
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, providercatalog.AuthVariantChatGPTLogin); got != interactiveAuthPhaseStartUnavailable {
+		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseStartUnavailable)
 	}
+}
+
+func addModelAuthSessionModel(endpointName string, providerRef string, session stateModel.AuthSessionView) state.Model {
+	ownerKey := stateModel.AddModelDraftAuthOwnerKey(endpointName, providerRef).String()
+	return state.Model{AuthSessions: map[string]stateModel.AuthSessionView{
+		ownerKey: session,
+	}}
 }
 
 func TestShouldRenderInteractiveAuthCode_DeviceOnly(t *testing.T) {
@@ -228,7 +224,7 @@ func TestShouldRenderInteractiveAuthCode_DeviceOnly(t *testing.T) {
 func TestInteractiveAuthLinkRows_LongURLAddsWrappedDisclosureRows(t *testing.T) {
 	t.Parallel()
 	longURL := "https://auth.openai.com/oauth/authorize?client_id=app_EMoamEE123456789&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&response_type=code"
-	rows := interactiveAuthLinkRows(longURL)
+	rows := interactiveAuthLinkRows(longURL, "owner")
 	if len(rows) < 2 {
 		t.Fatalf("rows=%d want wrapped disclosure rows for long url", len(rows))
 	}
@@ -236,8 +232,25 @@ func TestInteractiveAuthLinkRows_LongURLAddsWrappedDisclosureRows(t *testing.T) 
 
 func TestInteractiveAuthLinkRows_ShortURLStillUsesSingleLinkActionPlusWrappedLines(t *testing.T) {
 	t.Parallel()
-	rows := interactiveAuthLinkRows("https://chatgpt.com/activate")
+	rows := interactiveAuthLinkRows("https://chatgpt.com/activate", "owner")
 	if len(rows) < 2 {
 		t.Fatalf("rows=%d want action + disclosure rows", len(rows))
+	}
+}
+
+func TestShouldShowAuthStartRetryHint(t *testing.T) {
+	t.Parallel()
+
+	if !shouldShowAuthStartRetryHint("device auth start returned status 403", "") {
+		t.Fatal("expected retry hint for auth-start failure with empty session id")
+	}
+	if shouldShowAuthStartRetryHint("credential store failed", "") {
+		t.Fatal("did not expect retry hint for credential store failure")
+	}
+	if shouldShowAuthStartRetryHint("credential store failed: keyring write failed", "") {
+		t.Fatal("did not expect retry hint for detailed credential store failure")
+	}
+	if shouldShowAuthStartRetryHint("device auth start returned status 403", "sess-1") {
+		t.Fatal("did not expect retry hint when session id is present")
 	}
 }

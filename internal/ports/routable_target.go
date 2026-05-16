@@ -1,6 +1,6 @@
 package ports
 
-import "github.com/swobuforge/swobu/internal/domain/protocolsurface"
+import "github.com/swobuforge/swobu/internal/domain/protocolkind"
 
 type RoutableTarget struct {
 	BackendRef string
@@ -12,9 +12,9 @@ type RoutableTarget struct {
 	// surface, not a vendor umbrella and not a client-ingress selector.
 	// Client ingress is normalized to canonical operations before provider
 	// encoding.
-	ProtocolKind protocolsurface.Kind
+	ProtocolKind protocolkind.ProtocolKind
 	AuthKind     string
-	EndpointMode string
+	SelectedFrame string
 }
 
 func NewRoutableTarget(
@@ -22,10 +22,14 @@ func NewRoutableTarget(
 	providerSpec string,
 	baseURL string,
 	credentialRef string,
-	protocolKind protocolsurface.Kind,
+	protocolKind protocolkind.ProtocolKind,
 	authKind string,
-	endpointMode string,
+	extras ...string,
 ) RoutableTarget {
+	selectedFrame := ""
+	if len(extras) > 0 {
+		selectedFrame = extras[0]
+	}
 	return RoutableTarget{
 		BackendRef:    backendRef,
 		ProviderSpec:  providerSpec,
@@ -33,7 +37,7 @@ func NewRoutableTarget(
 		CredentialRef: credentialRef,
 		ProtocolKind:  protocolKind,
 		AuthKind:      authKind,
-		EndpointMode:  endpointMode,
+		SelectedFrame: selectedFrame,
 	}
 }
 
@@ -46,10 +50,11 @@ func (t RoutableTarget) Clone() RoutableTarget {
 		t.CredentialRef,
 		t.ProtocolKind,
 		t.AuthKind,
-		t.EndpointMode,
+		t.SelectedFrame,
 	)
 }
 
-func (t RoutableTarget) ProviderSpecName() string {
+// ProviderID returns the configured provider family key.
+func (t RoutableTarget) ProviderID() string {
 	return t.ProviderSpec
 }

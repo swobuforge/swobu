@@ -223,9 +223,9 @@ func (d *Daemon) emitErrorTraceForEventBestEffort(ctx context.Context, event run
 	d.telemetry.errorTracesInWindow++
 	trace := telemetry.ErrorTrace{
 		StatusCode:    event.StatusCode(),
-		ResultClass:   strings.TrimSpace(event.Result().String()),
-		ProviderRoute: strings.TrimSpace(event.Route().String()),
-		Operation:     strings.TrimSpace(string(event.NormalizedOp())),
+		ResultClass:   strings.TrimSpace(event.Result().String()),      // trimlowerlint:allow boundary canonicalization
+		ProviderRoute: strings.TrimSpace(event.Route().String()),       // trimlowerlint:allow boundary canonicalization
+		Operation:     strings.TrimSpace(string(event.NormalizedOp())), // trimlowerlint:allow boundary canonicalization
 	}
 	if durationMS, ok := event.Timing().DurationMillis(); ok {
 		trace.DurationMS = &durationMS
@@ -241,7 +241,7 @@ func telemetryTraceDebugEnabled() bool {
 }
 
 func telemetryErrorTraceMaxPerTick() int {
-	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryErrorTraceMaxPerTick))
+	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryErrorTraceMaxPerTick)) // trimlowerlint:allow boundary canonicalization
 	if raw == "" {
 		return 20
 	}

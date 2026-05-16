@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 )
 
 func assertNoTestHarnessArtifacts(t *testing.T, value string) {
@@ -105,7 +105,7 @@ func TestClientRunSpecForID(t *testing.T) {
 		t.Fatalf("OPENAI_API_KEY=%q", got)
 	}
 	joinedAiderArgs := strings.Join(spec.args, " ")
-	if got := joinedAiderArgs; got != "--model openai/"+compatibility.PrimaryTargetSelector {
+	if got := joinedAiderArgs; got != "--model openai/"+requestpath.PublicModelIDSwobu {
 		t.Fatalf("aider args=%q", got)
 	}
 	if strings.Contains(joinedAiderArgs, "hermetic-aider-token") {
@@ -115,7 +115,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `-c model="`+compatibility.PrimaryTargetSelector+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" -c forced_login_method="api"` {
+	if got := strings.Join(codex.args, " "); got != `-c model="`+requestpath.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" -c forced_login_method="api"` {
 		t.Fatalf("codex args=%q", got)
 	}
 	claude, ok := clientRunSpecForID("claude", "http://127.0.0.1:7926/c/acme/", "")
@@ -125,7 +125,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if got := claude.env["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:7926/c/acme/" {
 		t.Fatalf("claude env ANTHROPIC_BASE_URL=%q", got)
 	}
-	if got := claude.env["ANTHROPIC_MODEL"]; got != compatibility.PrimaryTargetSelector {
+	if got := claude.env["ANTHROPIC_MODEL"]; got != requestpath.PublicModelIDSwobu {
 		t.Fatalf("claude env ANTHROPIC_MODEL=%q", got)
 	}
 	opencode, ok := clientRunSpecForID("opencode", "http://127.0.0.1:7926/c/acme/", "")
@@ -158,7 +158,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("aider command missing")
 	}
-	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 aider --model openai/" + compatibility.PrimaryTargetSelector; cmd != want {
+	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 aider --model openai/" + requestpath.PublicModelIDSwobu; cmd != want {
 		t.Fatalf("aider command=%q want=%q", cmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, cmd)
@@ -166,7 +166,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `codex -c model="` + compatibility.PrimaryTargetSelector + `" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" -c forced_login_method="api"`; codex != want {
+	if want := `codex -c model="` + requestpath.PublicModelIDSwobu + `" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" -c forced_login_method="api"`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -174,7 +174,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("claude command missing")
 	}
-	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_MODEL=" + compatibility.PrimaryTargetSelector + " claude --model " + compatibility.PrimaryTargetSelector; claude != want {
+	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_MODEL=" + requestpath.PublicModelIDSwobu + " claude --model " + requestpath.PublicModelIDSwobu; claude != want {
 		t.Fatalf("claude command=%q want=%q", claude, want)
 	}
 	assertNoTestHarnessArtifacts(t, claude)

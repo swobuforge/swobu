@@ -1,4 +1,3 @@
-// Package providers routes execution requests by provider spec to concrete
-// provider wiring adapters, using domain/providercatalog's canonical provider-spec
-// catalog for adapter-family mapping.
+// Package providers owns outbound provider lifecycle services:
+// execution dispatch and model-catalog dispatch keyed by configured provider id.
 package providers

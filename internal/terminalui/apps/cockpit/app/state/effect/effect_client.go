@@ -8,14 +8,14 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-// CheckClientAccessEffect probes the daemon's endpoint compatibility.
+// CheckClientAccessEffect probes the daemon's endpoint canonical.
 type CheckClientAccessEffect struct {
 	EndpointName   string
 	ProviderConfig stateModel.ProviderConfigSnapshot
 }
 
 func (cmd CheckClientAccessEffect) Execute(ctx context.Context) []update.Action {
-	endpointName := strings.TrimSpace(cmd.EndpointName)
+	endpointName := strings.TrimSpace(cmd.EndpointName) // trimlowerlint:allow boundary canonicalization
 	if endpointName == "" {
 		return []update.Action{ClientAccessCheckFailed{Message: "workspace is not selected"}}
 	}

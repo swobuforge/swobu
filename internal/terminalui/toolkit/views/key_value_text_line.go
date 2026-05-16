@@ -4,8 +4,8 @@ import "strings"
 
 // FormatKeyValueTextLine formats a non-focusable key/value line with fixed key width.
 func FormatKeyValueTextLine(key string, value string, keyWidth int) string {
-	k := strings.TrimSpace(key)
-	v := strings.TrimSpace(value)
+	k := strings.TrimSpace(key)   // trimlowerlint:allow boundary canonicalization
+	v := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
 	if keyWidth < 1 {
 		keyWidth = 1
 	}

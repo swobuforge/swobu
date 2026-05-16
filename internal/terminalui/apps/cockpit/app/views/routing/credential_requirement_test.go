@@ -25,14 +25,14 @@ func TestProviderCredentialSelectionRequired(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "custom remote requires credential",
-			provider: "custom",
+			name:     "OpenAI-compatible remote requires credential",
+			provider: "openai_compatible",
 			baseURL:  "https://api.example.com/v1",
 			want:     true,
 		},
 		{
-			name:     "custom local does not require credential",
-			provider: "custom",
+			name:     "OpenAI-compatible local does not require credential",
+			provider: "openai_compatible",
 			baseURL:  "http://localhost:11434/v1",
 			want:     false,
 		},

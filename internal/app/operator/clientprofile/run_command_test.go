@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 )
 
 func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
@@ -21,7 +21,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "aider",
 			binary:   "aider",
-			contains: []string{"--model", "openai/" + compatibility.PrimaryTargetSelector},
+			contains: []string{"--model", "openai/" + requestpath.PublicModelIDSwobu},
 			envChecks: map[string]string{
 				"AIDER_OPENAI_API_BASE": "http://127.0.0.1:7926/c/acme/v1",
 				"OPENAI_API_KEY":        "swobu-placeholder",
@@ -31,7 +31,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			clientID: "codex",
 			binary:   "codex",
 			contains: []string{
-				`model="` + compatibility.PrimaryTargetSelector + `"`,
+				`model="` + requestpath.PublicModelIDSwobu + `"`,
 				`model_provider="swobu"`,
 				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
 				`forced_login_method="api"`,
@@ -40,10 +40,10 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "claude",
 			binary:   "claude",
-			contains: []string{"--model", compatibility.PrimaryTargetSelector},
+			contains: []string{"--model", requestpath.PublicModelIDSwobu},
 			envChecks: map[string]string{
 				"ANTHROPIC_BASE_URL": "http://127.0.0.1:7926/c/acme/",
-				"ANTHROPIC_MODEL":    compatibility.PrimaryTargetSelector,
+				"ANTHROPIC_MODEL":    requestpath.PublicModelIDSwobu,
 			},
 		},
 		{

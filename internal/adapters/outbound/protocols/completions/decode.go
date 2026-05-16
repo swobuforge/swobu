@@ -1,12 +1,15 @@
 package completions
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 type responseBody struct {
@@ -46,41 +49,50 @@ var tokenUsagePathSpec = protocols.TokenUsagePathSpec{
 	},
 }
 
-func DecodeBufferedResult(raw []byte) (compatibility.CanonicalOutputValue, error) {
+func DecodeResponseBuffered(raw []byte) (canonical.CanonicalOutputValue, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
-		return compatibility.CanonicalOutputValue{}, compatibility.InternalError("completions response is invalid JSON")
+		return canonical.CanonicalOutputValue{}, canonical.InternalError("completions response is invalid JSON")
 	}
 	if len(dto.Choices) == 0 {
-		return compatibility.CanonicalOutputValue{}, compatibility.InternalError("completions response is missing choices")
+		return canonical.CanonicalOutputValue{}, canonical.InternalError("completions response is missing choices")
 	}
 	choice := dto.Choices[0]
-	return compatibility.NewPromptOutputWithUsage(
+	return canonical.NewPromptOutputWithUsage(
 		dto.ID,
 		dto.Model,
-		[]compatibility.OutputItem{compatibility.NewTextOutputItem("text_0", choice.Text)},
+		[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", choice.Text)},
 		choice.FinishReason,
 		protocols.ExtractTokenUsage(raw, tokenUsagePathSpec),
 	), nil
 }
 
-func DecodeStream(body io.ReadCloser) compatibility.CanonicalOutputEventStream {
-	return &canonicalOutputEventStreamCloser{reader: protocols.NewSSEReader(body)}
+// DecodeResponseStream returns canonical envelope events directly for completions streams.
+func DecodeResponseStream(body io.ReadCloser, exchangeID string) canonical.EventReader {
+	return &canonicalEnvelopeStreamCloser{
+		exchangeID: exchangeID,
+		responseID: canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		reader:     protocols.NewSSEReader(body),
+	}
 }
 
-type canonicalOutputEventStreamCloser struct {
-	reader    *protocols.SSEReaderCloser
-	started   bool
-	textOpen  bool
-	pending   []compatibility.OutputEvent
-	resultID  string
-	model     string
-	completed bool
-	usage     compatibility.TokenUsage
+type canonicalEnvelopeStreamCloser struct {
+	exchangeID string
+	responseID canonical.EnvelopeID
+	reader     *protocols.SSEReaderCloser
+	started    bool
+	textOpen   bool
+	textEnvID  canonical.EnvelopeID
+	pending    []canonical.Event
+	resultID   string
+	model      string
+	completed  bool
+	usage      canonical.TokenUsage
+	seq        int64
 }
 
 // variants while maintaining canonical output ordering.
-func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, error) {
+func (s *canonicalEnvelopeStreamCloser) Next(context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
 		s.pending = s.pending[1:]
@@ -89,9 +101,20 @@ func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, er
 	for {
 		event, err := s.reader.Next()
 		if err != nil {
-			return compatibility.OutputEvent{}, err
+			if err == io.EOF && s.started && !s.completed {
+				s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
+				s.closeOpenTextWithStatus(canonical.EnvelopeStatusError)
+				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+				s.completed = true
+				if len(s.pending) > 0 {
+					out := s.pending[0]
+					s.pending = s.pending[1:]
+					return out, nil
+				}
+			}
+			return canonical.Event{}, err
 		}
-		if strings.TrimSpace(event.Data) == "[DONE]" {
+		if strings.TrimSpace(event.Data) == "[DONE]" { // trimlowerlint:allow boundary canonicalization
 			continue
 		}
 		rawChunk := []byte(event.Data)
@@ -101,21 +124,21 @@ func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, er
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
-			return compatibility.OutputEvent{}, compatibility.InternalError("completions stream chunk is invalid JSON")
+			return canonical.Event{}, canonical.InternalError("completions stream chunk is invalid JSON")
 		}
 		if !s.started {
 			s.started = true
 			s.resultID = chunk.ID
 			s.model = chunk.Model
-			s.usage = compatibility.NewUnknownTokenUsage()
+			s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse})
+			s.enqueueMetadata(map[string]string{"result_id": chunk.ID, "model": chunk.Model})
+			s.usage = canonical.NewUnknownTokenUsage()
 			if !chunkUsage.IsZero() {
 				s.usage = chunkUsage
 			}
-			return compatibility.OutputEvent{
-				Kind:     compatibility.OutputEventStarted,
-				ResultID: chunk.ID,
-				Model:    chunk.Model,
-			}, nil
+			out := s.pending[0]
+			s.pending = s.pending[1:]
+			return out, nil
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -124,44 +147,23 @@ func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, er
 		if choice.Text != "" {
 			if !s.textOpen {
 				s.textOpen = true
-				s.pending = append(s.pending, compatibility.OutputEvent{
-					Kind:     compatibility.OutputEventItemStarted,
-					ItemKind: compatibility.OutputItemText,
-					ItemID:   "text_0",
-					ResultID: s.resultID,
-					Model:    s.model,
-				})
+				s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
+				s.enqueueEnvelopeStart(s.textEnvID, s.responseID, canonical.EnvelopeStartPayload{
+					Kind: canonical.EnvMessage,
+					Role: canonical.ItemAuthorAssistant,
+				}, canonical.EventMeta{NativeID: "text_0"})
 			}
-			s.pending = append(s.pending, compatibility.OutputEvent{
-				Kind:      compatibility.OutputEventTextDelta,
-				ResultID:  s.resultID,
-				Model:     s.model,
-				ItemID:    "text_0",
-				TextDelta: choice.Text,
-			})
+			s.enqueueTextDelta(s.textEnvID, choice.Text)
 			event := s.pending[0]
 			s.pending = s.pending[1:]
 			return event, nil
 		}
-		if strings.TrimSpace(choice.FinishReason) != "" && !s.completed {
+		if strings.TrimSpace(choice.FinishReason) != "" && !s.completed { // trimlowerlint:allow boundary canonicalization
 			s.completed = true
-			if s.textOpen {
-				s.pending = append(s.pending, compatibility.OutputEvent{
-					Kind:     compatibility.OutputEventItemCompleted,
-					ItemKind: compatibility.OutputItemText,
-					ItemID:   "text_0",
-					ResultID: s.resultID,
-					Model:    s.model,
-				})
-				s.textOpen = false
-			}
-			s.pending = append(s.pending, compatibility.OutputEvent{
-				Kind:         compatibility.OutputEventCompleted,
-				ResultID:     s.resultID,
-				Model:        s.model,
-				FinishReason: choice.FinishReason,
-				Usage:        s.usage,
-			})
+			s.closeOpenTextWithStatus(canonical.EnvelopeStatusCompleted)
+			s.enqueueUsage(s.usage)
+			s.enqueueFinish(choice.FinishReason)
+			s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 			event := s.pending[0]
 			s.pending = s.pending[1:]
 			return event, nil
@@ -169,6 +171,93 @@ func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, er
 	}
 }
 
-func (s *canonicalOutputEventStreamCloser) Close() error {
+func (s *canonicalEnvelopeStreamCloser) Close(context.Context) error {
 	return s.reader.Close()
+}
+
+func (s *canonicalEnvelopeStreamCloser) nextSeq() int64 {
+	s.seq++
+	return s.seq
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueue(ev canonical.Event) {
+	ev.ExchangeID = s.exchangeID
+	ev.Seq = s.nextSeq()
+	ev.Time = time.Now().UTC()
+	s.pending = append(s.pending, ev)
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMeta) {
+	ev := canonical.Event{
+		Kind:     canonical.EventEnvelopeStart,
+		EnvID:    id,
+		ParentID: parent,
+		Payload:  payload,
+	}
+	if len(meta) > 0 {
+		ev.Meta = meta[0]
+	}
+	s.enqueue(ev)
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
+	s.enqueue(canonical.Event{
+		Kind:  canonical.EventEnvelopeEnd,
+		EnvID: id,
+		Payload: canonical.EnvelopeEndPayload{
+			Kind:   kind,
+			Status: status,
+		},
+	})
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueTextDelta(id canonical.EnvelopeID, text string) {
+	s.enqueue(canonical.Event{
+		Kind:    canonical.EventTextDelta,
+		EnvID:   id,
+		Payload: canonical.TextDeltaPayload{Text: text},
+	})
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueUsage(usage canonical.TokenUsage) {
+	s.enqueue(canonical.Event{
+		Kind:    canonical.EventUsage,
+		EnvID:   s.responseID,
+		Payload: canonical.UsagePayload{Usage: usage},
+	})
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueFinish(reason string) {
+	s.enqueue(canonical.Event{
+		Kind:    canonical.EventFinish,
+		EnvID:   s.responseID,
+		Payload: canonical.FinishPayload{Reason: reason},
+	})
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueMetadata(values map[string]string) {
+	s.enqueue(canonical.Event{
+		Kind:    canonical.EventMetadata,
+		EnvID:   s.responseID,
+		Payload: canonical.MetadataPayload{Values: values},
+	})
+}
+
+func (s *canonicalEnvelopeStreamCloser) enqueueError(code string, message string) {
+	s.enqueue(canonical.Event{
+		Kind:  canonical.EventError,
+		EnvID: s.responseID,
+		Payload: canonical.ErrorPayload{
+			Code:    code,
+			Message: message,
+		},
+	})
+}
+
+func (s *canonicalEnvelopeStreamCloser) closeOpenTextWithStatus(status canonical.EnvelopeStatus) {
+	if s.textOpen {
+		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
+		s.textOpen = false
+		s.textEnvID = ""
+	}
 }
