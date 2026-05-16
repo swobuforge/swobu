@@ -10,7 +10,7 @@ import (
 // DisclosureNoteRows renders subordinate disclosure copy with wrapping so long
 // backend messages do not break row grammar alignment.
 func DisclosureNoteRows(note string) []retained.ViewSpec[state.Model] {
-	note = strings.TrimSpace(note)
+	note = strings.TrimSpace(note) // trimlowerlint:allow boundary canonicalization
 	if note == "" {
 		return nil
 	}
@@ -19,7 +19,7 @@ func DisclosureNoteRows(note string) []retained.ViewSpec[state.Model] {
 
 // WrappedDetailRows renders wrapped subordinate copy without a leading marker.
 func WrappedDetailRows(note string) []retained.ViewSpec[state.Model] {
-	note = strings.TrimSpace(note)
+	note = strings.TrimSpace(note) // trimlowerlint:allow boundary canonicalization
 	if note == "" {
 		return nil
 	}

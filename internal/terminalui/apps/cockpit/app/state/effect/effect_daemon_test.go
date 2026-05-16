@@ -88,7 +88,6 @@ func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) 
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",
 		CredentialRef: "file:/tmp/openrouter.key",
-		ProtocolKind:  "chat_completions",
 	}).Execute(ctx)
 
 	if len(actions) != 1 {
@@ -104,6 +103,38 @@ func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) 
 	}
 	if len(loaded.ModelIDs) != 0 {
 		t.Fatalf("model ids = %#v, want empty on timeout", loaded.ModelIDs)
+	}
+}
+
+func TestLoadRoutingModelCatalogEffect_ChatGPTTierlessCredentialErrorSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_swobu/model-catalog/probe" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"BAD_ENDPOINT: chatgpt subscription tier could not be resolved from credential"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+	actions := (LoadRoutingModelCatalogEffect{
+		Scope:         "add_model_draft",
+		ProviderSpec:  "chatgpt",
+		BaseURL:       "https://api.openai.com/v1",
+		CredentialRef: "keychain:chatgpt/sess_abc",
+	}).Execute(context.Background())
+
+	if len(actions) != 1 {
+		t.Fatalf("actions length = %d, want 1", len(actions))
+	}
+	loaded, ok := actions[0].(RoutingModelCatalogLoaded)
+	if !ok {
+		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
+	}
+	want := "BAD_ENDPOINT: chatgpt subscription tier could not be resolved from credential"
+	if loaded.Error != want {
+		t.Fatalf("error = %q, want %q", loaded.Error, want)
 	}
 }
 

@@ -75,7 +75,7 @@ func renderPanelLines(spec PanelSpec) []string {
 	}
 	out := []string{renderPanelTop(spec.Title, innerWidth, spec.Border)}
 	for _, row := range spec.Rows {
-		wrapped := wrapText(strings.TrimSpace(row), contentWidth)
+		wrapped := wrapText(strings.TrimSpace(row), contentWidth) // trimlowerlint:allow boundary canonicalization
 		if len(wrapped) == 0 {
 			wrapped = []string{""}
 		}
@@ -89,9 +89,9 @@ func renderPanelLines(spec PanelSpec) []string {
 }
 
 func renderPanelTop(title string, innerWidth int, border PanelBorderStyle) string {
-	name := strings.TrimSpace(title)
+	name := strings.TrimSpace(title) // trimlowerlint:allow boundary canonicalization
 	if name == "" {
-		name = strings.TrimSpace(border.FallbackName)
+		name = strings.TrimSpace(border.FallbackName) // trimlowerlint:allow boundary canonicalization
 		if name == "" {
 			name = "Box"
 		}

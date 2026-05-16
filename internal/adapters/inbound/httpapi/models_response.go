@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/ports"
@@ -40,14 +39,5 @@ func writeModelsSuccess(w http.ResponseWriter, out requestpath.ListModelsOutput)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func writeModelResolutionHeaders(w http.ResponseWriter, metadata ports.ExecuteMetadata) {
-	if strings.TrimSpace(metadata.ModelRequested) != "" {
-		w.Header().Set("X-Swobu-Model-Requested", strings.TrimSpace(metadata.ModelRequested))
-	}
-	if strings.TrimSpace(metadata.ModelResolved) != "" {
-		w.Header().Set("X-Swobu-Model-Resolved", strings.TrimSpace(metadata.ModelResolved))
-	}
-	if strings.TrimSpace(metadata.ModelResolutionMode) != "" {
-		w.Header().Set("X-Swobu-Model-Resolution", strings.TrimSpace(metadata.ModelResolutionMode))
-	}
+func writeModelResolutionHeaders(_ http.ResponseWriter, _ ports.ProviderResponseMetadata) {
 }

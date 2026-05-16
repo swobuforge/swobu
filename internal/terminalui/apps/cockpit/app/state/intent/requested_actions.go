@@ -38,6 +38,10 @@ type SetCreateDraftTargetAlias struct {
 	TargetAlias string
 }
 
+type SetCreateDraftSelectedFrame struct {
+	SelectedFrame string
+}
+
 type RenameCurrentEndpoint struct {
 	Name string
 }
@@ -82,9 +86,13 @@ type ClientAccessCheckStarted struct{}
 // EndpointCopyRequested asks the reducer to copy an endpoint value.
 type EndpointCopyRequested struct{ Value string }
 
-// AuthLoginURLCopyRequested asks reducer to copy auth login URL and report
+// AuthSessionURLCopyRequested asks reducer to copy auth session URL and report
 // status near auth rows.
-type AuthLoginURLCopyRequested struct{ Value string }
+type AuthSessionURLCopyRequested struct{ Value string }
+type AuthSessionURLCopyScopedRequested struct {
+	OwnerKey string
+	Value    string
+}
 
 // ClientBaseURLCopyRequested asks the reducer to copy a client base URL.
 type ClientBaseURLCopyRequested struct{ Value string }
@@ -124,12 +132,14 @@ type CompatibilityDiagnosticsCopyRequested struct{}
 type SaveSelectedTargetRequested struct {
 	EndpointName string
 	ProviderRef  string
+	ErrorAnchor  string
 }
 
 // SaveProviderConfigRequested asks the reducer to save a provider config.
 type SaveProviderConfigRequested struct {
 	EndpointName   string
 	ProviderConfig stateModel.ProviderConfigSnapshot
+	ErrorAnchor    string
 }
 
 // AddProviderConfigRequested asks the reducer to append a new provider config
@@ -137,12 +147,14 @@ type SaveProviderConfigRequested struct {
 type AddProviderConfigRequested struct {
 	EndpointName   string
 	ProviderConfig stateModel.ProviderConfigSnapshot
+	ErrorAnchor    string
 }
 
 // DeleteProviderConfigRequested asks the reducer to delete one provider config.
 type DeleteProviderConfigRequested struct {
 	EndpointName string
 	ProviderRef  string
+	ErrorAnchor  string
 }
 
 // StoreKeychainCredentialRequested asks reducer to persist a keychain secret.
@@ -150,6 +162,7 @@ type StoreKeychainCredentialRequested struct {
 	ProviderSpec string
 	KeyName      string
 	Secret       string
+	ErrorAnchor  string
 }
 
 // StartProviderAuthSessionRequested asks reducer to start provider login/auth
@@ -157,12 +170,16 @@ type StoreKeychainCredentialRequested struct {
 type StartProviderAuthSessionRequested struct {
 	EndpointName   string
 	ProviderConfig stateModel.ProviderConfigSnapshot
-	AuthSubject    string
+	OwnerKey       string
 	AuthScope      string
 }
 
-// ResetAuthLoginUIRequested clears transient auth-login presentation state.
-type ResetAuthLoginUIRequested struct{}
+// ResetAuthSessionUIRequested clears transient auth-login presentation state.
+type ResetAuthSessionUIRequested struct{}
+
+// ResetAddModelAuthUIRequested clears transient add-model auth presentation
+// state without touching persisted-model auth rows.
+type ResetAddModelAuthUIRequested struct{}
 
 const (
 	RoutingModelCatalogScopeCreateDraft   = "create_draft"
@@ -176,5 +193,4 @@ type LoadRoutingModelCatalogRequested struct {
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string
-	ProtocolKind  string
 }

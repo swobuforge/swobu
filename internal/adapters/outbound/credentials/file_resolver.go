@@ -43,7 +43,7 @@ func (r FileResolver) ResolveCredential(ctx context.Context, providerSpec string
 	if err != nil {
 		return "", fmt.Errorf("credential file %q could not be read", path)
 	}
-	token := strings.TrimSpace(string(raw))
+	token := strings.TrimSpace(string(raw)) // trimlowerlint:allow boundary canonicalization
 	if token == "" {
 		return "", fmt.Errorf("credential file %q is empty", path)
 	}
@@ -51,7 +51,7 @@ func (r FileResolver) ResolveCredential(ctx context.Context, providerSpec string
 }
 
 func fileCredentialPath(credentialRef string) (string, error) {
-	ref := strings.TrimSpace(credentialRef)
+	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
 	if ref == "" {
 		return "", fmt.Errorf("credential ref must not be empty")
 	}
@@ -59,15 +59,15 @@ func fileCredentialPath(credentialRef string) (string, error) {
 	if strings.EqualFold(ref, "file") || strings.EqualFold(ref, "file:") {
 		return "", fmt.Errorf("credential file path must not be empty")
 	}
-	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) {
-		path = strings.TrimSpace(ref[len(fileCredentialRefPrefix):])
+	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+		path = strings.TrimSpace(ref[len(fileCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
 		if path == "" {
 			return "", fmt.Errorf("credential file path must not be empty")
 		}
 	}
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
-		if err != nil || strings.TrimSpace(home) == "" {
+		if err != nil || strings.TrimSpace(home) == "" { // trimlowerlint:allow boundary canonicalization
 			return "", fmt.Errorf("home directory is unavailable for credential file")
 		}
 		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))

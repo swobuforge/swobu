@@ -7,7 +7,6 @@ import (
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -40,7 +39,7 @@ func TestEndpointCredentialRefStoreUpsertCredentialRef(t *testing.T) {
 	name, _ := endpointintent.ParseEndpointName("main")
 	ref, _ := endpointintent.ParseProviderConfigRef("cfg-a")
 	spec, _ := endpointintent.ParseProviderSpec("openai")
-	cfg, _ := endpointintent.NewProviderConfig(ref, spec, "", "", protocolsurface.Responses)
+	cfg, _ := endpointintent.NewProviderConfig(ref, spec, "", "")
 	cfg, _ = cfg.WithModelID("gpt-4.1")
 	ep, _ := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
 	repo := &endpointRepoStub{endpoints: []endpointintent.Endpoint{ep}}
@@ -67,7 +66,7 @@ func TestEndpointCredentialRefStoreUpsertCredentialRef_SubjectLocatorSkipsEndpoi
 	name, _ := endpointintent.ParseEndpointName("main")
 	ref, _ := endpointintent.ParseProviderConfigRef("cfg-a")
 	spec, _ := endpointintent.ParseProviderSpec("openai")
-	cfg, _ := endpointintent.NewProviderConfig(ref, spec, "", "", protocolsurface.Responses)
+	cfg, _ := endpointintent.NewProviderConfig(ref, spec, "", "")
 	cfg, _ = cfg.WithModelID("gpt-4.1")
 	ep, _ := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
 	repo := &endpointRepoStub{endpoints: []endpointintent.Endpoint{ep}}

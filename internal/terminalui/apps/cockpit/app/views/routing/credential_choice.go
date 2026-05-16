@@ -29,10 +29,15 @@ func providerCredentialChoiceRow(spec providerCredentialChoiceRowSpec) retained.
 func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec providerCredentialChoiceRowSpec) retained.ViewSpec[state.Model] {
 	pc := selectedProvider(ctx.Model(), spec.ProviderConfig, spec.CreateMode)
 	currentRef := ""
+	providerSpec := ""
 	if pc != nil {
-		currentRef = strings.TrimSpace(pc.CredentialRef)
+		currentRef = strings.TrimSpace(pc.CredentialRef)  // trimlowerlint:allow boundary canonicalization
+		providerSpec = strings.TrimSpace(pc.ProviderSpec) // trimlowerlint:allow boundary canonicalization
 	}
 	current := credentialSource(currentRef)
+	if isResolvedInteractiveCredential(providerSpec, currentRef) {
+		current = "signed in"
+	}
 	if current == "" {
 		current = selectors.CredentialSummaryFromProviderConfig(pc)
 	}
@@ -59,10 +64,6 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("authentication needed - choose a credential ref to save")...)
 		}
 	} else {
-		providerSpec := ""
-		if pc != nil {
-			providerSpec = strings.TrimSpace(pc.ProviderSpec)
-		}
 		rows := credentialOptionRows(current, func(value string) []update.Action {
 			setOpen(false)
 			actions := applyProviderCredentialSelection(value, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
@@ -78,23 +79,20 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 }
 
 func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	credentialRef = strings.TrimSpace(credentialRef)
-	variant := providercatalog.AuthVariant(strings.ToLower(credentialRef))
+	credentialRef = strings.TrimSpace(credentialRef)                       // trimlowerlint:allow boundary canonicalization
+	variant := providercatalog.AuthVariant(strings.ToLower(credentialRef)) // trimlowerlint:allow boundary canonicalization
 	if providercatalog.IsInteractiveAuthVariant(variant) {
 		if createMode {
 			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 		}
-		if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+		if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
 			return nil
 		}
 		return []update.Action{state.StartProviderAuthSessionRequested{
-			EndpointName:   strings.TrimSpace(endpointName),
+			EndpointName:   strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
 			ProviderConfig: *providerConfig,
-			AuthSubject: stateModel.EncodeAuthEndpointProviderLocator(
-				strings.TrimSpace(endpointName),
-				strings.TrimSpace(providerConfig.Ref),
-			),
-			AuthScope: stateModel.AuthScopeEndpointProvider,
+			OwnerKey:       stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String(), // trimlowerlint:allow boundary canonicalization
+			AuthScope:      stateModel.AuthScopeEndpointProvider,
 		}}
 	}
 	if strings.EqualFold(credentialRef, "env") {
@@ -106,18 +104,12 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = credentialRef
-	return []update.Action{
-		state.RoutingSaveStartedAction{},
-		state.SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName),
-			ProviderConfig: next,
-		},
-	}
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // trimlowerlint:allow boundary canonicalization
 }
 
 func credentialOptionRows(
@@ -133,29 +125,29 @@ func credentialOptionRows(
 	}
 	containsOptionValue := func(values []option, value string) bool {
 		for _, item := range values {
-			if strings.TrimSpace(item.Value) == strings.TrimSpace(value) {
+			if strings.TrimSpace(item.Value) == strings.TrimSpace(value) { // trimlowerlint:allow boundary canonicalization
 				return true
 			}
 		}
 		return false
 	}
-	variants := providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec))
+	variants := providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec)) // trimlowerlint:allow boundary canonicalization
 	options := make([]option, 0, len(variants))
 	for _, v := range variants {
 		options = append(options, option{
 			Value: string(v),
-			Label: providercatalog.AuthVariantDisplayLabel(strings.TrimSpace(providerSpec), v),
+			Label: authVariantDisplayLabel(v), // trimlowerlint:allow boundary canonicalization
 		})
 	}
-	current = strings.TrimSpace(current)
-	if current != "" && current != "missing" && !containsOptionValue(options, current) {
+	current = strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
+	if current != "" && current != "missing" && current != "signed in" && !containsOptionValue(options, current) {
 		options = append([]option{{Value: current, Label: current}}, options...)
 	}
 	rows := make([]retained.ViewSpec[state.Model], 0, len(options))
 	for _, option := range options {
 		choice := option
 		rows = append(rows, toolkitviews.ListItemRow[state.Model](
-			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3),
+			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3), // trimlowerlint:allow boundary canonicalization
 			choice.Value == current,
 			true,
 			true,

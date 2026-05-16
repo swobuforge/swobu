@@ -6,7 +6,7 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
      create            not ready
 
   routing ▾
-     run on            Custom                                         choose ↵
+     run on            OpenAI Compatible                              choose ↵
      auth              missing                                        choose ↵
       -> set credential file before loading models
 

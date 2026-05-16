@@ -1,7 +1,7 @@
 package requestpath
 
 import (
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 // BackendModelEntity is the resolved backend model descriptor for one execution.
@@ -10,7 +10,7 @@ import (
 type BackendModelEntity struct {
 	BackendRef     string
 	ProviderSpec   string
-	ProtocolKind   protocolsurface.Kind
+	ProtocolKind   protocolkind.ProtocolKind
 	BackendModelID string
 }
 

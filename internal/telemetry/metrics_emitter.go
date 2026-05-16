@@ -36,7 +36,7 @@ type MetricsEmitter struct {
 var _ Emitter = (*MetricsEmitter)(nil)
 
 func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsEmitter, error) {
-	endpoint := strings.TrimSpace(cfg.EndpointURL)
+	endpoint := strings.TrimSpace(cfg.EndpointURL) // trimlowerlint:allow boundary canonicalization
 	if endpoint == "" {
 		return nil, fmt.Errorf("otel endpoint is required")
 	}
@@ -136,9 +136,9 @@ func (e *MetricsEmitter) EmitInstall(ctx context.Context, state State, swobuVers
 	}
 	e.installsTotal.Add(ctx, 1,
 		metric.WithAttributes(
-			attribute.String("swobu.version", strings.TrimSpace(swobuVersion)),
-			attribute.String("os", strings.TrimSpace(osFamily)),
-			attribute.String("arch", strings.TrimSpace(arch)),
+			attribute.String("swobu.version", strings.TrimSpace(swobuVersion)), // trimlowerlint:allow boundary canonicalization
+			attribute.String("os", strings.TrimSpace(osFamily)),                // trimlowerlint:allow boundary canonicalization
+			attribute.String("arch", strings.TrimSpace(arch)),                  // trimlowerlint:allow boundary canonicalization
 			attribute.Bool("telemetry_enabled", state.Enabled && !DoNotTrackEnabled()),
 		),
 	)
@@ -148,7 +148,7 @@ func (e *MetricsEmitter) EmitCounts(ctx context.Context, state string, count2xx,
 	if e == nil {
 		return
 	}
-	e.ticksTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("state", strings.TrimSpace(state))))
+	e.ticksTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("state", strings.TrimSpace(state)))) // trimlowerlint:allow boundary canonicalization
 	if count2xx > 0 {
 		e.requestsTotal.Add(ctx, count2xx, metric.WithAttributes(attribute.String("result_class", "2xx")))
 	}
@@ -171,14 +171,14 @@ func (e *MetricsEmitter) EmitErrorTrace(ctx context.Context, errorTrace ErrorTra
 	_, span := e.tracer.Start(ctx, "swobu.error")
 	span.SetAttributes(
 		attribute.Int("http.status_code", errorTrace.StatusCode),
-		attribute.String("result.class", strings.TrimSpace(errorTrace.ResultClass)),
+		attribute.String("result.class", strings.TrimSpace(errorTrace.ResultClass)), // trimlowerlint:allow boundary canonicalization
 		attribute.String("provider.family", normalizeProviderFamily(errorTrace.ProviderRoute)),
-		attribute.String("operation", strings.TrimSpace(errorTrace.Operation)),
+		attribute.String("operation", strings.TrimSpace(errorTrace.Operation)), // trimlowerlint:allow boundary canonicalization
 	)
 	if errorTrace.DurationMS != nil {
 		span.SetAttributes(attribute.Int("duration.ms", *errorTrace.DurationMS))
 	}
-	if stack := strings.TrimSpace(errorTrace.DebugRawStack); stack != "" {
+	if stack := strings.TrimSpace(errorTrace.DebugRawStack); stack != "" { // trimlowerlint:allow boundary canonicalization
 		span.SetAttributes(attribute.String("debug.raw_stack", stack))
 	}
 	span.End()

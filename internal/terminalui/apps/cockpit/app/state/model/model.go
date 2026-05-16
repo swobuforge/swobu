@@ -33,20 +33,24 @@ type Model struct {
 	ClientLaunchNote           string
 	ClientAccessStatus         string
 	ClientAccessNote           string
-	RoutingSaveError           string
+	SaveErrors                 map[string]string
 	LastStoredKeyProviderSpec  string
 	LastStoredKeySlotName      string
-	AuthLoginEndpointName      string
-	AuthLoginProviderRef       string
-	AuthLoginSessionID         string
-	AuthLoginURL               string
-	AuthLoginUserCode          string
-	AuthLoginSessionState      string
-	AuthLoginSessionError      string
-	AuthLoginCopyNote          string
-	TrafficRows                []TrafficRow
-	TrafficError               string
-	HelpNote                   string
+	// Invariant: AuthSessions payloads are canonicalized at write seams.
+	// UI readers must not re-trim session fields.
+	AuthSessions map[string]AuthSessionView
+	TrafficRows  []TrafficRow
+	TrafficError string
+	HelpNote     string
+}
+
+type AuthSessionView struct {
+	SessionID    string
+	URL          string
+	UserCode     string
+	SessionState string
+	SessionError string
+	CopyNote     string
 }
 
 type ControlPlaneMismatch struct {
@@ -87,6 +91,7 @@ type ProviderConfigSnapshot struct {
 	CredentialRef string `json:"credential_ref,omitempty"`
 	ModelID       string `json:"model_id,omitempty"`
 	TargetAlias   string `json:"target_alias,omitempty"`
+	SelectedFrame string `json:"selected_frame,omitempty"`
 	ProtocolKind  string `json:"protocol_kind"`
 }
 

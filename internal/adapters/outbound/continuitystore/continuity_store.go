@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 const defaultContinuityRetention = 4 * time.Hour
@@ -39,7 +39,7 @@ type chainNode struct {
 	ParentID   string
 	ResponseID string
 	Model      string
-	Items      []compatibility.CanonicalItem
+	Items      []canonical.CanonicalItem
 	CreatedAt  time.Time
 	LastUsedAt time.Time
 }
@@ -47,7 +47,7 @@ type chainNode struct {
 type indexedContinuityState struct {
 	nodesByID        map[string]chainNode
 	responseToNodeID map[string]string
-	namespaceNodeIDs map[compatibility.ContinuationNamespace][]string
+	namespaceNodeIDs map[canonical.ContinuationNamespace][]string
 }
 
 // NewLocalResponseContinuityStore builds the in-memory recent replay window.
@@ -66,26 +66,26 @@ func NewLocalResponseContinuityStore(cfg LocalResponseContinuityStoreConfig) *Lo
 	}
 }
 
-func (s *LocalResponseContinuityStore) Load(_ context.Context, previousResponseID string) (compatibility.ContinuitySnapshot, bool, error) {
+func (s *LocalResponseContinuityStore) Load(_ context.Context, previousResponseID string) (canonical.ContinuitySnapshot, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	index := s.pruneLocked()
 	nodeID := index.responseToNodeID[previousResponseID]
 	if nodeID == "" {
-		return compatibility.ContinuitySnapshot{}, false, nil
+		return canonical.ContinuitySnapshot{}, false, nil
 	}
 	thread, ok := s.materializeThreadLocked(index, nodeID)
 	if !ok {
 		s.deleteNodeLocked(nodeID)
-		return compatibility.ContinuitySnapshot{}, false, nil
+		return canonical.ContinuitySnapshot{}, false, nil
 	}
 	s.touchChainLocked(index, nodeID, s.now().UTC())
 	node := index.nodesByID[nodeID]
-	return compatibility.NewContinuitySnapshot(node.ResponseID, node.Model, thread), true, nil
+	return canonical.NewContinuitySnapshot(node.ResponseID, node.Model, thread), true, nil
 }
 
-func (s *LocalResponseContinuityStore) MatchPrefix(_ context.Context, namespace compatibility.ContinuationNamespace, thread []compatibility.CanonicalItem) (compatibility.ContinuationPrefixMatch, bool, error) {
+func (s *LocalResponseContinuityStore) MatchPrefix(_ context.Context, namespace canonical.ContinuationNamespace, thread []canonical.CanonicalItem) (canonical.ContinuationPrefixMatch, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -93,7 +93,7 @@ func (s *LocalResponseContinuityStore) MatchPrefix(_ context.Context, namespace 
 	nodeIDs := index.namespaceNodeIDs[namespace]
 	var (
 		bestNodeID string
-		bestThread []compatibility.CanonicalItem
+		bestThread []canonical.CanonicalItem
 		bestLen    int
 		bestNode   chainNode
 	)
@@ -118,16 +118,16 @@ func (s *LocalResponseContinuityStore) MatchPrefix(_ context.Context, namespace 
 		}
 	}
 	if bestNodeID == "" {
-		return compatibility.ContinuationPrefixMatch{}, false, nil
+		return canonical.ContinuationPrefixMatch{}, false, nil
 	}
 	s.touchChainLocked(index, bestNodeID, s.now().UTC())
-	return compatibility.ContinuationPrefixMatch{
-		Snapshot:     compatibility.NewContinuitySnapshot(bestNode.ResponseID, bestNode.Model, bestThread),
+	return canonical.ContinuationPrefixMatch{
+		Snapshot:     canonical.NewContinuitySnapshot(bestNode.ResponseID, bestNode.Model, bestThread),
 		PrefixLength: bestLen,
 	}, true, nil
 }
 
-func (s *LocalResponseContinuityStore) Store(_ context.Context, namespace compatibility.ContinuationNamespace, snapshot compatibility.ContinuitySnapshot) error {
+func (s *LocalResponseContinuityStore) Store(_ context.Context, namespace canonical.ContinuationNamespace, snapshot canonical.ContinuitySnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -200,7 +200,7 @@ func (s *LocalResponseContinuityStore) indexLocked() indexedContinuityState {
 	index := indexedContinuityState{
 		nodesByID:        make(map[string]chainNode, len(s.nodes)),
 		responseToNodeID: map[string]string{},
-		namespaceNodeIDs: map[compatibility.ContinuationNamespace][]string{},
+		namespaceNodeIDs: map[canonical.ContinuationNamespace][]string{},
 	}
 	for _, node := range s.nodes {
 		index.nodesByID[node.ID] = node
@@ -210,13 +210,13 @@ func (s *LocalResponseContinuityStore) indexLocked() indexedContinuityState {
 				index.responseToNodeID[node.ResponseID] = node.ID
 			}
 		}
-		ns := compatibility.NewContinuationNamespace(node.Namespace)
+		ns := canonical.NewContinuationNamespace(node.Namespace)
 		index.namespaceNodeIDs[ns] = append(index.namespaceNodeIDs[ns], node.ID)
 	}
 	return index
 }
 
-func (s *LocalResponseContinuityStore) materializeThreadLocked(index indexedContinuityState, nodeID string) ([]compatibility.CanonicalItem, bool) {
+func (s *LocalResponseContinuityStore) materializeThreadLocked(index indexedContinuityState, nodeID string) ([]canonical.CanonicalItem, bool) {
 	node, ok := index.nodesByID[nodeID]
 	if !ok {
 		return nil, false
@@ -267,7 +267,7 @@ func (s *LocalResponseContinuityStore) deleteNodeLocked(nodeID string) {
 	s.nodes = filtered
 }
 
-func commonPrefixLength(left []compatibility.CanonicalItem, right []compatibility.CanonicalItem) int {
+func commonPrefixLength(left []canonical.CanonicalItem, right []canonical.CanonicalItem) int {
 	limit := len(left)
 	if len(right) < limit {
 		limit = len(right)
@@ -293,11 +293,11 @@ func newerNode(left chainNode, right chainNode) bool {
 	return false
 }
 
-func cloneItems(items []compatibility.CanonicalItem) []compatibility.CanonicalItem {
+func cloneItems(items []canonical.CanonicalItem) []canonical.CanonicalItem {
 	if items == nil {
 		return nil
 	}
-	out := make([]compatibility.CanonicalItem, len(items))
+	out := make([]canonical.CanonicalItem, len(items))
 	for i := range items {
 		out[i] = items[i].Clone()
 	}

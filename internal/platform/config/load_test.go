@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 func TestLoad_AppliesDefaultsAndDecodesEndpoints(t *testing.T) {
@@ -18,7 +17,7 @@ endpoints:
     selected_provider_config_ref: backend-a
     provider_configs:
       - ref: backend-a
-        provider_spec: custom
+        provider_spec: openai_compatible
         protocol_kind: chat_completions
         base_url: https://example.test/v1
         model_id: gpt-4.1-mini
@@ -79,7 +78,7 @@ endpoints:
     selected_provider_config_ref: backend-a
     provider_configs:
       - ref: backend-a
-        provider_spec: custom
+        provider_spec: openai_compatible
         protocol_kind: chat_completions
 `
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
@@ -105,7 +104,7 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	spec, err := endpointintent.ParseProviderSpec("custom")
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -114,7 +113,6 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 		spec,
 		"https://example.test/v1",
 		"",
-		protocolsurface.ChatCompletions,
 	)
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
@@ -159,5 +157,121 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 	}
 	if got := loaded.Endpoints[0].SelectedProviderConfig().TargetAlias(); got != "fast" {
 		t.Fatalf("roundtrip target_alias = %q, want %q", got, "fast")
+	}
+}
+
+func TestSaveLoad_RoundTripMultiProviderCredentialRefsAndAliases_YAML(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	raw := `
+bind_addr: 127.0.0.1:7926
+endpoints:
+  - name: acme
+    selected_provider_config_ref: chatgpt-work
+    provider_configs:
+      - ref: chatgpt-work
+        provider_spec: chatgpt
+        protocol_kind: chat_completions
+        credential_ref: keychain:chatgpt/work_account
+        model_id: gpt-5.3-codex
+        target_alias: work-fast
+      - ref: chatgpt-personal
+        provider_spec: chatgpt
+        protocol_kind: chat_completions
+        credential_ref: keychain:chatgpt/personal_account
+        model_id: gpt-5.3-codex
+        target_alias: personal-safe
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(loaded.Endpoints) != 1 {
+		t.Fatalf("endpoint count=%d want 1", len(loaded.Endpoints))
+	}
+	cfgs := loaded.Endpoints[0].ProviderConfigs()
+	if len(cfgs) != 2 {
+		t.Fatalf("provider config count=%d want 2", len(cfgs))
+	}
+	if got := cfgs[0].CredentialRef(); got != "keychain:chatgpt/work_account" {
+		t.Fatalf("credential_ref[0]=%q", got)
+	}
+	if got := cfgs[1].CredentialRef(); got != "keychain:chatgpt/personal_account" {
+		t.Fatalf("credential_ref[1]=%q", got)
+	}
+	if got := cfgs[0].TargetAlias(); got != "work-fast" {
+		t.Fatalf("target_alias[0]=%q", got)
+	}
+	if got := cfgs[1].TargetAlias(); got != "personal-safe" {
+		t.Fatalf("target_alias[1]=%q", got)
+	}
+}
+
+func TestSaveLoad_RoundTripMultiProviderCredentialRefsAndAliases_JSON(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "swobu.json")
+	raw := `{
+  "bind_addr": "127.0.0.1:7926",
+  "endpoints": [
+    {
+      "name": "acme",
+      "selected_provider_config_ref": "chatgpt-work",
+      "provider_configs": [
+        {
+          "ref": "chatgpt-work",
+          "provider_spec": "chatgpt",
+          "protocol_kind": "chat_completions",
+          "credential_ref": "keychain:chatgpt/work_account",
+          "model_id": "gpt-5.3-codex",
+          "target_alias": "work-fast"
+        },
+        {
+          "ref": "chatgpt-personal",
+          "provider_spec": "chatgpt",
+          "protocol_kind": "chat_completions",
+          "credential_ref": "keychain:chatgpt/personal_account",
+          "model_id": "gpt-5.3-codex",
+          "target_alias": "personal-safe"
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if err := Save(path, loaded.Runtime, loaded.Endpoints); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	roundtrip, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load roundtrip returned error: %v", err)
+	}
+	cfgs := roundtrip.Endpoints[0].ProviderConfigs()
+	if len(cfgs) != 2 {
+		t.Fatalf("provider config count=%d want 2", len(cfgs))
+	}
+	if got := cfgs[0].CredentialRef(); got != "keychain:chatgpt/work_account" {
+		t.Fatalf("roundtrip credential_ref[0]=%q", got)
+	}
+	if got := cfgs[1].CredentialRef(); got != "keychain:chatgpt/personal_account" {
+		t.Fatalf("roundtrip credential_ref[1]=%q", got)
+	}
+	if got := cfgs[0].TargetAlias(); got != "work-fast" {
+		t.Fatalf("roundtrip target_alias[0]=%q", got)
+	}
+	if got := cfgs[1].TargetAlias(); got != "personal-safe" {
+		t.Fatalf("roundtrip target_alias[1]=%q", got)
 	}
 }

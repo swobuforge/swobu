@@ -1,43 +1,47 @@
 package ports
 
 import (
+	"context"
+	"io"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestNewExecuteRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
-	request := compatibility.NewDialogRequest(
+	request := canonical.NewDialogRequest(
 		"m",
-		[]compatibility.CanonicalItem{
-			compatibility.NewTextItem(compatibility.ItemAuthorUser, "hi"),
-			compatibility.NewToolUseItem(compatibility.ItemAuthorUser, "", "toolu_1", "calculator", map[string]any{"expr": "2+2"}),
+		[]canonical.CanonicalItem{
+			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			canonical.NewToolUseItem(canonical.ItemAuthorUser, "", "toolu_1", "calculator", map[string]any{"expr": "2+2"}),
 		},
 	)
 	target := NewRoutableTarget(
 		"backend-a",
-		"custom",
+		"openai_compatible",
 		"http://localhost:8080/v1",
 		"cred-1",
 		"chat_completions",
 		"",
-		"",
 	)
-	req := NewExecuteRequest(request, NewExecutionContract(compatibility.DeliveryModeStreaming), target)
+	req := NewProviderRequest(request, NewExecutionContract(true), target)
 
 	requestItems := request.Items()
 	requestItems[0].Text = "changed"
 	requestItems[1].Input["expr"] = "changed"
 
-	if got := req.Contract.DeliveryMode; got != compatibility.DeliveryModeStreaming {
-		t.Fatalf("delivery mode = %q, want %q", got, compatibility.DeliveryModeStreaming)
+	if got := req.Contract.Streaming; got != true {
+		t.Fatalf("streaming = %t, want %t", got, true)
 	}
-	if got := req.Request.SemanticKind(); got != compatibility.SemanticKindConversation {
-		t.Fatalf("semantic kind = %q, want %q", got, compatibility.SemanticKindConversation)
+	if req.Contract.AllowPreCommitFallback {
+		t.Fatal("allow_pre_commit_fallback = true, want false by default")
 	}
-	typed, ok := req.Request.(compatibility.DialogCanonicalRequest)
+	if got := req.Request.SemanticKind(); got != canonical.SemanticKindConversation {
+		t.Fatalf("semantic kind = %q, want %q", got, canonical.SemanticKindConversation)
+	}
+	typed, ok := req.Request.(canonical.DialogCanonicalRequest)
 	if !ok {
-		t.Fatalf("expected compatibility.DialogCanonicalRequest, got %T", req.Request)
+		t.Fatalf("expected canonical.DialogCanonicalRequest, got %T", req.Request)
 	}
 	if got := typed.Items()[0].Text; got != "hi" {
 		t.Fatalf("message text = %q, want %q", got, "hi")
@@ -50,41 +54,104 @@ func TestNewExecuteRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 	}
 }
 
+func TestExecutionContract_WithPreCommitFallbackEnabled_SetsFlag(t *testing.T) {
+	contract := NewExecutionContract(false)
+	if contract.AllowPreCommitFallback {
+		t.Fatal("allow_pre_commit_fallback = true, want false by default")
+	}
+
+	enabled := contract.WithPreCommitFallbackEnabled()
+	if !enabled.AllowPreCommitFallback {
+		t.Fatal("allow_pre_commit_fallback = false, want true after opt-in")
+	}
+	if enabled.Streaming != false {
+		t.Fatalf("streaming = %t, want %t", enabled.Streaming, false)
+	}
+}
+
 func TestNewBufferedExecuteResponse_ClonesCanonicalOutputAndPreservesDeliveryMode(t *testing.T) {
-	output := compatibility.NewConversationOutput(
+	output := canonical.NewConversationOutput(
 		"resp_1",
 		"m",
-		[]compatibility.OutputItem{
-			compatibility.NewTextOutputItem("text_0", "hi"),
+		[]canonical.OutputItem{
+			canonical.NewTextOutputItem("text_0", "hi"),
 		},
 		"stop",
 	)
 
-	resp := NewBufferedExecuteResponse(output)
+	resp := NewBufferedProviderResponse(output)
 	items := output.Items()
 	items[0].Text = "changed"
 
-	if got := resp.DeliveryMode(); got != compatibility.DeliveryModeBuffered {
-		t.Fatalf("delivery mode = %q, want %q", got, compatibility.DeliveryModeBuffered)
+	if resp.EnvelopeStream() == nil {
+		t.Fatal("envelope stream = nil, want non-nil")
 	}
-	typed, ok := resp.Output().(compatibility.CanonicalOutputValue)
-	if !ok {
-		t.Fatalf("output type = %T, want compatibility.CanonicalOutputValue", resp.Output())
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), resp.EnvelopeStream(), canonical.EnvResponse)
+	if err != nil {
+		t.Fatalf("ReadClosedEnvelope error: %v", err)
 	}
-	if got := typed.Items()[0].Text; got != "hi" {
+	snapshot, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatalf("ProjectResponse error: %v", err)
+	}
+	if got := snapshot.Items()[0].Text; got != "hi" {
 		t.Fatalf("output text = %q, want %q", got, "hi")
 	}
 }
 
 func TestNewStreamingExecuteResponse_PreservesDeliveryMode(t *testing.T) {
-	resp := NewStreamingExecuteResponse(compatibility.NewSliceEventStream([]compatibility.OutputEvent{
-		{Kind: compatibility.OutputEventStarted, ResultID: "resp_1", Model: "m"},
+	resp := NewEnvelopeStreamingProviderResponse(canonical.NewSliceEventReader([]canonical.Event{
+		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
+		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	}))
 
-	if got := resp.DeliveryMode(); got != compatibility.DeliveryModeStreaming {
-		t.Fatalf("delivery mode = %q, want %q", got, compatibility.DeliveryModeStreaming)
+	if resp.EnvelopeStream() == nil {
+		t.Fatal("envelope stream = nil, want non-nil")
 	}
-	if resp.Stream() == nil {
-		t.Fatal("stream = nil, want non-nil")
+}
+
+func TestNewEnvelopeStreamingExecuteResponse_ProjectsLegacyStream(t *testing.T) {
+	out := canonical.NewConversationOutput(
+		"resp_env_1",
+		"m",
+		[]canonical.OutputItem{
+			canonical.NewTextOutputItem("text_0", "ok"),
+		},
+		"completed",
+	)
+	reader, err := canonical.EventReaderFromCanonicalOutput("ex_ports_env", out)
+	if err != nil {
+		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
+	}
+
+	resp := NewEnvelopeStreamingProviderResponse(reader)
+	if resp.EnvelopeStream() == nil {
+		t.Fatal("envelope stream = nil, want non-nil")
+	}
+	stream := resp.EnvelopeStream()
+	seenResponseEnd := false
+	for {
+		ev, err := stream.Next(context.Background())
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("legacy stream next error: %v", err)
+		}
+		if ev.Kind == canonical.EventEnvelopeEnd {
+			payload, _ := ev.Payload.(canonical.EnvelopeEndPayload)
+			if payload.Kind == canonical.EnvResponse {
+				seenResponseEnd = true
+			}
+		}
+	}
+	if !seenResponseEnd {
+		t.Fatal("expected response envelope end event")
+	}
+	if err := resp.Close(); err != nil {
+		t.Fatalf("close error: %v", err)
+	}
+	if err := reader.Close(context.Background()); err != nil {
+		t.Fatalf("reader close error: %v", err)
 	}
 }

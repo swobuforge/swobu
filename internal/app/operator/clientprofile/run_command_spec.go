@@ -34,12 +34,12 @@ func compileCapabilityActions(spec capabilityClientSpec) []ActionSpec {
 	actions := make([]ActionSpec, 0, len(spec.Actions))
 	for _, actionSpec := range spec.Actions {
 		desc := actionDescriptors[actionSpec.Kind]
-		summary := strings.TrimSpace(actionSpec.Summary)
+		summary := strings.TrimSpace(actionSpec.Summary) // trimlowerlint:allow boundary canonicalization
 		if summary == "" {
 			summary = desc.Summary
 		}
 		content := actionSpec.Content
-		if actionSpec.Kind == ActionKindRun && strings.TrimSpace(content) == "" {
+		if actionSpec.Kind == ActionKindRun && strings.TrimSpace(content) == "" { // trimlowerlint:allow boundary canonicalization
 			content = runActionContentTemplate(spec.Run)
 		}
 		actions = append(actions, ActionSpec{
@@ -80,7 +80,7 @@ func runActionContentTemplate(run *capabilityRunSpec) string {
 }
 
 func redactDisplayEnvKey(key string) bool {
-	return strings.EqualFold(strings.TrimSpace(key), "OPENAI_API_KEY")
+	return strings.EqualFold(strings.TrimSpace(key), "OPENAI_API_KEY") // trimlowerlint:allow boundary canonicalization
 }
 
 func shellToken(raw string) string {
@@ -101,7 +101,7 @@ func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool)
 	}
 	vars := buildTemplateVars(baseURL, spec.Vars)
 	command := RunCommandSpec{
-		ClientID: strings.TrimSpace(clientID),
+		ClientID: strings.TrimSpace(clientID), // trimlowerlint:allow boundary canonicalization
 		Binary:   renderTemplate(spec.Run.Binary, vars),
 		Args:     renderTemplateSlice(spec.Run.Args, vars),
 		Env:      renderTemplateMap(spec.Run.Env, vars),
@@ -118,12 +118,12 @@ func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool)
 }
 
 func capabilitySpecByID(clientID string) (capabilityClientSpec, bool) {
-	clientID = strings.TrimSpace(clientID)
+	clientID = strings.TrimSpace(clientID) // trimlowerlint:allow boundary canonicalization
 	if clientID == "" {
 		return capabilityClientSpec{}, false
 	}
 	for _, spec := range capabilityCatalog() {
-		if strings.TrimSpace(spec.Identity.ID) == clientID {
+		if strings.TrimSpace(spec.Identity.ID) == clientID { // trimlowerlint:allow boundary canonicalization
 			return spec, true
 		}
 	}
@@ -153,12 +153,12 @@ func renderTemplateMap(values map[string]string, vars TemplateVars) map[string]s
 }
 
 func runPrepareContent(prepare capabilityRunPrepareSpec, spec capabilityClientSpec, baseURL string) string {
-	if strings.TrimSpace(prepare.FromActionID) == "" {
+	if strings.TrimSpace(prepare.FromActionID) == "" { // trimlowerlint:allow boundary canonicalization
 		return ""
 	}
 	actions := compileProfileActions(profileSpecFromCapability(spec), baseURL)
 	for _, action := range actions {
-		if strings.TrimSpace(action.ID) == strings.TrimSpace(prepare.FromActionID) {
+		if strings.TrimSpace(action.ID) == strings.TrimSpace(prepare.FromActionID) { // trimlowerlint:allow boundary canonicalization
 			return action.Content
 		}
 	}

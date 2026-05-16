@@ -1,0 +1,30 @@
+SWOBU 🧌                                                                ready   [ ? ] [› acme] [ + ]
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     name               acme                                                              edit ↵
+     endpoint           /c/acme/                                                          copy ↵
+     delete workspace                                                                     delete ↵
+
+  routing ▾
+     run on             chatgpt:gpt-5.3-codex:c57d7a7c                                    choose ↵
+     models             1 configured                                                      manage ↵
+  >    chatgpt:gpt-5.3-c                                                                  close ↵
+         provider          ChatGPT
+         frame             http_json_body                                                 next ↵
+         model             gpt-5.3-codex                                                  choose ↵
+         alias             not set                                                        edit ↵
+         auth              chatgpt_login                                                  choose ↵
+         delete model      disabled (last model)
+       add model                                                                          create ↵
+
+  clients ▸
+    not set
+
+  traffic ▸
+    no traffic yet
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   esc close   ? help

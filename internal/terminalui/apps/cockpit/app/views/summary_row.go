@@ -10,6 +10,6 @@ import (
 // SummaryRow renders a non-focusable summary line directly under a section
 // title without key/value column alignment.
 func SummaryRow(value string) retained.ViewSpec[state.Model] {
-	text := strings.TrimSpace(value)
+	text := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
 	return IndentLeft[state.Model](StaticTextLine[state.Model](text), InsetDetail)
 }

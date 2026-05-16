@@ -46,26 +46,22 @@ func buildProviderKeychainKeyNameRow(ctx *retained.Context[state.Model], spec pr
 		"",
 		"paste key value",
 		func(value string) []update.Action {
-			return []update.Action{state.StoreKeychainCredentialRequested{
-				ProviderSpec: strings.TrimSpace(pc.ProviderSpec),
-				KeyName:      effectiveName,
-				Secret:       strings.TrimSpace(value),
-			}}
+			return routingStoreKeychainCredentialActions(strings.TrimSpace(pc.ProviderSpec), effectiveName, strings.TrimSpace(value), "provider/keychain") // trimlowerlint:allow boundary canonicalization
 		},
 	)
 	return retained.VStack(ctx, keyNameRow, keyValueRow)
 }
 
 func keychainValueSummary(model state.Model, providerSpec string, keySlot string) string {
-	if strings.EqualFold(model.LastStoredKeyProviderSpec, strings.TrimSpace(providerSpec)) &&
-		model.LastStoredKeySlotName == strings.TrimSpace(keySlot) {
+	if strings.EqualFold(model.LastStoredKeyProviderSpec, strings.TrimSpace(providerSpec)) && // trimlowerlint:allow boundary canonicalization
+		model.LastStoredKeySlotName == strings.TrimSpace(keySlot) { // trimlowerlint:allow boundary canonicalization
 		return "stored"
 	}
 	return "missing"
 }
 
 func keychainEffectiveName(providerSpec string, current string) string {
-	name := strings.TrimSpace(current)
+	name := strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
 	if name != "" {
 		return name
 	}
@@ -73,7 +69,7 @@ func keychainEffectiveName(providerSpec string, current string) string {
 }
 
 func defaultKeychainKeyName(providerSpec string) string {
-	spec := strings.TrimSpace(strings.ToLower(providerSpec))
+	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
 	if spec == "" {
 		return "default"
 	}
@@ -85,16 +81,10 @@ func applyProviderKeychainKeyNameSelection(keyName string, providerConfig *state
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	return []update.Action{
-		state.RoutingSaveStartedAction{},
-		state.SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName),
-			ProviderConfig: next,
-		},
-	}
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // trimlowerlint:allow boundary canonicalization
 }

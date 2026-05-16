@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
-func TestApplyProviderEnvKeySelection_CreateModeUsesProviderDefaultProtocol(t *testing.T) {
+func TestApplyProviderEnvKeySelection_CreateModeLoadsCatalogScope(t *testing.T) {
 	t.Parallel()
 
 	actions := applyProviderEnvKeySelection("anthropic", "ANTHROPIC_API_KEY", nil, "", true, "")
@@ -19,8 +19,5 @@ func TestApplyProviderEnvKeySelection_CreateModeUsesProviderDefaultProtocol(t *t
 	}
 	if load.Scope != state.RoutingModelCatalogScopeCreateDraft {
 		t.Fatalf("scope = %q, want %q", load.Scope, state.RoutingModelCatalogScopeCreateDraft)
-	}
-	if got := load.ProtocolKind; got != "messages" {
-		t.Fatalf("protocol kind = %q, want %q", got, "messages")
 	}
 }

@@ -17,7 +17,7 @@ type CompatibilityRestartHintEffect struct {
 }
 
 func (eff CompatibilityRestartHintEffect) Execute(ctx context.Context) []update.Action {
-	_ = strings.TrimSpace(eff.Command)
+	_ = strings.TrimSpace(eff.Command) // trimlowerlint:allow boundary canonicalization
 	message := restartDaemonCompatibilityMessage(ctx)
 	return []update.Action{CompatibilityRecoveryNoted{
 		Message: message,
@@ -32,7 +32,7 @@ type CopyCompatibilityDiagnosticsEffect struct {
 
 func (eff CopyCompatibilityDiagnosticsEffect) Execute(context.Context) []update.Action {
 	return []update.Action{CompatibilityRecoveryNoted{
-		Message: copyValueNote(strings.TrimSpace(eff.Text)),
+		Message: copyValueNote(strings.TrimSpace(eff.Text)), // trimlowerlint:allow boundary canonicalization
 		Action:  "copy",
 	}}
 }
@@ -56,7 +56,7 @@ type CompatibilityRecoveryNoted struct {
 func restartDaemonCompatibilityMessage(ctx context.Context) string {
 	err := restartDaemon(ctx, daemonlifecycle.RestartInput{})
 	if err != nil {
-		return "failed to restart daemon: " + strings.TrimSpace(err.Error())
+		return "failed to restart daemon: " + strings.TrimSpace(err.Error()) // trimlowerlint:allow boundary canonicalization
 	}
 	return "daemon restart started"
 }

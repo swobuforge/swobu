@@ -6,9 +6,9 @@ SWOBU 🧌                                                                      
      delete workspace                                                                               delete ↵
 
   routing ▾
-     run on             gemma4:e4b                                                                  choose ↵
+     run on             ollama:gemma4:e4b:e3b0c442                                                  choose ↵
      models             1 configured                                                                manage ↵
-       gemma4:e4b                                                                                   edit ↵
+       ollama:gemma4:e4b:                                                                           edit ↵
        add model                                                                                    close ↵
          provider           OpenAI                                                                  change ↵
     >    auth               file missing                                                            change ↵

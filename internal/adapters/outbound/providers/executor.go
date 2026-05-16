@@ -4,54 +4,67 @@ import (
 	"context"
 	"net/http"
 
-	anthropicprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
-	customprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/custom"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
-type CredentialResolver interface {
-	ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error)
+// ProviderExecutionService dispatches canonical execution by configured provider id.
+type ProviderExecutionService struct {
+	byProviderID map[providercatalog.ProviderID]providersruntime.Executor
 }
 
-// ProviderExecutorMux dispatches provider execution and model-catalog calls
-// by selected provider spec.
-type ProviderExecutorMux struct {
-	custom    customprovider.ProviderExecutorAdapter
-	anthropic anthropicprovider.ProviderExecutorAdapter
+// ProviderModelCatalogService dispatches model-catalog loading by configured provider id.
+type ProviderModelCatalogService struct {
+	byProviderID map[providercatalog.ProviderID]providersruntime.ModelCatalogClient
 }
 
-func NewExecutor(client *http.Client, credentials CredentialResolver) ProviderExecutorMux {
-	return ProviderExecutorMux{
-		custom:    customprovider.NewExecutor(client, credentials),
-		anthropic: anthropicprovider.NewExecutor(client, credentials),
+// Services groups provider lifecycle services built from one provider-definition registry.
+type Services struct {
+	Execution    ProviderExecutionService
+	ModelCatalog ProviderModelCatalogService
+}
+
+// NewServices is the single composition entrypoint for outbound provider lifecycle services.
+func NewServices(client *http.Client, credentials providersruntime.CredentialProvider) Services {
+	runtimes := NewRuntimeFactory(client, credentials).Build(providercatalog.All())
+	execution := make(map[providercatalog.ProviderID]providersruntime.Executor, len(runtimes))
+	modelCatalog := make(map[providercatalog.ProviderID]providersruntime.ModelCatalogClient, len(runtimes))
+	for providerID, runtime := range runtimes {
+		execution[providerID] = runtime.Executor
+		modelCatalog[providerID] = runtime.ModelCatalogClient
+	}
+	return Services{
+		Execution: ProviderExecutionService{
+			byProviderID: execution,
+		},
+		ModelCatalog: ProviderModelCatalogService{
+			byProviderID: modelCatalog,
+		},
 	}
 }
 
-func (r ProviderExecutorMux) Execute(ctx context.Context, req ports.ExecuteRequest) (ports.ExecuteResponse, error) {
-	switch providerAdapterGroup(req.Target.ProviderSpecName()) {
-	case providercatalog.AdapterAnthropicMessages:
-		return r.anthropic.Execute(ctx, req)
-	case providercatalog.AdapterCustomOpenAICompatible:
-		return r.custom.Execute(ctx, req)
-	default:
-		return ports.ExecuteResponse{}, compatibility.BadEndpoint("provider spec is unsupported")
+func (s ProviderExecutionService) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
+	providerID, ok := providercatalog.ParseProviderID(req.Target.ProviderID())
+	if !ok {
+		return ports.ProviderResponse{}, canonical.BadEndpoint("provider id is unsupported")
 	}
+	adapter, ok := s.byProviderID[providerID]
+	if !ok {
+		return ports.ProviderResponse{}, canonical.BadEndpoint("provider id is unsupported")
+	}
+	return adapter.Execute(ctx, req)
 }
 
-func (r ProviderExecutorMux) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
-	switch providerAdapterGroup(target.ProviderSpecName()) {
-	case providercatalog.AdapterAnthropicMessages:
-		return r.anthropic.ListModels(ctx, target)
-	case providercatalog.AdapterCustomOpenAICompatible:
-		return r.custom.ListModels(ctx, target)
-	default:
-		return nil, compatibility.BadEndpoint("provider spec is unsupported")
+func (s ProviderModelCatalogService) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
+	providerID, ok := providercatalog.ParseProviderID(target.ProviderID())
+	if !ok {
+		return nil, canonical.BadEndpoint("provider id is unsupported")
 	}
-}
-
-func providerAdapterGroup(providerSpec string) string {
-	group, _ := providercatalog.AdapterForSpec(providerSpec)
-	return group
+	adapter, ok := s.byProviderID[providerID]
+	if !ok {
+		return nil, canonical.BadEndpoint("provider id is unsupported")
+	}
+	return adapter.ListModels(ctx, target)
 }

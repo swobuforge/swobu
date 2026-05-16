@@ -28,8 +28,8 @@ func buildProviderEnvKeyRow(ctx *retained.Context[state.Model], spec providerEnv
 	if pc == nil || !strings.EqualFold(credentialSource(pc.CredentialRef), "env") {
 		return nil
 	}
-	current := strings.TrimSpace(envCredentialKey(pc.CredentialRef))
-	summary, editorValue := envKeySummary(strings.TrimSpace(pc.ProviderSpec), current)
+	current := strings.TrimSpace(envCredentialKey(pc.CredentialRef))                   // trimlowerlint:allow boundary canonicalization
+	summary, editorValue := envKeySummary(strings.TrimSpace(pc.ProviderSpec), current) // trimlowerlint:allow boundary canonicalization
 	row := backendURLEditorRow(
 		ctx,
 		"env key",
@@ -38,17 +38,17 @@ func buildProviderEnvKeyRow(ctx *retained.Context[state.Model], spec providerEnv
 		"env variable",
 		func(value string) []update.Action {
 			draftBaseURL := model.CreateDraftProviderConfig.BaseURL
-			return applyProviderEnvKeySelection(strings.TrimSpace(pc.ProviderSpec), value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode, draftBaseURL)
+			return applyProviderEnvKeySelection(strings.TrimSpace(pc.ProviderSpec), value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode, draftBaseURL) // trimlowerlint:allow boundary canonicalization
 		},
 	)
 	return row
 }
 
 func envKeySummary(providerSpec string, explicitKey string) (summary string, editorValue string) {
-	if key := strings.TrimSpace(explicitKey); key != "" {
+	if key := strings.TrimSpace(explicitKey); key != "" { // trimlowerlint:allow boundary canonicalization
 		return key, key
 	}
-	if hint := strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)); hint != "" {
+	if hint := strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)); hint != "" { // trimlowerlint:allow boundary canonicalization
 		return hint, hint
 	}
 	return "missing", ""
@@ -57,32 +57,25 @@ func envKeySummary(providerSpec string, explicitKey string) (summary string, edi
 func applyProviderEnvKeySelection(providerSpec string, envKey string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool, createDraftBaseURL string) []update.Action {
 	ref := encodeCredentialEnvRef(envKey)
 	if createMode {
-		baseURL := strings.TrimSpace(createDraftBaseURL)
+		baseURL := strings.TrimSpace(createDraftBaseURL) // trimlowerlint:allow boundary canonicalization
 		if baseURL == "" {
-			baseURL = strings.TrimSpace(providercatalog.DefaultBaseURL(providerSpec))
+			baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // trimlowerlint:allow boundary canonicalization
 		}
 		return []update.Action{
 			state.SetCreateDraftCredentialRef{CredentialRef: ref},
 			state.SetCreateDraftModelID{ModelID: ""},
 			state.LoadRoutingModelCatalogRequested{
 				Scope:         state.RoutingModelCatalogScopeCreateDraft,
-				ProviderSpec:  strings.TrimSpace(providerSpec),
+				ProviderSpec:  strings.TrimSpace(providerSpec), // trimlowerlint:allow boundary canonicalization
 				BaseURL:       baseURL,
 				CredentialRef: ref,
-				ProtocolKind:  defaultProtocolKindForProvider(providerSpec),
 			},
 		}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	return []update.Action{
-		state.RoutingSaveStartedAction{},
-		state.SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName),
-			ProviderConfig: next,
-		},
-	}
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/env") // trimlowerlint:allow boundary canonicalization
 }

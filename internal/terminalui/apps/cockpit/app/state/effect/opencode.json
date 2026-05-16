@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "swobu/primary",
+  "model": "swobu/swobu",
   "provider": {
     "swobu": {
       "npm": "@ai-sdk/openai-compatible",

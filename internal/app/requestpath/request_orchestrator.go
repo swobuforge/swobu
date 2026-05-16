@@ -5,8 +5,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -42,7 +43,7 @@ func NewRequestHandler(endpoints ports.EndpointReader, providers ports.ProviderE
 type HandleInput struct {
 	EndpointName endpointintent.EndpointName
 	RequestID    string
-	Request      compatibility.CanonicalRequest
+	Request      canonical.CanonicalRequest
 	Contract     ExecutionContract
 	Provenance   IngressProvenance
 }
@@ -51,8 +52,8 @@ type HandleInput struct {
 // from the HTTP edge into evidence truth.
 type IngressProvenance struct {
 	ClientProtocol string
-	IngressFamily  compatibility.IngressFamily
-	NormalizedOp   compatibility.NormalizedPath
+	IngressFamily  canonical.IngressFamily
+	NormalizedOp   canonical.NormalizedPath
 	ClientHandler  string
 }
 
@@ -60,7 +61,7 @@ type IngressProvenance struct {
 // response. The app layer does not rewrite successful semantics; that remains a
 // client-edge responsibility in the inbound adapter.
 type HandleOutput struct {
-	Response ports.ExecuteResponse
+	Response ports.ProviderResponse
 	Target   ports.RoutableTarget
 }
 
@@ -88,33 +89,30 @@ type ListModelsOutput struct {
 // independent failure and delivery paths that belong in one orchestrator.
 func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutput, error) {
 	if in.EndpointName.IsZero() {
-		return HandleOutput{}, compatibility.BadEndpoint("endpoint name is required")
+		return HandleOutput{}, canonical.BadEndpoint("endpoint name is required")
 	}
 	if in.Request == nil {
-		return HandleOutput{}, compatibility.BadRequest("canonical request is required")
-	}
-	if strings.TrimSpace(string(in.Contract.DeliveryMode)) == "" {
-		return HandleOutput{}, compatibility.BadRequest("execution contract delivery mode is required")
+		return HandleOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	if o.endpoints == nil {
-		return HandleOutput{}, compatibility.InternalError("endpoint reader is not configured")
+		return HandleOutput{}, canonical.InternalError("endpoint reader is not configured")
 	}
 	if o.providers == nil {
-		return HandleOutput{}, compatibility.InternalError("provider executor is not configured")
+		return HandleOutput{}, canonical.InternalError("provider executor is not configured")
 	}
 	if o.routingPolicy == nil {
-		return HandleOutput{}, compatibility.InternalError("routing policy is not configured")
+		return HandleOutput{}, canonical.InternalError("routing policy is not configured")
 	}
 
 	endpoint, err := o.endpoints.GetEndpoint(ctx, in.EndpointName)
 	if err != nil {
-		return HandleOutput{}, compatibility.BadEndpoint("endpoint could not be resolved")
+		return HandleOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
 
 	intent := ClientIntent{
 		EndpointName:   in.EndpointName,
 		RequestID:      in.RequestID,
-		Request:        compatibility.CloneCanonicalRequest(in.Request),
+		Request:        canonical.CloneCanonicalRequest(in.Request),
 		RequestedModel: requestModel(in.Request),
 		Provenance:     in.Provenance,
 	}
@@ -122,97 +120,106 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	if err != nil {
 		return HandleOutput{}, err
 	}
-	resolvedRequest := materializeRequestForExecution(intent.Request, route.EffectiveModel)
-	backendModel := BackendModelEntity{
-		BackendRef:     route.Target.BackendRef,
-		ProviderSpec:   route.Target.ProviderSpecName(),
-		ProtocolKind:   route.Target.ProtocolKind,
-		BackendModelID: route.EffectiveModel,
+	routes := []RouteDecision{route}
+	if in.Contract.AllowPreCommitFallback {
+		allRoutes, fallbackErr := fallbackRouteDecisions(endpoint, intent.RequestedModel)
+		if fallbackErr != nil {
+			return HandleOutput{}, fallbackErr
+		}
+		if len(allRoutes) > 0 {
+			routes = allRoutes
+		}
 	}
-	outcome := o.executeAttempt(ctx, ExecutionAttempt{
-		Intent:               intent,
-		Route:                route,
-		Index:                1,
-		Contract:             in.Contract,
-		Request:              resolvedRequest,
-		DeclaredCapabilities: o.capabilityCatalog.SnapshotFor(backendModel),
-		Continuation:         compatibility.NewContinuationRuntime(o.continuity),
-	})
+	var (
+		outcome    AttemptOutcome
+		lastErr    error
+		finalRoute RouteDecision
+	)
+	for i, candidate := range routes {
+		resolvedRequest := materializeRequestForExecution(intent.Request, candidate.EffectiveModel)
+		protocolKind, err := resolveProviderProtocolForRequest(candidate.Target.ProviderID(), resolvedRequest)
+		if err != nil {
+			return HandleOutput{}, err
+		}
+		candidate.Target.ProtocolKind = protocolKind
+		backendModel := BackendModelEntity{
+			BackendRef:     candidate.Target.BackendRef,
+			ProviderSpec:   candidate.Target.ProviderID(),
+			ProtocolKind:   candidate.Target.ProtocolKind,
+			BackendModelID: candidate.EffectiveModel,
+		}
+		attemptContract := in.Contract
+		if candidate.Target.SelectedFrame != "" {
+			streaming, ok := providercatalog.StreamingForFrame(candidate.Target.SelectedFrame)
+			if !ok {
+				return HandleOutput{}, canonical.BadEndpoint("selected provider frame is unsupported")
+			}
+			attemptContract.Streaming = streaming
+		}
+		outcome = o.executeAttempt(ctx, ExecutionAttempt{
+			Intent:               intent,
+			Route:                candidate,
+			Index:                i + 1,
+			Contract:             attemptContract,
+			Request:              resolvedRequest,
+			DeclaredCapabilities: o.capabilityCatalog.SnapshotFor(backendModel),
+			Continuation:         canonical.NewContinuationRuntime(o.continuity),
+		})
+		if outcome.Err == nil {
+			finalRoute = candidate
+			break
+		}
+		lastErr = outcome.Err
+	}
 	if outcome.Err != nil {
-		return HandleOutput{}, outcome.Err
+		return HandleOutput{}, lastErr
 	}
 	metadata := outcome.Response.Metadata()
 	metadata.ModelRequested = intent.RequestedModel
-	metadata.ModelResolved = route.EffectiveModel
-	metadata.ModelResolutionMode = route.ResolutionMode
+	metadata.ModelResolved = finalRoute.EffectiveModel
+	metadata.ModelResolutionMode = finalRoute.ResolutionMode
 	resp := outcome.Response.WithMetadata(metadata)
 
 	return HandleOutput{
 		Response: resp,
-		Target:   route.Target,
+		Target:   finalRoute.Target,
 	}, nil
 }
 
 func (o RequestHandler) ListModels(ctx context.Context, in ListModelsInput) (ListModelsOutput, error) {
 	if in.EndpointName.IsZero() {
-		return ListModelsOutput{}, compatibility.BadEndpoint("endpoint name is required")
+		return ListModelsOutput{}, canonical.BadEndpoint("endpoint name is required")
 	}
 	if o.endpoints == nil {
-		return ListModelsOutput{}, compatibility.InternalError("endpoint reader is not configured")
+		return ListModelsOutput{}, canonical.InternalError("endpoint reader is not configured")
 	}
 	endpoint, err := o.endpoints.GetEndpoint(ctx, in.EndpointName)
 	if err != nil {
-		return ListModelsOutput{}, compatibility.BadEndpoint("endpoint could not be resolved")
+		return ListModelsOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
-	catalog := buildEndpointModelCatalog(endpoint)
-	models := make([]ModelOption, 0, len(catalog.Entries)+1)
-	if primary, ok := primaryModelOption(catalog); ok {
-		models = append(models, primary)
-	}
-	for _, entry := range catalog.Entries {
-		models = append(models, ModelOption{
-			ID:           entry.ID,
-			ModelID:      entry.ModelID,
-			ProviderSpec: entry.ProviderSpec,
-			BackendRef:   entry.ProviderRef,
-		})
-	}
+	selected := endpoint.SelectedProviderConfig()
+	models := []ModelOption{{
+		ID:           PublicModelIDSwobu,
+		ModelID:      selected.ModelID(),
+		ProviderSpec: selected.ProviderSpec().String(),
+		BackendRef:   selected.Ref().String(),
+	}}
 	return ListModelsOutput{
-		DefaultModelID: catalog.DefaultID,
+		DefaultModelID: PublicModelIDSwobu,
 		Models:         models,
 	}, nil
 }
 
-func primaryModelOption(catalog endpointModelCatalog) (ModelOption, bool) {
-	for _, entry := range catalog.Entries {
-		if normalizeSelector(entry.ID) == compatibility.PrimaryTargetSelector {
-			return ModelOption{}, false
-		}
-	}
-	for _, entry := range catalog.Entries {
-		if entry.ProviderRef != catalog.DefaultRef {
-			continue
-		}
-		return ModelOption{
-			ID:           compatibility.PrimaryTargetSelector,
-			ModelID:      entry.ModelID,
-			ProviderSpec: entry.ProviderSpec,
-			BackendRef:   entry.ProviderRef,
-		}, true
-	}
-	return ModelOption{}, false
-}
-
-func materializeRequestForExecution(request compatibility.CanonicalRequest, modelID string) compatibility.CanonicalRequest {
-	if strings.TrimSpace(modelID) == "" {
+func materializeRequestForExecution(request canonical.CanonicalRequest, modelID string) canonical.CanonicalRequest {
+	if strings.TrimSpace(modelID) == "" { // trimlowerlint:allow boundary canonicalization
 		return request
 	}
 	switch typed := request.(type) {
-	case compatibility.DialogCanonicalRequest:
-		return compatibility.NewDialogRequest(strings.TrimSpace(modelID), typed.Items())
-	case compatibility.GenerationCanonicalRequest:
-		return compatibility.NewGenerationRequest(compatibility.GenerationRequestParams{
-			Model:                strings.TrimSpace(modelID),
+	case canonical.DialogCanonicalRequest:
+		return canonical.NewDialogRequest(strings.TrimSpace(modelID), typed.Items()) // trimlowerlint:allow boundary canonicalization
+	case canonical.GenerationCanonicalRequest:
+		return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+			Model:                strings.TrimSpace(modelID), // trimlowerlint:allow boundary canonicalization
 			Thread:               typed.Thread(),
 			LastTurn:             typed.LastTurn(),
 			PreviousResponseID:   typed.PreviousResponseID(),
@@ -221,30 +228,30 @@ func materializeRequestForExecution(request compatibility.CanonicalRequest, mode
 			PromptCacheKey:       typed.PromptCacheKey(),
 			PromptCacheRetention: typed.PromptCacheRetention(),
 		})
-	case compatibility.PromptCanonicalRequest:
-		return compatibility.NewPromptRequest(strings.TrimSpace(modelID), typed.Prompt())
+	case canonical.PromptCanonicalRequest:
+		return canonical.NewPromptRequest(strings.TrimSpace(modelID), typed.Prompt()) // trimlowerlint:allow boundary canonicalization
 	default:
 		return request
 	}
 }
 
-func requestModel(request compatibility.CanonicalRequest) string {
+func requestModel(request canonical.CanonicalRequest) string {
 	switch typed := request.(type) {
-	case compatibility.DialogCanonicalRequest:
-		return strings.TrimSpace(typed.Model())
-	case compatibility.GenerationCanonicalRequest:
-		return strings.TrimSpace(typed.Model())
-	case compatibility.PromptCanonicalRequest:
-		return strings.TrimSpace(typed.Model())
+	case canonical.DialogCanonicalRequest:
+		return strings.TrimSpace(typed.Model()) // trimlowerlint:allow boundary canonicalization
+	case canonical.GenerationCanonicalRequest:
+		return strings.TrimSpace(typed.Model()) // trimlowerlint:allow boundary canonicalization
+	case canonical.PromptCanonicalRequest:
+		return strings.TrimSpace(typed.Model()) // trimlowerlint:allow boundary canonicalization
 	default:
 		return ""
 	}
 }
 
 func effectiveModelIDForRequest(selectedModelID string) (string, error) {
-	selectedModelID = strings.TrimSpace(selectedModelID)
+	selectedModelID = strings.TrimSpace(selectedModelID) // trimlowerlint:allow boundary canonicalization
 	if selectedModelID != "" {
 		return selectedModelID, nil
 	}
-	return "", compatibility.BadRequest("selected provider model is not configured")
+	return "", canonical.BadRequest("selected provider model is not configured")
 }

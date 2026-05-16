@@ -1,3 +1,6 @@
-line 1
-- SWOBU! 🧌                                                               ready   [ ? ] [› acme] [ + ]
-+ SWOBU 🧌                                                                ready   [ ? ] [› acme] [ + ]
+line 11
+-   >    gpt-5.3:2310                                                                       edit ↵
++   >    openai:gpt-5.3:23                                                                  edit ↵
+line 12
+-        opus:979c                                                                          edit ↵
++        anthropic:opus:97                                                                  edit ↵

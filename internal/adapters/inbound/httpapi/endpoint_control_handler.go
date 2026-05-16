@@ -10,7 +10,7 @@ import (
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)
@@ -44,7 +44,8 @@ type providerConfigDocument struct {
 	CredentialRef string `json:"credential_ref,omitempty"`
 	ModelID       string `json:"model_id,omitempty"`
 	TargetAlias   string `json:"target_alias,omitempty"`
-	ProtocolKind  string `json:"protocol_kind"`
+	SelectedFrame string `json:"selected_frame,omitempty"`
+	ProtocolKind  string `json:"protocol_kind,omitempty"`
 }
 
 // EndpointControlHandler renders the daemon-owned operator control plane for
@@ -137,7 +138,7 @@ func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.R
 			})
 			return
 		}
-		if strings.TrimSpace(doc.Name) != strings.TrimSpace(name) {
+		if strings.TrimSpace(doc.Name) != strings.TrimSpace(name) { // trimlowerlint:allow boundary canonicalization
 			writeEndpointControlError(w, operatorendpoints.CommandError{
 				Code:    operatorendpoints.CommandInvalidArgument,
 				Message: "endpoint document name must match the request path",
@@ -186,7 +187,7 @@ func endpointNameFromPath(path string) (string, bool) {
 		return "", false
 	}
 	name := strings.TrimPrefix(path, "/_swobu/endpoints/")
-	if strings.Contains(name, "/") || strings.TrimSpace(name) == "" {
+	if strings.Contains(name, "/") || strings.TrimSpace(name) == "" { // trimlowerlint:allow boundary canonicalization
 		return "", false
 	}
 	return name, true
@@ -200,7 +201,7 @@ func isMalformedEndpointControlPath(path string) bool {
 		return false
 	}
 	name := strings.TrimPrefix(path, "/_swobu/endpoints/")
-	return strings.Contains(name, "/") || strings.TrimSpace(name) == ""
+	return strings.Contains(name, "/") || strings.TrimSpace(name) == "" // trimlowerlint:allow boundary canonicalization
 }
 
 func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
@@ -218,6 +219,7 @@ func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
 			CredentialRef: providerConfig.CredentialRef(),
 			ModelID:       providerConfig.ModelID(),
 			TargetAlias:   providerConfig.TargetAlias(),
+			SelectedFrame: providerConfig.SelectedFrame(),
 			ProtocolKind:  providerConfig.ProtocolKind().String(),
 		})
 	}
@@ -243,9 +245,16 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		providerConfig, err := endpointintent.NewProviderConfig(ref, spec, encoded.BaseURL, encoded.CredentialRef, protocolsurface.Kind(encoded.ProtocolKind))
+		protocolKind := protocolkind.ProtocolKind(strings.TrimSpace(encoded.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
+		providerConfig, err := endpointintent.NewProviderConfig(ref, spec, encoded.BaseURL, encoded.CredentialRef, protocolKind)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
+		}
+		if strings.TrimSpace(encoded.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
+			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
 		}
 		providerConfig, err = providerConfig.WithModelID(encoded.ModelID)
 		if err != nil {

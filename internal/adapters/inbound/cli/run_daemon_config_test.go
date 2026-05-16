@@ -11,8 +11,7 @@ import (
 )
 
 func TestRunner_DaemonUsesEnvConfigPathWhenFlagOmitted(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 
 	configPath := filepath.Join(t.TempDir(), "swobu.yaml")
 	t.Setenv("SWOBU_CONFIG_PATH", configPath)
@@ -35,8 +34,7 @@ func TestRunner_DaemonUsesEnvConfigPathWhenFlagOmitted(t *testing.T) {
 }
 
 func TestRunner_DaemonConfigFlagOverridesEnvConfigPath(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
+	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 
 	envConfigPath := filepath.Join(t.TempDir(), "env-swobu.yaml")
 	t.Setenv("SWOBU_CONFIG_PATH", envConfigPath)

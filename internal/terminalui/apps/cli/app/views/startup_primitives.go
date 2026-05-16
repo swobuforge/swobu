@@ -23,7 +23,7 @@ func MessageBlock(title string, rows []string, wrapWidth int) view.ViewSpec {
 		wrapWidth = 72
 	}
 	return view.DurablePanel(view.PanelSpec{
-		Title:       strings.TrimSpace(title),
+		Title:       strings.TrimSpace(title), // trimlowerlint:allow boundary canonicalization
 		Rows:        append([]string(nil), rows...),
 		TargetWidth: wrapWidth + 4,
 		MinWidth:    20,

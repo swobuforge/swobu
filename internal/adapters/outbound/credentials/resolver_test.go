@@ -4,15 +4,21 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
+	"time"
 )
 
 type fakeKeyringClient struct {
 	values map[string]string
 	err    error
+	delay  time.Duration
 }
 
 func (f fakeKeyringClient) Get(scope, user string) (string, error) {
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
 	if f.err != nil {
 		return "", f.err
 	}
@@ -59,16 +65,39 @@ func TestKeyringResolver_ResolveCredential_LookupFailure(t *testing.T) {
 	}
 }
 
-func TestKeyringResolver_ResolveCredential_UsesMemoryFallback(t *testing.T) {
-	setMemoryFallbackSecret("openai", "openai/default", "token-memory")
-	resolver := NewKeyringResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
-	token, err := resolver.ResolveCredential(context.Background(), "openai", "keychain:openai/default")
+func TestKeyringResolver_ResolveCredential_LookupTimeout(t *testing.T) {
+	resolver := NewKeyringResolver(fakeKeyringClient{delay: keyringLookupTimeout + 100*time.Millisecond})
+	_, err := resolver.ResolveCredential(context.Background(), "openai", "keychain:openai/default")
+	if err == nil {
+		t.Fatalf("ResolveCredential returned nil error, want timeout failure")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "timed out", "openai/default") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolver_ResolvesSecretFileLocatorFromFileStore(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+	if _, err := StoreMaterializedCredential("chatgpt", "chatgpt/default", "token-file", CredentialWritePolicyFile); err != nil {
+		t.Fatalf("store file mode: %v", err)
+	}
+	resolver := NewResolver()
+	token, err := resolver.ResolveCredential(context.Background(), "chatgpt", "secretfile:chatgpt/default")
 	if err != nil {
 		t.Fatalf("ResolveCredential returned error: %v", err)
 	}
-	if token != "token-memory" {
-		t.Fatalf("token = %q, want token-memory", token)
+	if token != "token-file" {
+		t.Fatalf("token=%q want token-file", token)
 	}
+}
+
+func containsAll(haystack string, needles ...string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(haystack, needle) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestResolver_ResolveCredential_UnsupportedRef(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 )
@@ -62,11 +61,11 @@ func mustEndpoint(t *testing.T, name string, selectedRef string) endpointintent.
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	spec, err := endpointintent.ParseProviderSpec("custom")
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
-	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "", protocolsurface.ChatCompletions)
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "")
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}

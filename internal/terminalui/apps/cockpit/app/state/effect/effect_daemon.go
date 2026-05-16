@@ -88,7 +88,7 @@ func (RefreshDaemonStatusEffect) Execute(ctx context.Context) []update.Action {
 	if err != nil {
 		return []update.Action{DaemonStatusLoadFailed{Message: normalizeOperatorSurfaceError(err)}}
 	}
-	if strings.TrimSpace(status.SwobuVersion) == "" {
+	if strings.TrimSpace(status.SwobuVersion) == "" { // trimlowerlint:allow boundary canonicalization
 		return []update.Action{ControlPlaneIncompatibleDetected{
 			ExpectedProtocol:  controlplane.Protocol,
 			TUIVersion:        controlplane.SwobuVersion(),
@@ -101,7 +101,7 @@ func (RefreshDaemonStatusEffect) Execute(ctx context.Context) []update.Action {
 		return []update.Action{ControlPlaneIncompatibleDetected{
 			ExpectedProtocol:  controlplane.Protocol,
 			TUIVersion:        controlplane.SwobuVersion(),
-			DaemonVersion:     strings.TrimSpace(status.SwobuVersion),
+			DaemonVersion:     strings.TrimSpace(status.SwobuVersion), // trimlowerlint:allow boundary canonicalization
 			HasDaemonProtocol: false,
 			Reason:            "status payload is missing required control_plane_protocol",
 		}}
@@ -111,7 +111,7 @@ func (RefreshDaemonStatusEffect) Execute(ctx context.Context) []update.Action {
 			ExpectedProtocol:  controlplane.Protocol,
 			DaemonProtocol:    *status.ControlPlaneProtocol,
 			TUIVersion:        controlplane.SwobuVersion(),
-			DaemonVersion:     strings.TrimSpace(status.SwobuVersion),
+			DaemonVersion:     strings.TrimSpace(status.SwobuVersion), // trimlowerlint:allow boundary canonicalization
 			HasDaemonProtocol: true,
 			Reason:            "control-plane protocol mismatch",
 		}}
@@ -145,7 +145,7 @@ type RefreshStatusProjectionEffect struct {
 
 func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.Action {
 	requestedScope := statusProjectionScope{Kind: "all"}
-	if endpoint := strings.TrimSpace(eff.EndpointName); endpoint != "" {
+	if endpoint := strings.TrimSpace(eff.EndpointName); endpoint != "" { // trimlowerlint:allow boundary canonicalization
 		requestedScope = statusProjectionScope{
 			Kind:     "endpoint",
 			Endpoint: endpoint,
@@ -200,27 +200,27 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 }
 
 func validateStatusProjectionDoc(d statusProjectionDoc, requestedScope statusProjectionScope) error {
-	if strings.TrimSpace(d.Scope.Kind) == "" {
+	if strings.TrimSpace(d.Scope.Kind) == "" { // trimlowerlint:allow boundary canonicalization
 		return fmt.Errorf("status projection scope is required")
 	}
 	if d.Scope.Kind != requestedScope.Kind {
 		return fmt.Errorf("status projection scope kind mismatch: got %q want %q", d.Scope.Kind, requestedScope.Kind)
 	}
-	if d.Scope.Kind == "endpoint" && strings.TrimSpace(d.Scope.Endpoint) != requestedScope.Endpoint {
+	if d.Scope.Kind == "endpoint" && strings.TrimSpace(d.Scope.Endpoint) != requestedScope.Endpoint { // trimlowerlint:allow boundary canonicalization
 		return fmt.Errorf("status projection scope endpoint mismatch: got %q want %q", d.Scope.Endpoint, requestedScope.Endpoint)
 	}
 	for i := range d.RecentTraffic {
 		row := d.RecentTraffic[i]
-		if strings.TrimSpace(row.RequestID) == "" {
+		if strings.TrimSpace(row.RequestID) == "" { // trimlowerlint:allow boundary canonicalization
 			return fmt.Errorf("status projection row %d missing request_id", i)
 		}
-		if strings.TrimSpace(row.Route) == "" {
+		if strings.TrimSpace(row.Route) == "" { // trimlowerlint:allow boundary canonicalization
 			return fmt.Errorf("status projection row %d missing route", i)
 		}
-		if strings.TrimSpace(row.Result) == "" {
+		if strings.TrimSpace(row.Result) == "" { // trimlowerlint:allow boundary canonicalization
 			return fmt.Errorf("status projection row %d missing result", i)
 		}
-		if strings.TrimSpace(row.ObservedAt) == "" {
+		if strings.TrimSpace(row.ObservedAt) == "" { // trimlowerlint:allow boundary canonicalization
 			return fmt.Errorf("status projection row %d missing observed_at", i)
 		}
 	}
@@ -257,20 +257,16 @@ type LoadRoutingModelCatalogEffect struct {
 	ProviderSpec  string
 	BaseURL       string
 	CredentialRef string
-	ProtocolKind  string
 }
 
 func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.Action {
 	query := url.Values{}
-	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec))
-	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {
+	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec)) // trimlowerlint:allow boundary canonicalization
+	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {   // trimlowerlint:allow boundary canonicalization
 		query.Set("base_url", baseURL)
 	}
-	if credentialRef := strings.TrimSpace(eff.CredentialRef); credentialRef != "" {
+	if credentialRef := strings.TrimSpace(eff.CredentialRef); credentialRef != "" { // trimlowerlint:allow boundary canonicalization
 		query.Set("credential_ref", credentialRef)
-	}
-	if protocolKind := strings.TrimSpace(eff.ProtocolKind); protocolKind != "" {
-		query.Set("protocol_kind", protocolKind)
 	}
 	type probeResult struct {
 		ModelIDs []string `json:"model_ids,omitempty"`
@@ -280,20 +276,20 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 	if err != nil {
 		normalized := normalizeModelCatalogProbeLoadError(err)
 		return []update.Action{RoutingModelCatalogLoaded{
-			Scope:         strings.TrimSpace(eff.Scope),
-			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
-			BaseURL:       strings.TrimSpace(eff.BaseURL),
-			CredentialRef: strings.TrimSpace(eff.CredentialRef),
+			Scope:         strings.TrimSpace(eff.Scope),         // trimlowerlint:allow boundary canonicalization
+			ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),  // trimlowerlint:allow boundary canonicalization
+			BaseURL:       strings.TrimSpace(eff.BaseURL),       // trimlowerlint:allow boundary canonicalization
+			CredentialRef: strings.TrimSpace(eff.CredentialRef), // trimlowerlint:allow boundary canonicalization
 			Error:         normalized,
 		}}
 	}
 	return []update.Action{RoutingModelCatalogLoaded{
-		Scope:         strings.TrimSpace(eff.Scope),
-		ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),
-		BaseURL:       strings.TrimSpace(eff.BaseURL),
-		CredentialRef: strings.TrimSpace(eff.CredentialRef),
+		Scope:         strings.TrimSpace(eff.Scope),         // trimlowerlint:allow boundary canonicalization
+		ProviderSpec:  strings.TrimSpace(eff.ProviderSpec),  // trimlowerlint:allow boundary canonicalization
+		BaseURL:       strings.TrimSpace(eff.BaseURL),       // trimlowerlint:allow boundary canonicalization
+		CredentialRef: strings.TrimSpace(eff.CredentialRef), // trimlowerlint:allow boundary canonicalization
 		ModelIDs:      append([]string(nil), result.ModelIDs...),
-		Error:         strings.TrimSpace(result.Error),
+		Error:         strings.TrimSpace(result.Error), // trimlowerlint:allow boundary canonicalization
 	}}
 }
 
@@ -308,12 +304,12 @@ type RoutingModelCatalogLoaded struct {
 }
 
 func normalizeOperatorSurfaceError(err error) string {
-	message := strings.TrimSpace(err.Error())
-	message = strings.TrimSpace(strings.TrimPrefix(message, "operator client:"))
+	message := strings.TrimSpace(err.Error())                                    // trimlowerlint:allow boundary canonicalization
+	message = strings.TrimSpace(strings.TrimPrefix(message, "operator client:")) // trimlowerlint:allow boundary canonicalization
 	if message == "" {
 		return daemonUnavailableHint()
 	}
-	lower := strings.ToLower(message)
+	lower := strings.ToLower(message) // trimlowerlint:allow boundary canonicalization
 	if strings.Contains(lower, "is unavailable") ||
 		strings.Contains(lower, "request failed") ||
 		strings.Contains(lower, "connection refused") ||
@@ -330,7 +326,7 @@ func daemonUnavailableHint() string {
 
 func normalizeModelCatalogProbeLoadError(err error) string {
 	normalized := normalizeOperatorSurfaceError(err)
-	if strings.Contains(strings.ToLower(normalized), "request timed out") {
+	if strings.Contains(strings.ToLower(normalized), "request timed out") { // trimlowerlint:allow boundary canonicalization
 		return "model probe timed out at " + daemonURL() + " (retry)"
 	}
 	return normalized

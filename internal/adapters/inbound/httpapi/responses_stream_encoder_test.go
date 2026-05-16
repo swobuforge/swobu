@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	httpcodec "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/httpcodec"
+	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 // Reference lifecycle: https://developers.openai.com/api/reference/resources/responses/methods/create
@@ -12,11 +14,11 @@ import (
 // -> response.output_text.delta -> response.output_text.done -> response.content_part.done
 // -> response.output_item.done -> response.completed
 func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.T) {
-	encoder := newResponsesClientStreamEncoderWire()
-	events := []compatibility.OutputEvent{
-		{Kind: compatibility.OutputEventStarted, ResultID: "resp_1", Model: "m"},
-		{Kind: compatibility.OutputEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: compatibility.OutputEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
+	encoder := responses.NewResponsesClientStreamEncoderWire()
+	events := []httpcodec.StreamEvent{
+		{Kind: httpcodec.StreamEventStarted, ResultID: "resp_1", Model: "m"},
+		{Kind: httpcodec.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: httpcodec.StreamEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
 	}
 
 	frames := encodeAllFrames(t, &encoder, events)
@@ -69,13 +71,13 @@ func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.
 }
 
 func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T) {
-	encoder := newResponsesClientStreamEncoderWire()
-	events := []compatibility.OutputEvent{
-		{Kind: compatibility.OutputEventStarted, ResultID: "resp_2", Model: "m"},
-		{Kind: compatibility.OutputEventItemStarted, ItemKind: compatibility.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: compatibility.OutputEventToolUseArgumentsDelta, ItemKind: compatibility.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
-		{Kind: compatibility.OutputEventItemCompleted, ItemKind: compatibility.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: compatibility.OutputEventCompleted, FinishReason: "completed"},
+	encoder := responses.NewResponsesClientStreamEncoderWire()
+	events := []httpcodec.StreamEvent{
+		{Kind: httpcodec.StreamEventStarted, ResultID: "resp_2", Model: "m"},
+		{Kind: httpcodec.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: httpcodec.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
+		{Kind: httpcodec.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: httpcodec.StreamEventCompleted, FinishReason: "completed"},
 	}
 	frames := encodeAllFrames(t, &encoder, events)
 	types := eventTypes(frames)
@@ -98,18 +100,18 @@ func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T)
 }
 
 func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
-	encoder := newResponsesClientStreamEncoderWire()
+	encoder := responses.NewResponsesClientStreamEncoderWire()
 	input, output := 5, 2
 	cacheRead, cacheWrite := 0, 0
-	usage, err := compatibility.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
+	usage, err := canonical.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 
-	frames := encodeAllFrames(t, &encoder, []compatibility.OutputEvent{
-		{Kind: compatibility.OutputEventStarted, ResultID: "resp_usage_1", Model: "m"},
-		{Kind: compatibility.OutputEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: compatibility.OutputEventCompleted, Usage: usage},
+	frames := encodeAllFrames(t, &encoder, []httpcodec.StreamEvent{
+		{Kind: httpcodec.StreamEventStarted, ResultID: "resp_usage_1", Model: "m"},
+		{Kind: httpcodec.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: httpcodec.StreamEventCompleted, Usage: usage},
 	})
 
 	completed := frames[len(frames)-1]
@@ -127,11 +129,23 @@ func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroBut
 	}
 }
 
-func encodeAllFrames(t *testing.T, encoder *responsesClientStreamEncoderWire, events []compatibility.OutputEvent) []map[string]any {
+func encodeAllFrames(t *testing.T, encoder *responses.ResponsesClientStreamEncoderWire, events []httpcodec.StreamEvent) []map[string]any {
 	t.Helper()
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {
-		frames, err := encoder.Encode(event)
+		frames, err := encoder.Encode(httpcodec.StreamEvent{
+			Kind:           event.Kind,
+			ResultID:       event.ResultID,
+			Model:          event.Model,
+			ItemKind:       event.ItemKind,
+			ItemID:         event.ItemID,
+			TextDelta:      event.TextDelta,
+			ToolUseID:      event.ToolUseID,
+			Name:           event.Name,
+			ArgumentsDelta: event.ArgumentsDelta,
+			FinishReason:   event.FinishReason,
+			Usage:          event.Usage,
+		})
 		if err != nil {
 			t.Fatalf("Encode(%s) returned error: %v", event.Kind, err)
 		}
@@ -193,9 +207,9 @@ func equalStrings(left []string, right []string) bool {
 	return true
 }
 
-func mustUsageForStream(t *testing.T, input, output, cacheRead, cacheWrite int) compatibility.TokenUsage {
+func mustUsageForStream(t *testing.T, input, output, cacheRead, cacheWrite int) canonical.TokenUsage {
 	t.Helper()
-	usage, err := compatibility.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
+	usage, err := canonical.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}

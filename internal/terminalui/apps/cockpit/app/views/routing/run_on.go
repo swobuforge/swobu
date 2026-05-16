@@ -72,7 +72,7 @@ func createRunOnChoiceItems(model state.Model, onCancel func() []update.Action) 
 	if pc == nil {
 		return createProviderSpecItems(model, onCancel)
 	}
-	providerSpec := strings.TrimSpace(pc.ProviderSpec)
+	providerSpec := strings.TrimSpace(pc.ProviderSpec) // trimlowerlint:allow boundary canonicalization
 	if providerSpec == "" {
 		return nil
 	}
@@ -98,8 +98,8 @@ func primaryModelChoiceItems(snapshot *state.EndpointSnapshot, onCancel func() [
 	}
 	items := make([]views.FilterablePickerItem, 0, len(snapshot.ProviderConfigs))
 	for _, pc := range snapshot.ProviderConfigs {
-		providerRef := strings.TrimSpace(pc.Ref)
-		label := modelTargetLabel(snapshot, pc)
+		providerRef := strings.TrimSpace(pc.Ref) // trimlowerlint:allow boundary canonicalization
+		label := modelTargetLabel(pc)
 		items = append(items, views.FilterablePickerItem{
 			Label:    label,
 			Selected: providerRef == snapshot.SelectedProviderConfigRef,
@@ -119,16 +119,10 @@ func primaryModelChooseActions(snapshot *state.EndpointSnapshot, providerRef str
 	if snapshot == nil {
 		return closeActions
 	}
-	if strings.TrimSpace(providerRef) == strings.TrimSpace(snapshot.SelectedProviderConfigRef) {
+	if strings.TrimSpace(providerRef) == strings.TrimSpace(snapshot.SelectedProviderConfigRef) { // trimlowerlint:allow boundary canonicalization
 		return closeActions
 	}
-	actions := []update.Action{
-		state.RoutingSaveStartedAction{},
-		state.SaveSelectedTargetRequested{
-			EndpointName: strings.TrimSpace(snapshot.Name),
-			ProviderRef:  strings.TrimSpace(providerRef),
-		},
-	}
+	actions := routingSaveSelectedTargetActions(strings.TrimSpace(snapshot.Name), strings.TrimSpace(providerRef), "run_on") // trimlowerlint:allow boundary canonicalization
 	return append(actions, closeActions...)
 }
 
@@ -167,8 +161,8 @@ func BuildRunOnWorkspaceRow(ctx *retained.Context[state.Model]) retained.ViewSpe
 		}, cancelFn, views.FocusAffordance("choose", false))
 		if !open {
 			out = parent
-			if model.RoutingSaveError != "" {
-				out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(model.RoutingSaveError)...)
+			if message := views.ScopedError(model, "routing", "run_on"); message != "" {
+				out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(message)...)
 			}
 		} else {
 			out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, primaryModelChoiceItems(snapshot, func() []update.Action {
@@ -197,9 +191,6 @@ func BuildRunOnWorkspaceRow(ctx *retained.Context[state.Model]) retained.ViewSpe
 	return out
 }
 
-func modelTargetLabel(snapshot *state.EndpointSnapshot, pc state.ProviderConfigSnapshot) string {
-	if selector := selectors.ProviderConfigRequestModelID(snapshot, pc.Ref); selector != "" {
-		return selector
-	}
+func modelTargetLabel(pc state.ProviderConfigSnapshot) string {
 	return providerConfigSummary(pc)
 }

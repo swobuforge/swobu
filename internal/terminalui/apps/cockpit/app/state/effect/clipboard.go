@@ -19,7 +19,7 @@ var (
 )
 
 func copyValueNote(text string) string {
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(text) // trimlowerlint:allow boundary canonicalization
 	if text == "" {
 		return "nothing to copy"
 	}

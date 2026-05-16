@@ -1,13 +1,16 @@
 package messages
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 type bufferedResponseBody struct {
@@ -54,27 +57,27 @@ var tokenUsagePathSpec = protocols.TokenUsagePathSpec{
 	},
 }
 
-func DecodeBufferedResult(raw []byte) (compatibility.CanonicalOutputValue, error) {
+func DecodeResponseBuffered(raw []byte) (canonical.CanonicalOutputValue, error) {
 	var dto bufferedResponseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
-		return compatibility.CanonicalOutputValue{}, compatibility.InternalError("messages response is invalid JSON")
+		return canonical.CanonicalOutputValue{}, canonical.InternalError("messages response is invalid JSON")
 	}
-	items := make([]compatibility.CanonicalItem, 0, len(dto.Content))
+	items := make([]canonical.CanonicalItem, 0, len(dto.Content))
 	for i, block := range dto.Content {
-		switch strings.TrimSpace(block.Type) {
+		switch strings.TrimSpace(block.Type) { // trimlowerlint:allow boundary canonicalization
 		case "text":
-			items = append(items, compatibility.NewTextOutputItem("text_"+strconv.Itoa(i), block.Text))
+			items = append(items, canonical.NewTextOutputItem("text_"+strconv.Itoa(i), block.Text))
 		case "tool_use":
-			itemID := strings.TrimSpace(block.ID)
+			itemID := strings.TrimSpace(block.ID) // trimlowerlint:allow boundary canonicalization
 			if itemID == "" {
 				itemID = "tool_" + strconv.Itoa(i)
 			}
-			items = append(items, compatibility.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), cloneInput(block.Input)))
+			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), cloneInput(block.Input))) // trimlowerlint:allow boundary canonicalization
 		default:
-			return compatibility.CanonicalOutputValue{}, compatibility.InternalError("messages response content block is unsupported")
+			return canonical.CanonicalOutputValue{}, canonical.InternalError("messages response content block is unsupported")
 		}
 	}
-	return compatibility.NewConversationOutputWithUsage(
+	return canonical.NewConversationOutputWithUsage(
 		dto.ID,
 		dto.Model,
 		items,
@@ -83,24 +86,29 @@ func DecodeBufferedResult(raw []byte) (compatibility.CanonicalOutputValue, error
 	), nil
 }
 
-func DecodeStream(body io.ReadCloser) compatibility.CanonicalOutputEventStream {
-	return newStreamDecoder(body)
+// DecodeResponseStream returns canonical envelope events directly for messages streams.
+func DecodeResponseStream(body io.ReadCloser, exchangeID string) canonical.EventReader {
+	return newStreamDecoder(body, exchangeID)
 }
 
 type canonicalOutputEventStreamCloser struct {
+	exchangeID   string
+	responseID   canonical.EnvelopeID
 	reader       *protocols.SSEReaderCloser
 	resultID     string
 	model        string
 	finishReason string
 	started      bool
-	pending      []compatibility.OutputEvent
+	pending      []canonical.Event
 	blocks       map[int]streamContentBlock
-	latestUsage  compatibility.TokenUsage
+	latestUsage  canonical.TokenUsage
+	seq          int64
+	completed    bool
 }
 
 type streamContentBlock struct {
 	ItemID    string
-	ItemKind  compatibility.ItemKind
+	ItemKind  canonical.ItemKind
 	ToolUseID string
 	Name      string
 }
@@ -144,24 +152,38 @@ type messageDeltaFrame struct {
 	} `json:"delta"`
 }
 
-func newStreamDecoder(body io.ReadCloser) *canonicalOutputEventStreamCloser {
+func newStreamDecoder(body io.ReadCloser, exchangeID string) *canonicalOutputEventStreamCloser {
 	return &canonicalOutputEventStreamCloser{
+		exchangeID:  exchangeID,
+		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
 		reader:      protocols.NewSSEReader(body),
 		blocks:      map[int]streamContentBlock{},
-		latestUsage: compatibility.NewUnknownTokenUsage(),
+		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
 }
 
-func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, error) {
+func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		return s.shift(), nil
 	}
 	for {
 		frame, err := s.reader.Next()
 		if err != nil {
-			return compatibility.OutputEvent{}, err
+			if err == io.EOF && s.started && !s.completed {
+				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
+				for idx, block := range s.blocks {
+					s.enqueueEnvelopeEnd(s.blockEnvID(idx, block), s.blockKind(block), canonical.EnvelopeStatusError)
+				}
+				s.blocks = map[int]streamContentBlock{}
+				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+				s.completed = true
+				if len(s.pending) > 0 {
+					return s.shift(), nil
+				}
+			}
+			return canonical.Event{}, err
 		}
-		if strings.TrimSpace(frame.Data) == "" || frame.Event == "ping" {
+		if strings.TrimSpace(frame.Data) == "" || frame.Event == "ping" { // trimlowerlint:allow boundary canonicalization
 			continue
 		}
 		frameUsage := protocols.ExtractTokenUsage([]byte(frame.Data), tokenUsagePathSpec)
@@ -170,10 +192,10 @@ func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, er
 		}
 		var envelope streamEnvelope
 		if err := json.Unmarshal([]byte(frame.Data), &envelope); err != nil {
-			return compatibility.OutputEvent{}, compatibility.InternalError("messages stream frame is invalid JSON")
+			return canonical.Event{}, canonical.InternalError("messages stream frame is invalid JSON")
 		}
 		if err := s.handleFrame(envelope.Type, frame.Data); err != nil {
-			return compatibility.OutputEvent{}, err
+			return canonical.Event{}, err
 		}
 		if len(s.pending) > 0 {
 			return s.shift(), nil
@@ -182,7 +204,7 @@ func (s *canonicalOutputEventStreamCloser) Next() (compatibility.OutputEvent, er
 }
 
 func (s *canonicalOutputEventStreamCloser) handleFrame(frameType string, raw string) error {
-	switch strings.TrimSpace(frameType) {
+	switch strings.TrimSpace(frameType) { // trimlowerlint:allow boundary canonicalization
 	case "message_start":
 		return s.handleMessageStart(raw)
 	case "content_block_start":
@@ -199,22 +221,23 @@ func (s *canonicalOutputEventStreamCloser) handleFrame(frameType string, raw str
 	case "ping":
 		return nil
 	default:
-		return compatibility.InternalError("messages stream frame type is unsupported")
+		return canonical.InternalError("messages stream frame type is unsupported")
 	}
 }
 
 func (s *canonicalOutputEventStreamCloser) handleMessageStart(raw string) error {
 	var payload messageStartFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return compatibility.InternalError("messages stream message_start frame is invalid")
+		return canonical.InternalError("messages stream message_start frame is invalid")
 	}
 	s.started = true
 	s.resultID = payload.Message.ID
 	s.model = payload.Message.Model
-	s.pending = append(s.pending, compatibility.OutputEvent{
-		Kind:     compatibility.OutputEventStarted,
-		ResultID: s.resultID,
-		Model:    s.model,
+	s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse})
+	s.enqueue(canonical.Event{
+		Kind:    canonical.EventMetadata,
+		EnvID:   s.responseID,
+		Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": s.resultID, "model": s.model}},
 	})
 	return nil
 }
@@ -222,39 +245,25 @@ func (s *canonicalOutputEventStreamCloser) handleMessageStart(raw string) error 
 func (s *canonicalOutputEventStreamCloser) handleContentBlockStart(raw string) error {
 	var payload contentBlockStartFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return compatibility.InternalError("messages stream content_block_start frame is invalid")
+		return canonical.InternalError("messages stream content_block_start frame is invalid")
 	}
 	block := streamContentBlock{ItemID: "block_" + strconv.Itoa(payload.Index)}
-	switch strings.TrimSpace(payload.ContentBlock.Type) {
+	switch strings.TrimSpace(payload.ContentBlock.Type) { // trimlowerlint:allow boundary canonicalization
 	case "text":
-		block.ItemKind = compatibility.ItemKindText
+		block.ItemKind = canonical.ItemKindText
 		block.ItemID = "text_" + strconv.Itoa(payload.Index)
-		s.pending = append(s.pending, compatibility.OutputEvent{
-			Kind:     compatibility.OutputEventItemStarted,
-			ItemKind: compatibility.ItemKindText,
-			ItemID:   block.ItemID,
-			ResultID: s.resultID,
-			Model:    s.model,
-		})
+		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMeta{NativeID: block.ItemID})
 	case "tool_use":
-		block.ItemKind = compatibility.ItemKindToolUse
-		block.ToolUseID = strings.TrimSpace(payload.ContentBlock.ID)
+		block.ItemKind = canonical.ItemKindToolUse
+		block.ToolUseID = strings.TrimSpace(payload.ContentBlock.ID) // trimlowerlint:allow boundary canonicalization
 		if block.ToolUseID == "" {
 			block.ToolUseID = "toolu_swobu_" + strconv.Itoa(payload.Index)
 		}
-		block.Name = strings.TrimSpace(payload.ContentBlock.Name)
+		block.Name = strings.TrimSpace(payload.ContentBlock.Name) // trimlowerlint:allow boundary canonicalization
 		block.ItemID = block.ToolUseID
-		s.pending = append(s.pending, compatibility.OutputEvent{
-			Kind:      compatibility.OutputEventItemStarted,
-			ItemKind:  compatibility.ItemKindToolUse,
-			ItemID:    block.ItemID,
-			ToolUseID: block.ToolUseID,
-			Name:      block.Name,
-			ResultID:  s.resultID,
-			Model:     s.model,
-		})
+		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMeta{NativeID: block.ItemID})
 	default:
-		return compatibility.InternalError("messages stream content block type is unsupported")
+		return canonical.InternalError("messages stream content block type is unsupported")
 	}
 	s.blocks[payload.Index] = block
 	return nil
@@ -263,33 +272,27 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockStart(raw string) e
 func (s *canonicalOutputEventStreamCloser) handleContentBlockDelta(raw string) error {
 	var payload contentBlockDeltaFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return compatibility.InternalError("messages stream content_block_delta frame is invalid")
+		return canonical.InternalError("messages stream content_block_delta frame is invalid")
 	}
 	block, ok := s.blocks[payload.Index]
 	if !ok {
 		return nil
 	}
-	switch strings.TrimSpace(payload.Delta.Type) {
+	switch strings.TrimSpace(payload.Delta.Type) { // trimlowerlint:allow boundary canonicalization
 	case "text_delta":
-		s.pending = append(s.pending, compatibility.OutputEvent{
-			Kind:      compatibility.OutputEventTextDelta,
-			ItemID:    block.ItemID,
-			TextDelta: payload.Delta.Text,
-			ResultID:  s.resultID,
-			Model:     s.model,
+		s.enqueue(canonical.Event{
+			Kind:    canonical.EventTextDelta,
+			EnvID:   s.blockEnvID(payload.Index, block),
+			Payload: canonical.TextDeltaPayload{Text: payload.Delta.Text},
 		})
 	case "input_json_delta":
-		s.pending = append(s.pending, compatibility.OutputEvent{
-			Kind:           compatibility.OutputEventToolUseArgumentsDelta,
-			ItemID:         block.ItemID,
-			ToolUseID:      block.ToolUseID,
-			Name:           block.Name,
-			ArgumentsDelta: payload.Delta.PartialJSON,
-			ResultID:       s.resultID,
-			Model:          s.model,
+		s.enqueue(canonical.Event{
+			Kind:    canonical.EventArgsDelta,
+			EnvID:   s.blockEnvID(payload.Index, block),
+			Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON},
 		})
 	default:
-		return compatibility.InternalError("messages stream delta type is unsupported")
+		return canonical.InternalError("messages stream delta type is unsupported")
 	}
 	return nil
 }
@@ -297,21 +300,13 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockDelta(raw string) e
 func (s *canonicalOutputEventStreamCloser) handleContentBlockStop(raw string) error {
 	var payload contentBlockStopFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return compatibility.InternalError("messages stream content_block_stop frame is invalid")
+		return canonical.InternalError("messages stream content_block_stop frame is invalid")
 	}
 	block, ok := s.blocks[payload.Index]
 	if !ok {
 		return nil
 	}
-	s.pending = append(s.pending, compatibility.OutputEvent{
-		Kind:      compatibility.OutputEventItemCompleted,
-		ItemKind:  block.ItemKind,
-		ItemID:    block.ItemID,
-		ToolUseID: block.ToolUseID,
-		Name:      block.Name,
-		ResultID:  s.resultID,
-		Model:     s.model,
-	})
+	s.enqueueEnvelopeEnd(s.blockEnvID(payload.Index, block), s.blockKind(block), canonical.EnvelopeStatusCompleted)
 	delete(s.blocks, payload.Index)
 	return nil
 }
@@ -319,32 +314,64 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockStop(raw string) er
 func (s *canonicalOutputEventStreamCloser) handleMessageDelta(raw string) error {
 	var payload messageDeltaFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return compatibility.InternalError("messages stream message_delta frame is invalid")
+		return canonical.InternalError("messages stream message_delta frame is invalid")
 	}
-	s.finishReason = strings.TrimSpace(payload.Delta.StopReason)
+	s.finishReason = strings.TrimSpace(payload.Delta.StopReason) // trimlowerlint:allow boundary canonicalization
 	return nil
 }
 
 func (s *canonicalOutputEventStreamCloser) handleMessageStop() {
+	s.completed = true
 	finishReason := s.finishReason
 	if finishReason == "" {
 		finishReason = "completed"
 	}
-	s.pending = append(s.pending, compatibility.OutputEvent{
-		Kind:         compatibility.OutputEventCompleted,
-		ResultID:     s.resultID,
-		Model:        s.model,
-		FinishReason: finishReason,
-		Usage:        s.latestUsage,
-	})
+	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: finishReason}})
+	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 
-func (s *canonicalOutputEventStreamCloser) Close() error {
+func (s *canonicalOutputEventStreamCloser) Close(context.Context) error {
 	return s.reader.Close()
 }
 
-func (s *canonicalOutputEventStreamCloser) shift() compatibility.OutputEvent {
+func (s *canonicalOutputEventStreamCloser) shift() canonical.Event {
 	event := s.pending[0]
 	s.pending = s.pending[1:]
 	return event
+}
+
+func (s *canonicalOutputEventStreamCloser) nextSeq() int64 {
+	s.seq++
+	return s.seq
+}
+
+func (s *canonicalOutputEventStreamCloser) enqueue(ev canonical.Event) {
+	ev.ExchangeID = s.exchangeID
+	ev.Seq = s.nextSeq()
+	ev.Time = time.Now().UTC()
+	s.pending = append(s.pending, ev)
+}
+
+func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMeta) {
+	ev := canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: id, ParentID: parent, Payload: payload}
+	if len(meta) > 0 {
+		ev.Meta = meta[0]
+	}
+	s.enqueue(ev)
+}
+
+func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
+	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
+}
+
+func (s *canonicalOutputEventStreamCloser) blockEnvID(index int, _ streamContentBlock) canonical.EnvelopeID {
+	return canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseID, index))
+}
+
+func (s *canonicalOutputEventStreamCloser) blockKind(block streamContentBlock) canonical.EnvelopeKind {
+	if block.ItemKind == canonical.ItemKindToolUse {
+		return canonical.EnvToolCall
+	}
+	return canonical.EnvMessage
 }

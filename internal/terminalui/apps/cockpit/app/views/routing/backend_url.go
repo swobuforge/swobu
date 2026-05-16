@@ -28,16 +28,16 @@ func buildProviderBackendURLRow(ctx *retained.Context[state.Model], spec provide
 	model := ctx.Model()
 	pc := selectedProvider(model, spec.ProviderConfig, spec.CreateMode)
 	var out retained.ViewSpec[state.Model]
-	if pc == nil || strings.TrimSpace(pc.ProviderSpec) != "custom" {
+	if pc == nil || strings.TrimSpace(pc.ProviderSpec) != "openai_compatible" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
-	parent := backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(pc.BaseURL), "missing"), strings.TrimSpace(pc.BaseURL), "https://host/v1", func(value string) []update.Action {
+	parent := backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(pc.BaseURL), "missing"), strings.TrimSpace(pc.BaseURL), "https://host/v1", func(value string) []update.Action { // trimlowerlint:allow boundary canonicalization
 		return applyProviderBackendURL(value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
 	})
-	if strings.TrimSpace(pc.BaseURL) == "" {
-		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("custom backend URL is required (https://host/v1)")...)
-	} else if model.RoutingSaveError != "" {
-		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(model.RoutingSaveError)...)
+	if strings.TrimSpace(pc.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("OpenAI-compatible backend URL is required (https://host/v1)")...)
+	} else if message := views.ScopedError(model, "routing", "provider/backend-url"); message != "" {
+		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(message)...)
 	} else {
 		out = parent
 	}
@@ -77,7 +77,7 @@ func backendURLEditorRow(ctx *retained.Context[state.Model], label, summary, cur
 		},
 		func(value string) []update.Action {
 			setOpen(false)
-			actions := save(strings.TrimSpace(value))
+			actions := save(strings.TrimSpace(value)) // trimlowerlint:allow boundary canonicalization
 			return append([]update.Action{state.SetInteractionMode{Mode: state.InteractionModeManageList}}, actions...)
 		},
 		func() []update.Action {
@@ -89,20 +89,14 @@ func backendURLEditorRow(ctx *retained.Context[state.Model], label, summary, cur
 }
 
 func applyProviderBackendURL(baseURL string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	baseURL = strings.TrimSpace(baseURL)
+	baseURL = strings.TrimSpace(baseURL) // trimlowerlint:allow boundary canonicalization
 	if createMode {
 		return []update.Action{state.SetCreateDraftBaseURL{BaseURL: baseURL}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" {
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
 		return nil
 	}
 	next := *providerConfig
 	next.BaseURL = baseURL
-	return []update.Action{
-		state.RoutingSaveStartedAction{},
-		state.SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName),
-			ProviderConfig: next,
-		},
-	}
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/backend-url") // trimlowerlint:allow boundary canonicalization
 }

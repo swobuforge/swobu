@@ -14,7 +14,9 @@ import (
 
 func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {
 	t.Setenv("SWOBU_TELEMETRY_STDOUT_SINK_DEBUG", "1")
-	statePath := filepath.Join(t.TempDir(), "telemetry", "state.json")
+	root := filepath.Join(t.TempDir(), "swobu-home")
+	t.Setenv("SWOBU_HOME", root)
+	statePath := filepath.Join(root, "state", "telemetry", "state.json")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
 	}
@@ -27,8 +29,6 @@ func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte(stateDoc), 0o600); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	t.Setenv("SWOBU_TELEMETRY_STATE_PATH", statePath)
-
 	configPath := filepath.Join(t.TempDir(), "swobu.yaml")
 	configYAML := "bind_addr: 127.0.0.1:0\nendpoints:\n  []\n"
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {

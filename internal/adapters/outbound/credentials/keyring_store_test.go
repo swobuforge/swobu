@@ -54,7 +54,7 @@ func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
 	}
 }
 
-func TestStoreKeychainCredential_FallsBackToMemoryWhenKeyringUnavailable(t *testing.T) {
+func TestStoreKeychainCredential_FailsWhenKeyringUnavailable(t *testing.T) {
 	t.Parallel()
 
 	orig := keyringSet
@@ -64,14 +64,46 @@ func TestStoreKeychainCredential_FallsBackToMemoryWhenKeyringUnavailable(t *test
 		return fmt.Errorf("backend unavailable")
 	}
 
-	if err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123"); err != nil {
-		t.Fatalf("StoreKeychainCredential returned error: %v", err)
+	err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123")
+	if err == nil {
+		t.Fatal("StoreKeychainCredential returned nil error; want fail-fast keyring error")
 	}
-	token, ok := getMemoryFallbackSecret("openrouter", "openrouter/default")
-	if !ok {
-		t.Fatal("expected in-memory fallback secret to be set")
+	if !strings.Contains(err.Error(), "keyring write failed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if token != "token-123" {
-		t.Fatalf("fallback token = %q", token)
+}
+
+func TestStoreMaterializedCredential_AutoFallsBackToFile(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+	orig := keyringSet
+	t.Cleanup(func() { keyringSet = orig })
+	keyringSet = func(scope, user, pass string) error {
+		return fmt.Errorf("backend unavailable")
+	}
+
+	ref, err := StoreMaterializedCredential("chatgpt", "chatgpt/default", "token-123", CredentialWritePolicyAuto)
+	if err != nil {
+		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
+	}
+	if ref != "secretfile:chatgpt/default" {
+		t.Fatalf("ref=%q", ref)
+	}
+}
+
+func TestStoreMaterializedCredential_FileWritesWithoutKeyring(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+	orig := keyringSet
+	t.Cleanup(func() { keyringSet = orig })
+	keyringSet = func(scope, user, pass string) error {
+		t.Fatalf("unexpected keyring call scope=%q user=%q", scope, user)
+		return nil
+	}
+
+	ref, err := StoreMaterializedCredential("chatgpt", "chatgpt/default", "token-123", CredentialWritePolicyFile)
+	if err != nil {
+		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
+	}
+	if ref != "secretfile:chatgpt/default" {
+		t.Fatalf("ref=%q", ref)
 	}
 }

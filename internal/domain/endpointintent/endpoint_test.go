@@ -30,7 +30,7 @@ func TestEndpoint_ProviderConfigOrderPreservedFromSlicePosition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -47,7 +47,6 @@ func TestEndpoint_ProviderConfigOrderPreservedFromSlicePosition(t *testing.T) {
 		spec,
 		"https://b.test/v1",
 		"cred-b",
-		"chat_completions",
 	)
 	if err != nil {
 		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
@@ -57,7 +56,6 @@ func TestEndpoint_ProviderConfigOrderPreservedFromSlicePosition(t *testing.T) {
 		spec,
 		"https://a.test/v1",
 		"cred-a",
-		"chat_completions",
 	)
 	if err != nil {
 		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
@@ -88,7 +86,7 @@ func TestEndpoint_RejectsDuplicateProviderConfigRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseEndpointName returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -101,7 +99,6 @@ func TestEndpoint_RejectsDuplicateProviderConfigRef(t *testing.T) {
 		spec,
 		"https://a.test/v1",
 		"cred-a",
-		"chat_completions",
 	)
 	if err != nil {
 		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
@@ -111,7 +108,6 @@ func TestEndpoint_RejectsDuplicateProviderConfigRef(t *testing.T) {
 		spec,
 		"https://b.test/v1",
 		"cred-b",
-		"chat_completions",
 	)
 	if err != nil {
 		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
@@ -128,7 +124,7 @@ func TestEndpoint_RequiresSelectedProviderConfigToExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseEndpointName returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -144,11 +140,11 @@ func TestEndpoint_RequiresSelectedProviderConfigToExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a", "chat_completions")
+	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a")
 	if err != nil {
 		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
 	}
-	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b", "chat_completions")
+	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b")
 	if err != nil {
 		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
 	}
@@ -164,7 +160,7 @@ func TestEndpoint_RejectsDuplicateTargetAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseEndpointName returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -176,11 +172,11 @@ func TestEndpoint_RejectsDuplicateTargetAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a", "chat_completions")
+	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a")
 	if err != nil {
 		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
 	}
-	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b", "chat_completions")
+	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b")
 	if err != nil {
 		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
 	}
@@ -198,7 +194,7 @@ func TestEndpoint_RejectsTargetAliasThatCollidesWithModelSelector(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ParseEndpointName returned error: %v", err)
 	}
-	spec, err := ParseProviderSpec("custom")
+	spec, err := ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -210,52 +206,17 @@ func TestEndpoint_RejectsTargetAliasThatCollidesWithModelSelector(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
-	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a", "chat_completions")
+	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a")
 	if err != nil {
 		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
 	}
-	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b", "chat_completions")
+	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b")
 	if err != nil {
 		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
 	}
 	first, _ = first.WithModelID("fast")
 	second, _ = second.WithModelID("deep")
 	second, _ = second.WithTargetAlias("fast")
-
-	_, err = NewEndpoint(name, []ProviderConfig{first, second}, firstRef)
-	if !errors.Is(err, ErrInvalidEndpoint) {
-		t.Fatalf("expected ErrInvalidEndpoint, got %v", err)
-	}
-}
-
-func TestEndpoint_RejectsTargetAliasThatCollidesWithMechanicalSelector(t *testing.T) {
-	name, err := ParseEndpointName("alpha")
-	if err != nil {
-		t.Fatalf("ParseEndpointName returned error: %v", err)
-	}
-	spec, err := ParseProviderSpec("custom")
-	if err != nil {
-		t.Fatalf("ParseProviderSpec returned error: %v", err)
-	}
-	firstRef, err := ParseProviderConfigRef("cfg-a")
-	if err != nil {
-		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
-	}
-	secondRef, err := ParseProviderConfigRef("cfg-b")
-	if err != nil {
-		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
-	}
-	first, err := NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a", "chat_completions")
-	if err != nil {
-		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
-	}
-	second, err := NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b", "chat_completions")
-	if err != nil {
-		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
-	}
-	first, _ = first.WithModelID("shared")
-	second, _ = second.WithModelID("shared")
-	second, _ = second.WithTargetAlias("custom:shared:cfg-a")
 
 	_, err = NewEndpoint(name, []ProviderConfig{first, second}, firstRef)
 	if !errors.Is(err, ErrInvalidEndpoint) {

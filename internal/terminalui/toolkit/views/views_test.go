@@ -115,7 +115,7 @@ func TestChoiceOption_ChooseMarksHandled(t *testing.T) {
 	t.Parallel()
 
 	chosen := false
-	option := build(NewChoiceOption[struct{}]("custom", true, func() []update.Action {
+	option := build(NewChoiceOption[struct{}]("openai_compatible", true, func() []update.Action {
 		chosen = true
 		return nil
 	}))

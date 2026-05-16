@@ -1,4 +1,4 @@
-SWOBU! 🧌                                                                         ready   [ ? ] [› acme] [ + ]
+SWOBU 🧌                                                                          ready   [ ? ] [› acme] [ + ]
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
      name               acme                                                                        edit ↵
@@ -6,15 +6,15 @@ SWOBU! 🧌                                                                     
      delete workspace                                                                               delete ↵
 
   routing ▾
-     run on             gemma4:e4b                                                                  choose ↵
+     run on             ollama:gemma4:e4b:e3b0c442                                                  choose ↵
      models             1 configured                                                                manage ↵
-       gemma4:e4b                                                                                   edit ↵
+       gemma4:e4b:e3b0                                                                              edit ↵
        add model                                                                                    close ↵
-         provider           OpenRouter                                                              choose ↵
-         auth               env var missing                                                         choose ↵
-    >    env key            OPENROUTER_API_KEY                                                      edit ↵
-         expected           OPENROUTER_API_KEY
-         model              not set                                                                 choose ↵
+         provider           OpenAI                                                                  change ↵
+         auth               env var missing                                                         change ↵
+    >    env key            OPENAI_API_KEY                                                          edit ↵
+         expected           OPENAI_API_KEY
+         model              not selected                                                            choose ↵
 
   clients ▸
     not set

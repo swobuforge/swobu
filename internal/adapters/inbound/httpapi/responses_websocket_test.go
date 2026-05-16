@@ -9,17 +9,17 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/app/requestpath"
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewBufferedExecuteResponse(compatibility.NewConversationOutput(
+			Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"model",
-				[]compatibility.OutputItem{compatibility.NewTextOutputItem("text_0", "ok")},
+				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
 				"stop",
 			)),
 		},
@@ -38,10 +38,10 @@ func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewBufferedExecuteResponse(compatibility.NewConversationOutput(
+			Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"model",
-				[]compatibility.OutputItem{compatibility.NewTextOutputItem("text_0", "ok")},
+				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
 				"stop",
 			)),
 		},
@@ -62,10 +62,10 @@ func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
 		out: requestpath.HandleOutput{
-			Response: ports.NewBufferedExecuteResponse(compatibility.NewConversationOutput(
+			Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"model",
-				[]compatibility.OutputItem{compatibility.NewTextOutputItem("text_0", "ok")},
+				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
 				"stop",
 			)),
 		},

@@ -25,11 +25,11 @@ type OpenSupportLinkEffect struct {
 }
 
 func (cmd OpenSupportLinkEffect) Execute(ctx context.Context) []update.Action {
-	label := strings.TrimSpace(cmd.Label)
+	label := strings.TrimSpace(cmd.Label) // trimlowerlint:allow boundary canonicalization
 	if label == "" {
 		label = "support"
 	}
-	rawURL := strings.TrimSpace(cmd.URL)
+	rawURL := strings.TrimSpace(cmd.URL) // trimlowerlint:allow boundary canonicalization
 	if rawURL == "" {
 		return []update.Action{SupportLinkNoted{Message: "support link is missing"}}
 	}

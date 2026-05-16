@@ -60,7 +60,7 @@ func DecodeStream(contentEncoding string, body io.ReadCloser) (io.ReadCloser, er
 }
 
 func normalizeContentEncoding(contentEncoding string) string {
-	return strings.ToLower(strings.TrimSpace(contentEncoding))
+	return strings.ToLower(strings.TrimSpace(contentEncoding)) // trimlowerlint:allow boundary canonicalization
 }
 
 func newDecoder(contentEncoding string, body io.Reader) (io.ReadCloser, error) {

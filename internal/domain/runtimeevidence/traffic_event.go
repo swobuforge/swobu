@@ -37,12 +37,12 @@ type Route struct {
 }
 
 func NewRoute(providerConfigRef string, model string) (Route, error) {
-	if strings.TrimSpace(providerConfigRef) == "" {
+	if strings.TrimSpace(providerConfigRef) == "" { // trimlowerlint:allow domain canonicalization
 		return Route{}, fmt.Errorf("route provider config ref must not be empty")
 	}
 	return Route{
 		providerConfigRef: providerConfigRef,
-		model:             strings.TrimSpace(model),
+		model:             strings.TrimSpace(model), // trimlowerlint:allow domain canonicalization
 	}, nil
 }
 
@@ -167,7 +167,7 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 	if input.RequestID.IsZero() {
 		return TrafficEvent{}, fmt.Errorf("request id is required")
 	}
-	if strings.TrimSpace(input.Endpoint) == "" {
+	if strings.TrimSpace(input.Endpoint) == "" { // trimlowerlint:allow domain canonicalization
 		return TrafficEvent{}, fmt.Errorf("endpoint is required")
 	}
 	if input.Route.ProviderConfigRef() == "" {
@@ -185,10 +185,10 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 	if input.NormalizedOp == "" {
 		input.NormalizedOp = NormalizedOpUnknown
 	}
-	if strings.TrimSpace(input.BridgeID) == "" {
+	if strings.TrimSpace(input.BridgeID) == "" { // trimlowerlint:allow domain canonicalization
 		input.BridgeID = "direct"
 	}
-	if strings.TrimSpace(input.DecisionReason) == "" {
+	if strings.TrimSpace(input.DecisionReason) == "" { // trimlowerlint:allow domain canonicalization
 		input.DecisionReason = "selected_provider_config"
 	}
 	if input.StatusCode < 0 {
@@ -197,9 +197,9 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 	if input.AttemptCount <= 0 {
 		input.AttemptCount = 1
 	}
-	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode)
-	input.ModelRequested = strings.TrimSpace(input.ModelRequested)
-	input.ModelResolved = strings.TrimSpace(input.ModelResolved)
+	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode) // trimlowerlint:allow domain canonicalization
+	input.ModelRequested = strings.TrimSpace(input.ModelRequested)           // trimlowerlint:allow domain canonicalization
+	input.ModelResolved = strings.TrimSpace(input.ModelResolved)             // trimlowerlint:allow domain canonicalization
 	switch kind {
 	case EventKindUpstreamInflight:
 		if input.Result != ResultClassInProgress {

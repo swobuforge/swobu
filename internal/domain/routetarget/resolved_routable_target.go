@@ -1,7 +1,7 @@
 package routetarget
 
 import (
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
@@ -17,16 +17,15 @@ type ResolvedRoutableTarget struct {
 func ResolveRoutableTarget(endpoint endpointintent.Endpoint) (ResolvedRoutableTarget, error) {
 	providerConfig := endpoint.SelectedProviderConfig()
 	if providerConfig.Ref().String() == "" {
-		return ResolvedRoutableTarget{}, compatibility.BadEndpoint("selected provider config is missing")
+		return ResolvedRoutableTarget{}, canonical.BadEndpoint("selected provider config is missing")
 	}
 	routeProfile, ok := providercatalog.ResolveRouteProfile(
 		providerConfig.ProviderSpec().String(),
-		providerConfig.ProtocolKind(),
 		providerConfig.BaseURL(),
 		providerConfig.CredentialRef(),
 	)
 	if !ok {
-		return ResolvedRoutableTarget{}, compatibility.BadEndpoint("selected provider route is unsupported")
+		return ResolvedRoutableTarget{}, canonical.BadEndpoint("selected provider route is unsupported")
 	}
 	return ResolvedRoutableTarget{
 		EndpointName:   endpoint.Name(),

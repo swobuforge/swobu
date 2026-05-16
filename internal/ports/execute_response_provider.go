@@ -3,13 +3,13 @@ package ports
 import (
 	"context"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// ExecuteRequest is the semantic provider-port input.
+// ProviderRequest is the semantic provider-port input.
 // It carries canonical meaning plus selected-target wiring, not raw client or backend DTOs.
-type ExecuteRequest struct {
-	Request  compatibility.CanonicalRequest
+type ProviderRequest struct {
+	Request  canonical.CanonicalRequest
 	Contract ExecutionContract
 	Target   RoutableTarget
 }
@@ -17,31 +17,36 @@ type ExecuteRequest struct {
 // ExecutionContract carries runtime delivery semantics for one execution attempt.
 // It is intentionally separate from canonical request semantics.
 type ExecutionContract struct {
-	DeliveryMode compatibility.DeliveryMode
+	Streaming              bool
+	AllowPreCommitFallback bool
 }
 
-func NewExecutionContract(deliveryMode compatibility.DeliveryMode) ExecutionContract {
+func NewExecutionContract(streaming bool) ExecutionContract {
 	return ExecutionContract{
-		DeliveryMode: deliveryMode,
+		Streaming:              streaming,
+		AllowPreCommitFallback: false,
 	}
 }
 
-func NewExecuteRequest(request compatibility.CanonicalRequest, contract ExecutionContract, target RoutableTarget) ExecuteRequest {
-	return ExecuteRequest{
-		Request:  compatibility.CloneCanonicalRequest(request),
+func (c ExecutionContract) WithPreCommitFallbackEnabled() ExecutionContract {
+	c.AllowPreCommitFallback = true
+	return c
+}
+
+func NewProviderRequest(request canonical.CanonicalRequest, contract ExecutionContract, target RoutableTarget) ProviderRequest {
+	return ProviderRequest{
+		Request:  canonical.CloneCanonicalRequest(request),
 		Contract: contract,
 		Target:   target.Clone(),
 	}
 }
 
-type ExecuteResponse struct {
-	delivery compatibility.DeliveryMode
-	output   compatibility.CanonicalOutput
-	stream   compatibility.CanonicalOutputEventStream
-	metadata ExecuteMetadata
+type ProviderResponse struct {
+	envelope canonical.EventReader
+	metadata ProviderResponseMetadata
 }
 
-type ExecuteMetadata struct {
+type ProviderResponseMetadata struct {
 	AttemptCount              int
 	ContinuityRecovered       bool
 	ContinuityRecoveryTrigger string
@@ -50,46 +55,39 @@ type ExecuteMetadata struct {
 	ModelResolutionMode       string
 }
 
-// NewBufferedExecuteResponse returns a fully materialized canonical output from provider adaptation.
-func NewBufferedExecuteResponse(output compatibility.CanonicalOutput) ExecuteResponse {
-	return ExecuteResponse{
-		delivery: compatibility.DeliveryModeBuffered,
-		output:   compatibility.CloneCanonicalOutput(output),
+// NewBufferedProviderResponse returns a fully materialized canonical output from provider adaptation.
+func NewBufferedProviderResponse(output canonical.CanonicalOutput) ProviderResponse {
+	envelope, _ := canonical.EventReaderFromCanonicalOutput("buffered_exchange", output)
+	return ProviderResponse{
+		envelope: envelope,
 	}
 }
 
-// NewStreamingExecuteResponse returns canonical output-assembly events from provider adaptation.
-func NewStreamingExecuteResponse(stream compatibility.CanonicalOutputEventStream) ExecuteResponse {
-	return ExecuteResponse{
-		delivery: compatibility.DeliveryModeStreaming,
-		stream:   stream,
+// NewEnvelopeStreamingProviderResponse returns a streaming response whose source
+// of truth is a canonical envelope event stream.
+func NewEnvelopeStreamingProviderResponse(envelope canonical.EventReader) ProviderResponse {
+	return ProviderResponse{
+		envelope: envelope,
 	}
 }
 
-func (r ExecuteResponse) WithMetadata(metadata ExecuteMetadata) ExecuteResponse {
+func (r ProviderResponse) WithMetadata(metadata ProviderResponseMetadata) ProviderResponse {
 	r.metadata = metadata
 	return r
 }
 
-func (r ExecuteResponse) Output() compatibility.CanonicalOutput {
-	return compatibility.CloneCanonicalOutput(r.output)
+// EnvelopeStream returns the canonical envelope stream for this response.
+func (r ProviderResponse) EnvelopeStream() canonical.EventReader {
+	return r.envelope
 }
 
-func (r ExecuteResponse) Stream() compatibility.CanonicalOutputEventStream {
-	return r.stream
-}
-
-func (r ExecuteResponse) DeliveryMode() compatibility.DeliveryMode {
-	return r.delivery
-}
-
-func (r ExecuteResponse) Metadata() ExecuteMetadata {
+func (r ProviderResponse) Metadata() ProviderResponseMetadata {
 	return r.metadata
 }
 
-func (r ExecuteResponse) Close() error {
-	if r.stream != nil {
-		return r.stream.Close()
+func (r ProviderResponse) Close() error {
+	if r.envelope != nil {
+		return r.envelope.Close(context.Background())
 	}
 	return nil
 }
@@ -97,5 +95,5 @@ func (r ExecuteResponse) Close() error {
 type ProviderExecutor interface {
 	// Execute maps one canonical request to the selected target and returns
 	// canonical success semantics or an origin-preserving failure.
-	Execute(ctx context.Context, req ExecuteRequest) (ExecuteResponse, error)
+	Execute(ctx context.Context, req ProviderRequest) (ProviderResponse, error)
 }

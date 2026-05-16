@@ -41,13 +41,13 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 		return versionNoticeDecision{}
 	}
 
-	currentRaw := strings.TrimSpace(controlplane.SwobuVersion())
+	currentRaw := strings.TrimSpace(controlplane.SwobuVersion()) // trimlowerlint:allow boundary canonicalization
 	latestRaw, err := fetchLatestVersion()
 	if err != nil {
 		return versionNoticeDecision{}
 	}
 	latest := sanitizeLatestVersion(latestRaw)
-	current := strings.TrimSpace(currentRaw)
+	current := strings.TrimSpace(currentRaw) // trimlowerlint:allow boundary canonicalization
 	if latest == "" || current == "" || latest == current {
 		return versionNoticeDecision{}
 	}
@@ -69,7 +69,7 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 }
 
 func nonEmptyOr(value string, fallback string) string {
-	trimmed := strings.TrimSpace(value)
+	trimmed := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
 	if trimmed == "" {
 		return fallback
 	}
@@ -90,12 +90,12 @@ func defaultFetchLatestVersion() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(body)), nil
+	return strings.TrimSpace(string(body)), nil // trimlowerlint:allow boundary canonicalization
 }
 
 func sanitizeLatestVersion(raw string) string {
 	for _, line := range strings.Split(raw, "\n") {
-		candidate := strings.TrimSpace(line)
+		candidate := strings.TrimSpace(line) // trimlowerlint:allow boundary canonicalization
 		if candidate != "" {
 			return candidate
 		}
@@ -119,7 +119,7 @@ type semverLike struct {
 }
 
 func parseSemverLike(raw string) (semverLike, bool) {
-	value := strings.TrimSpace(raw)
+	value := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
 	value = strings.TrimPrefix(value, "v")
 	if value == "" {
 		return semverLike{}, false

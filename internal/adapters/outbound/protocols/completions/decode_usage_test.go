@@ -2,7 +2,7 @@ package completions
 
 import "testing"
 
-func TestDecodeBufferedResult_MapsUsageAndCacheFields(t *testing.T) {
+func TestDecodeResponseBuffered_MapsUsageAndCacheFields(t *testing.T) {
 	raw := []byte(`{
 		"id":"cmpl_1",
 		"model":"m",
@@ -10,9 +10,9 @@ func TestDecodeBufferedResult_MapsUsageAndCacheFields(t *testing.T) {
 		"usage":{"prompt_tokens":44,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":20,"cache_write_tokens":2}}
 	}`)
 
-	out, err := DecodeBufferedResult(raw)
+	out, err := DecodeResponseBuffered(raw)
 	if err != nil {
-		t.Fatalf("DecodeBufferedResult returned error: %v", err)
+		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
 	input, ok := out.Usage().InputTokens()
 	if !ok || input != 44 {

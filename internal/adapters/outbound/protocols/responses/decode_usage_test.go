@@ -2,7 +2,7 @@ package responses
 
 import "testing"
 
-func TestDecodeBufferedResult_MapsInputOutputAndCacheUsage(t *testing.T) {
+func TestDecodeResponseBuffered_MapsInputOutputAndCacheUsage(t *testing.T) {
 	raw := []byte(`{
 		"id":"resp_1",
 		"model":"m",
@@ -10,9 +10,9 @@ func TestDecodeBufferedResult_MapsInputOutputAndCacheUsage(t *testing.T) {
 		"usage":{"input_tokens":91,"output_tokens":6,"input_tokens_details":{"cached_tokens":64,"cache_write_tokens":3}}
 	}`)
 
-	out, err := DecodeBufferedResult(raw)
+	out, err := DecodeResponseBuffered(raw)
 	if err != nil {
-		t.Fatalf("DecodeBufferedResult returned error: %v", err)
+		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
 	input, ok := out.Usage().InputTokens()
 	if !ok || input != 91 {

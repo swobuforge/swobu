@@ -17,7 +17,7 @@ const (
 	RowModel        = "model"
 	RowUseKeyFrom   = "auth"
 	RowBackendURL   = "backend url"
-	RowTargetAlias  = "id"
+	RowTargetAlias  = "alias"
 	RowBaseURL      = "base url"
 	RowLaunchClient = "launch client"
 	RowCheckAccess  = "check access"

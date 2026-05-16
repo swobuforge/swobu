@@ -11,12 +11,13 @@ endpoints: *[] | [...#Endpoint]
 #ProviderConfig: {
 	ref!: string
 	provider_spec!: string
-	protocol_kind!: "chat_completions" | "responses" | "completions" | "messages"
 	base_url?: string
 	credential_ref?: string
 	model_id?: string
 	target_alias?: string
-	if provider_spec == "custom" {
+	protocol_kind?: string
+	selected_frame?: string
+	if provider_spec == "openai_compatible" {
 		base_url!: string
 	}
 }

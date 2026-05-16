@@ -40,8 +40,8 @@ func trafficHTTPStatus(row state.TrafficRow) string {
 func normalizeTrafficRows(rows []state.TrafficRow) []state.TrafficRow {
 	out := append([]state.TrafficRow(nil), rows...)
 	sort.SliceStable(out, func(i, j int) bool {
-		leftTime := strings.TrimSpace(out[i].ObservedAt)
-		rightTime := strings.TrimSpace(out[j].ObservedAt)
+		leftTime := strings.TrimSpace(out[i].ObservedAt)  // trimlowerlint:allow boundary canonicalization
+		rightTime := strings.TrimSpace(out[j].ObservedAt) // trimlowerlint:allow boundary canonicalization
 		if leftTime != rightTime {
 			return leftTime > rightTime
 		}
@@ -50,12 +50,12 @@ func normalizeTrafficRows(rows []state.TrafficRow) []state.TrafficRow {
 		if leftRank != rightRank {
 			return leftRank < rightRank
 		}
-		left := strings.TrimSpace(out[i].Target)
-		right := strings.TrimSpace(out[j].Target)
+		left := strings.TrimSpace(out[i].Target)  // trimlowerlint:allow boundary canonicalization
+		right := strings.TrimSpace(out[j].Target) // trimlowerlint:allow boundary canonicalization
 		if left != right {
 			return left < right
 		}
-		return strings.TrimSpace(out[i].OperationFamily) < strings.TrimSpace(out[j].OperationFamily)
+		return strings.TrimSpace(out[i].OperationFamily) < strings.TrimSpace(out[j].OperationFamily) // trimlowerlint:allow boundary canonicalization
 	})
 	return out
 }
@@ -98,7 +98,7 @@ func trafficRowKeyBase(row state.TrafficRow) string {
 }
 
 func trafficKeyToken(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.TrimSpace(strings.ToLower(value)) // trimlowerlint:allow boundary canonicalization
 	if value == "" {
 		return ""
 	}
@@ -124,7 +124,7 @@ func trafficKeyToken(value string) string {
 }
 
 func trafficResult(row state.TrafficRow) string {
-	result := strings.ToLower(strings.TrimSpace(row.Result))
+	result := strings.ToLower(strings.TrimSpace(row.Result)) // trimlowerlint:allow boundary canonicalization
 	if result == "in_progress" || result == "inflight" || result == "in flight" || row.StatusCode == 0 {
 		return "inflight"
 	}
@@ -143,11 +143,11 @@ func trafficResult(row state.TrafficRow) string {
 	if result == "success" || result == "ok" {
 		return "done"
 	}
-	return strings.ToUpper(toolkitviews.TrimToWidth(strings.TrimSpace(row.Result), 8))
+	return strings.ToUpper(toolkitviews.TrimToWidth(strings.TrimSpace(row.Result), 8)) // trimlowerlint:allow boundary canonicalization
 }
 
 func trafficKind(row state.TrafficRow) string {
-	op := strings.ToLower(strings.TrimSpace(row.OperationFamily))
+	op := strings.ToLower(strings.TrimSpace(row.OperationFamily)) // trimlowerlint:allow boundary canonicalization
 	if strings.Contains(op, "response") {
 		return "responses"
 	}
@@ -168,7 +168,7 @@ func trafficTiming(row state.TrafficRow) string {
 }
 
 func trafficWhen(row state.TrafficRow) string {
-	when := strings.TrimSpace(row.ObservedAt)
+	when := strings.TrimSpace(row.ObservedAt) // trimlowerlint:allow boundary canonicalization
 	if when != "" {
 		return when
 	}

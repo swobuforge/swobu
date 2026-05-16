@@ -23,7 +23,7 @@ func TestFilterablePickerItems_FiltersBySearchOrLabel(t *testing.T) {
 
 	filtered = filterablePickerItems(items, "cust")
 	if len(filtered) != 1 || filtered[0].Label != "Custom" {
-		t.Fatalf("filtered custom mismatch: %#v", filtered)
+		t.Fatalf("filtered openai_compatible mismatch: %#v", filtered)
 	}
 }
 

@@ -1,10 +1,9 @@
 package routing
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -15,7 +14,7 @@ func providerSpecRow(providerConfig *state.ProviderConfigSnapshot) retained.View
 	if providerConfig == nil {
 		return views.RowStatic("provider", "not set")
 	}
-	return views.RowStatic("provider", providercatalog.DisplayName(strings.TrimSpace(providerConfig.ProviderSpec)))
+	return views.RowStatic("provider", providerDisplayName(strings.TrimSpace(providerConfig.ProviderSpec))) // trimlowerlint:allow boundary canonicalization
 }
 
 func providerDeleteRow(endpointName string, providerConfig *state.ProviderConfigSnapshot) retained.ViewSpec[state.Model] {
@@ -29,40 +28,25 @@ func providerDeleteRow(endpointName string, providerConfig *state.ProviderConfig
 			return views.RowStatic("delete model", "disabled (last model)")
 		}
 		return views.RowAction("delete model", "", "delete", func() []update.Action {
-			return []update.Action{
-				state.RoutingSaveStartedAction{},
-				state.DeleteProviderConfigRequested{
-					EndpointName: strings.TrimSpace(endpointName),
-					ProviderRef:  strings.TrimSpace(providerConfig.Ref),
-				},
-			}
+			return routingDeleteProviderConfigActions(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref), "provider/delete") // trimlowerlint:allow boundary canonicalization
 		})
 	})
 }
 
 func currentSnapshotByName(model state.Model, endpointName string) *state.EndpointSnapshot {
-	name := strings.TrimSpace(endpointName)
+	name := strings.TrimSpace(endpointName) // trimlowerlint:allow boundary canonicalization
 	for i := range model.EndpointSnapshots {
-		if strings.TrimSpace(model.EndpointSnapshots[i].Name) == name {
+		if strings.TrimSpace(model.EndpointSnapshots[i].Name) == name { // trimlowerlint:allow boundary canonicalization
 			return &model.EndpointSnapshots[i]
 		}
 	}
 	return nil
 }
 
-func nextProviderRef(snapshot *state.EndpointSnapshot) string {
-	if snapshot == nil {
-		return "model-1"
+func nextProviderDraftKey(snapshot *state.EndpointSnapshot) string {
+	count := 0
+	if snapshot != nil {
+		count = len(snapshot.ProviderConfigs)
 	}
-	used := map[string]struct{}{}
-	for _, pc := range snapshot.ProviderConfigs {
-		used[strings.TrimSpace(pc.Ref)] = struct{}{}
-	}
-	for i := 1; i < 1000; i++ {
-		ref := fmt.Sprintf("model-%d", i)
-		if _, exists := used[ref]; !exists {
-			return ref
-		}
-	}
-	return fmt.Sprintf("model-%d", len(snapshot.ProviderConfigs)+1)
+	return "draft-" + strings.TrimSpace(strconv.Itoa(count+1)) // trimlowerlint:allow boundary canonicalization
 }

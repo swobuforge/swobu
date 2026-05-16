@@ -31,8 +31,8 @@ func TestResolveRoutableTarget_ReturnsRouteProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveRoutableTarget returned error: %v", err)
 	}
-	if got := resolved.RouteProfile.ProviderSpec; got != "custom" {
-		t.Fatalf("route profile provider spec = %q, want custom", got)
+	if got := resolved.RouteProfile.ProviderSpec; got != "openai_compatible" {
+		t.Fatalf("route profile provider spec = %q, want openai_compatible", got)
 	}
 }
 
@@ -47,7 +47,7 @@ func testEndpoint(t *testing.T, specs []providerConfigSpec, selectedRef string) 
 	if err != nil {
 		t.Fatalf("ParseEndpointName returned error: %v", err)
 	}
-	spec, err := endpointintent.ParseProviderSpec("custom")
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
@@ -67,7 +67,6 @@ func testEndpoint(t *testing.T, specs []providerConfigSpec, selectedRef string) 
 			spec,
 			"https://example.test/v1",
 			"cred-1",
-			"chat_completions",
 		)
 		if err != nil {
 			t.Fatalf("NewProviderConfig(%q) returned error: %v", entry.ref, err)

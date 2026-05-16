@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 )
 
 func TestCatalog_ContainsCanonicalProfiles(t *testing.T) {
@@ -99,7 +99,7 @@ func TestProfileActions_ParetoMatrix(t *testing.T) {
 	if got := openCodeActions[0].RowLabel(); got != "file config" {
 		t.Fatalf("opencode primary=%q", got)
 	}
-	if !strings.Contains(openCodeActions[0].Content, `"model": "swobu/`+compatibility.PrimaryTargetSelector+`"`) {
+	if !strings.Contains(openCodeActions[0].Content, `"model": "swobu/`+requestpath.PublicModelIDSwobu+`"`) {
 		t.Fatalf("opencode file config=%q", openCodeActions[0].Content)
 	}
 	if got := openCodeActions[1].RowLabel(); got != "run" {
@@ -120,7 +120,7 @@ func TestProfileActions_ParetoMatrix(t *testing.T) {
 	if !strings.Contains(otherActions[0].ActionSummary(), "openai + anthropic") {
 		t.Fatalf("other summary=%q", otherActions[0].ActionSummary())
 	}
-	if got := otherActions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    primary" {
+	if got := otherActions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    swobu" {
 		t.Fatalf("other copy values=%q", got)
 	}
 }

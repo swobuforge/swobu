@@ -3,7 +3,7 @@ package requestpath
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
@@ -16,14 +16,14 @@ type BackendModelCapabilityCatalog struct {
 
 type backendModelCapabilityRecord struct {
 	ProviderSpec   string
-	ProtocolKind   protocolsurface.Kind
+	ProtocolKind   protocolkind.ProtocolKind
 	BackendModelID string
 	Capability     CapabilitySnapshot
 }
 
 type backendModelCapabilityScope struct {
 	ProviderSpec string
-	ProtocolKind protocolsurface.Kind
+	ProtocolKind protocolkind.ProtocolKind
 }
 
 type backendModelCapabilityKey struct {
@@ -39,7 +39,7 @@ func newBackendModelCapabilityCatalog(records []backendModelCapabilityRecord) Ba
 		if !ok {
 			continue
 		}
-		model := strings.TrimSpace(record.BackendModelID)
+		model := strings.TrimSpace(record.BackendModelID) // trimlowerlint:allow boundary canonicalization
 		if model == "" || model == "*" {
 			byAny[scope] = record.Capability
 			continue
@@ -60,7 +60,7 @@ func (catalog BackendModelCapabilityCatalog) SnapshotFor(entity BackendModelEnti
 	if !ok {
 		return CapabilitySnapshot{}
 	}
-	modelID := strings.TrimSpace(entity.BackendModelID)
+	modelID := strings.TrimSpace(entity.BackendModelID) // trimlowerlint:allow boundary canonicalization
 	if modelID == "" {
 		return CapabilitySnapshot{}
 	}
@@ -82,7 +82,7 @@ func defaultBackendModelCapabilityCatalog() BackendModelCapabilityCatalog {
 	for _, fact := range facts {
 		records = append(records, backendModelCapabilityRecord{
 			ProviderSpec:   fact.ProviderSpec,
-			ProtocolKind:   fact.ProtocolKind,
+			ProtocolKind:   protocolkind.ProtocolKind(fact.ProtocolKind),
 			BackendModelID: fact.ModelID,
 			Capability: CapabilitySnapshot{
 				ToolChoice: ToolChoiceCapability{
@@ -94,8 +94,8 @@ func defaultBackendModelCapabilityCatalog() BackendModelCapabilityCatalog {
 	return newBackendModelCapabilityCatalog(records)
 }
 
-func normalizeCapabilityScope(providerSpec string, protocolKind protocolsurface.Kind) (backendModelCapabilityScope, bool) {
-	normalizedSpec := strings.TrimSpace(strings.ToLower(providerSpec))
+func normalizeCapabilityScope(providerSpec string, protocolKind protocolkind.ProtocolKind) (backendModelCapabilityScope, bool) {
+	normalizedSpec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
 	if normalizedSpec == "" || protocolKind == "" {
 		return backendModelCapabilityScope{}, false
 	}

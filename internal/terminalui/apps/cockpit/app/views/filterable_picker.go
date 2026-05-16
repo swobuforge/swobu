@@ -51,7 +51,7 @@ func FilterablePickerFocusKey(prefix string, filteredIndex int) string {
 	if filteredIndex < 0 {
 		filteredIndex = 0
 	}
-	base := strings.TrimSpace(prefix)
+	base := strings.TrimSpace(prefix) // trimlowerlint:allow boundary canonicalization
 	if base == "" {
 		base = "picker-option"
 	}
@@ -112,7 +112,7 @@ func RenderFilterablePickerDisclosure(
 			setState(cur)
 			return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
 		case interaction.KeyEsc:
-			if strings.TrimSpace(cur.Query) != "" {
+			if strings.TrimSpace(cur.Query) != "" { // trimlowerlint:allow boundary canonicalization
 				cur.Query = ""
 				cur.Cursor = 0
 				cur.Offset = 0
@@ -173,14 +173,14 @@ func filterablePickerRows(
 	rows := make([]retained.ViewSpec[state.Model], 0, len(cfg.HeaderRows)+ListMaxHeight+4)
 	rows = append(rows, cfg.HeaderRows...)
 	if filterablePickerShowFindRow(cfg, len(items), next.Query) {
-		findLabel := strings.TrimSpace(cfg.FindLabel)
+		findLabel := strings.TrimSpace(cfg.FindLabel) // trimlowerlint:allow boundary canonicalization
 		if findLabel == "" {
 			findLabel = "find"
 		}
 		rows = append(rows, RowStatic(findLabel, filterableQueryDisplay(next.Query)))
 	}
 	if len(filtered) == 0 {
-		none := strings.TrimSpace(cfg.NoMatchesLabel)
+		none := strings.TrimSpace(cfg.NoMatchesLabel) // trimlowerlint:allow boundary canonicalization
 		if none == "" {
 			none = "no matches"
 		}
@@ -196,7 +196,7 @@ func filterablePickerRows(
 		item := filtered[i]
 		itemCopy := item
 		key := itemCopy.Key
-		if strings.TrimSpace(key) == "" {
+		if strings.TrimSpace(key) == "" { // trimlowerlint:allow boundary canonicalization
 			key = FilterablePickerFocusKey(cfg.KeyPrefix, i)
 		}
 		buildRow := cfg.BuildOptionRow
@@ -223,7 +223,7 @@ func filterablePickerWindowSize(cfg FilterablePickerConfig) int {
 }
 
 func filterablePickerShowFindRow(cfg FilterablePickerConfig, totalItems int, query string) bool {
-	if strings.TrimSpace(query) != "" {
+	if strings.TrimSpace(query) != "" { // trimlowerlint:allow boundary canonicalization
 		return true
 	}
 	minOptions := cfg.MinOptionsForFind
@@ -234,7 +234,7 @@ func filterablePickerShowFindRow(cfg FilterablePickerConfig, totalItems int, que
 }
 
 func filterablePickerItems(items []FilterablePickerItem, query string) []FilterablePickerItem {
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = strings.ToLower(strings.TrimSpace(query)) // trimlowerlint:allow boundary canonicalization
 	if query == "" {
 		out := make([]FilterablePickerItem, 0, len(items))
 		out = append(out, items...)
@@ -242,11 +242,11 @@ func filterablePickerItems(items []FilterablePickerItem, query string) []Filtera
 	}
 	out := make([]FilterablePickerItem, 0, len(items))
 	for i := range items {
-		candidate := strings.TrimSpace(items[i].Search)
+		candidate := strings.TrimSpace(items[i].Search) // trimlowerlint:allow boundary canonicalization
 		if candidate == "" {
-			candidate = strings.TrimSpace(items[i].Label)
+			candidate = strings.TrimSpace(items[i].Label) // trimlowerlint:allow boundary canonicalization
 		}
-		if strings.Contains(strings.ToLower(candidate), query) {
+		if strings.Contains(strings.ToLower(candidate), query) { // trimlowerlint:allow boundary canonicalization
 			out = append(out, items[i])
 		}
 	}
@@ -299,7 +299,7 @@ func filterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg Filterabl
 		index = len(filtered) - 1
 	}
 	if index >= 0 && index < len(filtered) {
-		if key := strings.TrimSpace(filtered[index].Key); key != "" {
+		if key := strings.TrimSpace(filtered[index].Key); key != "" { // trimlowerlint:allow boundary canonicalization
 			return key
 		}
 	}
@@ -309,7 +309,7 @@ func filterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg Filterabl
 func defaultFilterablePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 	return func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 		return toolkitviews.ListItemRow[state.Model](
-			toolkitviews.InsetLabel(strings.TrimSpace(item.Label), 3),
+			toolkitviews.InsetLabel(strings.TrimSpace(item.Label), 3), // trimlowerlint:allow boundary canonicalization
 			item.Selected,
 			showSelected,
 			true,

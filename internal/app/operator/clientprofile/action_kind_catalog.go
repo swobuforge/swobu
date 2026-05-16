@@ -3,8 +3,6 @@ package clientprofile
 import (
 	"io/fs"
 	"strings"
-
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
 )
 
 type ActionKind string
@@ -206,7 +204,7 @@ func opencodeClientSpec() capabilityClientSpec {
 			pretty := strings.Join([]string{
 				"{",
 				`  "$schema": "https://opencode.ai/config.json",`,
-				`  "model": "swobu/` + compatibility.PrimaryTargetSelector + `",`,
+				`  "model": "swobu/{{primary_model}}",`,
 				`  "provider": {`,
 				`    "swobu": {`,
 				`      "npm": "@ai-sdk/openai-compatible",`,
@@ -221,7 +219,7 @@ func opencodeClientSpec() capabilityClientSpec {
 				`  }`,
 				"}",
 			}, "\n")
-			inline := `{"$schema":"https://opencode.ai/config.json","model":"swobu/` + compatibility.PrimaryTargetSelector + `","provider":{"swobu":{"npm":"@ai-sdk/openai-compatible","name":"Swobu","options":{"baseURL":"{{openai_base_url}}"},"models":{"primary":{"name":"Primary"}}}}}`
+			inline := `{"$schema":"https://opencode.ai/config.json","model":"swobu/{{primary_model}}","provider":{"swobu":{"npm":"@ai-sdk/openai-compatible","name":"Swobu","options":{"baseURL":"{{openai_base_url}}"},"models":{"primary":{"name":"Primary"}}}}}`
 			return TemplateVars{
 				"opencode_config_pretty": pretty,
 				"opencode_config_inline": inline,
@@ -261,12 +259,12 @@ func otherClientSpec() capabilityClientSpec {
 			{
 				ID:      "open",
 				Kind:    ActionKindOpenGuide,
-				Content: "OpenAI + Anthropic compatible\nBase URL: {{base_url}}\nModel:    primary\nSwobu autodetects v1 compatibility.",
+				Content: "OpenAI + Anthropic compatible\nBase URL: {{base_url}}\nModel:    {{primary_model}}\nSwobu autodetects v1 canonical.",
 			},
 			{
 				ID:      "copy-values",
 				Kind:    ActionKindCopyValues,
-				Content: "Base URL: {{base_url}}\nModel:    primary",
+				Content: "Base URL: {{base_url}}\nModel:    {{primary_model}}",
 			},
 		},
 	}

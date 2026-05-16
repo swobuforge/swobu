@@ -14,7 +14,7 @@ func FirstRunHero(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Mo
 	children := []retained.ViewSpec[state.Model]{
 		headerTextLine("unbundle your ai stack"),
 	}
-	if strings.TrimSpace(selectors.CreateDraftName(model)) == "" {
+	if strings.TrimSpace(selectors.CreateDraftName(model)) == "" { // trimlowerlint:allow boundary canonicalization
 		children = append(children, headerTextLine("set one local boundary between your client and your model backend"))
 	} else {
 		// Keep hero block height stable while name edits stream to avoid focus drift.

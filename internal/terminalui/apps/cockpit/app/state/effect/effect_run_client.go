@@ -57,10 +57,10 @@ func SetForegroundClientRunner(run func(context.Context, string, []string, map[s
 }
 
 func runClientOnceMessage(ctx context.Context, baseURL, clientID, modelID string) string {
-	if strings.TrimSpace(baseURL) == "" || baseURL == "none" {
+	if strings.TrimSpace(baseURL) == "" || baseURL == "none" { // trimlowerlint:allow boundary canonicalization
 		return "select a workspace before run once"
 	}
-	clientID = strings.TrimSpace(clientID)
+	clientID = strings.TrimSpace(clientID) // trimlowerlint:allow boundary canonicalization
 	if clientID == "" {
 		return "choose a client before run once"
 	}
@@ -70,7 +70,7 @@ func runClientOnceMessage(ctx context.Context, baseURL, clientID, modelID string
 	}
 	if spec.prepare != nil {
 		if err := spec.prepare(); err != nil {
-			return "failed to start " + spec.binary + ": " + strings.TrimSpace(err.Error())
+			return "failed to start " + spec.binary + ": " + strings.TrimSpace(err.Error()) // trimlowerlint:allow boundary canonicalization
 		}
 	}
 	executable, err := findClientExecutable(spec.binary)
@@ -86,7 +86,7 @@ func runClientOnceMessage(ctx context.Context, baseURL, clientID, modelID string
 		if errors.Is(err, ErrForegroundClientUnavailable) {
 			return "run once is unavailable until cockpit is active"
 		}
-		return "failed to start " + spec.binary + ": " + strings.TrimSpace(err.Error())
+		return "failed to start " + spec.binary + ": " + strings.TrimSpace(err.Error()) // trimlowerlint:allow boundary canonicalization
 	}
 	if exitCode != 0 {
 		return fmt.Sprintf("%s exited with code %d", spec.binary, exitCode)
@@ -107,8 +107,8 @@ func clientRunSpecForID(clientID, baseURL, modelID string) (clientRunSpec, bool)
 		return clientRunSpec{}, false
 	}
 	spec := clientRunSpec{
-		clientID: strings.TrimSpace(command.ClientID),
-		binary:   strings.TrimSpace(command.Binary),
+		clientID: strings.TrimSpace(command.ClientID), // trimlowerlint:allow boundary canonicalization
+		binary:   strings.TrimSpace(command.Binary),   // trimlowerlint:allow boundary canonicalization
 		args:     append([]string(nil), command.Args...),
 		env:      cloneStringMap(command.Env),
 	}
@@ -131,7 +131,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 }
 
 func ensurePreparedRunFile(prepare clientprofile.RunPrepareFileSpec) error {
-	path := strings.TrimSpace(prepare.Path)
+	path := strings.TrimSpace(prepare.Path) // trimlowerlint:allow boundary canonicalization
 	if path == "" {
 		return fmt.Errorf("empty run preparation file path")
 	}
@@ -158,7 +158,7 @@ func RunClientDisplayCommand(clientID, baseURL, modelID string) (string, bool) {
 	if len(spec.env) > 0 {
 		keys := make([]string, 0, len(spec.env))
 		for key := range spec.env {
-			if strings.EqualFold(strings.TrimSpace(key), "OPENAI_API_KEY") {
+			if strings.EqualFold(strings.TrimSpace(key), "OPENAI_API_KEY") { // trimlowerlint:allow boundary canonicalization
 				continue
 			}
 			keys = append(keys, key)

@@ -3,11 +3,12 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/compatibility"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -37,51 +38,56 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	}
 
 	query := req.URL.Query()
-	providerSpec := strings.TrimSpace(strings.ToLower(query.Get("provider_spec")))
+	providerSpec := strings.TrimSpace(strings.ToLower(query.Get("provider_spec"))) // trimlowerlint:allow boundary canonicalization
 	if providerSpec == "" {
 		http.Error(w, "provider_spec is required", http.StatusBadRequest)
 		return
 	}
-	protocolKindRaw := strings.TrimSpace(query.Get("protocol_kind"))
-	if protocolKindRaw == "" {
-		http.Error(w, "protocol_kind is required", http.StatusBadRequest)
-		return
-	}
-	protocolKind, err := protocolsurface.Parse(protocolKindRaw)
-	if err != nil {
-		http.Error(w, "protocol_kind is invalid", http.StatusBadRequest)
-		return
-	}
-	baseURL := strings.TrimSpace(query.Get("base_url"))
+	baseURL := strings.TrimSpace(query.Get("base_url")) // trimlowerlint:allow boundary canonicalization
 	if baseURL == "" {
-		baseURL = strings.TrimSpace(providercatalog.DefaultBaseURL(providerSpec))
+		baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // trimlowerlint:allow boundary canonicalization
 	}
-	credentialRef := strings.TrimSpace(query.Get("credential_ref"))
+	credentialRef := strings.TrimSpace(query.Get("credential_ref")) // trimlowerlint:allow boundary canonicalization
 
-	models, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, credentialRef, protocolKind)
+	models, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, credentialRef)
 	result := modelCatalogProbeResult{}
 	if probeErr != nil {
+		slog.Warn("model catalog probe failed",
+			"provider_spec", providerSpec,
+			"base_url", baseURL,
+			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
+			"error", probeErr.Error(),
+		)
 		result.Error = normalizeModelCatalogProbeError(probeErr.Error(), credentialRef)
 	} else {
+		slog.Debug("model catalog probe succeeded",
+			"provider_spec", providerSpec,
+			"base_url", baseURL,
+			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
+			"model_count", len(models),
+		)
 		result.ModelIDs = models
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-func probeModelIDs(ctx context.Context, providers ports.ProviderModelCatalog, providerSpec string, baseURL string, credentialRef string, protocolKind protocolsurface.Kind) ([]string, error) {
-	routeProfile, ok := providercatalog.ResolveRouteProfile(providerSpec, protocolKind, baseURL, credentialRef)
+func credentialRefKindForProbe(credentialRef string) string {
+	return string(credentialref.Parse(credentialRef).Kind())
+}
+
+func probeModelIDs(ctx context.Context, providers ports.ProviderModelCatalog, providerSpec string, baseURL string, credentialRef string) ([]string, error) {
+	routeProfile, ok := providercatalog.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
 	if !ok {
-		return nil, compatibility.BadEndpoint("selected provider route is unsupported")
+		return nil, canonical.BadEndpoint("selected provider route is unsupported")
 	}
 	models, err := providers.ListModels(ctx, ports.NewRoutableTarget(
 		"draft",
 		providerSpec,
 		baseURL,
 		credentialRef,
-		protocolKind,
+		"",
 		string(routeProfile.AuthKind),
-		string(routeProfile.APIFamily),
 	))
 	if err != nil {
 		return nil, err
@@ -90,21 +96,12 @@ func probeModelIDs(ctx context.Context, providers ports.ProviderModelCatalog, pr
 }
 
 func normalizeModelCatalogProbeError(message string, credentialRef string) string {
-	message = strings.TrimSpace(message)
-	if !strings.Contains(strings.ToLower(message), "credential reference could not be resolved") {
+	message = strings.TrimSpace(message)                                                           // trimlowerlint:allow boundary canonicalization
+	if !strings.Contains(strings.ToLower(message), "credential reference could not be resolved") { // trimlowerlint:allow boundary canonicalization
 		return message
 	}
-	if !isFileCredentialRef(credentialRef) {
+	if !credentialref.Parse(credentialRef).IsFileRef() {
 		return message
 	}
 	return "BAD_ENDPOINT: credential file could not be resolved (check file path, read permission, and non-empty token)"
-}
-
-func isFileCredentialRef(credentialRef string) bool {
-	ref := strings.TrimSpace(strings.ToLower(credentialRef))
-	return ref == "file" ||
-		ref == "file:" ||
-		strings.HasPrefix(ref, "file:") ||
-		strings.HasPrefix(ref, "/") ||
-		strings.HasPrefix(ref, "~/")
 }

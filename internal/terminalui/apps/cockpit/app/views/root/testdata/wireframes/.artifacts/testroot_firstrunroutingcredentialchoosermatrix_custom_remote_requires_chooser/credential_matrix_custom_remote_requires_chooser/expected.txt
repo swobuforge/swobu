@@ -1,4 +1,4 @@
-SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
+SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
 ────────────────────────────────────────────────────────────────────────────────
 > workspace ▾
      name              acme                                           edit ↵
@@ -7,7 +7,7 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   routing ▾
      run on            Custom                                         choose ↵
-     credentials       choose a key source                            choose ↵
+     auth              missing                                        choose ↵
       -> set credential file before loading models
 
   clients ▸

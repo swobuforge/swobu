@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,6 +33,9 @@ const (
 	defaultAuthorizeURL          = "https://auth.openai.com/oauth/authorize"
 	defaultTokenURL              = "https://auth.openai.com/oauth/token"
 	defaultOpenAIClientID        = "app_EMoamEEZ73f0CkXaXp7hrann"
+	defaultCallbackListenAddr    = "127.0.0.1:1455"
+	fallbackCallbackListenAddr   = "127.0.0.1:1457"
+	callbackPath                 = "/auth/callback"
 	daemonCallbackPath           = "/_swobu/auth/chatgpt/callback"
 	maxHTTPBodyBytes             = 128 * 1024
 	authSessionTTL               = 15 * time.Minute
@@ -48,24 +53,26 @@ var (
 )
 
 type CredentialWriter interface {
-	Store(providerSpec string, keyName string, secret string) error
+	Store(providerSpec string, keyName string, secret string) (string, error)
 }
 
-type CredentialWriterFunc func(providerSpec string, keyName string, secret string) error
+type CredentialWriterFunc func(providerSpec string, keyName string, secret string) (string, error)
 
-func (f CredentialWriterFunc) Store(providerSpec string, keyName string, secret string) error {
+func (f CredentialWriterFunc) Store(providerSpec string, keyName string, secret string) (string, error) {
 	return f(providerSpec, keyName, secret)
 }
 
 type ServiceConfig struct {
-	PublicBaseURL string
-	AuthorizeURL  string
-	TokenURL      string
-	ClientID      string
-	Originator    string
-	UserAgent     string
-	Now           func() time.Time
-	CredentialOut CredentialWriter
+	PublicBaseURL      string
+	AuthorizeURL       string
+	TokenURL           string
+	ClientID           string
+	CallbackListenAddr string
+	OAuthRedirectBase  string
+	Originator         string
+	UserAgent          string
+	Now                func() time.Time
+	CredentialOut      CredentialWriter
 }
 
 type Service struct {
@@ -75,6 +82,9 @@ type Service struct {
 	mu             sync.RWMutex
 	sessions       map[string]*sessionRecord
 	sessionByState map[string]string
+
+	callbackOnce     sync.Once
+	callbackStartErr error
 }
 
 type sessionRecord struct {
@@ -112,6 +122,7 @@ type SessionOutput struct {
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
+	IDToken     string `json:"id_token"`
 }
 
 type deviceUserCodeResponse struct {
@@ -135,22 +146,28 @@ func NewService(httpClient *http.Client, cfg ServiceConfig) *Service {
 		httpClient = &clone
 	}
 	cfg.PublicBaseURL = canonicalPublicBaseURL(cfg.PublicBaseURL)
-	if strings.TrimSpace(cfg.AuthorizeURL) == "" {
+	if strings.TrimSpace(cfg.AuthorizeURL) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.AuthorizeURL = defaultAuthorizeURL
 	}
-	if strings.TrimSpace(cfg.TokenURL) == "" {
+	if strings.TrimSpace(cfg.TokenURL) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.TokenURL = defaultTokenURL
 	}
-	if strings.TrimSpace(cfg.ClientID) == "" {
+	if strings.TrimSpace(cfg.ClientID) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.ClientID = defaultOpenAIClientID
+	}
+	callbackAddr := strings.TrimSpace(cfg.CallbackListenAddr) // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(callbackAddr, "off") || strings.EqualFold(callbackAddr, "none") {
+		cfg.CallbackListenAddr = ""
+	} else if callbackAddr == "" {
+		cfg.CallbackListenAddr = defaultCallbackListenAddr
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if strings.TrimSpace(cfg.Originator) == "" {
+	if strings.TrimSpace(cfg.Originator) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.Originator = defaultOriginator
 	}
-	if strings.TrimSpace(cfg.UserAgent) == "" {
+	if strings.TrimSpace(cfg.UserAgent) == "" { // trimlowerlint:allow boundary canonicalization
 		cfg.UserAgent = defaultUserAgent
 	}
 	return &Service{
@@ -169,6 +186,15 @@ func (s *Service) SetPublicBaseURL(raw string) {
 
 func (s *Service) Start(ctx context.Context, in StartInput) (StartOutput, error) {
 	authMode := canonicalAuthMode(in.AuthMode)
+	slog.Info("chatgpt auth session start requested",
+		"component", "chatgpt_login",
+		"auth_mode", authMode,
+	)
+	if authMode == "browser" {
+		if err := s.ensureCallbackServerStarted(); err != nil {
+			return StartOutput{}, err
+		}
+	}
 	sessionID, err := randomToken(18)
 	if err != nil {
 		return StartOutput{}, fmt.Errorf("chatgpt login start failed: session id generation failed")
@@ -254,8 +280,8 @@ func (s *Service) Session(ctx context.Context, sessionID string) (SessionOutput,
 			rec.terminal = true
 		} else if done {
 			rec.oauthCode = authCode
-			if strings.TrimSpace(verifier) != "" {
-				rec.codeVerifier = strings.TrimSpace(verifier)
+			if strings.TrimSpace(verifier) != "" { // trimlowerlint:allow boundary canonicalization
+				rec.codeVerifier = strings.TrimSpace(verifier) // trimlowerlint:allow boundary canonicalization
 			}
 		}
 	}
@@ -279,10 +305,20 @@ func (s *Service) Session(ctx context.Context, sessionID string) (SessionOutput,
 			return SessionOutput{}, fmt.Errorf("chatgpt login session is unknown")
 		}
 		if err != nil {
+			slog.Warn("chatgpt auth session token exchange/persist failed",
+				"component", "chatgpt_login",
+				"session_id", sessionID,
+				"error", err.Error(),
+			)
 			rec.state = SessionFailed
 			rec.errorMessage = err.Error()
 			rec.terminal = true
 		} else {
+			slog.Info("chatgpt auth session succeeded",
+				"component", "chatgpt_login",
+				"session_id", sessionID,
+				"credential_ref", credentialRef,
+			)
 			rec.state = SessionSucceeded
 			rec.credentialRef = credentialRef
 			rec.errorMessage = ""
@@ -298,7 +334,7 @@ func (s *Service) Session(ctx context.Context, sessionID string) (SessionOutput,
 	}
 	s.mu.Unlock()
 
-	if out.State == SessionSucceeded && strings.TrimSpace(out.CredentialRef) == "" {
+	if out.State == SessionSucceeded && strings.TrimSpace(out.CredentialRef) == "" { // trimlowerlint:allow boundary canonicalization
 		return SessionOutput{}, fmt.Errorf("chatgpt login succeeded without credential reference")
 	}
 	return out, nil
@@ -310,7 +346,13 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	q := req.URL.Query()
-	state := strings.TrimSpace(q.Get("state"))
+	state := strings.TrimSpace(q.Get("state")) // trimlowerlint:allow boundary canonicalization
+	slog.Info("chatgpt auth callback received",
+		"component", "chatgpt_login",
+		"has_state", state != "",
+		"has_code", strings.TrimSpace(q.Get("code")) != "", // trimlowerlint:allow boundary canonicalization
+		"has_error", strings.TrimSpace(q.Get("error")) != "", // trimlowerlint:allow boundary canonicalization
+	)
 	if state == "" {
 		http.Error(w, "missing state", http.StatusBadRequest)
 		return
@@ -318,6 +360,9 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 	s.mu.Lock()
 	sid, ok := lookupSessionIDByCallbackState(s.sessionByState, state)
 	if !ok {
+		slog.Warn("chatgpt auth callback state did not match active session",
+			"component", "chatgpt_login",
+		)
 		s.mu.Unlock()
 		writeAuthenticationErrorPage(w, http.StatusNotFound, callbackRequestID(q))
 		return
@@ -329,12 +374,21 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if rec.terminal {
+		slog.Info("chatgpt auth callback ignored because session is terminal",
+			"component", "chatgpt_login",
+			"session_id", sid,
+		)
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte("<html><body>Login already completed. You can close this tab.</body></html>"))
 		return
 	}
-	if errValue := strings.TrimSpace(q.Get("error")); errValue != "" {
+	if errValue := strings.TrimSpace(q.Get("error")); errValue != "" { // trimlowerlint:allow boundary canonicalization
+		slog.Warn("chatgpt auth callback returned oauth error",
+			"component", "chatgpt_login",
+			"session_id", sid,
+			"oauth_error", errValue,
+		)
 		rec.state = SessionFailed
 		rec.errorMessage = "oauth error: " + errValue
 		if requestID := callbackRequestID(q); requestID != "" {
@@ -345,8 +399,12 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 		writeAuthenticationErrorPage(w, http.StatusBadRequest, callbackRequestID(q))
 		return
 	}
-	code := strings.TrimSpace(q.Get("code"))
+	code := strings.TrimSpace(q.Get("code")) // trimlowerlint:allow boundary canonicalization
 	if code == "" {
+		slog.Warn("chatgpt auth callback missing oauth code",
+			"component", "chatgpt_login",
+			"session_id", sid,
+		)
 		rec.state = SessionFailed
 		rec.errorMessage = "oauth callback missing code"
 		if requestID := callbackRequestID(q); requestID != "" {
@@ -359,6 +417,10 @@ func (s *Service) HandleCallback(w http.ResponseWriter, req *http.Request) {
 	}
 	rec.oauthCode = code
 	rec.state = SessionPending
+	slog.Info("chatgpt auth callback accepted oauth code",
+		"component", "chatgpt_login",
+		"session_id", sid,
+	)
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -371,7 +433,7 @@ func callbackRequestID(q url.Values) string {
 	}
 	candidates := []string{"request_id", "requestId", "x_request_id", "x-request-id"}
 	for _, key := range candidates {
-		if value := strings.TrimSpace(q.Get(key)); value != "" {
+		if value := strings.TrimSpace(q.Get(key)); value != "" { // trimlowerlint:allow boundary canonicalization
 			return value
 		}
 	}
@@ -379,7 +441,7 @@ func callbackRequestID(q url.Values) string {
 }
 
 func lookupSessionIDByCallbackState(sessionByState map[string]string, rawState string) (string, bool) {
-	state := strings.TrimSpace(rawState)
+	state := strings.TrimSpace(rawState) // trimlowerlint:allow boundary canonicalization
 	if state == "" {
 		return "", false
 	}
@@ -390,7 +452,7 @@ func lookupSessionIDByCallbackState(sessionByState map[string]string, rawState s
 	// value during copy/open handoff. Accept the original nonce prefix.
 	for _, marker := range []string{"https://", "http://"} {
 		if idx := strings.Index(state, marker); idx > 0 {
-			if sid, ok := sessionByState[strings.TrimSpace(state[:idx])]; ok {
+			if sid, ok := sessionByState[strings.TrimSpace(state[:idx])]; ok { // trimlowerlint:allow boundary canonicalization
 				return sid, true
 			}
 		}
@@ -419,9 +481,13 @@ func writeAuthenticationErrorPage(w http.ResponseWriter, statusCode int, request
 func (s *Service) buildAuthorizeURL(oauthState string, codeVerifier string) (string, error) {
 	sum := sha256.Sum256([]byte(codeVerifier))
 	codeChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
-	redirectURI := strings.TrimRight(s.config.PublicBaseURL, "/") + daemonCallbackPath
+	redirectBase := strings.TrimSpace(s.config.OAuthRedirectBase) // trimlowerlint:allow boundary canonicalization
+	if redirectBase == "" {
+		redirectBase = "http://localhost:1455"
+	}
+	redirectURI := strings.TrimRight(redirectBase, "/") + callbackPath
 	params := url.Values{}
-	params.Set("client_id", strings.TrimSpace(s.config.ClientID))
+	params.Set("client_id", strings.TrimSpace(s.config.ClientID)) // trimlowerlint:allow boundary canonicalization
 	params.Set("response_type", "code")
 	params.Set("redirect_uri", redirectURI)
 	params.Set("scope", "openid profile email offline_access api.connectors.read api.connectors.invoke")
@@ -430,8 +496,8 @@ func (s *Service) buildAuthorizeURL(oauthState string, codeVerifier string) (str
 	params.Set("code_challenge_method", "S256")
 	params.Set("id_token_add_organizations", "true")
 	params.Set("codex_cli_simplified_flow", "true")
-	params.Set("originator", strings.TrimSpace(s.config.Originator))
-	authorizeURL := strings.TrimRight(strings.TrimSpace(s.config.AuthorizeURL), "/") + "?" + params.Encode()
+	params.Set("originator", strings.TrimSpace(s.config.Originator))                                         // trimlowerlint:allow boundary canonicalization
+	authorizeURL := strings.TrimRight(strings.TrimSpace(s.config.AuthorizeURL), "/") + "?" + params.Encode() // trimlowerlint:allow boundary canonicalization
 	if _, err := url.Parse(authorizeURL); err != nil {
 		return "", fmt.Errorf("chatgpt authorize url could not be built")
 	}
@@ -439,24 +505,32 @@ func (s *Service) buildAuthorizeURL(oauthState string, codeVerifier string) (str
 }
 
 func (s *Service) exchangeAndPersist(ctx context.Context, sessionID string, code string, codeVerifier string, redirectOverride string) (string, error) {
+	slog.Info("chatgpt auth token exchange started",
+		"component", "chatgpt_login",
+		"session_id", sessionID,
+	)
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
-	form.Set("client_id", strings.TrimSpace(s.config.ClientID))
-	form.Set("code", strings.TrimSpace(code))
-	redirectURI := strings.TrimRight(s.config.PublicBaseURL, "/") + daemonCallbackPath
-	if strings.TrimSpace(redirectOverride) != "" {
-		redirectURI = strings.TrimSpace(redirectOverride)
+	form.Set("client_id", strings.TrimSpace(s.config.ClientID))   // trimlowerlint:allow boundary canonicalization
+	form.Set("code", strings.TrimSpace(code))                     // trimlowerlint:allow boundary canonicalization
+	redirectBase := strings.TrimSpace(s.config.OAuthRedirectBase) // trimlowerlint:allow boundary canonicalization
+	if redirectBase == "" {
+		redirectBase = "http://localhost:1455"
+	}
+	redirectURI := strings.TrimRight(redirectBase, "/") + callbackPath
+	if strings.TrimSpace(redirectOverride) != "" { // trimlowerlint:allow boundary canonicalization
+		redirectURI = strings.TrimSpace(redirectOverride) // trimlowerlint:allow boundary canonicalization
 	}
 	form.Set("redirect_uri", redirectURI)
-	form.Set("code_verifier", strings.TrimSpace(codeVerifier))
+	form.Set("code_verifier", strings.TrimSpace(codeVerifier)) // trimlowerlint:allow boundary canonicalization
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(s.config.TokenURL), strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(s.config.TokenURL), strings.NewReader(form.Encode())) // trimlowerlint:allow boundary canonicalization
 	if err != nil {
 		return "", fmt.Errorf("token exchange request could not be built")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent))
+	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent)) // trimlowerlint:allow boundary canonicalization
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("token exchange failed")
@@ -464,35 +538,107 @@ func (s *Service) exchangeAndPersist(ctx context.Context, sessionID string, code
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodyBytes))
 	if resp.StatusCode != http.StatusOK {
+		slog.Warn("chatgpt auth token exchange failed with non-200 status",
+			"component", "chatgpt_login",
+			"session_id", sessionID,
+			"status_code", resp.StatusCode,
+		)
 		return "", fmt.Errorf("token exchange returned status %d%s", resp.StatusCode, formatRemoteAuthError(body))
 	}
 	var token tokenResponse
 	if err := json.Unmarshal(body, &token); err != nil {
 		return "", fmt.Errorf("token exchange response could not be decoded")
 	}
-	access := strings.TrimSpace(token.AccessToken)
+	access := strings.TrimSpace(token.AccessToken) // trimlowerlint:allow boundary canonicalization
 	if access == "" {
 		return "", fmt.Errorf("token exchange returned empty access token")
 	}
 
 	keyName := defaultCredentialKeychainTag + "/" + sessionID
+	if tier, ok := parseChatGPTSubscriptionTier(token.IDToken); ok {
+		keyName = defaultCredentialKeychainTag + "/" + tier + "/" + sessionID
+	}
+	credentialRef := "secret:" + keyName
 	if s.config.CredentialOut != nil {
-		if err := s.config.CredentialOut.Store("chatgpt", keyName, access); err != nil {
-			return "", fmt.Errorf("credential store failed")
+		persistedRef, err := s.config.CredentialOut.Store("chatgpt", keyName, access)
+		if err != nil {
+			slog.Warn("chatgpt auth credential persistence failed",
+				"component", "chatgpt_login",
+				"session_id", sessionID,
+				"credential_slot", keyName,
+				"error", err.Error(),
+			)
+			return "", fmt.Errorf("%s", classifyCredentialStoreFailure(err))
+		}
+		if strings.TrimSpace(persistedRef) != "" { // trimlowerlint:allow boundary canonicalization
+			credentialRef = strings.TrimSpace(persistedRef) // trimlowerlint:allow boundary canonicalization
 		}
 	}
-	return "keychain:" + keyName, nil
+	slog.Info("chatgpt auth credential persisted",
+		"component", "chatgpt_login",
+		"session_id", sessionID,
+		"credential_slot", keyName,
+	)
+	return credentialRef, nil
+}
+
+func classifyCredentialStoreFailure(err error) string {
+	lower := strings.ToLower(strings.TrimSpace(err.Error())) // trimlowerlint:allow boundary canonicalization
+	switch {
+	case strings.Contains(lower, "keyring write failed"):
+		return "credential store failed: os keyring unavailable"
+	case strings.Contains(lower, "permission denied"):
+		return "credential store failed: local credential state is not writable"
+	default:
+		return "credential store failed"
+	}
+}
+
+func parseChatGPTSubscriptionTier(idToken string) (string, bool) {
+	idToken = strings.TrimSpace(idToken) // trimlowerlint:allow boundary canonicalization
+	if idToken == "" {
+		return "", false
+	}
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return "", false
+	}
+	payloadPart := parts[1]
+	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
+	if err != nil {
+		return "", false
+	}
+	var claims struct {
+		Auth struct {
+			ChatGPTPlanType string `json:"chatgpt_plan_type"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(claims.Auth.ChatGPTPlanType)) { // trimlowerlint:allow boundary canonicalization
+	case "free":
+		return "free", true
+	case "plus":
+		return "plus", true
+	case "pro":
+		return "pro", true
+	case "team":
+		return "team", true
+	default:
+		return "", false
+	}
 }
 
 func (s *Service) requestDeviceCode(ctx context.Context) (string, string, time.Duration, error) {
-	body, _ := json.Marshal(map[string]string{"client_id": strings.TrimSpace(s.config.ClientID)})
+	body, _ := json.Marshal(map[string]string{"client_id": strings.TrimSpace(s.config.ClientID)}) // trimlowerlint:allow boundary canonicalization
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deviceUserCodeURL, strings.NewReader(string(body)))
 	if err != nil {
 		return "", "", 0, fmt.Errorf("device auth request could not be built")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent))
+	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent)) // trimlowerlint:allow boundary canonicalization
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("device auth start failed")
@@ -506,14 +652,14 @@ func (s *Service) requestDeviceCode(ctx context.Context) (string, string, time.D
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", "", 0, fmt.Errorf("device auth start response could not be decoded")
 	}
-	code := strings.TrimSpace(out.UserCode)
+	code := strings.TrimSpace(out.UserCode) // trimlowerlint:allow boundary canonicalization
 	if code == "" {
-		code = strings.TrimSpace(out.UserCodeAlt)
+		code = strings.TrimSpace(out.UserCodeAlt) // trimlowerlint:allow boundary canonicalization
 	}
-	if strings.TrimSpace(out.DeviceAuthID) == "" || code == "" {
+	if strings.TrimSpace(out.DeviceAuthID) == "" || code == "" { // trimlowerlint:allow boundary canonicalization
 		return "", "", 0, fmt.Errorf("device auth start response missing required fields")
 	}
-	return strings.TrimSpace(out.DeviceAuthID), code, parseDeviceInterval(out.Interval), nil
+	return strings.TrimSpace(out.DeviceAuthID), code, parseDeviceInterval(out.Interval), nil // trimlowerlint:allow boundary canonicalization
 }
 
 func (s *Service) pollDeviceToken(ctx context.Context, deviceAuthID string, userCode string, interval time.Duration) (string, string, bool, error) {
@@ -521,8 +667,8 @@ func (s *Service) pollDeviceToken(ctx context.Context, deviceAuthID string, user
 		interval = 5 * time.Second
 	}
 	body, _ := json.Marshal(map[string]string{
-		"device_auth_id": strings.TrimSpace(deviceAuthID),
-		"user_code":      strings.TrimSpace(userCode),
+		"device_auth_id": strings.TrimSpace(deviceAuthID), // trimlowerlint:allow boundary canonicalization
+		"user_code":      strings.TrimSpace(userCode),     // trimlowerlint:allow boundary canonicalization
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deviceTokenURL, strings.NewReader(string(body)))
 	if err != nil {
@@ -530,7 +676,7 @@ func (s *Service) pollDeviceToken(ctx context.Context, deviceAuthID string, user
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent))
+	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent)) // trimlowerlint:allow boundary canonicalization
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return "", "", false, fmt.Errorf("device auth poll failed")
@@ -547,16 +693,16 @@ func (s *Service) pollDeviceToken(ctx context.Context, deviceAuthID string, user
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", "", false, fmt.Errorf("device auth poll response could not be decoded")
 	}
-	return strings.TrimSpace(out.AuthorizationCode), strings.TrimSpace(out.CodeVerifier), true, nil
+	return strings.TrimSpace(out.AuthorizationCode), strings.TrimSpace(out.CodeVerifier), true, nil // trimlowerlint:allow boundary canonicalization
 }
 
 func canonicalPublicBaseURL(raw string) string {
-	base := strings.TrimSpace(raw)
+	base := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
 	if base == "" {
 		base = defaultPublicBaseURL
 	}
 	u, err := url.Parse(base)
-	if err != nil || strings.TrimSpace(u.Scheme) == "" || strings.TrimSpace(u.Host) == "" {
+	if err != nil || strings.TrimSpace(u.Scheme) == "" || strings.TrimSpace(u.Host) == "" { // trimlowerlint:allow boundary canonicalization
 		return defaultPublicBaseURL
 	}
 	u.Path = ""
@@ -566,7 +712,7 @@ func canonicalPublicBaseURL(raw string) string {
 }
 
 func normalizeSessionID(raw string) string {
-	id := strings.TrimSpace(raw)
+	id := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
 	if id == "" {
 		return ""
 	}
@@ -584,7 +730,7 @@ func normalizeSessionID(raw string) string {
 }
 
 func canonicalAuthMode(raw string) string {
-	mode := strings.ToLower(strings.TrimSpace(raw))
+	mode := strings.ToLower(strings.TrimSpace(raw)) // trimlowerlint:allow boundary canonicalization
 	if mode == "device" {
 		return "device"
 	}
@@ -592,7 +738,7 @@ func canonicalAuthMode(raw string) string {
 }
 
 func formatRemoteAuthError(raw []byte) string {
-	message := strings.TrimSpace(extractRemoteAuthErrorMessage(raw))
+	message := strings.TrimSpace(extractRemoteAuthErrorMessage(raw)) // trimlowerlint:allow boundary canonicalization
 	if message == "" {
 		return ""
 	}
@@ -610,13 +756,13 @@ func extractRemoteAuthErrorMessage(raw []byte) string {
 	}
 	var decoded envelope
 	if err := json.Unmarshal(raw, &decoded); err == nil {
-		code := strings.TrimSpace(decoded.Error.Code)
-		message := strings.TrimSpace(decoded.Error.Message)
+		code := strings.TrimSpace(decoded.Error.Code)       // trimlowerlint:allow boundary canonicalization
+		message := strings.TrimSpace(decoded.Error.Message) // trimlowerlint:allow boundary canonicalization
 		if code == "" {
-			code = strings.TrimSpace(decoded.Code)
+			code = strings.TrimSpace(decoded.Code) // trimlowerlint:allow boundary canonicalization
 		}
 		if message == "" {
-			message = strings.TrimSpace(decoded.Message)
+			message = strings.TrimSpace(decoded.Message) // trimlowerlint:allow boundary canonicalization
 		}
 		if code != "" && message != "" {
 			return fmt.Sprintf("%s (%s)", message, code)
@@ -628,7 +774,7 @@ func extractRemoteAuthErrorMessage(raw []byte) string {
 			return code
 		}
 	}
-	fallback := strings.TrimSpace(string(raw))
+	fallback := strings.TrimSpace(string(raw)) // trimlowerlint:allow boundary canonicalization
 	if fallback == "" {
 		return ""
 	}
@@ -648,7 +794,7 @@ func parseDeviceInterval(raw json.RawMessage) time.Duration {
 	}
 	var asString string
 	if err := json.Unmarshal(raw, &asString); err == nil {
-		if n, convErr := strconv.Atoi(strings.TrimSpace(asString)); convErr == nil && n > 0 {
+		if n, convErr := strconv.Atoi(strings.TrimSpace(asString)); convErr == nil && n > 0 { // trimlowerlint:allow boundary canonicalization
 			return time.Duration(n) * time.Second
 		}
 	}
@@ -671,4 +817,54 @@ func (s *Service) evictExpiredLocked(now time.Time) {
 		delete(s.sessions, sid)
 		delete(s.sessionByState, rec.oauthState)
 	}
+}
+
+func (s *Service) ensureCallbackServerStarted() error {
+	addr := strings.TrimSpace(s.config.CallbackListenAddr) // trimlowerlint:allow boundary canonicalization
+	if addr == "" {
+		return nil
+	}
+	s.callbackOnce.Do(func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc(callbackPath, s.HandleCallback)
+		server := &http.Server{
+			Addr:              addr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		var (
+			ln  net.Listener
+			err error
+		)
+		for _, candidate := range callbackListenCandidates(addr) {
+			server.Addr = candidate
+			ln, err = net.Listen("tcp", candidate)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			s.callbackStartErr = fmt.Errorf("chatgpt login callback listener unavailable at %s: %w", addr, err)
+			return
+		}
+		actualPort := ""
+		if tcp, ok := ln.Addr().(*net.TCPAddr); ok && tcp.Port > 0 {
+			actualPort = fmt.Sprintf("%d", tcp.Port)
+		}
+		if strings.TrimSpace(s.config.OAuthRedirectBase) == "" && actualPort != "" { // trimlowerlint:allow boundary canonicalization
+			s.config.OAuthRedirectBase = "http://localhost:" + actualPort
+		}
+		go func() {
+			_ = server.Serve(ln)
+		}()
+	})
+	return s.callbackStartErr
+}
+
+func callbackListenCandidates(addr string) []string {
+	addr = strings.TrimSpace(addr) // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(addr, defaultCallbackListenAddr) {
+		return []string{defaultCallbackListenAddr, fallbackCallbackListenAddr}
+	}
+	return []string{addr}
 }

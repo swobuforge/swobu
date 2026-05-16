@@ -5,7 +5,7 @@ import "testing"
 func TestToolChoiceCapabilityFacts_IncludeResponsesDefaultsForResponsesProviders(t *testing.T) {
 	facts := ToolChoiceCapabilityFacts()
 
-	for _, provider := range []string{"openai", "openrouter", "custom"} {
+	for _, provider := range []string{"openai", "openrouter", "openai_compatible"} {
 		found := false
 		for _, fact := range facts {
 			if fact.ProviderSpec != provider || fact.ProtocolKind != "responses" || fact.ModelID != "*" {

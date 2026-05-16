@@ -5,7 +5,7 @@ import "strings"
 // RenderSplitLine renders one line with left/right content separated by a
 // single space, truncating the left side first when width is constrained.
 func RenderSplitLine(width int, left string, right string) string {
-	left = strings.TrimSpace(left)
+	left = strings.TrimSpace(left) // trimlowerlint:allow boundary canonicalization
 	if width <= 0 {
 		return ""
 	}

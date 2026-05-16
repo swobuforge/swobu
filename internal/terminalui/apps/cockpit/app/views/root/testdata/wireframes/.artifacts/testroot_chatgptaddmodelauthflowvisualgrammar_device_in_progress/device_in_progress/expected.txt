@@ -1,4 +1,4 @@
-SWOBU! 🧌                                                               ready   [ ? ] [› acme] [ + ]
+SWOBU 🧌                                                                ready   [ ? ] [› acme] [ + ]
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
      name               acme                                                              edit ↵
@@ -6,9 +6,9 @@ SWOBU! 🧌                                                               ready 
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             gpt-3.5-turbo                                                     choose ↵
+     run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       gpt-3.5-turbo                                                                      edit ↵
+       gpt-3.5-turbo:231                                                                  edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
          auth              device code                                                    change ↵

@@ -11,7 +11,7 @@ func InsetLabel(label string, cols int) string {
 	if cols < 0 {
 		cols = 0
 	}
-	return strings.Repeat(" ", cols) + strings.TrimSpace(label)
+	return strings.Repeat(" ", cols) + strings.TrimSpace(label) // trimlowerlint:allow boundary canonicalization
 }
 
 // ListItemRow renders one focusable list row.

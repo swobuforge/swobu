@@ -1,6 +1,3 @@
-line 1
-- SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
-+ SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
-line 10
--      credentials       not required
-+      auth              not required
+line 9
+-      run on            Custom                                         choose ↵
++      run on            OpenAI Compatible                              choose ↵

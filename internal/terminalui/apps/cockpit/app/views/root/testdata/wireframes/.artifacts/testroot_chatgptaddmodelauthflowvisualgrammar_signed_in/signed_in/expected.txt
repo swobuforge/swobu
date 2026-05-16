@@ -1,4 +1,4 @@
-SWOBU! 🧌                                                      login complete   [ ? ] [› acme] [ + ]
+SWOBU 🧌                                                       login complete   [ ? ] [› acme] [ + ]
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
      name               acme                                                              edit ↵
@@ -6,20 +6,20 @@ SWOBU! 🧌                                                      login complete 
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             gpt-3.5-turbo                                                     choose ↵
+     run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       gpt-3.5-turbo                                                                      edit ↵
+       gpt-3.5-turbo:231                                                                  edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
          auth              signed in                                                      change ↵
-    >    model             not selected                                                   choose ↵
+    >    sign in           sign in another account                                        open ↵
+         model             not selected                                                   choose ↵
 
   clients ▸
     not set
 
   traffic ▸
     no traffic yet
-
 
 
 

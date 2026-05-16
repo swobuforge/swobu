@@ -370,10 +370,9 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitC
 	fs := flag.NewFlagSet("telemetry status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry status [--state-path <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry status")
 		fs.PrintDefaults()
 	}
-	statePath := fs.String("state-path", "", fmt.Sprintf("telemetry state file path (env: %s) (default: %s)", platformconfig.EnvTelemetryStatePath, platformconfig.ResolveTelemetryStatePath("")))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -381,7 +380,6 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitC
 		return ExitDown
 	}
 	store := telemetry.NewStore()
-	store.StatePath = platformconfig.ResolveTelemetryStatePath(*statePath)
 	state, err := store.LoadOrCreate()
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
@@ -413,10 +411,9 @@ func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, ar
 	fs := flag.NewFlagSet("telemetry toggle", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry [on|off] [--state-path <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry [on|off]")
 		fs.PrintDefaults()
 	}
-	statePath := fs.String("state-path", "", fmt.Sprintf("telemetry state file path (env: %s) (default: %s)", platformconfig.EnvTelemetryStatePath, platformconfig.ResolveTelemetryStatePath("")))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -424,7 +421,6 @@ func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, ar
 		return ExitDown
 	}
 	store := telemetry.NewStore()
-	store.StatePath = platformconfig.ResolveTelemetryStatePath(*statePath)
 	state, err := store.SetEnabled(enabled)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())

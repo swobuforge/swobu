@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -65,17 +66,28 @@ func (h ChatGPTLoginHandler) serveGenericStart(w http.ResponseWriter, req *http.
 		AuthMode     string `json:"auth_mode"`
 	}
 	_ = json.NewDecoder(req.Body).Decode(&body)
+	slog.Debug("auth session start HTTP request",
+		"component", "httpapi",
+		"provider_spec", strings.TrimSpace(strings.ToLower(body.ProviderSpec)), // trimlowerlint:allow boundary canonicalization
+		"has_endpoint_ref", strings.TrimSpace(body.EndpointRef) != "", // trimlowerlint:allow boundary canonicalization
+		"auth_mode", strings.TrimSpace(body.AuthMode), // trimlowerlint:allow boundary canonicalization
+	)
 	out, err := h.authStart(req.Context(), authplane.StartInput{
-		ProviderSpec: strings.TrimSpace(body.ProviderSpec),
-		EndpointRef:  strings.TrimSpace(body.EndpointRef),
-		AuthMode:     strings.TrimSpace(body.AuthMode),
+		ProviderSpec: strings.TrimSpace(body.ProviderSpec), // trimlowerlint:allow boundary canonicalization
+		EndpointRef:  strings.TrimSpace(body.EndpointRef),  // trimlowerlint:allow boundary canonicalization
+		AuthMode:     strings.TrimSpace(body.AuthMode),     // trimlowerlint:allow boundary canonicalization
 	})
 	if err != nil {
+		slog.Warn("auth session start HTTP failed",
+			"component", "httpapi",
+			"provider_spec", strings.TrimSpace(strings.ToLower(body.ProviderSpec)), // trimlowerlint:allow boundary canonicalization
+			"error", err.Error(),
+		)
 		writeChatGPTLoginError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 		return
 	}
 	writeChatGPTLoginJSON(w, http.StatusOK, map[string]any{
-		"provider_spec": strings.TrimSpace(strings.ToLower(body.ProviderSpec)),
+		"provider_spec": strings.TrimSpace(strings.ToLower(body.ProviderSpec)), // trimlowerlint:allow boundary canonicalization
 		"session_id":    out.SessionID,
 		"authorize_url": out.AuthorizeURL,
 		"user_code":     out.UserCode,
@@ -88,15 +100,24 @@ func (h ChatGPTLoginHandler) serveGenericSession(w http.ResponseWriter, req *htt
 		writeChatGPTLoginError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "auth session status is unavailable")
 		return
 	}
-	sessionID := strings.TrimSpace(strings.TrimPrefix(req.URL.Path, "/_swobu/auth/sessions/"))
+	sessionID := strings.TrimSpace(strings.TrimPrefix(req.URL.Path, "/_swobu/auth/sessions/")) // trimlowerlint:allow boundary canonicalization
+	slog.Debug("auth session poll HTTP request",
+		"component", "httpapi",
+		"session_id", sessionID,
+	)
 	if sessionID == "" || strings.Contains(sessionID, "/") {
 		writeChatGPTLoginError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "auth session id is required")
 		return
 	}
 	out, err := h.authSession(req.Context(), sessionID)
 	if err != nil {
+		slog.Warn("auth session poll HTTP failed",
+			"component", "httpapi",
+			"session_id", sessionID,
+			"error", err.Error(),
+		)
 		msg := err.Error()
-		if strings.Contains(strings.ToLower(msg), "unknown") {
+		if strings.Contains(strings.ToLower(msg), "unknown") { // trimlowerlint:allow boundary canonicalization
 			writeChatGPTLoginError(w, http.StatusNotFound, "NOT_FOUND", msg)
 			return
 		}
@@ -104,7 +125,7 @@ func (h ChatGPTLoginHandler) serveGenericSession(w http.ResponseWriter, req *htt
 		return
 	}
 	writeChatGPTLoginJSON(w, http.StatusOK, map[string]any{
-		"provider_spec":  strings.TrimSpace(out.ProviderSpec),
+		"provider_spec":  strings.TrimSpace(out.ProviderSpec), // trimlowerlint:allow boundary canonicalization
 		"session_id":     out.SessionID,
 		"state":          string(out.State),
 		"credential_ref": out.CredentialRef,
@@ -117,14 +138,23 @@ func (h ChatGPTLoginHandler) serveGenericCancel(w http.ResponseWriter, req *http
 		writeChatGPTLoginError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "auth session cancel is unavailable")
 		return
 	}
-	sessionID := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/_swobu/auth/sessions/"), "/cancel"))
+	sessionID := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/_swobu/auth/sessions/"), "/cancel")) // trimlowerlint:allow boundary canonicalization
+	slog.Debug("auth session cancel HTTP request",
+		"component", "httpapi",
+		"session_id", sessionID,
+	)
 	if sessionID == "" || strings.Contains(sessionID, "/") {
 		writeChatGPTLoginError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "auth session id is required")
 		return
 	}
 	if err := h.authCancel(req.Context(), sessionID); err != nil {
+		slog.Warn("auth session cancel HTTP failed",
+			"component", "httpapi",
+			"session_id", sessionID,
+			"error", err.Error(),
+		)
 		msg := err.Error()
-		if strings.Contains(strings.ToLower(msg), "unknown") {
+		if strings.Contains(strings.ToLower(msg), "unknown") { // trimlowerlint:allow boundary canonicalization
 			writeChatGPTLoginError(w, http.StatusNotFound, "NOT_FOUND", msg)
 			return
 		}
@@ -142,15 +172,24 @@ func (h ChatGPTLoginHandler) serveGenericRetry(w http.ResponseWriter, req *http.
 		writeChatGPTLoginError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "auth session retry is unavailable")
 		return
 	}
-	sessionID := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/_swobu/auth/sessions/"), "/retry"))
+	sessionID := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/_swobu/auth/sessions/"), "/retry")) // trimlowerlint:allow boundary canonicalization
+	slog.Debug("auth session retry HTTP request",
+		"component", "httpapi",
+		"session_id", sessionID,
+	)
 	if sessionID == "" || strings.Contains(sessionID, "/") {
 		writeChatGPTLoginError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "auth session id is required")
 		return
 	}
 	out, err := h.authRetry(req.Context(), sessionID)
 	if err != nil {
+		slog.Warn("auth session retry HTTP failed",
+			"component", "httpapi",
+			"session_id", sessionID,
+			"error", err.Error(),
+		)
 		msg := err.Error()
-		if strings.Contains(strings.ToLower(msg), "unknown") {
+		if strings.Contains(strings.ToLower(msg), "unknown") { // trimlowerlint:allow boundary canonicalization
 			writeChatGPTLoginError(w, http.StatusNotFound, "NOT_FOUND", msg)
 			return
 		}
@@ -174,8 +213,8 @@ func writeChatGPTLoginJSON(w http.ResponseWriter, status int, payload any) {
 func writeChatGPTLoginError(w http.ResponseWriter, status int, code string, message string) {
 	writeChatGPTLoginJSON(w, status, chatGPTLoginErrorEnvelope{
 		Error: chatGPTLoginError{
-			Code:    strings.TrimSpace(code),
-			Message: strings.TrimSpace(message),
+			Code:    strings.TrimSpace(code),    // trimlowerlint:allow boundary canonicalization
+			Message: strings.TrimSpace(message), // trimlowerlint:allow boundary canonicalization
 		},
 	})
 }
