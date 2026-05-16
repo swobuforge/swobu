@@ -13,6 +13,11 @@ func SupportedExecutionProtocolsForSpec(spec string) []protocolkind.ProtocolKind
 	switch strings.TrimSpace(strings.ToLower(spec)) { // trimlowerlint:allow domain canonicalization
 	case "anthropic":
 		return []protocolkind.ProtocolKind{protocolkind.Messages}
+	case "chatgpt":
+		return []protocolkind.ProtocolKind{
+			protocolkind.ChatCompletions,
+			protocolkind.Responses,
+		}
 	default:
 		return []protocolkind.ProtocolKind{
 			protocolkind.ChatCompletions,

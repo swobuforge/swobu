@@ -14,7 +14,7 @@ import (
 	"time"
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols/codex"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt/codexwire"
 	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -69,7 +69,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	if req.Request == nil {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
-	wireReq, err := codex.EncodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
+	wireReq, err := codexwire.EncodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}

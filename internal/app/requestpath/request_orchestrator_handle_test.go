@@ -269,7 +269,7 @@ func TestHandle_PreCommitFallbackEnabled_AllRoutesFail_ReturnsLastError(t *testi
 	}
 }
 
-func TestHandle_SelectedFramePlansProviderCallMode_IndependentFromClientMode(t *testing.T) {
+func TestHandle_SelectedFrameKeepsClientModeUnlessProviderRequiresOtherwise(t *testing.T) {
 	t.Run("batch client with stream provider frame", func(t *testing.T) {
 		endpoint := testResponsesEndpointWithFrame(t, providercatalog.FrameSSEEvent)
 		reader := endpointReaderStub{endpoint: endpoint}
@@ -297,8 +297,8 @@ func TestHandle_SelectedFramePlansProviderCallMode_IndependentFromClientMode(t *
 		if got := providers.calls[0].Contract.ClientResponseMode; got != ports.ResponseModeBuffered {
 			t.Fatalf("client response mode = %v, want %v", got, ports.ResponseModeBuffered)
 		}
-		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeStreaming {
-			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeStreaming)
+		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeBuffered {
+			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeBuffered)
 		}
 	})
 
@@ -329,12 +329,12 @@ func TestHandle_SelectedFramePlansProviderCallMode_IndependentFromClientMode(t *
 		if got := providers.calls[0].Contract.ClientResponseMode; got != ports.ResponseModeStreaming {
 			t.Fatalf("client response mode = %v, want %v", got, ports.ResponseModeStreaming)
 		}
-		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeBuffered {
-			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeBuffered)
+		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeStreaming {
+			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeStreaming)
 		}
 	})
 
-	t.Run("chatgpt forces streaming provider call even with batch frame", func(t *testing.T) {
+	t.Run("chatgpt batch client keeps batch provider call mode", func(t *testing.T) {
 		endpoint := testChatGPTResponsesEndpointWithFrame(t, providercatalog.FrameHTTPJSONBody)
 		reader := endpointReaderStub{endpoint: endpoint}
 		providers := &scriptedProviderExecutor{
@@ -345,7 +345,7 @@ func TestHandle_SelectedFramePlansProviderCallMode_IndependentFromClientMode(t *
 		handler := NewRequestHandler(reader, providers, nil, nil)
 		_, err := handler.Handle(context.Background(), HandleInput{
 			EndpointName: endpoint.Name(),
-			RequestID:    "req_frame_chatgpt_force_stream",
+			RequestID:    "req_frame_chatgpt_batch_mode",
 			Request: canonical.NewGenerationRequest(canonical.GenerationRequestParams{
 				Model: "m",
 				Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
@@ -358,8 +358,8 @@ func TestHandle_SelectedFramePlansProviderCallMode_IndependentFromClientMode(t *
 		if got := len(providers.calls); got != 1 {
 			t.Fatalf("provider calls = %d, want 1", got)
 		}
-		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeStreaming {
-			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeStreaming)
+		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeBuffered {
+			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeBuffered)
 		}
 	})
 }

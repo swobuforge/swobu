@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
-func resolveProviderProtocolForRequest(providerSpec string, request canonical.CanonicalRequest) (protocolkind.ProtocolKind, error) {
+func resolveProviderProtocolForRequest(providerSpec string, configured protocolkind.ProtocolKind, request canonical.CanonicalRequest) (protocolkind.ProtocolKind, error) {
 	if !providercatalog.SupportsSpec(providerSpec) {
 		return "", canonical.BadEndpoint("provider id is unsupported")
 	}
@@ -23,6 +23,9 @@ func resolveProviderProtocolForRequest(providerSpec string, request canonical.Ca
 
 	switch request.(type) {
 	case canonical.DialogCanonicalRequest:
+		if configured == protocolkind.Responses && providercatalog.SupportsExecutionProtocolForSpec(providerSpec, protocolkind.Responses) {
+			return protocolkind.Responses, nil
+		}
 		return protocolkind.ChatCompletions, nil
 	case canonical.GenerationCanonicalRequest:
 		return protocolkind.Responses, nil

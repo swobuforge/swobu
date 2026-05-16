@@ -105,3 +105,47 @@ func TestProviderConfig_DerivesProtocolFromProviderSpec(t *testing.T) {
 		t.Fatalf("protocol kind = %q, want %q", got, protocolkind.Messages)
 	}
 }
+
+func TestProviderConfig_WithProtocolKind(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-openai")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "https://example.test/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+
+	cfg, err = cfg.WithProtocolKind(protocolkind.Responses)
+	if err != nil {
+		t.Fatalf("WithProtocolKind returned error: %v", err)
+	}
+	if got := cfg.ProtocolKind(); got != protocolkind.Responses {
+		t.Fatalf("protocol kind = %q, want %q", got, protocolkind.Responses)
+	}
+	if got := cfg.SelectedFrame(); got == "" {
+		t.Fatal("selected frame must be set after protocol switch")
+	}
+}
+
+func TestProviderConfig_WithProtocolKindRejectsUnsupportedProtocol(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-anthropic")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("anthropic")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "https://api.anthropic.com/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if _, err := cfg.WithProtocolKind(protocolkind.Completions); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithProtocolKind(completions) error = %v, want ErrInvalidProviderConfig", err)
+	}
+}

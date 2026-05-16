@@ -136,7 +136,7 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	)
 	for i, candidate := range routes {
 		resolvedRequest := materializeRequestForExecution(intent.Request, candidate.EffectiveModel)
-		protocolKind, err := resolveProviderProtocolForRequest(candidate.Target.ProviderID(), resolvedRequest)
+		protocolKind, err := resolveProviderProtocolForRequest(candidate.Target.ProviderID(), candidate.Target.ProtocolKind, resolvedRequest)
 		if err != nil {
 			return HandleOutput{}, err
 		}
