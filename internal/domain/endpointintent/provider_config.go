@@ -160,6 +160,29 @@ func (c ProviderConfig) ProtocolKind() protocolkind.ProtocolKind {
 	return c.protocolKind
 }
 
+func (c ProviderConfig) WithProtocolKind(protocolKind protocolkind.ProtocolKind) (ProviderConfig, error) {
+	if !providercatalog.SupportsExecutionProtocolForSpec(c.providerSpec.String(), protocolKind) {
+		return ProviderConfig{}, fmt.Errorf(
+			"%w: protocol %q is unsupported for provider %q",
+			ErrInvalidProviderConfig,
+			protocolKind,
+			c.providerSpec.String(),
+		)
+	}
+	selectedFrame, ok := providercatalog.DefaultFrameForSpecProtocol(c.providerSpec.String(), protocolKind)
+	if !ok {
+		return ProviderConfig{}, fmt.Errorf(
+			"%w: provider %q protocol %q has no supported execution frames",
+			ErrInvalidProviderConfig,
+			c.providerSpec.String(),
+			protocolKind,
+		)
+	}
+	c.protocolKind = protocolKind
+	c.selectedFrame = selectedFrame
+	return c, nil
+}
+
 func (c ProviderConfig) SelectedFrame() string {
 	return c.selectedFrame
 }

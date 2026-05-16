@@ -2,39 +2,36 @@
 
 ![Swobu README hero](./assets/readme/swobu-readme-hero.png)
 
-Swobu is a local AI compatibility layer that unbundles AI clients from LLM backends.
+**Keep the AI tools. Control the traffic.**
 
-Use Claude Code, Codex CLI, Continue, or another OpenAI/Anthropic-compatible client. Point it at Swobu. Connect Swobu to OpenAI, Anthropic, OpenRouter, Ollama, or a custom OpenAI-compatible backend.
+Swobu is a local AI control boundary for coding tools and LLM clients.
 
-The client is not the brain.
+Point Claude Code, Codex CLI, Continue, or another OpenAI/Anthropic-compatible client at Swobu. Route traffic to OpenAI, Anthropic, OpenRouter, Ollama, or a custom OpenAI-compatible backend.
+
+The client should not decide where your AI traffic goes.
 
 ---
 
 ## Why Swobu
 
-AI clients often come with backend assumptions baked in.
+AI coding clients multiply fast, and each tends to carry assumptions about:
 
-That coupling gets painful when you want to:
+- provider choice
+- API shape
+- streaming behavior
+- auth handling
+- error shape
 
-- switch providers
-- compare models
-- run local inference
-- use a cheaper backend
-- keep your existing workflow
-- avoid rewriting client-specific glue
-- keep one local control boundary for AI traffic
+Swobu sits between client and backend so you can:
 
-Swobu sits between the client and the backend and absorbs the mismatch.
+- keep your preferred client
+- swap providers without rebuilding workflow glue
+- route local and hosted models through one boundary
+- compare backends from the same client experience
+- inspect local traffic health
+- avoid SDK lock-in
 
-It handles differences in:
-
-- protocol shape
-- streaming semantics
-- authentication assumptions
-- error models
-- client/backend quirks
-
-Keep the client. Swap the backend. Control the boundary.
+**Standardize the boundary, not the tool.**
 
 ---
 
@@ -44,148 +41,58 @@ Keep the client. Swap the backend. Control the boundary.
 
 ---
 
-## Quickstart (Lazy Path: Just Make It Work)
+## Install
 
-Install:
-
-```bash
+```sh
 curl -fsSL https://swobu.com/install.sh | sh
 ```
 
-Launch cockpit (interactive operator mode):
+Launch Swobu:
 
-```bash
+```sh
 swobu
 ```
 
 In cockpit:
 
 1. Create or select a workspace.
-2. Choose provider (`OpenAI`, `Anthropic`, `OpenRouter`, `Ollama`, or `custom`).
-3. Fill required routing/auth fields.
-4. Save.
-5. Use the shown local client URL/route for your client.
+2. Choose a backend provider.
+3. Configure base URL and auth.
+4. Copy the local endpoint shown by Swobu.
+5. Point your AI client at that endpoint.
 
-Verify daemon health in another terminal:
+Check health:
 
-```bash
+```sh
 swobu status
 ```
 
-Expected: JSON output and exit code `0` (healthy) or `1` (running but uninitialized/degraded).
+Stop Swobu:
 
-If the daemon is not reachable, you get exit code `2`.
-
----
-
-## Quickstart (Scripted / Non-Interactive)
-
-Start foreground daemon:
-
-```bash
-swobu daemon
-```
-
-Optional explicit config path:
-
-```bash
-swobu daemon --config /path/to/swobu.yaml
-```
-
-Check status from scripts/CI:
-
-```bash
-swobu status
-```
-
-Shutdown gracefully:
-
-```bash
+```sh
 swobu down
 ```
 
 ---
 
-## Install/Run From Source (Optional)
+## 60-second shape
 
-If you want to run the latest `master` directly:
+Typical OpenAI-style client config:
 
-```bash
-go run github.com/swobuforge/swobu/cmd/swobu@master --help
+```sh
+OPENAI_BASE_URL=http://127.0.0.1:7926/v1
+OPENAI_API_KEY=swobu
 ```
 
-If you want a local binary from `master` in your `GOBIN`:
+Anthropic-style clients use the corresponding Swobu-supported Anthropic surface.
 
-```bash
-go install github.com/swobuforge/swobu/cmd/swobu@master
-swobu --help
-```
-
-Use this path when you explicitly want latest source behavior rather than the
-stable install script channel.
+Exact environment variables depend on the client.
 
 ---
 
-## Command Surface (v0)
+## What works today
 
-Swobu keeps a narrow operator command surface:
-
-- `swobu` (interactive cockpit launcher)
-- `swobu daemon`
-- `swobu status`
-- `swobu down`
-- `swobu telemetry status|on|off`
-- `swobu version`
-
-Discover command help and defaults:
-
-```bash
-swobu --help
-swobu status --help
-swobu daemon --help
-swobu telemetry status --help
-```
-
----
-
-## What You Can Do In Cockpit (TUI)
-
-Cockpit is the operator UI over real daemon/domain truth. Use it to:
-
-- create, rename, and delete workspaces/endpoints
-- choose provider and route target per workspace
-- configure provider settings (including base URL/auth references)
-- inspect health/readiness state
-- inspect traffic truth (request counts, success/error outcomes, timing classes)
-- open help/feedback actions
-
-Cockpit is not a fake demo shell. It is the primary interactive control surface for local setup and operations.
-
----
-
-## Current Protocol Surface
-
-Swobu is currently in beta.
-
-Supported request families:
-
-- OpenAI-style:
-  - `/v1/chat/completions`
-  - `/v1/responses`
-  - `/v1/completions`
-- Anthropic-style:
-  - `/v1/messages`
-
-Streaming support:
-
-- Server-Sent Events
-- WebSocket
-
----
-
-## Supported Clients And Backends
-
-### Clients (tested)
+### Tested clients
 
 - Claude Code
 - Codex CLI
@@ -193,125 +100,140 @@ Streaming support:
 - OpenAI-compatible clients
 - Anthropic-compatible clients
 
-### Backends
+### Supported backends
 
 - OpenAI
 - Anthropic
 - OpenRouter
 - Ollama
+- ChatGPT
 - Custom OpenAI-compatible backends
 
----
+### Supported request families
 
-## Scenario Playbooks (JBTD)
+OpenAI-style:
 
-### 1) "I want to keep my client, change backend"
+- `/v1/chat/completions`
+- `/v1/responses`
+- `/v1/completions`
 
-- Launch `swobu`.
-- Keep your current client.
-- Configure the backend in cockpit.
-- Point client base URL to Swobu local endpoint.
-- Verify with `swobu status`.
+Anthropic-style:
 
-### 2) "I want local and hosted models behind one workflow"
+- `/v1/messages`
 
-- Start with one workspace (for example, local Ollama).
-- Duplicate/switch workspace routing to hosted backend.
-- Keep the same client UX while changing backend selection.
+### Streaming
 
-### 3) "I want scriptable ops, not UI"
+- Server-Sent Events
+- WebSocket
 
-- Run `swobu daemon` under your supervisor.
-- Use `swobu status` for machine health checks.
-- Use `swobu down` for controlled stop.
-
-### 4) "I do not want to learn a new SDK"
-
-- Do not adopt an SDK.
-- Keep client-native configuration (base URL + key style your client already supports).
-- Let Swobu normalize protocol/backend mismatch locally.
+Swobu is beta. Expect sharp edges.
 
 ---
 
-## Client Configuration Notes
+## Cockpit
 
-Swobu is designed for client configuration, not SDK lock-in.
+Swobu includes a local terminal cockpit for setup and operation.
 
-Typical shape:
+Use it to:
 
-```bash
-OPENAI_BASE_URL=http://127.0.0.1:7926/v1
-OPENAI_API_KEY=swobu
+- create, rename, and delete workspaces
+- choose backend/provider per workspace
+- configure routing and auth references
+- inspect readiness and health
+- inspect traffic outcomes
+- open help and feedback actions
+
+Cockpit is the primary local operator surface.
+
+---
+
+## Command surface
+
+```sh
+swobu                         # launch cockpit
+swobu daemon                  # run daemon in foreground
+swobu status                  # inspect daemon health
+swobu down                    # stop daemon
+swobu telemetry status        # inspect telemetry setting
+swobu telemetry on            # enable telemetry
+swobu telemetry off           # disable telemetry
+swobu version                 # print version
 ```
 
-Notes:
+Help:
 
-- exact variable names depend on your client
-- daemon URL default is `http://127.0.0.1:7926`
-- cockpit-generated routing decides which backend receives traffic
-
-If your client needs Anthropic-style endpoint shape, route it through the corresponding Swobu-supported surface.
+```sh
+swobu --help
+swobu daemon --help
+swobu status --help
+```
 
 ---
 
-## Telemetry Controls
+## Scripted / non-interactive use
 
-Check telemetry state:
+Run the daemon directly:
 
-```bash
-swobu telemetry status
+```sh
+swobu daemon
 ```
 
-Enable telemetry:
+Use an explicit config path:
 
-```bash
-swobu telemetry on
+```sh
+swobu daemon --config /path/to/swobu.yaml
 ```
 
-Disable telemetry:
+Check from scripts or CI:
 
-```bash
-swobu telemetry off
+```sh
+swobu status
 ```
 
-Swobu is local-first by default, but remote traffic still goes to whichever backend you configure.
+Health semantics:
+
+- exit `0`: healthy
+- exit `1`: running but uninitialized or degraded
+- exit `2`: daemon not reachable
+
+Shutdown:
+
+```sh
+swobu down
+```
 
 ---
 
-## Troubleshooting (Fast)
+## Run from source
 
-### `swobu status` returns `{"state":"down"}` / exit code `2`
+Latest `master`:
 
-- start daemon: `swobu` or `swobu daemon`
-- verify daemon URL/port (`swobu status --help`)
+```sh
+go run github.com/swobuforge/swobu/cmd/swobu@master --help
+```
 
-### daemon start fails with address already in use
+Install from source:
 
-- stop existing daemon: `swobu down`
-- rerun `swobu daemon`
+```sh
+go install github.com/swobuforge/swobu/cmd/swobu@master
+swobu --help
+```
 
-### cockpit opens but endpoint is uninitialized
-
-- finish workspace/provider configuration
-- save and re-check with `swobu status`
-
-### provider/auth errors during requests
-
-- verify provider credentials and base URL in cockpit routing config
-- verify selected workspace/provider mapping
+Use this when you want source behavior instead of the install-script channel.
 
 ---
 
-## What Swobu Is
+## What Swobu is
 
 Swobu is:
 
-- a local compatibility layer
+- a local AI compatibility layer
 - a protocol shim
 - a client/backend boundary
+- a local operator cockpit
 - a way to hot-swap LLM backends behind existing AI clients
 
-## What Swobu Is Not
+## What Swobu is not
 
 Swobu is not currently:
 
@@ -320,31 +242,38 @@ Swobu is not currently:
 - a new AI client
 - an observability platform
 - a prompt management system
+- a managed enterprise gateway
 
 ---
 
-## Security and Privacy
+## Security and privacy
+
+Swobu is local-first.
 
 By default, Swobu:
 
 - binds to loopback
 - keeps control on your machine
-- avoids sending prompts, completions, and auth material through default telemetry
+- does not send prompts, completions, or auth material through default telemetry
 
-Telemetry defaults to aggregate operational signals and can be turned off.
+Telemetry can be turned off:
 
-Do not confuse local-first with offline-only.
+```sh
+swobu telemetry off
+```
 
-If you configure a hosted backend, requests still go to that backend.
+Local-first is not offline-only.
+
+If you configure a hosted backend, AI requests still go to that backend.
 
 ---
 
-## Roadmap Direction
+## Roadmap direction
 
-Near-term focus is interoperability depth:
+Near-term focus:
 
-- more client profiles
-- more backend profiles
+- deeper client profiles
+- deeper backend profiles
 - better config generation
 - better compatibility diagnostics
 - clearer error translation
@@ -352,7 +281,9 @@ Near-term focus is interoperability depth:
 - safer local defaults
 - easier backend hot-swapping
 
-Goal: make it boring to connect supported AI clients to the backend you choose.
+Goal:
+
+**Make it boring to connect any supported AI client to the backend you choose.**
 
 ---
 
@@ -376,9 +307,16 @@ See [`SECURITY.md`](./SECURITY.md).
 
 ---
 
+## Commercial licensing
+
+For commercial licensing and additional permissions:
+
+- `contact@swobu.com`
+
+---
+
 ## License
 
-Swobu is released under AGPL-3.0-only. Commercial licensing and additional
-permissions are available by contacting contact@swobu.com.
+Swobu is released under AGPL-3.0-only.
 
 See [`LICENSE`](./LICENSE).
