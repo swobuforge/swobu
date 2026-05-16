@@ -7,8 +7,6 @@ import (
 )
 
 func TestStoreKeychainCredential_ValidatesInputs(t *testing.T) {
-	t.Parallel()
-
 	err := StoreKeychainCredential("", "openrouter/default", "token")
 	if err == nil || !strings.Contains(err.Error(), "provider spec is required") {
 		t.Fatalf("err = %v, want provider-spec validation", err)
@@ -26,8 +24,6 @@ func TestStoreKeychainCredential_ValidatesInputs(t *testing.T) {
 }
 
 func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
-	t.Parallel()
-
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
 
@@ -59,8 +55,6 @@ func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
 }
 
 func TestStoreKeychainCredential_FailsWhenKeyringUnavailable(t *testing.T) {
-	t.Parallel()
-
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
 

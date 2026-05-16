@@ -12,8 +12,8 @@ type RoutableTarget struct {
 	// surface, not a vendor umbrella and not a client-ingress selector.
 	// Client ingress is normalized to canonical operations before provider
 	// encoding.
-	ProtocolKind protocolkind.ProtocolKind
-	AuthKind     string
+	ProtocolKind  protocolkind.ProtocolKind
+	AuthKind      string
 	SelectedFrame string
 }
 

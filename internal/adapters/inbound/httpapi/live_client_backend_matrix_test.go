@@ -56,27 +56,27 @@ func TestLiveClientBackendHelloMatrix(t *testing.T) {
 		payload string
 	}{
 		{
-			id:   "codex",
-			ua:   "Codex/1.0",
-			path: "/chat/completions",
+			id:      "codex",
+			ua:      "Codex/1.0",
+			path:    "/chat/completions",
 			payload: `{"model":"swobu","messages":[{"role":"user","content":"hello world"}],"stream":true}`,
 		},
 		{
-			id:   "aider",
-			ua:   "Aider/0.82",
-			path: "/chat/completions",
+			id:      "aider",
+			ua:      "Aider/0.82",
+			path:    "/chat/completions",
 			payload: `{"model":"swobu","messages":[{"role":"user","content":"hello world"}],"stream":true}`,
 		},
 		{
-			id:   "opencode",
-			ua:   "OpenCode/0.1",
-			path: "/chat/completions",
+			id:      "opencode",
+			ua:      "OpenCode/0.1",
+			path:    "/chat/completions",
 			payload: `{"model":"swobu","messages":[{"role":"user","content":"hello world"}],"stream":true}`,
 		},
 		{
-			id:   "claude",
-			ua:   "Claude-Code/2.0",
-			path: "/messages",
+			id:      "claude",
+			ua:      "Claude-Code/2.0",
+			path:    "/messages",
 			payload: `{"model":"swobu","messages":[{"role":"user","content":"hello world"}],"stream":true}`,
 		},
 	}

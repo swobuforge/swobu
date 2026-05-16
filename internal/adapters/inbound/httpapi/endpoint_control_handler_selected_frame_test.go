@@ -65,4 +65,3 @@ func TestEncodeEndpointDocument_PreservesSelectedFrame(t *testing.T) {
 		t.Fatalf("selected frame=%q want=%q", got, providercatalog.FrameSSEEvent)
 	}
 }
-
