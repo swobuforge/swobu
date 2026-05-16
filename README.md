@@ -378,4 +378,7 @@ See [`SECURITY.md`](./SECURITY.md).
 
 ## License
 
+Swobu is released under AGPL-3.0-only. Commercial licensing and additional
+permissions are available by contacting contact@swobu.com.
+
 See [`LICENSE`](./LICENSE).

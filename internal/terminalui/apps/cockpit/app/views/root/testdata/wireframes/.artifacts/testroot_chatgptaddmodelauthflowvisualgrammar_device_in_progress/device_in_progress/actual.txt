@@ -8,17 +8,17 @@ SWOBU 🧌                                                                ready 
   routing ▾
      run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       openai:gpt-3.5-tu                                                                  edit ↵
+       model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
          auth              device code                                                    change ↵
+         delivery          streaming (SSE) (default)                                      next ↵
 
-  clients ▸
+> clients ▸
     not set
 
-> traffic ▸
+  traffic ▸
     no traffic yet
-
 
 
 

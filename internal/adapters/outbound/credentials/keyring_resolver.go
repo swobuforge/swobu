@@ -71,7 +71,11 @@ func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec str
 	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
 		return "", fmt.Errorf("keyring token for %q is empty", keyName)
 	}
-	return token, nil
+	bundle, _, err := DecodeTokenBundle(token)
+	if err != nil {
+		return "", fmt.Errorf("keyring token for %q is invalid: %w", keyName, err)
+	}
+	return bundle.AccessToken, nil
 }
 
 func KeyringScopeForProvider(providerSpec string) string {

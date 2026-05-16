@@ -26,7 +26,7 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	resp := ports.NewEnvelopeStreamingProviderResponse(envelope)
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, canonical.IngressFamilyResponses, resp, true); err != nil {
+	if err := writeSuccessResponse(rr, "req_test_1", canonical.IngressFamilyResponses, resp, true); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -57,7 +57,7 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 	resp := ports.NewEnvelopeStreamingProviderResponse(envelope)
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, canonical.IngressFamilyChatCompletions, resp, true); err != nil {
+	if err := writeSuccessResponse(rr, "req_test_2", canonical.IngressFamilyChatCompletions, resp, true); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {

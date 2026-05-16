@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -90,9 +91,10 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if err != nil {
 		return err
 	}
+	requestID := requestIDFromRequest(r)
 	out, err := h.requests.Handle(r.Context(), requestpath.HandleInput{
 		EndpointName: endpoint,
-		RequestID:    requestIDFromRequest(r),
+		RequestID:    requestID,
 		Request:      request,
 		Contract:     requestpath.NewExecutionContract(streaming),
 		Provenance:   ingressProvenance(r, canonical.IngressFamilyResponses, normalizedPath),
@@ -103,16 +105,16 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	defer func() {
 		_ = out.Response.Close()
 	}()
-	return writeResponsesWebsocketSuccess(conn, out.Response, streaming)
+	return writeResponsesWebsocketSuccess(conn, requestID, out.Response, streaming)
 }
 
-func writeResponsesWebsocketSuccess(conn *websocket.Conn, resp ports.ProviderResponse, streaming bool) error {
+func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp ports.ProviderResponse, streaming bool) error {
 	envelope := resp.EnvelopeStream()
 	if streaming {
 		if envelope == nil {
 			return canonical.InternalError("streaming provider response is missing a canonical envelope stream")
 		}
-		return writeResponsesWebsocketEnvelope(conn, envelope)
+		return writeResponsesWebsocketEnvelope(conn, requestID, envelope)
 	}
 	if !streaming {
 		if envelope == nil {
@@ -132,21 +134,31 @@ func writeResponsesWebsocketSuccess(conn *websocket.Conn, resp ports.ProviderRes
 		defer func() {
 			_ = envelope.Close(context.Background())
 		}()
-		return writeResponsesWebsocketEnvelope(conn, envelope)
+		return writeResponsesWebsocketEnvelope(conn, requestID, envelope)
 	}
 	return canonical.UnsupportedDelivery("response delivery variant is not implemented")
 }
 
-func writeResponsesWebsocketEnvelope(conn *websocket.Conn, envelope canonical.EventReader) error {
+func writeResponsesWebsocketEnvelope(conn *websocket.Conn, requestID string, envelope canonical.EventReader) error {
 	if envelope == nil {
 		return canonical.InternalError("streaming provider response is missing an output event stream")
 	}
-	if err := drainEncodedFrames(context.Background(), envelope, responses.NewWireEnvelopeStreamEncoder(), websocketFrameSink{conn: conn}); err != nil {
+	stats, err := drainEncodedFramesWithStats(context.Background(), envelope, responses.NewWireEnvelopeStreamEncoder(), websocketFrameSink{conn: conn})
+	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		return canonical.InternalError("stream decoding failed")
 	}
+	slog.Debug("protocol websocket stream emitted",
+		"component", "httpapi",
+		"event", "ws_stream_emit_complete",
+		"request_id", requestID,
+		"event_count", stats.EventCount,
+		"frame_count", stats.FrameCount,
+		"frame_bytes", stats.FrameBytes,
+		"frame_sha256", stats.FrameSHA256,
+	)
 	return nil
 }
 

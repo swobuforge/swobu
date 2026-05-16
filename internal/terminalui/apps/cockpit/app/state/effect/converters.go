@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
@@ -19,11 +17,7 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if err != nil {
 		return endpointintent.ProviderConfig{}, fmt.Errorf("provider spec: %w", err)
 	}
-	protocolKind := protocolkind.ProtocolKind(strings.TrimSpace(pc.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
-	if !providercatalog.SupportsExecutionProtocolForSpec(spec.String(), protocolKind) {
-		protocolKind = ""
-	}
-	config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef, protocolKind)
+	config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}

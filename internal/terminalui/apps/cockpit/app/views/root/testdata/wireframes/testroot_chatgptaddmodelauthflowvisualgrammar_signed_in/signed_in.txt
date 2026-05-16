@@ -8,11 +8,12 @@ SWOBU 🧌                                                       login complete 
   routing ▾
      run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       openai:gpt-3.5-tu                                                                  edit ↵
+       model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
          auth              signed in                                                      change ↵
-    >    sign in           sign in another account                                        open ↵
+    >    delivery          streaming (SSE) (default)                                      next ↵
+         sign in           sign in another account                                        open ↵
          model             not selected                                                   choose ↵
 
   clients ▸
@@ -20,7 +21,6 @@ SWOBU 🧌                                                       login complete 
 
   traffic ▸
     no traffic yet
-
 
 
 

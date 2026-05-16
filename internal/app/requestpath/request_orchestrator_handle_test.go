@@ -7,6 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -268,6 +269,101 @@ func TestHandle_PreCommitFallbackEnabled_AllRoutesFail_ReturnsLastError(t *testi
 	}
 }
 
+func TestHandle_SelectedFramePlansProviderCallMode_IndependentFromClientMode(t *testing.T) {
+	t.Run("batch client with stream provider frame", func(t *testing.T) {
+		endpoint := testResponsesEndpointWithFrame(t, providercatalog.FrameSSEEvent)
+		reader := endpointReaderStub{endpoint: endpoint}
+		providers := &scriptedProviderExecutor{
+			steps: []providerStep{
+				{resp: ports.NewBufferedProviderResponse(canonical.NewConversationOutput("resp_1", "m", []canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")}, "completed"))},
+			},
+		}
+		handler := NewRequestHandler(reader, providers, nil, nil)
+		_, err := handler.Handle(context.Background(), HandleInput{
+			EndpointName: endpoint.Name(),
+			RequestID:    "req_frame_stream",
+			Request: canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+				Model: "m",
+				Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			}),
+			Contract: NewExecutionContract(false),
+		})
+		if err != nil {
+			t.Fatalf("Handle returned error: %v", err)
+		}
+		if got := len(providers.calls); got != 1 {
+			t.Fatalf("provider calls = %d, want 1", got)
+		}
+		if got := providers.calls[0].Contract.ClientResponseMode; got != ports.ResponseModeBuffered {
+			t.Fatalf("client response mode = %v, want %v", got, ports.ResponseModeBuffered)
+		}
+		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeStreaming {
+			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeStreaming)
+		}
+	})
+
+	t.Run("stream client with batch provider frame", func(t *testing.T) {
+		endpoint := testResponsesEndpointWithFrame(t, providercatalog.FrameHTTPJSONBody)
+		reader := endpointReaderStub{endpoint: endpoint}
+		providers := &scriptedProviderExecutor{
+			steps: []providerStep{
+				{resp: ports.NewBufferedProviderResponse(canonical.NewConversationOutput("resp_1", "m", []canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")}, "completed"))},
+			},
+		}
+		handler := NewRequestHandler(reader, providers, nil, nil)
+		_, err := handler.Handle(context.Background(), HandleInput{
+			EndpointName: endpoint.Name(),
+			RequestID:    "req_frame_batch",
+			Request: canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+				Model: "m",
+				Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			}),
+			Contract: NewExecutionContract(true),
+		})
+		if err != nil {
+			t.Fatalf("Handle returned error: %v", err)
+		}
+		if got := len(providers.calls); got != 1 {
+			t.Fatalf("provider calls = %d, want 1", got)
+		}
+		if got := providers.calls[0].Contract.ClientResponseMode; got != ports.ResponseModeStreaming {
+			t.Fatalf("client response mode = %v, want %v", got, ports.ResponseModeStreaming)
+		}
+		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeBuffered {
+			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeBuffered)
+		}
+	})
+
+	t.Run("chatgpt forces streaming provider call even with batch frame", func(t *testing.T) {
+		endpoint := testChatGPTResponsesEndpointWithFrame(t, providercatalog.FrameHTTPJSONBody)
+		reader := endpointReaderStub{endpoint: endpoint}
+		providers := &scriptedProviderExecutor{
+			steps: []providerStep{
+				{resp: ports.NewBufferedProviderResponse(canonical.NewConversationOutput("resp_1", "m", []canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")}, "completed"))},
+			},
+		}
+		handler := NewRequestHandler(reader, providers, nil, nil)
+		_, err := handler.Handle(context.Background(), HandleInput{
+			EndpointName: endpoint.Name(),
+			RequestID:    "req_frame_chatgpt_force_stream",
+			Request: canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+				Model: "m",
+				Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			}),
+			Contract: NewExecutionContract(false),
+		})
+		if err != nil {
+			t.Fatalf("Handle returned error: %v", err)
+		}
+		if got := len(providers.calls); got != 1 {
+			t.Fatalf("provider calls = %d, want 1", got)
+		}
+		if got := providers.calls[0].Contract.ProviderCallMode; got != ports.ResponseModeStreaming {
+			t.Fatalf("provider call mode = %v, want %v", got, ports.ResponseModeStreaming)
+		}
+	})
+}
+
 type endpointReaderStub struct {
 	endpoint endpointintent.Endpoint
 }
@@ -342,6 +438,10 @@ func (p *toolModeAwareProvider) Execute(_ context.Context, req ports.ProviderReq
 }
 
 func testResponsesEndpoint(t *testing.T) endpointintent.Endpoint {
+	return testResponsesEndpointWithFrame(t, "")
+}
+
+func testResponsesEndpointWithFrame(t *testing.T, selectedFrame string) endpointintent.Endpoint {
 	t.Helper()
 
 	name, err := endpointintent.ParseEndpointName("alpha")
@@ -363,6 +463,12 @@ func testResponsesEndpoint(t *testing.T) endpointintent.Endpoint {
 	config, err = config.WithModelID("m")
 	if err != nil {
 		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	if selectedFrame != "" {
+		config, err = config.WithSelectedFrame(selectedFrame)
+		if err != nil {
+			t.Fatalf("WithSelectedFrame returned error: %v", err)
+		}
 	}
 	return mustEndpoint(t, name, []endpointintent.ProviderConfig{config}, ref)
 }
@@ -451,6 +557,38 @@ func testProviderChatStrictToolModelEndpoint(t *testing.T) endpointintent.Endpoi
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
 	config, err = config.WithModelID("nvidia/nemotron-3-super-120b-a12b")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	return mustEndpoint(t, name, []endpointintent.ProviderConfig{config}, ref)
+}
+
+func testChatGPTResponsesEndpointWithFrame(t *testing.T, selectedFrame string) endpointintent.Endpoint {
+	t.Helper()
+
+	name, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	ref, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("chatgpt")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	config, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if selectedFrame != "" {
+		config, err = config.WithSelectedFrame(selectedFrame)
+		if err != nil {
+			t.Fatalf("WithSelectedFrame returned error: %v", err)
+		}
+	}
+	config, err = config.WithModelID("m")
 	if err != nil {
 		t.Fatalf("WithModelID returned error: %v", err)
 	}

@@ -245,8 +245,11 @@ func TestReduce_ProviderAuthSessionFailedAnchorsAuthErrorOnly(t *testing.T) {
 	if got := auth.SessionError; got != "login timed out; retry" {
 		t.Fatalf("auth login session error = %q, want timeout message", got)
 	}
-	if got := auth.SessionID; got != "" {
-		t.Fatalf("auth login session id = %q, want cleared", got)
+	if got := auth.SessionID; got != "sess-1" {
+		t.Fatalf("auth login session id = %q, want preserved", got)
+	}
+	if got := auth.URL; got != "https://auth.openai.com" {
+		t.Fatalf("auth login url = %q, want preserved", got)
 	}
 	if got := model.InteractionMode; got != InteractionModeManageList {
 		t.Fatalf("interaction mode = %q, want %q", got, InteractionModeManageList)

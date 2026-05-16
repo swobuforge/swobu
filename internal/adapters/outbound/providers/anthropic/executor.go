@@ -59,7 +59,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
 
-	wireReq, err := e.encodeRequest(req.Request, req.Contract.Streaming)
+	wireReq, err := e.encodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -94,7 +94,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		}()
 		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), req.Target.ProtocolKind, req.Contract.Streaming)
+	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), req.Target.ProtocolKind, req.Contract.ProviderCallMode.Streaming())
 	if err != nil {
 		_ = resp.Body.Close()
 		return ports.ProviderResponse{}, err

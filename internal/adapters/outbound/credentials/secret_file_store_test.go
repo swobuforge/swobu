@@ -10,7 +10,11 @@ import (
 func TestSecretFileStore_RoundTrip(t *testing.T) {
 	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 	store := secretFileStore{}
-	if err := store.Store("chatgpt/default", "token-123"); err != nil {
+	raw, err := EncodeTokenBundle(TokenBundle{AccessToken: "token-123"})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	if err := store.Store("chatgpt/default", raw); err != nil {
 		t.Fatalf("Store returned error: %v", err)
 	}
 	token, err := store.Resolve("chatgpt/default")
@@ -25,7 +29,11 @@ func TestSecretFileStore_RoundTrip(t *testing.T) {
 func TestSecretFileStore_IsProviderAgnostic(t *testing.T) {
 	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 	store := secretFileStore{}
-	if err := store.Store("openai/default", "token-123"); err != nil {
+	raw, err := EncodeTokenBundle(TokenBundle{AccessToken: "token-123"})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	if err := store.Store("openai/default", raw); err != nil {
 		t.Fatalf("Store returned error: %v", err)
 	}
 	token, err := store.Resolve("openai/default")

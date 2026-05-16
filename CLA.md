@@ -8,7 +8,10 @@ This Contributor License Agreement applies to any contribution you submit to Swo
 
 "You" means the individual or legal entity submitting the Contribution.
 
-"Swobu" means the open-source project currently operated by Dmytrii Shchadei, and any successor, assignee, or legal entity to which Dmytrii Shchadei transfers ownership of Swobu, the Swobu repository, or related intellectual property.
+"Swobu" means the Swobu project, the owner or operator of the official Swobu
+repository, and any successor, assignee, affiliate, or legal entity to which
+ownership, stewardship, or licensing rights in Swobu, the Swobu repository, or
+related intellectual property are transferred.
 
 ## 1. Ownership
 

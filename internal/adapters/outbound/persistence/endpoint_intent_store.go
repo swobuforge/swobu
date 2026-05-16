@@ -11,7 +11,6 @@ import (
 	"sort"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 const endpointIntentSchemaVersion = 1
@@ -144,7 +143,6 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 			spec,
 			encoded.BaseURL,
 			encoded.CredentialRef,
-			protocolkind.ProtocolKind(encoded.ProtocolKind),
 		)
 		if err != nil {
 			return endpointintent.Endpoint{}, err

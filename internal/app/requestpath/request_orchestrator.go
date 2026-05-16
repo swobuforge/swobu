@@ -7,7 +7,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -149,13 +148,11 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 			BackendModelID: candidate.EffectiveModel,
 		}
 		attemptContract := in.Contract
-		if candidate.Target.SelectedFrame != "" {
-			streaming, ok := providercatalog.StreamingForFrame(candidate.Target.SelectedFrame)
-			if !ok {
-				return HandleOutput{}, canonical.BadEndpoint("selected provider frame is unsupported")
-			}
-			attemptContract.Streaming = streaming
+		providerCallMode, err := planProviderCallMode(in.Contract.ClientResponseMode, candidate.Target)
+		if err != nil {
+			return HandleOutput{}, err
 		}
+		attemptContract = attemptContract.WithProviderCallMode(providerCallMode)
 		outcome = o.executeAttempt(ctx, ExecutionAttempt{
 			Intent:               intent,
 			Route:                candidate,
@@ -178,6 +175,14 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	metadata.ModelRequested = intent.RequestedModel
 	metadata.ModelResolved = finalRoute.EffectiveModel
 	metadata.ModelResolutionMode = finalRoute.ResolutionMode
+	finalProviderCallMode, err := planProviderCallMode(in.Contract.ClientResponseMode, finalRoute.Target)
+	if err != nil {
+		return HandleOutput{}, err
+	}
+	finalContract := in.Contract.WithProviderCallMode(finalProviderCallMode)
+	metadata.ClientResponseMode = finalContract.ClientResponseMode.String()
+	metadata.ProviderCallMode = finalContract.ProviderCallMode.String()
+	metadata.ConversionKind = finalContract.ConversionKind.String()
 	resp := outcome.Response.WithMetadata(metadata)
 
 	return HandleOutput{

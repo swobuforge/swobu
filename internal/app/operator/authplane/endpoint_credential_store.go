@@ -142,7 +142,6 @@ func cloneProviderConfigWithCredentialRef(cfg endpointintent.ProviderConfig, pro
 		cfg.ProviderSpec(),
 		cfg.BaseURL(),
 		strings.TrimSpace(credentialRef), // trimlowerlint:allow boundary canonicalization
-		cfg.ProtocolKind(),
 	)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err

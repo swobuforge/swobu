@@ -2,6 +2,8 @@ package effect
 
 import (
 	"context"
+	"strings"
+	"unicode"
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
@@ -21,8 +23,18 @@ type CopyAuthSessionURLEffect struct {
 }
 
 func (cmd CopyAuthSessionURLEffect) Execute(ctx context.Context) []update.Action {
-	msg := copyValueNote(cmd.Value)
+	msg := copyValueNote(normalizeAuthSessionCopyValue(cmd.Value))
 	return []update.Action{AuthSessionCopyNoted{OwnerKey: cmd.OwnerKey, Message: msg}}
+}
+
+func normalizeAuthSessionCopyValue(value string) string {
+	trimmed := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, trimmed)
 }
 
 // CopyClientBaseURLEffect copies a client base URL to the clipboard.

@@ -18,7 +18,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 //go:embed runtime.cue
@@ -272,7 +271,6 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 			spec,
 			encoded.BaseURL,
 			encoded.CredentialRef,
-			protocolkind.ProtocolKind(strings.TrimSpace(encoded.ProtocolKind)), // trimlowerlint:allow boundary canonicalization
 		)
 		if err != nil {
 			return endpointintent.Endpoint{}, err

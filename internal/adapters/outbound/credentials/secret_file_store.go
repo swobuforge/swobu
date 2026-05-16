@@ -43,6 +43,18 @@ func (s *secretFileStore) Store(keyName string, secret string) error {
 }
 
 func (s *secretFileStore) Resolve(keyName string) (string, error) {
+	raw, err := s.ResolveRaw(keyName)
+	if err != nil {
+		return "", err
+	}
+	bundle, _, err := DecodeTokenBundle(raw)
+	if err != nil {
+		return "", err
+	}
+	return bundle.AccessToken, nil
+}
+
+func (s *secretFileStore) ResolveRaw(keyName string) (string, error) {
 	name := strings.TrimSpace(keyName) // trimlowerlint:allow boundary canonicalization
 	if name == "" {
 		return "", fmt.Errorf("credential file key name is required")

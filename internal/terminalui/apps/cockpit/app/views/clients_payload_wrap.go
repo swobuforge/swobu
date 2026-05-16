@@ -14,7 +14,7 @@ const (
 
 func payloadTextRow(text string) retained.ViewSpec[state.Model] {
 	return IndentLeft[state.Model](retained.FromRenderNode[state.Model](toolkitviews.NewAction(toolkitviews.RuneLen(text), false, false, func(_ bool, width int) string {
-		return toolkitviews.PadRight(toolkitviews.TrimToWidth(text, width), width)
+		return toolkitviews.PadRight(toolkitviews.TrimToWidthRaw(text, width), width)
 	}, nil, nil)), InsetSection+InsetDetail)
 }
 

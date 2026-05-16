@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+func mustBundle(t *testing.T, token string) string {
+	t.Helper()
+	raw, err := EncodeTokenBundle(TokenBundle{AccessToken: token, IssuedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	return raw
+}
+
 type fakeKeyringClient struct {
 	values map[string]string
 	err    error
@@ -28,7 +37,7 @@ func (f fakeKeyringClient) Get(scope, user string) (string, error) {
 func TestKeyringResolver_ResolveCredential_ExplicitKeyName(t *testing.T) {
 	client := fakeKeyringClient{
 		values: map[string]string{
-			KeyringScopeForProvider("openrouter") + "|openrouter/default": "token-1",
+			KeyringScopeForProvider("openrouter") + "|openrouter/default": mustBundle(t, "token-1"),
 		},
 	}
 	resolver := NewKeyringResolver(client)
@@ -44,7 +53,7 @@ func TestKeyringResolver_ResolveCredential_ExplicitKeyName(t *testing.T) {
 func TestKeyringResolver_ResolveCredential_BareKeychainUsesDefaultName(t *testing.T) {
 	client := fakeKeyringClient{
 		values: map[string]string{
-			KeyringScopeForProvider("openai") + "|openai/default": "token-2",
+			KeyringScopeForProvider("openai") + "|openai/default": mustBundle(t, "token-2"),
 		},
 	}
 	resolver := NewKeyringResolver(client)

@@ -14,16 +14,69 @@ type ProviderRequest struct {
 	Target   RoutableTarget
 }
 
-// ExecutionContract carries runtime delivery semantics for one execution attempt.
-// It is intentionally separate from canonical request semantics.
+type ResponseMode uint8
+
+const (
+	ResponseModeBuffered ResponseMode = iota
+	ResponseModeStreaming
+)
+
+func (m ResponseMode) String() string {
+	if m == ResponseModeStreaming {
+		return "streaming"
+	}
+	return "buffered"
+}
+
+func ResponseModeFromStreaming(streaming bool) ResponseMode {
+	if streaming {
+		return ResponseModeStreaming
+	}
+	return ResponseModeBuffered
+}
+
+func (m ResponseMode) Streaming() bool {
+	return m == ResponseModeStreaming
+}
+
+type ConversionKind uint8
+
+const (
+	ConversionPassthrough ConversionKind = iota
+	ConversionCollectStreamToBatch
+	ConversionSynthesizeBatchToStream
+)
+
+func (k ConversionKind) String() string {
+	switch k {
+	case ConversionCollectStreamToBatch:
+		return "collect_stream_to_batch"
+	case ConversionSynthesizeBatchToStream:
+		return "synthesize_batch_to_stream"
+	default:
+		return "passthrough"
+	}
+}
+
+// ExecutionContract carries runtime delivery semantics for one execution
+// attempt. Canonical request semantics remain delivery-agnostic.
 type ExecutionContract struct {
-	Streaming              bool
+	ClientResponseMode     ResponseMode
+	ProviderCallMode       ResponseMode
+	ConversionKind         ConversionKind
 	AllowPreCommitFallback bool
 }
 
 func NewExecutionContract(streaming bool) ExecutionContract {
+	mode := ResponseModeFromStreaming(streaming)
+	return NewExecutionContractForModes(mode, mode)
+}
+
+func NewExecutionContractForModes(clientResponseMode ResponseMode, providerCallMode ResponseMode) ExecutionContract {
 	return ExecutionContract{
-		Streaming:              streaming,
+		ClientResponseMode:     clientResponseMode,
+		ProviderCallMode:       providerCallMode,
+		ConversionKind:         deriveConversionKind(clientResponseMode, providerCallMode),
 		AllowPreCommitFallback: false,
 	}
 }
@@ -31,6 +84,22 @@ func NewExecutionContract(streaming bool) ExecutionContract {
 func (c ExecutionContract) WithPreCommitFallbackEnabled() ExecutionContract {
 	c.AllowPreCommitFallback = true
 	return c
+}
+
+func (c ExecutionContract) WithProviderCallMode(mode ResponseMode) ExecutionContract {
+	c.ProviderCallMode = mode
+	c.ConversionKind = deriveConversionKind(c.ClientResponseMode, c.ProviderCallMode)
+	return c
+}
+
+func deriveConversionKind(clientResponseMode ResponseMode, providerCallMode ResponseMode) ConversionKind {
+	if clientResponseMode == ResponseModeBuffered && providerCallMode == ResponseModeStreaming {
+		return ConversionCollectStreamToBatch
+	}
+	if clientResponseMode == ResponseModeStreaming && providerCallMode == ResponseModeBuffered {
+		return ConversionSynthesizeBatchToStream
+	}
+	return ConversionPassthrough
 }
 
 func NewProviderRequest(request canonical.CanonicalRequest, contract ExecutionContract, target RoutableTarget) ProviderRequest {
@@ -53,6 +122,9 @@ type ProviderResponseMetadata struct {
 	ModelRequested            string
 	ModelResolved             string
 	ModelResolutionMode       string
+	ClientResponseMode        string
+	ProviderCallMode          string
+	ConversionKind            string
 }
 
 // NewBufferedProviderResponse returns a fully materialized canonical output from provider adaptation.

@@ -40,8 +40,12 @@ func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
 		if user != "openrouter/default" {
 			t.Fatalf("user = %q", user)
 		}
-		if pass != "token-123" {
-			t.Fatalf("pass = %q", pass)
+		bundle, _, err := DecodeTokenBundle(pass)
+		if err != nil {
+			t.Fatalf("decode stored bundle: %v", err)
+		}
+		if bundle.AccessToken != "token-123" {
+			t.Fatalf("access_token=%q", bundle.AccessToken)
 		}
 		return nil
 	}

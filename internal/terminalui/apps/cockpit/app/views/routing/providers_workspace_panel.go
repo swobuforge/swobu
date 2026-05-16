@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -265,10 +266,12 @@ func buildWorkspaceAddModelDetailRows(
 		draft.Ref = nextProviderDraftKey(snapshot)
 	}
 	providerSpec := strings.TrimSpace(draft.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-	rows := []retained.ViewSpec[state.Model]{
-		retained.Named[state.Model]("add-model/provider", buildAddModelProviderRow(ctx, model, strings.TrimSpace(snapshot.Name), draft, panel)), // trimlowerlint:allow boundary canonicalization
-		retained.Named[state.Model]("add-model/credentials", buildAddModelCredentialRow(model, strings.TrimSpace(snapshot.Name), draft, panel)), // trimlowerlint:allow boundary canonicalization
-	}
+	rows := make([]retained.ViewSpec[state.Model], 0, 12)
+	rows = appendCanonicalProviderConfigRows(rows, "add-model", canonicalProviderConfigRows{
+		Provider: buildAddModelProviderRow(ctx, model, strings.TrimSpace(snapshot.Name), draft, panel),         // trimlowerlint:allow boundary canonicalization
+		Auth:     buildAddModelCredentialRow(model, strings.TrimSpace(snapshot.Name), draft, panel),            // trimlowerlint:allow boundary canonicalization
+		Frame:    buildAddModelFrameRow(draft, panel),
+	})
 	effectiveCredentialRef := effectiveAddModelCredentialRef(model, draft)
 	authVariant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(strings.TrimSpace(draft.CredentialRef))))) // trimlowerlint:allow boundary canonicalization
 	authViewState := interactiveAuthPhaseNone
@@ -307,6 +310,43 @@ func buildWorkspaceAddModelDetailRows(
 		rows = append(rows, createRow)
 	}
 	return rows
+}
+
+func buildAddModelFrameRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
+		_ = ctx
+		frames := providercatalog.SupportedFramesForSpecProtocol(
+			draft.ProviderSpec,
+			protocolkind.ProtocolKind(defaultProtocolKindForProvider(draft.ProviderSpec)),
+		)
+		selected := strings.TrimSpace(draft.SelectedFrame) // trimlowerlint:allow boundary canonicalization
+		if selected == "" && len(frames) > 0 {
+			selected = frames[0]
+		}
+		if selected == "" {
+			selected = "not set"
+		}
+		return views.RowActionWithCancel(
+			providerDeliveryRowLabel,
+			presentDeliveryFrameForProvider(
+				draft.ProviderSpec,
+				protocolkind.ProtocolKind(defaultProtocolKindForProvider(draft.ProviderSpec)),
+				selected,
+			),
+			"next",
+			func() []update.Action {
+			next := nextFrameSelection(frames, strings.TrimSpace(draft.SelectedFrame)) // trimlowerlint:allow boundary canonicalization
+			if next == "" {
+				return nil
+			}
+			updated := draft
+			updated.SelectedFrame = next
+			panel.setDraft(updated)
+			return nil
+			},
+			nil,
+		)
+	})
 }
 
 func appendWorkspaceAddModelCredentialRows(

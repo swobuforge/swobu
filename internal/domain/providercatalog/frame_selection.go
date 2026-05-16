@@ -37,6 +37,17 @@ func DefaultFrameForSpecProtocol(spec string, protocolKind protocolkind.Protocol
 	if len(supported) == 0 {
 		return "", false
 	}
+	// Prefer the highest-capability default frame for new provider configs.
+	// Today that is server-sent events when available, with batch JSON as
+	// deterministic fallback.
+	preferred := []string{FrameSSEEvent, FrameHTTPJSONBody}
+	for _, want := range preferred {
+		for _, got := range supported {
+			if got == want {
+				return got, true
+			}
+		}
+	}
 	return supported[0], true
 }
 

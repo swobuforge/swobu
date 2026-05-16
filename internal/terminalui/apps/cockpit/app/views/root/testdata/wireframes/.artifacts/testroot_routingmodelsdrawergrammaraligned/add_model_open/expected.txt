@@ -8,18 +8,18 @@ SWOBU 🧌                                                                ready 
   routing ▾
      run on             openai:gpt-5.3:2310255c                                           choose ↵
      models             2 configured                                                      manage ↵
-       gpt-5.3:2310                                                                       edit ↵
-       opus:979c                                                                          edit ↵
+                openai:gpt-5.3:2310255c                                                   edit ↵
+                anthropic:opus:979cec50                                                   edit ↵
   >    add model                                                                          close ↵
          provider          Provider                                                       change ↵
          auth              missing                                                        change ↵
+         delivery          request-response (HTTP JSON)                                   next ↵
 
   clients ▸
     not set
 
   traffic ▸
     no traffic yet
-
 
 
 

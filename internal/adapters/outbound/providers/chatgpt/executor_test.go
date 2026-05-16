@@ -2,6 +2,7 @@ package chatgpt
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -9,7 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
@@ -283,6 +286,89 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "credential reference could not be resolved") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+
+	origRefreshURL := chatGPTRefreshTokenURL
+	t.Cleanup(func() { chatGPTRefreshTokenURL = origRefreshURL })
+
+	refreshSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"token_fresh","refresh_token":"refresh_next","expires_in":3600}`))
+	}))
+	defer refreshSrv.Close()
+	chatGPTRefreshTokenURL = refreshSrv.URL
+
+	bundle, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
+		AccessToken:  "token_old",
+		RefreshToken: "refresh_1",
+		ExpiresAt:    time.Now().UTC().Add(-1 * time.Minute),
+		IssuedAt:     time.Now().UTC().Add(-2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	ref, err := outboundcredentials.StoreMaterializedCredential("chatgpt", "chatgpt/plus/sess_abc", bundle, outboundcredentials.CredentialWritePolicyFile)
+	if err != nil {
+		t.Fatalf("store credential: %v", err)
+	}
+
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if attempts == 1 {
+			if auth != "Bearer token_old" {
+				t.Fatalf("first auth=%q", auth)
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"expired"}`))
+			return
+		}
+		if auth != "Bearer token_fresh" {
+			t.Fatalf("second auth=%q", auth)
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer srv.Close()
+
+	exec := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
+	req := ports.NewProviderRequest(
+		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+			Model: "gpt-5.4-mini",
+			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+		}),
+		ports.NewExecutionContract(true),
+		ports.NewRoutableTarget(
+			"draft",
+			string(providercatalog.ProviderSpecChatGPT),
+			srv.URL+"/backend-api/codex",
+			ref,
+			protocolkind.Responses,
+			"backend_chatgpt",
+		),
+	)
+	resp, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	_ = resp.Close()
+	if attempts != 2 {
+		t.Fatalf("attempts=%d want 2", attempts)
+	}
+
+	raw, err := outboundcredentials.ResolveStoredSecretByRef("chatgpt", ref)
+	if err != nil {
+		t.Fatalf("resolve stored secret: %v", err)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
+		t.Fatalf("decode persisted secret: %v", err)
+	}
+	if strings.TrimSpace(persisted["access_token"].(string)) != "token_fresh" {
+		t.Fatalf("persisted access token=%v", persisted["access_token"])
 	}
 }
 

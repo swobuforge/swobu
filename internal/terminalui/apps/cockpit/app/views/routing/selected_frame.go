@@ -26,7 +26,7 @@ func providerFrameChoiceRow(spec providerFrameChoiceRowSpec) retained.ViewSpec[s
 
 func buildProviderFrameChoiceRow(spec providerFrameChoiceRowSpec) retained.ViewSpec[state.Model] {
 	if spec.ProviderConfig == nil {
-		return views.RowStatic("frame", "not set")
+		return views.RowStatic(providerDeliveryRowLabel, "not set")
 	}
 	frames := providercatalog.SupportedFramesForSpecProtocol(
 		spec.ProviderConfig.ProviderSpec,
@@ -39,7 +39,8 @@ func buildProviderFrameChoiceRow(spec providerFrameChoiceRowSpec) retained.ViewS
 	if selected == "" {
 		selected = "not set"
 	}
-	return views.RowActionWithCancel("frame", selected, "next", func() []update.Action {
+	protocol := protocolkind.ProtocolKind(strings.TrimSpace(spec.ProviderConfig.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
+	return views.RowActionWithCancel(providerDeliveryRowLabel, presentDeliveryFrameForProvider(spec.ProviderConfig.ProviderSpec, protocol, selected), "next", func() []update.Action {
 		next := nextFrameSelection(frames, strings.TrimSpace(spec.ProviderConfig.SelectedFrame)) // trimlowerlint:allow boundary canonicalization
 		if next == "" {
 			return nil

@@ -1,6 +1,6 @@
 line 11
--        gpt-5.3:2310                                                                       edit ↵
-+        openai:gpt-5.3:23                                                                  edit ↵
+-                 openai:gpt-5.3:2310255c                                                   edit ↵
++        model    openai:gpt-5.3:2310255c                                                   edit ↵
 line 12
--        opus:979c                                                                          edit ↵
-+        anthropic:opus:97                                                                  edit ↵
+-                 anthropic:opus:979cec50                                                   edit ↵
++        model    anthropic:opus:979cec50                                                   edit ↵

@@ -1,4 +1,4 @@
-SWOBU! 🧌                                      ready   [ ? ] [ + new workspace ]
+SWOBU 🧌                                       ready   [ ? ] [ + new workspace ]
 ────────────────────────────────────────────────────────────────────────────────
 > workspace ▾
      name              acme                                           edit ↵
@@ -7,7 +7,8 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   routing ▾
      run on            Ollama                                         choose ↵
-     credentials       env                                            choose ↵
+     auth              env var missing                                choose ↵
+     frame             http_json_body                                 next ↵
      env key           OLLAMA_API_KEY                                 edit ↵
      model             not set                                        choose ↵
 
@@ -16,7 +17,6 @@ SWOBU! 🧌                                      ready   [ ? ] [ + new workspace
 
   traffic ▸
     empty
-
 
 
 
