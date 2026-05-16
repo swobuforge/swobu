@@ -49,9 +49,9 @@ type EventMeta struct {
 	// directly decoded from a native stream.
 	Synthetic bool
 	// Buffered marks events that crossed a projection/materialization boundary.
-	Buffered  bool
+	Buffered bool
 	// Degraded marks behavior downgrades (for example stream-shaped batch).
-	Degraded  bool
+	Degraded bool
 
 	// Native identifiers are references only; canonical envelope IDs stay
 	// primary and stable throughout the exchange.

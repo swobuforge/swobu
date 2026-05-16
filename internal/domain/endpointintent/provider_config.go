@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 type ProviderConfigRef struct {

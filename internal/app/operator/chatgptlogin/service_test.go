@@ -583,20 +583,14 @@ func TestServiceStartBrowser_WhenCallbackPortsBusy_ReturnsDeviceHint(t *testing.
 
 func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T) {
 	now := time.Now().UTC()
+	callbackAddr := reserveCallbackAddr(t)
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		_, _ = w.Write([]byte(`{"access_token":"at_test"}`))
 	}))
 	defer tokenSrv.Close()
-
-	availabilityProbe, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		t.Skipf("callback port already occupied externally: %v", err)
-	} else {
-		_ = availabilityProbe.Close()
-	}
 	svc := NewService(http.DefaultClient, ServiceConfig{
 		TokenURL:           tokenSrv.URL,
-		CallbackListenAddr: "127.0.0.1:1455",
+		CallbackListenAddr: callbackAddr,
 		CallbackIdleTTL:    20 * time.Millisecond,
 		Now:                func() time.Time { return now },
 		CredentialOut:      &captureWriter{},
@@ -617,42 +611,63 @@ func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T
 		t.Fatalf("session poll: %v", err)
 	}
 	time.Sleep(80 * time.Millisecond)
-	ln, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		t.Fatalf("expected callback port released, listen failed: %v", err)
-	}
-	_ = ln.Close()
+	waitForCallbackPortRelease(t, callbackAddr, time.Second)
 }
 
 func TestServiceCallbackServer_ShutsDownAfterAbandonedBrowserSessionExpiry(t *testing.T) {
 	now := time.Now().UTC()
-
-	availabilityProbe, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		t.Skipf("callback port already occupied externally: %v", err)
-	} else {
-		_ = availabilityProbe.Close()
-	}
+	callbackAddr := reserveCallbackAddr(t)
 
 	svc := NewService(http.DefaultClient, ServiceConfig{
-		CallbackListenAddr: "127.0.0.1:1455",
+		CallbackListenAddr: callbackAddr,
 		CallbackIdleTTL:    15 * time.Millisecond,
 		SessionEvictEvery:  10 * time.Millisecond,
 		Now:                func() time.Time { return now },
 	})
 
 	// Start browser login but never complete callback/poll (abandoned flow).
-	if _, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"}); err != nil {
+	started, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
 		t.Fatalf("start browser auth: %v", err)
 	}
 
 	// Advance logical time past ttl so eviction loop reclaims stale session.
 	now = now.Add(authSessionTTL + 2*time.Second)
 	time.Sleep(80 * time.Millisecond)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		t.Fatalf("expected callback port released after abandoned session expiry, listen failed: %v", err)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		_, err := svc.Session(context.Background(), started.SessionID)
+		if err != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	t.Fatalf("expected session %s to be evicted after expiry", started.SessionID)
+}
+
+func waitForCallbackPortRelease(t *testing.T, addr string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			_ = ln.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expected callback port %s released, listen failed: %v", addr, lastErr)
+}
+
+func reserveCallbackAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve callback addr: %v", err)
+	}
+	addr := ln.Addr().String()
 	_ = ln.Close()
+	return addr
 }

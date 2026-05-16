@@ -45,7 +45,7 @@ func NewEndpoint(
 		}
 		seen[ref] = struct{}{}
 		providerModelLiteral := strings.TrimSpace(providerConfig.ProviderSpec().String()) + ":" + strings.TrimSpace(providerConfig.ModelID()) // trimlowerlint:allow domain canonicalization
-		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))                                                        // trimlowerlint:allow domain canonicalization
+		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))                                                       // trimlowerlint:allow domain canonicalization
 		if providerModelLiteral != ":" {
 			seenProviderModelLiteral[providerModelLiteral] = struct{}{}
 		}

@@ -157,10 +157,10 @@ func createProviderPropertyRows(
 		}),
 	})
 	rows = append(rows, retained.Named[state.Model]("alias", providerTargetAliasRow(providerTargetAliasRowSpec{
-			ProviderConfig: providerConfig,
-			EndpointName:   endpointName,
-			CreateMode:     createMode,
-		})))
+		ProviderConfig: providerConfig,
+		EndpointName:   endpointName,
+		CreateMode:     createMode,
+	})))
 	if providerConfig != nil {
 		if providerCredentialSelectionRequired(providerConfig.ProviderSpec, providerConfig.BaseURL, providerConfig.CredentialRef) {
 			rows = append(rows, retained.Named[state.Model]("credential", providerCredentialChoiceRow(providerCredentialChoiceRowSpec{

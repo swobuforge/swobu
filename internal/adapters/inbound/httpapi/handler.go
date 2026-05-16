@@ -256,7 +256,7 @@ func logIngressRequestShape(
 		"ingress_family", string(provenance.IngressFamily),
 		"normalized_op", string(provenance.NormalizedOp),
 		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // trimlowerlint:allow boundary canonicalization
-		"client_handler", strings.TrimSpace(provenance.ClientHandler),   // trimlowerlint:allow boundary canonicalization
+		"client_handler", strings.TrimSpace(provenance.ClientHandler), // trimlowerlint:allow boundary canonicalization
 		"streaming", streaming,
 		"item_count", threadCount,
 		"last_input_role", lastRole,
@@ -330,7 +330,7 @@ func logRequestOutcome(
 		"ingress_family", string(provenance.IngressFamily),
 		"normalized_op", string(provenance.NormalizedOp),
 		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // trimlowerlint:allow boundary canonicalization
-		"client_handler", strings.TrimSpace(provenance.ClientHandler),   // trimlowerlint:allow boundary canonicalization
+		"client_handler", strings.TrimSpace(provenance.ClientHandler), // trimlowerlint:allow boundary canonicalization
 		"result", result,
 		"status_code", statusCode,
 		"error_origin", errorOrigin,
@@ -339,8 +339,8 @@ func logRequestOutcome(
 		"model_resolved", strings.TrimSpace(modelResolved), // trimlowerlint:allow boundary canonicalization
 		"model_resolution_mode", strings.TrimSpace(modelResolutionMode), // trimlowerlint:allow boundary canonicalization
 		"client_response_mode", strings.TrimSpace(clientResponseMode), // trimlowerlint:allow boundary canonicalization
-		"provider_call_mode", strings.TrimSpace(providerCallMode),     // trimlowerlint:allow boundary canonicalization
-		"conversion_kind", strings.TrimSpace(conversionKind),          // trimlowerlint:allow boundary canonicalization
+		"provider_call_mode", strings.TrimSpace(providerCallMode), // trimlowerlint:allow boundary canonicalization
+		"conversion_kind", strings.TrimSpace(conversionKind), // trimlowerlint:allow boundary canonicalization
 	)
 }
 

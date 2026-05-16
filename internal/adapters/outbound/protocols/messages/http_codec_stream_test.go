@@ -154,4 +154,3 @@ func countType(types []string, want string) int {
 	}
 	return count
 }
-

@@ -8,9 +8,9 @@ import (
 
 	modelcatalogopenaicompat "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalogprotocols/openaicompat"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
+	messages "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/messages"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	messages "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/messages"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"

@@ -24,4 +24,3 @@ func planProviderCallMode(clientMode ports.ResponseMode, target ports.RoutableTa
 	}
 	return providerMode, nil
 }
-

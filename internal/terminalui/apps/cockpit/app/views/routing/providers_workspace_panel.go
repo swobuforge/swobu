@@ -268,8 +268,8 @@ func buildWorkspaceAddModelDetailRows(
 	providerSpec := strings.TrimSpace(draft.ProviderSpec) // trimlowerlint:allow boundary canonicalization
 	rows := make([]retained.ViewSpec[state.Model], 0, 12)
 	rows = appendCanonicalProviderConfigRows(rows, "add-model", canonicalProviderConfigRows{
-		Provider: buildAddModelProviderRow(ctx, model, strings.TrimSpace(snapshot.Name), draft, panel),         // trimlowerlint:allow boundary canonicalization
-		Auth:     buildAddModelCredentialRow(model, strings.TrimSpace(snapshot.Name), draft, panel),            // trimlowerlint:allow boundary canonicalization
+		Provider: buildAddModelProviderRow(ctx, model, strings.TrimSpace(snapshot.Name), draft, panel), // trimlowerlint:allow boundary canonicalization
+		Auth:     buildAddModelCredentialRow(model, strings.TrimSpace(snapshot.Name), draft, panel),    // trimlowerlint:allow boundary canonicalization
 		Frame:    buildAddModelFrameRow(draft, panel),
 	})
 	effectiveCredentialRef := effectiveAddModelCredentialRef(model, draft)
@@ -335,14 +335,14 @@ func buildAddModelFrameRow(draft state.ProviderConfigSnapshot, panel addModelPan
 			),
 			"next",
 			func() []update.Action {
-			next := nextFrameSelection(frames, strings.TrimSpace(draft.SelectedFrame)) // trimlowerlint:allow boundary canonicalization
-			if next == "" {
+				next := nextFrameSelection(frames, strings.TrimSpace(draft.SelectedFrame)) // trimlowerlint:allow boundary canonicalization
+				if next == "" {
+					return nil
+				}
+				updated := draft
+				updated.SelectedFrame = next
+				panel.setDraft(updated)
 				return nil
-			}
-			updated := draft
-			updated.SelectedFrame = next
-			panel.setDraft(updated)
-			return nil
 			},
 			nil,
 		)
