@@ -131,9 +131,9 @@ func newErrorEvidenceEvent(
 		input.Result = runtimeevidence.ResultClassBackendError
 		input.StatusCode = backendErr.StatusCode
 	} else {
-		var compatibilityErr canonical.Error
-		if errors.As(err, &compatibilityErr) {
-			input.Result = resultClassForSwobuError(compatibilityErr.Code)
+		var canonicalErr canonical.Error
+		if errors.As(err, &canonicalErr) {
+			input.Result = resultClassForSwobuError(canonicalErr.Code)
 		}
 	}
 	return runtimeevidence.NewTerminalTrafficEvent(input)

@@ -20,7 +20,7 @@ const (
 	ItemKindToolResult ItemKind = "tool_result"
 )
 
-// CanonicalItem is one ordered semantic unit in the compatibility core.
+// CanonicalItem is one ordered semantic unit in the canonical core.
 // Requests, outputs, and persisted continuation state all reuse this shape so
 // history is not modeled as a second parallel object graph.
 type CanonicalItem struct {

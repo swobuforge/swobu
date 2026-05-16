@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-// ContinuationStore is the narrow persistence contract compatibility needs for
+// ContinuationStore is the narrow persistence contract requestpath needs for
 // truthful responses-style continuation handling.
 type ContinuationStore interface {
 	Load(ctx context.Context, previousResponseID string) (ContinuitySnapshot, bool, error)

@@ -1,4 +1,4 @@
-// compatibility request lifecycle in one application seam.
+// protocol request lifecycle in one application seam.
 package requestpath
 
 import (
@@ -39,7 +39,7 @@ func NewRequestHandler(endpoints ports.EndpointReader, providers ports.ProviderE
 
 // HandleInput carries one semantic request lifecycle into the app layer.
 // Request-scoped execution metadata such as RequestID lives here rather than in
-// canonical request objects so compatibility types stay semantic-only.
+// canonical request objects so semantic types stay semantic-only.
 type HandleInput struct {
 	EndpointName endpointintent.EndpointName
 	RequestID    string
@@ -81,11 +81,11 @@ type ListModelsOutput struct {
 	Models         []ModelOption
 }
 
-// Handle resolves durable intent, asks compatibility to prepare any
+// Handle resolves durable intent, prepares any
 // continuation-aware request views, emits runtime evidence, and delegates
 // semantic execution to the provider port. It preserves Swobu-vs-backend error
 // origin rather than laundering failures into one generic class.
-// resolution, compatibility prep, provider execution, and evidence emission.
+// resolution, continuation prep, provider execution, and evidence emission.
 // independent failure and delivery paths that belong in one orchestrator.
 func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutput, error) {
 	if in.EndpointName.IsZero() {

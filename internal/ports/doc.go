@@ -3,7 +3,7 @@
 //
 // These interfaces carry semantic inputs and outputs. They must not become
 // transport-shaped facades over provider or adapter internals, and they should
-// expose one narrow contract where app orchestration needs compatibility-owned
+// expose one narrow contract where app orchestration needs canonical
 // continuation storage or provider execution.
 // Provider execution ports consume routable targets (execution-ready
 // projections), not static provider-spec catalog rows.

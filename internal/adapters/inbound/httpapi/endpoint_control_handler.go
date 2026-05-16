@@ -50,7 +50,7 @@ type providerConfigDocument struct {
 
 // EndpointControlHandler renders the daemon-owned operator control plane for
 // endpoint intent. It stays on the internal `_swobu/*` route family so client
-// compatibility paths remain separate from operator control.
+// protocol paths remain separate from operator control.
 type EndpointControlHandler struct {
 	list   endpointListFunc
 	get    endpointGetFunc

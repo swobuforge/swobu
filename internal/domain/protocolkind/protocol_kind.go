@@ -4,6 +4,7 @@ import "fmt"
 
 // ProtocolKind names one concrete protocol family used at Swobu edges.
 type ProtocolKind string
+type Kind = ProtocolKind
 
 const (
 	ChatCompletions ProtocolKind = "chat_completions"

@@ -4,7 +4,7 @@ import "fmt"
 
 // TokenUsage captures provider-neutral token accounting for one successful output.
 // It allows adapter edges to expose usage and cache truth without leaking
-// provider-dialect field names into compatibility semantics.
+// provider-dialect field names into canonical semantics.
 type TokenUsage struct {
 	inputTokens      int
 	outputTokens     int

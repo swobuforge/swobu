@@ -48,7 +48,7 @@ type responsesUsageDTO struct {
 }
 
 type responsesInputDetailsDTO struct {
-	// Keep cached_tokens non-omitempty for Responses compatibility clients that
+	// Keep cached_tokens non-omitempty for Responses protocol clients that
 	// treat input_tokens_details as a strict object schema once present.
 	CachedTokens     int `json:"cached_tokens"`
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
