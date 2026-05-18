@@ -81,10 +81,10 @@ func TestDraftModelBindings_ExposeDistinctCloseModes(t *testing.T) {
 func TestProviderModelCatalogLoadBlocked_FileCredentialGate(t *testing.T) {
 	t.Parallel()
 
-	if !providerModelCatalogLoadBlocked("openrouter", "", "file") {
+	if !state.ProviderModelCatalogLoadBlocked("openrouter", "", "file") {
 		t.Fatalf("expected unresolved file credential to block model catalog load")
 	}
-	if providerModelCatalogLoadBlocked("openrouter", "", "file:/tmp/openrouter.key") {
+	if state.ProviderModelCatalogLoadBlocked("openrouter", "", "file:/tmp/openrouter.key") {
 		t.Fatalf("expected resolved file credential to allow model catalog load")
 	}
 }
@@ -92,16 +92,16 @@ func TestProviderModelCatalogLoadBlocked_FileCredentialGate(t *testing.T) {
 func TestProviderModelCatalogLoadBlocked_ChatGPTLoginGate(t *testing.T) {
 	t.Parallel()
 
-	if !providerModelCatalogLoadBlocked("chatgpt", "", "") {
+	if !state.ProviderModelCatalogLoadBlocked("chatgpt", "", "") {
 		t.Fatalf("expected missing chatgpt login to block model catalog load")
 	}
-	if !providerModelCatalogLoadBlocked("chatgpt", "", "chatgpt_login") {
+	if !state.ProviderModelCatalogLoadBlocked("chatgpt", "", "chatgpt_login") {
 		t.Fatalf("expected pre-login marker to block model catalog load")
 	}
-	if providerModelCatalogLoadBlocked("chatgpt", "", "keychain:chatgpt/default") {
+	if state.ProviderModelCatalogLoadBlocked("chatgpt", "", "keychain:chatgpt/default") {
 		t.Fatalf("expected resolved chatgpt credential ref to allow model catalog load")
 	}
-	if got := providerModelCatalogBlockedMessage("chatgpt", "", ""); got != "" {
+	if got := state.ProviderModelCatalogBlockedMessage("chatgpt", "", ""); got != "" {
 		t.Fatalf("blocked message=%q", got)
 	}
 }
@@ -109,13 +109,13 @@ func TestProviderModelCatalogLoadBlocked_ChatGPTLoginGate(t *testing.T) {
 func TestProviderModelCatalogAuthFailed_RecognizesCredentialAndUnauthorizedErrors(t *testing.T) {
 	t.Parallel()
 
-	if !providerModelCatalogAuthFailed("BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK") {
+	if !state.ProviderModelCatalogAuthFailed("BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK") {
 		t.Fatal("expected credential error to be classified as auth failure")
 	}
-	if !providerModelCatalogAuthFailed("401 Unauthorized") {
+	if !state.ProviderModelCatalogAuthFailed("401 Unauthorized") {
 		t.Fatal("expected unauthorized error to be classified as auth failure")
 	}
-	if providerModelCatalogAuthFailed("model catalog request timed out") {
+	if state.ProviderModelCatalogAuthFailed("model catalog request timed out") {
 		t.Fatal("did not expect timeout error to be classified as auth failure")
 	}
 }
@@ -124,10 +124,10 @@ func TestProviderModelCatalogAuthFailureMessage_OnlyPresentForAuthErrors(t *test
 	t.Parallel()
 
 	errText := "BAD_ENDPOINT: credential reference could not be resolved"
-	if got := providerModelCatalogAuthFailureMessage(errText); got != errText {
+	if got := state.ProviderModelCatalogAuthFailureMessage(errText); got != errText {
 		t.Fatalf("auth failure message=%q want passthrough error %q", got, errText)
 	}
-	if got := providerModelCatalogAuthFailureMessage("request timed out"); got != "" {
+	if got := state.ProviderModelCatalogAuthFailureMessage("request timed out"); got != "" {
 		t.Fatalf("auth failure message=%q want empty for non-auth errors", got)
 	}
 }

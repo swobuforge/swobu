@@ -1,6 +1,10 @@
 package routing
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+)
 
 func TestProviderCredentialSelectionRequired(t *testing.T) {
 	t.Parallel()
@@ -48,9 +52,9 @@ func TestProviderCredentialSelectionRequired(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := providerCredentialSelectionRequired(tt.provider, tt.baseURL, tt.credentialRef)
+			got := state.ProviderCredentialSelectionRequired(tt.provider, tt.baseURL, tt.credentialRef)
 			if got != tt.want {
-				t.Fatalf("providerCredentialSelectionRequired(%q,%q,%q)=%v want %v", tt.provider, tt.baseURL, tt.credentialRef, got, tt.want)
+				t.Fatalf("state.ProviderCredentialSelectionRequired(%q,%q,%q)=%v want %v", tt.provider, tt.baseURL, tt.credentialRef, got, tt.want)
 			}
 		})
 	}
