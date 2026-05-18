@@ -97,7 +97,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftBaseURL:
-		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.BaseURL) // swobu:io-string source=boundary
+		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.BaseURL)                         // swobu:io-string source=boundary
 		if strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
 			model.CreateDraftProviderConfig.Region = stateModel.BedrockRegionFromBaseURL(model.CreateDraftProviderConfig.BaseURL)
 		}
