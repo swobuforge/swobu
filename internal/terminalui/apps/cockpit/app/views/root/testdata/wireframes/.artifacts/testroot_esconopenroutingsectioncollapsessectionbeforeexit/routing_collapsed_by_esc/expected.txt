@@ -6,7 +6,7 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
      create            ready                                          create ↵
 
 > routing ▸
-    OpenAI · env · gpt-5.3
+    OpenAI · env var · gpt-5.3
 
   clients ▸
     not set

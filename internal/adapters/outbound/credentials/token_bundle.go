@@ -8,7 +8,7 @@ import (
 )
 
 // TokenBundle stores refresh-capable auth material for provider-backed secret
-// refs. Resolvers keep backward compatibility with legacy raw-token values.
+// refs. Resolvers keep backward compatibility with previously stored raw-token values.
 type TokenBundle struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
@@ -18,9 +18,9 @@ type TokenBundle struct {
 }
 
 func EncodeTokenBundle(bundle TokenBundle) (string, error) {
-	bundle.AccessToken = strings.TrimSpace(bundle.AccessToken)   // trimlowerlint:allow boundary canonicalization
-	bundle.RefreshToken = strings.TrimSpace(bundle.RefreshToken) // trimlowerlint:allow boundary canonicalization
-	bundle.IDToken = strings.TrimSpace(bundle.IDToken)           // trimlowerlint:allow boundary canonicalization
+	bundle.AccessToken = strings.TrimSpace(bundle.AccessToken)   // swobu:io-string source=boundary
+	bundle.RefreshToken = strings.TrimSpace(bundle.RefreshToken) // swobu:io-string source=boundary
+	bundle.IDToken = strings.TrimSpace(bundle.IDToken)           // swobu:io-string source=boundary
 	if bundle.AccessToken == "" {
 		return "", fmt.Errorf("token bundle access token is required")
 	}
@@ -32,7 +32,7 @@ func EncodeTokenBundle(bundle TokenBundle) (string, error) {
 }
 
 func DecodeTokenBundle(raw string) (TokenBundle, bool, error) {
-	trimmed := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return TokenBundle{}, false, fmt.Errorf("token payload is empty")
 	}
@@ -43,9 +43,9 @@ func DecodeTokenBundle(raw string) (TokenBundle, bool, error) {
 	if err := json.Unmarshal([]byte(trimmed), &bundle); err != nil {
 		return TokenBundle{}, false, fmt.Errorf("token bundle decode failed")
 	}
-	bundle.AccessToken = strings.TrimSpace(bundle.AccessToken)   // trimlowerlint:allow boundary canonicalization
-	bundle.RefreshToken = strings.TrimSpace(bundle.RefreshToken) // trimlowerlint:allow boundary canonicalization
-	bundle.IDToken = strings.TrimSpace(bundle.IDToken)           // trimlowerlint:allow boundary canonicalization
+	bundle.AccessToken = strings.TrimSpace(bundle.AccessToken)   // swobu:io-string source=boundary
+	bundle.RefreshToken = strings.TrimSpace(bundle.RefreshToken) // swobu:io-string source=boundary
+	bundle.IDToken = strings.TrimSpace(bundle.IDToken)           // swobu:io-string source=boundary
 	if bundle.AccessToken == "" {
 		return TokenBundle{}, false, fmt.Errorf("token bundle access token is required")
 	}

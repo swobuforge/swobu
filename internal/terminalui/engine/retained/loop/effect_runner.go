@@ -61,7 +61,7 @@ func (loop *AppLoop[M]) handleRuntimeAction(action update.Action) bool {
 		}
 		return true
 	case interaction.FocusKeyAction:
-		key := strings.TrimSpace(cmd.Key) // trimlowerlint:allow boundary canonicalization
+		key := strings.TrimSpace(cmd.Key) // swobu:io-string source=boundary
 		if key == "" {
 			return true
 		}

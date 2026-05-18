@@ -108,7 +108,8 @@ func FetchStatus(ctx context.Context, client *http.Client, daemonURL string) (St
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return StatusPayload{State: string(StatusClassDown)}, StatusClassDown
 	}
-	switch payload.State {
+	state := payload.State // swobu:io-string source=http
+	switch state {
 	case "healthy":
 		return payload, StatusClassHealthy
 	case "uninitialized":
@@ -303,7 +304,8 @@ func waitForDaemonReadiness(ctx context.Context, client *http.Client, daemonURL 
 }
 
 func isReadinessState(state string) bool {
-	switch state {
+	readiness := state // swobu:io-string source=http
+	switch readiness {
 	case "healthy", "uninitialized", "degraded":
 		return true
 	default:

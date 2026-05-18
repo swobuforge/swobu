@@ -111,10 +111,10 @@ func applyProviderCredentialFileSelection(path string, providerConfig *state.Pro
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/file") // trimlowerlint:allow boundary canonicalization
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/file") // swobu:io-string source=boundary
 }

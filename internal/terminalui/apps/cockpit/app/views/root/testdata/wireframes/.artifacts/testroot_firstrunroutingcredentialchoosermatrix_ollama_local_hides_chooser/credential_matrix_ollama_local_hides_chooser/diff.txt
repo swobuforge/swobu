@@ -1,3 +1,27 @@
+line 10
+-      credential        external
++      model             not set                                        choose ↵
 line 11
--      frame             http_json_body                                 next ↵
-+      delivery          request-response (HTTP JSON)                   next ↵
+-      model             not set                                        choose ↵
++      delivery          auto                                           next ↵
+line 12
+-      delivery          auto                                           next ↵
++ 
+line 13
+- 
++   clients ▸
+line 14
+-   clients ▸
++     not set
+line 15
+-     not set
++ 
+line 16
+- 
++   traffic ▸
+line 17
+-   traffic ▸
++     empty
+line 18
+-     empty
++ 

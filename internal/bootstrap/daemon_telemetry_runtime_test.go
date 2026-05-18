@@ -14,7 +14,7 @@ import (
 type fakeTelemetryEmitter struct {
 	installCalls int
 	countCalls   int
-	errorTraces  []telemetry.ErrorTrace
+	errorTraces  []telemetry.ErrorTracePayload
 	lastState    string
 	last2xx      int64
 	last429      int64
@@ -37,7 +37,7 @@ func (e *fakeTelemetryEmitter) EmitCounts(_ context.Context, state string, count
 	e.last5xx = count5xx
 }
 
-func (e *fakeTelemetryEmitter) EmitErrorTrace(_ context.Context, trace telemetry.ErrorTrace) {
+func (e *fakeTelemetryEmitter) EmitErrorTrace(_ context.Context, trace telemetry.ErrorTracePayload) {
 	e.errorTraces = append(e.errorTraces, trace)
 }
 

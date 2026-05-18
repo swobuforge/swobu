@@ -121,7 +121,7 @@ func (r *Runner[M]) executeForegroundHandoffCall(call foregroundHandoffCall) {
 }
 
 func (r *Runner[M]) executeForegroundHandoff(ctx context.Context, req foregroundHandoffRequest) (foregroundHandoffResult, error) {
-	if strings.TrimSpace(req.Executable) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(req.Executable) == "" { // swobu:io-string source=boundary
 		return foregroundHandoffResult{}, errors.New("executable is empty")
 	}
 	if err := r.Screen.Suspend(); err != nil {

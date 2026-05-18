@@ -1,3 +1,3 @@
-line 9
--     OpenAI · env · gpt-5.3
-+     OpenAI · env var · gpt-5.3
+line 24
+- ↑↓ move   ↵ create   ? help   esc back
++ ↑↓ move   ↵ open   ? help   esc back

@@ -40,23 +40,23 @@ func classifyClientHandler(r *http.Request) string {
 	if r == nil {
 		return clientHandlerUnknown
 	}
-	ua := strings.ToLower(strings.TrimSpace(r.Header.Get("User-Agent"))) // trimlowerlint:allow boundary canonicalization
+	ua := strings.ToLower(strings.TrimSpace(r.Header.Get("User-Agent"))) // swobu:io-string source=boundary
 	if ua != "" {
 		token := strings.Fields(ua)[0]
-		token = strings.TrimSpace(strings.SplitN(token, "/", 2)[0]) // trimlowerlint:allow boundary canonicalization
+		token = strings.TrimSpace(strings.SplitN(token, "/", 2)[0]) // swobu:io-string source=boundary
 		normalized := normalizeHandlerToken(token)
 		if normalized != "" {
 			return normalized
 		}
 	}
-	if lang := normalizeHandlerToken(strings.TrimSpace(r.Header.Get("X-Stainless-Lang"))); lang != "" { // trimlowerlint:allow boundary canonicalization
+	if lang := normalizeHandlerToken(strings.TrimSpace(r.Header.Get("X-Stainless-Lang"))); lang != "" { // swobu:io-string source=boundary
 		return "stainless_" + lang
 	}
 	return clientHandlerUnknown
 }
 
 func normalizeHandlerToken(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw)) // trimlowerlint:allow boundary canonicalization
+	raw = strings.TrimSpace(strings.ToLower(raw)) // swobu:io-string source=boundary
 	if raw == "" {
 		return ""
 	}

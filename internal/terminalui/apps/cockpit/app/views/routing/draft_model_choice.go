@@ -29,18 +29,18 @@ func (createDraftModelBinding) Snapshot(model state.Model) state.ProviderConfigS
 
 func (createDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []update.Action {
 	return []update.Action{
-		state.SetCreateDraftModelID{ModelID: strings.TrimSpace(next.ModelID)}, // trimlowerlint:allow boundary canonicalization
+		state.SetCreateDraftModelIDAction{ModelID: strings.TrimSpace(next.ModelID)}, // swobu:io-string source=boundary
 	}
 }
 
 func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
-	provider := strings.TrimSpace(next.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+	provider := strings.TrimSpace(next.ProviderSpec) // swobu:io-string source=boundary
 	return []update.Action{
-		state.LoadRoutingModelCatalogRequested{
+		state.LoadRoutingModelCatalogRequestedAction{
 			Scope:         state.RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:  provider,
-			BaseURL:       strings.TrimSpace(next.BaseURL),       // trimlowerlint:allow boundary canonicalization
-			CredentialRef: strings.TrimSpace(next.CredentialRef), // trimlowerlint:allow boundary canonicalization
+			BaseURL:       strings.TrimSpace(next.BaseURL),       // swobu:io-string source=boundary
+			CredentialRef: strings.TrimSpace(next.CredentialRef), // swobu:io-string source=boundary
 		},
 	}
 }
@@ -67,14 +67,14 @@ func (b addDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []u
 }
 
 func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
-	provider := strings.TrimSpace(next.ProviderSpec)       // trimlowerlint:allow boundary canonicalization
-	credentialRef := strings.TrimSpace(next.CredentialRef) // trimlowerlint:allow boundary canonicalization
+	provider := strings.TrimSpace(next.ProviderSpec)       // swobu:io-string source=boundary
+	credentialRef := strings.TrimSpace(next.CredentialRef) // swobu:io-string source=boundary
 	credentialRef = effectiveAddModelCredentialRef(b.model, next)
 	return []update.Action{
-		state.LoadRoutingModelCatalogRequested{
+		state.LoadRoutingModelCatalogRequestedAction{
 			Scope:         state.RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:  provider,
-			BaseURL:       strings.TrimSpace(next.BaseURL), // trimlowerlint:allow boundary canonicalization
+			BaseURL:       strings.TrimSpace(next.BaseURL), // swobu:io-string source=boundary
 			CredentialRef: credentialRef,
 		},
 	}
@@ -99,13 +99,15 @@ type draftModelRowSpec struct {
 func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftModelRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	draft := spec.Binding.Snapshot(model)
-	provider := strings.TrimSpace(draft.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-	baseURL := strings.TrimSpace(draft.BaseURL)       // trimlowerlint:allow boundary canonicalization
-	cred := strings.TrimSpace(draft.CredentialRef)    // trimlowerlint:allow boundary canonicalization
+	provider := strings.TrimSpace(draft.ProviderSpec) // swobu:io-string source=boundary
+	baseURL := strings.TrimSpace(draft.BaseURL)       // swobu:io-string source=boundary
+	cred := strings.TrimSpace(draft.CredentialRef)    // swobu:io-string source=boundary
 	if addBinding, ok := spec.Binding.(addDraftModelBinding); ok {
 		cred = effectiveAddModelCredentialRef(addBinding.model, draft)
 	}
-	modelID := strings.TrimSpace(draft.ModelID) // trimlowerlint:allow boundary canonicalization
+	modelID := strings.TrimSpace(draft.ModelID) // swobu:io-string source=boundary
+	modelIDs, modelErr := spec.Binding.Catalog(model)
+	authFailed := providerModelCatalogAuthFailed(modelErr)
 
 	modelSummary := selectors.EmptyOr(modelID, "not set")
 	if _, ok := spec.Binding.(addDraftModelBinding); ok && modelID == "" {
@@ -114,7 +116,13 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	if spec.PickerOpen && modelID == "" {
 		modelSummary = "choose a model"
 	}
-	blocked := providerModelCatalogLoadBlocked(provider, baseURL, cred)
+	blocked := providerModelCatalogLoadBlocked(provider, baseURL, cred) || authFailed
+	if _, ok := spec.Binding.(createDraftModelBinding); ok {
+		flow := state.EvaluateCreateDraftRouteSetup(draft)
+		if flow.ModelState == state.RouteSetupSlotBlocked {
+			blocked = true
+		}
+	}
 	modelRow := views.RowChoiceWithHooks(views.RowModel, modelSummary, func() []update.Action {
 		if provider == "" || blocked {
 			return nil
@@ -129,21 +137,19 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
 	if blocked {
-		if message := strings.TrimSpace(providerModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" { // trimlowerlint:allow boundary canonicalization
+		if message, hasMessage := draftModelBlockedMessage(provider, baseURL, cred, modelErr, authFailed, isCreateDraftModelBinding(spec.Binding), draft); hasMessage {
 			notes := views.DisclosureNoteRows(message)
-			return retained.VStack(ctx, notes...)
+			return retained.VStack(ctx, append([]retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, "blocked")}, notes...)...)
 		}
-		return modelRow
+		return views.RowStatic(views.RowModel, "blocked")
 	}
 	if provider == "" || !spec.PickerOpen {
 		return modelRow
 	}
-
-	modelIDs, modelErr := spec.Binding.Catalog(model)
-	if strings.TrimSpace(modelErr) != "" || len(modelIDs) == 0 { // trimlowerlint:allow boundary canonicalization
-		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(strings.TrimSpace(draft.ModelID), "not set"), strings.TrimSpace(draft.ModelID), "model id", func(value string) []update.Action { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(modelErr) != "" || len(modelIDs) == 0 { // swobu:io-string source=boundary
+		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(strings.TrimSpace(draft.ModelID), "not set"), strings.TrimSpace(draft.ModelID), "model id", func(value string) []update.Action { // swobu:io-string source=boundary
 			next := draft
-			next.ModelID = strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+			next.ModelID = strings.TrimSpace(value) // swobu:io-string source=boundary
 			actions := spec.Binding.SetSnapshot(next)
 			spec.SetPickerOpen(false)
 			actions = append(actions,
@@ -178,7 +184,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		Options:   options,
 		OnChooseRawID: func(rawID string) []update.Action {
 			next := draft
-			next.ModelID = strings.TrimSpace(rawID) // trimlowerlint:allow boundary canonicalization
+			next.ModelID = strings.TrimSpace(rawID) // swobu:io-string source=boundary
 			actions := spec.Binding.SetSnapshot(next)
 			spec.SetPickerOpen(false)
 			actions = append(actions,
@@ -197,4 +203,25 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 			}
 		},
 	})
+}
+
+func isCreateDraftModelBinding(binding draftModelBinding) bool {
+	_, ok := binding.(createDraftModelBinding)
+	return ok
+}
+
+func draftModelBlockedMessage(provider, baseURL, cred, modelErr string, authFailed bool, createMode bool, draft state.ProviderConfigSnapshot) (string, bool) {
+	if authFailed {
+		return strings.TrimSpace(providerModelCatalogAuthFailureMessage(modelErr)), true // swobu:io-string source=boundary
+	}
+	if createMode {
+		flow := state.EvaluateCreateDraftRouteSetup(draft)
+		if flow.ModelBlocker != "" {
+			return flow.ModelBlocker, true
+		}
+	}
+	if message := strings.TrimSpace(providerModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" { // swobu:io-string source=boundary
+		return message, true
+	}
+	return "", false
 }

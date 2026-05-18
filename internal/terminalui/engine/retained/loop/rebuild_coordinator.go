@@ -81,7 +81,7 @@ func collectByID(node *layout.LayoutNode, out map[layout.NodeID]*layout.LayoutNo
 }
 
 func (loop *AppLoop[M]) applyPendingFocusKey() {
-	key := strings.TrimSpace(loop.pendingFocusKey) // trimlowerlint:allow boundary canonicalization
+	key := strings.TrimSpace(loop.pendingFocusKey) // swobu:io-string source=boundary
 	if key == "" || loop.Tree == nil {
 		return
 	}

@@ -41,13 +41,13 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 		return versionNoticeDecision{}
 	}
 
-	currentRaw := strings.TrimSpace(controlplane.SwobuVersion()) // trimlowerlint:allow boundary canonicalization
+	currentRaw := strings.TrimSpace(controlplane.SwobuVersion()) // swobu:io-string source=boundary
 	latestRaw, err := fetchLatestVersion()
 	if err != nil {
 		return versionNoticeDecision{}
 	}
 	latest := sanitizeLatestVersion(latestRaw)
-	current := strings.TrimSpace(currentRaw) // trimlowerlint:allow boundary canonicalization
+	current := strings.TrimSpace(currentRaw) // swobu:io-string source=boundary
 	if latest == "" || current == "" || latest == current {
 		return versionNoticeDecision{}
 	}
@@ -69,7 +69,7 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 }
 
 func nonEmptyOr(value string, fallback string) string {
-	trimmed := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(value) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return fallback
 	}
@@ -90,12 +90,12 @@ func defaultFetchLatestVersion() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(body)), nil // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(string(body)), nil // swobu:io-string source=boundary
 }
 
 func sanitizeLatestVersion(raw string) string {
 	for _, line := range strings.Split(raw, "\n") {
-		candidate := strings.TrimSpace(line) // trimlowerlint:allow boundary canonicalization
+		candidate := strings.TrimSpace(line) // swobu:io-string source=boundary
 		if candidate != "" {
 			return candidate
 		}
@@ -112,17 +112,17 @@ func patchOnlyVersionChange(current string, latest string) bool {
 	return curSemver.major == latSemver.major && curSemver.minor == latSemver.minor && curSemver.patch != latSemver.patch
 }
 
-type semverLike struct {
+type semverLikeVersion struct {
 	major int
 	minor int
 	patch int
 }
 
-func parseSemverLike(raw string) (semverLike, bool) {
-	value := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
+func parseSemverLike(raw string) (semverLikeVersion, bool) {
+	value := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	value = strings.TrimPrefix(value, "v")
 	if value == "" {
-		return semverLike{}, false
+		return semverLikeVersion{}, false
 	}
 	main := value
 	if cut := strings.IndexAny(main, "-+"); cut >= 0 {
@@ -130,19 +130,19 @@ func parseSemverLike(raw string) (semverLike, bool) {
 	}
 	parts := strings.Split(main, ".")
 	if len(parts) != 3 {
-		return semverLike{}, false
+		return semverLikeVersion{}, false
 	}
 	major, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return semverLike{}, false
+		return semverLikeVersion{}, false
 	}
 	minor, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return semverLike{}, false
+		return semverLikeVersion{}, false
 	}
 	patch, err := strconv.Atoi(parts[2])
 	if err != nil {
-		return semverLike{}, false
+		return semverLikeVersion{}, false
 	}
-	return semverLike{major: major, minor: minor, patch: patch}, true
+	return semverLikeVersion{major: major, minor: minor, patch: patch}, true
 }

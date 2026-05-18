@@ -17,6 +17,7 @@ type AuthVariant string
 const (
 	AuthVariantEnv               AuthVariant = "env"
 	AuthVariantFile              AuthVariant = "file"
+	AuthVariantAWSProfile        AuthVariant = "aws_profile"
 	AuthVariantChatGPTLogin      AuthVariant = "chatgpt_login"
 	AuthVariantChatGPTDeviceAuth AuthVariant = "chatgpt_device_auth"
 )
@@ -27,6 +28,7 @@ const (
 	AuthModeNone               AuthModeID = "none"
 	AuthModeTokenEnv           AuthModeID = "token_env"
 	AuthModeTokenFile          AuthModeID = "token_file"
+	AuthModeAWSProfile         AuthModeID = "aws_profile"
 	AuthModeInteractiveBrowser AuthModeID = "interactive_browser"
 	AuthModeInteractiveDevice  AuthModeID = "interactive_device"
 )
@@ -55,6 +57,7 @@ const (
 	ProviderSpecChatGPT          ProviderID = "chatgpt"
 	ProviderSpecAnthropic        ProviderID = "anthropic"
 	ProviderSpecOpenRouter       ProviderID = "openrouter"
+	ProviderSpecBedrock          ProviderID = "bedrock"
 	ProviderSpecOpenAICompatible ProviderID = "openai_compatible"
 
 	CapabilityModelCatalog Capability = "model_catalog"
@@ -140,6 +143,19 @@ func catalog() []Profile {
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
+			ProviderID:              ProviderSpecBedrock,
+			ProviderDisplayName:     "AWS Bedrock",
+			SetupHint:               string(ProviderSpecBedrock) + "   Bedrock OpenAI endpoint URL",
+			DefaultBaseURL:          "",
+			DefaultCredentialEnvVar: "AWS_BEARER_TOKEN_BEDROCK",
+			VisibleInOperatorUI:     true,
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeAWSProfile, Variant: AuthVariantAWSProfile, Kind: AuthNone, Requirement: AuthModeRequirementNever},
+				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+			},
+			DeclaredCapabilities: []Capability{CapabilityStreaming},
+		},
+		{
 			ProviderID:          ProviderSpecOpenAICompatible,
 			ProviderDisplayName: "OpenAI Compatible",
 			SetupHint:           string(ProviderSpecOpenAICompatible) + "   OpenAI-compatible URL (https://host/v1)",
@@ -210,7 +226,7 @@ func SupportedAuthVariantsForSpec(spec string) []AuthVariant {
 	out := make([]AuthVariant, 0, len(modes))
 	for _, mode := range modes {
 		variant := mode.Variant
-		if strings.TrimSpace(string(variant)) == "" { // trimlowerlint:allow domain canonicalization
+		if strings.TrimSpace(string(variant)) == "" { // swobu:io-string source=domain
 			continue
 		}
 		out = append(out, variant)
@@ -267,12 +283,6 @@ func DefaultEnvKeyForSpec(spec string) string {
 	return profile.DefaultCredentialEnvVar
 }
 
-// DefaultCredentialEnvVarForSpec returns the canonical environment variable name
-// for credential lookup, or empty if none is declared for the provider.
-func DefaultCredentialEnvVarForSpec(spec string) string {
-	return DefaultEnvKeyForSpec(spec)
-}
-
 func RequiresCredential(spec, baseURL string) bool {
 	return requiresCredentialFromModes(AllowedAuthModesForSpec(spec), baseURL)
 }
@@ -288,8 +298,12 @@ func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {
 		switch mode.Requirement {
 		case AuthModeRequirementNever:
 			hasNeverMode = true
+		case AuthModeRequirementAlways:
+			// Explicit always requirement: keep default credential requirement path.
 		case AuthModeRequirementExceptLoopbackExecute:
 			hasLoopbackConditional = true
+		default:
+			// Unknown requirements fall back to requiring credentials.
 		}
 	}
 	if hasNeverMode {
@@ -302,7 +316,7 @@ func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {
 }
 
 func InferAuthKind(spec, baseURL, credentialRef string) AuthKind {
-	if strings.TrimSpace(credentialRef) != "" { // trimlowerlint:allow domain canonicalization
+	if strings.TrimSpace(credentialRef) != "" { // swobu:io-string source=domain
 		return AuthCredentialRef
 	}
 	if RequiresCredential(spec, baseURL) {

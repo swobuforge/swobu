@@ -38,16 +38,16 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	}
 
 	query := req.URL.Query()
-	providerSpec := strings.TrimSpace(strings.ToLower(query.Get("provider_spec"))) // trimlowerlint:allow boundary canonicalization
+	providerSpec := strings.TrimSpace(strings.ToLower(query.Get("provider_spec"))) // swobu:io-string source=boundary
 	if providerSpec == "" {
 		http.Error(w, "provider_spec is required", http.StatusBadRequest)
 		return
 	}
-	baseURL := strings.TrimSpace(query.Get("base_url")) // trimlowerlint:allow boundary canonicalization
+	baseURL := strings.TrimSpace(query.Get("base_url")) // swobu:io-string source=boundary
 	if baseURL == "" {
-		baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // trimlowerlint:allow boundary canonicalization
+		baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 	}
-	credentialRef := strings.TrimSpace(query.Get("credential_ref")) // trimlowerlint:allow boundary canonicalization
+	credentialRef := strings.TrimSpace(query.Get("credential_ref")) // swobu:io-string source=boundary
 
 	models, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, credentialRef)
 	result := modelCatalogProbeResult{}
@@ -81,14 +81,18 @@ func probeModelIDs(ctx context.Context, providers ports.ProviderModelCatalog, pr
 	if !ok {
 		return nil, canonical.BadEndpoint("selected provider route is unsupported")
 	}
-	models, err := providers.ListModels(ctx, ports.NewRoutableTarget(
+	target := ports.NewRoutableTarget(
 		"draft",
 		providerSpec,
 		baseURL,
 		credentialRef,
 		"",
 		string(routeProfile.AuthKind),
-	))
+	)
+	if err := providers.ValidateCredentials(ctx, target); err != nil {
+		return nil, err
+	}
+	models, err := providers.ListModels(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +100,8 @@ func probeModelIDs(ctx context.Context, providers ports.ProviderModelCatalog, pr
 }
 
 func normalizeModelCatalogProbeError(message string, credentialRef string) string {
-	message = strings.TrimSpace(message)                                                           // trimlowerlint:allow boundary canonicalization
-	if !strings.Contains(strings.ToLower(message), "credential reference could not be resolved") { // trimlowerlint:allow boundary canonicalization
+	message = strings.TrimSpace(message)                                                           // swobu:io-string source=boundary
+	if !strings.Contains(strings.ToLower(message), "credential reference could not be resolved") { // swobu:io-string source=boundary
 		return message
 	}
 	if !credentialref.Parse(credentialRef).IsFileRef() {

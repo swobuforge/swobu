@@ -8,6 +8,7 @@ type Model struct {
 	InteractionMode  string
 	HelpTabOpen      bool
 	FooterVerb       string
+	FooterBaseVerb   string
 	FooterAllowSpace bool
 	FooterShowTabs   bool
 
@@ -38,13 +39,13 @@ type Model struct {
 	LastStoredKeySlotName      string
 	// Invariant: AuthSessions payloads are canonicalized at write seams.
 	// UI readers must not re-trim session fields.
-	AuthSessions map[string]AuthSessionView
+	AuthSessions map[string]AuthSessionViewState
 	TrafficRows  []TrafficRow
 	TrafficError string
 	HelpNote     string
 }
 
-type AuthSessionView struct {
+type AuthSessionViewState struct {
 	SessionID    string
 	URL          string
 	UserCode     string
@@ -87,6 +88,7 @@ type EndpointSnapshot struct {
 type ProviderConfigSnapshot struct {
 	Ref           string `json:"ref"`
 	ProviderSpec  string `json:"provider_spec"`
+	Region        string `json:"region,omitempty"`
 	BaseURL       string `json:"base_url,omitempty"`
 	CredentialRef string `json:"credential_ref,omitempty"`
 	ModelID       string `json:"model_id,omitempty"`

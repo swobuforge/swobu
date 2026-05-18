@@ -7,7 +7,12 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-func Width(s string) int { return runewidth.StringWidth(s) }
+func Width(s string) int {
+	if s == "" {
+		return 0
+	}
+	return runewidth.StringWidth(s)
+}
 
 func SanitizeTerminalText(s string) string {
 	if s == "" {

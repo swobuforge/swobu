@@ -56,7 +56,7 @@ func TestReduce_CreateDraftSelectionAndCreateSuccessClearsDraft(t *testing.T) {
 
 	Reduce(&model, SetCreateDraftName{Name: "jobs"})
 	Reduce(&model, SetCreateDraftProviderSpec{ProviderSpec: "openai_compatible"})
-	Reduce(&model, SetCreateDraftModelID{ModelID: "gpt-4.1-mini"})
+	Reduce(&model, SetCreateDraftModelIDAction{ModelID: "gpt-4.1-mini"})
 	Reduce(&model, SetCreateDraftCredentialRef{CredentialRef: "cred-a"})
 	Reduce(&model, SetCreateDraftBaseURL{BaseURL: "https://example.test/v1"})
 	Reduce(&model, WorkspaceCreateRequested{Name: "jobs"})
@@ -219,7 +219,7 @@ func TestReduce_ProviderAuthSessionFailedAnchorsAuthErrorOnly(t *testing.T) {
 		HeaderStatus:    "waiting for login…",
 		InteractionMode: InteractionModeBusySave,
 		SaveErrors:      map[string]string{"routing-row/run_on": "previous routing failure"},
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			stateModel.EndpointProviderAuthOwnerKey("testname", "openai/main").String(): {
 				SessionID:    "sess-1",
 				URL:          "https://auth.openai.com",
@@ -228,7 +228,7 @@ func TestReduce_ProviderAuthSessionFailedAnchorsAuthErrorOnly(t *testing.T) {
 		},
 	}
 
-	Reduce(&model, stateeffect.ProviderAuthSessionFailed{
+	Reduce(&model, stateeffect.ProviderAuthSessionFailedAction{
 		EndpointName: "testname",
 		ProviderConfig: ProviderConfigSnapshot{
 			Ref:          "openai/main",
@@ -347,7 +347,7 @@ func TestProviderOptions_UsesCanonicalDisplayOrder(t *testing.T) {
 		order = append(order, option.Spec)
 	}
 
-	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "openai_compatible"}
+	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "bedrock", "openai_compatible"}
 	if len(order) < len(wantPrefix) {
 		t.Fatalf("provider options=%v want at least %v", order, wantPrefix)
 	}
@@ -385,7 +385,7 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 	t.Parallel()
 
 	model := Model{}
-	effects := Reduce(&model, LoadRoutingModelCatalogRequested{
+	effects := Reduce(&model, LoadRoutingModelCatalogRequestedAction{
 		Scope:         RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",

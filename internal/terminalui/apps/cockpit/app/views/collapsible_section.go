@@ -16,7 +16,7 @@ func NewCollapsibleSection(
 	summary retained.ViewSpec[state.Model],
 	body ...retained.ViewSpec[state.Model],
 ) retained.ViewSpec[state.Model] {
-	cleanTitle := strings.TrimSpace(title) // trimlowerlint:allow boundary canonicalization
+	cleanTitle := strings.TrimSpace(title) // swobu:io-string source=boundary
 	return retained.Named[state.Model](cleanTitle, retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		open, setOpen := retained.UseState(ctx, func() bool { return defaultOpen })
 		var out retained.ViewSpec[state.Model]
@@ -44,7 +44,7 @@ func NewCollapsibleSection(
 					return closeSection()
 				}
 				setOpen(true)
-				verb := strings.TrimSpace(firstVerb) // trimlowerlint:allow boundary canonicalization
+				verb := strings.TrimSpace(firstVerb) // swobu:io-string source=boundary
 				if verb == "" {
 					verb = "act"
 				}
@@ -67,7 +67,7 @@ func NewCollapsibleSection(
 }
 
 func sectionToggleTitleRow(title string, expanded bool, onToggle func() []update.Action) retained.ViewSpec[state.Model] {
-	title = strings.TrimSpace(title) // trimlowerlint:allow boundary canonicalization
+	title = strings.TrimSpace(title) // swobu:io-string source=boundary
 	indicator := "▸"
 	if expanded {
 		indicator = "▾"
@@ -88,7 +88,7 @@ func sectionToggleTitleRow(title string, expanded bool, onToggle func() []update
 }
 
 func sectionStaticTitleRow(title string, expanded bool) retained.ViewSpec[state.Model] {
-	title = strings.TrimSpace(title) // trimlowerlint:allow boundary canonicalization
+	title = strings.TrimSpace(title) // swobu:io-string source=boundary
 	indicator := "▸"
 	if expanded {
 		indicator = "▾"

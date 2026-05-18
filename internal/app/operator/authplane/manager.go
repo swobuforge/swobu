@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-type Manager struct {
+type AuthSessionManager struct {
 	driver AuthMethodDriver
 	store  CredentialStore
 
@@ -16,36 +16,36 @@ type Manager struct {
 	sessions map[string]StartInput
 }
 
-func NewManager(driver AuthMethodDriver, store CredentialStore) (*Manager, error) {
+func NewAuthSessionManager(driver AuthMethodDriver, store CredentialStore) (*AuthSessionManager, error) {
 	if driver == nil {
 		return nil, fmt.Errorf("authplane driver is required")
 	}
-	return &Manager{
+	return &AuthSessionManager{
 		driver:   driver,
 		store:    store,
 		sessions: map[string]StartInput{},
 	}, nil
 }
 
-func (m *Manager) Start(ctx context.Context, in StartInput) (StartOutput, error) {
-	provider := strings.TrimSpace(strings.ToLower(in.ProviderSpec)) // trimlowerlint:allow boundary canonicalization
+func (m *AuthSessionManager) Start(ctx context.Context, in StartInput) (StartOutput, error) {
+	provider := strings.TrimSpace(strings.ToLower(in.ProviderSpec)) // swobu:io-string source=boundary
 	slog.Debug("auth session start requested",
 		"component", "authplane",
 		"provider_spec", provider,
-		"has_endpoint_ref", strings.TrimSpace(in.EndpointRef) != "", // trimlowerlint:allow boundary canonicalization
-		"auth_mode", strings.TrimSpace(in.AuthMode), // trimlowerlint:allow boundary canonicalization
+		"has_endpoint_ref", strings.TrimSpace(in.EndpointRef) != "", // swobu:io-string source=boundary
+		"auth_mode", strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	)
 	if provider == "" {
 		return StartOutput{}, fmt.Errorf("provider spec is required")
 	}
-	endpointRef := strings.TrimSpace(in.EndpointRef) // trimlowerlint:allow boundary canonicalization
+	endpointRef := strings.TrimSpace(in.EndpointRef) // swobu:io-string source=boundary
 	if endpointRef == "" {
 		return StartOutput{}, fmt.Errorf("endpoint ref is required")
 	}
 	out, err := m.driver.Start(ctx, StartInput{
 		ProviderSpec: provider,
 		EndpointRef:  endpointRef,
-		AuthMode:     strings.TrimSpace(in.AuthMode), // trimlowerlint:allow boundary canonicalization
+		AuthMode:     strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	})
 	if err != nil {
 		slog.Warn("auth session driver start failed",
@@ -55,7 +55,7 @@ func (m *Manager) Start(ctx context.Context, in StartInput) (StartOutput, error)
 		)
 		return StartOutput{}, err
 	}
-	sessionID := strings.TrimSpace(out.SessionID) // trimlowerlint:allow boundary canonicalization
+	sessionID := strings.TrimSpace(out.SessionID) // swobu:io-string source=boundary
 	if sessionID == "" {
 		return StartOutput{}, fmt.Errorf("auth method driver returned empty session id")
 	}
@@ -63,26 +63,27 @@ func (m *Manager) Start(ctx context.Context, in StartInput) (StartOutput, error)
 	m.sessions[sessionID] = StartInput{
 		ProviderSpec: provider,
 		EndpointRef:  endpointRef,
-		AuthMode:     strings.TrimSpace(in.AuthMode), // trimlowerlint:allow boundary canonicalization
+		AuthMode:     strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	}
 	m.mu.Unlock()
 	slog.Debug("auth session started",
 		"component", "authplane",
 		"provider_spec", provider,
 		"session_id", sessionID,
-		"has_authorize_url", strings.TrimSpace(out.AuthorizeURL) != "", // trimlowerlint:allow boundary canonicalization
-		"has_user_code", strings.TrimSpace(out.UserCode) != "", // trimlowerlint:allow boundary canonicalization
+		"has_authorize_url", strings.TrimSpace(out.AuthorizeURL) != "", // swobu:io-string source=boundary
+		"has_user_code", strings.TrimSpace(out.UserCode) != "", // swobu:io-string source=boundary
 	)
 	return StartOutput{
 		SessionID:    sessionID,
 		State:        SessionStatePending,
-		AuthorizeURL: strings.TrimSpace(out.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
-		UserCode:     strings.TrimSpace(out.UserCode),     // trimlowerlint:allow boundary canonicalization
+		AuthorizeURL: strings.TrimSpace(out.AuthorizeURL), // swobu:io-string source=boundary
+		UserCode:     strings.TrimSpace(out.UserCode),     // swobu:io-string source=boundary
+		ExpiresAt:    strings.TrimSpace(out.ExpiresAt),    // swobu:io-string source=boundary
 	}, nil
 }
 
-func (m *Manager) Poll(ctx context.Context, sessionID string) (SessionOutput, error) {
-	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
+func (m *AuthSessionManager) Poll(ctx context.Context, sessionID string) (SessionOutput, error) {
+	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
 	slog.Debug("auth session poll requested",
 		"component", "authplane",
 		"session_id", sessionID,
@@ -104,11 +105,11 @@ func (m *Manager) Poll(ctx context.Context, sessionID string) (SessionOutput, er
 		return SessionOutput{}, err
 	}
 	if pollOut.State == SessionStateSucceeded {
-		if strings.TrimSpace(pollOut.CredentialRef) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(pollOut.CredentialRef) == "" { // swobu:io-string source=boundary
 			return SessionOutput{}, fmt.Errorf("auth session succeeded without credential ref")
 		}
 		if m.store != nil {
-			persistedRef, err := m.store.UpsertCredentialRef(ctx, input.ProviderSpec, input.EndpointRef, strings.TrimSpace(pollOut.CredentialRef)) // trimlowerlint:allow boundary canonicalization
+			persistedRef, err := m.store.UpsertCredentialRef(ctx, input.ProviderSpec, input.EndpointRef, strings.TrimSpace(pollOut.CredentialRef)) // swobu:io-string source=boundary
 			if err != nil {
 				slog.Warn("auth session credential ref persistence failed",
 					"component", "authplane",
@@ -118,8 +119,8 @@ func (m *Manager) Poll(ctx context.Context, sessionID string) (SessionOutput, er
 				)
 				return SessionOutput{}, err
 			}
-			if strings.TrimSpace(persistedRef) != "" { // trimlowerlint:allow boundary canonicalization
-				pollOut.CredentialRef = strings.TrimSpace(persistedRef) // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(persistedRef) != "" { // swobu:io-string source=boundary
+				pollOut.CredentialRef = strings.TrimSpace(persistedRef) // swobu:io-string source=boundary
 			}
 		}
 	}
@@ -128,20 +129,20 @@ func (m *Manager) Poll(ctx context.Context, sessionID string) (SessionOutput, er
 		"session_id", sessionID,
 		"provider_spec", input.ProviderSpec,
 		"state", string(pollOut.State),
-		"has_credential_ref", strings.TrimSpace(pollOut.CredentialRef) != "", // trimlowerlint:allow boundary canonicalization
-		"has_error_message", strings.TrimSpace(pollOut.ErrorMessage) != "", // trimlowerlint:allow boundary canonicalization
+		"has_credential_ref", strings.TrimSpace(pollOut.CredentialRef) != "", // swobu:io-string source=boundary
+		"has_error_message", strings.TrimSpace(pollOut.ErrorMessage) != "", // swobu:io-string source=boundary
 	)
 	return SessionOutput{
 		ProviderSpec:  input.ProviderSpec,
 		SessionID:     sessionID,
 		State:         pollOut.State,
-		CredentialRef: strings.TrimSpace(pollOut.CredentialRef), // trimlowerlint:allow boundary canonicalization
-		ErrorMessage:  strings.TrimSpace(pollOut.ErrorMessage),  // trimlowerlint:allow boundary canonicalization
+		CredentialRef: strings.TrimSpace(pollOut.CredentialRef), // swobu:io-string source=boundary
+		ErrorMessage:  strings.TrimSpace(pollOut.ErrorMessage),  // swobu:io-string source=boundary
 	}, nil
 }
 
-func (m *Manager) Cancel(ctx context.Context, sessionID string) error {
-	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
+func (m *AuthSessionManager) Cancel(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
 	slog.Debug("auth session cancel requested",
 		"component", "authplane",
 		"session_id", sessionID,
@@ -167,8 +168,8 @@ func (m *Manager) Cancel(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-func (m *Manager) Retry(ctx context.Context, sessionID string) (StartOutput, error) {
-	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
+func (m *AuthSessionManager) Retry(ctx context.Context, sessionID string) (StartOutput, error) {
+	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
 	slog.Debug("auth session retry requested",
 		"component", "authplane",
 		"session_id", sessionID,
@@ -183,7 +184,7 @@ func (m *Manager) Retry(ctx context.Context, sessionID string) (StartOutput, err
 	return m.Start(ctx, input)
 }
 
-func (m *Manager) lookupSession(sessionID string) (StartInput, bool) {
+func (m *AuthSessionManager) lookupSession(sessionID string) (StartInput, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	in, ok := m.sessions[sessionID]

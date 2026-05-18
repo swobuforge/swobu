@@ -26,8 +26,8 @@ func BuildCompatibilityScreen(ctx *retained.Context[state.Model]) retained.ViewS
 			nil,
 			focusAffordance("run/copy", false),
 		),
-		RowStatic("tui version", strings.TrimSpace(mismatch.TUIVersion)),       // trimlowerlint:allow boundary canonicalization
-		RowStatic("daemon version", strings.TrimSpace(mismatch.DaemonVersion)), // trimlowerlint:allow boundary canonicalization
+		RowStatic("tui version", strings.TrimSpace(mismatch.TUIVersion)),       // swobu:io-string source=boundary
+		RowStatic("daemon version", strings.TrimSpace(mismatch.DaemonVersion)), // swobu:io-string source=boundary
 		RowStatic("protocol", compatibilityProtocolLine(*mismatch)),
 	}
 	const restartDaemonLabel = "restart daemon"
@@ -40,20 +40,20 @@ func BuildCompatibilityScreen(ctx *retained.Context[state.Model]) retained.ViewS
 	if shouldRenderCompatibilityRecoveryDetail(restartDaemonLabel, recoveryCommand) {
 		recoverRows = append(recoverRows, compatibilityDetailLine(recoveryCommand))
 	}
-	if strings.TrimSpace(mismatch.Note) != "" && strings.TrimSpace(mismatch.NoteAction) == "run" { // trimlowerlint:allow boundary canonicalization
-		recoverRows = append(recoverRows, compatibilityDetailLine("-> "+strings.TrimSpace(mismatch.Note))) // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(mismatch.Note) != "" && strings.TrimSpace(mismatch.NoteAction) == "run" { // swobu:io-string source=boundary
+		recoverRows = append(recoverRows, compatibilityDetailLine("-> "+strings.TrimSpace(mismatch.Note))) // swobu:io-string source=boundary
 	}
 	recoverRows = append(recoverRows,
 		RowStatic("", ""),
 		RowActionWithHooks("copy diagnostics", "", "copy", func() []update.Action {
 			return []update.Action{state.CompatibilityDiagnosticsCopyRequested{}}
 		}, nil, focusAffordance("run/copy", false)),
-		compatibilityDetailLine("swobu "+strings.TrimSpace(mismatch.TUIVersion)),     // trimlowerlint:allow boundary canonicalization
-		compatibilityDetailLine("daemon "+strings.TrimSpace(mismatch.DaemonVersion)), // trimlowerlint:allow boundary canonicalization
+		compatibilityDetailLine("swobu "+strings.TrimSpace(mismatch.TUIVersion)),     // swobu:io-string source=boundary
+		compatibilityDetailLine("daemon "+strings.TrimSpace(mismatch.DaemonVersion)), // swobu:io-string source=boundary
 		compatibilityDetailLine(compatibilityProtocolMismatchLine(*mismatch)),
 	)
-	if strings.TrimSpace(mismatch.Note) != "" && strings.TrimSpace(mismatch.NoteAction) == "copy" { // trimlowerlint:allow boundary canonicalization
-		recoverRows = append(recoverRows, compatibilityDetailLine("-> "+strings.TrimSpace(mismatch.Note))) // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(mismatch.Note) != "" && strings.TrimSpace(mismatch.NoteAction) == "copy" { // swobu:io-string source=boundary
+		recoverRows = append(recoverRows, compatibilityDetailLine("-> "+strings.TrimSpace(mismatch.Note))) // swobu:io-string source=boundary
 	}
 	return retained.VStackGap(ctx, StackGap,
 		Section[state.Model]("compatibility", compatibilityRows...),
@@ -62,7 +62,7 @@ func BuildCompatibilityScreen(ctx *retained.Context[state.Model]) retained.ViewS
 }
 
 func compatibilityRecoveryCommand(mismatch state.ControlPlaneMismatch) string {
-	command := strings.TrimSpace(mismatch.RecoveryCommand) // trimlowerlint:allow boundary canonicalization
+	command := strings.TrimSpace(mismatch.RecoveryCommand) // swobu:io-string source=boundary
 	if command == "" {
 		return "restart daemon"
 	}
@@ -84,12 +84,12 @@ func compatibilityProtocolMismatchLine(mismatch state.ControlPlaneMismatch) stri
 }
 
 func compatibilityDetailLine(value string) retained.ViewSpec[state.Model] {
-	return IndentLeft[state.Model](StaticTextLine[state.Model](strings.TrimSpace(value)), InsetSection+InsetDetail) // trimlowerlint:allow boundary canonicalization
+	return IndentLeft[state.Model](StaticTextLine[state.Model](strings.TrimSpace(value)), InsetSection+InsetDetail) // swobu:io-string source=boundary
 }
 
 func shouldRenderCompatibilityRecoveryDetail(label, detail string) bool {
-	normalizedLabel := strings.ToLower(strings.TrimSpace(label))   // trimlowerlint:allow boundary canonicalization
-	normalizedDetail := strings.ToLower(strings.TrimSpace(detail)) // trimlowerlint:allow boundary canonicalization
+	normalizedLabel := strings.ToLower(strings.TrimSpace(label))   // swobu:io-string source=boundary
+	normalizedDetail := strings.ToLower(strings.TrimSpace(detail)) // swobu:io-string source=boundary
 	if normalizedDetail == "" {
 		return false
 	}

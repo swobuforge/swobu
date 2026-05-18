@@ -14,7 +14,7 @@ type Renderer struct {
 	reconciler reconcile.Reconciler
 	mode       view.RenderMode
 	prev       view.ViewSpec
-	prevScene  view.Scene
+	prevScene  view.SceneSnapshot
 }
 
 func NewRenderer(out io.Writer, mode view.RenderMode) *Renderer {

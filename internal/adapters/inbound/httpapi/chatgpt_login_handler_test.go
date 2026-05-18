@@ -24,6 +24,7 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 			return authplane.StartOutput{
 				SessionID:    "sess-g1",
 				AuthorizeURL: "https://login.example",
+				ExpiresAt:    "2026-05-18T12:00:00Z",
 				State:        authplane.SessionStatePending,
 			}, nil
 		},
@@ -31,7 +32,7 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 		nil,
 		nil,
 	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","endpoint_ref":"main/chatgpt"}`))
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","endpoint_ref":"main/chatgpt","auth_mode":"browser"}`))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -43,6 +44,31 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 	}
 	if body["provider_spec"] != "chatgpt" {
 		t.Fatalf("provider_spec = %v", body["provider_spec"])
+	}
+	if body["expires_at"] != "2026-05-18T12:00:00Z" {
+		t.Fatalf("expires_at = %v", body["expires_at"])
+	}
+}
+
+func TestChatGPTLoginHandlerGenericStart_RequiresExplicitAuthMode(t *testing.T) {
+	t.Parallel()
+	handler := NewAuthSessionHandler(
+		func(_ context.Context, _ authplane.StartInput) (authplane.StartOutput, error) {
+			t.Fatal("start should not be called when auth_mode is missing")
+			return authplane.StartOutput{}, nil
+		},
+		nil,
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","endpoint_ref":"main/chatgpt"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "auth_mode is required") {
+		t.Fatalf("body = %q", rec.Body.String())
 	}
 }
 
@@ -113,6 +139,7 @@ func TestChatGPTLoginHandlerGenericRetry(t *testing.T) {
 			return authplane.StartOutput{
 				SessionID:    "sess-g2",
 				AuthorizeURL: "https://login.example/new",
+				ExpiresAt:    "2026-05-18T12:05:00Z",
 				State:        authplane.SessionStatePending,
 			}, nil
 		},
@@ -122,5 +149,12 @@ func TestChatGPTLoginHandlerGenericRetry(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["expires_at"] != "2026-05-18T12:05:00Z" {
+		t.Fatalf("expires_at = %v", body["expires_at"])
 	}
 }

@@ -1,6 +1,48 @@
 line 11
--                 openai:gpt-5.3:2310255c                                                   edit ↵
-+        model    openai:gpt-5.3:2310255c                                                   edit ↵
+-        model    openai:gpt-5.3:2310255c                                                   edit ↵
++        model    openai:gpt-5.3:2310255c                                                   close ↵
 line 12
--                 anthropic:opus:979cec50                                                   edit ↵
+-        model    anthropic:opus:979cec50                                                   edit ↵
++          provider          OpenAI
+line 13
+-   >    add model                                                                          close ↵
++          credential        env                                                            choose ↵
+line 14
+-          provider          Provider                                                       change ↵
++          model             gpt-5.3                                                        choose ↵
+line 15
+-          credential        missing                                                        change ↵
++          delivery          non-streaming                                                  next ↵
+line 16
+-          delivery          auto                                                           next ↵
++          alias             not set                                                        edit ↵
+line 17
+- 
++          env key           OPENAI_API_KEY                                                 edit ↵
+line 18
+-   clients ▸
++          delete model                                                                     delete ↵
+line 19
+-     not set
 +        model    anthropic:opus:979cec50                                                   edit ↵
+line 20
+- 
++   >    add model                                                                          close ↵
+line 21
+-   traffic ▸
++          provider          Provider                                                       change ↵
+line 22
+-     no traffic yet
++          credential        missing                                                        change ↵
+line 23
+- 
++          delivery          auto                                                           next ↵
+line 25
+- 
++   clients ▸
+line 26
+- 
++     not set
+line 28
+- 
++   traffic ▸

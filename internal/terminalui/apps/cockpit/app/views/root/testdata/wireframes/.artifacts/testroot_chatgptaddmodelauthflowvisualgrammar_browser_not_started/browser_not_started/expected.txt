@@ -6,15 +6,15 @@ SWOBU 🧌                                                   waiting for login�
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
+     provider           openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-                openai:gpt-3.5-turbo:2310255c                                             edit ↵
+       model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
-         auth              browser login                                                  change ↵
-    >    delivery          streaming (SSE) (default)                                      next ↵
-         sign in           open default browser                                           open ↵
+         credential        browser login                                                  change ↵
+    >    sign in           open default browser                                           open ↵
          fallback          use device code                                                switch ↵
+         delivery          auto                                                           next ↵
 
   clients ▸
     not set

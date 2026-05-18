@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	modelcatalogopenaicompat "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalogprotocols/openaicompat"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/protocols"
 	messages "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/messages"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -38,9 +37,9 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 }
 
 // NewRuntime builds a complete Anthropic provider runtime.
-func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntime {
+func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	executor := NewExecutor(client, credentials)
-	return providersruntime.ProviderRuntime{
+	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
 		Executor:           executor,
 		CredentialProvider: credentials,
@@ -55,11 +54,11 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	if req.Request == nil {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
-	if strings.TrimSpace(req.Target.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
 		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
 
-	wireReq, err := e.encodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
+	wireReq, err := messages.EncodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -103,7 +102,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 }
 
 func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
-	if strings.TrimSpace(target.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpedge.JoinBaseURLAndPath(target.BaseURL, "/models"), nil)
@@ -136,8 +135,9 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	return models, nil
 }
 
-func (e ProviderExecutorAdapter) encodeRequest(req canonical.CanonicalRequest, deliveryMode bool) (protocols.WireRequest, error) {
-	return messages.EncodeRequest(req, deliveryMode)
+func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+	_, err := e.ListModels(ctx, target)
+	return err
 }
 
 func anthropicResponseDecoder(providerIDRaw string, protocolKind protocolkind.ProtocolKind, delivery bool) (providersruntime.ResponseDecoder, error) {
@@ -175,7 +175,7 @@ func anthropicResponseDecoder(providerIDRaw string, protocolKind protocolkind.Pr
 }
 
 func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {
-	if strings.TrimSpace(credentialRef) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("anthropic provider credential reference is required")
 	}
 	if e.credentials == nil {
@@ -185,7 +185,7 @@ func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.
 	if err != nil {
 		return canonical.BadEndpoint("credential reference could not be resolved")
 	}
-	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
 	req.Header.Set("x-api-key", token)

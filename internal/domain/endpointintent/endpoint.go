@@ -44,16 +44,16 @@ func NewEndpoint(
 			return Endpoint{}, fmt.Errorf("%w: provider config ref must be unique", ErrInvalidEndpoint)
 		}
 		seen[ref] = struct{}{}
-		providerModelLiteral := strings.TrimSpace(providerConfig.ProviderSpec().String()) + ":" + strings.TrimSpace(providerConfig.ModelID()) // trimlowerlint:allow domain canonicalization
-		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))                                                       // trimlowerlint:allow domain canonicalization
+		providerModelLiteral := strings.TrimSpace(providerConfig.ProviderSpec().String()) + ":" + strings.TrimSpace(providerConfig.ModelID()) // swobu:io-string source=domain
+		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))                                                       // swobu:io-string source=domain
 		if providerModelLiteral != ":" {
 			seenProviderModelLiteral[providerModelLiteral] = struct{}{}
 		}
-		modelID := strings.ToLower(strings.TrimSpace(providerConfig.ModelID())) // trimlowerlint:allow domain canonicalization
+		modelID := strings.ToLower(strings.TrimSpace(providerConfig.ModelID())) // swobu:io-string source=domain
 		if modelID != "" {
 			seenModelID[modelID] = struct{}{}
 		}
-		alias := strings.ToLower(strings.TrimSpace(providerConfig.TargetAlias())) // trimlowerlint:allow domain canonicalization
+		alias := strings.ToLower(strings.TrimSpace(providerConfig.TargetAlias())) // swobu:io-string source=domain
 		if alias != "" {
 			if _, exists := seenAlias[alias]; exists {
 				return Endpoint{}, fmt.Errorf("%w: target alias must be unique per endpoint", ErrInvalidEndpoint)

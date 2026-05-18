@@ -74,8 +74,18 @@ func (l liftedView[M, S]) BuildRenderNode(ctx *Context[M]) RenderNode {
 
 type noopLocalScope struct{ base LocalScope }
 
-func (n noopLocalScope) Get(slot int) (any, bool) { return n.base.Get(slot) }
-func (n noopLocalScope) Set(slot int, value any)  { n.base.Set(slot, value) }
+func (n noopLocalScope) Get(slot int) (any, bool) {
+	if n.base == nil {
+		return nil, false
+	}
+	return n.base.Get(slot)
+}
+func (n noopLocalScope) Set(slot int, value any) {
+	if n.base == nil {
+		return
+	}
+	n.base.Set(slot, value)
+}
 func (n noopLocalScope) WithPrefix(prefix string) LocalScope {
 	return noopLocalScope{n.base.WithPrefix(prefix)}
 }

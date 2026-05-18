@@ -14,7 +14,7 @@ func TestClientStartAuthSession(t *testing.T) {
 			t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"provider_spec":"chatgpt","session_id":"sess-1","authorize_url":"https://auth.example","state":"pending"}`))
+		_, _ = w.Write([]byte(`{"provider_spec":"chatgpt","session_id":"sess-1","authorize_url":"https://auth.example","expires_at":"2026-05-18T12:00:00Z","state":"pending"}`))
 	}))
 	defer server.Close()
 
@@ -23,7 +23,7 @@ func TestClientStartAuthSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartAuthSession returned error: %v", err)
 	}
-	if out.ProviderSpec != "chatgpt" || out.SessionID != "sess-1" || out.State != "pending" {
+	if out.ProviderSpec != "chatgpt" || out.SessionID != "sess-1" || out.State != "pending" || out.ExpiresAt != "2026-05-18T12:00:00Z" {
 		t.Fatalf("unexpected output: %#v", out)
 	}
 }
@@ -72,7 +72,7 @@ func TestClientRetryAuthSession(t *testing.T) {
 			t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"sess-2","authorize_url":"https://auth.example","state":"pending"}`))
+		_, _ = w.Write([]byte(`{"session_id":"sess-2","authorize_url":"https://auth.example","expires_at":"2026-05-18T12:05:00Z","state":"pending"}`))
 	}))
 	defer server.Close()
 
@@ -81,7 +81,7 @@ func TestClientRetryAuthSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RetryAuthSession returned error: %v", err)
 	}
-	if out.SessionID != "sess-2" || out.State != "pending" {
+	if out.SessionID != "sess-2" || out.State != "pending" || out.ExpiresAt != "2026-05-18T12:05:00Z" {
 		t.Fatalf("unexpected output: %#v", out)
 	}
 }

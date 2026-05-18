@@ -69,14 +69,14 @@ func DecodeResponseBuffered(raw []byte) (canonical.CanonicalOutputValue, error) 
 
 // DecodeResponseStream returns canonical envelope events directly for completions streams.
 func DecodeResponseStream(body io.ReadCloser, exchangeID string) canonical.EventReader {
-	return &canonicalEnvelopeStreamCloser{
+	return &completionsEventReader{
 		exchangeID: exchangeID,
 		responseID: canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
 		reader:     protocols.NewSSEReader(body),
 	}
 }
 
-type canonicalEnvelopeStreamCloser struct {
+type completionsEventReader struct {
 	exchangeID string
 	responseID canonical.EnvelopeID
 	reader     *protocols.SSEReaderCloser
@@ -92,7 +92,7 @@ type canonicalEnvelopeStreamCloser struct {
 }
 
 // variants while maintaining canonical output ordering.
-func (s *canonicalEnvelopeStreamCloser) Next(context.Context) (canonical.Event, error) {
+func (s *completionsEventReader) Next(context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
 		s.pending = s.pending[1:]
@@ -114,7 +114,7 @@ func (s *canonicalEnvelopeStreamCloser) Next(context.Context) (canonical.Event, 
 			}
 			return canonical.Event{}, err
 		}
-		if strings.TrimSpace(event.Data) == "[DONE]" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(event.Data) == "[DONE]" { // swobu:io-string source=boundary
 			continue
 		}
 		rawChunk := []byte(event.Data)
@@ -151,14 +151,14 @@ func (s *canonicalEnvelopeStreamCloser) Next(context.Context) (canonical.Event, 
 				s.enqueueEnvelopeStart(s.textEnvID, s.responseID, canonical.EnvelopeStartPayload{
 					Kind: canonical.EnvMessage,
 					Role: canonical.ItemAuthorAssistant,
-				}, canonical.EventMeta{NativeID: "text_0"})
+				}, canonical.EventMetadataFields{NativeID: "text_0"})
 			}
 			s.enqueueTextDelta(s.textEnvID, choice.Text)
 			event := s.pending[0]
 			s.pending = s.pending[1:]
 			return event, nil
 		}
-		if strings.TrimSpace(choice.FinishReason) != "" && !s.completed { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(choice.FinishReason) != "" && !s.completed { // swobu:io-string source=boundary
 			s.completed = true
 			s.closeOpenTextWithStatus(canonical.EnvelopeStatusCompleted)
 			s.enqueueUsage(s.usage)
@@ -171,23 +171,23 @@ func (s *canonicalEnvelopeStreamCloser) Next(context.Context) (canonical.Event, 
 	}
 }
 
-func (s *canonicalEnvelopeStreamCloser) Close(context.Context) error {
+func (s *completionsEventReader) Close(context.Context) error {
 	return s.reader.Close()
 }
 
-func (s *canonicalEnvelopeStreamCloser) nextSeq() int64 {
+func (s *completionsEventReader) nextSeq() int64 {
 	s.seq++
 	return s.seq
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueue(ev canonical.Event) {
+func (s *completionsEventReader) enqueue(ev canonical.Event) {
 	ev.ExchangeID = s.exchangeID
 	ev.Seq = s.nextSeq()
 	ev.Time = time.Now().UTC()
 	s.pending = append(s.pending, ev)
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMeta) {
+func (s *completionsEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {
 	ev := canonical.Event{
 		Kind:     canonical.EventEnvelopeStart,
 		EnvID:    id,
@@ -200,7 +200,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueEnvelopeStart(id canonical.Envelo
 	s.enqueue(ev)
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
+func (s *completionsEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
 	s.enqueue(canonical.Event{
 		Kind:  canonical.EventEnvelopeEnd,
 		EnvID: id,
@@ -211,7 +211,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueEnvelopeEnd(id canonical.Envelope
 	})
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueTextDelta(id canonical.EnvelopeID, text string) {
+func (s *completionsEventReader) enqueueTextDelta(id canonical.EnvelopeID, text string) {
 	s.enqueue(canonical.Event{
 		Kind:    canonical.EventTextDelta,
 		EnvID:   id,
@@ -219,7 +219,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueTextDelta(id canonical.EnvelopeID
 	})
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueUsage(usage canonical.TokenUsage) {
+func (s *completionsEventReader) enqueueUsage(usage canonical.TokenUsage) {
 	s.enqueue(canonical.Event{
 		Kind:    canonical.EventUsage,
 		EnvID:   s.responseID,
@@ -227,7 +227,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueUsage(usage canonical.TokenUsage)
 	})
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueFinish(reason string) {
+func (s *completionsEventReader) enqueueFinish(reason string) {
 	s.enqueue(canonical.Event{
 		Kind:    canonical.EventFinish,
 		EnvID:   s.responseID,
@@ -235,7 +235,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueFinish(reason string) {
 	})
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueMetadata(values map[string]string) {
+func (s *completionsEventReader) enqueueMetadata(values map[string]string) {
 	s.enqueue(canonical.Event{
 		Kind:    canonical.EventMetadata,
 		EnvID:   s.responseID,
@@ -243,7 +243,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueMetadata(values map[string]string
 	})
 }
 
-func (s *canonicalEnvelopeStreamCloser) enqueueError(code string, message string) {
+func (s *completionsEventReader) enqueueError(code string, message string) {
 	s.enqueue(canonical.Event{
 		Kind:  canonical.EventError,
 		EnvID: s.responseID,
@@ -254,7 +254,7 @@ func (s *canonicalEnvelopeStreamCloser) enqueueError(code string, message string
 	})
 }
 
-func (s *canonicalEnvelopeStreamCloser) closeOpenTextWithStatus(status canonical.EnvelopeStatus) {
+func (s *completionsEventReader) closeOpenTextWithStatus(status canonical.EnvelopeStatus) {
 	if s.textOpen {
 		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
 		s.textOpen = false

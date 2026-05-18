@@ -7,21 +7,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/continuitystore"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
-	"github.com/swobuforge/swobu/internal/app/operator/authplane"
-	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
-	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
-	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
-	"github.com/swobuforge/swobu/internal/app/requestpath"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/ports"
@@ -58,7 +50,6 @@ type Daemon struct {
 	telemetry  embeddedTelemetryRuntimeState
 }
 
-var providerResponseHeaderTimeout = 5 * time.Minute
 var daemonReadHeaderTimeout = 10 * time.Second
 var daemonReadTimeout = 30 * time.Second
 var daemonWriteTimeout = 5 * time.Minute
@@ -114,7 +105,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		services := providersadapter.NewServices(
+		services := providersadapter.NewProviderServicesBundle(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
 		)
@@ -137,89 +128,10 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		continuity = continuitystore.NewLocalResponseContinuityStore(continuitystore.LocalResponseContinuityStoreConfig{})
 	}
 
-	orchestrator := requestpath.NewRequestHandler(daemon.endpoints, providers, evidence, continuity)
-	mux := http.NewServeMux()
-	mux.Handle("/c/", httpapi.NewHandler(orchestrator))
-	// Status is rendered at the HTTP edge for the same reason request handling is:
-	// bootstrap owns runtime truth, while httpapi owns HTTP response shape.
-	mux.Handle("/_swobu/status", httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
-		status, err := daemon.Status()
-		if err != nil {
-			return httpapi.StatusDocument{}, err
-		}
-		return httpapi.StatusDocument{
-			State:                string(status.State),
-			EndpointCount:        status.EndpointCount,
-			ControlPlaneProtocol: controlplane.Protocol,
-			SwobuVersion:         controlplane.SwobuVersion(),
-		}, nil
-	}))
-	mux.Handle("/_swobu/status-projection", httpapi.NewStatusProjectionHandler(func(_ context.Context, scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
-		return daemon.StatusProjectionForScope(scope)
-	}))
-	// Shutdown is a tiny internal control seam for the daemon CLI. It stays out
-	// of the public compatibility contract and only exists so `swobu down` can
-	// request graceful stop without inventing a second process manager.
-	mux.Handle("/_swobu/down", httpapi.NewShutdownHandler(func(context.Context) error {
-		go func() {
-			_ = daemon.Close(context.Background())
-		}()
-		return nil
-	}))
-	mux.Handle("/_swobu/model-catalog/probe", httpapi.NewModelCatalogProbeHandler(modelCatalog))
-	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
-	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
-		PublicBaseURL: daemonPublicBaseURLFromBindAddr(cfg.BindAddr),
-		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) (string, error) {
-			return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
-		}),
-	})
-	authDriver, err := authplane.NewChatGPTMethodDriver(chatGPTLogin)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg.BindAddr, providers, modelCatalog, evidence, continuity, authCredentialWritePolicy)
 	if err != nil {
-		return nil, fmt.Errorf("auth session driver: %w", err)
+		return nil, err
 	}
-	authStore := authplane.NewEndpointCredentialRefStore(endpointIntent)
-	authManager, err := authplane.NewManager(authDriver, authStore)
-	if err != nil {
-		return nil, fmt.Errorf("auth session manager: %w", err)
-	}
-	authSessionHandler := httpapi.NewAuthSessionHandler(
-		func(ctx context.Context, in authplane.StartInput) (authplane.StartOutput, error) {
-			return authManager.Start(ctx, in)
-		},
-		func(ctx context.Context, sessionID string) (authplane.SessionOutput, error) {
-			return authManager.Poll(ctx, sessionID)
-		},
-		func(ctx context.Context, sessionID string) error {
-			return authManager.Cancel(ctx, sessionID)
-		},
-		func(ctx context.Context, sessionID string) (authplane.StartOutput, error) {
-			return authManager.Retry(ctx, sessionID)
-		},
-	)
-	mux.Handle("/_swobu/auth/sessions", authSessionHandler)
-	mux.Handle("/_swobu/auth/sessions/", authSessionHandler)
-	mux.HandleFunc("/_swobu/auth/chatgpt/callback", chatGPTLogin.HandleCallback)
-	mux.Handle("/_swobu/endpoints", httpapi.NewEndpointControlHandler(
-		func(ctx context.Context) ([]endpointintent.Endpoint, error) { return endpointIntent.List(ctx) },
-		func(ctx context.Context, name string) (endpointintent.Endpoint, error) {
-			return endpointIntent.Get(ctx, name)
-		},
-		func(ctx context.Context, endpoint endpointintent.Endpoint) (endpointintent.Endpoint, error) {
-			return endpointIntent.Put(ctx, endpoint)
-		},
-		func(ctx context.Context, name string) error { return endpointIntent.Delete(ctx, name) },
-	))
-	mux.Handle("/_swobu/endpoints/", httpapi.NewEndpointControlHandler(
-		func(ctx context.Context) ([]endpointintent.Endpoint, error) { return endpointIntent.List(ctx) },
-		func(ctx context.Context, name string) (endpointintent.Endpoint, error) {
-			return endpointIntent.Get(ctx, name)
-		},
-		func(ctx context.Context, endpoint endpointintent.Endpoint) (endpointintent.Endpoint, error) {
-			return endpointIntent.Put(ctx, endpoint)
-		},
-		func(ctx context.Context, name string) error { return endpointIntent.Delete(ctx, name) },
-	))
 	server := newDaemonHTTPServer(cfg.BindAddr, mux)
 
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_start", "bind_addr", cfg.BindAddr)
@@ -246,46 +158,6 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	daemon.startTelemetryRuntime()
 
 	return daemon, nil
-}
-
-func newDaemonHTTPServer(bindAddr string, handler http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              bindAddr,
-		Handler:           handler,
-		ReadHeaderTimeout: daemonReadHeaderTimeout,
-		ReadTimeout:       daemonReadTimeout,
-		WriteTimeout:      daemonWriteTimeout,
-		IdleTimeout:       daemonIdleTimeout,
-	}
-}
-
-func newProviderHTTPClient() *http.Client {
-	baseTransport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return &http.Client{}
-	}
-	transport := baseTransport.Clone()
-	transport.ResponseHeaderTimeout = providerResponseHeaderTimeout
-	return &http.Client{Transport: transport}
-}
-
-func daemonPublicBaseURLFromBindAddr(bindAddr string) string {
-	addr := strings.TrimSpace(bindAddr) // trimlowerlint:allow boundary canonicalization
-	if addr == "" {
-		return "http://127.0.0.1:7926"
-	}
-	if strings.HasPrefix(strings.ToLower(addr), "http://") || strings.HasPrefix(strings.ToLower(addr), "https://") { // trimlowerlint:allow boundary canonicalization
-		return strings.TrimRight(addr, "/")
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "http://127.0.0.1:7926"
-	}
-	host = strings.TrimSpace(host) // trimlowerlint:allow boundary canonicalization
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	return "http://" + net.JoinHostPort(host, port)
 }
 
 func (d *Daemon) Close(ctx context.Context) error {

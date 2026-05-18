@@ -31,7 +31,7 @@ func allowWhileControlPlaneIncompatible(action update.Action) bool {
 func reduceDaemonState(model *Model, action update.Action) bool {
 	switch value := action.(type) {
 	case stateeffect.ControlPlaneIncompatibleDetected:
-		reason := strings.TrimSpace(value.Reason) // trimlowerlint:allow boundary canonicalization
+		reason := strings.TrimSpace(value.Reason) // swobu:io-string source=boundary
 		if reason == "" {
 			reason = "control-plane protocol mismatch"
 		}
@@ -39,8 +39,8 @@ func reduceDaemonState(model *Model, action update.Action) bool {
 			ExpectedProtocol:  value.ExpectedProtocol,
 			DaemonProtocol:    value.DaemonProtocol,
 			HasDaemonProtocol: value.HasDaemonProtocol,
-			TUIVersion:        strings.TrimSpace(value.TUIVersion),    // trimlowerlint:allow boundary canonicalization
-			DaemonVersion:     strings.TrimSpace(value.DaemonVersion), // trimlowerlint:allow boundary canonicalization
+			TUIVersion:        strings.TrimSpace(value.TUIVersion),    // swobu:io-string source=boundary
+			DaemonVersion:     strings.TrimSpace(value.DaemonVersion), // swobu:io-string source=boundary
 			Reason:            reason,
 			RecoveryCommand:   "restart daemon",
 			Note:              "",
@@ -63,12 +63,12 @@ func reduceDaemonState(model *Model, action update.Action) bool {
 		model.HeaderStatus = daemonstate.HeaderReady
 		model.DaemonHint = ""
 		model.FooterShowTabs = true
-		switch strings.TrimSpace(value.State) { // trimlowerlint:allow boundary canonicalization
-		case "healthy":
+		daemonState := strings.TrimSpace(value.State) // swobu:io-string source=boundary
+		if daemonState == "healthy" {
 			model.DaemonState = daemonstate.DaemonStateUp
-		case "uninitialized":
+		} else if daemonState == "uninitialized" {
 			model.DaemonState = daemonstate.DaemonStateUninitialized
-		default:
+		} else {
 			model.DaemonState = daemonstate.DaemonStateUp
 		}
 		if value.EndpointCount == 0 && model.DaemonState == daemonstate.DaemonStateUninitialized {
@@ -80,13 +80,13 @@ func reduceDaemonState(model *Model, action update.Action) bool {
 			model.HeaderStatus = "incompatible"
 			model.DaemonState = "incompatible"
 			model.DaemonHint = "daemon mismatch"
-			model.ControlPlane.Note = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+			model.ControlPlane.Note = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 			model.ControlPlane.NoteAction = ""
 			return true
 		}
 		model.HeaderStatus = daemonstate.HeaderOfflineStale
 		model.DaemonState = daemonstate.DaemonStateUnreachable
-		model.DaemonHint = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.DaemonHint = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return true
 	default:
 		return false

@@ -19,7 +19,7 @@ func TestChatCompletionsCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 		"stop",
 		usage,
 	)
-	raw, err := (chatcompletions.ChatCompletionsCodec{}).EncodeBuffered(output)
+	raw, err := (chatcompletions.ChatCompletionsFamilyCodec{}).EncodeBuffered(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 		"completed",
 		usage,
 	)
-	raw, err := (responses.ResponsesCodec{}).EncodeBuffered(output)
+	raw, err := (responses.ResponsesFamilyCodec{}).EncodeBuffered(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPrese
 		"completed",
 		usage,
 	)
-	raw, err := (responses.ResponsesCodec{}).EncodeBuffered(outputValue)
+	raw, err := (responses.ResponsesFamilyCodec{}).EncodeBuffered(outputValue)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestMessagesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 		"end_turn",
 		usage,
 	)
-	raw, err := (messages.MessagesCodec{}).EncodeBuffered(output)
+	raw, err := (messages.MessagesFamilyCodec{}).EncodeBuffered(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}

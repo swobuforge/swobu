@@ -84,7 +84,7 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 	for i := 0; i < len(items); {
 		item := items[i]
 		if item.Kind == canonical.ItemKindToolResult {
-			if strings.TrimSpace(item.ToolUseID) == "" { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(item.ToolUseID) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("tool_result items require tool_use_id for the chat completions protocol")
 			}
 			out = append(out, messageBody{

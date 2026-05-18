@@ -15,11 +15,25 @@ const (
 )
 
 func NewExecutionContract(deliveryMode bool) ExecutionContract {
-	return ports.NewExecutionContract(deliveryMode)
+	mode := ports.ResponseModeFromStreaming(deliveryMode)
+	return NewExecutionContractForModes(mode, mode)
 }
 
 func NewExecutionContractForModes(clientResponseMode ResponseMode, providerCallMode ResponseMode) ExecutionContract {
-	return ports.NewExecutionContractForModes(clientResponseMode, providerCallMode)
+	contract := ExecutionContract{
+		ClientResponseMode:     clientResponseMode,
+		ProviderCallMode:       providerCallMode,
+		AllowPreCommitFallback: false,
+	}
+	switch {
+	case clientResponseMode == ports.ResponseModeBuffered && providerCallMode == ports.ResponseModeStreaming:
+		contract.ConversionKind = ports.ConversionCollectStreamToBatch
+	case clientResponseMode == ports.ResponseModeStreaming && providerCallMode == ports.ResponseModeBuffered:
+		contract.ConversionKind = ports.ConversionSynthesizeBatchToStream
+	default:
+		contract.ConversionKind = ports.ConversionPassthrough
+	}
+	return contract
 }
 
 func NewExecutionContractWithPreCommitFallback(deliveryMode bool) ExecutionContract {

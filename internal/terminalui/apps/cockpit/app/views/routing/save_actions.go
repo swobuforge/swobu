@@ -12,8 +12,8 @@ func routingSaveSelectedTargetActions(endpointName, providerRef, rowKey string) 
 	return []update.Action{
 		state.RoutingSaveStartedAction{},
 		state.SaveSelectedTargetRequested{
-			EndpointName: strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderRef:  strings.TrimSpace(providerRef),  // trimlowerlint:allow boundary canonicalization
+			EndpointName: strings.TrimSpace(endpointName), // swobu:io-string source=boundary
+			ProviderRef:  strings.TrimSpace(providerRef),  // swobu:io-string source=boundary
 			ErrorAnchor:  views.ScopedErrorAnchor("routing", rowKey),
 		},
 	}
@@ -23,7 +23,7 @@ func routingSaveProviderConfigActions(endpointName string, providerConfig state.
 	return []update.Action{
 		state.RoutingSaveStartedAction{},
 		state.SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
+			EndpointName:   strings.TrimSpace(endpointName), // swobu:io-string source=boundary
 			ProviderConfig: providerConfig,
 			ErrorAnchor:    views.ScopedErrorAnchor("routing", rowKey),
 		},
@@ -34,7 +34,7 @@ func routingAddProviderConfigActions(endpointName string, providerConfig state.P
 	return []update.Action{
 		state.RoutingSaveStartedAction{},
 		state.AddProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
+			EndpointName:   strings.TrimSpace(endpointName), // swobu:io-string source=boundary
 			ProviderConfig: providerConfig,
 			ErrorAnchor:    views.ScopedErrorAnchor("routing", rowKey),
 		},
@@ -45,8 +45,8 @@ func routingDeleteProviderConfigActions(endpointName, providerRef, rowKey string
 	return []update.Action{
 		state.RoutingSaveStartedAction{},
 		state.DeleteProviderConfigRequested{
-			EndpointName: strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderRef:  strings.TrimSpace(providerRef),  // trimlowerlint:allow boundary canonicalization
+			EndpointName: strings.TrimSpace(endpointName), // swobu:io-string source=boundary
+			ProviderRef:  strings.TrimSpace(providerRef),  // swobu:io-string source=boundary
 			ErrorAnchor:  views.ScopedErrorAnchor("routing", rowKey),
 		},
 	}
@@ -55,9 +55,9 @@ func routingDeleteProviderConfigActions(endpointName, providerRef, rowKey string
 func routingStoreKeychainCredentialActions(providerSpec, keyName, secret, rowKey string) []update.Action {
 	return []update.Action{
 		state.StoreKeychainCredentialRequested{
-			ProviderSpec: strings.TrimSpace(providerSpec), // trimlowerlint:allow boundary canonicalization
-			KeyName:      strings.TrimSpace(keyName),      // trimlowerlint:allow boundary canonicalization
-			Secret:       strings.TrimSpace(secret),       // trimlowerlint:allow boundary canonicalization
+			ProviderSpec: strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
+			KeyName:      strings.TrimSpace(keyName),      // swobu:io-string source=boundary
+			Secret:       strings.TrimSpace(secret),       // swobu:io-string source=boundary
 			ErrorAnchor:  views.ScopedErrorAnchor("routing", rowKey),
 		},
 	}

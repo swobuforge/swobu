@@ -15,21 +15,23 @@ import (
 )
 
 type responseBody struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Message struct {
-			Role      string          `json:"role"`
-			Content   json.RawMessage `json:"content"`
-			ToolCalls []toolCallBody  `json:"tool_calls"`
-		} `json:"message"`
-		Delta struct {
-			Role      string               `json:"role"`
-			Content   string               `json:"content"`
-			ToolCalls []streamToolCallBody `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
+	ID      string             `json:"id"`
+	Model   string             `json:"model"`
+	Choices []streamChoiceBody `json:"choices"`
+}
+
+type streamChoiceBody struct {
+	Message struct {
+		Role      string          `json:"role"`
+		Content   json.RawMessage `json:"content"`
+		ToolCalls []toolCallBody  `json:"tool_calls"`
+	} `json:"message"`
+	Delta struct {
+		Role      string               `json:"role"`
+		Content   string               `json:"content"`
+		ToolCalls []streamToolCallBody `json:"tool_calls"`
+	} `json:"delta"`
+	FinishReason string `json:"finish_reason"`
 }
 
 type streamToolCallBody struct {
@@ -96,10 +98,17 @@ func DecodeResponseBuffered(raw []byte) (canonical.CanonicalOutputValue, error) 
 
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
 func DecodeResponseStream(body io.ReadCloser, exchangeID string) canonical.EventReader {
-	return newStreamDecoder(body, exchangeID)
+	return &chatCompletionsEventReader{
+		exchangeID:  exchangeID,
+		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		reader:      protocols.NewSSEReader(body),
+		toolCalls:   map[int]streamToolState{},
+		toolEnvIDs:  map[int]canonical.EnvelopeID{},
+		latestUsage: canonical.NewUnknownTokenUsage(),
+	}
 }
 
-type canonicalOutputEventStreamCloser struct {
+type chatCompletionsEventReader struct {
 	exchangeID  string
 	responseID  canonical.EnvelopeID
 	reader      *protocols.SSEReaderCloser
@@ -124,20 +133,9 @@ type streamToolState struct {
 	PendingArgs  []string
 }
 
-func newStreamDecoder(body io.ReadCloser, exchangeID string) *canonicalOutputEventStreamCloser {
-	return &canonicalOutputEventStreamCloser{
-		exchangeID:  exchangeID,
-		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:      protocols.NewSSEReader(body),
-		toolCalls:   map[int]streamToolState{},
-		toolEnvIDs:  map[int]canonical.EnvelopeID{},
-		latestUsage: canonical.NewUnknownTokenUsage(),
-	}
-}
-
 // ordered state machine over text, tool calls, and terminal frames.
 // variants while maintaining canonical output ordering.
-func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Event, error) {
+func (s *chatCompletionsEventReader) Next(context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
 		s.pending = s.pending[1:]
@@ -159,7 +157,7 @@ func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Even
 			}
 			return canonical.Event{}, err
 		}
-		if strings.TrimSpace(event.Data) == "[DONE]" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(event.Data) == "[DONE]" { // swobu:io-string source=boundary
 			continue
 		}
 		rawChunk := []byte(event.Data)
@@ -189,72 +187,84 @@ func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Even
 			continue
 		}
 		choice := chunk.Choices[0]
-		if choice.Delta.Content != "" {
-			if !s.textOpen {
-				s.textOpen = true
-				s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
-				s.enqueueEnvelopeStart(s.textEnvID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMeta{NativeID: "text_0"})
-			}
-			s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, EnvID: s.textEnvID, Payload: canonical.TextDeltaPayload{Text: choice.Delta.Content}})
+		if err := s.applyChoiceDelta(choice); err != nil {
+			return canonical.Event{}, err
 		}
-		for _, call := range choice.Delta.ToolCalls {
-			if err := s.queueToolCallDelta(call); err != nil {
-				return canonical.Event{}, err
-			}
-		}
-		if strings.TrimSpace(choice.FinishReason) != "" && !s.completed { // trimlowerlint:allow boundary canonicalization
-			if s.textOpen {
-				s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, canonical.EnvelopeStatusCompleted)
-				s.textOpen = false
-			}
-			for idx, state := range s.toolCalls {
-				if state.Started {
-					if envID := s.toolEnvIDs[idx]; envID != "" {
-						s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
-					}
-				}
-				delete(s.toolCalls, idx)
-				delete(s.toolEnvIDs, idx)
-			}
-			s.completed = true
-			s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
-			s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
-			s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
-		}
+		s.applyChoiceFinish(choice)
 		if len(s.pending) > 0 {
 			return s.shiftPending(), nil
 		}
 	}
 }
 
-func (s *canonicalOutputEventStreamCloser) Close(context.Context) error {
+func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) error {
+	if choice.Delta.Content != "" {
+		if !s.textOpen {
+			s.textOpen = true
+			s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
+			s.enqueueEnvelopeStart(s.textEnvID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMetadataFields{NativeID: "text_0"})
+		}
+		s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, EnvID: s.textEnvID, Payload: canonical.TextDeltaPayload{Text: choice.Delta.Content}})
+	}
+	for _, call := range choice.Delta.ToolCalls {
+		if err := s.queueToolCallDelta(call); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *chatCompletionsEventReader) applyChoiceFinish(choice streamChoiceBody) {
+	if strings.TrimSpace(choice.FinishReason) == "" || s.completed { // swobu:io-string source=boundary
+		return
+	}
+	if s.textOpen {
+		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, canonical.EnvelopeStatusCompleted)
+		s.textOpen = false
+	}
+	for idx, state := range s.toolCalls {
+		if state.Started {
+			if envID := s.toolEnvIDs[idx]; envID != "" {
+				s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
+			}
+		}
+		delete(s.toolCalls, idx)
+		delete(s.toolEnvIDs, idx)
+	}
+	s.completed = true
+	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
+	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+}
+
+func (s *chatCompletionsEventReader) Close(context.Context) error {
 	return s.reader.Close()
 }
 
-func (s *canonicalOutputEventStreamCloser) shiftPending() canonical.Event {
+func (s *chatCompletionsEventReader) shiftPending() canonical.Event {
 	event := s.pending[0]
 	s.pending = s.pending[1:]
 	return event
 }
 
-func (s *canonicalOutputEventStreamCloser) queueToolCallDelta(call streamToolCallBody) error {
+func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody) error {
 	state := s.toolCalls[call.Index]
 	if state.OutputItemID == "" {
 		state.OutputItemID = "tool_" + strconv.Itoa(call.Index)
 	}
 	if state.ToolUseID == "" {
-		state.ToolUseID = strings.TrimSpace(call.ID) // trimlowerlint:allow boundary canonicalization
+		state.ToolUseID = strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if state.ToolUseID == "" {
 			state.ToolUseID = "toolu_swobu_" + strconv.Itoa(call.Index)
 		}
 	}
-	if strings.TrimSpace(call.Function.Name) != "" { // trimlowerlint:allow boundary canonicalization
-		state.Name = strings.TrimSpace(call.Function.Name) // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(call.Function.Name) != "" { // swobu:io-string source=boundary
+		state.Name = strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
 	}
 	if call.Function.Arguments != "" {
 		state.PendingArgs = append(state.PendingArgs, call.Function.Arguments)
 	}
-	if !state.Started && strings.TrimSpace(state.Name) == "" { // trimlowerlint:allow boundary canonicalization
+	if !state.Started && strings.TrimSpace(state.Name) == "" { // swobu:io-string source=boundary
 		s.toolCalls[call.Index] = state
 		return nil
 	}
@@ -262,7 +272,7 @@ func (s *canonicalOutputEventStreamCloser) queueToolCallDelta(call streamToolCal
 		state.Started = true
 		envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, state.OutputItemID))
 		s.toolEnvIDs[call.Index] = envID
-		s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: state.Name, ToolUseID: state.ToolUseID}, canonical.EventMeta{NativeID: state.OutputItemID})
+		s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: state.Name, ToolUseID: state.ToolUseID}, canonical.EventMetadataFields{NativeID: state.OutputItemID})
 	}
 	for _, delta := range state.PendingArgs {
 		s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, EnvID: s.toolEnvIDs[call.Index], Payload: canonical.ArgsDeltaPayload{Args: delta}})
@@ -272,19 +282,19 @@ func (s *canonicalOutputEventStreamCloser) queueToolCallDelta(call streamToolCal
 	return nil
 }
 
-func (s *canonicalOutputEventStreamCloser) nextSeq() int64 {
+func (s *chatCompletionsEventReader) nextSeq() int64 {
 	s.seq++
 	return s.seq
 }
 
-func (s *canonicalOutputEventStreamCloser) enqueue(ev canonical.Event) {
+func (s *chatCompletionsEventReader) enqueue(ev canonical.Event) {
 	ev.ExchangeID = s.exchangeID
 	ev.Seq = s.nextSeq()
 	ev.Time = time.Now().UTC()
 	s.pending = append(s.pending, ev)
 }
 
-func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMeta) {
+func (s *chatCompletionsEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {
 	ev := canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: id, ParentID: parent, Payload: payload}
 	if len(meta) > 0 {
 		ev.Meta = meta[0]
@@ -292,11 +302,11 @@ func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeStart(id canonical.Env
 	s.enqueue(ev)
 }
 
-func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
+func (s *chatCompletionsEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
 }
 
-func (s *canonicalOutputEventStreamCloser) closeOpenChildren(status canonical.EnvelopeStatus) {
+func (s *chatCompletionsEventReader) closeOpenChildren(status canonical.EnvelopeStatus) {
 	if s.textOpen {
 		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
 		s.textOpen = false
@@ -329,22 +339,22 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 			return nil, canonical.InternalError("chat completions response tool call type is unsupported")
 		}
 		input := map[string]any{}
-		if strings.TrimSpace(call.Function.Arguments) != "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(call.Function.Arguments) != "" { // swobu:io-string source=boundary
 			if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil {
 				return nil, canonical.InternalError("chat completions response tool call arguments are invalid")
 			}
 		}
-		itemID := strings.TrimSpace(call.ID) // trimlowerlint:allow boundary canonicalization
+		itemID := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if itemID == "" {
 			itemID = "tool_0"
 		}
-		out = append(out, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(call.ID), strings.TrimSpace(call.Function.Name), input)) // trimlowerlint:allow boundary canonicalization
+		out = append(out, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(call.ID), strings.TrimSpace(call.Function.Name), input)) // swobu:io-string source=boundary
 	}
 	return out, nil
 }
 
 func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, error) {
-	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" { // trimlowerlint:allow boundary canonicalization
+	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" { // swobu:io-string source=boundary
 		return nil, nil
 	}
 	var text string
@@ -366,7 +376,7 @@ func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, e
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	for _, part := range parts {
-		partType := strings.TrimSpace(part.Type) // trimlowerlint:allow boundary canonicalization
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"
 		}

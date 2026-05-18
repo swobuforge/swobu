@@ -36,7 +36,7 @@ func normalizeCodexRequest(wireReq protocols.WireRequest) (protocols.WireRequest
 	if !hasNonEmptyStringField(body, "instructions") {
 		body["instructions"] = "You are a helpful assistant."
 	}
-	if inputText, ok := body["input"].(string); ok && strings.TrimSpace(inputText) != "" { // trimlowerlint:allow boundary canonicalization
+	if inputText, ok := body["input"].(string); ok && strings.TrimSpace(inputText) != "" { // swobu:io-string source=boundary
 		body["input"] = []any{
 			map[string]any{
 				"type": "message",
@@ -68,5 +68,5 @@ func hasNonEmptyStringField(body map[string]any, key string) bool {
 	if !ok {
 		return false
 	}
-	return strings.TrimSpace(typed) != "" // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(typed) != "" // swobu:io-string source=boundary
 }

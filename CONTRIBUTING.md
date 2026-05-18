@@ -78,6 +78,13 @@ By submitting a contribution, you agree to the terms in [`CLA.md`](./CLA.md).
 
 Swobu must be able to maintain, sublicense, dual-license, and relicense contributions as the project evolves.
 
+Why this exists:
+
+- Swobu is AGPL-licensed in public.
+- some teams need a commercial license path.
+- the CLA preserves that option while keeping the public project open.
+- contributors keep ownership of their contributions.
+
 Only submit code, docs, tests, designs, or assets you have the legal right to contribute.
 
 If you contribute on behalf of an employer, client, school, or other organization, ensure you are authorized to do so.

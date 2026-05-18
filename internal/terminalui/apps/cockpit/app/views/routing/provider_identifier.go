@@ -11,16 +11,16 @@ import (
 const unresolvedProviderIdentifier = "not configured"
 
 func providerHumanIdentifier(pc state.ProviderConfigSnapshot) string {
-	alias := strings.TrimSpace(pc.TargetAlias) // trimlowerlint:allow boundary canonicalization
+	alias := strings.TrimSpace(pc.TargetAlias) // swobu:io-string source=boundary
 	if alias != "" {
 		return alias
 	}
-	provider := strings.TrimSpace(strings.ToLower(pc.ProviderSpec)) // trimlowerlint:allow boundary canonicalization
-	model := strings.TrimSpace(pc.ModelID)                          // trimlowerlint:allow boundary canonicalization
+	provider := strings.TrimSpace(strings.ToLower(pc.ProviderSpec)) // swobu:io-string source=boundary
+	model := strings.TrimSpace(pc.ModelID)                          // swobu:io-string source=boundary
 	if provider == "" || model == "" {
 		return unresolvedProviderIdentifier
 	}
-	return provider + ":" + model + ":" + shortStableHash(strings.TrimSpace(pc.CredentialRef)) // trimlowerlint:allow boundary canonicalization
+	return provider + ":" + model + ":" + shortStableHash(strings.TrimSpace(pc.CredentialRef)) // swobu:io-string source=boundary
 }
 
 func shortStableHash(value string) string {

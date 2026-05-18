@@ -12,25 +12,25 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-type ResponsesCodec struct{}
+type ResponsesFamilyCodec struct{}
 
-func (ResponsesCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
+func (ResponsesFamilyCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
 	var dto responsesRequestDTO
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, false, canonical.BadRequest("responses request body is invalid JSON")
 	}
-	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID)) // trimlowerlint:allow boundary canonicalization
+	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID)) // swobu:io-string source=boundary
 	inputText, conversation, err := decodeResponsesInput(dto.Input)
 	if err != nil {
 		return nil, false, err
 	}
-	if strings.TrimSpace(dto.PreviousResponseID) != "" && strings.TrimSpace(dto.Conversation) != "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(dto.PreviousResponseID) != "" && strings.TrimSpace(dto.Conversation) != "" { // swobu:io-string source=boundary
 		return nil, false, canonical.BadRequest("responses request must not specify both previous_response_id and conversation")
 	}
-	if strings.TrimSpace(dto.Conversation) != "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(dto.Conversation) != "" { // swobu:io-string source=boundary
 		return nil, false, canonical.BadRequest("responses conversation is not supported in swobu v0")
 	}
-	if inputText == "" && len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseID) == "" { // trimlowerlint:allow boundary canonicalization
+	if inputText == "" && len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseID) == "" { // swobu:io-string source=boundary
 		return nil, false, canonical.BadRequest("responses request is missing required fields")
 	}
 	toolMode, err := DecodeResponsesToolMode(dto.ToolChoice)
@@ -38,13 +38,13 @@ func (ResponsesCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, boo
 		return nil, false, err
 	}
 	request := canonical.NewGenerationRequest(canonical.GenerationRequestParams{
-		Model:                strings.TrimSpace(dto.Model), // trimlowerlint:allow boundary canonicalization
+		Model:                strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
 		InputText:            inputText,
 		Items:                conversation,
 		ToolMode:             toolMode,
-		PreviousResponseID:   strings.TrimSpace(dto.PreviousResponseID),   // trimlowerlint:allow boundary canonicalization
-		PromptCacheKey:       strings.TrimSpace(dto.PromptCacheKey),       // trimlowerlint:allow boundary canonicalization
-		PromptCacheRetention: strings.TrimSpace(dto.PromptCacheRetention), // trimlowerlint:allow boundary canonicalization
+		PreviousResponseID:   strings.TrimSpace(dto.PreviousResponseID),   // swobu:io-string source=boundary
+		PromptCacheKey:       strings.TrimSpace(dto.PromptCacheKey),       // swobu:io-string source=boundary
+		PromptCacheRetention: strings.TrimSpace(dto.PromptCacheRetention), // swobu:io-string source=boundary
 	})
 	if err := canonical.ValidateResponseContinuationSelectors(request); err != nil {
 		return nil, false, err
@@ -53,7 +53,7 @@ func (ResponsesCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, boo
 }
 
 func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
-	raw := strings.TrimSpace(string(input)) // trimlowerlint:allow boundary canonicalization
+	raw := strings.TrimSpace(string(input)) // swobu:io-string source=boundary
 	if raw == "" {
 		raw = "null"
 	}
@@ -75,14 +75,15 @@ func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
 // to default mode for forward canonical. Invalid JSON type shapes still fail
 // request validation.
 func DecodeResponsesToolMode(raw json.RawMessage) (canonical.ToolMode, error) {
-	raw = json.RawMessage(strings.TrimSpace(string(raw))) // trimlowerlint:allow boundary canonicalization
+	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		return canonical.ToolModeDefault, nil
 	}
 
 	var stringMode string
 	if err := json.Unmarshal(raw, &stringMode); err == nil {
-		switch strings.ToLower(strings.TrimSpace(stringMode)) { // trimlowerlint:allow boundary canonicalization
+		normalizedMode := strings.ToLower(strings.TrimSpace(stringMode)) // swobu:io-string source=provider-wire
+		switch normalizedMode {
 		case "", "none":
 			return canonical.ToolModeDefault, nil
 		case "auto":
@@ -100,7 +101,8 @@ func DecodeResponsesToolMode(raw json.RawMessage) (canonical.ToolMode, error) {
 	if err := json.Unmarshal(raw, &objectMode); err != nil {
 		return canonical.ToolModeDefault, canonical.BadRequest("responses request tool_choice is invalid")
 	}
-	switch strings.ToLower(strings.TrimSpace(objectMode.Type)) { // trimlowerlint:allow boundary canonicalization
+	normalizedType := strings.ToLower(strings.TrimSpace(objectMode.Type)) // swobu:io-string source=provider-wire
+	switch normalizedType {
 	case "function", "required":
 		return canonical.ToolModeRequired, nil
 	case "auto":
@@ -110,7 +112,7 @@ func DecodeResponsesToolMode(raw json.RawMessage) (canonical.ToolMode, error) {
 	}
 }
 
-func (ResponsesCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
+func (ResponsesFamilyCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
 	encoded := make([]responsesOutputItemDTO, 0, len(output.Items()))
 	outputText := ""
 	for _, item := range output.Items() {
@@ -153,13 +155,13 @@ func (ResponsesCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, 
 	return encodedBody, nil
 }
 
-func (ResponsesCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
-	return &responsesClientStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
+func (ResponsesFamilyCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
+	return &responsesEnvelopeStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
 }
 
 // family's polymorphic item shapes at the transport edge.
 func decodeResponsesInput(raw json.RawMessage) (string, []canonical.CanonicalItem, error) {
-	raw = json.RawMessage(strings.TrimSpace(string(raw))) // trimlowerlint:allow boundary canonicalization
+	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", nil, nil
 	}
@@ -176,13 +178,13 @@ func decodeResponsesInput(raw json.RawMessage) (string, []canonical.CanonicalIte
 
 	decoded := make([]canonical.CanonicalItem, 0, len(items))
 	for idx, item := range items {
-		itemType := strings.TrimSpace(item.Type) // trimlowerlint:allow boundary canonicalization
+		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
 		if itemType == "" {
 			itemType = "message"
 		}
 		switch itemType {
 		case "message":
-			role := strings.TrimSpace(item.Role) // trimlowerlint:allow boundary canonicalization
+			role := strings.TrimSpace(item.Role) // swobu:io-string source=boundary
 			if role == "" {
 				role = "user"
 			}
@@ -192,23 +194,23 @@ func decodeResponsesInput(raw json.RawMessage) (string, []canonical.CanonicalIte
 			}
 			decoded = append(decoded, parts...)
 		case "function_call":
-			callID := strings.TrimSpace(item.CallID) // trimlowerlint:allow boundary canonicalization
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			if callID == "" {
-				callID = strings.TrimSpace(item.ID) // trimlowerlint:allow boundary canonicalization
+				callID = strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			}
 			if callID == "" {
 				callID = openaicompat.GeneratedToolUseID(idx, 0)
 			}
-			if strings.TrimSpace(item.Name) == "" { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(item.Name) == "" { // swobu:io-string source=boundary
 				return "", nil, canonical.BadRequest("responses request function_call items require a name")
 			}
 			input, err := httpcodec.DecodeJSONObject(item.Arguments, "responses request function_call arguments are invalid")
 			if err != nil {
 				return "", nil, err
 			}
-			decoded = append(decoded, canonical.NewToolUseItem(canonical.ItemAuthorAssistant, "", callID, strings.TrimSpace(item.Name), input)) // trimlowerlint:allow boundary canonicalization
+			decoded = append(decoded, canonical.NewToolUseItem(canonical.ItemAuthorAssistant, "", callID, strings.TrimSpace(item.Name), input)) // swobu:io-string source=boundary
 		case "function_call_output":
-			callID := strings.TrimSpace(item.CallID) // trimlowerlint:allow boundary canonicalization
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			if callID == "" {
 				return "", nil, canonical.BadRequest("responses request function_call_output items require call_id")
 			}
@@ -236,7 +238,7 @@ func decodeResponseOutputText(raw json.RawMessage) (string, error) {
 	}
 	var builder strings.Builder
 	for _, part := range content {
-		partType := strings.TrimSpace(part.Type) // trimlowerlint:allow boundary canonicalization
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		if partType != "" && partType != "text" && partType != "output_text" {
 			return "", canonical.BadRequest("responses request function_call_output must contain text only")
 		}
@@ -267,12 +269,12 @@ func responsesUsageFromCanonical(usage canonical.TokenUsage) *responsesUsageDTO 
 	return dto
 }
 
-type responsesClientStreamEncoder struct {
+type responsesEnvelopeStreamEncoder struct {
 	wire    ResponsesClientStreamEncoderWire
 	adapter *httpcodec.EnvelopeEventAdapter
 }
 
-func (s *responsesClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
+func (s *responsesEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
 	streamEvents := s.adapter.Translate(event)
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
@@ -285,7 +287,7 @@ func (s *responsesClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Event
 	return frames, nil
 }
 
-func (s *responsesClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
+func (s *responsesEnvelopeStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
 	encoder := s.encoder()
 	rawFrames, err := encoder.Encode(event)
 	if err != nil {
@@ -301,7 +303,7 @@ func (s *responsesClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]
 	return frames, nil
 }
 
-func (s *responsesClientStreamEncoder) Finish() ([][]byte, error) {
+func (s *responsesEnvelopeStreamEncoder) Finish() ([][]byte, error) {
 	encoder := s.encoder()
 	rawFrames, err := encoder.Finish()
 	if err != nil {
@@ -317,7 +319,7 @@ func (s *responsesClientStreamEncoder) Finish() ([][]byte, error) {
 	return frames, nil
 }
 
-func (s *responsesClientStreamEncoder) encoder() *ResponsesClientStreamEncoderWire {
+func (s *responsesEnvelopeStreamEncoder) encoder() *ResponsesClientStreamEncoderWire {
 	if s.wire.toolItems == nil {
 		s.wire = NewResponsesClientStreamEncoderWire()
 	}

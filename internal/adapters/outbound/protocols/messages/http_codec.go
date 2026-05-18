@@ -10,9 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-type MessagesCodec struct{}
+type MessagesFamilyCodec struct{}
 
-func (MessagesCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
+func (MessagesFamilyCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
 	var dto messagesRequestDTO
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, false, canonical.BadRequest("messages request body is invalid JSON")
@@ -22,16 +22,16 @@ func (MessagesCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool
 	}
 	items := make([]canonical.CanonicalItem, 0, len(dto.Messages))
 	for idx, msg := range dto.Messages {
-		decoded, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role)) // trimlowerlint:allow boundary canonicalization
+		decoded, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role)) // swobu:io-string source=boundary
 		if err != nil {
 			return nil, false, err
 		}
 		items = append(items, decoded...)
 	}
-	return canonical.NewDialogRequest(strings.TrimSpace(dto.Model), items), dto.Stream, nil // trimlowerlint:allow boundary canonicalization
+	return canonical.NewDialogRequest(strings.TrimSpace(dto.Model), items), dto.Stream, nil // swobu:io-string source=boundary
 }
 
-func (MessagesCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
+func (MessagesFamilyCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
 	items := output.Items()
 	content := make([]messagesResponsePartDTO, 0, len(items))
 	for _, item := range items {
@@ -65,8 +65,8 @@ func (MessagesCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, e
 	})
 }
 
-func (MessagesCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
-	return &messagesClientStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
+func (MessagesFamilyCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
+	return &messagesEnvelopeStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
 }
 
 // family's mixed content variants at the transport edge.
@@ -94,30 +94,31 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string) ([]canoni
 
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	for _, part := range parts {
-		switch strings.TrimSpace(part.Type) { // trimlowerlint:allow boundary canonicalization
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=provider-wire
+		switch partType {
 		case "text":
 			if part.Text == "" {
 				return nil, canonical.BadRequest("messages request text parts must not be empty")
 			}
 			decoded = append(decoded, canonical.NewTextItem(author, part.Text))
 		case "tool_use":
-			if strings.TrimSpace(part.Name) == "" { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(part.Name) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("messages request tool_use parts require a name")
 			}
 			input, err := httpcodec.DecodeJSONObject(part.Input, "messages request tool_use input is invalid")
 			if err != nil {
 				return nil, err
 			}
-			decoded = append(decoded, canonical.NewToolUseItem(author, "", strings.TrimSpace(part.ID), strings.TrimSpace(part.Name), input)) // trimlowerlint:allow boundary canonicalization
+			decoded = append(decoded, canonical.NewToolUseItem(author, "", strings.TrimSpace(part.ID), strings.TrimSpace(part.Name), input)) // swobu:io-string source=boundary
 		case "tool_result":
-			if strings.TrimSpace(part.ToolUseID) == "" { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(part.ToolUseID) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("messages request tool_result parts require tool_use_id")
 			}
 			text, err := decodeToolResultText(part.Content)
 			if err != nil {
 				return nil, err
 			}
-			decoded = append(decoded, canonical.NewToolResultItem(author, strings.TrimSpace(part.ToolUseID), text)) // trimlowerlint:allow boundary canonicalization
+			decoded = append(decoded, canonical.NewToolResultItem(author, strings.TrimSpace(part.ToolUseID), text)) // swobu:io-string source=boundary
 		default:
 			return nil, canonical.BadRequest("messages request content contains an unsupported part type")
 		}
@@ -153,7 +154,7 @@ func decodeToolResultText(raw json.RawMessage) (string, error) {
 	}
 	var builder strings.Builder
 	for _, part := range parts {
-		if strings.TrimSpace(part.Type) != "text" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(part.Type) != "text" { // swobu:io-string source=boundary
 			return "", canonical.BadRequest("messages request tool_result content must contain text parts only")
 		}
 		builder.WriteString(part.Text)
@@ -161,7 +162,7 @@ func decodeToolResultText(raw json.RawMessage) (string, error) {
 	return builder.String(), nil
 }
 
-type messagesClientStreamEncoder struct {
+type messagesEnvelopeStreamEncoder struct {
 	started        bool
 	nextIndex      int
 	activeTextID   string
@@ -171,7 +172,7 @@ type messagesClientStreamEncoder struct {
 	adapter        *httpcodec.EnvelopeEventAdapter
 }
 
-func (s *messagesClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
+func (s *messagesEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
 	streamEvents := s.adapter.Translate(event)
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
@@ -186,7 +187,7 @@ func (s *messagesClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Event)
 
 // event-to-frame fanout over blocks, tool calls, and terminal envelopes.
 // and lifecycle event shapes defined by the wire contract.
-func (s *messagesClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
+func (s *messagesEnvelopeStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
 	if s.blockIndexByID == nil {
 		s.blockIndexByID = map[string]int{}
 	}
@@ -342,4 +343,4 @@ func (s *messagesClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]b
 	}
 }
 
-func (s *messagesClientStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
+func (s *messagesEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }

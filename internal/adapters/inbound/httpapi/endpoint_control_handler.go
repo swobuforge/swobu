@@ -105,8 +105,7 @@ func (h EndpointControlHandler) serveCollection(w http.ResponseWriter, req *http
 
 // preserving structured daemon-side operator errors.
 func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.Request, name string) {
-	switch req.Method {
-	case http.MethodGet:
+	if req.Method == http.MethodGet {
 		if h.get == nil {
 			writeEndpointControlError(w, operatorendpoints.CommandError{
 				Code:    operatorendpoints.CommandUnavailable,
@@ -120,7 +119,9 @@ func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.R
 			return
 		}
 		writeEndpointControlJSON(w, http.StatusOK, encodeEndpointDocument(endpoint))
-	case http.MethodPut:
+		return
+	}
+	if req.Method == http.MethodPut {
 		if h.put == nil {
 			writeEndpointControlError(w, operatorendpoints.CommandError{
 				Code:    operatorendpoints.CommandUnavailable,
@@ -137,7 +138,7 @@ func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.R
 			})
 			return
 		}
-		if strings.TrimSpace(doc.Name) != strings.TrimSpace(name) { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(doc.Name) != strings.TrimSpace(name) { // swobu:io-string source=boundary
 			writeEndpointControlError(w, operatorendpoints.CommandError{
 				Code:    operatorendpoints.CommandInvalidArgument,
 				Message: "endpoint document name must match the request path",
@@ -159,7 +160,9 @@ func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.R
 			return
 		}
 		writeEndpointControlJSON(w, http.StatusOK, encodeEndpointDocument(saved))
-	case http.MethodDelete:
+		return
+	}
+	if req.Method == http.MethodDelete {
 		if h.delete == nil {
 			writeEndpointControlError(w, operatorendpoints.CommandError{
 				Code:    operatorendpoints.CommandUnavailable,
@@ -172,21 +175,20 @@ func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.R
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
 	}
+	w.WriteHeader(http.StatusMethodNotAllowed)
 }
 
 func endpointNameFromPath(path string) (string, bool) {
-	switch path {
-	case "/_swobu/endpoints", "/_swobu/endpoints/":
+	if path == "/_swobu/endpoints" || path == "/_swobu/endpoints/" {
 		return "", false
 	}
 	if !strings.HasPrefix(path, "/_swobu/endpoints/") {
 		return "", false
 	}
 	name := strings.TrimPrefix(path, "/_swobu/endpoints/")
-	if strings.Contains(name, "/") || strings.TrimSpace(name) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.Contains(name, "/") || strings.TrimSpace(name) == "" { // swobu:io-string source=boundary
 		return "", false
 	}
 	return name, true
@@ -200,7 +202,7 @@ func isMalformedEndpointControlPath(path string) bool {
 		return false
 	}
 	name := strings.TrimPrefix(path, "/_swobu/endpoints/")
-	return strings.Contains(name, "/") || strings.TrimSpace(name) == "" // trimlowerlint:allow boundary canonicalization
+	return strings.Contains(name, "/") || strings.TrimSpace(name) == "" // swobu:io-string source=boundary
 }
 
 func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
@@ -248,7 +250,7 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		if strings.TrimSpace(encoded.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(encoded.SelectedFrame) != "" { // swobu:io-string source=boundary
 			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
 			if err != nil {
 				return endpointintent.Endpoint{}, err

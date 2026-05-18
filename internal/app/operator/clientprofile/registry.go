@@ -14,12 +14,12 @@ func Catalog() []Profile {
 
 // FindByLabel returns the matching profile by exact trimmed label.
 func FindByLabel(profiles []Profile, label string) Profile {
-	label = strings.TrimSpace(label) // trimlowerlint:allow boundary canonicalization
+	label = strings.TrimSpace(label) // swobu:io-string source=boundary
 	if label == "" {
 		return nil
 	}
 	for _, profile := range profiles {
-		if strings.TrimSpace(profile.Identity().Label) == label { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(profile.Identity().Label) == label { // swobu:io-string source=boundary
 			return profile
 		}
 	}
@@ -28,12 +28,12 @@ func FindByLabel(profiles []Profile, label string) Profile {
 
 // FindByID returns the matching profile by exact trimmed id.
 func FindByID(profiles []Profile, id string) Profile {
-	id = strings.TrimSpace(id) // trimlowerlint:allow boundary canonicalization
+	id = strings.TrimSpace(id) // swobu:io-string source=boundary
 	if id == "" {
 		return nil
 	}
 	for _, profile := range profiles {
-		if strings.TrimSpace(profile.Identity().ID) == id { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(profile.Identity().ID) == id { // swobu:io-string source=boundary
 			return profile
 		}
 	}

@@ -47,7 +47,7 @@ func (h StatusProjectionHandler) ServeHTTP(w http.ResponseWriter, req *http.Requ
 }
 
 func parseProjectionScope(req *http.Request) (evidencestore.ProjectionScope, error) {
-	raw := strings.TrimSpace(req.URL.Query().Get("scope")) // trimlowerlint:allow boundary canonicalization
+	raw := strings.TrimSpace(req.URL.Query().Get("scope")) // swobu:io-string source=boundary
 	if raw == "" {
 		return evidencestore.ProjectionScope{}, fmt.Errorf("status projection scope is required")
 	}
@@ -56,7 +56,7 @@ func parseProjectionScope(req *http.Request) (evidencestore.ProjectionScope, err
 	}
 	const endpointPrefix = "endpoint:"
 	if strings.HasPrefix(raw, endpointPrefix) {
-		endpoint := strings.TrimSpace(strings.TrimPrefix(raw, endpointPrefix)) // trimlowerlint:allow boundary canonicalization
+		endpoint := strings.TrimSpace(strings.TrimPrefix(raw, endpointPrefix)) // swobu:io-string source=boundary
 		if endpoint == "" {
 			return evidencestore.ProjectionScope{}, fmt.Errorf("status projection endpoint scope requires endpoint name")
 		}

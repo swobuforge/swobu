@@ -10,7 +10,7 @@ import (
 type ButtonRenderNode struct{ *ActionRenderNode }
 
 func NewButton(label string, onActivate func() []update.Action) *ButtonRenderNode {
-	trimmed := strings.TrimSpace(label) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(label) // swobu:io-string source=boundary
 	intrinsic := runeLen(trimmed) + 4
 	return &ButtonRenderNode{
 		ActionRenderNode: NewAction(intrinsic, true, true, func(focused bool, _ int) string {

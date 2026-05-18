@@ -31,7 +31,7 @@ type StartupEvent = appstate.Event
 
 type StartupState = appstate.StartupState
 
-// TODO(execution-system): StartupTranscript is a legacy startup presenter noun kept as a type alias
+// TODO(execution-system): StartupTranscript is an older startup presenter noun kept as a type alias
 // for compatibility with external integration tests and callers.
 type StartupTranscript = StartupConsolePresenter
 
@@ -48,9 +48,12 @@ func NewStartupConsolePresenter(out io.Writer) *StartupConsolePresenter {
 	}
 }
 
-// TODO(execution-system): NewStartupTranscript keeps a legacy constructor surface while delegating to
+// TODO(execution-system): NewStartupTranscript keeps an older constructor surface while delegating to
 // the canonical StartupConsolePresenter constructor.
 func NewStartupTranscript(out io.Writer) *StartupConsolePresenter {
+	if out == nil {
+		out = io.Discard
+	}
 	return NewStartupConsolePresenter(out)
 }
 
@@ -92,6 +95,13 @@ func logStartupPhaseEvent(event StartupEvent) {
 		slog.Info("startup phase", "phase", "stopped", "message", "daemon runtime stopped")
 	case StartupEventHandoffToInteractive:
 		slog.Info("startup phase", "phase", "handoff", "message", "entering interactive cockpit")
+	case StartupEventSplash,
+		StartupEventTelemetryDisclosure,
+		StartupEventVersionNotice,
+		StartupEventDaemonRuntimeStart,
+		StartupEventStartupFailed,
+		StartupEventStartupTimedOut:
+		return
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testing.T) {
 	t.Parallel()
 
-	codec := MessagesCodec{}
+	codec := MessagesFamilyCodec{}
 	encoder := codec.NewStreamState()
 	events := []canonical.Event{
 		{
@@ -28,7 +28,7 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 			EnvID:      "msg_1",
 			ParentID:   "res_1",
 			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant},
-			Meta:       canonical.EventMeta{NativeID: "text_0"},
+			Meta:       canonical.EventMetadataFields{NativeID: "text_0"},
 		},
 		{
 			ExchangeID: "ex_1",

@@ -64,15 +64,16 @@ func DecodeResponseBuffered(raw []byte) (canonical.CanonicalOutputValue, error) 
 	}
 	items := make([]canonical.CanonicalItem, 0, len(dto.Content))
 	for i, block := range dto.Content {
-		switch strings.TrimSpace(block.Type) { // trimlowerlint:allow boundary canonicalization
+		blockType := strings.TrimSpace(block.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
+		switch blockType {
 		case "text":
 			items = append(items, canonical.NewTextOutputItem("text_"+strconv.Itoa(i), block.Text))
 		case "tool_use":
-			itemID := strings.TrimSpace(block.ID) // trimlowerlint:allow boundary canonicalization
+			itemID := strings.TrimSpace(block.ID) // swobu:io-string source=boundary
 			if itemID == "" {
 				itemID = "tool_" + strconv.Itoa(i)
 			}
-			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), cloneInput(block.Input))) // trimlowerlint:allow boundary canonicalization
+			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), cloneInput(block.Input))) // swobu:io-string source=boundary
 		default:
 			return canonical.CanonicalOutputValue{}, canonical.InternalError("messages response content block is unsupported")
 		}
@@ -88,10 +89,16 @@ func DecodeResponseBuffered(raw []byte) (canonical.CanonicalOutputValue, error) 
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.
 func DecodeResponseStream(body io.ReadCloser, exchangeID string) canonical.EventReader {
-	return newStreamDecoder(body, exchangeID)
+	return &messagesEventReader{
+		exchangeID:  exchangeID,
+		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		reader:      protocols.NewSSEReader(body),
+		blocks:      map[int]streamContentBlock{},
+		latestUsage: canonical.NewUnknownTokenUsage(),
+	}
 }
 
-type canonicalOutputEventStreamCloser struct {
+type messagesEventReader struct {
 	exchangeID   string
 	responseID   canonical.EnvelopeID
 	reader       *protocols.SSEReaderCloser
@@ -152,17 +159,7 @@ type messageDeltaFrame struct {
 	} `json:"delta"`
 }
 
-func newStreamDecoder(body io.ReadCloser, exchangeID string) *canonicalOutputEventStreamCloser {
-	return &canonicalOutputEventStreamCloser{
-		exchangeID:  exchangeID,
-		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:      protocols.NewSSEReader(body),
-		blocks:      map[int]streamContentBlock{},
-		latestUsage: canonical.NewUnknownTokenUsage(),
-	}
-}
-
-func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Event, error) {
+func (s *messagesEventReader) Next(context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		return s.shift(), nil
 	}
@@ -183,7 +180,7 @@ func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Even
 			}
 			return canonical.Event{}, err
 		}
-		if strings.TrimSpace(frame.Data) == "" || frame.Event == "ping" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(frame.Data) == "" || frame.Event == "ping" { // swobu:io-string source=boundary
 			continue
 		}
 		frameUsage := protocols.ExtractTokenUsage([]byte(frame.Data), tokenUsagePathSpec)
@@ -203,8 +200,9 @@ func (s *canonicalOutputEventStreamCloser) Next(context.Context) (canonical.Even
 	}
 }
 
-func (s *canonicalOutputEventStreamCloser) handleFrame(frameType string, raw string) error {
-	switch strings.TrimSpace(frameType) { // trimlowerlint:allow boundary canonicalization
+func (s *messagesEventReader) handleFrame(frameType string, raw string) error {
+	normalizedFrameType := strings.TrimSpace(frameType) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
+	switch normalizedFrameType {
 	case "message_start":
 		return s.handleMessageStart(raw)
 	case "content_block_start":
@@ -225,7 +223,7 @@ func (s *canonicalOutputEventStreamCloser) handleFrame(frameType string, raw str
 	}
 }
 
-func (s *canonicalOutputEventStreamCloser) handleMessageStart(raw string) error {
+func (s *messagesEventReader) handleMessageStart(raw string) error {
 	var payload messageStartFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream message_start frame is invalid")
@@ -242,26 +240,27 @@ func (s *canonicalOutputEventStreamCloser) handleMessageStart(raw string) error 
 	return nil
 }
 
-func (s *canonicalOutputEventStreamCloser) handleContentBlockStart(raw string) error {
+func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	var payload contentBlockStartFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_start frame is invalid")
 	}
 	block := streamContentBlock{ItemID: "block_" + strconv.Itoa(payload.Index)}
-	switch strings.TrimSpace(payload.ContentBlock.Type) { // trimlowerlint:allow boundary canonicalization
+	contentBlockType := strings.TrimSpace(payload.ContentBlock.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
+	switch contentBlockType {
 	case "text":
 		block.ItemKind = canonical.ItemKindText
 		block.ItemID = "text_" + strconv.Itoa(payload.Index)
-		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMeta{NativeID: block.ItemID})
+		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMetadataFields{NativeID: block.ItemID})
 	case "tool_use":
 		block.ItemKind = canonical.ItemKindToolUse
-		block.ToolUseID = strings.TrimSpace(payload.ContentBlock.ID) // trimlowerlint:allow boundary canonicalization
+		block.ToolUseID = strings.TrimSpace(payload.ContentBlock.ID) // swobu:io-string source=boundary
 		if block.ToolUseID == "" {
 			block.ToolUseID = "toolu_swobu_" + strconv.Itoa(payload.Index)
 		}
-		block.Name = strings.TrimSpace(payload.ContentBlock.Name) // trimlowerlint:allow boundary canonicalization
+		block.Name = strings.TrimSpace(payload.ContentBlock.Name) // swobu:io-string source=boundary
 		block.ItemID = block.ToolUseID
-		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMeta{NativeID: block.ItemID})
+		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMetadataFields{NativeID: block.ItemID})
 	default:
 		return canonical.InternalError("messages stream content block type is unsupported")
 	}
@@ -269,7 +268,7 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockStart(raw string) e
 	return nil
 }
 
-func (s *canonicalOutputEventStreamCloser) handleContentBlockDelta(raw string) error {
+func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 	var payload contentBlockDeltaFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_delta frame is invalid")
@@ -278,7 +277,8 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockDelta(raw string) e
 	if !ok {
 		return nil
 	}
-	switch strings.TrimSpace(payload.Delta.Type) { // trimlowerlint:allow boundary canonicalization
+	deltaType := strings.TrimSpace(payload.Delta.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
+	switch deltaType {
 	case "text_delta":
 		s.enqueue(canonical.Event{
 			Kind:    canonical.EventTextDelta,
@@ -297,7 +297,7 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockDelta(raw string) e
 	return nil
 }
 
-func (s *canonicalOutputEventStreamCloser) handleContentBlockStop(raw string) error {
+func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 	var payload contentBlockStopFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_stop frame is invalid")
@@ -311,16 +311,16 @@ func (s *canonicalOutputEventStreamCloser) handleContentBlockStop(raw string) er
 	return nil
 }
 
-func (s *canonicalOutputEventStreamCloser) handleMessageDelta(raw string) error {
+func (s *messagesEventReader) handleMessageDelta(raw string) error {
 	var payload messageDeltaFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream message_delta frame is invalid")
 	}
-	s.finishReason = strings.TrimSpace(payload.Delta.StopReason) // trimlowerlint:allow boundary canonicalization
+	s.finishReason = strings.TrimSpace(payload.Delta.StopReason) // swobu:io-string source=boundary
 	return nil
 }
 
-func (s *canonicalOutputEventStreamCloser) handleMessageStop() {
+func (s *messagesEventReader) handleMessageStop() {
 	s.completed = true
 	finishReason := s.finishReason
 	if finishReason == "" {
@@ -331,29 +331,29 @@ func (s *canonicalOutputEventStreamCloser) handleMessageStop() {
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 
-func (s *canonicalOutputEventStreamCloser) Close(context.Context) error {
+func (s *messagesEventReader) Close(context.Context) error {
 	return s.reader.Close()
 }
 
-func (s *canonicalOutputEventStreamCloser) shift() canonical.Event {
+func (s *messagesEventReader) shift() canonical.Event {
 	event := s.pending[0]
 	s.pending = s.pending[1:]
 	return event
 }
 
-func (s *canonicalOutputEventStreamCloser) nextSeq() int64 {
+func (s *messagesEventReader) nextSeq() int64 {
 	s.seq++
 	return s.seq
 }
 
-func (s *canonicalOutputEventStreamCloser) enqueue(ev canonical.Event) {
+func (s *messagesEventReader) enqueue(ev canonical.Event) {
 	ev.ExchangeID = s.exchangeID
 	ev.Seq = s.nextSeq()
 	ev.Time = time.Now().UTC()
 	s.pending = append(s.pending, ev)
 }
 
-func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMeta) {
+func (s *messagesEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {
 	ev := canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: id, ParentID: parent, Payload: payload}
 	if len(meta) > 0 {
 		ev.Meta = meta[0]
@@ -361,15 +361,15 @@ func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeStart(id canonical.Env
 	s.enqueue(ev)
 }
 
-func (s *canonicalOutputEventStreamCloser) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
+func (s *messagesEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
 }
 
-func (s *canonicalOutputEventStreamCloser) blockEnvID(index int, _ streamContentBlock) canonical.EnvelopeID {
+func (s *messagesEventReader) blockEnvID(index int, _ streamContentBlock) canonical.EnvelopeID {
 	return canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseID, index))
 }
 
-func (s *canonicalOutputEventStreamCloser) blockKind(block streamContentBlock) canonical.EnvelopeKind {
+func (s *messagesEventReader) blockKind(block streamContentBlock) canonical.EnvelopeKind {
 	if block.ItemKind == canonical.ItemKindToolUse {
 		return canonical.EnvToolCall
 	}

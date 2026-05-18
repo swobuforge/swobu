@@ -6,15 +6,15 @@ SWOBU 🧌                                                       login complete 
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
+     provider           openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-                openai:gpt-3.5-turbo:2310255c                                             edit ↵
+       model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
-         auth              signed in                                                      change ↵
-    >    delivery          streaming (SSE) (default)                                      next ↵
-         sign in           sign in another account                                        open ↵
+         credential        signed in                                                      change ↵
+    >    sign in           sign in another account                                        open ↵
          model             not selected                                                   choose ↵
+         delivery          auto                                                           next ↵
 
   clients ▸
     not set

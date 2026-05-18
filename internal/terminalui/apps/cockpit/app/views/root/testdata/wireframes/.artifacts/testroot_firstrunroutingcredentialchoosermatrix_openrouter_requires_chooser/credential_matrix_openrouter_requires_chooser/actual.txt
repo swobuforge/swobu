@@ -6,17 +6,17 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
      create            not ready
 
   routing ▾
-     run on            OpenRouter                                     choose ↵
-     auth              missing                                        choose ↵
-     delivery          request-response (HTTP JSON)                   next ↵
-      -> set credential file before loading models
+     provider          OpenRouter                                     choose ↵
+     credential        missing                                        choose ↵
+     model             blocked
+      -> set credential before loading models
+     delivery          auto                                           next ↵
 
   clients ▸
     not set
 
   traffic ▸
     empty
-
 
 
 

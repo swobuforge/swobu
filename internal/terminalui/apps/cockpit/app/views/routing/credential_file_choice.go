@@ -15,7 +15,7 @@ import (
 )
 
 func credentialFileRow(value string, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
-	summary := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+	summary := strings.TrimSpace(value) // swobu:io-string source=boundary
 	if summary == "" {
 		summary = "required"
 	}
@@ -33,7 +33,7 @@ type credentialFileEntry struct {
 }
 
 func initialCredentialFileBrowseState(currentPath string) credentialFileBrowseState {
-	dir := strings.TrimSpace(currentPath) // trimlowerlint:allow boundary canonicalization
+	dir := strings.TrimSpace(currentPath) // swobu:io-string source=boundary
 	if dir != "" {
 		if info, err := os.Stat(dir); err == nil {
 			if info.IsDir() {
@@ -61,7 +61,7 @@ func credentialFilePickerItems(
 	onChooseFile func(string) []update.Action,
 ) ([]views.FilterablePickerItem, error) {
 	b := browse
-	if strings.TrimSpace(b.Dir) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(b.Dir) == "" { // swobu:io-string source=boundary
 		b = initialCredentialFileBrowseState(currentPath)
 		setBrowse(b)
 	}
@@ -100,7 +100,7 @@ func credentialFilePickerItems(
 }
 
 func credentialFileBrowserPath(dir string) string {
-	path := filepath.ToSlash(strings.TrimSpace(dir)) // trimlowerlint:allow boundary canonicalization
+	path := filepath.ToSlash(strings.TrimSpace(dir)) // swobu:io-string source=boundary
 	if path == "" {
 		path = "."
 	}
@@ -111,7 +111,7 @@ func credentialFileBrowserPath(dir string) string {
 }
 
 func credentialFileEntries(dir string) ([]credentialFileEntry, error) {
-	dir = strings.TrimSpace(dir) // trimlowerlint:allow boundary canonicalization
+	dir = strings.TrimSpace(dir) // swobu:io-string source=boundary
 	if dir == "" {
 		dir = "."
 	}
@@ -132,7 +132,7 @@ func credentialFileEntries(dir string) ([]credentialFileEntry, error) {
 		})
 	}
 	for _, item := range items {
-		name := strings.TrimSpace(item.Name()) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(item.Name()) // swobu:io-string source=boundary
 		if name == "" {
 			continue
 		}
@@ -151,7 +151,7 @@ func credentialFileEntries(dir string) ([]credentialFileEntry, error) {
 		if out[i].IsDir != out[j].IsDir {
 			return out[i].IsDir
 		}
-		return strings.ToLower(out[i].Label) < strings.ToLower(out[j].Label) // trimlowerlint:allow boundary canonicalization
+		return strings.ToLower(out[i].Label) < strings.ToLower(out[j].Label) // swobu:io-string source=boundary
 	})
 	return out, nil
 }

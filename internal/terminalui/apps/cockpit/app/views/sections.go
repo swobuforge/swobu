@@ -3,6 +3,7 @@ package views
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
@@ -22,4 +23,10 @@ func Section[M any](title string, rows ...retained.ViewSpec[M]) retained.ViewSpe
 	})
 }
 
-func sectionHeader[M any](title string) retained.ViewSpec[M] { return NewSectionHeader[M](title) }
+func sectionHeader[M any](title string) retained.ViewSpec[M] {
+	title = strings.TrimSpace(title) // swobu:io-string source=boundary
+	if title == "" {
+		title = "section"
+	}
+	return NewSectionHeader[M](title)
+}

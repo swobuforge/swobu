@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -61,7 +59,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeCompatibilityError(w, err)
 		return
 	}
-	if isWebSocketUpgrade(r) {
+	if websocketUpgrade(r) {
 		if normalizedPath == canonical.NormalizedPathResponses {
 			h.serveResponsesWebsocket(w, r, endpointName, normalizedPath)
 			return
@@ -78,7 +76,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	family, err := canonical.InferFamily(r.Method, normalizedPath, strings.TrimSpace(r.Header.Get("anthropic-version")) != "") // trimlowerlint:allow boundary canonicalization
+	family, err := canonical.InferFamily(r.Method, normalizedPath, strings.TrimSpace(r.Header.Get("anthropic-version")) != "") // swobu:io-string source=boundary
 	if err != nil {
 		writeCompatibilityError(w, err)
 		return
@@ -212,34 +210,6 @@ func decodeCanonicalRequest(family canonical.IngressFamily, raw []byte) (canonic
 	return codec.DecodeRequest(raw)
 }
 
-func requestIDFromRequest(r *http.Request) string {
-	requestID := strings.TrimSpace(r.Header.Get("X-Request-Id")) // trimlowerlint:allow boundary canonicalization
-	if requestID == "" {
-		requestID = strings.TrimSpace(r.Header.Get("X-Request-ID")) // trimlowerlint:allow boundary canonicalization
-	}
-	if requestID == "" {
-		requestID = newRequestID()
-	}
-	return requestID
-}
-
-func newRequestID() string {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "swobu-request"
-	}
-	return hex.EncodeToString(raw[:])
-}
-
-func isWebSocketUpgrade(r *http.Request) bool {
-	if r == nil {
-		return false
-	}
-	connection := strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))) // trimlowerlint:allow boundary canonicalization
-	upgrade := strings.ToLower(strings.TrimSpace(r.Header.Get("Upgrade")))       // trimlowerlint:allow boundary canonicalization
-	return strings.Contains(connection, "upgrade") && upgrade == "websocket"
-}
-
 func logIngressRequestShape(
 	requestID string,
 	endpoint string,
@@ -255,8 +225,8 @@ func logIngressRequestShape(
 		"endpoint", endpoint,
 		"ingress_family", string(provenance.IngressFamily),
 		"normalized_op", string(provenance.NormalizedOp),
-		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // trimlowerlint:allow boundary canonicalization
-		"client_handler", strings.TrimSpace(provenance.ClientHandler), // trimlowerlint:allow boundary canonicalization
+		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // swobu:io-string source=boundary
+		"client_handler", strings.TrimSpace(provenance.ClientHandler), // swobu:io-string source=boundary
 		"streaming", streaming,
 		"item_count", threadCount,
 		"last_input_role", lastRole,
@@ -271,7 +241,7 @@ func requestShapeSummary(request canonical.CanonicalRequest) (int, string, bool)
 		return len(items), lastRoleFromItems(items), false
 	case canonical.GenerationCanonicalRequest:
 		items := typed.Thread()
-		return len(items), lastRoleFromItems(items), strings.TrimSpace(typed.PreviousResponseID()) != "" // trimlowerlint:allow boundary canonicalization
+		return len(items), lastRoleFromItems(items), strings.TrimSpace(typed.PreviousResponseID()) != "" // swobu:io-string source=boundary
 	case canonical.PromptCanonicalRequest:
 		return 1, "user", false
 	default:
@@ -317,7 +287,7 @@ func logRequestOutcome(
 			result = "backend_error"
 			statusCode = backendErr.StatusCode
 			errorOrigin = string(canonical.ErrorOriginBackend)
-			backendRef = strings.TrimSpace(backendErr.BackendRef) // trimlowerlint:allow boundary canonicalization
+			backendRef = strings.TrimSpace(backendErr.BackendRef) // swobu:io-string source=boundary
 		} else {
 			statusCode = statusCodeForCompatibilityError(err)
 		}
@@ -329,18 +299,18 @@ func logRequestOutcome(
 		"endpoint", endpoint,
 		"ingress_family", string(provenance.IngressFamily),
 		"normalized_op", string(provenance.NormalizedOp),
-		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // trimlowerlint:allow boundary canonicalization
-		"client_handler", strings.TrimSpace(provenance.ClientHandler), // trimlowerlint:allow boundary canonicalization
+		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // swobu:io-string source=boundary
+		"client_handler", strings.TrimSpace(provenance.ClientHandler), // swobu:io-string source=boundary
 		"result", result,
 		"status_code", statusCode,
 		"error_origin", errorOrigin,
 		"backend_ref", backendRef,
-		"model_requested", strings.TrimSpace(modelRequested), // trimlowerlint:allow boundary canonicalization
-		"model_resolved", strings.TrimSpace(modelResolved), // trimlowerlint:allow boundary canonicalization
-		"model_resolution_mode", strings.TrimSpace(modelResolutionMode), // trimlowerlint:allow boundary canonicalization
-		"client_response_mode", strings.TrimSpace(clientResponseMode), // trimlowerlint:allow boundary canonicalization
-		"provider_call_mode", strings.TrimSpace(providerCallMode), // trimlowerlint:allow boundary canonicalization
-		"conversion_kind", strings.TrimSpace(conversionKind), // trimlowerlint:allow boundary canonicalization
+		"model_requested", strings.TrimSpace(modelRequested), // swobu:io-string source=boundary
+		"model_resolved", strings.TrimSpace(modelResolved), // swobu:io-string source=boundary
+		"model_resolution_mode", strings.TrimSpace(modelResolutionMode), // swobu:io-string source=boundary
+		"client_response_mode", strings.TrimSpace(clientResponseMode), // swobu:io-string source=boundary
+		"provider_call_mode", strings.TrimSpace(providerCallMode), // swobu:io-string source=boundary
+		"conversion_kind", strings.TrimSpace(conversionKind), // swobu:io-string source=boundary
 	)
 }
 

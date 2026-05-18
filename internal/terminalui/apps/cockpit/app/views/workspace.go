@@ -27,7 +27,7 @@ func BuildWorkspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec
 	var out retained.ViewSpec[state.Model]
 	if !isCreate {
 		endpointSummary := selectors.EmptyOr(endpoint, "none")
-		if strings.TrimSpace(endpointSummary) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(endpointSummary) == "" { // swobu:io-string source=boundary
 			endpointSummary = "none"
 		}
 		nameRow := retained.Named[state.Model]("name", retained.Build[state.Model](buildWorkspaceNameRow))
@@ -185,7 +185,7 @@ func buildWorkspaceNameRow(ctx *retained.Context[state.Model]) retained.ViewSpec
 }
 
 func validateCreateDraftWorkspaceName(value string, existing []string) (string, string) {
-	trimmed := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(value) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return "", ""
 	}
@@ -199,7 +199,7 @@ func validateWorkspaceName(value string, existing []string, current string) (str
 	}
 	parsedName := parsed.String()
 	for _, existingName := range existing {
-		if strings.TrimSpace(existingName) == strings.TrimSpace(parsedName) && strings.TrimSpace(existingName) != strings.TrimSpace(current) { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(existingName) == strings.TrimSpace(parsedName) && strings.TrimSpace(existingName) != strings.TrimSpace(current) { // swobu:io-string source=boundary
 			return parsedName, "workspace name already exists"
 		}
 	}
@@ -217,11 +217,11 @@ func createWorkspaceStatus(model state.Model) string {
 }
 
 func currentCreateName(model state.Model) string {
-	return strings.TrimSpace(selectors.CreateDraftName(model)) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(selectors.CreateDraftName(model)) // swobu:io-string source=boundary
 }
 
 func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
-	endpoint = strings.TrimSpace(endpoint) // trimlowerlint:allow boundary canonicalization
+	endpoint = strings.TrimSpace(endpoint) // swobu:io-string source=boundary
 	return RowActionWithHooks("delete workspace", "", "delete", func() []update.Action {
 		if endpoint == "" {
 			return nil
@@ -231,7 +231,7 @@ func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
 }
 
 func busyCreateRow(value string) retained.ViewSpec[state.Model] {
-	value = strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+	value = strings.TrimSpace(value) // swobu:io-string source=boundary
 	return retained.FromRenderNode[state.Model](toolkitviews.NewAction(6+toolkitviews.RuneLen(value), true, false, func(_ bool, width int) string {
 		line := ">   create"
 		if value != "" {
@@ -243,7 +243,7 @@ func busyCreateRow(value string) retained.ViewSpec[state.Model] {
 
 func createWorkspaceActions(model state.Model) []update.Action {
 	name := selectors.CreateDraftName(model)
-	if strings.TrimSpace(name) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(name) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	parsed, message := validateWorkspaceName(name, model.Endpoints, "")
@@ -254,13 +254,17 @@ func createWorkspaceActions(model state.Model) []update.Action {
 	if provider == nil {
 		return nil
 	}
-	if provider.ProviderSpec == "openai_compatible" && strings.TrimSpace(provider.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+	flow := state.EvaluateCreateDraftRouteSetup(*provider)
+	if !flow.Ready {
 		return nil
 	}
-	if strings.TrimSpace(provider.ModelID) == "" { // trimlowerlint:allow boundary canonicalization
+	if provider.ProviderSpec == "openai_compatible" && strings.TrimSpace(provider.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil
 	}
-	credentialRef := strings.TrimSpace(provider.CredentialRef) // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(provider.ModelID) == "" { // swobu:io-string source=boundary
+		return nil
+	}
+	credentialRef := strings.TrimSpace(provider.CredentialRef) // swobu:io-string source=boundary
 	parsedCredentialRef := credentialref.Parse(credentialRef)
 	if state.ProviderRequiresCredential(provider.ProviderSpec, provider.BaseURL) {
 		if parsedCredentialRef.Kind() == credentialref.KindEmpty || parsedCredentialRef.IsEmptyFileSelection() {

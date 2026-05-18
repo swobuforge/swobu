@@ -7,6 +7,9 @@ import (
 
 // WrapLinePreserveIndent wraps long text while preserving indentation.
 func WrapLinePreserveIndent(line string, width int) []string {
+	if width <= 0 {
+		return []string{line}
+	}
 	return layout.WrapLinePreserveIndent(line, width)
 }
 

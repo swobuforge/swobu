@@ -49,6 +49,9 @@ func renderNode[M any](ctx *Context[M], w ViewSpec[M]) RenderNode {
 // Materialize converts one declarative view value into a layout node.
 // Use this helper when composing wrappers in other packages.
 func Materialize[M any](ctx *Context[M], w ViewSpec[M]) RenderNode {
+	if w == nil {
+		return nil
+	}
 	return renderNode(ctx, w)
 }
 
@@ -121,7 +124,12 @@ type viewSpecClosure[M any] struct {
 	onUnmount func() []update.Effect
 }
 
-func (v viewSpecClosure[M]) BuildRenderNode(ctx *Context[M]) RenderNode { return v.render(ctx) }
+func (v viewSpecClosure[M]) BuildRenderNode(ctx *Context[M]) RenderNode {
+	if v.render == nil {
+		return nil
+	}
+	return v.render(ctx)
+}
 
 func (v viewSpecClosure[M]) OnMountEffects() []update.Effect {
 	if v.onMount == nil {

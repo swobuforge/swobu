@@ -42,9 +42,9 @@ func Reduce(model *Model, action update.Action) []update.Effect {
 func reduceEndpointSelection(model *Model, action update.Action) bool {
 	switch value := action.(type) {
 	case SelectEndpoint:
-		model.CurrentEndpoint = strings.TrimSpace(value.Name) // trimlowerlint:allow boundary canonicalization
+		model.CurrentEndpoint = strings.TrimSpace(value.Name) // swobu:io-string source=boundary
 		model.InteractionMode = InteractionModeNAV
-		model.FooterShowTabs = strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 // trimlowerlint:allow boundary canonicalization
+		model.FooterShowTabs = strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 // swobu:io-string source=boundary
 		model.WorkspaceCopyNote = ""
 		model.ClientCopyNote = ""
 		model.ClientLaunchNote = ""
@@ -53,7 +53,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.HelpNote = ""
 		return true
 	case CreateEndpoint:
-		name := strings.TrimSpace(value.Name) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(value.Name) // swobu:io-string source=boundary
 		if name == "" || containsString(model.Endpoints, name) {
 			return true
 		}
@@ -70,49 +70,55 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.HelpNote = ""
 		return true
 	case SetCreateDraftName:
-		model.CreateDraftName = strings.TrimSpace(value.Name) // trimlowerlint:allow boundary canonicalization
+		model.CreateDraftName = strings.TrimSpace(value.Name) // swobu:io-string source=boundary
 		model.WorkspaceSaveError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftProviderSpec:
 		model.CreateDraftProviderConfig = ProviderConfigForSpec(value.ProviderSpec, model.CreateDraftProviderConfig)
+		if !strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
+			model.CreateDraftProviderConfig.Region = ""
+		}
 		model.WorkspaceSaveError = ""
 		model.CreateDraftModelIDs = nil
 		model.CreateDraftModelError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
-	case SetCreateDraftModelID:
-		model.CreateDraftProviderConfig.ModelID = strings.TrimSpace(value.ModelID) // trimlowerlint:allow boundary canonicalization
+	case SetCreateDraftModelIDAction:
+		model.CreateDraftProviderConfig.ModelID = strings.TrimSpace(value.ModelID) // swobu:io-string source=boundary
 		model.WorkspaceSaveError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftCredentialRef:
-		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef) // trimlowerlint:allow boundary canonicalization
+		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef) // swobu:io-string source=boundary
 		model.WorkspaceSaveError = ""
 		model.CreateDraftModelIDs = nil
 		model.CreateDraftModelError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftBaseURL:
-		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.BaseURL) // trimlowerlint:allow boundary canonicalization
+		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.BaseURL) // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
+			model.CreateDraftProviderConfig.Region = stateModel.BedrockRegionFromBaseURL(model.CreateDraftProviderConfig.BaseURL)
+		}
 		model.WorkspaceSaveError = ""
 		model.CreateDraftModelIDs = nil
 		model.CreateDraftModelError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftTargetAlias:
-		model.CreateDraftProviderConfig.TargetAlias = strings.TrimSpace(strings.ToLower(value.TargetAlias)) // trimlowerlint:allow boundary canonicalization
+		model.CreateDraftProviderConfig.TargetAlias = strings.TrimSpace(strings.ToLower(value.TargetAlias)) // swobu:io-string source=boundary
 		model.WorkspaceSaveError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftSelectedFrame:
-		model.CreateDraftProviderConfig.SelectedFrame = strings.TrimSpace(value.SelectedFrame) // trimlowerlint:allow boundary canonicalization
+		model.CreateDraftProviderConfig.SelectedFrame = strings.TrimSpace(value.SelectedFrame) // swobu:io-string source=boundary
 		model.WorkspaceSaveError = ""
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case RenameCurrentEndpoint:
-		next := strings.TrimSpace(value.Name)               // trimlowerlint:allow boundary canonicalization
-		current := strings.TrimSpace(model.CurrentEndpoint) // trimlowerlint:allow boundary canonicalization
+		next := strings.TrimSpace(value.Name)               // swobu:io-string source=boundary
+		current := strings.TrimSpace(model.CurrentEndpoint) // swobu:io-string source=boundary
 		if current == "" || next == "" || current == next {
 			return true
 		}
@@ -131,7 +137,7 @@ func reduceCatalogState(model *Model, action update.Action) bool {
 		model.EndpointSnapshots = cloneEndpointSnapshots(value.Snapshots)
 		model.Endpoints = endpointSnapshotNames(model.EndpointSnapshots)
 		model.CurrentEndpoint = reconcileCurrentEndpoint(model.CurrentEndpoint, model.Endpoints, hadEndpoints)
-		model.FooterShowTabs = strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 // trimlowerlint:allow boundary canonicalization
+		model.FooterShowTabs = strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 // swobu:io-string source=boundary
 		refreshFirstRunFooterAffordance(model)
 		model.WorkspaceCopyNote = ""
 		model.ClientCopyNote = ""
@@ -140,7 +146,7 @@ func reduceCatalogState(model *Model, action update.Action) bool {
 		return true
 	case stateeffect.EndpointsLoadFailed:
 		if len(model.Endpoints) == 0 {
-			model.DaemonHint = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+			model.DaemonHint = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		}
 		return true
 	default:
@@ -156,21 +162,21 @@ func reduceClientAndTrafficState(model *Model, action update.Action) []update.Ef
 		return nil
 	case stateeffect.TrafficLoadFailed:
 		model.TrafficRows = nil
-		model.TrafficError = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.TrafficError = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case stateeffect.SupportLinkNoted:
-		model.HelpNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.HelpNote = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case stateeffect.HelpDiagnosticsCopyNoted:
-		model.HelpNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.HelpNote = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case stateeffect.ClientCopyNoted:
-		model.ClientCopyNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.ClientCopyNote = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case stateeffect.ClientLaunchNoted:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
-		model.ClientLaunchNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.ClientLaunchNote = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case ClientAccessCheckStarted:
 		model.HeaderStatus = "checking..."
@@ -178,7 +184,7 @@ func reduceClientAndTrafficState(model *Model, action update.Action) []update.Ef
 		model.ClientAccessNote = ""
 		ep := currentEndpoint(model)
 		sp := currentSelectedProviderConfig(model)
-		if strings.TrimSpace(ep) == "" || sp == nil { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(ep) == "" || sp == nil { // swobu:io-string source=boundary
 			return nil
 		}
 		return []update.Effect{stateeffect.CheckClientAccessEffect{
@@ -188,14 +194,14 @@ func reduceClientAndTrafficState(model *Model, action update.Action) []update.Ef
 	case stateeffect.ClientAccessChecked:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
-		model.ClientAccessStatus = strings.TrimSpace(value.Status) // trimlowerlint:allow boundary canonicalization
-		model.ClientAccessNote = strings.TrimSpace(value.Message)  // trimlowerlint:allow boundary canonicalization
+		model.ClientAccessStatus = strings.TrimSpace(value.Status) // swobu:io-string source=boundary
+		model.ClientAccessNote = strings.TrimSpace(value.Message)  // swobu:io-string source=boundary
 		return []update.Effect{refreshStatusProjectionEffectFor(model)}
 	case stateeffect.ClientAccessCheckFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
 		model.ClientAccessStatus = "check failed"
-		model.ClientAccessNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.ClientAccessNote = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	default:
 		return nil
@@ -212,7 +218,7 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		clearSaveErrors(model)
 		model.ClientAccessNote = ""
 		return []update.Effect{stateeffect.SaveNewWorkspaceEffect{
-			Name:           strings.TrimSpace(value.Name), // trimlowerlint:allow boundary canonicalization
+			Name:           strings.TrimSpace(value.Name), // swobu:io-string source=boundary
 			ProviderConfig: model.CreateDraftProviderConfig,
 		}}
 	case WorkspaceRenameRequested:
@@ -223,8 +229,8 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		clearSaveErrors(model)
 		model.ClientAccessNote = ""
 		return []update.Effect{stateeffect.SaveWorkspaceNameEffect{
-			CurrentName: strings.TrimSpace(value.CurrentName), // trimlowerlint:allow boundary canonicalization
-			Name:        strings.TrimSpace(value.Name),        // trimlowerlint:allow boundary canonicalization
+			CurrentName: strings.TrimSpace(value.CurrentName), // swobu:io-string source=boundary
+			Name:        strings.TrimSpace(value.Name),        // swobu:io-string source=boundary
 		}}
 	case stateeffect.WorkspaceSaveSucceeded:
 		model.HeaderStatus = "saved"
@@ -234,10 +240,10 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		model.FooterShowTabs = true
 		model.WorkspaceSaveError = ""
 		model.WorkspaceCopyNote = ""
-		if strings.TrimSpace(value.PreviousName) == "" { // trimlowerlint:allow boundary canonicalization
-			applyWorkspaceCreate(model, strings.TrimSpace(value.Name)) // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(value.PreviousName) == "" { // swobu:io-string source=boundary
+			applyWorkspaceCreate(model, strings.TrimSpace(value.Name)) // swobu:io-string source=boundary
 		} else {
-			applyWorkspaceRename(model, strings.TrimSpace(value.PreviousName), strings.TrimSpace(value.Name)) // trimlowerlint:allow boundary canonicalization
+			applyWorkspaceRename(model, strings.TrimSpace(value.PreviousName), strings.TrimSpace(value.Name)) // swobu:io-string source=boundary
 		}
 		model.CreateDraftName = ""
 		model.CreateDraftProviderConfig = ProviderConfigSnapshot{}
@@ -246,7 +252,7 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: 350 * time.Millisecond},
 		}
 	case WorkspaceDeleteRequested:
-		name := strings.TrimSpace(value.Name) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(value.Name) // swobu:io-string source=boundary
 		if name == "" {
 			return nil
 		}
@@ -262,7 +268,7 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		model.InteractionMode = InteractionModeNAV
 		model.WorkspaceSaveError = ""
 		model.WorkspaceCopyNote = ""
-		applyWorkspaceDelete(model, strings.TrimSpace(value.Name)) // trimlowerlint:allow boundary canonicalization
+		applyWorkspaceDelete(model, strings.TrimSpace(value.Name)) // swobu:io-string source=boundary
 		return []update.Effect{
 			stateeffect.RefreshEndpointsEffect{},
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: 350 * time.Millisecond},
@@ -270,187 +276,15 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 	case stateeffect.WorkspaceDeleteFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
-		model.WorkspaceSaveError = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.WorkspaceSaveError = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case stateeffect.WorkspaceSaveFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
-		model.WorkspaceSaveError = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
+		model.WorkspaceSaveError = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	case stateeffect.EndpointCopyNoted:
-		model.WorkspaceCopyNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
-		return nil
-	default:
-		return nil
-	}
-}
-
-func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect {
-	switch value := action.(type) {
-	case RoutingSaveStartedAction:
-		model.HeaderStatus = "saving…"
-		model.InteractionMode = InteractionModeBusySave
-		clearSaveErrors(model)
-		return nil
-	case stateeffect.RoutingSaveSucceeded:
-		model.HeaderStatus = "ready"
-		model.InteractionMode = InteractionModeNAV
-		clearSaveErrors(model)
-		applyRoutingSelection(model, strings.TrimSpace(value.EndpointName), strings.TrimSpace(value.ProviderRef)) // trimlowerlint:allow boundary canonicalization
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
-	case stateeffect.RoutingMutationSaved:
-		model.HeaderStatus = "ready"
-		model.InteractionMode = InteractionModeNAV
-		clearSaveErrors(model)
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
-	case stateeffect.ProviderConfigAddedSaved:
-		model.HeaderStatus = "ready"
-		model.InteractionMode = InteractionModeNAV
-		clearSaveErrors(model)
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}
-	case stateeffect.RoutingSaveFailed:
-		model.HeaderStatus = "ready"
-		model.InteractionMode = InteractionModeNAV
-		setSaveError(model, strings.TrimSpace(value.ErrorAnchor), strings.TrimSpace(value.Message)) // trimlowerlint:allow boundary canonicalization
-		return nil
-	case SaveSelectedTargetRequested:
-		return []update.Effect{stateeffect.SaveSelectedTargetEffect(value)}
-	case SaveProviderConfigRequested:
-		return []update.Effect{stateeffect.SaveProviderConfigEffect(value)}
-	case AddProviderConfigRequested:
-		return []update.Effect{stateeffect.AddProviderConfigEffect(value)}
-	case DeleteProviderConfigRequested:
-		return []update.Effect{stateeffect.DeleteProviderConfigEffect(value)}
-	case StoreKeychainCredentialRequested:
-		model.HeaderStatus = "saving…"
-		model.InteractionMode = InteractionModeBusySave
-		clearSaveErrors(model)
-		return []update.Effect{stateeffect.StoreKeychainCredentialEffect(value)}
-	case StartProviderAuthSessionRequested:
-		model.HeaderStatus = "waiting for login…"
-		model.InteractionMode = InteractionModeBusySave
-		clearSaveErrors(model)
-		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // trimlowerlint:allow boundary canonicalization
-		return []update.Effect{stateeffect.StartProviderAuthSessionEffect{
-			EndpointName:   strings.TrimSpace(value.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: value.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(value.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(value.AuthScope), // trimlowerlint:allow boundary canonicalization
-		}}
-	case ResetAuthSessionUIRequested:
-		clearAuthSessions(model)
-		return nil
-	case ResetAddModelAuthUIRequested:
-		clearAuthSessionsByPrefix(model, stateModel.AuthOwnerPrefixAddModelDraft)
-		return nil
-	case stateeffect.ProviderAuthSessionStarted:
-		model.HeaderStatus = "waiting for login…"
-		// Pending auth must keep auth rows actionable (open/copy/switch),
-		// so keep operator in manage mode instead of busy-save lockout.
-		model.InteractionMode = InteractionModeManageList
-		setAuthSession(model, strings.TrimSpace(value.OwnerKey), stateModel.AuthSessionView{ // trimlowerlint:allow boundary canonicalization
-			SessionID:    strings.TrimSpace(value.SessionID),    // trimlowerlint:allow boundary canonicalization
-			URL:          strings.TrimSpace(value.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
-			UserCode:     strings.TrimSpace(value.UserCode),     // trimlowerlint:allow boundary canonicalization
-			SessionState: strings.TrimSpace(value.State),        // trimlowerlint:allow boundary canonicalization
-			SessionError: "",
-			CopyNote:     "",
-		})
-		loginURL := strings.TrimSpace(value.AuthorizeURL) // trimlowerlint:allow boundary canonicalization
-		if loginURL != "" {
-			return []update.Effect{stateeffect.OpenSupportLinkEffect{
-				Label: "login",
-				URL:   loginURL,
-			}}
-		}
-		return nil
-	case stateeffect.ProviderAuthSessionFailed:
-		model.HeaderStatus = "ready"
-		model.InteractionMode = InteractionModeManageList
-		clearSaveErrors(model)
-		ownerKey := strings.TrimSpace(value.OwnerKey) // trimlowerlint:allow boundary canonicalization
-		previous, hadPrevious := authSession(model, ownerKey)
-		// Keep any previously issued login URL/session visible so operators can
-		// retry in another browser or copy the link when auto-open fails.
-		url := ""
-		userCode := ""
-		sessionID := ""
-		if hadPrevious {
-			url = strings.TrimSpace(previous.URL)           // trimlowerlint:allow boundary canonicalization
-			userCode = strings.TrimSpace(previous.UserCode) // trimlowerlint:allow boundary canonicalization
-			sessionID = strings.TrimSpace(previous.SessionID)
-		}
-		setAuthSession(model, strings.TrimSpace(value.OwnerKey), stateModel.AuthSessionView{ // trimlowerlint:allow boundary canonicalization
-			SessionID:    sessionID,
-			URL:          url,
-			UserCode:     userCode,
-			SessionState: "failed",
-			SessionError: strings.TrimSpace(value.Message), // trimlowerlint:allow boundary canonicalization
-			CopyNote:     "",
-		})
-		return nil
-	case stateeffect.ProviderAuthSessionPolled:
-		ownerKey := strings.TrimSpace(value.OwnerKey) // trimlowerlint:allow boundary canonicalization
-		session, ok := authSession(model, ownerKey)
-		if ok && strings.TrimSpace(session.SessionID) == strings.TrimSpace(value.SessionID) { // trimlowerlint:allow boundary canonicalization
-			session.SessionState = strings.TrimSpace(value.State)        // trimlowerlint:allow boundary canonicalization
-			session.SessionError = strings.TrimSpace(value.ErrorMessage) // trimlowerlint:allow boundary canonicalization
-			setAuthSession(model, ownerKey, session)
-		}
-		return nil
-	case stateeffect.AuthSessionCopyNoted:
-		ownerKey := strings.TrimSpace(value.OwnerKey) // trimlowerlint:allow boundary canonicalization
-		session, _ := authSession(model, ownerKey)
-		session.CopyNote = strings.TrimSpace(value.Message) // trimlowerlint:allow boundary canonicalization
-		setAuthSession(model, ownerKey, session)
-		return nil
-	case stateeffect.PollProviderAuthSessionRequested:
-		return []update.Effect{stateeffect.PollProviderAuthSessionEffect{
-			EndpointName:   strings.TrimSpace(value.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: value.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(value.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(value.AuthScope), // trimlowerlint:allow boundary canonicalization
-			SessionID:      strings.TrimSpace(value.SessionID), // trimlowerlint:allow boundary canonicalization
-			AttemptsLeft:   value.AttemptsLeft,
-		}}
-	case stateeffect.ProviderAuthSessionCredentialResolved:
-		if strings.TrimSpace(value.AuthScope) == stateModel.AuthScopeCreateDraft { // trimlowerlint:allow boundary canonicalization
-			model.HeaderStatus = "login complete"
-			model.InteractionMode = InteractionModeManageList
-			clearSaveErrors(model)
-			model.CreateDraftProviderConfig.ProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-			model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)           // trimlowerlint:allow boundary canonicalization
-			model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef)              // trimlowerlint:allow boundary canonicalization
-			clearAuthSession(model, strings.TrimSpace(value.OwnerKey))                                          // trimlowerlint:allow boundary canonicalization
-			return nil
-		}
-		if stateModel.AuthOwnerKey(strings.TrimSpace(value.OwnerKey)).IsAddModelDraft() { // trimlowerlint:allow boundary canonicalization
-			model.HeaderStatus = "login complete"
-			model.InteractionMode = InteractionModeManageList
-			clearSaveErrors(model)
-			model.AddModelDraftProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-			model.AddModelDraftBaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)           // trimlowerlint:allow boundary canonicalization
-			model.AddModelDraftCredentialRef = strings.TrimSpace(value.CredentialRef)              // trimlowerlint:allow boundary canonicalization
-			clearAuthSession(model, strings.TrimSpace(value.OwnerKey))                             // trimlowerlint:allow boundary canonicalization
-			return nil
-		}
-		next := value.ProviderConfig
-		next.CredentialRef = strings.TrimSpace(value.CredentialRef) // trimlowerlint:allow boundary canonicalization
-		model.HeaderStatus = "saving…"
-		model.InteractionMode = InteractionModeBusySave
-		clearSaveErrors(model)
-		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // trimlowerlint:allow boundary canonicalization
-		return []update.Effect{stateeffect.SaveProviderConfigEffect(SaveProviderConfigRequested{
-			EndpointName:   strings.TrimSpace(value.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: next,
-			ErrorAnchor:    "",
-		})}
-	case stateeffect.KeychainCredentialStored:
-		model.HeaderStatus = "saved"
-		model.InteractionMode = InteractionModeNAV
-		clearSaveErrors(model)
-		model.LastStoredKeyProviderSpec = strings.TrimSpace(value.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-		model.LastStoredKeySlotName = strings.TrimSpace(value.KeyName)          // trimlowerlint:allow boundary canonicalization
+		model.WorkspaceCopyNote = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
 		return nil
 	default:
 		return nil
@@ -465,7 +299,7 @@ func clearAuthSession(model *Model, ownerKey string) {
 	if model == nil || model.AuthSessions == nil {
 		return
 	}
-	key := strings.TrimSpace(ownerKey) // trimlowerlint:allow boundary canonicalization
+	key := strings.TrimSpace(ownerKey) // swobu:io-string source=boundary
 	if key == "" {
 		return
 	}
@@ -490,25 +324,25 @@ func clearAuthSessionsByPrefix(model *Model, prefix stateModel.AuthOwnerKey) {
 	}
 }
 
-func setAuthSession(model *Model, ownerKey string, session stateModel.AuthSessionView) {
+func setAuthSession(model *Model, ownerKey string, session stateModel.AuthSessionViewState) {
 	if model == nil {
 		return
 	}
-	key := strings.TrimSpace(ownerKey) // trimlowerlint:allow boundary canonicalization
+	key := strings.TrimSpace(ownerKey) // swobu:io-string source=boundary
 	if key == "" {
 		return
 	}
 	if model.AuthSessions == nil {
-		model.AuthSessions = map[string]stateModel.AuthSessionView{}
+		model.AuthSessions = map[string]stateModel.AuthSessionViewState{}
 	}
 	model.AuthSessions[key] = session
 }
 
-func authSession(model *Model, ownerKey string) (stateModel.AuthSessionView, bool) {
+func authSession(model *Model, ownerKey string) (stateModel.AuthSessionViewState, bool) {
 	if model == nil || model.AuthSessions == nil {
-		return stateModel.AuthSessionView{}, false
+		return stateModel.AuthSessionViewState{}, false
 	}
-	session, ok := model.AuthSessions[strings.TrimSpace(ownerKey)] // trimlowerlint:allow boundary canonicalization
+	session, ok := model.AuthSessions[strings.TrimSpace(ownerKey)] // swobu:io-string source=boundary
 	return session, ok
 }
 
@@ -518,8 +352,8 @@ func clearSaveErrors(model *Model) {
 
 func setSaveError(model *Model, anchor, message string) {
 	model.SaveErrors = nil
-	anchor = strings.TrimSpace(anchor)   // trimlowerlint:allow boundary canonicalization
-	message = strings.TrimSpace(message) // trimlowerlint:allow boundary canonicalization
+	anchor = strings.TrimSpace(anchor)   // swobu:io-string source=boundary
+	message = strings.TrimSpace(message) // swobu:io-string source=boundary
 	if anchor == "" || message == "" {
 		return
 	}
@@ -527,7 +361,7 @@ func setSaveError(model *Model, anchor, message string) {
 }
 
 func currentEndpoint(model *Model) string {
-	if strings.TrimSpace(model.CurrentEndpoint) != "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(model.CurrentEndpoint) != "" { // swobu:io-string source=boundary
 		return model.CurrentEndpoint
 	}
 	if len(model.Endpoints) > 0 {
@@ -558,19 +392,4 @@ func currentSelectedProviderConfig(model *Model) *ProviderConfigSnapshot {
 		return &model.CreateDraftProviderConfig
 	}
 	return nil
-}
-
-func reconcileCurrentEndpoint(current string, endpoints []string, hadEndpoints bool) string {
-	trimmed := strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
-	if trimmed == "" {
-		if hadEndpoints {
-			// Preserve explicit create-lane selection chosen in the rail.
-			return ""
-		}
-		return firstOrEmpty(endpoints)
-	}
-	if containsString(endpoints, trimmed) {
-		return trimmed
-	}
-	return firstOrEmpty(endpoints)
 }

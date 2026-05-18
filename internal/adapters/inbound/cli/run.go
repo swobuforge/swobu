@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,8 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/term"
-
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/swobuforge/swobu/internal/bootstrap"
@@ -26,7 +23,7 @@ import (
 	"github.com/swobuforge/swobu/internal/telemetry"
 	uicli "github.com/swobuforge/swobu/internal/terminalui/apps/cli"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit"
-	tuisession "github.com/swobuforge/swobu/internal/terminalui/session"
+	uimode "github.com/swobuforge/swobu/internal/terminalui/session"
 )
 
 // ExitCode is contract-bearing for `swobu status`: healthy=0, reachable but
@@ -53,6 +50,13 @@ type Runner struct {
 	LaunchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer) error
 	StartupHandoffFloor time.Duration
 	Sleep               func(time.Duration)
+}
+
+type uiModeBridge interface {
+	Mode() uimode.Mode
+	OnModeChange(func(prev, next uimode.Mode))
+	BindWriter(mode uimode.Mode, writer io.Writer) io.Writer
+	SetMode(mode uimode.Mode) error
 }
 
 // daemon control, explicit lifecycle commands, and TUI launch handoff.
@@ -97,74 +101,97 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if sleep == nil {
 		sleep = time.Sleep
 	}
-	session := tuisession.New(tuisession.ModeTranscript)
-	stdout = session.BindWriter(tuisession.ModeTranscript, stdout)
-	stderr = session.BindWriter(tuisession.ModeTranscript, stderr)
+	uiMode := uimode.New(uimode.ModeTranscript)
+	stdout = uiMode.BindWriter(uimode.ModeTranscript, stdout)
+	stderr = uiMode.BindWriter(uimode.ModeTranscript, stderr)
 
 	if len(args) == 0 {
-		if isInteractive() {
-			startupOut := session.BindWriter(tuisession.ModeTranscript, r.Stdout)
-			if startupOut == nil {
-				startupOut = session.BindWriter(tuisession.ModeTranscript, os.Stdout)
-			}
-			startupErr := session.BindWriter(tuisession.ModeTranscript, r.Stderr)
-			if startupErr == nil {
-				startupErr = session.BindWriter(tuisession.ModeTranscript, os.Stderr)
-			}
-			versionDecision := emitVersionNoticeIfConfigured(startupOut)
-			if versionDecision.show {
-				if err := waitForVersionNoticeContinue(stdin, startupOut); err != nil {
-					_, _ = fmt.Fprintln(startupErr, err.Error())
-					return ExitDown
-				}
-			}
-			if err := ensureTelemetryNoticeBeforeDaemonStart(startupOut); err != nil {
-				_, _ = fmt.Fprintln(startupErr, err.Error())
-				return ExitDown
-			}
-			if err := attachOrStart(ctx, startupOut, startupErr, client); err != nil {
-				_, _ = fmt.Fprintln(startupErr, err.Error())
-				return ExitDown
-			}
-			sleep(startupHandoffFloor)
-			uicli.NewStartupConsolePresenter(startupOut).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
-			if err := session.SetMode(tuisession.ModeInteractive); err != nil {
-				_, _ = fmt.Fprintln(startupErr, err.Error())
-				return ExitDown
-			}
-			// Always return to transcript mode, even on cockpit failure, so any
-			// buffered log policy bound to the session can flush deterministically.
-			defer func() {
-				_ = session.SetMode(tuisession.ModeTranscript)
-			}()
+		return runInteractiveDefault(ctx, interactiveDefaultRunSpec{
+			stdin:               stdin,
+			stderr:              stderr,
+			client:              client,
+			attachOrStart:       attachOrStart,
+			launchInteractive:   launchInteractive,
+			isInteractive:       isInteractive,
+			uiMode:              uiMode,
+			startupHandoffFloor: startupHandoffFloor,
+			sleep:               sleep,
+			runner:              r,
+		})
+	}
+	return dispatchSubcommand(ctx, args, start, client, stdout, stderr)
+}
 
-			cockpitOut := session.BindWriter(tuisession.ModeInteractive, r.Stdout)
-			if cockpitOut == nil {
-				cockpitOut = session.BindWriter(tuisession.ModeInteractive, os.Stdout)
-			}
-			cockpitErr := session.BindWriter(tuisession.ModeInteractive, r.Stderr)
-			if cockpitErr == nil {
-				cockpitErr = session.BindWriter(tuisession.ModeInteractive, os.Stderr)
-			}
+type interactiveDefaultRunSpec struct {
+	stdin               io.Reader
+	stderr              io.Writer
+	client              *http.Client
+	attachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
+	launchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer) error
+	isInteractive       func() bool
+	uiMode              uiModeBridge
+	startupHandoffFloor time.Duration
+	sleep               func(time.Duration)
+	runner              Runner
+}
 
-			prevLogger := slog.Default()
-			// Logging behavior during cockpit is selected by the slog bridge
-			// policy, not by terminal session internals.
-			bridgedLogger := slog.New(platformlogging.NewSessionBufferedHandler(prevLogger.Handler(), session))
-			slog.SetDefault(bridgedLogger)
-			defer slog.SetDefault(prevLogger)
-
-			if err := launchInteractive(ctx, stdin, cockpitOut, cockpitErr); err != nil {
-				_, _ = fmt.Fprintln(cockpitErr, err.Error())
-				return ExitDown
-			}
-			return ExitHealthy
-		}
-		_, _ = fmt.Fprintln(stderr, "interactive cockpit requires a terminal; use `swobu status` or `swobu daemon --config <path>`")
+func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) ExitCode {
+	if !spec.isInteractive() {
+		_, _ = fmt.Fprintln(spec.stderr, "interactive cockpit requires a terminal; use `swobu status` or `swobu daemon --config <path>`")
 		return ExitDown
 	}
+	startupOut := spec.uiMode.BindWriter(uimode.ModeTranscript, spec.runner.Stdout)
+	if startupOut == nil {
+		startupOut = spec.uiMode.BindWriter(uimode.ModeTranscript, os.Stdout)
+	}
+	startupErr := spec.uiMode.BindWriter(uimode.ModeTranscript, spec.runner.Stderr)
+	if startupErr == nil {
+		startupErr = spec.uiMode.BindWriter(uimode.ModeTranscript, os.Stderr)
+	}
+	versionDecision := emitVersionNoticeIfConfigured(startupOut)
+	if versionDecision.show {
+		if err := waitForVersionNoticeContinue(spec.stdin, startupOut); err != nil {
+			_, _ = fmt.Fprintln(startupErr, err.Error())
+			return ExitDown
+		}
+	}
+	if err := ensureTelemetryNoticeBeforeDaemonStart(startupOut); err != nil {
+		_, _ = fmt.Fprintln(startupErr, err.Error())
+		return ExitDown
+	}
+	if err := spec.attachOrStart(ctx, startupOut, startupErr, spec.client); err != nil {
+		_, _ = fmt.Fprintln(startupErr, err.Error())
+		return ExitDown
+	}
+	spec.sleep(spec.startupHandoffFloor)
+	uicli.NewStartupConsolePresenter(startupOut).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
+	if err := spec.uiMode.SetMode(uimode.ModeInteractive); err != nil {
+		_, _ = fmt.Fprintln(startupErr, err.Error())
+		return ExitDown
+	}
+	defer func() { _ = spec.uiMode.SetMode(uimode.ModeTranscript) }()
+	cockpitOut := spec.uiMode.BindWriter(uimode.ModeInteractive, spec.runner.Stdout)
+	if cockpitOut == nil {
+		cockpitOut = spec.uiMode.BindWriter(uimode.ModeInteractive, os.Stdout)
+	}
+	cockpitErr := spec.uiMode.BindWriter(uimode.ModeInteractive, spec.runner.Stderr)
+	if cockpitErr == nil {
+		cockpitErr = spec.uiMode.BindWriter(uimode.ModeInteractive, os.Stderr)
+	}
+	prevLogger := slog.Default()
+	bridgedLogger := slog.New(platformlogging.NewSessionBufferedHandler(prevLogger.Handler(), spec.uiMode))
+	slog.SetDefault(bridgedLogger)
+	defer slog.SetDefault(prevLogger)
+	if err := spec.launchInteractive(ctx, spec.stdin, cockpitOut, cockpitErr); err != nil {
+		_, _ = fmt.Fprintln(cockpitErr, err.Error())
+		return ExitDown
+	}
+	return ExitHealthy
+}
 
-	switch args[0] {
+func dispatchSubcommand(ctx context.Context, args []string, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), client *http.Client, stdout io.Writer, stderr io.Writer) ExitCode {
+	subcommand := args[0] // swobu:io-string source=cli-args
+	switch subcommand {
 	case "--version", "-v", "version":
 		_, _ = fmt.Fprintln(stdout, controlplane.SwobuVersion())
 		return ExitHealthy
@@ -177,25 +204,9 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	case "telemetry":
 		return runTelemetry(stdout, stderr, args[1:])
 	default:
-		_, _ = fmt.Fprintf(stderr, "unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "unknown subcommand %q\n", subcommand)
 		return ExitDown
 	}
-}
-
-func waitForVersionNoticeContinue(in io.Reader, out io.Writer) error {
-	if in == nil {
-		return errors.New("version notice acknowledgment requires stdin")
-	}
-	_, _ = fmt.Fprintln(out, "press Enter to continue")
-	reader := bufio.NewReader(in)
-	if _, err := reader.ReadBytes('\n'); err != nil {
-		return fmt.Errorf("version notice acknowledgment failed: %w", err)
-	}
-	return nil
-}
-
-func defaultIsInteractive() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), stdout io.Writer, stderr io.Writer, args []string) ExitCode {
@@ -347,97 +358,6 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 	return ExitHealthy
 }
 
-func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
-	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off")
-		return ExitDown
-	}
-
-	switch args[0] {
-	case "status":
-		return runTelemetryStatus(stdout, stderr, args[1:])
-	case "on":
-		return runTelemetrySetEnabled(stdout, stderr, true, args[1:])
-	case "off":
-		return runTelemetrySetEnabled(stdout, stderr, false, args[1:])
-	default:
-		_, _ = fmt.Fprintf(stderr, "unknown telemetry subcommand %q\n", args[0])
-		return ExitDown
-	}
-}
-
-func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
-	fs := flag.NewFlagSet("telemetry status", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry status")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return ExitHealthy
-		}
-		return ExitDown
-	}
-	store := telemetry.NewStore()
-	state, err := store.LoadOrCreate()
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	payload := struct {
-		Enabled            bool   `json:"enabled"`
-		DoNotTrack         bool   `json:"do_not_track"`
-		AnonymousInstallID string `json:"anonymous_install_id"`
-		FirstSeenAt        string `json:"first_seen_at"`
-		NoticeShown        bool   `json:"notice_shown"`
-		LastUploadAt       string `json:"last_upload_at,omitempty"`
-	}{
-		Enabled:            state.Enabled && !telemetry.DoNotTrackEnabled(),
-		DoNotTrack:         telemetry.DoNotTrackEnabled(),
-		AnonymousInstallID: state.AnonymousInstallID,
-		FirstSeenAt:        state.FirstSeenAt,
-		NoticeShown:        state.NoticeShown,
-		LastUploadAt:       state.LastUploadAt,
-	}
-	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	return ExitHealthy
-}
-
-func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, args []string) ExitCode {
-	fs := flag.NewFlagSet("telemetry toggle", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu telemetry [on|off]")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return ExitHealthy
-		}
-		return ExitDown
-	}
-	store := telemetry.NewStore()
-	state, err := store.SetEnabled(enabled)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	payload := struct {
-		Enabled bool `json:"enabled"`
-	}{
-		Enabled: state.Enabled,
-	}
-	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	return ExitHealthy
-}
-
 func fetchStatus(ctx context.Context, client *http.Client, daemonURL string) (StatusPayload, ExitCode) {
 	payload, class := daemonlifecycle.FetchStatus(ctx, client, daemonURL)
 	switch class {
@@ -452,15 +372,6 @@ func fetchStatus(ctx context.Context, client *http.Client, daemonURL string) (St
 	}
 }
 
-func daemonDone(d *bootstrap.Daemon) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		_ = d.Wait(context.Background())
-		close(done)
-	}()
-	return done
-}
-
 func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, client *http.Client) error {
 	_, err := daemonlifecycle.AttachOrStart(ctx, daemonlifecycle.AttachOrStartInput{
 		DaemonURL:            platformconfig.DefaultDaemonURL(),
@@ -470,8 +381,4 @@ func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, cl
 		ReadinessTimeout:     15 * time.Second,
 	})
 	return err
-}
-
-func startupReporterFromWriter(out io.Writer) daemonlifecycle.StartupReporter {
-	return uicli.NewStartupConsolePresenter(out).DaemonLifecycleReporter()
 }

@@ -6,25 +6,25 @@ SWOBU 🧌                                                                ready 
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             openai:gpt-5.3:2310255c                                           choose ↵
+     provider           openai:gpt-5.3:2310255c                                           choose ↵
      models             2 configured                                                      manage ↵
-       model    openai:gpt-5.3:2310255c                                                   edit ↵
+       model    openai:gpt-5.3:2310255c                                                   close ↵
+         provider          OpenAI
+         credential        env                                                            choose ↵
+         model             gpt-5.3                                                        choose ↵
+         delivery          non-streaming                                                  next ↵
+         alias             not set                                                        edit ↵
+         env key           OPENAI_API_KEY                                                 edit ↵
+         delete model                                                                     delete ↵
        model    anthropic:opus:979cec50                                                   edit ↵
   >    add model                                                                          close ↵
          provider          Provider                                                       change ↵
-         auth              missing                                                        change ↵
-         delivery          request-response (HTTP JSON)                                   next ↵
+         credential        missing                                                        change ↵
+         delivery          auto                                                           next ↵
 
   clients ▸
     not set
 
   traffic ▸
-    no traffic yet
-
-
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ act   esc close   ? help

@@ -12,11 +12,11 @@ const (
 )
 
 func validateRequestedPublicModel(raw string) string {
-	requested := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
+	requested := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	if requested == "" {
 		return modelResolutionRuntime
 	}
-	if strings.EqualFold(requested, PublicModelIDSwobu) { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(requested, PublicModelIDSwobu) { // swobu:io-string source=boundary
 		return modelResolutionClient
 	}
 	// Compatibility ingress may still send backend model literals; Swobu runtime

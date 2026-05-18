@@ -16,10 +16,6 @@ import (
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
-func daemonURL() string {
-	return platformconfig.DefaultDaemonURL()
-}
-
 func httpClient() *http.Client {
 	return &http.Client{Timeout: 2 * time.Second}
 }
@@ -32,11 +28,11 @@ func httpClientWithTimeout(timeout time.Duration) *http.Client {
 }
 
 func operatorClient() *operatorclient.Client {
-	return operatorclient.New(httpClient(), daemonURL())
+	return operatorclient.New(httpClient(), platformconfig.DefaultDaemonURL())
 }
 
 func operatorClientWithTimeout(timeout time.Duration) *operatorclient.Client {
-	return operatorclient.New(httpClientWithTimeout(timeout), daemonURL())
+	return operatorclient.New(httpClientWithTimeout(timeout), platformconfig.DefaultDaemonURL())
 }
 
 func loadJSON[T any](ctx context.Context, rawURL string) (T, error) {

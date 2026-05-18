@@ -12,7 +12,7 @@ func createRunOnSummary(model state.Model) string {
 	if pc == nil {
 		return "not set"
 	}
-	return providerConfigSummary(*pc)
+	return providerHumanIdentifier(*pc)
 }
 
 func selectedDefaultModelSummary(model state.Model, snapshot *state.EndpointSnapshot) string {
@@ -20,9 +20,5 @@ func selectedDefaultModelSummary(model state.Model, snapshot *state.EndpointSnap
 	if pc == nil {
 		return selectors.EmptyOr(snapshot.SelectedProviderConfigRef, "not selected")
 	}
-	return providerConfigSummary(*pc)
-}
-
-func providerConfigSummary(pc state.ProviderConfigSnapshot) string {
-	return providerHumanIdentifier(pc)
+	return providerHumanIdentifier(*pc)
 }

@@ -29,14 +29,14 @@ func ContainsToolUseOutput(items []canonical.OutputItem) bool {
 }
 
 func DefaultFinishReason(value string, fallback string) string {
-	if strings.TrimSpace(value) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(value) == "" { // swobu:io-string source=boundary
 		return fallback
 	}
 	return value
 }
 
 func FallbackID(value string, fallback string) string {
-	if strings.TrimSpace(value) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(value) == "" { // swobu:io-string source=boundary
 		return fallback
 	}
 	return value

@@ -25,7 +25,7 @@ type ProviderExecutorAdapter struct {
 	credentials providersruntime.CredentialProvider
 }
 
-type protocolCodecDispatch struct {
+type protocolCodecDispatchSpec struct {
 	realize        func(req canonical.CanonicalRequest, streaming bool) (protocols.WireRequest, error)
 	decodeBuffered func(raw []byte) (ports.ProviderResponse, error)
 	decodeStream   func(body io.ReadCloser) (ports.ProviderResponse, error)
@@ -33,7 +33,7 @@ type protocolCodecDispatch struct {
 
 const swobuCallerUAHeaderValue = "swobu/dev"
 
-var protocolDispatchTable = map[protocolkind.ProtocolKind]protocolCodecDispatch{
+var protocolDispatchTable = map[protocolkind.ProtocolKind]protocolCodecDispatchSpec{
 	protocolkind.ChatCompletions: {
 		realize: func(req canonical.CanonicalRequest, streaming bool) (protocols.WireRequest, error) {
 			return chatcompletions.EncodeRequest(req, streaming)
@@ -93,9 +93,9 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 }
 
 // NewRuntime builds a complete OpenAI-compatible provider runtime.
-func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntime {
+func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	executor := NewExecutor(client, credentials)
-	return providersruntime.ProviderRuntime{
+	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
 		Executor:           executor,
 		CredentialProvider: credentials,
@@ -106,16 +106,15 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 // Execute applies provider wiring, performs the backend HTTP call, and decodes
 // successful responses into canonical semantics. Backend-origin failures remain
 // backend errors rather than being normalized into Swobu success envelopes.
-func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
-	return e.executeOnce(ctx, req)
-}
-
 // ListModels reads the OpenAI-compatible model catalog for one selected OpenAI-compatible
 // provider target. This is an operator-support path, not a compatibility-path
 // semantic request.
 func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
-	if strings.TrimSpace(target.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("OpenAI-compatible provider base URL is required")
+	}
+	if requiresExplicitCredentialRef(target.ProviderID(), target.BaseURL, target.CredentialRef) {
+		return nil, canonical.BadEndpoint(providerCredentialRequiredMessage(target.ProviderID()))
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpedge.JoinBaseURLAndPath(target.BaseURL, "/models"), nil)
 	if err != nil {
@@ -152,12 +151,20 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	return models, nil
 }
 
-func (e ProviderExecutorAdapter) executeOnce(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
+func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+	_, err := e.ListModels(ctx, target)
+	return err
+}
+
+func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
 	if req.Request == nil {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
-	if strings.TrimSpace(req.Target.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
 		return ports.ProviderResponse{}, canonical.BadEndpoint("OpenAI-compatible provider base URL is required")
+	}
+	if requiresExplicitCredentialRef(req.Target.ProviderID(), req.Target.BaseURL, req.Target.CredentialRef) {
+		return ports.ProviderResponse{}, canonical.BadEndpoint(providerCredentialRequiredMessage(req.Target.ProviderID()))
 	}
 
 	wireReq, err := e.encodeRequest(req.Target, req.Request, req.Contract.ProviderCallMode.Streaming())
@@ -222,7 +229,7 @@ func (e ProviderExecutorAdapter) encodeRequest(target ports.RoutableTarget, req 
 // applyCredential keeps auth resolution at the provider edge so canonicals and
 // app orchestration never need to know provider token mechanics.
 func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {
-	if strings.TrimSpace(credentialRef) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	if e.credentials == nil {
@@ -232,7 +239,7 @@ func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.
 	if err != nil {
 		return canonical.BadEndpoint("credential reference could not be resolved")
 	}
-	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -267,22 +274,37 @@ func (e ProviderExecutorAdapter) decodeStreamingResponse(target ports.RoutableTa
 	return dispatch.decodeStream(body)
 }
 
-func protocolCodecDispatchFor(providerIDRaw string, kind protocolkind.ProtocolKind) (protocolCodecDispatch, error) {
-	providerID, ok := providercatalog.ParseProviderID(strings.TrimSpace(providerIDRaw)) // trimlowerlint:allow boundary canonicalization
+func protocolCodecDispatchFor(providerIDRaw string, kind protocolkind.ProtocolKind) (protocolCodecDispatchSpec, error) {
+	providerID, ok := providercatalog.ParseProviderID(strings.TrimSpace(providerIDRaw)) // swobu:io-string source=boundary
 	if !ok {
-		return protocolCodecDispatch{}, canonical.BadEndpoint("provider id is unsupported for OpenAI-compatible adapter runtime")
+		return protocolCodecDispatchSpec{}, canonical.BadEndpoint("provider id is unsupported for OpenAI-compatible adapter runtime")
 	}
 	switch providerID {
 	case providercatalog.ProviderSpecOpenAI, providercatalog.ProviderSpecOpenRouter, providercatalog.ProviderSpecOpenAICompatible, providercatalog.ProviderSpecOllama:
 	default:
-		return protocolCodecDispatch{}, canonical.BadEndpoint("provider id is unsupported for OpenAI-compatible adapter runtime")
+		return protocolCodecDispatchSpec{}, canonical.BadEndpoint("provider id is unsupported for OpenAI-compatible adapter runtime")
 	}
 	dispatch, ok := protocolDispatchTable[kind]
 	if !ok {
 		if kind == protocolkind.Messages {
-			return protocolCodecDispatch{}, canonical.UnsupportedOperation("OpenAI-compatible provider does not implement the messages protocol")
+			return protocolCodecDispatchSpec{}, canonical.UnsupportedOperation("OpenAI-compatible provider does not implement the messages protocol")
 		}
-		return protocolCodecDispatch{}, canonical.UnsupportedOperation("OpenAI-compatible provider protocol kind is not implemented")
+		return protocolCodecDispatchSpec{}, canonical.UnsupportedOperation("OpenAI-compatible provider protocol kind is not implemented")
 	}
 	return dispatch, nil
+}
+
+func requiresExplicitCredentialRef(providerSpec string, baseURL string, credentialRef string) bool {
+	if strings.TrimSpace(credentialRef) != "" { // swobu:io-string source=boundary
+		return false
+	}
+	return providercatalog.RequiresCredential(strings.TrimSpace(providerSpec), strings.TrimSpace(baseURL)) // swobu:io-string source=boundary
+}
+
+func providerCredentialRequiredMessage(providerSpec string) string {
+	providerID, ok := providercatalog.ParseProviderID(strings.TrimSpace(providerSpec)) // swobu:io-string source=boundary
+	if !ok {
+		return "provider credential reference is required"
+	}
+	return string(providerID) + " provider credential reference is required"
 }

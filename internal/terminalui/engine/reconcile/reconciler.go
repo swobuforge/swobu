@@ -4,13 +4,13 @@ import "github.com/swobuforge/swobu/internal/terminalui/view"
 
 type Reconciler struct{}
 
-func (Reconciler) Reconcile(prev view.ViewSpec, next view.ViewSpec, mode view.RenderMode) []RenderOp {
+func (Reconciler) Reconcile(prev view.ViewSpec, next view.ViewSpec, mode view.RenderMode) []RenderOpEntry {
 	prevN := view.Normalize(prev)
 	nextN := view.Normalize(next)
 	return Reconciler{}.ReconcileScene(view.Project(prevN), view.Project(nextN), mode)
 }
 
-func (Reconciler) ReconcileScene(prev view.Scene, next view.Scene, mode view.RenderMode) []RenderOp {
+func (Reconciler) ReconcileScene(prev view.SceneSnapshot, next view.SceneSnapshot, mode view.RenderMode) []RenderOpEntry {
 	switch mode {
 	case view.RenderModeLive:
 		return reconcileLive(prev, next)
@@ -21,28 +21,28 @@ func (Reconciler) ReconcileScene(prev view.Scene, next view.Scene, mode view.Ren
 	}
 }
 
-func reconcileAppend(prev view.Scene, next view.Scene) []RenderOp {
+func reconcileAppend(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpEntry {
 	prevDurable := prev.Durable
 	nextDurable := next.Durable
 	start := longestCommonPrefix(prevDurable, nextDurable)
-	ops := make([]RenderOp, 0, len(nextDurable)-start)
+	ops := make([]RenderOpEntry, 0, len(nextDurable)-start)
 	for i := start; i < len(nextDurable); i++ {
-		ops = append(ops, RenderOp{Kind: RenderOpAppendDurableLine, Text: nextDurable[i]})
+		ops = append(ops, RenderOpEntry{Kind: RenderOpAppendDurableLine, Text: nextDurable[i]})
 	}
 	return ops
 }
 
-func reconcileLive(prev view.Scene, next view.Scene) []RenderOp {
+func reconcileLive(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpEntry {
 	ops := reconcileAppend(prev, next)
 	p := last(prev.Ephemeral)
 	n := last(next.Ephemeral)
 	if n != "" && n != p {
-		ops = append(ops, RenderOp{Kind: RenderOpUpdateEphemeralLine, Text: n})
+		ops = append(ops, RenderOpEntry{Kind: RenderOpUpdateEphemeralLine, Text: n})
 	}
 	return ops
 }
 
-func reconcileFullscreen(prev view.Scene, next view.Scene) []RenderOp {
+func reconcileFullscreen(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpEntry {
 	p := prev.Durable
 	pn := prev.Ephemeral
 	if len(pn) > 0 {
@@ -56,7 +56,7 @@ func reconcileFullscreen(prev view.Scene, next view.Scene) []RenderOp {
 	if equalSlice(p, n) {
 		return nil
 	}
-	return []RenderOp{{Kind: RenderOpPaintFrame, FrameLines: n}}
+	return []RenderOpEntry{{Kind: RenderOpPaintFrame, FrameLines: n}}
 }
 
 func longestCommonPrefix(a, b []string) int {

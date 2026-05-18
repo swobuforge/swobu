@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -35,12 +34,9 @@ const (
 var chatGPTRefreshTokenURL = "https://auth.openai.com/oauth/token"
 var chatGPTOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
-var catalogBaseURL = "https://swobu.com"
-
 type ProviderExecutorAdapter struct {
 	client      *http.Client
 	credentials providersruntime.CredentialProvider
-	catalogBase string
 }
 
 func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider) ProviderExecutorAdapter {
@@ -50,14 +46,13 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 	return ProviderExecutorAdapter{
 		client:      client,
 		credentials: credentials,
-		catalogBase: catalogBaseURL,
 	}
 }
 
 // NewRuntime builds a complete ChatGPT provider runtime.
-func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntime {
+func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	executor := NewExecutor(client, credentials)
-	return providersruntime.ProviderRuntime{
+	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
 		Executor:           executor,
 		CredentialProvider: credentials,
@@ -118,7 +113,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	if resp.StatusCode == http.StatusUnauthorized {
 		backendErr := httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 		recoveredToken, refreshErr := e.resolveAccessToken(ctx, req.Target.ProviderID(), req.Target.CredentialRef, true)
-		if refreshErr != nil || strings.TrimSpace(recoveredToken) == "" {
+		if refreshErr != nil || strings.TrimSpace(recoveredToken) == "" { // swobu:io-string source=boundary
 			return ports.ProviderResponse{}, backendErr
 		}
 		retryReq, buildErr := newRequest(recoveredToken)
@@ -149,7 +144,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 }
 
 func (e ProviderExecutorAdapter) resolveAccessToken(ctx context.Context, providerSpec string, credentialRef string, forceRefresh bool) (string, error) {
-	if strings.TrimSpace(credentialRef) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
 		return "", canonical.BadEndpoint("chatgpt provider credential reference is required")
 	}
 	if e.credentials == nil {
@@ -160,7 +155,7 @@ func (e ProviderExecutorAdapter) resolveAccessToken(ctx context.Context, provide
 		if err != nil {
 			return "", canonical.BadEndpoint("credential reference could not be resolved")
 		}
-		if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 			return "", canonical.BadEndpoint("credential reference resolved to an empty token")
 		}
 		return token, nil
@@ -172,7 +167,7 @@ func (e ProviderExecutorAdapter) resolveAccessToken(ctx context.Context, provide
 	if err != nil {
 		return "", canonical.BadEndpoint("credential reference could not be resolved")
 	}
-	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return "", canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
 	return token, nil
@@ -187,10 +182,10 @@ func (e ProviderExecutorAdapter) refreshCredentialBundle(ctx context.Context, pr
 	if err != nil || !isBundle {
 		return fmt.Errorf("credential is not refreshable")
 	}
-	if strings.TrimSpace(bundle.RefreshToken) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(bundle.RefreshToken) == "" { // swobu:io-string source=boundary
 		return fmt.Errorf("credential is not refreshable")
 	}
-	if !bundle.ExpiresAt.IsZero() && bundle.ExpiresAt.After(time.Now().UTC().Add(tokenRefreshSkew)) && strings.TrimSpace(bundle.AccessToken) != "" { // trimlowerlint:allow boundary canonicalization
+	if !bundle.ExpiresAt.IsZero() && bundle.ExpiresAt.After(time.Now().UTC().Add(tokenRefreshSkew)) && strings.TrimSpace(bundle.AccessToken) != "" { // swobu:io-string source=boundary
 		return nil
 	}
 	nextBundle, err := requestChatGPTTokenRefresh(ctx, e.client, bundle.RefreshToken)
@@ -208,7 +203,7 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
 	form.Set("client_id", chatGPTOAuthClientID)
-	form.Set("refresh_token", strings.TrimSpace(refreshToken)) // trimlowerlint:allow boundary canonicalization
+	form.Set("refresh_token", strings.TrimSpace(refreshToken)) // swobu:io-string source=boundary
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatGPTRefreshTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return outboundcredentials.TokenBundle{}, fmt.Errorf("token refresh request could not be built")
@@ -233,17 +228,17 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return outboundcredentials.TokenBundle{}, fmt.Errorf("token refresh response could not be decoded")
 	}
-	if strings.TrimSpace(payload.AccessToken) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(payload.AccessToken) == "" { // swobu:io-string source=boundary
 		return outboundcredentials.TokenBundle{}, fmt.Errorf("token refresh returned empty access token")
 	}
 	out := outboundcredentials.TokenBundle{
-		AccessToken:  strings.TrimSpace(payload.AccessToken),  // trimlowerlint:allow boundary canonicalization
-		RefreshToken: strings.TrimSpace(payload.RefreshToken), // trimlowerlint:allow boundary canonicalization
-		IDToken:      strings.TrimSpace(payload.IDToken),      // trimlowerlint:allow boundary canonicalization
+		AccessToken:  strings.TrimSpace(payload.AccessToken),  // swobu:io-string source=boundary
+		RefreshToken: strings.TrimSpace(payload.RefreshToken), // swobu:io-string source=boundary
+		IDToken:      strings.TrimSpace(payload.IDToken),      // swobu:io-string source=boundary
 		IssuedAt:     time.Now().UTC(),
 	}
 	if out.RefreshToken == "" {
-		out.RefreshToken = strings.TrimSpace(refreshToken) // trimlowerlint:allow boundary canonicalization
+		out.RefreshToken = strings.TrimSpace(refreshToken) // swobu:io-string source=boundary
 	}
 	if payload.ExpiresIn > 0 {
 		out.ExpiresAt = out.IssuedAt.Add(time.Duration(payload.ExpiresIn) * time.Second)
@@ -256,67 +251,25 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	if !ok {
 		return nil, canonical.BadEndpoint("chatgpt subscription tier could not be resolved from credential")
 	}
-	resourceURL := strings.TrimRight(e.catalogBase, "/") + "/api/v1/model-catalog/chatgpt/subscriptions/" + tier
-	slog.Debug("chatgpt model catalog request",
-		"backend_ref", strings.TrimSpace(target.BackendRef), // trimlowerlint:allow boundary canonicalization
-		"catalog_url", resourceURL,
+	models, ok := chatGPTTierModelIDs(tier)
+	if !ok {
+		return nil, canonical.BadEndpoint("chatgpt model catalog tier is unavailable in bundled list")
+	}
+	slog.Debug("chatgpt model catalog loaded from bundled lists",
+		"backend_ref", strings.TrimSpace(target.BackendRef), // swobu:io-string source=boundary
 		"tier", tier,
-		"tier_from_credential_ref", ok,
+		"model_count", len(models),
 	)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, resourceURL, nil)
-	if err != nil {
-		slog.Warn("chatgpt model catalog request build failed",
-			"catalog_url", resourceURL,
-			"error", err.Error(),
-		)
-		return nil, canonical.BadEndpoint("chatgpt model catalog request could not be built")
-	}
-	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
-	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
-	resp, err := e.client.Do(httpReq)
-	if err != nil {
-		slog.Warn("chatgpt model catalog request failed",
-			"catalog_url", resourceURL,
-			"error", err.Error(),
-		)
-		return nil, canonical.BadEndpoint("chatgpt model catalog request failed before backend response")
-	}
-	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
-	if err != nil {
-		defer func() { _ = resp.Body.Close() }()
-		slog.Warn("chatgpt model catalog content decode failed",
-			"catalog_url", resourceURL,
-			"error", err.Error(),
-		)
-		return nil, canonical.InternalError("chatgpt model catalog response content encoding is unsupported or invalid")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
-		slog.Warn("chatgpt model catalog backend error",
-			"catalog_url", resourceURL,
-			"status_code", resp.StatusCode,
-			"tier", tier,
-		)
-		return nil, httpedge.ReadBackendHTTPError(resp, target.BackendRef)
-	}
-	var payload struct {
-		ModelIDs []string `json:"model_ids"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		slog.Warn("chatgpt model catalog decode failed",
-			"catalog_url", resourceURL,
-			"error", err.Error(),
-		)
-		return nil, canonical.InternalError("chatgpt model catalog could not be decoded")
-	}
-	models := ports.CloneModelIDs(payload.ModelIDs)
-	slices.Sort(models)
-	models = slices.Compact(models)
 	return models, nil
 }
 
+func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+	_, err := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, false)
+	return err
+}
+
 func resolveChatGPTSubscriptionTier(credentialRef string) (string, bool) {
-	ref := strings.ToLower(strings.TrimSpace(credentialRef)) // trimlowerlint:allow boundary canonicalization
+	ref := strings.ToLower(strings.TrimSpace(credentialRef)) // swobu:io-string source=boundary
 	for _, tier := range []string{"team", "pro", "plus", "free"} {
 		if strings.Contains(ref, "/"+tier) || strings.Contains(ref, ":"+tier) || strings.Contains(ref, "_"+tier) || strings.Contains(ref, "-"+tier) {
 			return tier, true
@@ -333,11 +286,11 @@ func resolveChatGPTSubscriptionTier(credentialRef string) (string, bool) {
 }
 
 func resolveChatGPTExecuteBaseURL(raw string) string {
-	base := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
+	base := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	if base == "" {
 		return chatGPTCodexExecuteBase
 	}
-	lower := strings.ToLower(base) // trimlowerlint:allow boundary canonicalization
+	lower := strings.ToLower(base) // swobu:io-string source=boundary
 	if strings.Contains(lower, "chatgpt.com/backend-api/codex") {
 		return strings.TrimRight(base, "/")
 	}
@@ -345,24 +298,6 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 		return chatGPTCodexExecuteBase
 	}
 	return strings.TrimRight(base, "/")
-}
-
-func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {
-	if strings.TrimSpace(credentialRef) == "" { // trimlowerlint:allow boundary canonicalization
-		return canonical.BadEndpoint("chatgpt provider credential reference is required")
-	}
-	if e.credentials == nil {
-		return canonical.BadEndpoint("credential resolver is not configured")
-	}
-	token, err := e.credentials.ResolveCredential(ctx, providerSpec, credentialRef)
-	if err != nil {
-		return canonical.BadEndpoint("credential reference could not be resolved")
-	}
-	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
-		return canonical.BadEndpoint("credential reference resolved to an empty token")
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	return nil
 }
 
 func chatGPTResponseDecoder(providerIDRaw string, protocolKind protocolkind.ProtocolKind, delivery bool) (providersruntime.ResponseDecoder, error) {

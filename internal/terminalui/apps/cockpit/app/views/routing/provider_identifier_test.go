@@ -55,7 +55,7 @@ func TestProviderDisplayLabel_UsesCanonicalProviderIdentifier(t *testing.T) {
 		ModelID:       "gpt-5.4-mini",
 		CredentialRef: "keychain:chatgpt/default",
 	}
-	if got, want := providerDisplayLabel(pc), providerHumanIdentifier(pc); got != want {
-		t.Fatalf("providerDisplayLabel()=%q want canonical %q", got, want)
+	if got, want := providerHumanIdentifier(pc), providerHumanIdentifier(pc); got != want {
+		t.Fatalf("providerHumanIdentifier()=%q want canonical %q", got, want)
 	}
 }

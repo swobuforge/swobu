@@ -19,7 +19,7 @@ var (
 )
 
 func copyValueNote(text string) string {
-	text = strings.TrimSpace(text) // trimlowerlint:allow boundary canonicalization
+	text = strings.TrimSpace(text) // swobu:io-string source=boundary
 	if text == "" {
 		return "nothing to copy"
 	}

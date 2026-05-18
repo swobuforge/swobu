@@ -18,12 +18,12 @@ func interactiveAddModelCredentialRows(
 	draft state.ProviderConfigSnapshot,
 	source string,
 ) []retained.ViewSpec[state.Model] {
-	variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))                                                        // trimlowerlint:allow boundary canonicalization
-	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(providerSpec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) { // trimlowerlint:allow boundary canonicalization
+	variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))                                                        // swobu:io-string source=boundary
+	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(providerSpec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
 		return nil
 	}
 	return interactiveAuthStatusRows(model, interactiveAuthRenderConfig{
-		EndpointName: strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
+		EndpointName: strings.TrimSpace(endpointName), // swobu:io-string source=boundary
 		Draft:        draft,
 		Variant:      variant,
 		StartAuth: func(next state.ProviderConfigSnapshot) []update.Action {
@@ -48,15 +48,15 @@ const (
 
 func classifyInteractiveAuthPhase(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, variant providercatalog.AuthVariant) interactiveAuthPhase {
 	authState := addModelAuthStateForDraft(model, endpointName, draft)
-	if strings.EqualFold(strings.TrimSpace(authState.SessionState), "expired") { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(strings.TrimSpace(authState.SessionState), "expired") { // swobu:io-string source=boundary
 		return interactiveAuthPhaseExpired
 	}
 	if variant == providercatalog.AuthVariantChatGPTLogin &&
-		strings.EqualFold(strings.TrimSpace(authState.SessionState), "failed") && // trimlowerlint:allow boundary canonicalization
-		strings.TrimSpace(authState.SessionID) != "" { // trimlowerlint:allow boundary canonicalization
+		strings.EqualFold(strings.TrimSpace(authState.SessionState), "failed") && // swobu:io-string source=boundary
+		strings.TrimSpace(authState.SessionID) != "" { // swobu:io-string source=boundary
 		return interactiveAuthPhaseStartUnavailable
 	}
-	sessionActive := strings.TrimSpace(authState.SessionID) != "" // trimlowerlint:allow boundary canonicalization
+	sessionActive := strings.TrimSpace(authState.SessionID) != "" // swobu:io-string source=boundary
 	if sessionActive {
 		return interactiveAuthPhaseInProgress
 	}
@@ -82,28 +82,28 @@ type interactiveAuthRenderConfig struct {
 
 func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfig) []retained.ViewSpec[state.Model] {
 	rows := make([]retained.ViewSpec[state.Model], 0, 6)
-	endpointName := strings.TrimSpace(cfg.EndpointName) // trimlowerlint:allow boundary canonicalization
+	endpointName := strings.TrimSpace(cfg.EndpointName) // swobu:io-string source=boundary
 	draft := cfg.Draft
 	variant := cfg.Variant
 	authState := addModelAuthStateForDraft(model, endpointName, draft)
 	viewState := classifyInteractiveAuthPhase(model, endpointName, draft, variant)
 	if viewState == interactiveAuthPhaseInProgress || viewState == interactiveAuthPhaseStartUnavailable {
-		stateValue := strings.TrimSpace(authState.SessionState) // trimlowerlint:allow boundary canonicalization
-		loginURL := strings.TrimSpace(authState.URL)            // trimlowerlint:allow boundary canonicalization
-		userCode := strings.TrimSpace(authState.UserCode)       // trimlowerlint:allow boundary canonicalization
+		stateValue := strings.TrimSpace(authState.SessionState) // swobu:io-string source=boundary
+		loginURL := strings.TrimSpace(authState.URL)            // swobu:io-string source=boundary
+		userCode := strings.TrimSpace(authState.UserCode)       // swobu:io-string source=boundary
 		if variant == providercatalog.AuthVariantChatGPTLogin {
 			if viewState == interactiveAuthPhaseStartUnavailable {
 				rows = append(rows, views.RowStatic("", "could not open default browser"))
 			}
 		}
 		if loginURL != "" {
-			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // trimlowerlint:allow boundary canonicalization
+			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // swobu:io-string source=boundary
 		}
 		if shouldRenderInteractiveAuthCode(variant, userCode) {
 			rows = append(rows, views.RowAction("code", userCode, "copy", func() []update.Action {
 				return []update.Action{
 					state.AuthSessionURLCopyScopedRequested{
-						OwnerKey: interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)), // trimlowerlint:allow boundary canonicalization
+						OwnerKey: interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)), // swobu:io-string source=boundary
 						Value:    userCode,
 					},
 				}
@@ -119,9 +119,9 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 			}
 			return cfg.StartAuth(draft)
 		}))
-		loginURL := strings.TrimSpace(authState.URL) // trimlowerlint:allow boundary canonicalization
+		loginURL := strings.TrimSpace(authState.URL) // swobu:io-string source=boundary
 		if loginURL != "" {
-			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // trimlowerlint:allow boundary canonicalization
+			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // swobu:io-string source=boundary
 		}
 	} else if viewState == interactiveAuthPhaseResolved && variant == providercatalog.AuthVariantChatGPTLogin {
 		rows = append(rows, views.RowAction("sign in", "sign in another account", "open", func() []update.Action {
@@ -153,7 +153,7 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 			return nil
 		}))
 	}
-	if strings.TrimSpace(authState.SessionError) != "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(authState.SessionError) != "" { // swobu:io-string source=boundary
 		rows = append(rows, views.DisclosureNoteRows(authState.SessionError)...)
 	}
 	if shouldShowAuthStartRetryHint(authState.SessionError, authState.SessionID) {
@@ -171,11 +171,11 @@ type addModelAuthState struct {
 }
 
 func addModelAuthStateForDraft(model state.Model, endpointName string, draft state.ProviderConfigSnapshot) addModelAuthState {
-	ownerKey := interactiveAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(draft.Ref)) // trimlowerlint:allow boundary canonicalization
+	ownerKey := interactiveAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(draft.Ref)) // swobu:io-string source=boundary
 	if model.AuthSessions == nil {
 		return addModelAuthState{}
 	}
-	session, ok := model.AuthSessions[strings.TrimSpace(ownerKey)] // trimlowerlint:allow boundary canonicalization
+	session, ok := model.AuthSessions[strings.TrimSpace(ownerKey)] // swobu:io-string source=boundary
 	if !ok {
 		return addModelAuthState{}
 	}
@@ -189,31 +189,31 @@ func addModelAuthStateForDraft(model state.Model, endpointName string, draft sta
 }
 
 func interactiveAuthOwnerKey(endpointName string, providerRef string) string {
-	if strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
-		return stateModel.CreateDraftAuthOwnerKey(strings.TrimSpace(providerRef)).String() // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
+		return stateModel.CreateDraftAuthOwnerKey(strings.TrimSpace(providerRef)).String() // swobu:io-string source=boundary
 	}
-	return stateModel.AddModelDraftAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerRef)).String() // trimlowerlint:allow boundary canonicalization
+	return stateModel.AddModelDraftAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerRef)).String() // swobu:io-string source=boundary
 }
 
 func shouldShowAuthStartRetryHint(sessionError string, sessionID string) bool {
-	errText := strings.TrimSpace(sessionError)               // trimlowerlint:allow boundary canonicalization
-	if errText == "" || strings.TrimSpace(sessionID) != "" { // trimlowerlint:allow boundary canonicalization
+	errText := strings.TrimSpace(sessionError)               // swobu:io-string source=boundary
+	if errText == "" || strings.TrimSpace(sessionID) != "" { // swobu:io-string source=boundary
 		return false
 	}
 	// Credential store failures happen after auth completion and should not be
 	// misreported as auth-start failures.
-	if strings.Contains(strings.ToLower(errText), "credential store failed") { // trimlowerlint:allow boundary canonicalization
+	if strings.Contains(strings.ToLower(errText), "credential store failed") { // swobu:io-string source=boundary
 		return false
 	}
 	return true
 }
 
 func shouldRenderInteractiveAuthCode(variant providercatalog.AuthVariant, userCode string) bool {
-	return variant == providercatalog.AuthVariantChatGPTDeviceAuth && strings.TrimSpace(userCode) != "" // trimlowerlint:allow boundary canonicalization
+	return variant == providercatalog.AuthVariantChatGPTDeviceAuth && strings.TrimSpace(userCode) != "" // swobu:io-string source=boundary
 }
 
 func interactiveAuthLinkRows(loginURL string, ownerKey string) []retained.ViewSpec[state.Model] {
-	url := strings.TrimSpace(loginURL) // trimlowerlint:allow boundary canonicalization
+	url := strings.TrimSpace(loginURL) // swobu:io-string source=boundary
 	if url == "" {
 		return nil
 	}
@@ -221,7 +221,7 @@ func interactiveAuthLinkRows(loginURL string, ownerKey string) []retained.ViewSp
 		views.RowActionWideValue("link", "", "copy", func() []update.Action {
 			return []update.Action{
 				state.AuthSessionURLCopyScopedRequested{
-					OwnerKey: strings.TrimSpace(ownerKey), // trimlowerlint:allow boundary canonicalization
+					OwnerKey: strings.TrimSpace(ownerKey), // swobu:io-string source=boundary
 					Value:    url,
 				},
 			}

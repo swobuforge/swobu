@@ -130,7 +130,7 @@ func (l *ChoiceListRenderNode) renderLine(focused bool) string {
 }
 
 func (l *ChoiceListRenderNode) renderItem(label string, selected bool) string {
-	label = strings.TrimSpace(label) // trimlowerlint:allow boundary canonicalization
+	label = strings.TrimSpace(label) // swobu:io-string source=boundary
 	if l.RenderItem != nil {
 		return l.RenderItem(label, selected)
 	}

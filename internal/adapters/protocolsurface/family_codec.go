@@ -20,13 +20,13 @@ type FamilyCodec interface {
 func ForIngressFamily(family canonical.IngressFamily) (FamilyCodec, error) {
 	switch family {
 	case canonical.IngressFamilyChatCompletions:
-		return chatcompletions.ChatCompletionsCodec{}, nil
+		return chatcompletions.ChatCompletionsFamilyCodec{}, nil
 	case canonical.IngressFamilyResponses:
-		return responses.ResponsesCodec{}, nil
+		return responses.ResponsesFamilyCodec{}, nil
 	case canonical.IngressFamilyCompletions:
-		return completions.CompletionsCodec{}, nil
+		return completions.CompletionsFamilyCodec{}, nil
 	case canonical.IngressFamilyMessages:
-		return messages.MessagesCodec{}, nil
+		return messages.MessagesFamilyCodec{}, nil
 	default:
 		return nil, canonical.UnsupportedOperation("ingress family is not implemented")
 	}

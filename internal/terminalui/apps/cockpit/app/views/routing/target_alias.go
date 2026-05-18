@@ -27,7 +27,7 @@ func buildProviderTargetAliasRow(ctx *retained.Context[state.Model], spec provid
 	if pc == nil {
 		return nil
 	}
-	currentValue := strings.TrimSpace(pc.TargetAlias) // trimlowerlint:allow boundary canonicalization
+	currentValue := strings.TrimSpace(pc.TargetAlias) // swobu:io-string source=boundary
 	summary := "not set"
 	if currentValue != "" {
 		summary = currentValue
@@ -61,7 +61,7 @@ func aliasInlineEditorRow(
 			},
 			func(value string) []update.Action {
 				setOpen(false)
-				actions := save(strings.TrimSpace(value)) // trimlowerlint:allow boundary canonicalization
+				actions := save(strings.TrimSpace(value)) // swobu:io-string source=boundary
 				return append([]update.Action{state.SetInteractionMode{Mode: state.InteractionModeManageList}}, actions...)
 			},
 			func() []update.Action {
@@ -84,14 +84,14 @@ func aliasInlineEditorRow(
 }
 
 func applyProviderTargetAlias(targetAlias string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	targetAlias = strings.ToLower(strings.TrimSpace(targetAlias)) // trimlowerlint:allow boundary canonicalization
+	targetAlias = strings.ToLower(strings.TrimSpace(targetAlias)) // swobu:io-string source=boundary
 	if createMode {
 		return []update.Action{state.SetCreateDraftTargetAlias{TargetAlias: targetAlias}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	next := *providerConfig
 	next.TargetAlias = targetAlias
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/alias") // trimlowerlint:allow boundary canonicalization
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/alias") // swobu:io-string source=boundary
 }

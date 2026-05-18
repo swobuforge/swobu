@@ -2,42 +2,12 @@
 
 ![Swobu README hero](./assets/readme/swobu-readme-hero.png)
 
-**Keep the AI tools. Control the traffic.**
+**Use the AI coding client you like with the backend you want.**
 
-Swobu is a local AI control boundary for coding tools and LLM clients.
+Swobu is a local router for AI coding clients. Point Claude Code, Codex CLI, Continue, or another OpenAI/Anthropic-compatible client at Swobu, then route traffic to OpenAI, Anthropic, OpenRouter, AWS Bedrock, Ollama, ChatGPT, or a custom backend.
 
-Point Claude Code, Codex CLI, Continue, or another OpenAI/Anthropic-compatible client at Swobu. Route traffic to OpenAI, Anthropic, OpenRouter, Ollama, or a custom OpenAI-compatible backend.
-
-The client should not decide where your AI traffic goes.
-
----
-
-## Why Swobu
-
-AI coding clients multiply fast, and each tends to carry assumptions about:
-
-- provider choice
-- API shape
-- streaming behavior
-- auth handling
-- error shape
-
-Swobu sits between client and backend so you can:
-
-- keep your preferred client
-- swap providers without rebuilding workflow glue
-- route local and hosted models through one boundary
-- compare backends from the same client experience
-- inspect local traffic health
-- avoid SDK lock-in
-
-**Standardize the boundary, not the tool.**
-
----
-
-## Demo
-
-![Swobu first demo](./assets/readme/swobu-cli-demo.gif)
+The client is not the brain.
+Swobu is early. Expect sharp edges.
 
 ---
 
@@ -45,21 +15,17 @@ Swobu sits between client and backend so you can:
 
 ```sh
 curl -fsSL https://swobu.com/install.sh | sh
-```
-
-Launch Swobu:
-
-```sh
 swobu
 ```
 
-In cockpit:
+The installer uses GitHub release artifacts (`checksums.txt` verified).
 
-1. Create or select a workspace.
-2. Choose a backend provider.
-3. Configure base URL and auth.
-4. Copy the local endpoint shown by Swobu.
-5. Point your AI client at that endpoint.
+If a release artifact is not available yet, install from source:
+
+```sh
+go install github.com/swobuforge/swobu/cmd/swobu@master
+swobu
+```
 
 Check health:
 
@@ -75,7 +41,21 @@ swobu down
 
 ---
 
-## 60-second shape
+## 60-second setup
+
+Run Swobu:
+
+```sh
+swobu
+```
+
+In the cockpit:
+
+1. Create or select a workspace.
+2. Choose a backend provider.
+3. Configure base URL and auth.
+4. Copy the local endpoint shown by Swobu.
+5. Point your AI client at that endpoint.
 
 Typical OpenAI-style client config:
 
@@ -90,7 +70,34 @@ Exact environment variables depend on the client.
 
 ---
 
+## Demo
+
+![Swobu first demo](./assets/readme/swobu-cli-demo.gif)
+
+---
+
+## Why Swobu
+
+AI coding clients are becoming frontends.
+
+But each client still tends to carry assumptions about provider choice, API shape, streaming behavior, auth handling, model names, and error shape.
+
+That breaks down when you want to:
+
+- keep your preferred client
+- switch model backends
+- route local and hosted models through one boundary
+- compare backends from the same client experience
+- inspect local traffic health
+- avoid rewriting workflow glue every week
+
+Swobu standardizes the boundary, not the tool.
+
+---
+
 ## What works today
+
+Swobu is beta. These surfaces are the current focus.
 
 ### Tested clients
 
@@ -105,6 +112,7 @@ Exact environment variables depend on the client.
 - OpenAI
 - Anthropic
 - OpenRouter
+- AWS Bedrock
 - Ollama
 - ChatGPT
 - Custom OpenAI-compatible backends
@@ -126,7 +134,12 @@ Anthropic-style:
 - Server-Sent Events
 - WebSocket
 
-Swobu is beta. Expect sharp edges.
+### Known gaps
+
+- compatibility varies by client and backend
+- some clients require client-specific environment variables
+- provider-reported token/cache fields are not uniform
+- release installer support is currently Linux/macOS (`amd64`/`arm64`)
 
 ---
 
@@ -262,6 +275,10 @@ Telemetry can be turned off:
 swobu telemetry off
 ```
 
+Telemetry details:
+
+- [`docs/telemetry.md`](./docs/telemetry.md)
+
 Local-first is not offline-only.
 
 If you configure a hosted backend, AI requests still go to that backend.
@@ -294,6 +311,10 @@ Contributions are welcome.
 Swobu uses a Contributor License Agreement.
 
 By submitting a pull request or other contribution, you agree to the terms in [`CLA.md`](./CLA.md). This allows Swobu to maintain, sublicense, dual-license, and relicense contributions in the future.
+
+Why a CLA?
+
+Swobu is AGPL-licensed, and may also offer commercial licensing for teams that cannot use AGPL software. The CLA preserves that option while keeping the public repo open. Contributors keep ownership of their contributions.
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a pull request.
 

@@ -95,20 +95,20 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 			case canonical.ItemKindToolUse:
 				content = append(content, contentID{
 					Type:  "tool_use",
-					ID:    strings.TrimSpace(current.ToolUseID), // trimlowerlint:allow boundary canonicalization
-					Name:  strings.TrimSpace(current.Name),      // trimlowerlint:allow boundary canonicalization
+					ID:    strings.TrimSpace(current.ToolUseID), // swobu:io-string source=boundary
+					Name:  strings.TrimSpace(current.Name),      // swobu:io-string source=boundary
 					Input: cloneInput(current.Input),
 				})
-				if strings.TrimSpace(content[len(content)-1].Name) == "" { // trimlowerlint:allow boundary canonicalization
+				if strings.TrimSpace(content[len(content)-1].Name) == "" { // swobu:io-string source=boundary
 					return nil, canonical.BadRequest("messages protocol tool_use items require a name")
 				}
 			case canonical.ItemKindToolResult:
-				if strings.TrimSpace(current.ToolUseID) == "" { // trimlowerlint:allow boundary canonicalization
+				if strings.TrimSpace(current.ToolUseID) == "" { // swobu:io-string source=boundary
 					return nil, canonical.BadRequest("messages protocol tool_result items require tool_use_id")
 				}
 				content = append(content, contentID{
 					Type:      "tool_result",
-					ToolUseID: strings.TrimSpace(current.ToolUseID), // trimlowerlint:allow boundary canonicalization
+					ToolUseID: strings.TrimSpace(current.ToolUseID), // swobu:io-string source=boundary
 					Content:   current.Text,
 				})
 			default:

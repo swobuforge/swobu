@@ -21,6 +21,14 @@ type envelopeOpenProjection struct {
 	evs    []Event
 }
 
+type requestSemanticKind string
+
+const (
+	requestSemanticKindConversation       requestSemanticKind = "conversation"
+	requestSemanticKindResponseGeneration requestSemanticKind = "response_generation"
+	requestSemanticKindPromptGeneration   requestSemanticKind = "prompt_generation"
+)
+
 // ReadClosedEnvelope consumes events until the requested envelope kind closes.
 // It returns io.EOF when no such closed envelope exists in the stream.
 func ReadClosedEnvelope(ctx context.Context, r EventReader, kind EnvelopeKind) (*ClosedEnvelope, error) {
@@ -86,57 +94,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputValue, error) {
 	model := ""
 
 	for _, ev := range e.Events {
-		switch ev.Kind {
-		case EventEnvelopeStart:
-			payload, _ := ev.Payload.(EnvelopeStartPayload)
-			switch payload.Kind {
-			case EnvMessage:
-				item := NewTextOutputItem(string(ev.EnvID), "")
-				item.Author = payload.Role
-				itemsByID[ev.EnvID] = &item
-				orderedIDs = append(orderedIDs, ev.EnvID)
-			case EnvToolCall:
-				toolUseID := payload.ToolUseID
-				if toolUseID == "" {
-					toolUseID = string(ev.EnvID)
-				}
-				item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, map[string]any{})
-				item.Author = ItemAuthorAssistant
-				itemsByID[ev.EnvID] = &item
-				orderedIDs = append(orderedIDs, ev.EnvID)
-			}
-		case EventTextDelta:
-			payload, _ := ev.Payload.(TextDeltaPayload)
-			if item, ok := itemsByID[ev.EnvID]; ok {
-				item.Text += payload.Text
-			}
-		case EventArgsDelta:
-			payload, _ := ev.Payload.(ArgsDeltaPayload)
-			if item, ok := itemsByID[ev.EnvID]; ok {
-				// Tool-call arguments can arrive in several deltas; preserve raw
-				// concatenation until final decode at closure.
-				raw, _ := item.Input["$arguments_delta"].(string)
-				item.Input["$arguments_delta"] = raw + payload.Args
-			}
-		case EventUsage:
-			payload, ok := ev.Payload.(UsagePayload)
-			if ok {
-				usage = payload.Usage
-			}
-		case EventFinish:
-			payload, _ := ev.Payload.(FinishPayload)
-			finish = payload.Reason
-		case EventMetadata:
-			payload, _ := ev.Payload.(MetadataPayload)
-			if payload.Values != nil {
-				if payload.Values["result_id"] != "" {
-					resultID = payload.Values["result_id"]
-				}
-				if payload.Values["model"] != "" {
-					model = payload.Values["model"]
-				}
-			}
-		}
+		responseProjectionApplyEvent(ev, itemsByID, &orderedIDs, &usage, &finish, &resultID, &model)
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -160,6 +118,73 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputValue, error) {
 	return &out, nil
 }
 
+func responseProjectionApplyEvent(
+	ev Event,
+	itemsByID map[EnvelopeID]*CanonicalItem,
+	orderedIDs *[]EnvelopeID,
+	usage *TokenUsage,
+	finish *string,
+	resultID *string,
+	model *string,
+) {
+	switch ev.Kind {
+	case EventEnvelopeStart:
+		responseProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs)
+	case EventTextDelta:
+		payload, _ := ev.Payload.(TextDeltaPayload)
+		if item, ok := itemsByID[ev.EnvID]; ok {
+			item.Text += payload.Text
+		}
+	case EventArgsDelta:
+		payload, _ := ev.Payload.(ArgsDeltaPayload)
+		if item, ok := itemsByID[ev.EnvID]; ok {
+			raw, _ := item.Input["$arguments_delta"].(string)
+			item.Input["$arguments_delta"] = raw + payload.Args
+		}
+	case EventUsage:
+		payload, ok := ev.Payload.(UsagePayload)
+		if ok {
+			*usage = payload.Usage
+		}
+	case EventFinish:
+		payload, _ := ev.Payload.(FinishPayload)
+		*finish = payload.Reason
+	case EventMetadata:
+		payload, _ := ev.Payload.(MetadataPayload)
+		if payload.Values != nil {
+			if payload.Values["result_id"] != "" {
+				*resultID = payload.Values["result_id"]
+			}
+			if payload.Values["model"] != "" {
+				*model = payload.Values["model"]
+			}
+		}
+	default:
+		// ignored by response projection
+	}
+}
+
+func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) {
+	payload, _ := ev.Payload.(EnvelopeStartPayload)
+	if payload.Kind == EnvMessage {
+		item := NewTextOutputItem(string(ev.EnvID), "")
+		item.Author = payload.Role
+		itemsByID[ev.EnvID] = &item
+		*orderedIDs = append(*orderedIDs, ev.EnvID)
+		return
+	}
+	if payload.Kind == EnvToolCall {
+		toolUseID := payload.ToolUseID
+		if toolUseID == "" {
+			toolUseID = string(ev.EnvID)
+		}
+		item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, map[string]any{})
+		item.Author = ItemAuthorAssistant
+		itemsByID[ev.EnvID] = &item
+		*orderedIDs = append(*orderedIDs, ev.EnvID)
+	}
+}
+
 // ProjectRequest materializes a closed request envelope into a canonical
 // request snapshot while preserving semantic kind hints.
 func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
@@ -168,51 +193,12 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 	}
 	var (
 		model        string
-		semanticKind = "conversation"
+		semanticKind = requestSemanticKindConversation
 		itemsByID    = map[EnvelopeID]*CanonicalItem{}
 		orderedIDs   = make([]EnvelopeID, 0)
 	)
 	for _, ev := range e.Events {
-		switch ev.Kind {
-		case EventMetadata:
-			payload, _ := ev.Payload.(MetadataPayload)
-			if payload.Values != nil {
-				if payload.Values["model"] != "" {
-					model = payload.Values["model"]
-				}
-				if payload.Values["semantic_kind"] != "" {
-					semanticKind = payload.Values["semantic_kind"]
-				}
-			}
-		case EventEnvelopeStart:
-			payload, _ := ev.Payload.(EnvelopeStartPayload)
-			switch payload.Kind {
-			case EnvMessage:
-				item := NewTextItem(payload.Role, "")
-				itemsByID[ev.EnvID] = &item
-				orderedIDs = append(orderedIDs, ev.EnvID)
-			case EnvToolResult:
-				item := NewToolResultItem(payload.Role, payload.ToolUseID, "")
-				item.Name = payload.Name
-				itemsByID[ev.EnvID] = &item
-				orderedIDs = append(orderedIDs, ev.EnvID)
-			}
-		case EventTextDelta:
-			payload, _ := ev.Payload.(TextDeltaPayload)
-			if item, ok := itemsByID[ev.EnvID]; ok {
-				item.Text += payload.Text
-			}
-		case EventArgsDelta:
-			payload, _ := ev.Payload.(ArgsDeltaPayload)
-			if item, ok := itemsByID[ev.EnvID]; ok {
-				if item.Input == nil {
-					item.Input = map[string]any{}
-				}
-				// Arguments are folded at close so this path stays stream-safe.
-				raw, _ := item.Input["$arguments_delta"].(string)
-				item.Input["$arguments_delta"] = raw + payload.Args
-			}
-		}
+		requestProjectionApplyEvent(ev, itemsByID, &orderedIDs, &model, &semanticKind)
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -234,9 +220,9 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		items = append(items, item.Clone())
 	}
 	switch semanticKind {
-	case "response_generation":
+	case requestSemanticKindResponseGeneration:
 		return NewGenerationRequest(GenerationRequestParams{Model: model, Thread: items, LastTurn: items}), nil
-	case "prompt_generation":
+	case requestSemanticKindPromptGeneration:
 		prompt := ""
 		for _, item := range items {
 			if item.Kind == ItemKindText {
@@ -246,5 +232,60 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		return NewPromptRequest(model, prompt), nil
 	default:
 		return NewDialogRequest(model, items), nil
+	}
+}
+
+func requestProjectionApplyEvent(
+	ev Event,
+	itemsByID map[EnvelopeID]*CanonicalItem,
+	orderedIDs *[]EnvelopeID,
+	model *string,
+	semanticKind *requestSemanticKind,
+) {
+	switch ev.Kind {
+	case EventMetadata:
+		payload, _ := ev.Payload.(MetadataPayload)
+		if payload.Values != nil {
+			if payload.Values["model"] != "" {
+				*model = payload.Values["model"]
+			}
+			if payload.Values["semantic_kind"] != "" {
+				*semanticKind = requestSemanticKind(payload.Values["semantic_kind"])
+			}
+		}
+	case EventEnvelopeStart:
+		requestProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs)
+	case EventTextDelta:
+		payload, _ := ev.Payload.(TextDeltaPayload)
+		if item, ok := itemsByID[ev.EnvID]; ok {
+			item.Text += payload.Text
+		}
+	case EventArgsDelta:
+		payload, _ := ev.Payload.(ArgsDeltaPayload)
+		if item, ok := itemsByID[ev.EnvID]; ok {
+			if item.Input == nil {
+				item.Input = map[string]any{}
+			}
+			raw, _ := item.Input["$arguments_delta"].(string)
+			item.Input["$arguments_delta"] = raw + payload.Args
+		}
+	default:
+		// ignored by request projection
+	}
+}
+
+func requestProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) {
+	payload, _ := ev.Payload.(EnvelopeStartPayload)
+	if payload.Kind == EnvMessage {
+		item := NewTextItem(payload.Role, "")
+		itemsByID[ev.EnvID] = &item
+		*orderedIDs = append(*orderedIDs, ev.EnvID)
+		return
+	}
+	if payload.Kind == EnvToolResult {
+		item := NewToolResultItem(payload.Role, payload.ToolUseID, "")
+		item.Name = payload.Name
+		itemsByID[ev.EnvID] = &item
+		*orderedIDs = append(*orderedIDs, ev.EnvID)
 	}
 }

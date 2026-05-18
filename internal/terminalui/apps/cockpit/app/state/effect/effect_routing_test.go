@@ -33,12 +33,12 @@ func TestPollProviderAuthSessionEffect_FailedStatusSurfacesCredentialStoreError(
 	if len(actions) != 2 {
 		t.Fatalf("actions length=%d want 2", len(actions))
 	}
-	if _, ok := actions[0].(ProviderAuthSessionPolled); !ok {
-		t.Fatalf("action[0]=%T want ProviderAuthSessionPolled", actions[0])
+	if _, ok := actions[0].(ProviderAuthSessionPolledAction); !ok {
+		t.Fatalf("action[0]=%T want ProviderAuthSessionPolledAction", actions[0])
 	}
-	failed, ok := actions[1].(ProviderAuthSessionFailed)
+	failed, ok := actions[1].(ProviderAuthSessionFailedAction)
 	if !ok {
-		t.Fatalf("action[1]=%T want ProviderAuthSessionFailed", actions[1])
+		t.Fatalf("action[1]=%T want ProviderAuthSessionFailedAction", actions[1])
 	}
 	if got := strings.TrimSpace(failed.Message); got != "credential store failed" {
 		t.Fatalf("failed message=%q", got)

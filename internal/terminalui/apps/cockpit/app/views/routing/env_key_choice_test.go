@@ -13,9 +13,9 @@ func TestApplyProviderEnvKeySelection_CreateModeLoadsCatalogScope(t *testing.T) 
 	if len(actions) != 3 {
 		t.Fatalf("action count = %d, want 3", len(actions))
 	}
-	load, ok := actions[2].(state.LoadRoutingModelCatalogRequested)
+	load, ok := actions[2].(state.LoadRoutingModelCatalogRequestedAction)
 	if !ok {
-		t.Fatalf("action[2] = %T, want state.LoadRoutingModelCatalogRequested", actions[2])
+		t.Fatalf("action[2] = %T, want state.LoadRoutingModelCatalogRequestedAction", actions[2])
 	}
 	if load.Scope != state.RoutingModelCatalogScopeCreateDraft {
 		t.Fatalf("scope = %q, want %q", load.Scope, state.RoutingModelCatalogScopeCreateDraft)

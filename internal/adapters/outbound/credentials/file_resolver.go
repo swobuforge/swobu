@@ -12,17 +12,17 @@ const fileCredentialRefPrefix = "file:"
 const maxCredentialFileBytes = 16 * 1024
 
 // FileResolver reads provider keys from a local credential file.
-type FileResolver struct{}
+type FileCredentialSourceResolver struct{}
 
 // NewFileResolver builds the file-based credential resolver.
-func NewFileResolver() FileResolver {
-	return FileResolver{}
+func NewFileResolver() FileCredentialSourceResolver {
+	return FileCredentialSourceResolver{}
 }
 
 // ResolveCredential returns the provider token for one configured credential
 // reference. Supported refs: "file:/abs/path", "file:~/path", or direct
 // absolute/tilde paths.
-func (r FileResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
+func (r FileCredentialSourceResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	_ = ctx
 	_ = providerSpec
 	path, err := fileCredentialPath(credentialRef)
@@ -43,7 +43,7 @@ func (r FileResolver) ResolveCredential(ctx context.Context, providerSpec string
 	if err != nil {
 		return "", fmt.Errorf("credential file %q could not be read", path)
 	}
-	token := strings.TrimSpace(string(raw)) // trimlowerlint:allow boundary canonicalization
+	token := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if token == "" {
 		return "", fmt.Errorf("credential file %q is empty", path)
 	}
@@ -51,7 +51,7 @@ func (r FileResolver) ResolveCredential(ctx context.Context, providerSpec string
 }
 
 func fileCredentialPath(credentialRef string) (string, error) {
-	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	if ref == "" {
 		return "", fmt.Errorf("credential ref must not be empty")
 	}
@@ -59,15 +59,15 @@ func fileCredentialPath(credentialRef string) (string, error) {
 	if strings.EqualFold(ref, "file") || strings.EqualFold(ref, "file:") {
 		return "", fmt.Errorf("credential file path must not be empty")
 	}
-	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
-		path = strings.TrimSpace(ref[len(fileCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // swobu:io-string source=boundary
+		path = strings.TrimSpace(ref[len(fileCredentialRefPrefix):]) // swobu:io-string source=boundary
 		if path == "" {
 			return "", fmt.Errorf("credential file path must not be empty")
 		}
 	}
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
-		if err != nil || strings.TrimSpace(home) == "" { // trimlowerlint:allow boundary canonicalization
+		if err != nil || strings.TrimSpace(home) == "" { // swobu:io-string source=boundary
 			return "", fmt.Errorf("home directory is unavailable for credential file")
 		}
 		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))

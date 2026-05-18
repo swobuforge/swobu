@@ -34,7 +34,7 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		model.StreamEnabled = !model.StreamEnabled
 		return nil
 	case SetInteractionMode:
-		mode := strings.TrimSpace(value.Mode) // trimlowerlint:allow boundary canonicalization
+		mode := strings.TrimSpace(value.Mode) // swobu:io-string source=boundary
 		if mode == "" {
 			mode = InteractionModeNAV
 		}
@@ -43,13 +43,12 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 	case SetFocusedRowAffordance:
 		applyFocusedRowFooterAffordance(model, value)
 		return nil
-	case LoadRoutingModelCatalogRequested:
-		scope := strings.TrimSpace(value.Scope)                 // trimlowerlint:allow boundary canonicalization
-		spec := strings.TrimSpace(value.ProviderSpec)           // trimlowerlint:allow boundary canonicalization
-		baseURL := strings.TrimSpace(value.BaseURL)             // trimlowerlint:allow boundary canonicalization
-		credentialRef := strings.TrimSpace(value.CredentialRef) // trimlowerlint:allow boundary canonicalization
-		switch scope {
-		case RoutingModelCatalogScopeCreateDraft:
+	case LoadRoutingModelCatalogRequestedAction:
+		scope := strings.TrimSpace(value.Scope)                 // swobu:io-string source=boundary
+		spec := strings.TrimSpace(value.ProviderSpec)           // swobu:io-string source=boundary
+		baseURL := strings.TrimSpace(value.BaseURL)             // swobu:io-string source=boundary
+		credentialRef := strings.TrimSpace(value.CredentialRef) // swobu:io-string source=boundary
+		if scope == RoutingModelCatalogScopeCreateDraft {
 			if spec == "" {
 				model.CreateDraftModelIDs = nil
 				model.CreateDraftModelError = ""
@@ -57,7 +56,7 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 			}
 			model.CreateDraftModelIDs = nil
 			model.CreateDraftModelError = ""
-		case RoutingModelCatalogScopeAddModelDraft:
+		} else if scope == RoutingModelCatalogScopeAddModelDraft {
 			if spec == "" {
 				model.AddModelDraftModelIDs = nil
 				model.AddModelDraftModelError = ""
@@ -71,27 +70,26 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 			model.AddModelDraftCredentialRef = credentialRef
 			model.AddModelDraftModelIDs = nil
 			model.AddModelDraftModelError = ""
-		default:
+		} else {
 			return nil
 		}
 		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
 			Scope:         scope,
 			ProviderSpec:  spec,
 			BaseURL:       baseURL,
-			CredentialRef: credentialRef, // trimlowerlint:allow boundary canonicalization
+			CredentialRef: credentialRef, // swobu:io-string source=boundary
 		}}
 	case stateeffect.RoutingModelCatalogLoaded:
-		scope := strings.TrimSpace(value.Scope)                                                                                                                             // trimlowerlint:allow boundary canonicalization
-		if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) { // trimlowerlint:allow boundary canonicalization
+		scope := strings.TrimSpace(value.Scope)                                                                                                                             // swobu:io-string source=boundary
+		if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) { // swobu:io-string source=boundary
 			return nil
 		}
-		switch scope {
-		case RoutingModelCatalogScopeCreateDraft:
+		if scope == RoutingModelCatalogScopeCreateDraft {
 			model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
-			model.CreateDraftModelError = strings.TrimSpace(value.Error) // trimlowerlint:allow boundary canonicalization
-		case RoutingModelCatalogScopeAddModelDraft:
+			model.CreateDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
+		} else if scope == RoutingModelCatalogScopeAddModelDraft {
 			model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
-			model.AddModelDraftModelError = strings.TrimSpace(value.Error) // trimlowerlint:allow boundary canonicalization
+			model.AddModelDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
 		}
 		return nil
 	case FocusNextAfterRebuildRequested:
@@ -99,15 +97,15 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 	case EndpointCopyRequested:
 		return []update.Effect{stateeffect.CopyEndpointValueEffect(value)}
 	case AuthSessionURLCopyRequested:
-		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{Value: strings.TrimSpace(value.Value)}} // trimlowerlint:allow boundary canonicalization
+		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{Value: strings.TrimSpace(value.Value)}} // swobu:io-string source=boundary
 	case AuthSessionURLCopyScopedRequested:
 		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{
-			OwnerKey: strings.TrimSpace(value.OwnerKey), // trimlowerlint:allow boundary canonicalization
-			Value:    strings.TrimSpace(value.Value),    // trimlowerlint:allow boundary canonicalization
+			OwnerKey: strings.TrimSpace(value.OwnerKey), // swobu:io-string source=boundary
+			Value:    strings.TrimSpace(value.Value),    // swobu:io-string source=boundary
 		}}
-	case ClientBaseURLCopyRequested:
+	case ClientBaseURLCopyRequestedAction:
 		return []update.Effect{stateeffect.CopyClientBaseURLEffect(value)}
-	case ClientLaunchRequested:
+	case ClientLaunchRequestedAction:
 		model.HeaderStatus = "running…"
 		model.InteractionMode = InteractionModeBusyLaunch
 		return []update.Effect{stateeffect.LaunchClientEffect(value)}
@@ -128,17 +126,17 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		return nil, true
 	case OpenSupportLinkRequested:
 		return []update.Effect{stateeffect.OpenSupportLinkEffect{
-			Label: strings.TrimSpace(value.Label), // trimlowerlint:allow boundary canonicalization
-			URL:   strings.TrimSpace(value.URL),   // trimlowerlint:allow boundary canonicalization
+			Label: strings.TrimSpace(value.Label), // swobu:io-string source=boundary
+			URL:   strings.TrimSpace(value.URL),   // swobu:io-string source=boundary
 		}}, true
 	case HelpDiagnosticsCopyRequested:
-		return []update.Effect{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true // trimlowerlint:allow boundary canonicalization
+		return []update.Effect{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true // swobu:io-string source=boundary
 	case CompatibilityRestartRequested:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
 		return []update.Effect{stateeffect.CompatibilityRestartHintEffect{
-			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand), // trimlowerlint:allow boundary canonicalization
+			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand), // swobu:io-string source=boundary
 		}}, true
 	case CompatibilityDiagnosticsCopyRequested:
 		if model.ControlPlane == nil {
@@ -151,8 +149,8 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		if model.ControlPlane == nil {
 			return nil, true
 		}
-		model.ControlPlane.Note = strings.TrimSpace(value.Message)      // trimlowerlint:allow boundary canonicalization
-		model.ControlPlane.NoteAction = strings.TrimSpace(value.Action) // trimlowerlint:allow boundary canonicalization
+		model.ControlPlane.Note = strings.TrimSpace(value.Message)      // swobu:io-string source=boundary
+		model.ControlPlane.NoteAction = strings.TrimSpace(value.Action) // swobu:io-string source=boundary
 		return nil, true
 	default:
 		return nil, false
@@ -160,23 +158,26 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 }
 
 func firstRunFooterVerb(model *Model, fallback string) string {
-	verb := strings.TrimSpace(fallback)                                                                                                            // trimlowerlint:allow boundary canonicalization
-	if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != "" && strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" { // trimlowerlint:allow boundary canonicalization
-		verb = "edit"
-	}
-	if firstRunCreateReady(model) {
+	verb := strings.TrimSpace(fallback) // swobu:io-string source=boundary
+	if firstRunCreateReady(model) && firstRunPrimaryCreateEligible(verb) {
 		verb = "create"
 	}
-	if strings.TrimSpace(model.CreateDraftName) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(model.CreateDraftName) == "" { // swobu:io-string source=boundary
 		verb = "edit"
-	} else if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) == "" { // trimlowerlint:allow boundary canonicalization
+	} else if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) == "" { // swobu:io-string source=boundary
 		verb = "open"
 	}
-	return strings.TrimSpace(verb) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(verb) // swobu:io-string source=boundary
+}
+
+func firstRunPrimaryCreateEligible(focusVerb string) bool {
+	verb := strings.TrimSpace(focusVerb) // swobu:io-string source=boundary
+	return verb == "choose" || verb == "next" || verb == "create"
 }
 
 func applyFocusedRowFooterAffordance(model *Model, value SetFocusedRowAffordance) {
-	verb := strings.TrimSpace(value.Verb) // trimlowerlint:allow boundary canonicalization
+	verb := strings.TrimSpace(value.Verb) // swobu:io-string source=boundary
+	model.FooterBaseVerb = verb
 	if model.ControlPlane != nil {
 		model.FooterVerb = "run/copy"
 		model.FooterAllowSpace = value.AllowSpace
@@ -201,7 +202,7 @@ func refreshFirstRunFooterAffordance(model *Model) {
 	if model.ControlPlane != nil {
 		return
 	}
-	if strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(model.CurrentEndpoint) != "" || len(model.Endpoints) > 0 { // swobu:io-string source=boundary
 		return
 	}
 	model.FooterVerb = firstRunFooterVerb(model, model.FooterVerb)
@@ -209,7 +210,7 @@ func refreshFirstRunFooterAffordance(model *Model) {
 }
 
 func firstRunCreateReady(model *Model) bool {
-	name := strings.TrimSpace(model.CreateDraftName) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(model.CreateDraftName) // swobu:io-string source=boundary
 	if name == "" {
 		return false
 	}
@@ -217,29 +218,29 @@ func firstRunCreateReady(model *Model) bool {
 		return false
 	}
 	for _, existing := range model.Endpoints {
-		if strings.TrimSpace(existing) == name { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(existing) == name { // swobu:io-string source=boundary
 			return false
 		}
 	}
-	provider := strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+	provider := strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) // swobu:io-string source=boundary
 	if provider == "" {
 		return false
 	}
-	if provider == "openai_compatible" && strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) == "" { // trimlowerlint:allow boundary canonicalization
+	if provider == "openai_compatible" && strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) == "" { // swobu:io-string source=boundary
 		return false
 	}
-	if strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" { // swobu:io-string source=boundary
 		return false
 	}
-	if ProviderRequiresCredential(provider, strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)) && strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) == "" { // trimlowerlint:allow boundary canonicalization
+	if ProviderRequiresCredential(provider, strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)) && strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) == "" { // swobu:io-string source=boundary
 		return false
 	}
 	return true
 }
 
 func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
-	daemonVersion := strings.TrimSpace(mismatch.DaemonVersion) // trimlowerlint:allow boundary canonicalization
-	tuiVersion := strings.TrimSpace(mismatch.TUIVersion)       // trimlowerlint:allow boundary canonicalization
+	daemonVersion := strings.TrimSpace(mismatch.DaemonVersion) // swobu:io-string source=boundary
+	tuiVersion := strings.TrimSpace(mismatch.TUIVersion)       // swobu:io-string source=boundary
 	protocolGot := "missing"
 	if mismatch.HasDaemonProtocol {
 		protocolGot = fmt.Sprintf("%d", mismatch.DaemonProtocol)
@@ -252,37 +253,37 @@ func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
 }
 
 func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef string) bool {
-	switch strings.TrimSpace(scope) { // trimlowerlint:allow boundary canonicalization
-	case RoutingModelCatalogScopeCreateDraft:
-		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec { // trimlowerlint:allow boundary canonicalization
+	normalizedScope := strings.TrimSpace(scope)
+	if normalizedScope == RoutingModelCatalogScopeCreateDraft {
+		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec { // swobu:io-string source=boundary
 			return false
 		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL { // swobu:io-string source=boundary
 			return false
 		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef { // trimlowerlint:allow boundary canonicalization
-			return false
-		}
-		return true
-	case RoutingModelCatalogScopeAddModelDraft:
-		if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec { // trimlowerlint:allow boundary canonicalization
-			return false
-		}
-		if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL { // trimlowerlint:allow boundary canonicalization
-			return false
-		}
-		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef { // swobu:io-string source=boundary
 			return false
 		}
 		return true
-	default:
-		return false
 	}
+	if normalizedScope == RoutingModelCatalogScopeAddModelDraft {
+		if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec { // swobu:io-string source=boundary
+			return false
+		}
+		if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL { // swobu:io-string source=boundary
+			return false
+		}
+		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef { // swobu:io-string source=boundary
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 func refreshStatusProjectionEffectFor(model *Model) stateeffect.RefreshStatusProjectionEffect {
 	if model == nil {
 		return stateeffect.RefreshStatusProjectionEffect{}
 	}
-	return stateeffect.RefreshStatusProjectionEffect{EndpointName: strings.TrimSpace(model.CurrentEndpoint)} // trimlowerlint:allow boundary canonicalization
+	return stateeffect.RefreshStatusProjectionEffect{EndpointName: strings.TrimSpace(model.CurrentEndpoint)} // swobu:io-string source=boundary
 }

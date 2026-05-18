@@ -40,36 +40,38 @@ func HeaderShell(model state.Model) string {
 	if rail == "" {
 		return status
 	}
-	if strings.TrimSpace(status) == "saved" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(status) == "saved" { // swobu:io-string source=boundary
 		return status + "   " + rail + "     "
 	}
 	return status + "   " + rail
 }
 
 func FooterHints(model state.Model) string {
-	switch InteractionMode(model) {
-	case state.InteractionModeEditText:
+	mode := InteractionMode(model)
+	if mode == state.InteractionModeEditText {
 		return "↵ save   esc close   ? help"
-	case state.InteractionModePickOne:
-		return "↑↓ move   ↵ select   esc close   ? help"
-	case state.InteractionModeManageList:
-		return "↑↓ move   ↵ act   esc close   ? help"
-	case state.InteractionModeBusyLaunch, state.InteractionModeBusySave:
-		return "busy   ↑↓ move   ? help"
-	default:
-		verb := EmptyOr(model.FooterVerb, "act")
-		out := "↑↓ move   ↵ " + verb + "   ? help   esc back"
-		if model.FooterShowTabs {
-			out += "   tab tabs"
-		}
-		if model.HeaderStatus == "saved" {
-			out = "↑↓ move   ↵ copy   ? help   tab tabs"
-		}
-		if model.FooterAllowSpace {
-			out += "   space toggle"
-		}
-		return out
 	}
+	if mode == state.InteractionModePickOne {
+		return "↑↓ move   ↵ select   esc close   ? help"
+	}
+	if mode == state.InteractionModeManageList {
+		return "↑↓ move   ↵ act   esc close   ? help"
+	}
+	if mode == state.InteractionModeBusyLaunch || mode == state.InteractionModeBusySave {
+		return "busy   ↑↓ move   ? help"
+	}
+	verb := EmptyOr(model.FooterVerb, "act")
+	out := "↑↓ move   ↵ " + verb + "   ? help   esc back"
+	if model.FooterShowTabs {
+		out += "   tab tabs"
+	}
+	if model.HeaderStatus == "saved" {
+		out = "↑↓ move   ↵ copy   ? help   tab tabs"
+	}
+	if model.FooterAllowSpace {
+		out += "   space toggle"
+	}
+	return out
 }
 
 func DaemonValue(model state.Model) string {
@@ -160,7 +162,7 @@ func CreateDraftEndpointValue(model state.Model) string {
 }
 
 func deriveEndpointSlug(raw string) string {
-	value := strings.TrimSpace(strings.ToLower(raw)) // trimlowerlint:allow boundary canonicalization
+	value := strings.TrimSpace(strings.ToLower(raw)) // swobu:io-string source=boundary
 	if value == "" {
 		return ""
 	}
@@ -255,7 +257,7 @@ func WorkspaceRail(model state.Model) string {
 	}
 	current := model.CurrentEndpoint
 	for _, endpoint := range model.Endpoints {
-		name := strings.TrimSpace(endpoint) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(endpoint) // swobu:io-string source=boundary
 		if name == "" {
 			continue
 		}

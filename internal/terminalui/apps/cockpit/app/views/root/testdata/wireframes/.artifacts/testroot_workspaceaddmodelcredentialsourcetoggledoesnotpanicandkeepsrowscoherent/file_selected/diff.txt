@@ -1,3 +1,57 @@
 line 11
--                 ollama:gemma4:e4b:e3b0c442                                                          edit ↵
-+        model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
+-        model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
++        model    ollama:gemma4:e4b:e3b0c442                                                          close ↵
+line 12
+-        add model                                                                                    close ↵
++          provider           Ollama
+line 13
+-          provider           OpenAI                                                                  change ↵
++          credential         missing                                                                 choose ↵
+line 14
+-     >    credential         file missing                                                            change ↵
++             -> authentication needed - choose a credential ref
+line 15
+-          credential file    required                                                                browse ↵
++             to save
+line 16
+-          key file           not found
++          model              gemma4:e4b                                                              choose ↵
+line 17
+-           -> set credential file before loading models
++          delivery           non-streaming                                                           next ↵
+line 18
+-          model              choose after auth
++          alias              not set                                                                 edit ↵
+line 19
+-          delivery           auto                                                                    next ↵
++          delete model       disabled (last model)
+line 20
+- 
++        add model                                                                                    close ↵
+line 21
+-   clients ▸
++          provider           OpenAI                                                                  change ↵
+line 22
+-     not set
++     >    credential         file missing                                                            change ↵
+line 23
+- 
++          credential file    required                                                                browse ↵
+line 24
+-   traffic ▸
++          key file           not found
+line 25
+-     no traffic yet
++           -> set credential file before loading models
+line 26
+- 
++          model              choose after auth
+line 27
+- 
++          delivery           auto                                                                    next ↵
+line 29
+- 
++   clients ▸
+line 30
+- 
++     not set

@@ -21,4 +21,4 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
 
 
 ────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ create   ? help   esc back
+↑↓ move   ↵ open   ? help   esc back

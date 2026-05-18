@@ -47,7 +47,7 @@ func (s Store) EnsureNoticeShownWithDisclosure(out io.Writer) (State, error) {
 	if out == nil {
 		out = io.Discard
 	}
-	if _, err := fmt.Fprintln(out, strings.TrimSpace(firstRunNoticeText)); err != nil { // trimlowerlint:allow boundary canonicalization
+	if _, err := fmt.Fprintln(out, strings.TrimSpace(firstRunNoticeText)); err != nil { // swobu:io-string source=boundary
 		return State{}, err
 	}
 	return s.MarkNoticeShown()

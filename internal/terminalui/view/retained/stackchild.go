@@ -73,6 +73,9 @@ func Box[M any](_ *Context[M], child ViewSpec[M]) ViewSpec[M] {
 type boxView[M any] struct{ child ViewSpec[M] }
 
 func (b boxView[M]) BuildRenderNode(ctx *Context[M]) RenderNode {
+	if b.child == nil {
+		return nil
+	}
 	return b.child.BuildRenderNode(ctx)
 }
 

@@ -51,7 +51,7 @@ func FilterablePickerFocusKey(prefix string, filteredIndex int) string {
 	if filteredIndex < 0 {
 		filteredIndex = 0
 	}
-	base := strings.TrimSpace(prefix) // trimlowerlint:allow boundary canonicalization
+	base := strings.TrimSpace(prefix) // swobu:io-string source=boundary
 	if base == "" {
 		base = "picker-option"
 	}
@@ -112,7 +112,7 @@ func RenderFilterablePickerDisclosure(
 			setState(cur)
 			return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
 		case interaction.KeyEsc:
-			if strings.TrimSpace(cur.Query) != "" { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(cur.Query) != "" { // swobu:io-string source=boundary
 				cur.Query = ""
 				cur.Cursor = 0
 				cur.Offset = 0
@@ -173,14 +173,14 @@ func filterablePickerRows(
 	rows := make([]retained.ViewSpec[state.Model], 0, len(cfg.HeaderRows)+ListMaxHeight+4)
 	rows = append(rows, cfg.HeaderRows...)
 	if filterablePickerShowFindRow(cfg, len(items), next.Query) {
-		findLabel := strings.TrimSpace(cfg.FindLabel) // trimlowerlint:allow boundary canonicalization
+		findLabel := strings.TrimSpace(cfg.FindLabel) // swobu:io-string source=boundary
 		if findLabel == "" {
 			findLabel = "find"
 		}
 		rows = append(rows, RowStatic(findLabel, filterableQueryDisplay(next.Query)))
 	}
 	if len(filtered) == 0 {
-		none := strings.TrimSpace(cfg.NoMatchesLabel) // trimlowerlint:allow boundary canonicalization
+		none := strings.TrimSpace(cfg.NoMatchesLabel) // swobu:io-string source=boundary
 		if none == "" {
 			none = "no matches"
 		}
@@ -196,7 +196,7 @@ func filterablePickerRows(
 		item := filtered[i]
 		itemCopy := item
 		key := itemCopy.Key
-		if strings.TrimSpace(key) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(key) == "" { // swobu:io-string source=boundary
 			key = FilterablePickerFocusKey(cfg.KeyPrefix, i)
 		}
 		buildRow := cfg.BuildOptionRow
@@ -223,7 +223,7 @@ func filterablePickerWindowSize(cfg FilterablePickerConfig) int {
 }
 
 func filterablePickerShowFindRow(cfg FilterablePickerConfig, totalItems int, query string) bool {
-	if strings.TrimSpace(query) != "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(query) != "" { // swobu:io-string source=boundary
 		return true
 	}
 	minOptions := cfg.MinOptionsForFind
@@ -234,7 +234,7 @@ func filterablePickerShowFindRow(cfg FilterablePickerConfig, totalItems int, que
 }
 
 func filterablePickerItems(items []FilterablePickerItem, query string) []FilterablePickerItem {
-	query = strings.ToLower(strings.TrimSpace(query)) // trimlowerlint:allow boundary canonicalization
+	query = strings.ToLower(strings.TrimSpace(query)) // swobu:io-string source=boundary
 	if query == "" {
 		out := make([]FilterablePickerItem, 0, len(items))
 		out = append(out, items...)
@@ -242,11 +242,11 @@ func filterablePickerItems(items []FilterablePickerItem, query string) []Filtera
 	}
 	out := make([]FilterablePickerItem, 0, len(items))
 	for i := range items {
-		candidate := strings.TrimSpace(items[i].Search) // trimlowerlint:allow boundary canonicalization
+		candidate := strings.TrimSpace(items[i].Search) // swobu:io-string source=boundary
 		if candidate == "" {
-			candidate = strings.TrimSpace(items[i].Label) // trimlowerlint:allow boundary canonicalization
+			candidate = strings.TrimSpace(items[i].Label) // swobu:io-string source=boundary
 		}
-		if strings.Contains(strings.ToLower(candidate), query) { // trimlowerlint:allow boundary canonicalization
+		if strings.Contains(strings.ToLower(candidate), query) { // swobu:io-string source=boundary
 			out = append(out, items[i])
 		}
 	}
@@ -299,7 +299,7 @@ func filterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg Filterabl
 		index = len(filtered) - 1
 	}
 	if index >= 0 && index < len(filtered) {
-		if key := strings.TrimSpace(filtered[index].Key); key != "" { // trimlowerlint:allow boundary canonicalization
+		if key := strings.TrimSpace(filtered[index].Key); key != "" { // swobu:io-string source=boundary
 			return key
 		}
 	}
@@ -309,7 +309,7 @@ func filterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg Filterabl
 func defaultFilterablePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 	return func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
 		return toolkitviews.ListItemRow[state.Model](
-			toolkitviews.InsetLabel(strings.TrimSpace(item.Label), 3), // trimlowerlint:allow boundary canonicalization
+			toolkitviews.InsetLabel(strings.TrimSpace(item.Label), 3), // swobu:io-string source=boundary
 			item.Selected,
 			showSelected,
 			true,
@@ -320,5 +320,8 @@ func defaultFilterablePickerOptionRow(showSelected bool) func(item FilterablePic
 }
 
 func ChoicePickerOptionRow(showSelected bool) func(item FilterablePickerItem, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
-	return defaultFilterablePickerOptionRow(showSelected)
+	if showSelected {
+		return defaultFilterablePickerOptionRow(true)
+	}
+	return defaultFilterablePickerOptionRow(false)
 }

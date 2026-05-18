@@ -20,7 +20,7 @@ func DecodeModelIDs(respBody io.Reader) ([]string, error) {
 	}
 	models := make([]string, 0, len(payload.Data))
 	for _, model := range payload.Data {
-		id := strings.TrimSpace(model.ID) // trimlowerlint:allow boundary canonicalization
+		id := strings.TrimSpace(model.ID) // swobu:io-string source=boundary
 		if id == "" {
 			continue
 		}

@@ -112,6 +112,9 @@ func Named[M any](name string, child ViewSpec[M]) ViewSpec[M] {
 
 // BuildViewRootNode is the private reconciler seam for building the typed root view.
 func BuildViewRootNode[M any](root ViewSpec[M], local LocalScope, dispatch func(update.Action), emit func(update.Action), model func() M) RenderNode {
+	if root == nil {
+		return nil
+	}
 	return buildViewNode(root, local, dispatch, emit, model)
 }
 

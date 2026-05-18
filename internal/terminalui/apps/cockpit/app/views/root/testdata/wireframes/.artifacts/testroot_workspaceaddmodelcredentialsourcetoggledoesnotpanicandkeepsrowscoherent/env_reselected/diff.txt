@@ -1,3 +1,54 @@
 line 11
--                 ollama:gemma4:e4b:e3b0c442                                                          edit ↵
-+        model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
+-        model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
++        model    ollama:gemma4:e4b:e3b0c442                                                          close ↵
+line 12
+-        add model                                                                                    close ↵
++          provider           Ollama
+line 13
+-          provider           OpenAI                                                                  change ↵
++          credential         missing                                                                 choose ↵
+line 14
+-          credential         env var missing                                                         change ↵
++             -> authentication needed - choose a credential ref
+line 15
+-     >    env key            OPENAI_API_KEY                                                          edit ↵
++             to save
+line 16
+-          expected           OPENAI_API_KEY
++          model              gemma4:e4b                                                              choose ↵
+line 17
+-          model              not selected                                                            choose ↵
++          delivery           non-streaming                                                           next ↵
+line 18
+-          delivery           auto                                                                    next ↵
++          alias              not set                                                                 edit ↵
+line 19
+- 
++          delete model       disabled (last model)
+line 20
+-   clients ▸
++        add model                                                                                    close ↵
+line 21
+-     not set
++          provider           OpenAI                                                                  change ↵
+line 22
+- 
++          credential         env var missing                                                         change ↵
+line 23
+-   traffic ▸
++     >    env key            OPENAI_API_KEY                                                          edit ↵
+line 24
+-     no traffic yet
++          expected           OPENAI_API_KEY
+line 25
+- 
++          model              not selected                                                            choose ↵
+line 26
+- 
++          delivery           auto                                                                    next ↵
+line 28
+- 
++   clients ▸
+line 29
+- 
++     not set

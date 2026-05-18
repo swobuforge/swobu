@@ -36,7 +36,7 @@ type MetricsEmitter struct {
 var _ Emitter = (*MetricsEmitter)(nil)
 
 func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsEmitter, error) {
-	endpoint := strings.TrimSpace(cfg.EndpointURL) // trimlowerlint:allow boundary canonicalization
+	endpoint := strings.TrimSpace(cfg.EndpointURL) // swobu:io-string source=boundary
 	if endpoint == "" {
 		return nil, fmt.Errorf("otel endpoint is required")
 	}
@@ -136,9 +136,9 @@ func (e *MetricsEmitter) EmitInstall(ctx context.Context, state State, swobuVers
 	}
 	e.installsTotal.Add(ctx, 1,
 		metric.WithAttributes(
-			attribute.String("swobu.version", strings.TrimSpace(swobuVersion)), // trimlowerlint:allow boundary canonicalization
-			attribute.String("os", strings.TrimSpace(osFamily)),                // trimlowerlint:allow boundary canonicalization
-			attribute.String("arch", strings.TrimSpace(arch)),                  // trimlowerlint:allow boundary canonicalization
+			attribute.String("swobu.version", strings.TrimSpace(swobuVersion)), // swobu:io-string source=boundary
+			attribute.String("os", strings.TrimSpace(osFamily)),                // swobu:io-string source=boundary
+			attribute.String("arch", strings.TrimSpace(arch)),                  // swobu:io-string source=boundary
 			attribute.Bool("telemetry_enabled", state.Enabled && !DoNotTrackEnabled()),
 		),
 	)
@@ -148,7 +148,7 @@ func (e *MetricsEmitter) EmitCounts(ctx context.Context, state string, count2xx,
 	if e == nil {
 		return
 	}
-	e.ticksTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("state", strings.TrimSpace(state)))) // trimlowerlint:allow boundary canonicalization
+	e.ticksTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("state", strings.TrimSpace(state)))) // swobu:io-string source=boundary
 	if count2xx > 0 {
 		e.requestsTotal.Add(ctx, count2xx, metric.WithAttributes(attribute.String("result_class", "2xx")))
 	}
@@ -164,21 +164,21 @@ func (e *MetricsEmitter) EmitCounts(ctx context.Context, state string, count2xx,
 	}
 }
 
-func (e *MetricsEmitter) EmitErrorTrace(ctx context.Context, errorTrace ErrorTrace) {
+func (e *MetricsEmitter) EmitErrorTrace(ctx context.Context, errorTrace ErrorTracePayload) {
 	if e == nil || e.tracer == nil {
 		return
 	}
 	_, span := e.tracer.Start(ctx, "swobu.error")
 	span.SetAttributes(
 		attribute.Int("http.status_code", errorTrace.StatusCode),
-		attribute.String("result.class", strings.TrimSpace(errorTrace.ResultClass)), // trimlowerlint:allow boundary canonicalization
+		attribute.String("result.class", strings.TrimSpace(errorTrace.ResultClass)), // swobu:io-string source=boundary
 		attribute.String("provider.family", normalizeProviderFamily(errorTrace.ProviderRoute)),
-		attribute.String("operation", strings.TrimSpace(errorTrace.Operation)), // trimlowerlint:allow boundary canonicalization
+		attribute.String("operation", strings.TrimSpace(errorTrace.Operation)), // swobu:io-string source=boundary
 	)
 	if errorTrace.DurationMS != nil {
 		span.SetAttributes(attribute.Int("duration.ms", *errorTrace.DurationMS))
 	}
-	if stack := strings.TrimSpace(errorTrace.DebugRawStack); stack != "" { // trimlowerlint:allow boundary canonicalization
+	if stack := strings.TrimSpace(errorTrace.DebugRawStack); stack != "" { // swobu:io-string source=boundary
 		span.SetAttributes(attribute.String("debug.raw_stack", stack))
 	}
 	span.End()
