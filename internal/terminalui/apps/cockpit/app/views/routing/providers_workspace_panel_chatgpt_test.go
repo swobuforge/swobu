@@ -65,7 +65,7 @@ func TestInteractiveAddModelCredentialRows_RequireSessionState(t *testing.T) {
 		t.Fatal("expected no rows before auth session state exists")
 	}
 
-	sessionModel := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+	sessionModel := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionViewState{
 		SessionID:    "sess-1",
 		SessionState: "pending",
 		URL:          "https://example.com/verify",
@@ -128,7 +128,7 @@ func TestClassifyInteractiveAuthPhase_BrowserNotStarted(t *testing.T) {
 
 func TestClassifyInteractiveAuthPhase_BrowserInProgress(t *testing.T) {
 	t.Parallel()
-	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionViewState{
 		SessionID:    "sess-1",
 		SessionState: "pending",
 	})
@@ -141,7 +141,7 @@ func TestClassifyInteractiveAuthPhase_BrowserInProgress(t *testing.T) {
 func TestClassifyInteractiveAuthPhase_CreateDraftBrowserInProgress(t *testing.T) {
 	t.Parallel()
 	model := state.Model{
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			stateModel.CreateDraftAuthOwnerKey("create-draft").String(): {
 				SessionID:    "sess-1",
 				SessionState: "pending",
@@ -157,7 +157,7 @@ func TestClassifyInteractiveAuthPhase_CreateDraftBrowserInProgress(t *testing.T)
 
 func TestClassifyInteractiveAuthPhase_IgnoresSessionFromOtherProviderRef(t *testing.T) {
 	t.Parallel()
-	model := addModelAuthSessionModel("acme", "cfg-other", stateModel.AuthSessionView{
+	model := addModelAuthSessionModel("acme", "cfg-other", stateModel.AuthSessionViewState{
 		SessionID:    "sess-1",
 		SessionState: "pending",
 	})
@@ -169,7 +169,7 @@ func TestClassifyInteractiveAuthPhase_IgnoresSessionFromOtherProviderRef(t *test
 
 func TestClassifyInteractiveAuthPhase_DeviceCodeInProgress(t *testing.T) {
 	t.Parallel()
-	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionViewState{
 		SessionID:    "sess-1",
 		SessionState: "pending",
 		URL:          "https://chatgpt.com/activate",
@@ -195,7 +195,7 @@ func TestClassifyInteractiveAuthPhase_SignedIn(t *testing.T) {
 
 func TestClassifyInteractiveAuthPhase_Expired(t *testing.T) {
 	t.Parallel()
-	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionViewState{
 		SessionID:    "sess-1",
 		SessionState: "expired",
 	})
@@ -207,7 +207,7 @@ func TestClassifyInteractiveAuthPhase_Expired(t *testing.T) {
 
 func TestClassifyInteractiveAuthPhase_BrowserUnavailable(t *testing.T) {
 	t.Parallel()
-	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionView{
+	model := addModelAuthSessionModel("acme", "cfg-a", stateModel.AuthSessionViewState{
 		SessionID:    "sess-1",
 		SessionState: "failed",
 		SessionError: "could not open default browser",
@@ -218,9 +218,9 @@ func TestClassifyInteractiveAuthPhase_BrowserUnavailable(t *testing.T) {
 	}
 }
 
-func addModelAuthSessionModel(endpointName string, providerRef string, session stateModel.AuthSessionView) state.Model {
+func addModelAuthSessionModel(endpointName string, providerRef string, session stateModel.AuthSessionViewState) state.Model {
 	ownerKey := stateModel.AddModelDraftAuthOwnerKey(endpointName, providerRef).String()
-	return state.Model{AuthSessions: map[string]stateModel.AuthSessionView{
+	return state.Model{AuthSessions: map[string]stateModel.AuthSessionViewState{
 		ownerKey: session,
 	}}
 }

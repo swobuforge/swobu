@@ -9,6 +9,7 @@ import (
 // ProviderModelCatalog reads operator-support model catalogs for one selected
 // provider target. It is separate from protocol-path semantic execution.
 type ProviderModelCatalog interface {
+	ValidateCredentials(ctx context.Context, target RoutableTarget) error
 	ListModels(ctx context.Context, target RoutableTarget) ([]string, error)
 }
 
@@ -17,7 +18,7 @@ type ProviderModelCatalog interface {
 func CloneModelIDs(ids []string) []string {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
-		id = strings.TrimSpace(id) // trimlowerlint:allow boundary canonicalization
+		id = strings.TrimSpace(id) // swobu:io-string source=boundary
 		if id == "" {
 			continue
 		}

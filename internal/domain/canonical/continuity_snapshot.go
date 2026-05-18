@@ -13,11 +13,11 @@ type ContinuationNamespace string
 // native previous_response_id values or canonical prefix matching inside that
 // bucket.
 func NewContinuationNamespace(raw string) ContinuationNamespace {
-	return ContinuationNamespace(strings.TrimSpace(raw)) // trimlowerlint:allow domain canonicalization
+	return ContinuationNamespace(strings.TrimSpace(raw)) // swobu:io-string source=domain
 }
 
 func (s ContinuationNamespace) IsZero() bool {
-	return strings.TrimSpace(string(s)) == "" // trimlowerlint:allow domain canonicalization
+	return strings.TrimSpace(string(s)) == "" // swobu:io-string source=domain
 }
 
 func (s ContinuationNamespace) String() string {
@@ -69,7 +69,7 @@ func PreviousResponseIDFromRequest(request CanonicalRequest) (string, bool, erro
 	if err := ValidateResponseContinuationSelectors(typed); err != nil {
 		return "", false, err
 	}
-	value := strings.TrimSpace(typed.PreviousResponseID()) // trimlowerlint:allow domain canonicalization
+	value := strings.TrimSpace(typed.PreviousResponseID()) // swobu:io-string source=domain
 	if value == "" {
 		return "", false, nil
 	}

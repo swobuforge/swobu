@@ -6,14 +6,10 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/view"
 )
 
-func Line(text string) view.ViewSpec {
-	return view.DurableText(text)
-}
-
 func SplashBlock(rows []string) view.ViewSpec {
 	children := make([]view.ViewSpec, 0, len(rows))
 	for _, row := range rows {
-		children = append(children, Line(row))
+		children = append(children, view.DurableText(row))
 	}
 	return view.FlowColumn("splash", 0, children...)
 }
@@ -23,7 +19,7 @@ func MessageBlock(title string, rows []string, wrapWidth int) view.ViewSpec {
 		wrapWidth = 72
 	}
 	return view.DurablePanel(view.PanelSpec{
-		Title:       strings.TrimSpace(title), // trimlowerlint:allow boundary canonicalization
+		Title:       strings.TrimSpace(title), // swobu:io-string source=boundary
 		Rows:        append([]string(nil), rows...),
 		TargetWidth: wrapWidth + 4,
 		MinWidth:    20,

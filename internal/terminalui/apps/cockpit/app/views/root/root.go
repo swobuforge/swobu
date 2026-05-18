@@ -3,6 +3,7 @@ package root
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
@@ -87,9 +88,40 @@ func workspaceRailKeyHandler(ctx *retained.Context[state.Model], ev interaction.
 			return true, []update.Action{state.SetHelpTabOpenAction{Open: true}}
 		}
 		return false, nil
+	case interaction.KeyEnter:
+		if actions, ok := firstRunPrimaryEnterActions(model); ok {
+			return true, actions
+		}
+		return false, nil
 	default:
 		return false, nil
 	}
+}
+
+func firstRunPrimaryEnterActions(model state.Model) ([]update.Action, bool) {
+	if model.CurrentEndpoint != "" || len(model.Endpoints) > 0 {
+		return nil, false
+	}
+	if model.FooterVerb != "create" || model.FooterBaseVerb == "create" {
+		return nil, false
+	}
+	name := model.CreateDraftName
+	if name == "" {
+		return nil, false
+	}
+	parsed, err := endpointintent.ParseEndpointName(name)
+	if err != nil {
+		return nil, false
+	}
+	flow := state.EvaluateCreateDraftRouteSetup(model.CreateDraftProviderConfig)
+	if !flow.Ready {
+		return nil, false
+	}
+	canonicalName := parsed.String()
+	return []update.Action{
+		state.SetCreateDraftName{Name: canonicalName},
+		state.WorkspaceCreateRequested{Name: canonicalName},
+	}, true
 }
 
 func topTabActions(help bool, endpoint string) []update.Action {
@@ -117,7 +149,7 @@ func cycleTopTabSelection(model state.Model, reverse bool) (bool, string) {
 			if item == "__help__" {
 				continue
 			}
-			if strings.TrimSpace(item) == current { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(item) == current { // swobu:io-string source=boundary
 				index = i
 				break
 			}
@@ -137,5 +169,5 @@ func cycleTopTabSelection(model state.Model, reverse bool) (bool, string) {
 	if items[index] == "__help__" {
 		return true, ""
 	}
-	return false, strings.TrimSpace(items[index]) // trimlowerlint:allow boundary canonicalization
+	return false, strings.TrimSpace(items[index]) // swobu:io-string source=boundary
 }

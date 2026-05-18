@@ -8,7 +8,7 @@ import (
 )
 
 func defaultProtocolKindForProvider(providerSpec string) string {
-	if strings.EqualFold(strings.TrimSpace(providerSpec), "anthropic") { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(strings.TrimSpace(providerSpec), "anthropic") { // swobu:io-string source=boundary
 		return protocolkind.Messages.String()
 	}
 	return protocolkind.ChatCompletions.String()

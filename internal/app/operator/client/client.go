@@ -31,6 +31,7 @@ type AuthSessionStartResult struct {
 	SessionID    string
 	AuthorizeURL string
 	UserCode     string
+	ExpiresAt    string
 	State        string
 }
 
@@ -45,6 +46,8 @@ type AuthSessionStatusResult struct {
 type AuthSessionRetryResult struct {
 	SessionID    string
 	AuthorizeURL string
+	UserCode     string
+	ExpiresAt    string
 	State        string
 }
 
@@ -85,7 +88,7 @@ func (c *Client) List(ctx context.Context) ([]endpointintent.Endpoint, error) {
 
 // Get returns a single endpoint intent by name.
 func (c *Client) Get(ctx context.Context, name string) (endpointintent.Endpoint, error) {
-	name = strings.TrimSpace(name) // trimlowerlint:allow boundary canonicalization
+	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
 		return endpointintent.Endpoint{}, fmt.Errorf("operator client: name is required")
 	}
@@ -137,7 +140,7 @@ func (c *Client) Put(ctx context.Context, ep endpointintent.Endpoint) (endpointi
 
 // Delete removes an endpoint intent by name.
 func (c *Client) Delete(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name) // trimlowerlint:allow boundary canonicalization
+	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
 		return fmt.Errorf("operator client: name is required")
 	}
@@ -158,11 +161,11 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 
 // CheckClientAccess sends a minimal compatibility probe through one endpoint.
 func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, modelID string) (AccessCheckResult, error) {
-	endpointName = strings.TrimSpace(endpointName) // trimlowerlint:allow boundary canonicalization
+	endpointName = strings.TrimSpace(endpointName) // swobu:io-string source=boundary
 	if endpointName == "" {
 		return AccessCheckResult{}, fmt.Errorf("operator client: endpoint name is required")
 	}
-	modelID = strings.TrimSpace(modelID) // trimlowerlint:allow boundary canonicalization
+	modelID = strings.TrimSpace(modelID) // swobu:io-string source=boundary
 	if modelID == "" {
 		modelID = "healthcheck"
 	}
@@ -184,7 +187,7 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 		}, nil
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	message := strings.TrimSpace(string(raw)) // trimlowerlint:allow boundary canonicalization
+	message := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if message == "" {
 		message = fmt.Sprintf("compatibility request returned status %d", resp.StatusCode)
 	}
@@ -196,9 +199,9 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 
 func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endpointRef string, authMode string) (AuthSessionStartResult, error) {
 	body, err := json.Marshal(map[string]string{
-		"provider_spec": strings.TrimSpace(providerSpec), // trimlowerlint:allow boundary canonicalization
-		"endpoint_ref":  strings.TrimSpace(endpointRef),  // trimlowerlint:allow boundary canonicalization
-		"auth_mode":     strings.TrimSpace(authMode),     // trimlowerlint:allow boundary canonicalization
+		"provider_spec": strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
+		"endpoint_ref":  strings.TrimSpace(endpointRef),  // swobu:io-string source=boundary
+		"auth_mode":     strings.TrimSpace(authMode),     // swobu:io-string source=boundary
 	})
 	if err != nil {
 		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session payload could not be encoded")
@@ -221,22 +224,24 @@ func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endp
 		SessionID    string `json:"session_id"`
 		AuthorizeURL string `json:"authorize_url"`
 		UserCode     string `json:"user_code"`
+		ExpiresAt    string `json:"expires_at"`
 		State        string `json:"state"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start response could not be decoded")
 	}
 	return AuthSessionStartResult{
-		ProviderSpec: strings.TrimSpace(doc.ProviderSpec), // trimlowerlint:allow boundary canonicalization
-		SessionID:    strings.TrimSpace(doc.SessionID),    // trimlowerlint:allow boundary canonicalization
-		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
-		UserCode:     strings.TrimSpace(doc.UserCode),     // trimlowerlint:allow boundary canonicalization
-		State:        strings.TrimSpace(doc.State),        // trimlowerlint:allow boundary canonicalization
+		ProviderSpec: strings.TrimSpace(doc.ProviderSpec), // swobu:io-string source=boundary
+		SessionID:    strings.TrimSpace(doc.SessionID),    // swobu:io-string source=boundary
+		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // swobu:io-string source=boundary
+		UserCode:     strings.TrimSpace(doc.UserCode),     // swobu:io-string source=boundary
+		ExpiresAt:    strings.TrimSpace(doc.ExpiresAt),    // swobu:io-string source=boundary
+		State:        strings.TrimSpace(doc.State),        // swobu:io-string source=boundary
 	}, nil
 }
 
 func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (AuthSessionStatusResult, error) {
-	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
+	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
 	if sessionID == "" {
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session id is required")
 	}
@@ -263,16 +268,16 @@ func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (Au
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status response could not be decoded")
 	}
 	return AuthSessionStatusResult{
-		ProviderSpec:  strings.TrimSpace(doc.ProviderSpec),  // trimlowerlint:allow boundary canonicalization
-		SessionID:     strings.TrimSpace(doc.SessionID),     // trimlowerlint:allow boundary canonicalization
-		State:         strings.TrimSpace(doc.State),         // trimlowerlint:allow boundary canonicalization
-		CredentialRef: strings.TrimSpace(doc.CredentialRef), // trimlowerlint:allow boundary canonicalization
-		ErrorMessage:  strings.TrimSpace(doc.ErrorMessage),  // trimlowerlint:allow boundary canonicalization
+		ProviderSpec:  strings.TrimSpace(doc.ProviderSpec),  // swobu:io-string source=boundary
+		SessionID:     strings.TrimSpace(doc.SessionID),     // swobu:io-string source=boundary
+		State:         strings.TrimSpace(doc.State),         // swobu:io-string source=boundary
+		CredentialRef: strings.TrimSpace(doc.CredentialRef), // swobu:io-string source=boundary
+		ErrorMessage:  strings.TrimSpace(doc.ErrorMessage),  // swobu:io-string source=boundary
 	}, nil
 }
 
 func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error {
-	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
+	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
 	if sessionID == "" {
 		return fmt.Errorf("operator client: auth session id is required")
 	}
@@ -292,7 +297,7 @@ func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error 
 }
 
 func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSessionRetryResult, error) {
-	sessionID = strings.TrimSpace(sessionID) // trimlowerlint:allow boundary canonicalization
+	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
 	if sessionID == "" {
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session id is required")
 	}
@@ -311,102 +316,20 @@ func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSe
 	var doc struct {
 		SessionID    string `json:"session_id"`
 		AuthorizeURL string `json:"authorize_url"`
+		UserCode     string `json:"user_code"`
+		ExpiresAt    string `json:"expires_at"`
 		State        string `json:"state"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry response could not be decoded")
 	}
 	return AuthSessionRetryResult{
-		SessionID:    strings.TrimSpace(doc.SessionID),    // trimlowerlint:allow boundary canonicalization
-		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
-		State:        strings.TrimSpace(doc.State),        // trimlowerlint:allow boundary canonicalization
+		SessionID:    strings.TrimSpace(doc.SessionID),    // swobu:io-string source=boundary
+		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // swobu:io-string source=boundary
+		UserCode:     strings.TrimSpace(doc.UserCode),     // swobu:io-string source=boundary
+		ExpiresAt:    strings.TrimSpace(doc.ExpiresAt),    // swobu:io-string source=boundary
+		State:        strings.TrimSpace(doc.State),        // swobu:io-string source=boundary
 	}, nil
-}
-
-// endpointDocument mirrors the HTTP wire format for a single endpoint.
-type endpointDocument struct {
-	Name                      string                   `json:"name"`
-	SelectedProviderConfigRef string                   `json:"selected_provider_config_ref"`
-	ProviderConfigs           []providerConfigDocument `json:"provider_configs"`
-}
-
-type providerConfigDocument struct {
-	Ref           string `json:"ref"`
-	ProviderSpec  string `json:"provider_spec"`
-	BaseURL       string `json:"base_url,omitempty"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	ModelID       string `json:"model_id,omitempty"`
-	TargetAlias   string `json:"target_alias,omitempty"`
-	SelectedFrame string `json:"selected_frame,omitempty"`
-	ProtocolKind  string `json:"protocol_kind,omitempty"`
-}
-
-type endpointListDocument struct {
-	Endpoints []endpointDocument `json:"endpoints"`
-}
-
-func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
-	providerConfigs := ep.ProviderConfigs()
-	doc := endpointDocument{
-		Name:                      ep.Name().String(),
-		SelectedProviderConfigRef: ep.SelectedProviderConfigRef().String(),
-		ProviderConfigs:           make([]providerConfigDocument, 0, len(providerConfigs)),
-	}
-	for _, pc := range providerConfigs {
-		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
-			Ref:           pc.Ref().String(),
-			ProviderSpec:  pc.ProviderSpec().String(),
-			BaseURL:       pc.BaseURL(),
-			CredentialRef: pc.CredentialRef(),
-			ModelID:       pc.ModelID(),
-			TargetAlias:   pc.TargetAlias(),
-			SelectedFrame: pc.SelectedFrame(),
-			ProtocolKind:  pc.ProtocolKind().String(),
-		})
-	}
-	return doc
-}
-
-func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
-	name, err := endpointintent.ParseEndpointName(d.Name)
-	if err != nil {
-		return endpointintent.Endpoint{}, err
-	}
-	selectedRef, err := endpointintent.ParseProviderConfigRef(d.SelectedProviderConfigRef)
-	if err != nil {
-		return endpointintent.Endpoint{}, err
-	}
-	providerConfigs := make([]endpointintent.ProviderConfig, 0, len(d.ProviderConfigs))
-	for _, pc := range d.ProviderConfigs {
-		ref, err := endpointintent.ParseProviderConfigRef(pc.Ref)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		spec, err := endpointintent.ParseProviderSpec(pc.ProviderSpec)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		if strings.TrimSpace(pc.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
-			config, err = config.WithSelectedFrame(pc.SelectedFrame)
-			if err != nil {
-				return endpointintent.Endpoint{}, err
-			}
-		}
-		config, err = config.WithModelID(pc.ModelID)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		config, err = config.WithTargetAlias(pc.TargetAlias)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		providerConfigs = append(providerConfigs, config)
-	}
-	return endpointintent.NewEndpoint(name, providerConfigs, selectedRef)
 }
 
 func errorFromResponse(resp *http.Response, fallback string) error {
@@ -417,7 +340,7 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-		if msg := strings.TrimSpace(payload.Error.Message); msg != "" { // trimlowerlint:allow boundary canonicalization
+		if msg := strings.TrimSpace(payload.Error.Message); msg != "" { // swobu:io-string source=boundary
 			return fmt.Errorf("operator client: %s (code=%s)", msg, payload.Error.Code)
 		}
 	}

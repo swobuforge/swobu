@@ -3,7 +3,7 @@ package clientprofile
 import "strings"
 
 func openAIBaseURL(baseURL string) string {
-	base := strings.TrimSpace(baseURL) // trimlowerlint:allow boundary canonicalization
+	base := strings.TrimSpace(baseURL) // swobu:io-string source=boundary
 	if base == "" || base == "none" {
 		return ""
 	}

@@ -70,7 +70,7 @@ func bootstrapModelFromDaemon(ctx context.Context) state.Model {
 	model.EndpointSnapshots = make([]state.EndpointSnapshot, 0, len(endpoints))
 	for _, ep := range endpoints {
 		snapshot := endpointSnapshotFromIntent(ep)
-		if strings.TrimSpace(snapshot.Name) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(snapshot.Name) == "" { // swobu:io-string source=boundary
 			continue
 		}
 		model.EndpointSnapshots = append(model.EndpointSnapshots, snapshot)
@@ -85,18 +85,18 @@ func bootstrapModelFromDaemon(ctx context.Context) state.Model {
 
 func endpointSnapshotFromIntent(ep endpointintent.Endpoint) state.EndpointSnapshot {
 	snapshot := state.EndpointSnapshot{
-		Name:                      strings.TrimSpace(ep.Name().String()),                      // trimlowerlint:allow boundary canonicalization
-		SelectedProviderConfigRef: strings.TrimSpace(ep.SelectedProviderConfigRef().String()), // trimlowerlint:allow boundary canonicalization
+		Name:                      strings.TrimSpace(ep.Name().String()),                      // swobu:io-string source=boundary
+		SelectedProviderConfigRef: strings.TrimSpace(ep.SelectedProviderConfigRef().String()), // swobu:io-string source=boundary
 		ProviderConfigs:           make([]state.ProviderConfigSnapshot, 0, len(ep.ProviderConfigs())),
 	}
 	for _, providerConfig := range ep.ProviderConfigs() {
 		snapshot.ProviderConfigs = append(snapshot.ProviderConfigs, state.ProviderConfigSnapshot{
-			Ref:           strings.TrimSpace(providerConfig.Ref().String()),          // trimlowerlint:allow boundary canonicalization
-			ProviderSpec:  strings.TrimSpace(providerConfig.ProviderSpec().String()), // trimlowerlint:allow boundary canonicalization
-			BaseURL:       strings.TrimSpace(providerConfig.BaseURL()),               // trimlowerlint:allow boundary canonicalization
-			CredentialRef: strings.TrimSpace(providerConfig.CredentialRef()),         // trimlowerlint:allow boundary canonicalization
-			ModelID:       strings.TrimSpace(providerConfig.ModelID()),               // trimlowerlint:allow boundary canonicalization
-			TargetAlias:   strings.TrimSpace(providerConfig.TargetAlias()),           // trimlowerlint:allow boundary canonicalization
+			Ref:           strings.TrimSpace(providerConfig.Ref().String()),          // swobu:io-string source=boundary
+			ProviderSpec:  strings.TrimSpace(providerConfig.ProviderSpec().String()), // swobu:io-string source=boundary
+			BaseURL:       strings.TrimSpace(providerConfig.BaseURL()),               // swobu:io-string source=boundary
+			CredentialRef: strings.TrimSpace(providerConfig.CredentialRef()),         // swobu:io-string source=boundary
+			ModelID:       strings.TrimSpace(providerConfig.ModelID()),               // swobu:io-string source=boundary
+			TargetAlias:   strings.TrimSpace(providerConfig.TargetAlias()),           // swobu:io-string source=boundary
 		})
 	}
 	return snapshot
@@ -106,7 +106,7 @@ func endpointSnapshotNames(entries []state.EndpointSnapshot) []string {
 	seen := make(map[string]struct{}, len(entries))
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		name := strings.TrimSpace(entry.Name) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(entry.Name) // swobu:io-string source=boundary
 		if name == "" {
 			continue
 		}

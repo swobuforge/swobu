@@ -10,9 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-type ChatCompletionsCodec struct{}
+type ChatCompletionsFamilyCodec struct{}
 
-func (ChatCompletionsCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
+func (ChatCompletionsFamilyCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
 	var dto chatCompletionsRequestDTO
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, false, canonical.BadRequest("chat completions request body is invalid JSON")
@@ -28,10 +28,10 @@ func (ChatCompletionsCodec) DecodeRequest(raw []byte) (canonical.CanonicalReques
 		}
 		items = append(items, decoded...)
 	}
-	return canonical.NewDialogRequest(strings.TrimSpace(dto.Model), items), dto.Stream, nil // trimlowerlint:allow boundary canonicalization
+	return canonical.NewDialogRequest(strings.TrimSpace(dto.Model), items), dto.Stream, nil // swobu:io-string source=boundary
 }
 
-func (ChatCompletionsCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
+func (ChatCompletionsFamilyCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
 	return json.Marshal(chatCompletionsResponseDTO{
 		ID:     httpcodec.FallbackID(output.ResultID(), "chatcmpl_swobu"),
 		Object: "chat.completion",
@@ -45,8 +45,8 @@ func (ChatCompletionsCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]
 	})
 }
 
-func (ChatCompletionsCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
-	return &chatCompletionClientStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
+func (ChatCompletionsFamilyCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
+	return &chatCompletionsEnvelopeStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
 }
 
 func decodeChatCompletionsItems(
@@ -62,13 +62,13 @@ func decodeChatCompletionsItems(
 		return nil, err
 	}
 
-	role = strings.TrimSpace(role) // trimlowerlint:allow boundary canonicalization
+	role = strings.TrimSpace(role) // swobu:io-string source=boundary
 	if role == "tool" {
-		if strings.TrimSpace(toolCallID) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(toolCallID) == "" { // swobu:io-string source=boundary
 			return nil, canonical.BadRequest("chat completions tool messages require tool_call_id")
 		}
 		return []canonical.CanonicalItem{
-			canonical.NewToolResultItem(canonical.ItemAuthorTool, strings.TrimSpace(toolCallID), joinItemText(textItems)), // trimlowerlint:allow boundary canonicalization
+			canonical.NewToolResultItem(canonical.ItemAuthorTool, strings.TrimSpace(toolCallID), joinItemText(textItems)), // swobu:io-string source=boundary
 		}, nil
 	}
 
@@ -77,18 +77,18 @@ func decodeChatCompletionsItems(
 		if call.Type != "" && call.Type != "function" {
 			return nil, canonical.BadRequest("chat completions request contains an unsupported tool call type")
 		}
-		if strings.TrimSpace(call.Function.Name) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(call.Function.Name) == "" { // swobu:io-string source=boundary
 			return nil, canonical.BadRequest("chat completions tool calls require a function name")
 		}
 		input, err := httpcodec.DecodeJSONObject(call.Function.Arguments, "chat completions tool call arguments are invalid")
 		if err != nil {
 			return nil, err
 		}
-		id := strings.TrimSpace(call.ID) // trimlowerlint:allow boundary canonicalization
+		id := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if id == "" {
 			id = openaicompat.GeneratedToolUseID(msgIdx, idx)
 		}
-		items = append(items, canonical.NewToolUseItem(author, "", id, strings.TrimSpace(call.Function.Name), input)) // trimlowerlint:allow boundary canonicalization
+		items = append(items, canonical.NewToolUseItem(author, "", id, strings.TrimSpace(call.Function.Name), input)) // swobu:io-string source=boundary
 	}
 	return items, nil
 }
@@ -104,7 +104,7 @@ func joinItemText(items []canonical.CanonicalItem) string {
 	return builder.String()
 }
 
-type chatCompletionClientStreamEncoder struct {
+type chatCompletionsEnvelopeStreamEncoder struct {
 	resultID string
 	model    string
 	started  bool
@@ -112,7 +112,7 @@ type chatCompletionClientStreamEncoder struct {
 	adapter  *httpcodec.EnvelopeEventAdapter
 }
 
-func (s *chatCompletionClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
+func (s *chatCompletionsEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
 	streamEvents := s.adapter.Translate(event)
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
@@ -126,7 +126,7 @@ func (s *chatCompletionClientStreamEncoder) EncodeEnvelopeEvent(event canonical.
 }
 
 // event-to-frame fanout over text, tool calls, and terminal envelopes.
-func (s *chatCompletionClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
+func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
 	if s.toolByID == nil {
 		s.toolByID = map[string]int{}
 	}
@@ -245,7 +245,7 @@ func (s *chatCompletionClientStreamEncoder) Encode(event httpcodec.StreamEvent) 
 	}
 }
 
-func (s *chatCompletionClientStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
+func (s *chatCompletionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
 
 func chatMessageFromOutput(output canonical.CanonicalOutput) chatCompletionsResponseMessageDTO {
 	text := httpcodec.OutputText(output.Items())

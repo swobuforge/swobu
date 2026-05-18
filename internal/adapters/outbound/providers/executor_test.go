@@ -35,7 +35,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	services := NewServices(upstream.Client(), testCredentialResolver{})
+	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
 
 	openAIReq := ports.NewProviderRequest(
 		canonical.NewDialogRequest("m", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}),
@@ -69,7 +69,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	services := NewServices(upstream.Client(), testCredentialResolver{})
+	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
 
 	openAIModels, err := services.ModelCatalog.ListModels(context.Background(), ports.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref",
@@ -92,7 +92,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	t.Parallel()
 
-	services := NewServices(http.DefaultClient, testCredentialResolver{})
+	services := NewProviderServicesBundle(http.DefaultClient, testCredentialResolver{})
 	_, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
 		canonical.NewPromptRequest("m", "hi"),
 		ports.NewExecutionContract(false),
@@ -100,5 +100,27 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
 		t.Fatalf("unknown provider must fail fast, got err=%v", err)
+	}
+}
+
+func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+	}))
+	defer upstream.Close()
+
+	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
+	err := services.ModelCatalog.ValidateCredentials(context.Background(), ports.NewRoutableTarget(
+		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref",
+	))
+	if err != nil {
+		t.Fatalf("openai validate credentials failed: %v", err)
 	}
 }

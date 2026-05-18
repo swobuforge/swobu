@@ -148,7 +148,7 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 			BackendModelID: candidate.EffectiveModel,
 		}
 		attemptContract := in.Contract
-		providerCallMode, err := planProviderCallMode(in.Contract.ClientResponseMode, candidate.Target)
+		providerCallMode, err := providerCallModePolicy(in.Contract.ClientResponseMode, candidate.Target)
 		if err != nil {
 			return HandleOutput{}, err
 		}
@@ -175,7 +175,7 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	metadata.ModelRequested = intent.RequestedModel
 	metadata.ModelResolved = finalRoute.EffectiveModel
 	metadata.ModelResolutionMode = finalRoute.ResolutionMode
-	finalProviderCallMode, err := planProviderCallMode(in.Contract.ClientResponseMode, finalRoute.Target)
+	finalProviderCallMode, err := providerCallModePolicy(in.Contract.ClientResponseMode, finalRoute.Target)
 	if err != nil {
 		return HandleOutput{}, err
 	}
@@ -216,15 +216,15 @@ func (o RequestHandler) ListModels(ctx context.Context, in ListModelsInput) (Lis
 }
 
 func materializeRequestForExecution(request canonical.CanonicalRequest, modelID string) canonical.CanonicalRequest {
-	if strings.TrimSpace(modelID) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(modelID) == "" { // swobu:io-string source=boundary
 		return request
 	}
 	switch typed := request.(type) {
 	case canonical.DialogCanonicalRequest:
-		return canonical.NewDialogRequest(strings.TrimSpace(modelID), typed.Items()) // trimlowerlint:allow boundary canonicalization
+		return canonical.NewDialogRequest(strings.TrimSpace(modelID), typed.Items()) // swobu:io-string source=boundary
 	case canonical.GenerationCanonicalRequest:
 		return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
-			Model:                strings.TrimSpace(modelID), // trimlowerlint:allow boundary canonicalization
+			Model:                strings.TrimSpace(modelID), // swobu:io-string source=boundary
 			Thread:               typed.Thread(),
 			LastTurn:             typed.LastTurn(),
 			PreviousResponseID:   typed.PreviousResponseID(),
@@ -234,7 +234,7 @@ func materializeRequestForExecution(request canonical.CanonicalRequest, modelID 
 			PromptCacheRetention: typed.PromptCacheRetention(),
 		})
 	case canonical.PromptCanonicalRequest:
-		return canonical.NewPromptRequest(strings.TrimSpace(modelID), typed.Prompt()) // trimlowerlint:allow boundary canonicalization
+		return canonical.NewPromptRequest(strings.TrimSpace(modelID), typed.Prompt()) // swobu:io-string source=boundary
 	default:
 		return request
 	}
@@ -243,18 +243,18 @@ func materializeRequestForExecution(request canonical.CanonicalRequest, modelID 
 func requestModel(request canonical.CanonicalRequest) string {
 	switch typed := request.(type) {
 	case canonical.DialogCanonicalRequest:
-		return strings.TrimSpace(typed.Model()) // trimlowerlint:allow boundary canonicalization
+		return strings.TrimSpace(typed.Model()) // swobu:io-string source=boundary
 	case canonical.GenerationCanonicalRequest:
-		return strings.TrimSpace(typed.Model()) // trimlowerlint:allow boundary canonicalization
+		return strings.TrimSpace(typed.Model()) // swobu:io-string source=boundary
 	case canonical.PromptCanonicalRequest:
-		return strings.TrimSpace(typed.Model()) // trimlowerlint:allow boundary canonicalization
+		return strings.TrimSpace(typed.Model()) // swobu:io-string source=boundary
 	default:
 		return ""
 	}
 }
 
 func effectiveModelIDForRequest(selectedModelID string) (string, error) {
-	selectedModelID = strings.TrimSpace(selectedModelID) // trimlowerlint:allow boundary canonicalization
+	selectedModelID = strings.TrimSpace(selectedModelID) // swobu:io-string source=boundary
 	if selectedModelID != "" {
 		return selectedModelID, nil
 	}

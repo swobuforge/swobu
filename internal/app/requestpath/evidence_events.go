@@ -38,10 +38,10 @@ func newInflightEvidenceEvent(
 	return runtimeevidence.NewInflightTrafficEvent(runtimeevidence.TrafficEventInput{
 		RequestID:           id,
 		Endpoint:            endpointName.String(),
-		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // trimlowerlint:allow boundary canonicalization
-		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // trimlowerlint:allow boundary canonicalization
-		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // trimlowerlint:allow boundary canonicalization
-		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // trimlowerlint:allow boundary canonicalization
+		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // swobu:io-string source=boundary
+		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // swobu:io-string source=boundary
+		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // swobu:io-string source=boundary
+		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // swobu:io-string source=boundary
 		Route:               route,
 		AttemptCount:        1,
 		ModelRequested:      requestedModel,
@@ -75,10 +75,10 @@ func newSuccessEvidenceEvent(
 	return runtimeevidence.NewTerminalTrafficEvent(runtimeevidence.TrafficEventInput{
 		RequestID:                 id,
 		Endpoint:                  endpointName.String(),
-		ClientProtocol:            runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // trimlowerlint:allow boundary canonicalization
-		IngressFamily:             runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // trimlowerlint:allow boundary canonicalization
-		NormalizedOp:              runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // trimlowerlint:allow boundary canonicalization
-		ClientHandler:             runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // trimlowerlint:allow boundary canonicalization
+		ClientProtocol:            runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // swobu:io-string source=boundary
+		IngressFamily:             runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // swobu:io-string source=boundary
+		NormalizedOp:              runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // swobu:io-string source=boundary
+		ClientHandler:             runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // swobu:io-string source=boundary
 		Route:                     route,
 		Result:                    runtimeevidence.ResultClassSuccess,
 		StatusCode:                200,
@@ -114,10 +114,10 @@ func newErrorEvidenceEvent(
 	input := runtimeevidence.TrafficEventInput{
 		RequestID:           id,
 		Endpoint:            endpointName.String(),
-		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // trimlowerlint:allow boundary canonicalization
-		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // trimlowerlint:allow boundary canonicalization
-		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // trimlowerlint:allow boundary canonicalization
-		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // trimlowerlint:allow boundary canonicalization
+		ClientProtocol:      runtimeevidence.ClientProtocol(strings.TrimSpace(provenance.ClientProtocol)),       // swobu:io-string source=boundary
+		IngressFamily:       runtimeevidence.IngressFamily(strings.TrimSpace(string(provenance.IngressFamily))), // swobu:io-string source=boundary
+		NormalizedOp:        runtimeevidence.NormalizedOp(strings.TrimSpace(string(provenance.NormalizedOp))),   // swobu:io-string source=boundary
+		ClientHandler:       runtimeevidence.ClientHandler(strings.TrimSpace(provenance.ClientHandler)),         // swobu:io-string source=boundary
 		Route:               route,
 		Result:              runtimeevidence.ResultClassSwobuError,
 		AttemptCount:        1,

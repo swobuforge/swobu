@@ -18,7 +18,7 @@ type ProviderConfigRef struct {
 // ParseProviderConfigRef validates the operator-visible provider-config
 // reference as durable intent.
 func ParseProviderConfigRef(raw string) (ProviderConfigRef, error) {
-	if strings.TrimSpace(raw) == "" { // trimlowerlint:allow domain canonicalization
+	if strings.TrimSpace(raw) == "" { // swobu:io-string source=domain
 		return ProviderConfigRef{}, fmt.Errorf("%w: provider config ref must not be empty", ErrInvalidProviderConfigRef)
 	}
 	return ProviderConfigRef{value: raw}, nil
@@ -64,8 +64,8 @@ type ProviderSpec struct {
 // ParseProviderSpec validates the durable provider-spec identifier used by one
 // provider config.
 func ParseProviderSpec(raw string) (ProviderSpec, error) {
-	// trimlowerlint:allow boundary canonicalization from raw operator input to ProviderSpec
-	spec := strings.ToLower(strings.TrimSpace(raw)) // trimlowerlint:allow domain canonicalization
+	// swobu:io-string source=boundary from raw operator input to ProviderSpec
+	spec := strings.ToLower(strings.TrimSpace(raw)) // swobu:io-string source=domain
 	if spec == "" {
 		return ProviderSpec{}, fmt.Errorf("%w: provider spec must not be empty", ErrInvalidProviderSpec)
 	}
@@ -117,7 +117,7 @@ func NewProviderConfig(
 	if spec.value == "" {
 		return ProviderConfig{}, fmt.Errorf("%w: provider spec is required", ErrInvalidProviderConfig)
 	}
-	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // trimlowerlint:allow domain canonicalization
+	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=domain
 		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-compatible provider configs require a base URL", ErrInvalidProviderConfig)
 	}
 	protocolKind, ok := providercatalog.DefaultExecutionProtocolForSpec(spec.value)
@@ -188,7 +188,7 @@ func (c ProviderConfig) SelectedFrame() string {
 }
 
 func (c ProviderConfig) WithSelectedFrame(selectedFrame string) (ProviderConfig, error) {
-	selectedFrame = strings.TrimSpace(selectedFrame) // trimlowerlint:allow domain canonicalization
+	selectedFrame = strings.TrimSpace(selectedFrame) // swobu:io-string source=domain
 	if selectedFrame == "" {
 		return ProviderConfig{}, fmt.Errorf("%w: selected frame is required", ErrInvalidProviderConfig)
 	}
@@ -210,7 +210,7 @@ func (c ProviderConfig) ModelID() string {
 }
 
 func (c ProviderConfig) WithModelID(modelID string) (ProviderConfig, error) {
-	c.modelID = strings.TrimSpace(modelID) // trimlowerlint:allow domain canonicalization
+	c.modelID = strings.TrimSpace(modelID) // swobu:io-string source=domain
 	return c, nil
 }
 
@@ -219,7 +219,7 @@ func (c ProviderConfig) TargetAlias() string {
 }
 
 func (c ProviderConfig) WithTargetAlias(targetAlias string) (ProviderConfig, error) {
-	targetAlias = strings.ToLower(strings.TrimSpace(targetAlias)) // trimlowerlint:allow domain canonicalization
+	targetAlias = strings.ToLower(strings.TrimSpace(targetAlias)) // swobu:io-string source=domain
 	if targetAlias == "" {
 		c.targetAlias = ""
 		return c, nil

@@ -24,13 +24,15 @@ func authVariantDisplayLabel(variant providercatalog.AuthVariant) string {
 		return "env var"
 	case providercatalog.AuthVariantFile:
 		return "file"
+	case providercatalog.AuthVariantAWSProfile:
+		return "AWS profile"
 	default:
 		return string(variant)
 	}
 }
 
 func authVariantStartAction(spec string, variant providercatalog.AuthVariant) (label string, verb string, ok bool) {
-	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(spec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) { // trimlowerlint:allow boundary canonicalization
+	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(spec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
 		return "", "", false
 	}
 	switch variant {

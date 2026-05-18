@@ -1,3 +1,12 @@
-line 11
--                 ollama:gemma4:e4b:e3b0c442                                                          edit ↵
-+        model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
+line 21
+-          provider           OpenAI Compatible                                                       change ↵
++          provider           OpenAI                                                                  change ↵
+line 22
+-          credential         env var                                                                 change ↵
++          credential         env var missing                                                         change ↵
+line 23
+-          scope              base url missing                                                        edit ↵
++     >    env key            OPENAI_API_KEY                                                          edit ↵
+line 24
+-     >    env key            missing                                                                 edit ↵
++          expected           OPENAI_API_KEY

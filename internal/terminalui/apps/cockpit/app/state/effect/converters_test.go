@@ -39,3 +39,21 @@ func TestArgsToProviderConfig_PreservesSelectedFrame(t *testing.T) {
 		t.Fatalf("selected frame=%q want=%q", got, providercatalog.FrameSSEEvent)
 	}
 }
+
+func TestArgsToProviderConfig_BedrockRegionDerivesBaseURL(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := argsToProviderConfig(stateModel.ProviderConfigSnapshot{
+		Ref:           "backend-a",
+		ProviderSpec:  "bedrock",
+		Region:        "eu-west-2",
+		BaseURL:       "",
+		CredentialRef: "profile:default",
+	})
+	if err != nil {
+		t.Fatalf("argsToProviderConfig returned error: %v", err)
+	}
+	if got := cfg.BaseURL(); got != "https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1" {
+		t.Fatalf("base URL=%q want eu-west-2 bedrock runtime URL", got)
+	}
+}

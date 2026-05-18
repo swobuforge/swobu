@@ -6,10 +6,10 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
      create            not ready
 
   routing ▾
-     run on            Ollama                                         choose ↵
-     auth              not required
-     frame             http_json_body                                 next ↵
+     provider          Ollama                                         choose ↵
+     credential        external
      model             not set                                        choose ↵
+     delivery          auto                                           next ↵
 
   clients ▸
     not set

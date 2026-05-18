@@ -12,17 +12,17 @@ type CredentialSourceResolver interface {
 }
 
 var (
-	_ CredentialSourceResolver = EnvResolver{}
-	_ CredentialSourceResolver = FileResolver{}
-	_ CredentialSourceResolver = KeyringResolver{}
+	_ CredentialSourceResolver = EnvCredentialSourceResolver{}
+	_ CredentialSourceResolver = FileCredentialSourceResolver{}
+	_ CredentialSourceResolver = KeyringCredentialSourceResolver{}
 )
 
-// secretFileResolver adapts secretfile references onto secret-file storage.
-type secretFileResolver struct {
+// secretFileCredentialSourceResolver adapts secretfile references onto secret-file storage.
+type secretFileCredentialSourceResolver struct {
 	store *secretFileStore
 }
 
-func (r secretFileResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
+func (r secretFileCredentialSourceResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	_ = ctx
 	_ = providerSpec
 	keyName, err := secretFileCredentialName(credentialRef)
@@ -32,7 +32,7 @@ func (r secretFileResolver) ResolveCredential(ctx context.Context, providerSpec 
 	return r.store.Resolve(keyName)
 }
 
-var _ CredentialSourceResolver = secretFileResolver{}
+var _ CredentialSourceResolver = secretFileCredentialSourceResolver{}
 
 func newSourceResolverRegistry() map[credentialref.Kind]CredentialSourceResolver {
 	return map[credentialref.Kind]CredentialSourceResolver{
@@ -40,7 +40,7 @@ func newSourceResolverRegistry() map[credentialref.Kind]CredentialSourceResolver
 		credentialref.KindFile:     NewFileResolver(),
 		credentialref.KindSecret:   NewKeyringResolver(nil),
 		credentialref.KindKeychain: NewKeyringResolver(nil),
-		credentialref.KindSecretFile: secretFileResolver{
+		credentialref.KindSecretFile: secretFileCredentialSourceResolver{
 			store: &secretFileStore{},
 		},
 	}

@@ -15,7 +15,7 @@ type CheckClientAccessEffect struct {
 }
 
 func (cmd CheckClientAccessEffect) Execute(ctx context.Context) []update.Action {
-	endpointName := strings.TrimSpace(cmd.EndpointName) // trimlowerlint:allow boundary canonicalization
+	endpointName := strings.TrimSpace(cmd.EndpointName) // swobu:io-string source=boundary
 	if endpointName == "" {
 		return []update.Action{ClientAccessCheckFailed{Message: "workspace is not selected"}}
 	}

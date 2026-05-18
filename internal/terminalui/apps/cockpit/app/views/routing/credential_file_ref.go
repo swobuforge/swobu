@@ -7,27 +7,26 @@ const keychainCredentialRefPrefix = "keychain:"
 const envCredentialRefPrefix = "env:"
 
 func credentialSource(credentialRef string) string {
-	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
-	switch ref {
-	case "env", "keychain", "file":
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
+	if ref == "env" || ref == "keychain" || ref == "file" {
 		return ref
 	}
-	if strings.HasPrefix(strings.ToLower(ref), envCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), envCredentialRefPrefix) { // swobu:io-string source=boundary
 		return "env"
 	}
-	if strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // swobu:io-string source=boundary
 		return "keychain"
 	}
-	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // swobu:io-string source=boundary
 		return "file"
 	}
 	return ref
 }
 
 func credentialFilePath(credentialRef string) string {
-	ref := strings.TrimSpace(credentialRef)                               // trimlowerlint:allow boundary canonicalization
-	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
-		return strings.TrimSpace(ref[len(fileCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef)                               // swobu:io-string source=boundary
+	if strings.HasPrefix(strings.ToLower(ref), fileCredentialRefPrefix) { // swobu:io-string source=boundary
+		return strings.TrimSpace(ref[len(fileCredentialRefPrefix):]) // swobu:io-string source=boundary
 	}
 	if strings.HasPrefix(ref, "~/") || strings.HasPrefix(ref, "/") {
 		return ref
@@ -36,7 +35,7 @@ func credentialFilePath(credentialRef string) string {
 }
 
 func encodeCredentialFileRef(path string) string {
-	trimmed := strings.TrimSpace(path) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(path) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return "file"
 	}
@@ -44,15 +43,15 @@ func encodeCredentialFileRef(path string) string {
 }
 
 func envCredentialKey(credentialRef string) string {
-	ref := strings.TrimSpace(credentialRef)                               // trimlowerlint:allow boundary canonicalization
-	if !strings.HasPrefix(strings.ToLower(ref), envCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef)                               // swobu:io-string source=boundary
+	if !strings.HasPrefix(strings.ToLower(ref), envCredentialRefPrefix) { // swobu:io-string source=boundary
 		return ""
 	}
-	return strings.TrimSpace(ref[len(envCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(ref[len(envCredentialRefPrefix):]) // swobu:io-string source=boundary
 }
 
 func encodeCredentialEnvRef(key string) string {
-	trimmed := strings.TrimSpace(key) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(key) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return "env"
 	}
@@ -60,15 +59,15 @@ func encodeCredentialEnvRef(key string) string {
 }
 
 func keychainCredentialName(credentialRef string) string {
-	ref := strings.TrimSpace(credentialRef)                                    // trimlowerlint:allow boundary canonicalization
-	if !strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef)                                    // swobu:io-string source=boundary
+	if !strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // swobu:io-string source=boundary
 		return ""
 	}
-	return strings.TrimSpace(ref[len(keychainCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(ref[len(keychainCredentialRefPrefix):]) // swobu:io-string source=boundary
 }
 
 func encodeCredentialKeychainRef(name string) string {
-	trimmed := strings.TrimSpace(name) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(name) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return "keychain"
 	}

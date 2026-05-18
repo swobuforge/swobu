@@ -31,8 +31,8 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 	currentRef := ""
 	providerSpec := ""
 	if pc != nil {
-		currentRef = strings.TrimSpace(pc.CredentialRef)  // trimlowerlint:allow boundary canonicalization
-		providerSpec = strings.TrimSpace(pc.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+		currentRef = strings.TrimSpace(pc.CredentialRef)  // swobu:io-string source=boundary
+		providerSpec = strings.TrimSpace(pc.ProviderSpec) // swobu:io-string source=boundary
 	}
 	current := credentialSource(currentRef)
 	if isResolvedInteractiveCredential(providerSpec, currentRef) {
@@ -79,19 +79,19 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 }
 
 func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	credentialRef = strings.TrimSpace(credentialRef)                       // trimlowerlint:allow boundary canonicalization
-	variant := providercatalog.AuthVariant(strings.ToLower(credentialRef)) // trimlowerlint:allow boundary canonicalization
+	credentialRef = strings.TrimSpace(credentialRef)                       // swobu:io-string source=boundary
+	variant := providercatalog.AuthVariant(strings.ToLower(credentialRef)) // swobu:io-string source=boundary
 	if providercatalog.IsInteractiveAuthVariant(variant) {
 		if createMode {
 			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 		}
-		if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+		if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 			return nil
 		}
 		return []update.Action{state.StartProviderAuthSessionRequested{
-			EndpointName:   strings.TrimSpace(endpointName), // trimlowerlint:allow boundary canonicalization
+			EndpointName:   strings.TrimSpace(endpointName), // swobu:io-string source=boundary
 			ProviderConfig: *providerConfig,
-			OwnerKey:       stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String(), // trimlowerlint:allow boundary canonicalization
+			OwnerKey:       stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String(), // swobu:io-string source=boundary
 			AuthScope:      stateModel.AuthScopeEndpointProvider,
 		}}
 	}
@@ -104,12 +104,12 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = credentialRef
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // trimlowerlint:allow boundary canonicalization
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // swobu:io-string source=boundary
 }
 
 func credentialOptionRows(
@@ -125,21 +125,25 @@ func credentialOptionRows(
 	}
 	containsOptionValue := func(values []option, value string) bool {
 		for _, item := range values {
-			if strings.TrimSpace(item.Value) == strings.TrimSpace(value) { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(item.Value) == strings.TrimSpace(value) { // swobu:io-string source=boundary
 				return true
 			}
 		}
 		return false
 	}
-	variants := providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec)) // trimlowerlint:allow boundary canonicalization
-	options := make([]option, 0, len(variants))
-	for _, v := range variants {
+	descriptors := authModeDescriptorsForSpec(providerSpec)
+	options := make([]option, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		label := descriptor.Label
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == providercatalog.AuthVariantEnv { // swobu:io-string source=boundary
+			label = "Bedrock API key"
+		}
 		options = append(options, option{
-			Value: string(v),
-			Label: authVariantDisplayLabel(v), // trimlowerlint:allow boundary canonicalization
+			Value: string(descriptor.Variant),
+			Label: label,
 		})
 	}
-	current = strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
+	current = strings.TrimSpace(current) // swobu:io-string source=boundary
 	if current != "" && current != "missing" && current != "signed in" && !containsOptionValue(options, current) {
 		options = append([]option{{Value: current, Label: current}}, options...)
 	}
@@ -147,7 +151,7 @@ func credentialOptionRows(
 	for _, option := range options {
 		choice := option
 		rows = append(rows, toolkitviews.ListItemRow[state.Model](
-			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3), // trimlowerlint:allow boundary canonicalization
+			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3), // swobu:io-string source=boundary
 			choice.Value == current,
 			true,
 			true,

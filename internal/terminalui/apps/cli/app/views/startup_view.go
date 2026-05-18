@@ -11,10 +11,9 @@ func Build(startup state.StartupState) view.ViewSpec {
 	children := make([]view.ViewSpec, 0, len(startup.Sections)+2)
 	for i, section := range startup.Sections {
 		var node view.ViewSpec
-		switch section.Kind {
-		case "splash":
+		if section.Kind == "splash" {
 			node = SplashBlock(section.Rows)
-		default:
+		} else {
 			node = MessageBlock(section.Title, section.Rows, 72)
 		}
 		node.Key = fmt.Sprintf("startup-section-%d", i)

@@ -12,7 +12,7 @@ func TestStdoutEmitter_ErrorTracePayload_DoesNotContainForbiddenTelemetryTokens(
 	var sink strings.Builder
 	emitter := NewStdoutEmitter(&sink)
 	durationMS := 1450
-	emitter.EmitErrorTrace(context.Background(), ErrorTrace{
+	emitter.EmitErrorTrace(context.Background(), ErrorTracePayload{
 		StatusCode:    500,
 		ResultClass:   "backend_error",
 		ProviderRoute: "openai:gpt-4.1",

@@ -1,3 +1,48 @@
 line 11
--                 openai:gpt-3.5-turbo:2310255c                                             edit ↵
-+        model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
+-        model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
++        model    openai:gpt-3.5-turbo:2310255c                                             close ↵
+line 12
+-        add model                                                                          close ↵
++          provider          OpenAI
+line 13
+-          provider          ChatGPT                                                        change ↵
++          credential        env                                                            choose ↵
+line 14
+-          credential        signed in                                                      change ↵
++          model             gpt-3.5-turbo                                                  choose ↵
+line 15
+-     >    sign in           sign in another account                                        open ↵
++          delivery          non-streaming                                                  next ↵
+line 16
+-          model             not selected                                                   choose ↵
++          alias             not set                                                        edit ↵
+line 17
+-          delivery          auto                                                           next ↵
++          env key           OPENAI_API_KEY                                                 edit ↵
+line 18
+- 
++          delete model      disabled (last model)
+line 19
+-   clients ▸
++        add model                                                                          close ↵
+line 20
+-     not set
++          provider          ChatGPT                                                        change ↵
+line 21
+- 
++          credential        signed in                                                      change ↵
+line 22
+-   traffic ▸
++          sign in           sign in another account                                        open ↵
+line 23
+-     no traffic yet
++          model             not selected                                                   choose ↵
+line 24
+- 
++          delivery          auto                                                           next ↵
+line 26
+- 
++ > clients ▸
+line 27
+- 
++     not set

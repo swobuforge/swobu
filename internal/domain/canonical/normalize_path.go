@@ -11,7 +11,8 @@ const (
 )
 
 func NormalizePath(raw string) (NormalizedPath, error) {
-	switch raw {
+	path := raw // swobu:io-string source=http-path
+	switch path {
 	case "/chat/completions", "/v1/chat/completions":
 		return NormalizedPathChatCompletions, nil
 	case "/responses", "/v1/responses":

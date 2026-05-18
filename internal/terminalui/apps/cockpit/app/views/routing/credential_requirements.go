@@ -15,3 +15,11 @@ func providerModelCatalogLoadBlocked(provider, baseURL, credentialRef string) bo
 func providerModelCatalogBlockedMessage(provider, baseURL, credentialRef string) string {
 	return state.ProviderModelCatalogBlockedMessage(provider, baseURL, credentialRef)
 }
+
+func providerModelCatalogAuthFailed(probeError string) bool {
+	return state.ProviderModelCatalogAuthFailed(probeError)
+}
+
+func providerModelCatalogAuthFailureMessage(probeError string) string {
+	return state.ProviderModelCatalogAuthFailureMessage(probeError)
+}

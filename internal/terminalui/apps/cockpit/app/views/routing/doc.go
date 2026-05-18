@@ -8,4 +8,6 @@
 // This package owns routing section, run-on rows, provider panels, property
 // rows, and pure formatting. It does not own mode decisions (shell/) or state
 // (state/).
+//
+// Model-creation canonical slot grammar is documented in model_creation_flow.md.
 package routing

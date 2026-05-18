@@ -6,14 +6,14 @@ SWOBU 🧌                                                                ready 
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             chatgpt:gpt-5.3-codex:c57d7a7c                                    choose ↵
-     models             1 configured                                                      manage ↵
-  >    model    chatgpt:gpt-5.3-codex:c57d7a7c                                            close ↵
+     provider           chatgpt:gpt-5.3-codex:c57d7a7c                                    choose ↵
+>    models             1 configured                                                      manage ↵
+       model    chatgpt:gpt-5.3-codex:c57d7a7c                                            close ↵
          provider          ChatGPT
-         delivery          request-response (HTTP JSON)                                   next ↵
+         credential        chatgpt_login                                                  choose ↵
          model             gpt-5.3-codex                                                  choose ↵
+         delivery          non-streaming                                                  next ↵
          alias             not set                                                        edit ↵
-         auth              chatgpt_login                                                  choose ↵
          delete model      disabled (last model)
        add model                                                                          create ↵
 

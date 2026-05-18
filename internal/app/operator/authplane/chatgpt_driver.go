@@ -4,31 +4,32 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 )
 
 const ChatGPTProviderSpec = "chatgpt"
 
-// ChatGPTMethodDriver adapts the chatgpt login service to authplane
+// ChatGPTAuthMethodDriver adapts the chatgpt login service to authplane
 // lifecycle semantics.
-type ChatGPTMethodDriver struct {
-	service *chatgptlogin.Service
+type ChatGPTAuthMethodDriver struct {
+	service *chatgptlogin.LoginService
 }
 
-func NewChatGPTMethodDriver(service *chatgptlogin.Service) (*ChatGPTMethodDriver, error) {
+func NewChatGPTAuthMethodDriver(service *chatgptlogin.LoginService) (*ChatGPTAuthMethodDriver, error) {
 	if service == nil {
 		return nil, fmt.Errorf("chatgpt login service is required")
 	}
-	return &ChatGPTMethodDriver{service: service}, nil
+	return &ChatGPTAuthMethodDriver{service: service}, nil
 }
 
-func (d *ChatGPTMethodDriver) Start(ctx context.Context, in StartInput) (DriverStartResult, error) {
-	if strings.ToLower(strings.TrimSpace(in.ProviderSpec)) != ChatGPTProviderSpec { // trimlowerlint:allow boundary canonicalization
-		return DriverStartResult{}, fmt.Errorf("provider spec %q is unsupported", strings.TrimSpace(in.ProviderSpec)) // trimlowerlint:allow boundary canonicalization
+func (d *ChatGPTAuthMethodDriver) Start(ctx context.Context, in StartInput) (DriverStartResult, error) {
+	if strings.ToLower(strings.TrimSpace(in.ProviderSpec)) != ChatGPTProviderSpec { // swobu:io-string source=boundary
+		return DriverStartResult{}, fmt.Errorf("provider spec %q is unsupported", strings.TrimSpace(in.ProviderSpec)) // swobu:io-string source=boundary
 	}
 	start, err := d.service.Start(ctx, chatgptlogin.StartInput{
-		AuthMode: strings.TrimSpace(in.AuthMode), // trimlowerlint:allow boundary canonicalization
+		AuthMode: strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	})
 	if err != nil {
 		return DriverStartResult{}, err
@@ -36,24 +37,24 @@ func (d *ChatGPTMethodDriver) Start(ctx context.Context, in StartInput) (DriverS
 	return DriverStartResult{
 		SessionID:    start.SessionID,
 		AuthorizeURL: start.AuthorizeURL,
-		UserCode:     strings.TrimSpace(start.UserCode), // trimlowerlint:allow boundary canonicalization
+		UserCode:     strings.TrimSpace(start.UserCode), // swobu:io-string source=boundary
+		ExpiresAt:    start.ExpiresAt.UTC().Format(time.RFC3339),
 	}, nil
 }
 
-func (d *ChatGPTMethodDriver) Poll(ctx context.Context, sessionID string) (DriverPollResult, error) {
+func (d *ChatGPTAuthMethodDriver) Poll(ctx context.Context, sessionID string) (DriverPollResult, error) {
 	out, err := d.service.Session(ctx, sessionID)
 	if err != nil {
 		return DriverPollResult{}, err
 	}
-	state := SessionState(strings.ToLower(strings.TrimSpace(string(out.State)))) // trimlowerlint:allow boundary canonicalization
+	state := SessionState(strings.ToLower(strings.TrimSpace(string(out.State)))) // swobu:io-string source=boundary
 	return DriverPollResult{
 		State:         state,
-		CredentialRef: strings.TrimSpace(out.CredentialRef), // trimlowerlint:allow boundary canonicalization
-		ErrorMessage:  strings.TrimSpace(out.ErrorMessage),  // trimlowerlint:allow boundary canonicalization
+		CredentialRef: strings.TrimSpace(out.CredentialRef), // swobu:io-string source=boundary
+		ErrorMessage:  strings.TrimSpace(out.ErrorMessage),  // swobu:io-string source=boundary
 	}, nil
 }
 
-func (d *ChatGPTMethodDriver) Cancel(_ context.Context, _ string) error {
-	// chatgpt login sessions currently do not expose cancellation.
-	return nil
+func (d *ChatGPTAuthMethodDriver) Cancel(_ context.Context, sessionID string) error {
+	return d.service.Cancel(sessionID)
 }

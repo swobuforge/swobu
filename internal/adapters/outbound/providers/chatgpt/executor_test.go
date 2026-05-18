@@ -55,22 +55,14 @@ func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	}, nil
 }
 
-func TestListModels_UsesTierCatalogEndpoint(t *testing.T) {
+func TestListModels_LoadsBundledTierModels(t *testing.T) {
 	t.Parallel()
 
-	var seenPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenPath = r.URL.Path
-		_, _ = w.Write([]byte(`{"model_ids":["gpt-5.5","gpt-5.4"]}`))
-	}))
-	defer srv.Close()
-
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	exec.catalogBase = srv.URL
+	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
 	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
 		"draft",
 		"chatgpt",
-		srv.URL+"/v1",
+		"https://chatgpt.com/backend-api/codex",
 		"keychain:chatgpt/acct_plus",
 		protocolkind.ChatCompletions,
 		"credential_ref",
@@ -78,30 +70,19 @@ func TestListModels_UsesTierCatalogEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if seenPath != "/api/v1/model-catalog/chatgpt/subscriptions/plus" {
-		t.Fatalf("path=%q", seenPath)
-	}
-	if strings.Join(models, ",") != "gpt-5.4,gpt-5.5" {
-		t.Fatalf("models=%v", models)
+	if len(models) == 0 {
+		t.Fatal("expected non-empty bundled models for plus tier")
 	}
 }
 
 func TestListModels_UsesTierFromCredentialRefPathSegment(t *testing.T) {
 	t.Parallel()
 
-	var seenPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenPath = r.URL.Path
-		_, _ = w.Write([]byte(`{"model_ids":["gpt-5.5"]}`))
-	}))
-	defer srv.Close()
-
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	exec.catalogBase = srv.URL
-	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
+	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
 		"draft",
 		"chatgpt",
-		srv.URL+"/v1",
+		"https://chatgpt.com/backend-api/codex",
 		"keychain:chatgpt/plus/sess_abc",
 		protocolkind.ChatCompletions,
 		"credential_ref",
@@ -109,8 +90,8 @@ func TestListModels_UsesTierFromCredentialRefPathSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if seenPath != "/api/v1/model-catalog/chatgpt/subscriptions/plus" {
-		t.Fatalf("path=%q", seenPath)
+	if len(models) == 0 {
+		t.Fatal("expected non-empty bundled models for plus tier")
 	}
 }
 
@@ -125,7 +106,6 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	exec.catalogBase = srv.URL
 	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
 		"draft",
 		"chatgpt",
@@ -138,35 +118,7 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 		t.Fatalf("expected error, got models=%v", models)
 	}
 	if called {
-		t.Fatal("catalog endpoint must not be called when tier is unknown")
-	}
-}
-
-func TestListModels_TierResource404ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	var seenPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenPath = r.URL.Path
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	exec.catalogBase = srv.URL
-	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
-		"draft",
-		"chatgpt",
-		srv.URL+"/v1",
-		"keychain:chatgpt/plus/sess_abc",
-		protocolkind.ChatCompletions,
-		"credential_ref",
-	))
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if seenPath != "/api/v1/model-catalog/chatgpt/subscriptions/plus" {
-		t.Fatalf("path=%q", seenPath)
+		t.Fatal("network must not be used when tier is unknown")
 	}
 }
 

@@ -43,7 +43,7 @@ func TestEndpointCredentialRefStoreUpsertCredentialRef(t *testing.T) {
 	cfg, _ = cfg.WithModelID("gpt-4.1")
 	ep, _ := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
 	repo := &endpointRepoStub{endpoints: []endpointintent.Endpoint{ep}}
-	store := NewEndpointCredentialRefStore(operatorendpoints.NewOperatorEndpointStore(repo))
+	store := NewEndpointCredentialStore(operatorendpoints.NewOperatorEndpointStore(repo))
 
 	persisted, err := store.UpsertCredentialRef(context.Background(), "openai", EncodeEndpointCredentialLocator("main", "cfg-a"), "keychain:openai/default")
 	if err != nil {
@@ -70,7 +70,7 @@ func TestEndpointCredentialRefStoreUpsertCredentialRef_SubjectLocatorSkipsEndpoi
 	cfg, _ = cfg.WithModelID("gpt-4.1")
 	ep, _ := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
 	repo := &endpointRepoStub{endpoints: []endpointintent.Endpoint{ep}}
-	store := NewEndpointCredentialRefStore(operatorendpoints.NewOperatorEndpointStore(repo))
+	store := NewEndpointCredentialStore(operatorendpoints.NewOperatorEndpointStore(repo))
 
 	persisted, err := store.UpsertCredentialRef(context.Background(), "chatgpt", "subject:main#cfg-a", "chatgpt:acct_a")
 	if err != nil {

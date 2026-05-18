@@ -21,7 +21,7 @@ func ProviderOptions() []ProviderOption {
 		if !profile.VisibleInOperatorUI {
 			continue
 		}
-		label := strings.TrimSpace(profile.SetupHint) // trimlowerlint:allow boundary canonicalization
+		label := trimModelInput(profile.SetupHint)
 		if label == "" {
 			label = string(profile.ProviderID)
 		}
@@ -31,22 +31,25 @@ func ProviderOptions() []ProviderOption {
 }
 
 func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) ProviderConfigSnapshot {
-	spec = strings.TrimSpace(spec) // trimlowerlint:allow boundary canonicalization
+	spec = trimModelInput(spec)
 	next := current
-	if strings.TrimSpace(next.Ref) == "" { // trimlowerlint:allow boundary canonicalization
+	if trimModelInput(next.Ref) == "" {
 		next.Ref = DraftProviderRef
 	}
-	currentProtocol := protocolkind.ProtocolKind(strings.TrimSpace(next.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
+	currentProtocol := protocolkind.ProtocolKind(trimModelInput(next.ProtocolKind))
 	if currentProtocol == "" || !supportsDraftProtocolForSpec(spec, currentProtocol) {
 		next.ProtocolKind = defaultDraftProtocolForSpec(spec).String()
 	}
-	if frame, ok := providercatalog.DefaultFrameForSpecProtocol(spec, protocolkind.ProtocolKind(strings.TrimSpace(next.ProtocolKind))); ok {
+	if frame, ok := providercatalog.DefaultFrameForSpecProtocol(spec, protocolkind.ProtocolKind(trimModelInput(next.ProtocolKind))); ok {
 		next.SelectedFrame = frame
 	}
 	next.ProviderSpec = spec
-	defaultBaseURL := strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(spec)) // trimlowerlint:allow boundary canonicalization
+	defaultBaseURL := trimModelInput(providercatalog.DefaultExecuteBaseURL(spec))
 	if defaultBaseURL != "" {
 		next.BaseURL = defaultBaseURL
+	}
+	if !strings.EqualFold(spec, "bedrock") {
+		next.Region = ""
 	}
 	// Provider switches must always force explicit credential re-selection.
 	next.CredentialRef = ""
@@ -54,6 +57,8 @@ func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) Provider
 }
 
 func ProviderRequiresCredential(spec, baseURL string) bool {
+	spec = trimModelInput(spec)
+	baseURL = trimModelInput(baseURL)
 	return providercatalog.RequiresCredential(spec, baseURL)
 }
 
@@ -65,7 +70,7 @@ func defaultDraftProtocolForSpec(spec string) protocolkind.ProtocolKind {
 	if !providercatalog.SupportsSpec(spec) {
 		return protocolkind.ChatCompletions
 	}
-	if strings.EqualFold(strings.TrimSpace(spec), "anthropic") { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(trimModelInput(spec), "anthropic") {
 		return protocolkind.Messages
 	}
 	return protocolkind.ChatCompletions
@@ -75,8 +80,12 @@ func supportsDraftProtocolForSpec(spec string, protocol protocolkind.ProtocolKin
 	if !providercatalog.SupportsSpec(spec) {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(spec), "anthropic") { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(trimModelInput(spec), "anthropic") {
 		return protocol == protocolkind.Messages
 	}
 	return protocol == protocolkind.ChatCompletions || protocol == protocolkind.Responses || protocol == protocolkind.Completions
+}
+
+func trimModelInput(value string) string {
+	return strings.TrimSpace(value) // swobu:io-string source=boundary
 }

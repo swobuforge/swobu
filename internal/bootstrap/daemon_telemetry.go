@@ -221,11 +221,11 @@ func (d *Daemon) emitErrorTraceForEventBestEffort(ctx context.Context, event run
 		return
 	}
 	d.telemetry.errorTracesInWindow++
-	trace := telemetry.ErrorTrace{
+	trace := telemetry.ErrorTracePayload{
 		StatusCode:    event.StatusCode(),
-		ResultClass:   strings.TrimSpace(event.Result().String()),      // trimlowerlint:allow boundary canonicalization
-		ProviderRoute: strings.TrimSpace(event.Route().String()),       // trimlowerlint:allow boundary canonicalization
-		Operation:     strings.TrimSpace(string(event.NormalizedOp())), // trimlowerlint:allow boundary canonicalization
+		ResultClass:   strings.TrimSpace(event.Result().String()),      // swobu:io-string source=boundary
+		ProviderRoute: strings.TrimSpace(event.Route().String()),       // swobu:io-string source=boundary
+		Operation:     strings.TrimSpace(string(event.NormalizedOp())), // swobu:io-string source=boundary
 	}
 	if durationMS, ok := event.Timing().DurationMillis(); ok {
 		trace.DurationMS = &durationMS
@@ -241,7 +241,7 @@ func telemetryTraceDebugEnabled() bool {
 }
 
 func telemetryErrorTraceMaxPerTick() int {
-	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryErrorTraceMaxPerTick)) // trimlowerlint:allow boundary canonicalization
+	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryErrorTraceMaxPerTick)) // swobu:io-string source=boundary
 	if raw == "" {
 		return 20
 	}

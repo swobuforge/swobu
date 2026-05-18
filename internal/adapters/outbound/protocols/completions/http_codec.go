@@ -8,9 +8,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-type CompletionsCodec struct{}
+type CompletionsFamilyCodec struct{}
 
-func (CompletionsCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
+func (CompletionsFamilyCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, bool, error) {
 	var dto completionsRequestDTO
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, false, canonical.BadRequest("completions request body is invalid JSON")
@@ -18,10 +18,10 @@ func (CompletionsCodec) DecodeRequest(raw []byte) (canonical.CanonicalRequest, b
 	if dto.Prompt == "" {
 		return nil, false, canonical.BadRequest("completions request is missing required fields")
 	}
-	return canonical.NewPromptRequest(strings.TrimSpace(dto.Model), dto.Prompt), dto.Stream, nil // trimlowerlint:allow boundary canonicalization
+	return canonical.NewPromptRequest(strings.TrimSpace(dto.Model), dto.Prompt), dto.Stream, nil // swobu:io-string source=boundary
 }
 
-func (CompletionsCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
+func (CompletionsFamilyCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte, error) {
 	return json.Marshal(completionsResponseDTO{
 		ID:     httpcodec.FallbackID(output.ResultID(), "cmpl_swobu"),
 		Object: "text_completion",
@@ -35,15 +35,15 @@ func (CompletionsCodec) EncodeBuffered(output canonical.CanonicalOutput) ([]byte
 	})
 }
 
-func (CompletionsCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
-	return &completionsClientStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
+func (CompletionsFamilyCodec) NewStreamState() httpcodec.EnvelopeStreamEncoder {
+	return &completionsEnvelopeStreamEncoder{adapter: httpcodec.NewEnvelopeEventAdapter()}
 }
 
-type completionsClientStreamEncoder struct {
+type completionsEnvelopeStreamEncoder struct {
 	adapter *httpcodec.EnvelopeEventAdapter
 }
 
-func (s *completionsClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
+func (s *completionsEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
 	streamEvents := s.adapter.Translate(event)
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
@@ -56,7 +56,7 @@ func (s *completionsClientStreamEncoder) EncodeEnvelopeEvent(event canonical.Eve
 	return frames, nil
 }
 
-func (s *completionsClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
+func (s *completionsEnvelopeStreamEncoder) Encode(event httpcodec.StreamEvent) ([][]byte, error) {
 	switch event.Kind {
 	case httpcodec.StreamEventStarted, httpcodec.StreamEventItemStarted, httpcodec.StreamEventItemCompleted:
 		return nil, nil
@@ -88,7 +88,7 @@ func (s *completionsClientStreamEncoder) Encode(event httpcodec.StreamEvent) ([]
 	}
 }
 
-func (s *completionsClientStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
+func (s *completionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
 
 func completionsUsageFromCanonical(usage canonical.TokenUsage) *completionsUsageDTO {
 	input, hasInput := usage.InputTokens()

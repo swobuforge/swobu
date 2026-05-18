@@ -46,22 +46,22 @@ func buildProviderKeychainKeyNameRow(ctx *retained.Context[state.Model], spec pr
 		"",
 		"paste key value",
 		func(value string) []update.Action {
-			return routingStoreKeychainCredentialActions(strings.TrimSpace(pc.ProviderSpec), effectiveName, strings.TrimSpace(value), "provider/keychain") // trimlowerlint:allow boundary canonicalization
+			return routingStoreKeychainCredentialActions(strings.TrimSpace(pc.ProviderSpec), effectiveName, strings.TrimSpace(value), "provider/keychain") // swobu:io-string source=boundary
 		},
 	)
 	return retained.VStack(ctx, keyNameRow, keyValueRow)
 }
 
 func keychainValueSummary(model state.Model, providerSpec string, keySlot string) string {
-	if strings.EqualFold(model.LastStoredKeyProviderSpec, strings.TrimSpace(providerSpec)) && // trimlowerlint:allow boundary canonicalization
-		model.LastStoredKeySlotName == strings.TrimSpace(keySlot) { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(model.LastStoredKeyProviderSpec, strings.TrimSpace(providerSpec)) && // swobu:io-string source=boundary
+		model.LastStoredKeySlotName == strings.TrimSpace(keySlot) { // swobu:io-string source=boundary
 		return "stored"
 	}
 	return "missing"
 }
 
 func keychainEffectiveName(providerSpec string, current string) string {
-	name := strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(current) // swobu:io-string source=boundary
 	if name != "" {
 		return name
 	}
@@ -69,7 +69,7 @@ func keychainEffectiveName(providerSpec string, current string) string {
 }
 
 func defaultKeychainKeyName(providerSpec string) string {
-	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
+	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // swobu:io-string source=boundary
 	if spec == "" {
 		return "default"
 	}
@@ -81,10 +81,10 @@ func applyProviderKeychainKeyNameSelection(keyName string, providerConfig *state
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // trimlowerlint:allow boundary canonicalization
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // swobu:io-string source=boundary
 }

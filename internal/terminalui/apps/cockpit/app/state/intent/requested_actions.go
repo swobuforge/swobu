@@ -22,7 +22,7 @@ type SetCreateDraftProviderSpec struct {
 	ProviderSpec string
 }
 
-type SetCreateDraftModelID struct {
+type SetCreateDraftModelIDAction struct {
 	ModelID string
 }
 
@@ -94,11 +94,11 @@ type AuthSessionURLCopyScopedRequested struct {
 	Value    string
 }
 
-// ClientBaseURLCopyRequested asks the reducer to copy a client base URL.
-type ClientBaseURLCopyRequested struct{ Value string }
+// ClientBaseURLCopyRequestedAction asks the reducer to copy a client base URL.
+type ClientBaseURLCopyRequestedAction struct{ Value string }
 
-// ClientLaunchRequested asks the reducer to launch a local client preset.
-type ClientLaunchRequested struct {
+// ClientLaunchRequestedAction asks the reducer to launch a local client preset.
+type ClientLaunchRequestedAction struct {
 	BaseURL string
 	Preset  string
 	ModelID string
@@ -174,8 +174,8 @@ type StartProviderAuthSessionRequested struct {
 	AuthScope      string
 }
 
-// ResetAuthSessionUIRequested clears transient auth-login presentation state.
-type ResetAuthSessionUIRequested struct{}
+// ResetAuthSessionUIRequestedAction clears transient auth-login presentation state.
+type ResetAuthSessionUIRequestedAction struct{}
 
 // ResetAddModelAuthUIRequested clears transient add-model auth presentation
 // state without touching persisted-model auth rows.
@@ -186,9 +186,9 @@ const (
 	RoutingModelCatalogScopeAddModelDraft = "add_model_draft"
 )
 
-// LoadRoutingModelCatalogRequested asks reducer to load provider-backed
+// LoadRoutingModelCatalogRequestedAction asks reducer to load provider-backed
 // model catalog choices for routing composition across scopes.
-type LoadRoutingModelCatalogRequested struct {
+type LoadRoutingModelCatalogRequestedAction struct {
 	Scope         string
 	ProviderSpec  string
 	BaseURL       string

@@ -17,11 +17,17 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if err != nil {
 		return endpointintent.ProviderConfig{}, fmt.Errorf("provider spec: %w", err)
 	}
-	config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef)
+	baseURL := pc.BaseURL
+	if strings.EqualFold(strings.TrimSpace(pc.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
+		if derived := stateModel.BedrockBaseURLForRegion(pc.Region); strings.TrimSpace(derived) != "" { // swobu:io-string source=boundary
+			baseURL = derived
+		}
+	}
+	config, err := endpointintent.NewProviderConfig(ref, spec, baseURL, pc.CredentialRef)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}
-	if strings.TrimSpace(pc.SelectedFrame) != "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(pc.SelectedFrame) != "" { // swobu:io-string source=boundary
 		config, err = config.WithSelectedFrame(pc.SelectedFrame)
 		if err != nil {
 			return endpointintent.ProviderConfig{}, err
@@ -49,6 +55,7 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 		snapshot.ProviderConfigs = append(snapshot.ProviderConfigs, stateModel.ProviderConfigSnapshot{
 			Ref:           pc.Ref().String(),
 			ProviderSpec:  pc.ProviderSpec().String(),
+			Region:        stateModel.BedrockRegionFromBaseURL(pc.BaseURL()),
 			BaseURL:       pc.BaseURL(),
 			CredentialRef: pc.CredentialRef(),
 			ModelID:       pc.ModelID(),
@@ -61,14 +68,17 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 }
 
 func trafficOperationFamily(ingressFamily string, result string, statusCode int) string {
-	switch strings.TrimSpace(strings.ToLower(ingressFamily)) { // trimlowerlint:allow boundary canonicalization
-	case "responses":
+	family := strings.TrimSpace(strings.ToLower(ingressFamily)) // swobu:io-string source=boundary
+	if family == "responses" {
 		return "responses"
-	case "chat_completions":
+	}
+	if family == "chat_completions" {
 		return "chat"
-	case "completions":
+	}
+	if family == "completions" {
 		return "completions"
-	case "messages":
+	}
+	if family == "messages" {
 		return "messages"
 	}
 	if statusCode == 0 {

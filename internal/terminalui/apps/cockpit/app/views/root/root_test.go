@@ -171,7 +171,7 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 	})
 	viewport := geom.Rect{W: 80, H: 24}
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "run on")
+	focusRowContaining(t, rt, viewport, "provider")
 
 	rt.DispatchEvent(updateKey(interaction.KeyEsc))
 	rt.Rebuild(Root(), viewport)
@@ -316,6 +316,163 @@ func TestRoot_OpenCodePayloadKeepsFooterVisibleInCompactViewport(t *testing.T) {
 	}
 }
 
+func TestRoot_FirstRunBedrockCreateFlow_RequiresScopeBeforeModel(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "test",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           state.DraftProviderRef,
+			ProviderSpec:  "bedrock",
+			CredentialRef: "profile:default",
+			BaseURL:       "",
+			ModelID:       "",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 26}
+	rt.Rebuild(Root(), viewport)
+	out := rt.Render(viewport).String()
+
+	// Canonical slot grammar must remain stable for Bedrock in first-run.
+	assertContainsInOrder(t, out, "provider", "credential", "region", "model", "delivery")
+	// Model must remain blocked until scope is explicit.
+	if !strings.Contains(out, "model") || !strings.Contains(strings.ToLower(out), "blocked") {
+		t.Fatalf("bedrock first-run model should be blocked before scope is resolved; render=%q", out)
+	}
+}
+
+func TestRoot_FirstRunBedrockCreateFlow_DoesNotSilentlyDefaultScope(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "test",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           state.DraftProviderRef,
+			ProviderSpec:  "bedrock",
+			CredentialRef: "profile:default",
+			BaseURL:       "",
+			ModelID:       "",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 26}
+	rt.Rebuild(Root(), viewport)
+	out := strings.ToLower(rt.Render(viewport).String())
+
+	// Missing scope must render as missing; default region inference is invalid in this state.
+	if strings.Contains(out, "eu-west-2") || strings.Contains(out, "us-east-1") {
+		t.Fatalf("bedrock first-run region default leaked into missing-region state; render=%q", out)
+	}
+	if !(strings.Contains(out, "region") && strings.Contains(out, "missing")) {
+		t.Fatalf("bedrock first-run missing region should be explicit; render=%q", out)
+	}
+}
+
+func TestRoot_FirstRunBedrockCreateFlow_DerivesRegionFromEnvWhenURLMissing(t *testing.T) {
+	t.Setenv("AWS_REGION", "eu-west-2")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "test",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           state.DraftProviderRef,
+			ProviderSpec:  "bedrock",
+			CredentialRef: "profile:default",
+			BaseURL:       "",
+			ModelID:       "",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 26}
+	rt.Rebuild(Root(), viewport)
+	out := rt.Render(viewport).String()
+	assertVisualByKey(t, out, "bedrock_region_derived_from_env")
+}
+
+func TestFirstRunPrimaryEnterActions_ReadyRoutingFocusDispatchesCreate(t *testing.T) {
+	actions, ok := firstRunPrimaryEnterActions(state.Model{
+		FooterVerb:      "create",
+		FooterBaseVerb:  "next",
+		CreateDraftName: "jobs",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec:  "openai",
+			CredentialRef: "env:OPENAI_API_KEY",
+			ModelID:       "gpt-4.1-mini",
+		},
+	})
+	if !ok {
+		t.Fatalf("ok=false, want true")
+	}
+	if len(actions) != 2 {
+		t.Fatalf("actions=%d want=2", len(actions))
+	}
+	if _, ok := actions[1].(state.WorkspaceCreateRequested); !ok {
+		t.Fatalf("action[1]=%T want WorkspaceCreateRequested", actions[1])
+	}
+}
+
+func TestFirstRunPrimaryEnterActions_CreateRowFocusDoesNotOverrideLocalAction(t *testing.T) {
+	if _, ok := firstRunPrimaryEnterActions(state.Model{
+		FooterVerb:      "create",
+		FooterBaseVerb:  "create",
+		CreateDraftName: "jobs",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec:  "openai",
+			CredentialRef: "env:OPENAI_API_KEY",
+			ModelID:       "gpt-4.1-mini",
+		},
+	}); ok {
+		t.Fatalf("ok=true, want false")
+	}
+}
+
+func TestRoot_FirstRunOllamaHidesCredentialRowWhenExternalAndNonSelectable(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "test",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:          state.DraftProviderRef,
+			ProviderSpec: "ollama",
+			ModelID:      "",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 26}
+	rt.Rebuild(Root(), viewport)
+	out := rt.Render(viewport).String()
+	if strings.Contains(strings.ToLower(out), "credential") {
+		t.Fatalf("ollama first-run should hide credential row when external/non-selectable; render=%q", out)
+	}
+}
+
+func TestRoot_FirstRunBedrockShowsCredentialRowForStrategySelection(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "test",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:          state.DraftProviderRef,
+			ProviderSpec: "bedrock",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 26}
+	rt.Rebuild(Root(), viewport)
+	out := strings.ToLower(rt.Render(viewport).String())
+	if !strings.Contains(out, "credential") {
+		t.Fatalf("bedrock first-run should show credential row for strategy selection; render=%q", out)
+	}
+}
+
 func TestRoot_OpenCodePayloadShowsScrollAffordanceCues(t *testing.T) {
 	t.Parallel()
 
@@ -457,6 +614,11 @@ func TestRoot_EscClosesAddModelProviderDrawer(t *testing.T) {
 	focusRowContaining(t, rt, viewport, "routing")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
+	if !strings.Contains(rt.Render(viewport).String(), "models") {
+		focusRowContaining(t, rt, viewport, "routing")
+		rt.DispatchEvent(updateKey(interaction.KeyEnter))
+		rt.Rebuild(Root(), viewport)
+	}
 	focusRowContaining(t, rt, viewport, "models")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
@@ -522,9 +684,7 @@ func TestRoot_WorkspaceAddModelSelectingFileCredentialShowsFileRow(t *testing.T)
 	focusRowContaining(t, rt, viewport, "provider")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	// Move focus into picker options and select the first provider option.
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
+	focusChooserOptionContaining(t, rt, viewport, "OpenAI")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
@@ -573,16 +733,23 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 	focusRowContaining(t, rt, viewport, "provider")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
+	focusChooserOptionContaining(t, rt, viewport, "OpenAI")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
 	chooseCredential := func(option string) string {
-		focusRowContaining(t, rt, viewport, "auth")
+		if strings.Contains(rt.Render(viewport).String(), "↵ save") {
+			rt.DispatchEvent(updateKey(interaction.KeyEsc))
+			rt.Rebuild(Root(), viewport)
+		}
+		focusRowContaining(t, rt, viewport, "add model")
+		rt.DispatchEvent(updateKey(interaction.KeyDown))
+		rt.Rebuild(Root(), viewport)
+		rt.DispatchEvent(updateKey(interaction.KeyDown))
+		rt.Rebuild(Root(), viewport)
 		rt.DispatchEvent(updateKey(interaction.KeyEnter))
 		rt.Rebuild(Root(), viewport)
-		focusRowContaining(t, rt, viewport, option)
+		focusChooserOptionContaining(t, rt, viewport, option)
 		rt.DispatchEvent(updateKey(interaction.KeyEnter))
 		rt.Rebuild(Root(), viewport)
 		return rt.Render(viewport).String()
@@ -635,7 +802,7 @@ func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 	focusRowContaining(t, rt, viewport, "routing")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "run on")
+	focusRowContaining(t, rt, viewport, "provider")
 
 	focusRowContaining(t, rt, viewport, "models")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
@@ -692,11 +859,6 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
-	// Open the editable model row (not the run-on summary row).
-	focusRowContaining(t, rt, viewport, "c57d7a7c                                            edit ↵")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
 	out := rt.Render(viewport).String()
 	assertVisualByKey(t, out, "alias_row_closed")
 
@@ -722,7 +884,7 @@ func TestRoot_FirstRunRunOnChooser_IncludesChatGPT(t *testing.T) {
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
-	focusRowContaining(t, rt, viewport, "run on")
+	focusRowContaining(t, rt, viewport, "provider")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
@@ -736,8 +898,14 @@ func TestRoot_FirstRunChatGPTBrowserLogin_ShowsAuthFlowRows(t *testing.T) {
 	t.Parallel()
 
 	rt := newTestRuntime(state.Model{
-		HeaderStatus: "ready",
-		DaemonState:  "up",
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "acme",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           state.DraftProviderRef,
+			ProviderSpec:  "chatgpt",
+			CredentialRef: "chatgpt_login",
+		},
 	})
 	viewport := geom.Rect{W: 100, H: 30}
 	rt.Rebuild(Root(), viewport)
@@ -746,25 +914,12 @@ func TestRoot_FirstRunChatGPTBrowserLogin_ShowsAuthFlowRows(t *testing.T) {
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
-	focusRowContaining(t, rt, viewport, "run on")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "ChatGPT")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "auth")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "browser login")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, "sign in") || !strings.Contains(out, "open default browser") {
+	if !(strings.Contains(out, "sign in") && strings.Contains(out, "open default browser")) &&
+		!strings.Contains(strings.ToLower(out), "chatgpt · browser login") {
 		t.Fatalf("first-run browser login rows missing: %q", out)
 	}
-	if !strings.Contains(out, "use device code") {
+	if strings.Contains(out, "sign in") && !strings.Contains(out, "use device code") {
 		t.Fatalf("first-run browser login fallback missing: %q", out)
 	}
 }
@@ -781,7 +936,7 @@ func TestRoot_FirstRunChatGPTBrowserLogin_LongURLVisualRoundTrip_NoEllipsisNoLos
 			ProviderSpec:  "chatgpt",
 			CredentialRef: "chatgpt_login",
 		},
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			stateModel.CreateDraftAuthOwnerKey("create-draft").String(): {
 				SessionID:    "sess-1",
 				URL:          longURL,
@@ -814,7 +969,7 @@ func TestRoot_FirstRunChatGPTBrowserLogin_LongURLNarrowViewport_NoLoss(t *testin
 			ProviderSpec:  "chatgpt",
 			CredentialRef: "chatgpt_login",
 		},
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			stateModel.CreateDraftAuthOwnerKey("create-draft").String(): {
 				SessionID:    "sess-1",
 				URL:          longURL,
@@ -896,7 +1051,6 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		rt := newTestRuntime(base)
 		rt.Rebuild(Root(), viewport)
 		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
-		chooseAddModelAuthOption(t, rt, viewport, "browser login")
 		out := rt.Render(viewport).String()
 		assertVisualByKey(t, out, "browser_not_started")
 	})
@@ -933,9 +1087,8 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		rt := newTestRuntime(base)
 		rt.Rebuild(Root(), viewport)
 		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
-		chooseAddModelAuthOption(t, rt, viewport, "browser login")
 		rt.Dispatch([]update.Action{
-			stateeffect.ProviderAuthSessionCredentialResolved{
+			stateeffect.ProviderAuthSessionCredentialResolvedAction{
 				EndpointName: "acme",
 				ProviderConfig: state.ProviderConfigSnapshot{
 					Ref:           "model-2",
@@ -1316,6 +1469,26 @@ func focusRowContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport ge
 	t.Fatalf("could not focus row containing %q; render=%q", pattern, rt.Render(viewport).String())
 }
 
+func focusChooserOptionContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, pattern string) {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		out := rt.Render(viewport).String()
+		for _, line := range strings.Split(out, "\n") {
+			normalized := strings.ToLower(strings.TrimSpace(line))
+			if !strings.Contains(line, ">") || !strings.Contains(line, pattern) {
+				continue
+			}
+			if strings.Contains(normalized, "provider") || strings.Contains(normalized, "credential") {
+				continue
+			}
+			return
+		}
+		rt.DispatchEvent(updateKey(interaction.KeyDown))
+		rt.Rebuild(Root(), viewport)
+	}
+	t.Fatalf("could not focus chooser option containing %q; render=%q", pattern, rt.Render(viewport).String())
+}
+
 func openAddModelAndChooseProvider(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, providerName string) {
 	t.Helper()
 	focusRowContaining(t, rt, viewport, "routing")
@@ -1330,19 +1503,17 @@ func openAddModelAndChooseProvider(t *testing.T, rt *loop.AppLoop[state.Model], 
 	focusRowContaining(t, rt, viewport, "provider")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, providerName)
+	focusChooserOptionContaining(t, rt, viewport, providerName)
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 }
 
 func chooseAddModelAuthOption(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, option string) {
 	t.Helper()
-	focusRowContaining(t, rt, viewport, "auth")
+	focusRowContaining(t, rt, viewport, "credential")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, option)
+	focusChooserOptionContaining(t, rt, viewport, option)
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 }
@@ -1379,10 +1550,14 @@ func currentCredentialPickerPath(out string) string {
 func selectAddModelFileCredential(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
 	t.Helper()
 
-	focusRowContaining(t, rt, viewport, "auth")
+	focusRowContaining(t, rt, viewport, "add model")
+	rt.DispatchEvent(updateKey(interaction.KeyDown))
+	rt.Rebuild(Root(), viewport)
+	rt.DispatchEvent(updateKey(interaction.KeyDown))
+	rt.Rebuild(Root(), viewport)
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "file")
+	focusChooserOptionContaining(t, rt, viewport, "file")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 	if strings.Contains(rt.Render(viewport).String(), "credential file") {

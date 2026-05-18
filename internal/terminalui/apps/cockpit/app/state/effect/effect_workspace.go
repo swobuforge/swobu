@@ -17,8 +17,8 @@ type SaveWorkspaceNameEffect struct {
 }
 
 func (cmd SaveWorkspaceNameEffect) Execute(ctx context.Context) []update.Action {
-	currentName := strings.TrimSpace(cmd.CurrentName) // trimlowerlint:allow boundary canonicalization
-	nextName := strings.TrimSpace(cmd.Name)           // trimlowerlint:allow boundary canonicalization
+	currentName := strings.TrimSpace(cmd.CurrentName) // swobu:io-string source=boundary
+	nextName := strings.TrimSpace(cmd.Name)           // swobu:io-string source=boundary
 	if currentName == "" || nextName == "" {
 		return []update.Action{WorkspaceSaveFailed{Message: "endpoint rename requires current and next names"}}
 	}
@@ -54,7 +54,7 @@ type SaveNewWorkspaceEffect struct {
 }
 
 func (cmd SaveNewWorkspaceEffect) Execute(ctx context.Context) []update.Action {
-	name := strings.TrimSpace(cmd.Name) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(cmd.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return []update.Action{WorkspaceSaveFailed{Message: "workspace create requires name"}}
 	}
@@ -94,7 +94,7 @@ type DeleteWorkspaceEffect struct {
 }
 
 func (cmd DeleteWorkspaceEffect) Execute(ctx context.Context) []update.Action {
-	name := strings.TrimSpace(cmd.Name) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(cmd.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return []update.Action{WorkspaceDeleteFailed{Message: "workspace delete requires name"}}
 	}

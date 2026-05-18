@@ -115,7 +115,7 @@ func logResponsesEncodeShape(req canonical.GenerationCanonicalRequest, input any
 		"component", "protocol.responses",
 		"event", "outbound_request_shape",
 		"streaming", deliveryMode,
-		"has_previous_response_id", strings.TrimSpace(req.PreviousResponseID()) != "", // trimlowerlint:allow boundary canonicalization
+		"has_previous_response_id", strings.TrimSpace(req.PreviousResponseID()) != "", // swobu:io-string source=boundary
 		"thread_item_count", len(thread),
 		"last_turn_item_count", len(lastTurn),
 		"thread_tail_role", responsesTailRole(thread),
@@ -153,7 +153,7 @@ func encodeInput(req canonical.GenerationCanonicalRequest) (any, error) {
 	// Native continuation-only calls should rely on previous_response_id without
 	// replaying anchor thread input. Replaying can end with assistant output and
 	// violate backend prefill constraints.
-	if strings.TrimSpace(req.PreviousResponseID()) != "" && !req.HasLastTurn() { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(req.PreviousResponseID()) != "" && !req.HasLastTurn() { // swobu:io-string source=boundary
 		return nil, nil
 	}
 	if input, ok, err := encodeSimpleInput(req); ok || err != nil {
@@ -236,7 +236,7 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 			})
 			i++
 		case canonical.ItemKindToolResult:
-			if strings.TrimSpace(current.ToolUseID) == "" { // trimlowerlint:allow boundary canonicalization
+			if strings.TrimSpace(current.ToolUseID) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("tool_result items require tool_use_id for the responses protocol")
 			}
 			encoded = append(encoded, functionCallOutputItem{

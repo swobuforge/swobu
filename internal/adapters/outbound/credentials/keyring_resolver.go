@@ -24,24 +24,27 @@ type KeyringClient interface {
 type OSKeyringClient struct{}
 
 func (OSKeyringClient) Get(scope, user string) (string, error) {
+	if strings.TrimSpace(scope) == "" || strings.TrimSpace(user) == "" { // swobu:io-string source=boundary
+		return "", fmt.Errorf("keyring scope and user are required")
+	}
 	return keyringcommodity.Get(scope, user)
 }
 
-// KeyringResolver resolves keychain credential refs against OS keyring.
-type KeyringResolver struct {
+// KeyringCredentialSourceResolver resolves keychain credential refs against OS keyring.
+type KeyringCredentialSourceResolver struct {
 	client KeyringClient
 }
 
-func NewKeyringResolver(client KeyringClient) KeyringResolver {
+func NewKeyringResolver(client KeyringClient) KeyringCredentialSourceResolver {
 	if client == nil {
 		client = OSKeyringClient{}
 	}
-	return KeyringResolver{client: client}
+	return KeyringCredentialSourceResolver{client: client}
 }
 
-func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
+func (r KeyringCredentialSourceResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	_ = ctx
-	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	keyName, parseErr := secretCredentialName(providerSpec, ref)
 	if parseErr != nil {
 		return "", parseErr
@@ -68,7 +71,7 @@ func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec str
 	if err != nil {
 		return "", fmt.Errorf("keyring lookup failed for %q: %w", keyName, err)
 	}
-	if strings.TrimSpace(token) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return "", fmt.Errorf("keyring token for %q is empty", keyName)
 	}
 	bundle, _, err := DecodeTokenBundle(token)
@@ -79,7 +82,7 @@ func (r KeyringResolver) ResolveCredential(ctx context.Context, providerSpec str
 }
 
 func KeyringScopeForProvider(providerSpec string) string {
-	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
+	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // swobu:io-string source=boundary
 	if spec == "" {
 		spec = "provider"
 	}
@@ -87,31 +90,27 @@ func KeyringScopeForProvider(providerSpec string) string {
 }
 
 func CanonicalKeychainCredentialName(providerSpec string) string {
-	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
+	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // swobu:io-string source=boundary
 	if spec == "" {
 		return "default"
 	}
 	return spec + "/default"
 }
 
-func keychainCredentialName(providerSpec, credentialRef string) (string, error) {
-	return secretCredentialName(providerSpec, credentialRef)
-}
-
 func secretCredentialName(providerSpec, credentialRef string) (string, error) {
-	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	if ref == "keychain" || ref == "secret" {
 		return CanonicalKeychainCredentialName(providerSpec), nil
 	}
-	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
-		name := strings.TrimSpace(ref[len(secretCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // swobu:io-string source=boundary
+		name := strings.TrimSpace(ref[len(secretCredentialRefPrefix):]) // swobu:io-string source=boundary
 		if name == "" {
 			return "", fmt.Errorf("secret credential name must not be empty")
 		}
 		return name, nil
 	}
-	if strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
-		name := strings.TrimSpace(ref[len(keychainCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // swobu:io-string source=boundary
+		name := strings.TrimSpace(ref[len(keychainCredentialRefPrefix):]) // swobu:io-string source=boundary
 		if name == "" {
 			return "", fmt.Errorf("keychain credential name must not be empty")
 		}
@@ -121,12 +120,12 @@ func secretCredentialName(providerSpec, credentialRef string) (string, error) {
 }
 
 func secretFileCredentialName(credentialRef string) (string, error) {
-	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	if ref == "secretfile" {
 		return "", fmt.Errorf("secret file credential name must not be empty")
 	}
-	if strings.HasPrefix(strings.ToLower(ref), secretFileCredentialRefPrefix) { // trimlowerlint:allow boundary canonicalization
-		name := strings.TrimSpace(ref[len(secretFileCredentialRefPrefix):]) // trimlowerlint:allow boundary canonicalization
+	if strings.HasPrefix(strings.ToLower(ref), secretFileCredentialRefPrefix) { // swobu:io-string source=boundary
+		name := strings.TrimSpace(ref[len(secretFileCredentialRefPrefix):]) // swobu:io-string source=boundary
 		if name == "" {
 			return "", fmt.Errorf("secret file credential name must not be empty")
 		}

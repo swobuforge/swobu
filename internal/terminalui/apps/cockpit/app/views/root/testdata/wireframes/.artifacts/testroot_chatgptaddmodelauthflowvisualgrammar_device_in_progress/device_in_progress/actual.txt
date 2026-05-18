@@ -6,25 +6,25 @@ SWOBU 🧌                                                                ready 
      delete workspace                                                                     delete ↵
 
   routing ▾
-     run on             openai:gpt-3.5-turbo:2310255c                                     choose ↵
+     provider           openai:gpt-3.5-turbo:2310255c                                     choose ↵
      models             1 configured                                                      manage ↵
-       model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
+       model    openai:gpt-3.5-turbo:2310255c                                             close ↵
+         provider          OpenAI
+         credential        env                                                            choose ↵
+           env var   selected
+           file
+         model             gpt-3.5-turbo                                                  choose ↵
+         delivery          non-streaming                                                  next ↵
+         alias             not set                                                        edit ↵
+         env key           OPENAI_API_KEY                                                 edit ↵
+         delete model      disabled (last model)
        add model                                                                          close ↵
          provider          ChatGPT                                                        change ↵
-         auth              device code                                                    change ↵
-         delivery          streaming (SSE) (default)                                      next ↵
+         credential        browser login                                                  change ↵
+         sign in           open default browser                                           open ↵
+    >    fallback          use device code                                                switch ↵
+         delivery          auto                                                           next ↵
 
-> clients ▸
-    not set
-
-  traffic ▸
-    no traffic yet
-
-
-
-
-
-
-
+  clients ▸
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ act   esc close   ? help

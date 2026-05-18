@@ -1,3 +1,6 @@
+//go:build integration_live
+// +build integration_live
+
 package httpapi_test
 
 import (
@@ -32,7 +35,7 @@ type liveTrafficRow struct {
 
 func TestLiveClientBackendHelloMatrix(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_SMOKE")) != "1" {
-		t.Skip("set SWOBU_LIVE_SMOKE=1 to run live client/backend smoke matrix")
+		t.Fatalf("set SWOBU_LIVE_SMOKE=1 to run live client/backend smoke matrix")
 	}
 
 	daemonURL := strings.TrimSpace(os.Getenv("SWOBU_LIVE_DAEMON_URL"))

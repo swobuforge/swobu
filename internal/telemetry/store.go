@@ -31,16 +31,16 @@ type Store struct {
 
 func NewStore() Store {
 	return Store{
-		StatePath: defaultStatePath(),
+		StatePath: platformconfig.DefaultTelemetryStatePath(),
 		Now:       time.Now,
 		Rand:      rand.Reader,
 	}
 }
 
 func (s Store) LoadOrCreate() (State, error) {
-	path := strings.TrimSpace(s.StatePath) // trimlowerlint:allow boundary canonicalization
+	path := strings.TrimSpace(s.StatePath) // swobu:io-string source=boundary
 	if path == "" {
-		path = defaultStatePath()
+		path = platformconfig.DefaultTelemetryStatePath()
 	}
 	now := s.Now
 	if now == nil {
@@ -52,10 +52,10 @@ func (s Store) LoadOrCreate() (State, error) {
 		if err := json.Unmarshal(data, &state); err != nil {
 			return State{}, fmt.Errorf("decode telemetry state: %w", err)
 		}
-		if strings.TrimSpace(state.AnonymousInstallID) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(state.AnonymousInstallID) == "" { // swobu:io-string source=boundary
 			state.AnonymousInstallID = newAnonymousInstallID(s.Rand, now)
 		}
-		if strings.TrimSpace(state.FirstSeenAt) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(state.FirstSeenAt) == "" { // swobu:io-string source=boundary
 			state.FirstSeenAt = now().UTC().Format(time.RFC3339)
 		}
 		return state, nil
@@ -89,9 +89,9 @@ func (s Store) SetEnabled(enabled bool) (State, error) {
 }
 
 func (s Store) Reset() (State, error) {
-	path := strings.TrimSpace(s.StatePath) // trimlowerlint:allow boundary canonicalization
+	path := strings.TrimSpace(s.StatePath) // swobu:io-string source=boundary
 	if path == "" {
-		path = defaultStatePath()
+		path = platformconfig.DefaultTelemetryStatePath()
 	}
 	now := s.Now
 	if now == nil {
@@ -138,7 +138,7 @@ func (s Store) InspectPreview() ([]byte, error) {
 		return nil, err
 	}
 	enabled := state.Enabled
-	if isDoNotTrackEnabled() {
+	if DoNotTrackEnabled() {
 		enabled = false
 	}
 	preview := struct {
@@ -165,14 +165,10 @@ func (s Store) InspectPreview() ([]byte, error) {
 	return out, nil
 }
 
-func defaultStatePath() string {
-	return platformconfig.DefaultTelemetryStatePath()
-}
-
 func writeState(path string, state State) error {
-	path = strings.TrimSpace(path) // trimlowerlint:allow boundary canonicalization
+	path = strings.TrimSpace(path) // swobu:io-string source=boundary
 	if path == "" {
-		path = defaultStatePath()
+		path = platformconfig.DefaultTelemetryStatePath()
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create telemetry state dir: %w", err)
@@ -205,16 +201,13 @@ func newAnonymousInstallID(r io.Reader, now func() time.Time) string {
 	return fmt.Sprintf("anon_%x", now().UnixNano())
 }
 
-func isDoNotTrackEnabled() bool {
-	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvDoNotTrack))
-}
-
 func DoNotTrackEnabled() bool {
-	return isDoNotTrackEnabled()
+	raw := os.Getenv(platformconfig.EnvDoNotTrack)
+	return platformconfig.EnvTruthy(raw)
 }
 
 func (s Store) isTelemetryEnabled() bool {
-	if isDoNotTrackEnabled() {
+	if DoNotTrackEnabled() {
 		return false
 	}
 	state, err := s.LoadOrCreate()

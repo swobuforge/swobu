@@ -59,7 +59,7 @@ type RecentTrafficRow struct {
 	ObservedAt     string                           `json:"observed_at,omitempty"`
 	Timing         *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
 	TokenUsage     *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
-	// TODO(execution-system): Legacy flattened token fields preserved for compatibility with existing
+	// TODO(execution-system): Flattened token fields are preserved for compatibility with existing
 	// runtimeevidence integration tests and older readers.
 	InputTokens         *int   `json:"-"`
 	OutputTokens        *int   `json:"-"`

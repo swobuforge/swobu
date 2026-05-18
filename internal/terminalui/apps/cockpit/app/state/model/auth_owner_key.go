@@ -11,10 +11,14 @@ const (
 )
 
 func EndpointProviderAuthOwnerKey(endpointName string, providerRef string) AuthOwnerKey {
+	endpointName = strings.TrimSpace(endpointName) // swobu:io-string source=boundary
+	providerRef = strings.TrimSpace(providerRef)   // swobu:io-string source=boundary
 	return AuthOwnerPrefixEndpointProvider.compose(endpointName, providerRef)
 }
 
 func AddModelDraftAuthOwnerKey(endpointName string, draftRef string) AuthOwnerKey {
+	endpointName = strings.TrimSpace(endpointName) // swobu:io-string source=boundary
+	draftRef = strings.TrimSpace(draftRef)         // swobu:io-string source=boundary
 	return AuthOwnerPrefixAddModelDraft.compose(endpointName, draftRef)
 }
 
@@ -23,7 +27,7 @@ func CreateDraftAuthOwnerKey(draftRef string) AuthOwnerKey {
 }
 
 func (k AuthOwnerKey) String() string {
-	return strings.TrimSpace(string(k)) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(string(k)) // swobu:io-string source=boundary
 }
 
 func (k AuthOwnerKey) Prefix() string {
@@ -32,7 +36,7 @@ func (k AuthOwnerKey) Prefix() string {
 		return ""
 	}
 	parts := strings.SplitN(owner, "|", 2)
-	return strings.TrimSpace(parts[0]) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(parts[0]) // swobu:io-string source=boundary
 }
 
 func (k AuthOwnerKey) IsAddModelDraft() bool {
@@ -58,9 +62,9 @@ func (k AuthOwnerKey) ProviderRef() string {
 }
 
 func (k AuthOwnerKey) compose(endpointName string, providerRef string) AuthOwnerKey {
-	prefix := strings.TrimSpace(string(k))         // trimlowerlint:allow boundary canonicalization
-	endpointName = strings.TrimSpace(endpointName) // trimlowerlint:allow boundary canonicalization
-	providerRef = strings.TrimSpace(providerRef)   // trimlowerlint:allow boundary canonicalization
+	prefix := strings.TrimSpace(string(k))         // swobu:io-string source=boundary
+	endpointName = strings.TrimSpace(endpointName) // swobu:io-string source=boundary
+	providerRef = strings.TrimSpace(providerRef)   // swobu:io-string source=boundary
 	return AuthOwnerKey(prefix + "|" + endpointName + "|" + providerRef)
 }
 
@@ -71,13 +75,13 @@ func (k AuthOwnerKey) parts() (prefix string, endpointName string, providerRef s
 	}
 	parts := strings.SplitN(raw, "|", 3)
 	if len(parts) > 0 {
-		prefix = strings.TrimSpace(parts[0]) // trimlowerlint:allow boundary canonicalization
+		prefix = strings.TrimSpace(parts[0]) // swobu:io-string source=boundary
 	}
 	if len(parts) > 1 {
-		endpointName = strings.TrimSpace(parts[1]) // trimlowerlint:allow boundary canonicalization
+		endpointName = strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
 	}
 	if len(parts) > 2 {
-		providerRef = strings.TrimSpace(parts[2]) // trimlowerlint:allow boundary canonicalization
+		providerRef = strings.TrimSpace(parts[2]) // swobu:io-string source=boundary
 	}
 	return prefix, endpointName, providerRef
 }

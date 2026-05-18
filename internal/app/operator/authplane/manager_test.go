@@ -54,7 +54,7 @@ func (s *storeStub) UpsertCredentialRef(_ context.Context, providerSpec string, 
 func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 	t.Parallel()
 	store := &storeStub{}
-	manager, err := NewManager(driverStub{
+	manager, err := NewAuthSessionManager(driverStub{
 		startFn: func(_ context.Context, in StartInput) (DriverStartResult, error) {
 			if in.ProviderSpec != "chatgpt" {
 				t.Fatalf("provider spec = %q", in.ProviderSpec)
@@ -69,7 +69,7 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 		},
 	}, store)
 	if err != nil {
-		t.Fatalf("NewManager error: %v", err)
+		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
 
 	start, err := manager.Start(context.Background(), StartInput{ProviderSpec: " ChatGPT ", EndpointRef: "acme"})
@@ -98,7 +98,7 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 func TestManagerPollUsesPersistedCredentialRefOverride(t *testing.T) {
 	t.Parallel()
 	store := &storeStub{returnRef: "memory:chatgpt/acme"}
-	manager, err := NewManager(driverStub{
+	manager, err := NewAuthSessionManager(driverStub{
 		startFn: func(_ context.Context, _ StartInput) (DriverStartResult, error) {
 			return DriverStartResult{SessionID: "sess-2"}, nil
 		},
@@ -107,7 +107,7 @@ func TestManagerPollUsesPersistedCredentialRefOverride(t *testing.T) {
 		},
 	}, store)
 	if err != nil {
-		t.Fatalf("NewManager error: %v", err)
+		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
 	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", EndpointRef: "acme"}); err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -123,9 +123,9 @@ func TestManagerPollUsesPersistedCredentialRefOverride(t *testing.T) {
 
 func TestManagerPollUnknownSessionFails(t *testing.T) {
 	t.Parallel()
-	manager, err := NewManager(driverStub{}, nil)
+	manager, err := NewAuthSessionManager(driverStub{}, nil)
 	if err != nil {
-		t.Fatalf("NewManager error: %v", err)
+		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
 	if _, err := manager.Poll(context.Background(), "missing"); err == nil {
 		t.Fatal("expected unknown session error")
@@ -135,14 +135,14 @@ func TestManagerPollUnknownSessionFails(t *testing.T) {
 func TestManagerCancelPropagatesDriverError(t *testing.T) {
 	t.Parallel()
 	wantErr := errors.New("cancel failed")
-	manager, err := NewManager(driverStub{
+	manager, err := NewAuthSessionManager(driverStub{
 		startFn: func(_ context.Context, _ StartInput) (DriverStartResult, error) {
 			return DriverStartResult{SessionID: "sess-1"}, nil
 		},
 		cancelFn: func(_ context.Context, _ string) error { return wantErr },
 	}, nil)
 	if err != nil {
-		t.Fatalf("NewManager error: %v", err)
+		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
 	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", EndpointRef: "acme"}); err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -155,7 +155,7 @@ func TestManagerCancelPropagatesDriverError(t *testing.T) {
 func TestManagerRetryReusesStartInput(t *testing.T) {
 	t.Parallel()
 	var seen []StartInput
-	manager, err := NewManager(driverStub{
+	manager, err := NewAuthSessionManager(driverStub{
 		startFn: func(_ context.Context, in StartInput) (DriverStartResult, error) {
 			seen = append(seen, in)
 			if len(seen) == 1 {
@@ -165,7 +165,7 @@ func TestManagerRetryReusesStartInput(t *testing.T) {
 		},
 	}, nil)
 	if err != nil {
-		t.Fatalf("NewManager error: %v", err)
+		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
 	_, err = manager.Start(context.Background(), StartInput{
 		ProviderSpec: "chatgpt",

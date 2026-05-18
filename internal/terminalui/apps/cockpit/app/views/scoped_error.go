@@ -7,8 +7,8 @@ import (
 )
 
 func ScopedErrorAnchor(scope, key string) string {
-	scope = strings.TrimSpace(scope) // trimlowerlint:allow boundary canonicalization
-	key = strings.TrimSpace(key)     // trimlowerlint:allow boundary canonicalization
+	scope = strings.TrimSpace(scope) // swobu:io-string source=boundary
+	key = strings.TrimSpace(key)     // swobu:io-string source=boundary
 	if scope == "" || key == "" {
 		return ""
 	}
@@ -20,5 +20,5 @@ func ScopedError(model state.Model, scope, key string) string {
 	if anchor == "" || model.SaveErrors == nil {
 		return ""
 	}
-	return strings.TrimSpace(model.SaveErrors[anchor]) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(model.SaveErrors[anchor]) // swobu:io-string source=boundary
 }

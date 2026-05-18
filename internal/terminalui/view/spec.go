@@ -37,14 +37,6 @@ type ViewSpec struct {
 	Children  []ViewSpec
 }
 
-func DurableLine(text string) ViewSpec {
-	return DurableText(text)
-}
-
-func EphemeralLine(text string) ViewSpec {
-	return EphemeralText(text)
-}
-
 func DurableText(text string) ViewSpec {
 	return ViewSpec{
 		Kind:      "text",

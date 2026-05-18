@@ -92,8 +92,8 @@ type GenerationRequestParams struct {
 // Continuity and cache-related fields stay here so provider adapters can preserve
 // cost- and behavior-sensitive response API features explicitly.
 func NewGenerationRequest(params GenerationRequestParams) GenerationCanonicalRequest {
-	previousResponseID := strings.TrimSpace(params.PreviousResponseID) // trimlowerlint:allow domain canonicalization
-	conversationID := strings.TrimSpace(params.ConversationID)         // trimlowerlint:allow domain canonicalization
+	previousResponseID := strings.TrimSpace(params.PreviousResponseID) // swobu:io-string source=domain
+	conversationID := strings.TrimSpace(params.ConversationID)         // swobu:io-string source=domain
 	invalidContinuationPair := previousResponseID != "" && conversationID != ""
 
 	authoredThread := cloneCanonicalItems(params.Items)

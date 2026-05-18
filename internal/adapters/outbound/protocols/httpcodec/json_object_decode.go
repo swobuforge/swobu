@@ -10,7 +10,7 @@ import (
 // DecodeJSONObject decodes an optional JSON object payload used by tool-call
 // argument surfaces across OpenAI-compatible protocol families.
 func DecodeJSONObject(raw json.RawMessage, message string) (map[string]any, error) {
-	raw = json.RawMessage(strings.TrimSpace(string(raw))) // trimlowerlint:allow boundary canonicalization
+	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		return map[string]any{}, nil
 	}

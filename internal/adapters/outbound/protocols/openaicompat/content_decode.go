@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-type TextContentPart struct {
+type TextContentPartItem struct {
 	Type       string `json:"type"`
 	Text       string `json:"text"`
 	InputText  string `json:"input_text"`
@@ -16,7 +16,8 @@ type TextContentPart struct {
 }
 
 func AuthorForRole(role string) canonical.ItemAuthor {
-	switch strings.TrimSpace(role) { // trimlowerlint:allow boundary canonicalization
+	normalizedRole := strings.TrimSpace(role) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
+	switch normalizedRole {
 	case "assistant":
 		return canonical.ItemAuthorAssistant
 	case "tool":
@@ -31,7 +32,7 @@ func GeneratedToolUseID(msgIdx int, partIdx int) string {
 }
 
 func DecodeTextContentItems(raw json.RawMessage, surface string, author canonical.ItemAuthor) ([]canonical.CanonicalItem, error) {
-	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" { // trimlowerlint:allow boundary canonicalization
+	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" { // swobu:io-string source=boundary
 		return nil, nil
 	}
 	var text string
@@ -42,14 +43,14 @@ func DecodeTextContentItems(raw json.RawMessage, surface string, author canonica
 		return []canonical.CanonicalItem{canonical.NewTextItem(author, text)}, nil
 	}
 
-	var parts []TextContentPart
+	var parts []TextContentPartItem
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		return nil, canonical.BadRequest(surface + " message content is invalid")
 	}
 
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	for _, part := range parts {
-		partType := strings.TrimSpace(part.Type) // trimlowerlint:allow boundary canonicalization
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"
 		}

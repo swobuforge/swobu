@@ -85,6 +85,8 @@ func SynthesizeRequestFromCanonicalRequest(exchangeID string, req CanonicalReque
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventArgsDelta, EnvID: id, ParentID: requestID, Payload: ArgsDeltaPayload{Args: args}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: requestID, Payload: EnvelopeEndPayload{Kind: EnvToolResult, Status: EnvelopeStatusCompleted}},
 			)
+		default:
+			// Ignore unsupported request item kinds during synthesis.
 		}
 	}
 	events = append(events,
@@ -185,6 +187,8 @@ func SynthesizeResponseFromOutput(exchangeID string, output CanonicalOutput) ([]
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventArgsDelta, EnvID: id, ParentID: responseID, Payload: ArgsDeltaPayload{Args: args}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: responseID, Payload: EnvelopeEndPayload{Kind: EnvToolCall, Status: EnvelopeStatusCompleted}},
 			)
+		default:
+			// Ignore unsupported output item kinds during synthesis.
 		}
 	}
 	events = append(events,

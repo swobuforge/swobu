@@ -20,15 +20,15 @@ type secretFileDoc struct {
 }
 
 func (s *secretFileStore) Store(keyName string, secret string) error {
-	name := strings.TrimSpace(keyName) // trimlowerlint:allow boundary canonicalization
-	token := strings.TrimSpace(secret) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(keyName) // swobu:io-string source=boundary
+	token := strings.TrimSpace(secret) // swobu:io-string source=boundary
 	if name == "" {
 		return fmt.Errorf("credential file key name is required")
 	}
 	if token == "" {
 		return fmt.Errorf("credential file key value is required")
 	}
-	path := secretFilePath()
+	path := platformconfig.DefaultAuthCredentialFilePath()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := readSecretFileDoc(path)
@@ -55,26 +55,22 @@ func (s *secretFileStore) Resolve(keyName string) (string, error) {
 }
 
 func (s *secretFileStore) ResolveRaw(keyName string) (string, error) {
-	name := strings.TrimSpace(keyName) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(keyName) // swobu:io-string source=boundary
 	if name == "" {
 		return "", fmt.Errorf("credential file key name is required")
 	}
-	path := secretFilePath()
+	path := platformconfig.DefaultAuthCredentialFilePath()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := readSecretFileDoc(path)
 	if err != nil {
 		return "", err
 	}
-	token := strings.TrimSpace(doc.Credentials[name]) // trimlowerlint:allow boundary canonicalization
+	token := strings.TrimSpace(doc.Credentials[name]) // swobu:io-string source=boundary
 	if token == "" {
 		return "", fmt.Errorf("credential file token for %q is empty or missing", name)
 	}
 	return token, nil
-}
-
-func secretFilePath() string {
-	return platformconfig.DefaultAuthCredentialFilePath()
 }
 
 func readSecretFileDoc(path string) (secretFileDoc, error) {
@@ -85,7 +81,7 @@ func readSecretFileDoc(path string) (secretFileDoc, error) {
 		}
 		return secretFileDoc{}, fmt.Errorf("credential file read failed: %w", err)
 	}
-	if strings.TrimSpace(string(raw)) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(string(raw)) == "" { // swobu:io-string source=boundary
 		return secretFileDoc{Credentials: map[string]string{}}, nil
 	}
 	var doc secretFileDoc

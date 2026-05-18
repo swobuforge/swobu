@@ -1,0 +1,26 @@
+SWOBU 🧌                                                           ready   [ ? ] [ + new workspace ]
+────────────────────────────────────────────────────────────────────────────────────────────────────
+> workspace ▾
+     name               test                                                              edit ↵
+     endpoint           /c/test/
+     create             not ready
+
+  routing ▾
+     provider           AWS Bedrock                                                       choose ↵
+     credential         external: AWS profile                                             choose ↵
+     region             eu-west-2                                                         choose ↵
+     model              not set                                                           choose ↵
+     delivery           auto                                                              next ↵
+
+  clients ▸
+    not set
+
+  traffic ▸
+    empty
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ act   ? help   esc back

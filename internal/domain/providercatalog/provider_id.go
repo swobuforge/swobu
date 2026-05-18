@@ -12,6 +12,7 @@ func ParseProviderID(raw string) (ProviderID, bool) {
 		ProviderSpecChatGPT,
 		ProviderSpecAnthropic,
 		ProviderSpecOpenRouter,
+		ProviderSpecBedrock,
 		ProviderSpecOpenAICompatible:
 		return ProviderID(raw), true
 	default:

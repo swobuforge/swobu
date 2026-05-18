@@ -29,7 +29,7 @@ func TestHandle_StreamingEvidenceReconcilesUsageOnCompletedEvent(t *testing.T) {
 	stream := canonical.NewSliceEventReader([]canonical.Event{
 		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
 		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": "resp_1", "model": "m"}}},
-		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventEnvelopeStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, Meta: canonical.EventMeta{NativeID: "text_0"}},
+		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventEnvelopeStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, Meta: canonical.EventMetadataFields{NativeID: "text_0"}},
 		{ExchangeID: "test_exchange", Seq: 4, Kind: canonical.EventTextDelta, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.TextDeltaPayload{Text: "ok"}},
 		{ExchangeID: "test_exchange", Seq: 5, Kind: canonical.EventEnvelopeEnd, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvMessage, Status: canonical.EnvelopeStatusCompleted}},
 		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventUsage, EnvID: "res_1", Payload: canonical.UsagePayload{Usage: usage}},
@@ -99,7 +99,7 @@ func TestHandle_StreamingEvidenceDoesNotReconcileUsageWhenClosedBeforeCompleted(
 
 	stream := canonical.NewSliceEventReader([]canonical.Event{
 		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
-		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventEnvelopeStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, Meta: canonical.EventMeta{NativeID: "text_0"}},
+		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventEnvelopeStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, Meta: canonical.EventMetadataFields{NativeID: "text_0"}},
 		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventTextDelta, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.TextDeltaPayload{Text: "partial"}},
 	})
 

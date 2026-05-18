@@ -60,24 +60,24 @@ func DecodeStream(contentEncoding string, body io.ReadCloser) (io.ReadCloser, er
 }
 
 func normalizeContentEncoding(contentEncoding string) string {
-	return strings.ToLower(strings.TrimSpace(contentEncoding)) // trimlowerlint:allow boundary canonicalization
+	return strings.ToLower(strings.TrimSpace(contentEncoding)) // swobu:io-string source=boundary
 }
 
 func newDecoder(contentEncoding string, body io.Reader) (io.ReadCloser, error) {
-	switch contentEncoding {
-	case "gzip", "x-gzip":
+	if contentEncoding == "gzip" || contentEncoding == "x-gzip" {
 		return gzip.NewReader(body)
-	case "deflate":
+	}
+	if contentEncoding == "deflate" {
 		return zlib.NewReader(body)
-	case "zstd":
+	}
+	if contentEncoding == "zstd" {
 		reader, err := zstd.NewReader(body)
 		if err != nil {
 			return nil, err
 		}
 		return zstdReadCloser{Decoder: reader}, nil
-	default:
-		return nil, fmt.Errorf("unsupported content encoding %q", contentEncoding)
 	}
+	return nil, fmt.Errorf("unsupported content encoding %q", contentEncoding)
 }
 
 type zstdReadCloser struct {

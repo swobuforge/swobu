@@ -19,9 +19,9 @@ func isStrictToolModeUnsupported(raw string) bool {
 	if !ok {
 		return false
 	}
-	message := strings.ToLower(fields.message) // trimlowerlint:allow boundary canonicalization
+	message := strings.ToLower(fields.message) // swobu:io-string source=boundary
 	param := fields.param
-	code := fields.code
+	code := strings.TrimSpace(fields.code) // swobu:io-string source=provider-wire
 
 	if param == "tool_choice" {
 		switch code {
@@ -53,7 +53,7 @@ func decodeBackendErrorFields(raw string) (backendErrorFields, bool) {
 	return backendErrorFields{
 		param:   decodeJSONFieldString(envelope.Error["param"]),
 		code:    decodeJSONFieldString(envelope.Error["code"]),
-		message: strings.TrimSpace(decodeJSONFieldString(envelope.Error["message"])), // trimlowerlint:allow boundary canonicalization
+		message: strings.TrimSpace(decodeJSONFieldString(envelope.Error["message"])), // swobu:io-string source=boundary
 	}, true
 }
 
@@ -65,5 +65,5 @@ func decodeJSONFieldString(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &out) != nil {
 		return ""
 	}
-	return strings.TrimSpace(out) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(out) // swobu:io-string source=boundary
 }

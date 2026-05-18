@@ -1,3 +1,3 @@
-line 11
--      frame             http_json_body                                 next ↵
-+      delivery          request-response (HTTP JSON)                   next ↵
+line 12
+-       -> set credential file before loading models
++       -> set credential before loading models

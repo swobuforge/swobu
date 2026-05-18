@@ -7,22 +7,22 @@ import (
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
-// telemetryObservedEvidenceSink decorates runtime evidence writes with a
+// telemetryObservedRequestEvidenceSink decorates runtime evidence writes with a
 // downstream telemetry observer callback. It must never block or alter the
 // request-path evidence append semantics.
-type telemetryObservedEvidenceSink struct {
+type telemetryObservedRequestEvidenceSink struct {
 	base     ports.RequestEvidenceSink
 	onAppend func(runtimeevidence.TrafficEvent)
 }
 
 func newTelemetryObservedEvidenceSink(base ports.RequestEvidenceSink, onAppend func(runtimeevidence.TrafficEvent)) ports.RequestEvidenceSink {
-	return &telemetryObservedEvidenceSink{
+	return &telemetryObservedRequestEvidenceSink{
 		base:     base,
 		onAppend: onAppend,
 	}
 }
 
-func (s *telemetryObservedEvidenceSink) Append(ctx context.Context, event runtimeevidence.TrafficEvent) {
+func (s *telemetryObservedRequestEvidenceSink) Append(ctx context.Context, event runtimeevidence.TrafficEvent) {
 	if s == nil || s.base == nil {
 		return
 	}

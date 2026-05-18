@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	anthropicprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
+	bedrockprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	chatgptprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
 	openaicompatprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaicompat"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -24,8 +25,8 @@ func NewRuntimeFactory(client *http.Client, credentialProvider providersruntime.
 	return RuntimeFactory{client: client, credentialProvider: credentialProvider}
 }
 
-func (f RuntimeFactory) Build(registry []providercatalog.Profile) map[providercatalog.ProviderID]providersruntime.ProviderRuntime {
-	byProviderID := make(map[providercatalog.ProviderID]providersruntime.ProviderRuntime, len(registry))
+func (f RuntimeFactory) Build(registry []providercatalog.Profile) map[providercatalog.ProviderID]providersruntime.ProviderRuntimeBundle {
+	byProviderID := make(map[providercatalog.ProviderID]providersruntime.ProviderRuntimeBundle, len(registry))
 	for _, profile := range registry {
 		providerID := profile.ProviderID
 		if providerID == "" {
@@ -41,7 +42,7 @@ func (f RuntimeFactory) Build(registry []providercatalog.Profile) map[providerca
 	return byProviderID
 }
 
-func (f RuntimeFactory) runtimeFor(providerID providercatalog.ProviderID) providersruntime.ProviderRuntime {
+func (f RuntimeFactory) runtimeFor(providerID providercatalog.ProviderID) providersruntime.ProviderRuntimeBundle {
 	switch providerID {
 	case providercatalog.ProviderSpecOllama,
 		providercatalog.ProviderSpecOpenAI,
@@ -50,6 +51,8 @@ func (f RuntimeFactory) runtimeFor(providerID providercatalog.ProviderID) provid
 		return openaicompatprovider.NewRuntime(providerID, f.client, f.credentialProvider)
 	case providercatalog.ProviderSpecAnthropic:
 		return anthropicprovider.NewRuntime(providerID, f.client, f.credentialProvider)
+	case providercatalog.ProviderSpecBedrock:
+		return bedrockprovider.NewRuntime(providerID, f.client, f.credentialProvider)
 	case providercatalog.ProviderSpecChatGPT:
 		return chatgptprovider.NewRuntime(providerID, f.client, f.credentialProvider)
 	default:
@@ -57,7 +60,7 @@ func (f RuntimeFactory) runtimeFor(providerID providercatalog.ProviderID) provid
 	}
 }
 
-func validateRuntimeAgainstProfile(profile providercatalog.Profile, runtime providersruntime.ProviderRuntime) {
+func validateRuntimeAgainstProfile(profile providercatalog.Profile, runtime providersruntime.ProviderRuntimeBundle) {
 	providerID := profile.ProviderID
 	if runtime.ProviderID != providerID {
 		panic(fmt.Sprintf("providers: runtime id mismatch for %s", providerID))

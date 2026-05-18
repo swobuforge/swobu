@@ -16,7 +16,7 @@ func contentRows(content string) []retained.ViewSpec[state.Model] {
 	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	rows := make([]retained.ViewSpec[state.Model], 0, len(lines))
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(line) == "" { // swobu:io-string source=boundary
 			continue
 		}
 		rows = append(rows, wrappedPayloadTextRows(line)...)
@@ -112,8 +112,8 @@ func payloadMaxOffset(rowCount int, maxHeight int) int {
 }
 
 func actionStableID(action clientprofile.Action) string {
-	if strings.TrimSpace(action.ID) != "" { // trimlowerlint:allow boundary canonicalization
-		return strings.TrimSpace(action.ID) // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(action.ID) != "" { // swobu:io-string source=boundary
+		return strings.TrimSpace(action.ID) // swobu:io-string source=boundary
 	}
 	if action.RowLabel() != "" {
 		return action.RowLabel()

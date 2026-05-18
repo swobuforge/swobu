@@ -186,6 +186,8 @@ type Sizing struct {
 func (s Sizing) ResolveIntrinsic(intrinsic geom.Size, c geom.Constraints) geom.Size {
 	out := intrinsic
 	switch s.W {
+	case SizeFit:
+		// keep intrinsic width
 	case SizeFixed:
 		out.W = s.Fixed.W
 	case SizeGrow:
@@ -194,6 +196,8 @@ func (s Sizing) ResolveIntrinsic(intrinsic geom.Size, c geom.Constraints) geom.S
 		}
 	}
 	switch s.H {
+	case SizeFit:
+		// keep intrinsic height
 	case SizeFixed:
 		out.H = s.Fixed.H
 	case SizeGrow:
@@ -222,5 +226,8 @@ type Sized struct {
 }
 
 func (s Sized) ResolveSize(intrinsic geom.Size, c geom.Constraints) geom.Size {
+	if s.Sizing == (Sizing{}) {
+		return geom.ClampSize(intrinsic, c)
+	}
 	return s.Sizing.ResolveIntrinsic(intrinsic, c)
 }

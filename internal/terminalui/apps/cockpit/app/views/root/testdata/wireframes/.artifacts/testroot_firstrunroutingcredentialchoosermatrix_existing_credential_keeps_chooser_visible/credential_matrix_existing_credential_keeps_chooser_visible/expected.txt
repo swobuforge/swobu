@@ -6,11 +6,11 @@ SWOBU 🧌                                       ready   [ ? ] [ + new workspace
      create            not ready
 
   routing ▾
-     run on            Ollama                                         choose ↵
-     auth              env var missing                                choose ↵
-     frame             http_json_body                                 next ↵
+     provider          Ollama                                         choose ↵
+     credential        env var missing                                choose ↵
      env key           OLLAMA_API_KEY                                 edit ↵
      model             not set                                        choose ↵
+     delivery          auto                                           next ↵
 
   clients ▸
     not set

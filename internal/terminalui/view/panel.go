@@ -75,12 +75,12 @@ func renderPanelLines(spec PanelSpec) []string {
 	}
 	out := []string{renderPanelTop(spec.Title, innerWidth, spec.Border)}
 	for _, row := range spec.Rows {
-		wrapped := wrapText(strings.TrimSpace(row), contentWidth) // trimlowerlint:allow boundary canonicalization
+		wrapped := wrapText(strings.TrimSpace(row), contentWidth) // swobu:io-string source=boundary
 		if len(wrapped) == 0 {
 			wrapped = []string{""}
 		}
 		for _, line := range wrapped {
-			body := padRight(trimToWidth(line, contentWidth), contentWidth)
+			body := textmetrics.PadRight(textmetrics.TrimToWidth(line, contentWidth), contentWidth)
 			out = append(out, spec.Border.Vertical+strings.Repeat(" ", leftPad)+body+strings.Repeat(" ", rightPad)+spec.Border.Vertical)
 		}
 	}
@@ -89,22 +89,22 @@ func renderPanelLines(spec PanelSpec) []string {
 }
 
 func renderPanelTop(title string, innerWidth int, border PanelBorderStyle) string {
-	name := strings.TrimSpace(title) // trimlowerlint:allow boundary canonicalization
+	name := strings.TrimSpace(title) // swobu:io-string source=boundary
 	if name == "" {
-		name = strings.TrimSpace(border.FallbackName) // trimlowerlint:allow boundary canonicalization
+		name = strings.TrimSpace(border.FallbackName) // swobu:io-string source=boundary
 		if name == "" {
 			name = "Box"
 		}
 	}
 	label := border.TitlePrefix + name + border.TitleSuffix
-	if runeLen(label) > innerWidth-1 {
-		limit := innerWidth - runeLen(border.TitlePrefix+border.TitleSuffix)
+	if textmetrics.Width(label) > innerWidth-1 {
+		limit := innerWidth - textmetrics.Width(border.TitlePrefix+border.TitleSuffix)
 		if limit < 1 {
 			limit = 1
 		}
-		label = border.TitlePrefix + trimToWidth(name, limit) + border.TitleSuffix
+		label = border.TitlePrefix + textmetrics.TrimToWidth(name, limit) + border.TitleSuffix
 	}
-	remaining := innerWidth - runeLen(label)
+	remaining := innerWidth - textmetrics.Width(label)
 	if remaining < 0 {
 		remaining = 0
 	}
@@ -115,7 +115,7 @@ func wrapText(text string, width int) []string {
 	if text == "" {
 		return nil
 	}
-	if width <= 0 || runeLen(text) <= width {
+	if width <= 0 || textmetrics.Width(text) <= width {
 		return []string{text}
 	}
 	words := strings.Fields(text)
@@ -126,7 +126,7 @@ func wrapText(text string, width int) []string {
 	line := words[0]
 	for _, w := range words[1:] {
 		next := line + " " + w
-		if runeLen(next) <= width {
+		if textmetrics.Width(next) <= width {
 			line = next
 			continue
 		}
@@ -136,16 +136,6 @@ func wrapText(text string, width int) []string {
 	out = append(out, line)
 	return out
 }
-
-func trimToWidth(s string, width int) string {
-	return textmetrics.TrimToWidth(s, width)
-}
-
-func padRight(s string, width int) string {
-	return textmetrics.PadRight(s, width)
-}
-
-func runeLen(s string) int { return textmetrics.Width(s) }
 
 func max(a, b int) int {
 	if a > b {

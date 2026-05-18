@@ -3,6 +3,7 @@ package routing
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -19,49 +20,77 @@ type providerFrameChoiceRowSpec struct {
 
 func providerFrameChoiceRow(spec providerFrameChoiceRowSpec) retained.ViewSpec[state.Model] {
 	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
-		_ = ctx
-		return buildProviderFrameChoiceRow(spec)
+		return buildProviderFrameChoiceRow(ctx.Model(), spec)
 	})
 }
 
-func buildProviderFrameChoiceRow(spec providerFrameChoiceRowSpec) retained.ViewSpec[state.Model] {
+func buildProviderFrameChoiceRow(model state.Model, spec providerFrameChoiceRowSpec) retained.ViewSpec[state.Model] {
 	if spec.ProviderConfig == nil {
 		return views.RowStatic(providerDeliveryRowLabel, "not set")
 	}
 	frames := providercatalog.SupportedFramesForSpecProtocol(
 		spec.ProviderConfig.ProviderSpec,
-		protocolkind.ProtocolKind(strings.TrimSpace(spec.ProviderConfig.ProtocolKind)), // trimlowerlint:allow boundary canonicalization
+		protocolkind.ProtocolKind(strings.TrimSpace(spec.ProviderConfig.ProtocolKind)), // swobu:io-string source=boundary
 	)
-	selected := strings.TrimSpace(spec.ProviderConfig.SelectedFrame) // trimlowerlint:allow boundary canonicalization
+	selected := strings.TrimSpace(spec.ProviderConfig.SelectedFrame) // swobu:io-string source=boundary
 	if selected == "" && len(frames) > 0 {
 		selected = frames[0]
 	}
 	if selected == "" {
 		selected = "not set"
 	}
-	protocol := protocolkind.ProtocolKind(strings.TrimSpace(spec.ProviderConfig.ProtocolKind)) // trimlowerlint:allow boundary canonicalization
-	return views.RowActionWithCancel(providerDeliveryRowLabel, presentDeliveryFrameForProvider(spec.ProviderConfig.ProviderSpec, protocol, selected), "next", func() []update.Action {
-		next := nextFrameSelection(frames, strings.TrimSpace(spec.ProviderConfig.SelectedFrame)) // trimlowerlint:allow boundary canonicalization
+	summary := "auto"
+	if spec.ProviderConfig.ModelID != "" {
+		protocol := protocolkind.ProtocolKind(strings.TrimSpace(spec.ProviderConfig.ProtocolKind)) // swobu:io-string source=boundary
+		summary = presentDeliveryFrameForProvider(spec.ProviderConfig.ProviderSpec, protocol, selected)
+	}
+	return views.RowActionWithHooks(providerDeliveryRowLabel, summary, "next", func() []update.Action {
+		if spec.CreateMode {
+			if actions, ok := firstRunCreateFromDeliveryActions(model); ok {
+				return actions
+			}
+		}
+		next := nextFrameSelection(frames, strings.TrimSpace(spec.ProviderConfig.SelectedFrame)) // swobu:io-string source=boundary
 		if next == "" {
 			return nil
 		}
 		if spec.CreateMode {
 			return []update.Action{state.SetCreateDraftSelectedFrame{SelectedFrame: next}}
 		}
-		if strings.TrimSpace(spec.EndpointName) == "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(spec.EndpointName) == "" { // swobu:io-string source=boundary
 			return nil
 		}
 		updated := *spec.ProviderConfig
 		updated.SelectedFrame = next
-		return routingSaveProviderConfigActions(strings.TrimSpace(spec.EndpointName), updated, "provider/frame") // trimlowerlint:allow boundary canonicalization
-	}, nil)
+		return routingSaveProviderConfigActions(strings.TrimSpace(spec.EndpointName), updated, "provider/frame") // swobu:io-string source=boundary
+	}, nil, views.FocusAffordance("next", false))
+}
+
+func firstRunCreateFromDeliveryActions(model state.Model) ([]update.Action, bool) {
+	name := model.CreateDraftName
+	if name == "" {
+		return nil, false
+	}
+	parsed, err := endpointintent.ParseEndpointName(name)
+	if err != nil {
+		return nil, false
+	}
+	flow := state.EvaluateCreateDraftRouteSetup(model.CreateDraftProviderConfig)
+	if !flow.Ready {
+		return nil, false
+	}
+	canonicalName := parsed.String()
+	return []update.Action{
+		state.SetCreateDraftName{Name: canonicalName},
+		state.WorkspaceCreateRequested{Name: canonicalName},
+	}, true
 }
 
 func nextFrameSelection(frames []string, current string) string {
 	if len(frames) == 0 {
 		return ""
 	}
-	current = strings.TrimSpace(current) // trimlowerlint:allow boundary canonicalization
+	current = strings.TrimSpace(current) // swobu:io-string source=boundary
 	for i, frame := range frames {
 		if frame != current {
 			continue

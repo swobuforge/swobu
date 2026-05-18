@@ -67,7 +67,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if len(raw) > maxWebsocketRequestBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
-	trimmed := strings.TrimSpace(string(raw)) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return canonical.BadRequest("websocket request payload is empty")
 	}
@@ -79,7 +79,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if t, ok := envelope["type"]; ok {
 		_ = json.Unmarshal(t, &requestType)
 	}
-	if strings.TrimSpace(requestType) != websocketRequestTypeResponseCreate { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(requestType) != websocketRequestTypeResponseCreate { // swobu:io-string source=boundary
 		return canonical.UnsupportedOperation("websocket request type is not implemented")
 	}
 	delete(envelope, "type")

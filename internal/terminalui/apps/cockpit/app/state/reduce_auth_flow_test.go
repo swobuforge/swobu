@@ -66,7 +66,7 @@ func TestReduce_ProviderAuthSessionStarted_AutoOpensLoginURL(t *testing.T) {
 
 func TestReduce_ProviderAuthSessionFailed_PreservesExistingLoginURLAndSessionID(t *testing.T) {
 	model := Model{
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			stateModel.EndpointProviderAuthOwnerKey("acme", "chatgpt/main").String(): {
 				SessionID:    "s-1",
 				URL:          "https://auth.example/login",
@@ -74,7 +74,7 @@ func TestReduce_ProviderAuthSessionFailed_PreservesExistingLoginURLAndSessionID(
 			},
 		},
 	}
-	effects := Reduce(&model, stateeffect.ProviderAuthSessionFailed{
+	effects := Reduce(&model, stateeffect.ProviderAuthSessionFailedAction{
 		EndpointName: "acme",
 		ProviderConfig: ProviderConfigSnapshot{
 			Ref:          "chatgpt/main",
@@ -132,7 +132,7 @@ func TestReduce_ProviderAuthSessionCredentialResolved_CreateDraftTransient(t *te
 			BaseURL:       "https://api.openai.com/v1",
 		},
 	}
-	effects := Reduce(&model, stateeffect.ProviderAuthSessionCredentialResolved{
+	effects := Reduce(&model, stateeffect.ProviderAuthSessionCredentialResolvedAction{
 		EndpointName: "",
 		ProviderConfig: ProviderConfigSnapshot{
 			Ref:           "create-draft",
@@ -158,7 +158,7 @@ func TestReduce_AddModelAuthFlow_DoesNotMutateGlobalProviderAuthRows(t *testing.
 	existingOwner := stateModel.EndpointProviderAuthOwnerKey("acme", "cfg-existing").String()
 	addOwner := stateModel.AddModelDraftAuthOwnerKey("acme", "cfg-add").String()
 	model := Model{
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			existingOwner: {SessionID: "sess-existing", URL: "https://existing.example/login", SessionState: "pending"},
 		},
 	}
@@ -191,7 +191,7 @@ func TestReduce_NonAddModelAuthFlow_DoesNotOverwriteAddModelAuthState(t *testing
 	addOwner := stateModel.AddModelDraftAuthOwnerKey("acme", "cfg-add").String()
 	existingOwner := stateModel.EndpointProviderAuthOwnerKey("acme", "cfg-existing").String()
 	model := Model{
-		AuthSessions: map[string]stateModel.AuthSessionView{
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
 			addOwner: {SessionID: "sess-add", URL: "https://add.example/login", SessionState: "pending"},
 		},
 	}

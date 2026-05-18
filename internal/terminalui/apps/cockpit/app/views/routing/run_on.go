@@ -72,11 +72,11 @@ func createRunOnChoiceItems(model state.Model, onCancel func() []update.Action) 
 	if pc == nil {
 		return createProviderSpecItems(model, onCancel)
 	}
-	providerSpec := strings.TrimSpace(pc.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+	providerSpec := strings.TrimSpace(pc.ProviderSpec) // swobu:io-string source=boundary
 	if providerSpec == "" {
 		return nil
 	}
-	summary := providerConfigSummary(*pc)
+	summary := providerHumanIdentifier(*pc)
 	return []views.FilterablePickerItem{
 		{
 			Label:    summary,
@@ -98,8 +98,8 @@ func primaryModelChoiceItems(snapshot *state.EndpointSnapshot, onCancel func() [
 	}
 	items := make([]views.FilterablePickerItem, 0, len(snapshot.ProviderConfigs))
 	for _, pc := range snapshot.ProviderConfigs {
-		providerRef := strings.TrimSpace(pc.Ref) // trimlowerlint:allow boundary canonicalization
-		label := modelTargetLabel(pc)
+		providerRef := strings.TrimSpace(pc.Ref) // swobu:io-string source=boundary
+		label := providerHumanIdentifier(pc)
 		items = append(items, views.FilterablePickerItem{
 			Label:    label,
 			Selected: providerRef == snapshot.SelectedProviderConfigRef,
@@ -119,10 +119,10 @@ func primaryModelChooseActions(snapshot *state.EndpointSnapshot, providerRef str
 	if snapshot == nil {
 		return closeActions
 	}
-	if strings.TrimSpace(providerRef) == strings.TrimSpace(snapshot.SelectedProviderConfigRef) { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(providerRef) == strings.TrimSpace(snapshot.SelectedProviderConfigRef) { // swobu:io-string source=boundary
 		return closeActions
 	}
-	actions := routingSaveSelectedTargetActions(strings.TrimSpace(snapshot.Name), strings.TrimSpace(providerRef), "run_on") // trimlowerlint:allow boundary canonicalization
+	actions := routingSaveSelectedTargetActions(strings.TrimSpace(snapshot.Name), strings.TrimSpace(providerRef), "run_on") // swobu:io-string source=boundary
 	return append(actions, closeActions...)
 }
 
@@ -189,8 +189,4 @@ func BuildRunOnWorkspaceRow(ctx *retained.Context[state.Model]) retained.ViewSpe
 		}
 	}
 	return out
-}
-
-func modelTargetLabel(pc state.ProviderConfigSnapshot) string {
-	return providerConfigSummary(pc)
 }

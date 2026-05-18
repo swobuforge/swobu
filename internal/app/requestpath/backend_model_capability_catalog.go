@@ -39,7 +39,7 @@ func newBackendModelCapabilityCatalog(records []backendModelCapabilityRecord) Ba
 		if !ok {
 			continue
 		}
-		model := strings.TrimSpace(record.BackendModelID) // trimlowerlint:allow boundary canonicalization
+		model := strings.TrimSpace(record.BackendModelID) // swobu:io-string source=boundary
 		if model == "" || model == "*" {
 			byAny[scope] = record.Capability
 			continue
@@ -60,7 +60,7 @@ func (catalog BackendModelCapabilityCatalog) SnapshotFor(entity BackendModelEnti
 	if !ok {
 		return CapabilitySnapshot{}
 	}
-	modelID := strings.TrimSpace(entity.BackendModelID) // trimlowerlint:allow boundary canonicalization
+	modelID := strings.TrimSpace(entity.BackendModelID) // swobu:io-string source=boundary
 	if modelID == "" {
 		return CapabilitySnapshot{}
 	}
@@ -95,7 +95,7 @@ func defaultBackendModelCapabilityCatalog() BackendModelCapabilityCatalog {
 }
 
 func normalizeCapabilityScope(providerSpec string, protocolKind protocolkind.ProtocolKind) (backendModelCapabilityScope, bool) {
-	normalizedSpec := strings.TrimSpace(strings.ToLower(providerSpec)) // trimlowerlint:allow boundary canonicalization
+	normalizedSpec := strings.TrimSpace(strings.ToLower(providerSpec)) // swobu:io-string source=boundary
 	if normalizedSpec == "" || protocolKind == "" {
 		return backendModelCapabilityScope{}, false
 	}

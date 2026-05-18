@@ -1,3 +1,30 @@
-line 11
--                 ollama:gemma4:e4b:e3b0c442                                                          edit ↵
-+        model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
+line 21
+-          provider           OpenAI Compatible                                                       change ↵
++          provider           OpenAI                                                                  change ↵
+line 22
+-          credential         file missing                                                            change ↵
++     >    credential         file missing                                                            change ↵
+line 23
+-          scope              base url missing                                                        edit ↵
++          credential file    required                                                                browse ↵
+line 24
+-     >    credential file    required                                                                browse ↵
++          key file           not found
+line 25
+-          key file           not found
++           -> set credential file before loading models
+line 26
+-           -> set credential file before loading models
++          model              choose after auth
+line 27
+-          model              choose after auth
++          delivery           auto                                                                    next ↵
+line 28
+-          delivery           auto                                                                    next ↵
++ 
+line 29
+- 
++   clients ▸
+line 30
+-   clients ▸
++     not set

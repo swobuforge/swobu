@@ -21,9 +21,9 @@ type Ref struct {
 }
 
 func Parse(raw string) Ref {
-	trimmed := strings.TrimSpace(raw) // trimlowerlint:allow domain canonicalization
-	// trimlowerlint:allow boundary canonicalization for credential-ref prefix classification
-	normalized := strings.ToLower(trimmed) // trimlowerlint:allow domain canonicalization
+	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
+	// swobu:io-string source=boundary for credential-ref prefix classification
+	normalized := strings.ToLower(trimmed) // swobu:io-string source=domain
 	switch {
 	case normalized == "":
 		return Ref{raw: raw, norm: normalized, kind: KindEmpty}
@@ -47,7 +47,7 @@ func (r Ref) Kind() Kind {
 }
 
 func (r Ref) String() string {
-	return strings.TrimSpace(r.raw) // trimlowerlint:allow domain canonicalization
+	return strings.TrimSpace(r.raw) // swobu:io-string source=domain
 }
 
 func (r Ref) IsFileRef() bool {
@@ -62,7 +62,7 @@ func (r Ref) IsEmptyFileSelection() bool {
 		return true
 	}
 	if strings.HasPrefix(r.norm, "file:") {
-		return strings.TrimSpace(strings.TrimPrefix(r.norm, "file:")) == "" // trimlowerlint:allow domain canonicalization
+		return strings.TrimSpace(strings.TrimPrefix(r.norm, "file:")) == "" // swobu:io-string source=domain
 	}
 	return false
 }

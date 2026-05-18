@@ -20,7 +20,7 @@ func SupportedFramesForSpecProtocol(spec string, protocolKind protocolkind.Proto
 }
 
 func SupportsFrameForSpecProtocol(spec string, protocolKind protocolkind.ProtocolKind, frame string) bool {
-	frame = strings.TrimSpace(frame) // trimlowerlint:allow domain canonicalization
+	frame = strings.TrimSpace(frame) // swobu:io-string source=domain
 	if frame == "" {
 		return false
 	}
@@ -52,7 +52,7 @@ func DefaultFrameForSpecProtocol(spec string, protocolKind protocolkind.Protocol
 }
 
 func StreamingForFrame(frame string) (bool, bool) {
-	switch strings.TrimSpace(frame) { // trimlowerlint:allow domain canonicalization
+	switch strings.TrimSpace(frame) { // swobu:io-string source=domain
 	case FrameHTTPJSONBody:
 		return false, true
 	case FrameSSEEvent:

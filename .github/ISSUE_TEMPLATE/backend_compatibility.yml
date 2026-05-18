@@ -1,0 +1,47 @@
+name: Backend compatibility report
+description: Report provider/backend protocol, auth, or routing incompatibility.
+title: "[compat][backend]: "
+labels:
+  - compatibility
+body:
+  - type: input
+    id: backend
+    attributes:
+      label: Backend
+      placeholder: OpenAI, Anthropic, OpenRouter, Ollama, ChatGPT, custom...
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      placeholder: Claude Code, Codex CLI, Continue, custom OpenAI-compatible, ...
+    validations:
+      required: true
+
+  - type: input
+    id: request_family
+    attributes:
+      label: Request family
+      placeholder: /v1/chat/completions, /v1/responses, /v1/messages
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Include backend error payloads, status codes, and any Swobu render/log snippets (redacted).

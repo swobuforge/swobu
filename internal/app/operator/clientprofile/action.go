@@ -17,14 +17,14 @@ func (a Action) IsConfigured() bool {
 }
 
 func (a Action) EffectiveFocusVerb() string {
-	if strings.TrimSpace(a.FocusVerb) != "" { // trimlowerlint:allow boundary canonicalization
-		return strings.TrimSpace(a.FocusVerb) // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(a.FocusVerb) != "" { // swobu:io-string source=boundary
+		return strings.TrimSpace(a.FocusVerb) // swobu:io-string source=boundary
 	}
 	return a.ActionVerb()
 }
 
 func (a Action) HasPayload() bool {
-	return strings.TrimSpace(a.Content) != "" // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(a.Content) != "" // swobu:io-string source=boundary
 }
 
 func (a Action) IsRunAction() bool {
@@ -36,13 +36,13 @@ func (a Action) IsCopyAction() bool {
 }
 
 func (a Action) RowLabel() string {
-	return strings.TrimSpace(a.Label) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(a.Label) // swobu:io-string source=boundary
 }
 
 func (a Action) ActionSummary() string {
-	return strings.TrimSpace(a.Summary) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(a.Summary) // swobu:io-string source=boundary
 }
 
 func (a Action) ActionVerb() string {
-	return strings.TrimSpace(a.Verb) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(a.Verb) // swobu:io-string source=boundary
 }

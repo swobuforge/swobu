@@ -35,8 +35,8 @@ func helpActionRow(label string, url string, note string) retained.ViewSpec[stat
 }
 
 func fallbackURLForHelpAction(note string, label string) string {
-	note = strings.TrimSpace(note)   // trimlowerlint:allow boundary canonicalization
-	label = strings.TrimSpace(label) // trimlowerlint:allow boundary canonicalization
+	note = strings.TrimSpace(note)   // swobu:io-string source=boundary
+	label = strings.TrimSpace(label) // swobu:io-string source=boundary
 	if note == "" || label == "" {
 		return ""
 	}
@@ -46,7 +46,7 @@ func fallbackURLForHelpAction(note string, label string) string {
 	}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(note, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(note, prefix)) // trimlowerlint:allow boundary canonicalization
+			return strings.TrimSpace(strings.TrimPrefix(note, prefix)) // swobu:io-string source=boundary
 		}
 	}
 	return ""

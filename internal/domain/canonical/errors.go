@@ -107,6 +107,9 @@ func NewClassifiedBackendError(class BackendErrorClass, cause BackendError) Clas
 }
 
 func (e ClassifiedBackendError) Error() string {
+	if e.Cause.Origin == "" && e.Cause.BackendRef == "" && e.Cause.Message == "" && e.Cause.StatusCode == 0 {
+		return "backend classified error"
+	}
 	return e.Cause.Error()
 }
 
@@ -152,8 +155,8 @@ func IsPreviousResponseNotFoundBackendError(err error) bool {
 	if json.Unmarshal([]byte(backendErr.Message), &envelope) != nil {
 		return false
 	}
-	return strings.TrimSpace(envelope.Error.Param) == "previous_response_id" && // trimlowerlint:allow domain canonicalization
-		strings.TrimSpace(envelope.Error.Code) == backendErrorCodePreviousResponseNotFound // trimlowerlint:allow domain canonicalization
+	return strings.TrimSpace(envelope.Error.Param) == "previous_response_id" && // swobu:io-string source=domain
+		strings.TrimSpace(envelope.Error.Code) == backendErrorCodePreviousResponseNotFound // swobu:io-string source=domain
 }
 
 func IsBackendErrorClass(err error, class BackendErrorClass) bool {

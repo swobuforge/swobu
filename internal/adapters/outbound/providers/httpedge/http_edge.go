@@ -14,7 +14,7 @@ func JoinBaseURLAndPath(baseURL string, path string) string {
 }
 
 func DecodeHTTPResponseContentEncoding(resp *http.Response) (*http.Response, error) {
-	contentEncoding := strings.TrimSpace(resp.Header.Get("Content-Encoding")) // trimlowerlint:allow boundary canonicalization
+	contentEncoding := strings.TrimSpace(resp.Header.Get("Content-Encoding")) // swobu:io-string source=boundary
 	if contentEncoding == "" {
 		return resp, nil
 	}
@@ -34,7 +34,7 @@ func ReadBackendHTTPError(resp *http.Response, backendRef string) canonical.Back
 	return canonical.NewBackendError(
 		backendRef,
 		resp.StatusCode,
-		strings.TrimSpace(string(raw)), // trimlowerlint:allow boundary canonicalization
-		strings.TrimSpace(resp.Header.Get("Retry-After")), // trimlowerlint:allow boundary canonicalization
+		strings.TrimSpace(string(raw)), // swobu:io-string source=boundary
+		strings.TrimSpace(resp.Header.Get("Retry-After")), // swobu:io-string source=boundary
 	)
 }

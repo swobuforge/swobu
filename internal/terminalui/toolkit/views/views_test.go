@@ -33,7 +33,7 @@ func TestKeyValueActionRow_PaintUsesSharedPresentation(t *testing.T) {
 
 	line.Paint(buf, node, &layout.PaintContext{FocusedID: 7})
 
-	if got, want := buf.String(), newRowParts("daemon", "up", "test enter", true).render(40, DefaultRowLayoutPolicy()); got != want {
+	if got, want := buf.String(), newRowParts("daemon", "up", "test enter", true).render(40, DefaultLineLayoutPolicy()); got != want {
 		t.Fatalf("paint = %q, want %q", got, want)
 	}
 }
@@ -41,7 +41,7 @@ func TestKeyValueActionRow_PaintUsesSharedPresentation(t *testing.T) {
 func TestKeyValueActionRow_FixedActionColumnFallsBackOnNarrowViewport(t *testing.T) {
 	t.Parallel()
 
-	policy := DefaultRowLayoutPolicy()
+	policy := DefaultLineLayoutPolicy()
 	line := newRowParts("endpoint", "/c/test/", "copy ↵", true).render(22, policy)
 	if !strings.Contains(line, "endpoint") {
 		t.Fatalf("render=%q missing label under narrow viewport", line)
@@ -54,7 +54,7 @@ func TestKeyValueActionRow_FixedActionColumnFallsBackOnNarrowViewport(t *testing
 func TestKeyValueActionRow_DropsActionBeforeLeftContentOnTightWidth(t *testing.T) {
 	t.Parallel()
 
-	policy := DefaultRowLayoutPolicy()
+	policy := DefaultLineLayoutPolicy()
 	line := newRowParts("credential file", "/home/user/openai.key", "browse ↵", true).render(14, policy)
 	if strings.Contains(line, "↵") {
 		t.Fatalf("render=%q must drop action on tight width", line)
@@ -64,7 +64,7 @@ func TestKeyValueActionRow_DropsActionBeforeLeftContentOnTightWidth(t *testing.T
 func TestKeyValueActionRow_LabelOnlyRowKeepsPrimaryContent(t *testing.T) {
 	t.Parallel()
 
-	policy := DefaultRowLayoutPolicy()
+	policy := DefaultLineLayoutPolicy()
 	line := newRowParts("delete workspace", "", "delete ↵", false).render(28, policy)
 	if strings.TrimSpace(strings.Trim(line, " ")) == "" {
 		t.Fatalf("render=%q should not collapse to blank", line)
@@ -83,7 +83,7 @@ func TestKeyValueActionRow_LabelOnlyRowKeepsPrimaryContent(t *testing.T) {
 func TestKeyValueActionRow_ActionAnchoredRightButLeftAligned(t *testing.T) {
 	t.Parallel()
 
-	policy := DefaultRowLayoutPolicy()
+	policy := DefaultLineLayoutPolicy()
 	line := newRowParts("name", "test", "edit ↵", false).render(44, policy)
 	idx := strings.Index(line, "edit ↵")
 	if idx < 0 {
@@ -98,7 +98,7 @@ func TestKeyValueActionRow_ActionAnchoredRightButLeftAligned(t *testing.T) {
 func TestKeyValueActionRow_ActionColumnHasStableStart(t *testing.T) {
 	t.Parallel()
 
-	policy := DefaultRowLayoutPolicy()
+	policy := DefaultLineLayoutPolicy()
 	lineA := newRowParts("name", "test", "edit ↵", false).render(64, policy)
 	lineB := newRowParts("credential file", "/home/user/openai.key", "browse ↵", false).render(64, policy)
 	idxA := strings.Index(lineA, "edit ↵")
@@ -149,7 +149,7 @@ func TestInlineEditor_EmitsChangeCommitAndCancel(t *testing.T) {
 		"name",
 		"ac",
 		"workspace",
-		DefaultRowLayoutPolicy(),
+		DefaultLineLayoutPolicy(),
 		func(value string) []update.Action { changed = value; return nil },
 		func(value string) []update.Action { committed = value; return nil },
 		func() []update.Action { cancelled = true; return nil },
@@ -181,7 +181,7 @@ func TestInlineEditor_PaintUsesSharedRowLayout(t *testing.T) {
 		"name",
 		"ac",
 		"workspace",
-		DefaultRowLayoutPolicy(),
+		DefaultLineLayoutPolicy(),
 		func(string) []update.Action { return nil },
 		func(string) []update.Action { return nil },
 		func() []update.Action { return nil },
@@ -190,7 +190,7 @@ func TestInlineEditor_PaintUsesSharedRowLayout(t *testing.T) {
 	buf := paint.NewBuffer(geom.Rect{W: 48, H: 1})
 	editor.Paint(buf, node, &layout.PaintContext{FocusedID: 12})
 
-	if got, want := strings.TrimRight(buf.String(), " "), strings.TrimRight(newRowParts("name", "ac_", "save ↵", true).render(48, DefaultRowLayoutPolicy()), " "); got != want {
+	if got, want := strings.TrimRight(buf.String(), " "), strings.TrimRight(newRowParts("name", "ac_", "save ↵", true).render(48, DefaultLineLayoutPolicy()), " "); got != want {
 		t.Fatalf("paint = %q, want %q", got, want)
 	}
 }
@@ -202,7 +202,7 @@ func TestInlineEditor_EmptyActiveUsesCaretOnly(t *testing.T) {
 		"name",
 		"",
 		"choose a workspace name",
-		DefaultRowLayoutPolicy(),
+		DefaultLineLayoutPolicy(),
 		func(string) []update.Action { return nil },
 		func(string) []update.Action { return nil },
 		func() []update.Action { return nil },
@@ -215,8 +215,100 @@ func TestInlineEditor_EmptyActiveUsesCaretOnly(t *testing.T) {
 	if strings.Contains(got, "choose a workspace name_") {
 		t.Fatalf("focused empty editor must hide placeholder, got %q", got)
 	}
-	if want := strings.TrimRight(newRowParts("name", "_", "save ↵", true).render(64, DefaultRowLayoutPolicy()), " "); strings.TrimRight(got, " ") != want {
+	if want := strings.TrimRight(newRowParts("name", "_", "save ↵", true).render(64, DefaultLineLayoutPolicy()), " "); strings.TrimRight(got, " ") != want {
 		t.Fatalf("paint = %q, want %q", got, want)
+	}
+}
+
+func TestInlineEditor_BackspaceAtEmpty_IsStableAndKeepsEmpty(t *testing.T) {
+	t.Parallel()
+
+	var changed []string
+	editor := build(NewInlineEditor[struct{}](
+		"env",
+		"",
+		"AWS_BEARER_TOKEN_BEDROCK",
+		DefaultLineLayoutPolicy(),
+		func(value string) []update.Action {
+			changed = append(changed, value)
+			return nil
+		},
+		func(string) []update.Action { return nil },
+		func() []update.Action { return nil },
+	))
+	h := editor.(interaction.EventHandler)
+
+	for i := 0; i < 5; i++ {
+		_ = h.HandleEvent(interactionBackspace(), nil)
+	}
+
+	if len(changed) == 0 {
+		t.Fatalf("expected change callbacks on backspace-at-empty")
+	}
+	if got := changed[len(changed)-1]; got != "" {
+		t.Fatalf("final value=%q want empty", got)
+	}
+}
+
+func TestInlineEditor_EraseToEmptyThenCommit_SavesEmptyValue(t *testing.T) {
+	t.Parallel()
+
+	var committed string
+	editor := build(NewInlineEditor[struct{}](
+		"env",
+		"OPENAI_API_KEY",
+		"env variable",
+		DefaultLineLayoutPolicy(),
+		func(string) []update.Action { return nil },
+		func(value string) []update.Action {
+			committed = value
+			return nil
+		},
+		func() []update.Action { return nil },
+	))
+	h := editor.(interaction.EventHandler)
+
+	for i := 0; i < len("OPENAI_API_KEY")+3; i++ {
+		_ = h.HandleEvent(interactionBackspace(), nil)
+	}
+	_ = h.HandleEvent(interactionKey(interaction.KeyEnter), nil)
+
+	if committed != "" {
+		t.Fatalf("commit=%q want empty", committed)
+	}
+}
+
+func TestInlineEditor_TypeThenCancel_UsesCancelPath(t *testing.T) {
+	t.Parallel()
+
+	var changed string
+	cancelled := false
+	editor := build(NewInlineEditor[struct{}](
+		"name",
+		"acme",
+		"workspace",
+		DefaultLineLayoutPolicy(),
+		func(value string) []update.Action {
+			changed = value
+			return nil
+		},
+		func(string) []update.Action { return nil },
+		func() []update.Action {
+			cancelled = true
+			return nil
+		},
+	))
+	h := editor.(interaction.EventHandler)
+
+	_ = h.HandleEvent(interactionRune('-'), nil)
+	_ = h.HandleEvent(interactionRune('2'), nil)
+	_ = h.HandleEvent(interactionKey(interaction.KeyEsc), nil)
+
+	if changed != "acme-2" {
+		t.Fatalf("changed=%q want acme-2", changed)
+	}
+	if !cancelled {
+		t.Fatalf("cancelled=%v want true", cancelled)
 	}
 }
 

@@ -1,6 +1,45 @@
+line 10
+-      models             2 configured                                                      manage ↵
++ >    models             2 configured                                                      manage ↵
 line 11
--   >             openai:gpt-5.3:2310255c                                                   edit ↵
-+   >    model    openai:gpt-5.3:2310255c                                                   edit ↵
+-   >    model    openai:gpt-5.3:2310255c                                                   edit ↵
++        model    openai:gpt-5.3:2310255c                                                   close ↵
 line 12
--                 anthropic:opus:979cec50                                                   edit ↵
+-        model    anthropic:opus:979cec50                                                   edit ↵
++          provider          OpenAI
+line 13
+-        add model                                                                          create ↵
++          credential        env                                                            choose ↵
+line 14
+- 
++          model             gpt-5.3                                                        choose ↵
+line 15
+-   clients ▸
++          delivery          non-streaming                                                  next ↵
+line 16
+-     not set
++          alias             not set                                                        edit ↵
+line 17
+- 
++          env key           OPENAI_API_KEY                                                 edit ↵
+line 18
+-   traffic ▸
++          delete model                                                                     delete ↵
+line 19
+-     no traffic yet
 +        model    anthropic:opus:979cec50                                                   edit ↵
+line 20
+- 
++        add model                                                                          create ↵
+line 22
+- 
++   clients ▸
+line 23
+- 
++     not set
+line 25
+- 
++   traffic ▸
+line 26
+- 
++     no traffic yet

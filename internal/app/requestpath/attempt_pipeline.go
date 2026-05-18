@@ -18,6 +18,11 @@ type chainedAttemptPipeline struct {
 }
 
 func (k chainedAttemptPipeline) Execute(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
+	if k.invoke == nil {
+		return AttemptOutcome{
+			Err: canonical.InternalError("attempt pipeline invoke function is not configured"),
+		}
+	}
 	return k.invoke(ctx, attempt)
 }
 
@@ -227,7 +232,7 @@ func logContinuationPreparation(attempt ExecutionAttempt, prepared canonical.Can
 		"request_id", attempt.Intent.RequestID,
 		"endpoint", attempt.Intent.EndpointName.String(),
 		"target_protocol", string(attempt.Route.Target.ProtocolKind),
-		"has_previous_response_id", strings.TrimSpace(typed.PreviousResponseID()) != "", // trimlowerlint:allow boundary canonicalization
+		"has_previous_response_id", strings.TrimSpace(typed.PreviousResponseID()) != "", // swobu:io-string source=boundary
 		"thread_item_count", len(thread),
 		"last_turn_item_count", len(lastTurn),
 		"last_turn_tail_role", continuationTailRole(lastTurn),

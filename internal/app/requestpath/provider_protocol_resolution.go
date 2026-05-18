@@ -12,7 +12,7 @@ func resolveProviderProtocolForRequest(providerSpec string, configured protocolk
 	if !providercatalog.SupportsSpec(providerSpec) {
 		return "", canonical.BadEndpoint("provider id is unsupported")
 	}
-	if strings.EqualFold(strings.TrimSpace(providerSpec), "anthropic") { // trimlowerlint:allow boundary canonicalization
+	if strings.EqualFold(strings.TrimSpace(providerSpec), "anthropic") { // swobu:io-string source=boundary
 		switch request.(type) {
 		case canonical.DialogCanonicalRequest, canonical.GenerationCanonicalRequest:
 			return protocolkind.Messages, nil

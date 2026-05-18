@@ -7,32 +7,50 @@ import (
 )
 
 func padRight(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
 	return textmetrics.PadRight(s, width)
 }
 
 // PadRight right-pads or truncates text to width using toolkit grammar.
 func PadRight(s string, width int) string {
-	return padRight(s, width)
+	if width <= 0 {
+		return ""
+	}
+	return textmetrics.PadRight(s, width)
 }
 
 func trimToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
 	return textmetrics.TrimToWidth(s, width)
 }
 
 // TrimToWidth trims text to width with ellipsis when needed.
 func TrimToWidth(s string, width int) string {
-	return trimToWidth(s, width)
+	if width <= 0 {
+		return ""
+	}
+	return textmetrics.TrimToWidth(s, width)
 }
 
 // TrimToWidthRaw trims text to width without adding ellipsis.
 func TrimToWidthRaw(s string, width int) string {
-	return trimToWidthRaw(s, width)
+	if width <= 0 {
+		return ""
+	}
+	return textmetrics.TrimToWidthRaw(s, width)
 }
 
 // trimToWidthRaw truncates a string to at most `width` runes without adding
 // an ellipsis. Callers that want visual truncation indicators should use
 // trimToWidth instead.
 func trimToWidthRaw(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
 	return textmetrics.TrimToWidthRaw(s, width)
 }
 
@@ -49,15 +67,18 @@ func trimLastRune(value string) string {
 }
 
 func runeLen(s string) int {
-	return textmetrics.Width(s)
+	return textmetrics.Width(textmetrics.SanitizeTerminalText(s))
 }
 
 // RuneLen returns rune-aware text width.
 func RuneLen(s string) int {
-	return runeLen(textmetrics.SanitizeTerminalText(s))
+	return textmetrics.Width(textmetrics.SanitizeTerminalText(s))
 }
 
 func sanitizeTextForTerminal(s string) string {
+	if s == "" {
+		return ""
+	}
 	return textmetrics.SanitizeTerminalText(s)
 }
 

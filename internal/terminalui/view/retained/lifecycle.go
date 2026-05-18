@@ -23,5 +23,8 @@ func captureLifecycle(candidate any) LifecycleEffects {
 
 // CaptureLifecycle extracts lifecycle effects from a view.
 func CaptureLifecycle(candidate any) LifecycleEffects {
+	if candidate == nil {
+		return LifecycleEffects{}
+	}
 	return captureLifecycle(candidate)
 }

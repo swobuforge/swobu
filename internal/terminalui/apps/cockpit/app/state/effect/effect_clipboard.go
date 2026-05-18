@@ -28,7 +28,7 @@ func (cmd CopyAuthSessionURLEffect) Execute(ctx context.Context) []update.Action
 }
 
 func normalizeAuthSessionCopyValue(value string) string {
-	trimmed := strings.TrimSpace(value) // trimlowerlint:allow boundary canonicalization
+	trimmed := strings.TrimSpace(value) // swobu:io-string source=boundary
 	return strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
 			return -1

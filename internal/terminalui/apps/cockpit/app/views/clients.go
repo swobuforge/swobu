@@ -33,7 +33,7 @@ func BuildClientsSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 	if spec, ok := maybeStaticClientsSection(ctx, model); ok {
 		return spec
 	}
-	baseURL := strings.TrimSpace(selectors.ClientBaseURL(model)) // trimlowerlint:allow boundary canonicalization
+	baseURL := strings.TrimSpace(selectors.ClientBaseURL(model)) // swobu:io-string source=boundary
 	profiles := clientprofile.Catalog()
 	local := bindClientsSectionState(ctx)
 	selected := selectedClientProfile(profiles, local.selectedClientID)
@@ -290,14 +290,14 @@ func buildActionRow(model state.Model, action clientprofile.Action, baseURL stri
 }
 
 func actionResultNote(model state.Model, action clientprofile.Action) string {
-	switch action.ActionVerb() {
-	case "run":
+	verb := action.ActionVerb()
+	if verb == "run" {
 		return model.ClientLaunchNote
-	case "copy":
-		return model.ClientCopyNote
-	default:
-		return ""
 	}
+	if verb == "copy" {
+		return model.ClientCopyNote
+	}
+	return ""
 }
 
 func activateClientAction(model state.Model, action clientprofile.Action, actionID, baseURL string, selected clientprofile.Profile, local clientsSectionState) []update.Action {
@@ -308,19 +308,20 @@ func activateClientAction(model state.Model, action clientprofile.Action, action
 			local.setPayloadScrollOffset(0)
 		}
 	}
-	switch action.ActionVerb() {
-	case "run":
+	verb := action.ActionVerb()
+	if verb == "run" {
 		if selected != nil {
-			actions = append(actions, state.ClientLaunchRequested{
+			actions = append(actions, state.ClientLaunchRequestedAction{
 				BaseURL: baseURL,
 				Preset:  selected.Identity().ID,
 				ModelID: selectedClientRunModelID(model),
 			})
 		}
-	case "copy":
-		copyValue := strings.TrimSpace(action.Content) // trimlowerlint:allow boundary canonicalization
+	}
+	if verb == "copy" {
+		copyValue := strings.TrimSpace(action.Content) // swobu:io-string source=boundary
 		if copyValue != "" {
-			actions = append(actions, state.ClientBaseURLCopyRequested{Value: copyValue})
+			actions = append(actions, state.ClientBaseURLCopyRequestedAction{Value: copyValue})
 		}
 	}
 	if len(actions) == 0 {
@@ -334,7 +335,7 @@ func selectedClientRunModelID(model state.Model) string {
 	if snapshot == nil {
 		return ""
 	}
-	if strings.TrimSpace(snapshot.Name) == "" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(snapshot.Name) == "" { // swobu:io-string source=boundary
 		return ""
 	}
 	return requestpath.PublicModelIDSwobu

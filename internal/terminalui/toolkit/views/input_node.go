@@ -17,18 +17,18 @@ type InputRenderNode struct {
 	Label      string
 	Value      string
 	EmptyValue string
-	Policy     RowLayoutPolicy
+	Policy     LineLayoutPolicy
 	OnChange   func(string) []update.Action
 	OnCommit   func(string) []update.Action
 	OnCancel   func() []update.Action
 }
 
-func NewInput(label, value, emptyValue string, policy RowLayoutPolicy, onChange func(string) []update.Action, onCommit func(string) []update.Action, onCancel func() []update.Action) *InputRenderNode {
+func NewInput(label, value, emptyValue string, policy LineLayoutPolicy, onChange func(string) []update.Action, onCommit func(string) []update.Action, onCancel func() []update.Action) *InputRenderNode {
 	return &InputRenderNode{
 		Sized:      layout.Sized{Sizing: layout.Sizing{W: layout.SizeGrow, H: layout.SizeFit}},
-		Label:      strings.TrimSpace(label), // trimlowerlint:allow boundary canonicalization
+		Label:      strings.TrimSpace(label), // swobu:io-string source=boundary
 		Value:      value,
-		EmptyValue: strings.TrimSpace(emptyValue), // trimlowerlint:allow boundary canonicalization
+		EmptyValue: strings.TrimSpace(emptyValue), // swobu:io-string source=boundary
 		Policy:     policy,
 		OnChange:   onChange,
 		OnCommit:   onCommit,
@@ -50,7 +50,7 @@ func (i *InputRenderNode) Paint(p paint.Painter, node *layout.LayoutNode, ctx *l
 	}
 	policy := i.Policy
 	if policy.MaxLabelFractionDiv <= 0 {
-		policy = DefaultRowLayoutPolicy()
+		policy = DefaultLineLayoutPolicy()
 	}
 	p.Text(0, 0, i.parts(ctx.FocusedID == node.ID).render(node.BorderRect.W, policy))
 }

@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 const (
 	EnvDaemonURL                 = "SWOBU_DAEMON_URL"
@@ -19,10 +22,10 @@ const (
 )
 
 func EnvTruthy(value string) bool {
-	switch strings.TrimSpace(strings.ToLower(value)) { // trimlowerlint:allow boundary canonicalization
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	normalized := strings.TrimSpace(strings.ToLower(value)) // swobu:io-string source=boundary
+	return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+}
+
+func ReadEnvTrim(key string) string {
+	return strings.TrimSpace(os.Getenv(key)) // swobu:io-string source=boundary
 }

@@ -18,9 +18,9 @@ func TestCreateDraftModelBinding_LoadCatalogUsesCreateAction(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}
-	load, ok := actions[0].(state.LoadRoutingModelCatalogRequested)
+	load, ok := actions[0].(state.LoadRoutingModelCatalogRequestedAction)
 	if !ok {
-		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequested", actions[0])
+		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequestedAction", actions[0])
 	}
 	if load.Scope != state.RoutingModelCatalogScopeCreateDraft {
 		t.Fatalf("scope=%q want %q", load.Scope, state.RoutingModelCatalogScopeCreateDraft)
@@ -42,9 +42,9 @@ func TestAddDraftModelBinding_LoadCatalogUsesAddDraftAction(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}
-	load, ok := actions[0].(state.LoadRoutingModelCatalogRequested)
+	load, ok := actions[0].(state.LoadRoutingModelCatalogRequestedAction)
 	if !ok {
-		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequested", actions[0])
+		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequestedAction", actions[0])
 	}
 	if load.Scope != state.RoutingModelCatalogScopeAddModelDraft {
 		t.Fatalf("scope=%q want %q", load.Scope, state.RoutingModelCatalogScopeAddModelDraft)
@@ -103,5 +103,56 @@ func TestProviderModelCatalogLoadBlocked_ChatGPTLoginGate(t *testing.T) {
 	}
 	if got := providerModelCatalogBlockedMessage("chatgpt", "", ""); got != "" {
 		t.Fatalf("blocked message=%q", got)
+	}
+}
+
+func TestProviderModelCatalogAuthFailed_RecognizesCredentialAndUnauthorizedErrors(t *testing.T) {
+	t.Parallel()
+
+	if !providerModelCatalogAuthFailed("BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK") {
+		t.Fatal("expected credential error to be classified as auth failure")
+	}
+	if !providerModelCatalogAuthFailed("401 Unauthorized") {
+		t.Fatal("expected unauthorized error to be classified as auth failure")
+	}
+	if providerModelCatalogAuthFailed("model catalog request timed out") {
+		t.Fatal("did not expect timeout error to be classified as auth failure")
+	}
+}
+
+func TestProviderModelCatalogAuthFailureMessage_OnlyPresentForAuthErrors(t *testing.T) {
+	t.Parallel()
+
+	errText := "BAD_ENDPOINT: credential reference could not be resolved"
+	if got := providerModelCatalogAuthFailureMessage(errText); got != errText {
+		t.Fatalf("auth failure message=%q want passthrough error %q", got, errText)
+	}
+	if got := providerModelCatalogAuthFailureMessage("request timed out"); got != "" {
+		t.Fatalf("auth failure message=%q want empty for non-auth errors", got)
+	}
+}
+
+func TestDraftModelBlockedMessage_AuthFailureUsesRawProbeError(t *testing.T) {
+	t.Parallel()
+
+	draft := state.ProviderConfigSnapshot{
+		ProviderSpec: "bedrock",
+		BaseURL:      "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+	}
+	errText := "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK"
+	got, ok := draftModelBlockedMessage(
+		draft.ProviderSpec,
+		draft.BaseURL,
+		"env:AWS_BEARER_TOKEN_BEDROCK",
+		errText,
+		true,
+		false,
+		draft,
+	)
+	if !ok {
+		t.Fatal("expected blocked message for auth failure")
+	}
+	if got != errText {
+		t.Fatalf("blocked message=%q want raw probe error %q", got, errText)
 	}
 }

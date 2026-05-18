@@ -1,0 +1,48 @@
+package state
+
+import stateIntent "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/intent"
+
+const (
+	RoutingModelCatalogScopeCreateDraft   = stateIntent.RoutingModelCatalogScopeCreateDraft
+	RoutingModelCatalogScopeAddModelDraft = stateIntent.RoutingModelCatalogScopeAddModelDraft
+)
+
+type SelectEndpoint = stateIntent.SelectEndpoint
+type CreateEndpoint = stateIntent.CreateEndpoint
+type SetCreateDraftName = stateIntent.SetCreateDraftName
+type SetCreateDraftProviderSpec = stateIntent.SetCreateDraftProviderSpec
+type SetCreateDraftModelIDAction = stateIntent.SetCreateDraftModelIDAction
+type SetCreateDraftCredentialRef = stateIntent.SetCreateDraftCredentialRef
+type SetCreateDraftBaseURL = stateIntent.SetCreateDraftBaseURL
+type SetCreateDraftTargetAlias = stateIntent.SetCreateDraftTargetAlias
+type SetCreateDraftSelectedFrame = stateIntent.SetCreateDraftSelectedFrame
+type RenameCurrentEndpoint = stateIntent.RenameCurrentEndpoint
+type ToggleStream = stateIntent.ToggleStream
+type SetInteractionMode = stateIntent.SetInteractionMode
+type SetFocusedRowAffordance = stateIntent.SetFocusedRowAffordance
+type FocusNextAfterRebuildRequested = stateIntent.FocusNextAfterRebuildRequested
+type WorkspaceCreateRequested = stateIntent.WorkspaceCreateRequested
+type WorkspaceRenameRequested = stateIntent.WorkspaceRenameRequested
+type WorkspaceDeleteRequested = stateIntent.WorkspaceDeleteRequested
+type RoutingSaveStartedAction = stateIntent.RoutingSaveStartedAction
+type ClientAccessCheckStarted = stateIntent.ClientAccessCheckStarted
+type EndpointCopyRequested = stateIntent.EndpointCopyRequested
+type AuthSessionURLCopyRequested = stateIntent.AuthSessionURLCopyRequested
+type AuthSessionURLCopyScopedRequested = stateIntent.AuthSessionURLCopyScopedRequested
+type ClientBaseURLCopyRequestedAction = stateIntent.ClientBaseURLCopyRequestedAction
+type ClientLaunchRequestedAction = stateIntent.ClientLaunchRequestedAction
+type RefreshStatusProjectionRequested = stateIntent.RefreshStatusProjectionRequested
+type SetHelpTabOpenAction = stateIntent.SetHelpTabOpenAction
+type OpenSupportLinkRequested = stateIntent.OpenSupportLinkRequested
+type HelpDiagnosticsCopyRequested = stateIntent.HelpDiagnosticsCopyRequested
+type CompatibilityRestartRequested = stateIntent.CompatibilityRestartRequested
+type CompatibilityDiagnosticsCopyRequested = stateIntent.CompatibilityDiagnosticsCopyRequested
+type SaveSelectedTargetRequested = stateIntent.SaveSelectedTargetRequested
+type SaveProviderConfigRequested = stateIntent.SaveProviderConfigRequested
+type AddProviderConfigRequested = stateIntent.AddProviderConfigRequested
+type DeleteProviderConfigRequested = stateIntent.DeleteProviderConfigRequested
+type StoreKeychainCredentialRequested = stateIntent.StoreKeychainCredentialRequested
+type StartProviderAuthSessionRequested = stateIntent.StartProviderAuthSessionRequested
+type ResetAuthSessionUIRequestedAction = stateIntent.ResetAuthSessionUIRequestedAction
+type ResetAddModelAuthUIRequested = stateIntent.ResetAddModelAuthUIRequested
+type LoadRoutingModelCatalogRequestedAction = stateIntent.LoadRoutingModelCatalogRequestedAction

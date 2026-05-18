@@ -16,6 +16,9 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("anthropic") {
 		t.Fatal("anthropic provider spec should be supported")
 	}
+	if !SupportsSpec("bedrock") {
+		t.Fatal("bedrock provider spec should be supported")
+	}
 }
 
 func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
@@ -42,6 +45,9 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if !RequiresCredential("openai_compatible", "https://lab.example/v1") {
 		t.Fatal("remote OpenAI-compatible URL should require credential")
 	}
+	if RequiresCredential("bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1") {
+		t.Fatal("bedrock should default to AWS profile mode without credential_ref requirement")
+	}
 
 	chatgptVariants := SupportedAuthVariantsForSpec("chatgpt")
 	if len(chatgptVariants) < 2 {
@@ -57,6 +63,17 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if modes[0].ID != AuthModeInteractiveBrowser || !modes[0].Interactive {
 		t.Fatalf("chatgpt mode[0]=%+v", modes[0])
+	}
+
+	bedrockModes := AllowedAuthModesForSpec("bedrock")
+	if len(bedrockModes) != 2 {
+		t.Fatalf("bedrock allowed auth modes=%v want exactly 2", bedrockModes)
+	}
+	if bedrockModes[0].ID != AuthModeAWSProfile || bedrockModes[0].Variant != AuthVariantAWSProfile {
+		t.Fatalf("bedrock mode[0]=%+v", bedrockModes[0])
+	}
+	if bedrockModes[1].ID != AuthModeTokenEnv || bedrockModes[1].Variant != AuthVariantEnv {
+		t.Fatalf("bedrock mode[1]=%+v", bedrockModes[1])
 	}
 }
 

@@ -2,7 +2,6 @@
 package routing
 
 import (
-	"os"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
@@ -16,6 +15,7 @@ import (
 )
 
 // BuildSection is the top-level routing section builder.
+// Model-creation row grammar is documented in model_creation_flow.md.
 // It routes to create or workspace variants based on whether an endpoint is selected.
 func BuildSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
@@ -46,25 +46,29 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 	runOn := buildCreateRunOnRow(ctx, provider, runPickerOpen, setRunPickerOpen, pickerState, setPickerState)
 	rows := []retained.ViewSpec[state.Model]{retained.Named[state.Model]("run_on", runOn)}
 
-	useKeyFrom := buildCreateUseKeyFromRow(provider, credSummary, baseURL, cred, keyPickerState, setKeyPickerState)
-	rows = append(rows, retained.Named[state.Model]("use_key_from", useKeyFrom))
+	flow := state.EvaluateCreateDraftRouteSetup(model.CreateDraftProviderConfig)
+	if flow.CredentialVisible {
+		useKeyFrom := buildCreateUseKeyFromRow(provider, credSummary, baseURL, cred, keyPickerState, setKeyPickerState)
+		rows = append(rows, retained.Named[state.Model]("use_key_from", useKeyFrom))
+	}
+	if flow.ScopeVisible {
+		rows = append(rows, retained.Named[state.Model]("scope", providerScopeRow(providerScopeRowSpec{
+			ProviderConfig: &model.CreateDraftProviderConfig,
+			CreateMode:     true,
+		})))
+	}
+	rows = appendCreateCredentialRows(rows, provider, cred)
+	// Dependency actions (for example auth start/continue) must render before
+	// model so operators see and satisfy prerequisites in-order.
 	rows = append(rows, buildCreateInteractiveAuthRows(model)...)
-	rows = append(rows, retained.Named[state.Model]("frame", providerFrameChoiceRow(providerFrameChoiceRowSpec{
+	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState)
+	rows = append(rows, retained.Named[state.Model]("model", modelRow))
+	rows = append(rows, retained.Named[state.Model]("delivery", providerFrameChoiceRow(providerFrameChoiceRowSpec{
 		ProviderConfig: &model.CreateDraftProviderConfig,
 		CreateMode:     true,
 	})))
 
-	rows = appendCreateCredentialRows(rows, provider, cred)
-	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState)
-	rows = append(rows, retained.Named[state.Model]("model", modelRow))
-
-	summary := firstRunRunOnSummary(provider)
-	if provider != "" {
-		summary = providerDisplayName(provider) + " · " + selectors.EmptyOr(credSummary, "not set")
-		if modelID != "" {
-			summary += " · " + modelID
-		}
-	}
+	summary := createSectionSummary(provider, modelID, credSummary)
 	return retained.Named[state.Model](
 		"routing-create",
 		views.NewCollapsibleSection(
@@ -108,25 +112,30 @@ func buildCreateRunOnRow(
 	options := state.ProviderOptions()
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
-		specChoice := strings.TrimSpace(option.Spec) // trimlowerlint:allow boundary canonicalization
+		specChoice := strings.TrimSpace(option.Spec) // swobu:io-string source=boundary
 		if specChoice == "" {
 			continue
 		}
-		label := strings.TrimSpace(providerDisplayName(specChoice)) // trimlowerlint:allow boundary canonicalization
+		label := strings.TrimSpace(providerDisplayName(specChoice)) // swobu:io-string source=boundary
 		if label == "" || strings.EqualFold(label, "Provider") {
-			label = selectors.EmptyOr(strings.TrimSpace(option.Label), specChoice) // trimlowerlint:allow boundary canonicalization
+			label = selectors.EmptyOr(strings.TrimSpace(option.Label), specChoice) // swobu:io-string source=boundary
 		}
 		items = append(items, views.FilterablePickerItem{
 			Label:  label,
 			Search: specChoice + " " + label,
 			OnChoose: func() []update.Action {
 				setRunPickerOpen(false)
-				nextBaseURL := strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(specChoice)) // trimlowerlint:allow boundary canonicalization
+				nextBaseURL := strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(specChoice)) // swobu:io-string source=boundary
+				if strings.EqualFold(specChoice, "bedrock") && nextBaseURL == "" {
+					if region := strings.TrimSpace(bedrockRegionFromEnv()); region != "" { // swobu:io-string source=boundary
+						nextBaseURL = bedrockBaseURLForRegion(region)
+					}
+				}
 				return []update.Action{
 					state.SetCreateDraftProviderSpec{ProviderSpec: specChoice},
 					state.SetCreateDraftCredentialRef{CredentialRef: ""},
-					state.SetCreateDraftModelID{ModelID: ""},
-					state.LoadRoutingModelCatalogRequested{
+					state.SetCreateDraftModelIDAction{ModelID: ""},
+					state.LoadRoutingModelCatalogRequestedAction{
 						Scope:         state.RoutingModelCatalogScopeCreateDraft,
 						ProviderSpec:  specChoice,
 						BaseURL:       nextBaseURL,
@@ -165,7 +174,7 @@ func buildCreateUseKeyFromRow(
 	if provider == "" {
 		return views.RowChoiceWithHooks(views.RowUseKeyFrom, credSummary, func() []update.Action { return nil }, nil, views.FocusAffordance("choose", false))
 	}
-	if !providerCredentialSelectionRequired(provider, baseURL, credentialRef) {
+	if !state.CreateDraftCredentialStrategySelectable(provider) {
 		return views.RowStatic(views.RowUseKeyFrom, credSummary)
 	}
 	useKeyFrom := views.RowChoiceWithHooks(views.RowUseKeyFrom, credSummary, func() []update.Action {
@@ -175,26 +184,26 @@ func buildCreateUseKeyFromRow(
 		setKeyPickerState("source-open")
 		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
 	}, nil, views.FocusAffordance("choose", false))
-	if strings.TrimSpace(keyPickerState) != "source-open" { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(keyPickerState) != "source-open" { // swobu:io-string source=boundary
 		return useKeyFrom
 	}
 	options := credentialOptionRows(credentialSource(credentialRef), func(choice string) []update.Action {
 		actions := applyProviderCredentialSelection(choice, provider, nil, "", true)
 		nextRef := createDraftCredentialRefFromActions(actions)
 		setKeyPickerState("")
-		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // trimlowerlint:allow boundary canonicalization
+		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
 		if providercatalog.IsInteractiveAuthVariant(variant) {
 			draft := createDraftAuthProviderConfig(provider, baseURL, nextRef)
 			if variant == providercatalog.AuthVariantChatGPTLogin {
-				actions = append(actions, state.ResetAuthSessionUIRequested{})
+				actions = append(actions, state.ResetAuthSessionUIRequestedAction{})
 			}
 			if variant == providercatalog.AuthVariantChatGPTDeviceAuth {
 				actions = append(actions, startAuthActionsForCreateDraft(draft)...)
 			}
 		}
 		actions = append(actions,
-			state.SetCreateDraftModelID{ModelID: ""},
-			state.LoadRoutingModelCatalogRequested{
+			state.SetCreateDraftModelIDAction{ModelID: ""},
+			state.LoadRoutingModelCatalogRequestedAction{
 				Scope:         state.RoutingModelCatalogScopeCreateDraft,
 				ProviderSpec:  provider,
 				BaseURL:       baseURL,
@@ -215,16 +224,16 @@ func buildCreateUseKeyFromRow(
 }
 
 func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state.Model] {
-	provider := strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec)                  // trimlowerlint:allow boundary canonicalization
-	source := strings.TrimSpace(credentialSource(model.CreateDraftProviderConfig.CredentialRef)) // trimlowerlint:allow boundary canonicalization
-	variant := providercatalog.AuthVariant(strings.ToLower(source))                              // trimlowerlint:allow boundary canonicalization
+	provider := model.CreateDraftProviderConfig.ProviderSpec
+	source := credentialSource(model.CreateDraftProviderConfig.CredentialRef)
+	variant := providercatalog.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
 	if !providercatalog.SupportsAuthVariant(provider, variant) || !providercatalog.IsInteractiveAuthVariant(variant) {
 		return nil
 	}
 	draft := createDraftAuthProviderConfig(
 		provider,
 		effectiveCreateDraftBaseURL(model, provider),
-		strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef), // trimlowerlint:allow boundary canonicalization
+		model.CreateDraftProviderConfig.CredentialRef,
 	)
 	return interactiveAuthStatusRows(model, interactiveAuthRenderConfig{
 		EndpointName: "",
@@ -237,7 +246,7 @@ func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state
 			next.CredentialRef = string(providercatalog.AuthVariantChatGPTDeviceAuth)
 			actions := []update.Action{
 				state.SetCreateDraftCredentialRef{CredentialRef: string(providercatalog.AuthVariantChatGPTDeviceAuth)},
-				state.ResetAuthSessionUIRequested{},
+				state.ResetAuthSessionUIRequestedAction{},
 			}
 			return append(actions, startAuthActionsForCreateDraft(next)...)
 		},
@@ -247,9 +256,9 @@ func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state
 func createDraftAuthProviderConfig(provider, baseURL, credentialRef string) state.ProviderConfigSnapshot {
 	return state.ProviderConfigSnapshot{
 		Ref:           "create-draft",
-		ProviderSpec:  strings.TrimSpace(provider),      // trimlowerlint:allow boundary canonicalization
-		BaseURL:       strings.TrimSpace(baseURL),       // trimlowerlint:allow boundary canonicalization
-		CredentialRef: strings.TrimSpace(credentialRef), // trimlowerlint:allow boundary canonicalization // trimlowerlint:allow boundary canonicalization
+		ProviderSpec:  strings.TrimSpace(provider),      // swobu:io-string source=boundary
+		BaseURL:       strings.TrimSpace(baseURL),       // swobu:io-string source=boundary
+		CredentialRef: strings.TrimSpace(credentialRef), // swobu:io-string source=boundary // swobu:io-string source=boundary
 	}
 }
 
@@ -260,13 +269,7 @@ func appendCreateCredentialRows(rows []retained.ViewSpec[state.Model], provider 
 	if isResolvedInteractiveCredential(provider, credentialRef) {
 		return rows
 	}
-	credSource := credentialSource(credentialRef)
-	if strings.EqualFold(credSource, "env") {
-		rows = append(rows, retained.Named[state.Model]("env-key", providerEnvKeyRow(providerEnvKeyRowSpec{CreateMode: true})))
-	}
-	if strings.EqualFold(credSource, "file") {
-		rows = append(rows, retained.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{CreateMode: true})))
-	}
+	rows = append(rows, authModeRendererForCredentialRef(credentialRef).RenderCreateExtras(provider, credentialRef)...)
 	return rows
 }
 
@@ -315,151 +318,4 @@ func workspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec[stat
 		retained.Named[state.Model]("run_on", retained.Build[state.Model](BuildRunOnWorkspaceRow)),
 		retained.Named[state.Model]("providers", retained.Build[state.Model](BuildProvidersWorkspacePanel)),
 	)
-}
-
-func firstRunProviderChoiceRow(label string, onActivate func() []update.Action) retained.ViewSpec[state.Model] {
-	return toolkitviews.ListItemRow[state.Model](
-		toolkitviews.InsetLabel(strings.TrimSpace(label), 4), // trimlowerlint:allow boundary canonicalization
-		false,
-		false,
-		false,
-		onActivate,
-		nil,
-	)
-}
-
-func firstRunRunOnSummary(provider string) string {
-	if strings.TrimSpace(provider) == "" { // trimlowerlint:allow boundary canonicalization
-		return "choose a provider"
-	}
-	return providerDisplayName(provider)
-}
-
-func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
-	if strings.TrimSpace(provider) == "" { // trimlowerlint:allow boundary canonicalization
-		return "missing"
-	}
-	resolvedRef := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
-	if isResolvedInteractiveCredential(provider, resolvedRef) {
-		return "signed in"
-	}
-	cred := credentialSource(resolvedRef)
-	if cred != "" {
-		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(cred))) // trimlowerlint:allow boundary canonicalization
-		if providercatalog.SupportsAuthVariant(provider, variant) {
-			return authVariantDisplayLabel(variant)
-		}
-		if strings.EqualFold(cred, "env") {
-			key := strings.TrimSpace(envCredentialKey(resolvedRef)) // trimlowerlint:allow boundary canonicalization
-			if key == "" {
-				key = strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(provider)) // trimlowerlint:allow boundary canonicalization
-			}
-			if key != "" {
-				if _, ok := os.LookupEnv(key); !ok {
-					return "env var missing"
-				}
-			}
-			return "env var"
-		}
-		if strings.EqualFold(cred, "file") {
-			path := strings.TrimSpace(credentialFilePath(resolvedRef)) // trimlowerlint:allow boundary canonicalization
-			if path == "" {
-				return "file missing"
-			}
-			if _, err := os.Stat(path); err != nil {
-				return "file missing"
-			}
-			return "file"
-		}
-		if strings.EqualFold(cred, "keychain") {
-			return "signed in"
-		}
-		return cred
-	}
-	if !providerCredentialSelectionRequired(provider, baseURL, "") {
-		return "not required"
-	}
-	return "missing"
-}
-
-func isResolvedInteractiveCredential(provider, credentialRef string) bool {
-	provider = strings.TrimSpace(provider)  // trimlowerlint:allow boundary canonicalization
-	ref := strings.TrimSpace(credentialRef) // trimlowerlint:allow boundary canonicalization
-	if provider == "" || ref == "" {
-		return false
-	}
-	hasInteractive := false
-	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(provider) {
-		if providercatalog.IsInteractiveAuthVariant(variant) {
-			hasInteractive = true
-			break
-		}
-	}
-	if !hasInteractive {
-		return false
-	}
-	source := strings.ToLower(strings.TrimSpace(credentialSource(ref))) // trimlowerlint:allow boundary canonicalization
-	if source == "" {
-		return false
-	}
-	if providercatalog.SupportsAuthVariant(provider, providercatalog.AuthVariant(source)) {
-		return false
-	}
-	return !providercatalog.SupportsAuthVariant(provider, providercatalog.AuthVariant(source))
-}
-
-func createDraftCredentialRefFromActions(actions []update.Action) string {
-	for _, action := range actions {
-		if set, ok := action.(state.SetCreateDraftCredentialRef); ok {
-			return strings.TrimSpace(set.CredentialRef) // trimlowerlint:allow boundary canonicalization
-		}
-	}
-	return ""
-}
-
-func savedRoutingSummary(provider state.ProviderConfigSnapshot) string {
-	spec := providerDisplayName(provider.ProviderSpec)
-	cred := strings.TrimSpace(provider.CredentialRef) // trimlowerlint:allow boundary canonicalization
-	if cred == "" {
-		cred = defaultCreateDraftCredentialRef(provider.ProviderSpec)
-	}
-	modelID := providerConfigSummary(provider)
-	if modelID == "" && cred == "" {
-		return spec
-	}
-	if modelID == "" {
-		return spec + " · " + cred
-	}
-	if cred == "" {
-		return spec + " · " + modelID
-	}
-	return spec + " · " + cred + " · " + modelID
-}
-
-func workspaceRoutingSummary(provider state.ProviderConfigSnapshot) string {
-	spec := providerDisplayName(provider.ProviderSpec)
-	modelID := strings.TrimSpace(provider.ModelID) // trimlowerlint:allow boundary canonicalization
-	if modelID == "" {
-		return spec + " · models"
-	}
-	return spec + " · " + modelID + " · models"
-}
-
-func defaultCreateDraftCredentialRef(provider string) string {
-	spec := strings.TrimSpace(strings.ToLower(provider)) // trimlowerlint:allow boundary canonicalization
-	if spec == "" {
-		return ""
-	}
-	if !providercatalog.RequiresCredential(spec, providercatalog.DefaultExecuteBaseURL(spec)) {
-		return ""
-	}
-	return "env"
-}
-
-func effectiveCreateDraftBaseURL(model state.Model, provider string) string {
-	baseURL := model.CreateDraftProviderConfig.BaseURL
-	if baseURL != "" {
-		return baseURL
-	}
-	return strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(provider)) // trimlowerlint:allow boundary canonicalization
 }

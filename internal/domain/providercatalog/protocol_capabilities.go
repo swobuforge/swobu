@@ -10,7 +10,8 @@ func SupportedExecutionProtocolsForSpec(spec string) []protocolkind.ProtocolKind
 	if !SupportsSpec(spec) {
 		return nil
 	}
-	switch strings.TrimSpace(strings.ToLower(spec)) { // trimlowerlint:allow domain canonicalization
+	normalizedSpec := strings.TrimSpace(strings.ToLower(spec)) // swobu:io-string source=provider-config
+	switch normalizedSpec {
 	case "anthropic":
 		return []protocolkind.ProtocolKind{protocolkind.Messages}
 	case "chatgpt":

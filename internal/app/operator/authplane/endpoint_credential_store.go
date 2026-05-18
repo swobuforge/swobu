@@ -16,29 +16,29 @@ const subjectRefPrefix = "subject:"
 // EncodeEndpointCredentialLocator returns the canonical endpoint locator used by
 // authplane persistence: <endpoint-name>#<provider-config-ref>.
 func EncodeEndpointCredentialLocator(endpointName string, providerRef string) string {
-	return strings.TrimSpace(endpointName) + endpointRefDelimiter + strings.TrimSpace(providerRef) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(endpointName) + endpointRefDelimiter + strings.TrimSpace(providerRef) // swobu:io-string source=boundary
 }
 
-// EndpointCredentialRefStore persists resolved credential refs into endpoint
+// EndpointCredentialStore persists resolved credential refs into endpoint
 // intent provider configs.
-type EndpointCredentialRefStore struct {
+type EndpointCredentialStore struct {
 	endpoints operatorendpoints.OperatorEndpointStore
 }
 
-func NewEndpointCredentialRefStore(endpoints operatorendpoints.OperatorEndpointStore) EndpointCredentialRefStore {
-	return EndpointCredentialRefStore{endpoints: endpoints}
+func NewEndpointCredentialStore(endpoints operatorendpoints.OperatorEndpointStore) EndpointCredentialStore {
+	return EndpointCredentialStore{endpoints: endpoints}
 }
 
-func (s EndpointCredentialRefStore) UpsertCredentialRef(ctx context.Context, providerSpec string, endpointRef string, credentialRef string) (string, error) {
+func (s EndpointCredentialStore) UpsertCredentialRef(ctx context.Context, providerSpec string, endpointRef string, credentialRef string) (string, error) {
 	slog.Debug("auth credential upsert requested",
 		"component", "authplane",
-		"provider_spec", strings.TrimSpace(strings.ToLower(providerSpec)), // trimlowerlint:allow boundary canonicalization
+		"provider_spec", strings.TrimSpace(strings.ToLower(providerSpec)), // swobu:io-string source=boundary
 		"endpoint_ref_kind", endpointRefKind(endpointRef),
 	)
 	if isTransientSubjectLocator(endpointRef) {
 		// Draft-scoped auth subjects are pre-create and intentionally do not
 		// mutate endpoint intent yet. The caller materializes this ref on create.
-		return strings.TrimSpace(credentialRef), nil // trimlowerlint:allow boundary canonicalization
+		return strings.TrimSpace(credentialRef), nil // swobu:io-string source=boundary
 	}
 	endpointNameRaw, providerRefRaw, err := decodeEndpointCredentialLocator(endpointRef)
 	if err != nil {
@@ -101,7 +101,7 @@ func (s EndpointCredentialRefStore) UpsertCredentialRef(ctx context.Context, pro
 		"endpoint_name", endpointName.String(),
 		"provider_ref", providerRef.String(),
 	)
-	return strings.TrimSpace(credentialRef), nil // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(credentialRef), nil // swobu:io-string source=boundary
 }
 
 func endpointRefKind(raw string) string {
@@ -112,11 +112,11 @@ func endpointRefKind(raw string) string {
 }
 
 func isTransientSubjectLocator(raw string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), subjectRefPrefix) // trimlowerlint:allow boundary canonicalization
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), subjectRefPrefix) // swobu:io-string source=boundary
 }
 
 func decodeEndpointCredentialLocator(raw string) (endpointName string, providerRef string, err error) {
-	locator := strings.TrimSpace(raw) // trimlowerlint:allow boundary canonicalization
+	locator := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	if locator == "" {
 		return "", "", fmt.Errorf("endpoint ref is required")
 	}
@@ -124,8 +124,8 @@ func decodeEndpointCredentialLocator(raw string) (endpointName string, providerR
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("endpoint ref must use %q separator", endpointRefDelimiter)
 	}
-	endpointName = strings.TrimSpace(parts[0]) // trimlowerlint:allow boundary canonicalization
-	providerRef = strings.TrimSpace(parts[1])  // trimlowerlint:allow boundary canonicalization
+	endpointName = strings.TrimSpace(parts[0]) // swobu:io-string source=boundary
+	providerRef = strings.TrimSpace(parts[1])  // swobu:io-string source=boundary
 	if endpointName == "" || providerRef == "" {
 		return "", "", fmt.Errorf("endpoint ref must include endpoint name and provider ref")
 	}
@@ -133,15 +133,15 @@ func decodeEndpointCredentialLocator(raw string) (endpointName string, providerR
 }
 
 func cloneProviderConfigWithCredentialRef(cfg endpointintent.ProviderConfig, providerSpec string, credentialRef string) (endpointintent.ProviderConfig, error) {
-	currentSpec := strings.TrimSpace(cfg.ProviderSpec().String())                                                     // trimlowerlint:allow boundary canonicalization
-	if spec := strings.TrimSpace(strings.ToLower(providerSpec)); spec != "" && spec != strings.ToLower(currentSpec) { // trimlowerlint:allow boundary canonicalization
+	currentSpec := strings.TrimSpace(cfg.ProviderSpec().String())                                                     // swobu:io-string source=boundary
+	if spec := strings.TrimSpace(strings.ToLower(providerSpec)); spec != "" && spec != strings.ToLower(currentSpec) { // swobu:io-string source=boundary
 		return endpointintent.ProviderConfig{}, fmt.Errorf("provider spec mismatch for credential persistence")
 	}
 	next, err := endpointintent.NewProviderConfig(
 		cfg.Ref(),
 		cfg.ProviderSpec(),
 		cfg.BaseURL(),
-		strings.TrimSpace(credentialRef), // trimlowerlint:allow boundary canonicalization
+		strings.TrimSpace(credentialRef), // swobu:io-string source=boundary
 	)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err

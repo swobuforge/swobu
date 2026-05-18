@@ -6,27 +6,27 @@ SWOBU 🧌                                                                      
      delete workspace                                                                               delete ↵
 
   routing ▾
-     run on             ollama:gemma4:e4b:e3b0c442                                                  choose ↵
+     provider           ollama:gemma4:e4b:e3b0c442                                                  choose ↵
      models             1 configured                                                                manage ↵
-       model    ollama:gemma4:e4b:e3b0c442                                                          edit ↵
+       model    ollama:gemma4:e4b:e3b0c442                                                          close ↵
+         provider           Ollama
+         credential         missing                                                                 choose ↵
+            -> authentication needed - choose a credential ref
+            to save
+         model              gemma4:e4b                                                              choose ↵
+         delivery           non-streaming                                                           next ↵
+         alias              not set                                                                 edit ↵
+         delete model       disabled (last model)
        add model                                                                                    close ↵
          provider           OpenAI                                                                  change ↵
-         auth               env var missing                                                         change ↵
-         delivery           streaming (SSE) (default)                                               next ↵
+         credential         env var missing                                                         change ↵
     >    env key            OPENAI_API_KEY                                                          edit ↵
          expected           OPENAI_API_KEY
          model              not selected                                                            choose ↵
+         delivery           auto                                                                    next ↵
 
   clients ▸
     not set
-
-  traffic ▸
-    no traffic yet
-
-
-
-
-
 
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ act   esc close   ? help

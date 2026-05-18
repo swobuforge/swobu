@@ -43,13 +43,13 @@ func applyWorkspaceCreate(model *Model, name string) {
 }
 
 func applyWorkspaceDelete(model *Model, name string) {
-	name = strings.TrimSpace(name) // trimlowerlint:allow boundary canonicalization
+	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
 		return
 	}
 	filteredEndpoints := make([]string, 0, len(model.Endpoints))
 	for _, endpoint := range model.Endpoints {
-		if strings.TrimSpace(endpoint) == name { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(endpoint) == name { // swobu:io-string source=boundary
 			continue
 		}
 		filteredEndpoints = append(filteredEndpoints, endpoint)
@@ -58,7 +58,7 @@ func applyWorkspaceDelete(model *Model, name string) {
 
 	filteredCatalog := make([]CatalogEntry, 0, len(model.Catalog))
 	for _, entry := range model.Catalog {
-		if strings.TrimSpace(entry.EndpointName) == name { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(entry.EndpointName) == name { // swobu:io-string source=boundary
 			continue
 		}
 		filteredCatalog = append(filteredCatalog, entry)
@@ -67,14 +67,14 @@ func applyWorkspaceDelete(model *Model, name string) {
 
 	filteredSnapshots := make([]EndpointSnapshot, 0, len(model.EndpointSnapshots))
 	for _, snapshot := range model.EndpointSnapshots {
-		if strings.TrimSpace(snapshot.Name) == name { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(snapshot.Name) == name { // swobu:io-string source=boundary
 			continue
 		}
 		filteredSnapshots = append(filteredSnapshots, snapshot)
 	}
 	model.EndpointSnapshots = filteredSnapshots
 
-	if strings.TrimSpace(model.CurrentEndpoint) == name { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(model.CurrentEndpoint) == name { // swobu:io-string source=boundary
 		model.CurrentEndpoint = firstOrEmpty(model.Endpoints)
 	}
 }
@@ -114,7 +114,7 @@ func endpointNames(entries []CatalogEntry) []string {
 	names := make([]string, 0, len(entries))
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
-		name := strings.TrimSpace(entry.EndpointName) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(entry.EndpointName) // swobu:io-string source=boundary
 		if name == "" {
 			continue
 		}
@@ -132,7 +132,7 @@ func endpointSnapshotNames(entries []EndpointSnapshot) []string {
 	names := make([]string, 0, len(entries))
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
-		name := strings.TrimSpace(entry.Name) // trimlowerlint:allow boundary canonicalization
+		name := strings.TrimSpace(entry.Name) // swobu:io-string source=boundary
 		if name == "" {
 			continue
 		}

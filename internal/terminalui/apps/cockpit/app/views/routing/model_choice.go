@@ -40,7 +40,7 @@ func providerModelCatalogChoicesAvailable(w providerModelChoiceRowSpec) bool {
 	if w.CreateMode || w.ProviderConfig == nil {
 		return false
 	}
-	spec := strings.TrimSpace(w.ProviderConfig.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+	spec := strings.TrimSpace(w.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
 	if strings.EqualFold(spec, "openai_compatible") {
 		return false
 	}
@@ -72,11 +72,11 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		actions := []update.Action{state.SetInteractionMode{Mode: mode}}
 		if nextOpen {
 			pc := *w.ProviderConfig
-			actions = append(actions, state.LoadRoutingModelCatalogRequested{
+			actions = append(actions, state.LoadRoutingModelCatalogRequestedAction{
 				Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-				ProviderSpec:  strings.TrimSpace(pc.ProviderSpec),  // trimlowerlint:allow boundary canonicalization
-				BaseURL:       strings.TrimSpace(pc.BaseURL),       // trimlowerlint:allow boundary canonicalization
-				CredentialRef: strings.TrimSpace(pc.CredentialRef), // trimlowerlint:allow boundary canonicalization // trimlowerlint:allow boundary canonicalization
+				ProviderSpec:  strings.TrimSpace(pc.ProviderSpec),  // swobu:io-string source=boundary
+				BaseURL:       strings.TrimSpace(pc.BaseURL),       // swobu:io-string source=boundary
+				CredentialRef: strings.TrimSpace(pc.CredentialRef), // swobu:io-string source=boundary // swobu:io-string source=boundary
 			})
 			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("provider-model-option", 0)})
 		}
@@ -115,10 +115,11 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 			},
 		})
 	}
-	if strings.TrimSpace(model.AddModelDraftModelError) != "" || len(options) == 0 { // trimlowerlint:allow boundary canonicalization
-		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(strings.TrimSpace(selectedModelID(model, w.ProviderConfig, w.CreateMode)), "not set"), strings.TrimSpace(selectedModelID(model, w.ProviderConfig, w.CreateMode)), "model id", func(value string) []update.Action { // trimlowerlint:allow boundary canonicalization
+	if model.AddModelDraftModelError != "" || len(options) == 0 {
+		current := selectedModelID(model, w.ProviderConfig, w.CreateMode)
+		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(current, "not set"), current, "model id", func(value string) []update.Action {
 			setOpen(false)
-			actions := applyProviderModelSelection(strings.TrimSpace(value), w.ProviderConfig, w.EndpointName, w.CreateMode) // trimlowerlint:allow boundary canonicalization
+			actions := applyProviderModelSelection(value, w.ProviderConfig, w.EndpointName, w.CreateMode)
 			actions = append(actions, []update.Action{
 				state.SetInteractionMode{Mode: closeMode},
 				interaction.FocusKeyAction{Key: "model"},
@@ -133,7 +134,7 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		Options:   options,
 		OnChooseRawID: func(rawID string) []update.Action {
 			setOpen(false)
-			actions := applyProviderModelSelection(strings.TrimSpace(rawID), w.ProviderConfig, w.EndpointName, w.CreateMode) // trimlowerlint:allow boundary canonicalization
+			actions := applyProviderModelSelection(rawID, w.ProviderConfig, w.EndpointName, w.CreateMode)
 			actions = append(actions, []update.Action{
 				state.SetInteractionMode{Mode: closeMode},
 				interaction.FocusKeyAction{Key: "model"},
@@ -172,29 +173,29 @@ func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.
 	if providerConfig == nil {
 		return false
 	}
-	if strings.TrimSpace(model.AddModelDraftProviderSpec) != strings.TrimSpace(providerConfig.ProviderSpec) { // trimlowerlint:allow boundary canonicalization
+	if model.AddModelDraftProviderSpec != providerConfig.ProviderSpec {
 		return false
 	}
-	if strings.TrimSpace(model.AddModelDraftBaseURL) != strings.TrimSpace(providerConfig.BaseURL) { // trimlowerlint:allow boundary canonicalization
+	if model.AddModelDraftBaseURL != providerConfig.BaseURL {
 		return false
 	}
-	if strings.TrimSpace(model.AddModelDraftCredentialRef) != strings.TrimSpace(providerConfig.CredentialRef) { // trimlowerlint:allow boundary canonicalization
+	if model.AddModelDraftCredentialRef != providerConfig.CredentialRef {
 		return false
 	}
 	return true
 }
 
 func applyProviderModelSelection(modelID string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	modelID = strings.TrimSpace(modelID) // trimlowerlint:allow boundary canonicalization
+	modelID = strings.TrimSpace(modelID) // swobu:io-string source=boundary
 	if createMode {
-		return []update.Action{state.SetCreateDraftModelID{ModelID: modelID}}
+		return []update.Action{state.SetCreateDraftModelIDAction{ModelID: modelID}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // trimlowerlint:allow boundary canonicalization
+	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	next := *providerConfig
 	next.ModelID = modelID
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/model") // trimlowerlint:allow boundary canonicalization
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/model") // swobu:io-string source=boundary
 }
 
 func selectedModelID(model state.Model, providerConfig *state.ProviderConfigSnapshot, createMode bool) string {
@@ -202,7 +203,7 @@ func selectedModelID(model state.Model, providerConfig *state.ProviderConfigSnap
 	if pc == nil {
 		return ""
 	}
-	return strings.TrimSpace(pc.ModelID) // trimlowerlint:allow boundary canonicalization
+	return strings.TrimSpace(pc.ModelID) // swobu:io-string source=boundary
 }
 
 func selectedProvider(model state.Model, providerConfig *state.ProviderConfigSnapshot, createMode bool) *state.ProviderConfigSnapshot {

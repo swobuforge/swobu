@@ -1,3 +1,51 @@
 line 11
--                 openai:gpt-3.5-turbo:2310255c                                             edit ↵
-+        model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
+-        model    openai:gpt-3.5-turbo:2310255c                                             edit ↵
++        model    openai:gpt-3.5-turbo:2310255c                                             close ↵
+line 12
+-        add model                                                                          close ↵
++          provider          OpenAI
+line 13
+-          provider          ChatGPT                                                        change ↵
++          credential        env                                                            choose ↵
+line 14
+-          credential        device code                                                    change ↵
++            env var   selected
+line 15
+-          delivery          auto                                                           next ↵
++            file
+line 16
+- 
++          model             gpt-3.5-turbo                                                  choose ↵
+line 17
+- > clients ▸
++          delivery          non-streaming                                                  next ↵
+line 18
+-     not set
++          alias             not set                                                        edit ↵
+line 19
+- 
++          env key           OPENAI_API_KEY                                                 edit ↵
+line 20
+-   traffic ▸
++          delete model      disabled (last model)
+line 21
+-     no traffic yet
++        add model                                                                          close ↵
+line 22
+- 
++          provider          ChatGPT                                                        change ↵
+line 23
+- 
++          credential        browser login                                                  change ↵
+line 24
+- 
++          sign in           open default browser                                           open ↵
+line 25
+- 
++     >    fallback          use device code                                                switch ↵
+line 26
+- 
++          delivery          auto                                                           next ↵
+line 28
+- 
++   clients ▸

@@ -10,21 +10,21 @@ import (
 )
 
 // CredentialResolver composes credential source adapters behind one provider-facing seam.
-type CredentialResolver struct {
+type CredentialSourceResolverRegistry struct {
 	byKind map[credentialref.Kind]CredentialSourceResolver
 }
 
-func NewResolver() CredentialResolver {
-	return CredentialResolver{
+func NewResolver() CredentialSourceResolverRegistry {
+	return CredentialSourceResolverRegistry{
 		byKind: newSourceResolverRegistry(),
 	}
 }
 
-func (r CredentialResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
+func (r CredentialSourceResolverRegistry) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	ref := credentialref.Parse(credentialRef)
 	slog.Debug("credential resolve requested",
 		"component", "credentials",
-		"provider_spec", strings.TrimSpace(strings.ToLower(providerSpec)), // trimlowerlint:allow boundary canonicalization
+		"provider_spec", strings.TrimSpace(strings.ToLower(providerSpec)), // swobu:io-string source=boundary
 		"ref_kind", fmt.Sprintf("%v", ref.Kind()),
 	)
 	resolver, ok := r.byKind[ref.Kind()]

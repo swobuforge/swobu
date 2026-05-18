@@ -110,14 +110,14 @@ func createProviderSpecItems(model state.Model, onCancel func() []update.Action)
 	}
 	currentSpec := ""
 	if pc := selectors.CreateDraftProviderConfig(model); pc != nil {
-		currentSpec = strings.TrimSpace(pc.ProviderSpec) // trimlowerlint:allow boundary canonicalization
+		currentSpec = strings.TrimSpace(pc.ProviderSpec) // swobu:io-string source=boundary
 	}
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
-		spec := strings.TrimSpace(option.Spec) // trimlowerlint:allow boundary canonicalization
+		spec := strings.TrimSpace(option.Spec) // swobu:io-string source=boundary
 		label := providerDisplayName(spec)
-		if strings.TrimSpace(label) == "" || strings.EqualFold(label, "Provider") { // trimlowerlint:allow boundary canonicalization
-			label = selectors.EmptyOr(strings.TrimSpace(option.Label), spec) // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(label) == "" || strings.EqualFold(label, "Provider") { // swobu:io-string source=boundary
+			label = selectors.EmptyOr(strings.TrimSpace(option.Label), spec) // swobu:io-string source=boundary
 		}
 		choiceSpec := spec
 		items = append(items, views.FilterablePickerItem{
@@ -143,14 +143,24 @@ func createProviderPropertyRows(
 	model state.Model,
 ) []retained.ViewSpec[state.Model] {
 	rows := make([]retained.ViewSpec[state.Model], 0, 8)
-	rows = appendCanonicalProviderConfigRows(rows, "", canonicalProviderConfigRows{
+	rows = appendCanonicalProviderConfigLayout(rows, "", canonicalProviderConfigLayout{
 		Provider: providerSpecRow(providerConfig),
-		Frame: providerFrameChoiceRow(providerFrameChoiceRowSpec{
+		Credential: providerCredentialChoiceRow(providerCredentialChoiceRowSpec{
+			ProviderConfig: providerConfig,
+			EndpointName:   endpointName,
+			CreateMode:     createMode,
+		}),
+		Scope: providerScopeRow(providerScopeRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		}),
 		Model: providerModelChoiceRow(providerModelChoiceRowSpec{
+			ProviderConfig: providerConfig,
+			EndpointName:   endpointName,
+			CreateMode:     createMode,
+		}),
+		Delivery: providerFrameChoiceRow(providerFrameChoiceRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
@@ -161,18 +171,9 @@ func createProviderPropertyRows(
 		EndpointName:   endpointName,
 		CreateMode:     createMode,
 	})))
-	if providerConfig != nil {
-		if providerCredentialSelectionRequired(providerConfig.ProviderSpec, providerConfig.BaseURL, providerConfig.CredentialRef) {
-			rows = append(rows, retained.Named[state.Model]("credential", providerCredentialChoiceRow(providerCredentialChoiceRowSpec{
-				ProviderConfig: providerConfig,
-				EndpointName:   endpointName,
-				CreateMode:     createMode,
-			})))
-		}
-	}
 	if !createMode &&
 		providerConfig != nil &&
-		strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "chatgpt") && // trimlowerlint:allow boundary canonicalization
+		strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "chatgpt") && // swobu:io-string source=boundary
 		providerAuthSession(model, endpointName, providerConfig).URL != "" {
 		rows = append(rows, retained.Named[state.Model]("provider-login", providerLoginURLRow(endpointName, providerConfig)))
 	}
@@ -183,15 +184,15 @@ func createProviderPropertyRows(
 			CreateMode:     createMode,
 		})))
 	}
-	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "file") {
-		rows = append(rows, retained.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{
+	if providerConfig != nil && strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
+		rows = append(rows, retained.Named[state.Model]("profile", bedrockAuthProfileEditor(bedrockAuthProfileEditorSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		})))
 	}
-	if providerConfig != nil && strings.TrimSpace(providerConfig.ProviderSpec) == "openai_compatible" { // trimlowerlint:allow boundary canonicalization
-		rows = append(rows, retained.Named[state.Model]("backend-url", providerBackendURLRow(providerBackendURLRowSpec{
+	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "file") {
+		rows = append(rows, retained.Named[state.Model]("credential-file", providerCredentialFileBrowseRow(providerCredentialFileBrowseRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
@@ -205,6 +206,34 @@ func createProviderPropertyRows(
 	return rows
 }
 
+type providerScopeRowSpec struct {
+	ProviderConfig *state.ProviderConfigSnapshot
+	EndpointName   string
+	CreateMode     bool
+}
+
+func providerScopeRow(spec providerScopeRowSpec) retained.ViewSpec[state.Model] {
+	if spec.ProviderConfig == nil {
+		return nil
+	}
+	providerSpec := strings.TrimSpace(spec.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
+	if strings.EqualFold(providerSpec, "bedrock") {
+		return bedrockAuthRegionEditor(bedrockAuthRegionEditorSpec{
+			ProviderConfig: spec.ProviderConfig,
+			EndpointName:   spec.EndpointName,
+			CreateMode:     spec.CreateMode,
+		})
+	}
+	if strings.EqualFold(providerSpec, "openai_compatible") {
+		return providerBackendURLRow(providerBackendURLRowSpec{
+			ProviderConfig: spec.ProviderConfig,
+			EndpointName:   spec.EndpointName,
+			CreateMode:     spec.CreateMode,
+		})
+	}
+	return nil
+}
+
 func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConfigSnapshot) retained.ViewSpec[state.Model] {
 	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		if providerConfig == nil {
@@ -212,12 +241,12 @@ func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConf
 		}
 		model := ctx.Model()
 		auth := providerAuthSession(model, endpointName, providerConfig)
-		loginURL := strings.TrimSpace(auth.URL) // trimlowerlint:allow boundary canonicalization
+		loginURL := strings.TrimSpace(auth.URL) // swobu:io-string source=boundary
 		summary := "pending browser auth"
-		if s := strings.TrimSpace(auth.SessionState); s != "" { // trimlowerlint:allow boundary canonicalization
+		if s := strings.TrimSpace(auth.SessionState); s != "" { // swobu:io-string source=boundary
 			summary = "login " + s
 		}
-		if strings.TrimSpace(auth.SessionError) != "" { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(auth.SessionError) != "" { // swobu:io-string source=boundary
 			summary = "login error"
 		}
 		return views.RowActionWithCancel(
@@ -237,15 +266,15 @@ func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConf
 	})
 }
 
-func providerAuthSession(model state.Model, endpointName string, providerConfig *state.ProviderConfigSnapshot) stateModel.AuthSessionView {
+func providerAuthSession(model state.Model, endpointName string, providerConfig *state.ProviderConfigSnapshot) stateModel.AuthSessionViewState {
 	if providerConfig == nil {
-		return stateModel.AuthSessionView{}
+		return stateModel.AuthSessionViewState{}
 	}
-	ownerKey := stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String() // trimlowerlint:allow boundary canonicalization
+	ownerKey := stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String() // swobu:io-string source=boundary
 	if model.AuthSessions == nil {
-		return stateModel.AuthSessionView{}
+		return stateModel.AuthSessionViewState{}
 	}
-	return model.AuthSessions[strings.TrimSpace(ownerKey)] // trimlowerlint:allow boundary canonicalization
+	return model.AuthSessions[strings.TrimSpace(ownerKey)] // swobu:io-string source=boundary
 }
 
 func newProviderSummaryRow(provider state.ProviderConfigSnapshot, selected, expanded bool, onActivate func() []update.Action, onCancel func() []update.Action) retained.ViewSpec[state.Model] {
@@ -262,7 +291,7 @@ func providerSummaryRow(
 	onActivate func() []update.Action,
 	onCancel func() []update.Action,
 ) retained.ViewSpec[state.Model] {
-	label := providerDisplayLabel(provider)
+	label := providerHumanIdentifier(provider)
 	verb := "edit"
 	if expanded {
 		verb = "close"
@@ -270,8 +299,4 @@ func providerSummaryRow(
 	// Provider/model identifiers can be long; keep declarative row grammar and
 	// place them in wide value column with an explicit label for alignment.
 	return views.RowActionWideValueWithCancel("model", label, verb, onActivate, onCancel)
-}
-
-func providerDisplayLabel(pc state.ProviderConfigSnapshot) string {
-	return providerHumanIdentifier(pc)
 }

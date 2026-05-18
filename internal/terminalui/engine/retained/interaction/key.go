@@ -33,7 +33,8 @@ const (
 // only for migration compatibility; new code should use typed Key values directly.
 // Unknown names fall back to KeyRune with the original rune preserved.
 func ParseKey(name string, r rune) (Key, rune) {
-	switch name {
+	keyName := name // swobu:io-string source=terminal-input
+	switch keyName {
 	case "up":
 		return KeyUp, 0
 	case "down":

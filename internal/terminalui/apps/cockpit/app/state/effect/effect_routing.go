@@ -3,7 +3,6 @@ package effect
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -140,7 +139,7 @@ func (cmd DeleteProviderConfigEffect) Execute(ctx context.Context) []update.Acti
 	if err != nil {
 		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
 	}
-	removeRef := strings.TrimSpace(cmd.ProviderRef) // trimlowerlint:allow boundary canonicalization
+	removeRef := strings.TrimSpace(cmd.ProviderRef) // swobu:io-string source=boundary
 	configs := ep.ProviderConfigs()
 	if len(configs) <= 1 {
 		return []update.Action{RoutingSaveFailed{Message: "at least one model is required", ErrorAnchor: cmd.ErrorAnchor}}
@@ -148,7 +147,7 @@ func (cmd DeleteProviderConfigEffect) Execute(ctx context.Context) []update.Acti
 	next := make([]endpointintent.ProviderConfig, 0, len(configs)-1)
 	removed := false
 	for _, cfg := range configs {
-		if strings.TrimSpace(cfg.Ref().String()) == removeRef { // trimlowerlint:allow boundary canonicalization
+		if strings.TrimSpace(cfg.Ref().String()) == removeRef { // swobu:io-string source=boundary
 			removed = true
 			continue
 		}
@@ -158,7 +157,7 @@ func (cmd DeleteProviderConfigEffect) Execute(ctx context.Context) []update.Acti
 		return []update.Action{RoutingSaveFailed{Message: "model not found", ErrorAnchor: cmd.ErrorAnchor}}
 	}
 	selectedRef := ep.SelectedProviderConfigRef()
-	if strings.TrimSpace(selectedRef.String()) == removeRef { // trimlowerlint:allow boundary canonicalization
+	if strings.TrimSpace(selectedRef.String()) == removeRef { // swobu:io-string source=boundary
 		selectedRef = next[0].Ref()
 	}
 	newEp, err := endpointintent.NewEndpoint(ep.Name(), next, selectedRef)
@@ -181,9 +180,9 @@ type StoreKeychainCredentialEffect struct {
 
 func (cmd StoreKeychainCredentialEffect) Execute(ctx context.Context) []update.Action {
 	_ = ctx
-	providerSpec := strings.TrimSpace(cmd.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-	keyName := strings.TrimSpace(cmd.KeyName)           // trimlowerlint:allow boundary canonicalization
-	secret := strings.TrimSpace(cmd.Secret)             // trimlowerlint:allow boundary canonicalization
+	providerSpec := strings.TrimSpace(cmd.ProviderSpec) // swobu:io-string source=boundary
+	keyName := strings.TrimSpace(cmd.KeyName)           // swobu:io-string source=boundary
+	secret := strings.TrimSpace(cmd.Secret)             // swobu:io-string source=boundary
 	if providerSpec == "" || keyName == "" || secret == "" {
 		return []update.Action{RoutingSaveFailed{Message: "provider, key name, and key value are required", ErrorAnchor: cmd.ErrorAnchor}}
 	}
@@ -230,12 +229,12 @@ type StartProviderAuthSessionEffect struct {
 }
 
 func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.Action {
-	endpointName := strings.TrimSpace(eff.EndpointName)                // trimlowerlint:allow boundary canonicalization
-	providerSpec := strings.TrimSpace(eff.ProviderConfig.ProviderSpec) // trimlowerlint:allow boundary canonicalization
-	ownerKey := strings.TrimSpace(eff.OwnerKey)                        // trimlowerlint:allow boundary canonicalization
-	authScope := strings.TrimSpace(eff.AuthScope)                      // trimlowerlint:allow boundary canonicalization
+	endpointName := strings.TrimSpace(eff.EndpointName)                // swobu:io-string source=boundary
+	providerSpec := strings.TrimSpace(eff.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
+	ownerKey := strings.TrimSpace(eff.OwnerKey)                        // swobu:io-string source=boundary
+	authScope := strings.TrimSpace(eff.AuthScope)                      // swobu:io-string source=boundary
 	if providerSpec == "" {
-		return []update.Action{ProviderAuthSessionFailed{
+		return []update.Action{ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
@@ -244,7 +243,7 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 		}}
 	}
 	if authScope == "" {
-		return []update.Action{ProviderAuthSessionFailed{
+		return []update.Action{ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
@@ -253,7 +252,7 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 		}}
 	}
 	if authScope == stateModel.AuthScopeEndpointProvider && endpointName == "" {
-		return []update.Action{ProviderAuthSessionFailed{
+		return []update.Action{ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
@@ -264,7 +263,7 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 	c := operatorClient()
 	authSubject, err := authSubjectForOwnerKey(ownerKey, authScope)
 	if err != nil {
-		return []update.Action{ProviderAuthSessionFailed{
+		return []update.Action{ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
@@ -276,10 +275,10 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 		ctx,
 		providerSpec,
 		authSubject,
-		authModeForCredentialRef(strings.TrimSpace(eff.ProviderConfig.CredentialRef)), // trimlowerlint:allow boundary canonicalization
+		authModeForCredentialRef(strings.TrimSpace(eff.ProviderConfig.CredentialRef)), // swobu:io-string source=boundary
 	)
 	if err != nil {
-		return []update.Action{ProviderAuthSessionFailed{
+		return []update.Action{ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
@@ -287,7 +286,7 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 			Message:        normalizeAuthSessionSurfaceError(err),
 		}}
 	}
-	sessionID := strings.TrimSpace(start.SessionID) // trimlowerlint:allow boundary canonicalization
+	sessionID := strings.TrimSpace(start.SessionID) // swobu:io-string source=boundary
 	return []update.Action{
 		ProviderAuthSessionStarted{
 			EndpointName:   endpointName,
@@ -295,11 +294,11 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			SessionID:      sessionID,
-			AuthorizeURL:   strings.TrimSpace(start.AuthorizeURL), // trimlowerlint:allow boundary canonicalization
-			UserCode:       strings.TrimSpace(start.UserCode),     // trimlowerlint:allow boundary canonicalization
+			AuthorizeURL:   strings.TrimSpace(start.AuthorizeURL), // swobu:io-string source=boundary
+			UserCode:       strings.TrimSpace(start.UserCode),     // swobu:io-string source=boundary
 			State:          "pending",
 		},
-		PollProviderAuthSessionRequested{
+		PollProviderAuthSessionRequestedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
@@ -311,13 +310,13 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 }
 
 func authSubjectForOwnerKey(ownerKey string, authScope string) (string, error) {
-	key := stateModel.AuthOwnerKey(strings.TrimSpace(ownerKey)) // trimlowerlint:allow boundary canonicalization
+	key := stateModel.AuthOwnerKey(strings.TrimSpace(ownerKey)) // swobu:io-string source=boundary
 	providerRef := key.ProviderRef()
 	endpointName := key.EndpointName()
 	if providerRef == "" {
 		return "", fmt.Errorf("auth owner key is missing provider ref")
 	}
-	switch strings.TrimSpace(authScope) { // trimlowerlint:allow boundary canonicalization
+	switch strings.TrimSpace(authScope) { // swobu:io-string source=boundary
 	case stateModel.AuthScopeCreateDraft:
 		if !key.IsCreateDraft() {
 			return "", fmt.Errorf("auth owner key must be create-draft scoped")
@@ -337,203 +336,4 @@ func authSubjectForOwnerKey(ownerKey string, authScope string) (string, error) {
 	default:
 		return "", fmt.Errorf("auth scope is required for login")
 	}
-}
-
-type PollProviderAuthSessionRequested struct {
-	EndpointName   string
-	ProviderConfig stateModel.ProviderConfigSnapshot
-	OwnerKey       string
-	AuthScope      string
-	SessionID      string
-	AttemptsLeft   int
-}
-
-type ProviderAuthSessionStarted struct {
-	EndpointName   string
-	ProviderConfig stateModel.ProviderConfigSnapshot
-	OwnerKey       string
-	AuthScope      string
-	SessionID      string
-	AuthorizeURL   string
-	UserCode       string
-	State          string
-}
-
-type PollProviderAuthSessionEffect struct {
-	EndpointName   string
-	ProviderConfig stateModel.ProviderConfigSnapshot
-	OwnerKey       string
-	AuthScope      string
-	SessionID      string
-	AttemptsLeft   int
-}
-
-func (eff PollProviderAuthSessionEffect) Execute(ctx context.Context) []update.Action {
-	sessionID := strings.TrimSpace(eff.SessionID) // trimlowerlint:allow boundary canonicalization
-	if sessionID == "" {
-		return []update.Action{ProviderAuthSessionFailed{
-			EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-			Message:        "login session id is required",
-		}}
-	}
-	c := operatorClient()
-	status, err := c.GetAuthSessionStatus(ctx, sessionID)
-	if err != nil {
-		return []update.Action{ProviderAuthSessionFailed{
-			EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-			Message:        normalizeAuthSessionSurfaceError(err),
-		}}
-	}
-	stateValue := strings.ToLower(strings.TrimSpace(status.State)) // trimlowerlint:allow boundary canonicalization
-	actions := []update.Action{ProviderAuthSessionPolled{
-		EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-		ProviderConfig: eff.ProviderConfig,
-		OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-		AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-		SessionID:      sessionID,
-		State:          stateValue,
-		ErrorMessage:   strings.TrimSpace(status.ErrorMessage), // trimlowerlint:allow boundary canonicalization
-	}}
-	switch stateValue {
-	case "succeeded":
-		credentialRef := strings.TrimSpace(status.CredentialRef) // trimlowerlint:allow boundary canonicalization
-		if credentialRef == "" {
-			return append(actions, ProviderAuthSessionFailed{
-				EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-				ProviderConfig: eff.ProviderConfig,
-				OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-				AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-				Message:        "login completed without credential reference",
-			})
-		}
-		return append(actions, ProviderAuthSessionCredentialResolved{
-			EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-			CredentialRef:  credentialRef,
-		})
-	case "failed", "expired", "canceled":
-		msg := strings.TrimSpace(status.ErrorMessage) // trimlowerlint:allow boundary canonicalization
-		if msg == "" {
-			msg = fmt.Sprintf("%s login %s", strings.TrimSpace(status.ProviderSpec), stateValue) // trimlowerlint:allow boundary canonicalization
-		}
-		return append(actions, ProviderAuthSessionFailed{
-			EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-			Message:        msg,
-		})
-	default:
-		if eff.AttemptsLeft <= 1 {
-			return append(actions, ProviderAuthSessionFailed{
-				EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-				ProviderConfig: eff.ProviderConfig,
-				OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-				AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-				Message:        "login timed out; retry",
-			})
-		}
-		timer := time.NewTimer(1 * time.Second)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-		}
-		return append(actions, PollProviderAuthSessionRequested{
-			EndpointName:   strings.TrimSpace(eff.EndpointName), // trimlowerlint:allow boundary canonicalization
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       strings.TrimSpace(eff.OwnerKey),  // trimlowerlint:allow boundary canonicalization
-			AuthScope:      strings.TrimSpace(eff.AuthScope), // trimlowerlint:allow boundary canonicalization
-			SessionID:      sessionID,
-			AttemptsLeft:   eff.AttemptsLeft - 1,
-		})
-	}
-}
-
-type ProviderAuthSessionCredentialResolved struct {
-	EndpointName   string
-	ProviderConfig stateModel.ProviderConfigSnapshot
-	OwnerKey       string
-	AuthScope      string
-	CredentialRef  string
-}
-
-type ProviderAuthSessionPolled struct {
-	EndpointName   string
-	ProviderConfig stateModel.ProviderConfigSnapshot
-	OwnerKey       string
-	AuthScope      string
-	SessionID      string
-	State          string
-	ErrorMessage   string
-}
-
-type ProviderAuthSessionFailed struct {
-	EndpointName   string
-	ProviderConfig stateModel.ProviderConfigSnapshot
-	OwnerKey       string
-	AuthScope      string
-	Message        string
-}
-
-func normalizeAuthSessionSurfaceError(err error) string {
-	raw := strings.TrimSpace(err.Error()) // trimlowerlint:allow boundary canonicalization
-	lower := strings.ToLower(raw)         // trimlowerlint:allow boundary canonicalization
-	// Preserve backend-auth specific failures instead of collapsing into daemon
-	// unavailable hints.
-	if strings.Contains(lower, "auth session") && strings.Contains(lower, "code=") {
-		return sanitizeAuthSessionErrorMessage(strings.TrimSpace(strings.TrimPrefix(raw, "operator client:"))) // trimlowerlint:allow boundary canonicalization
-	}
-	return sanitizeAuthSessionErrorMessage(normalizeOperatorSurfaceError(err))
-}
-
-var (
-	authReturnedStatusPattern = regexp.MustCompile(`(?i)returned status\s+(\d{3})`)
-	authCodePattern           = regexp.MustCompile(`(?i)\(code=([A-Z_]+)\)`)
-)
-
-func sanitizeAuthSessionErrorMessage(message string) string {
-	trimmed := strings.TrimSpace(message) // trimlowerlint:allow boundary canonicalization
-	if trimmed == "" {
-		return trimmed
-	}
-	lower := strings.ToLower(trimmed) // trimlowerlint:allow boundary canonicalization
-	if strings.Contains(lower, "<html") || strings.Contains(lower, "<!doctype html") {
-		status := ""
-		if match := authReturnedStatusPattern.FindStringSubmatch(trimmed); len(match) == 2 {
-			status = strings.TrimSpace(match[1]) // trimlowerlint:allow boundary canonicalization
-		}
-		code := ""
-		if match := authCodePattern.FindStringSubmatch(trimmed); len(match) == 2 {
-			code = strings.TrimSpace(match[1]) // trimlowerlint:allow boundary canonicalization
-		}
-		summary := "auth start failed: upstream returned an HTML challenge page"
-		if status != "" {
-			summary = fmt.Sprintf("auth start failed: upstream returned status %s with an HTML challenge page", status)
-		}
-		if code != "" {
-			summary = summary + " (code=" + code + ")"
-		}
-		return summary
-	}
-	if len(trimmed) > 240 {
-		return strings.TrimSpace(trimmed[:240]) + "…" // trimlowerlint:allow boundary canonicalization
-	}
-	return trimmed
-}
-
-func authModeForCredentialRef(ref string) string {
-	if strings.EqualFold(strings.TrimSpace(ref), "chatgpt_device_auth") { // trimlowerlint:allow boundary canonicalization
-		return "device"
-	}
-	return "browser"
 }

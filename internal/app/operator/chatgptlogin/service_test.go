@@ -60,7 +60,7 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 		CredentialOut:      store,
 	})
 
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestServiceCallbackUnknownState(t *testing.T) {
 func TestServiceCallbackOAuthErrorMarksSessionFailed(t *testing.T) {
 	t.Parallel()
 	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestServiceCallbackOAuthErrorMarksSessionFailed(t *testing.T) {
 func TestServiceCallbackStateWithAppendedURLStillResolvesSession(t *testing.T) {
 	t.Parallel()
 	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestServiceTokenExchangeFailureMarksFailed(t *testing.T) {
 	defer tokenSrv.Close()
 
 	svc := NewService(http.DefaultClient, ServiceConfig{TokenURL: tokenSrv.URL, CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestServiceCredentialStoreFailureMarksFailed(t *testing.T) {
 		CallbackListenAddr: "off",
 		CredentialOut:      store,
 	})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestServiceSessionExpires(t *testing.T) {
 		CallbackListenAddr: "off",
 		Now:                func() time.Time { return now },
 	})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestServiceSessionExpires(t *testing.T) {
 func TestServiceStartAuthorizeURLIncludesOriginator(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, ServiceConfig{Originator: "swobu_test", CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestServiceStartAuthorizeURLIncludesOriginator(t *testing.T) {
 func TestServiceStartAuthorizeURL_DefaultScopeMatchesCodexContract(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestServiceStartAuthorizeURL_DefaultScopeMatchesCodexContract(t *testing.T)
 func TestServiceStartAuthorizeURL_DefaultOriginatorMatchesCodex(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestServiceStartAuthorizeURL_DefaultOriginatorMatchesCodex(t *testing.T) {
 func TestServiceStartAuthorizeURL_MatchesCodexQueryShape(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestServiceStartAuthorizeURL_MatchesCodexQueryShape(t *testing.T) {
 func TestServiceStartAuthorizeURL_UsesCodexCallbackPath(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, ServiceConfig{PublicBaseURL: "http://127.0.0.1:7926", CallbackListenAddr: "off"})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 		CallbackListenAddr: "off",
 		CredentialOut:      &captureWriter{},
 	})
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestServiceSessionSuccess_PlanTierIncludedInCredentialRefWhenPresent(t *tes
 		CredentialOut:      store,
 	})
 
-	start, err := svc.Start(context.Background(), StartInput{})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -533,11 +533,10 @@ func TestServiceDefaults_DoNotEmbedTimeSignedAuthArtifacts(t *testing.T) {
 }
 
 func TestServiceStartBrowser_WhenPrimaryCallbackPortBusy_FallsBackToSecondaryPort(t *testing.T) {
-	ln1455, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		t.Skipf("primary callback port already occupied externally: %v", err)
+	ln1455 := occupyPortIfAvailable(t, "127.0.0.1:1455")
+	if ln1455 != nil {
+		defer func() { _ = ln1455.Close() }()
 	}
-	defer func() { _ = ln1455.Close() }()
 
 	svc := NewService(nil, ServiceConfig{
 		CallbackListenAddr: "127.0.0.1:1455",
@@ -557,21 +556,19 @@ func TestServiceStartBrowser_WhenPrimaryCallbackPortBusy_FallsBackToSecondaryPor
 }
 
 func TestServiceStartBrowser_WhenCallbackPortsBusy_ReturnsDeviceHint(t *testing.T) {
-	ln1455, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		t.Skipf("primary callback port already occupied externally: %v", err)
+	ln1455 := occupyPortIfAvailable(t, "127.0.0.1:1455")
+	if ln1455 != nil {
+		defer func() { _ = ln1455.Close() }()
 	}
-	defer func() { _ = ln1455.Close() }()
-	ln1457, err := net.Listen("tcp", "127.0.0.1:1457")
-	if err != nil {
-		t.Skipf("secondary callback port already occupied externally: %v", err)
+	ln1457 := occupyPortIfAvailable(t, "127.0.0.1:1457")
+	if ln1457 != nil {
+		defer func() { _ = ln1457.Close() }()
 	}
-	defer func() { _ = ln1457.Close() }()
 
 	svc := NewService(nil, ServiceConfig{
 		CallbackListenAddr: "127.0.0.1:1455",
 	})
-	_, err = svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	_, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err == nil {
 		t.Fatal("expected callback listener unavailable error")
 	}
@@ -579,6 +576,16 @@ func TestServiceStartBrowser_WhenCallbackPortsBusy_ReturnsDeviceHint(t *testing.
 	if !strings.Contains(msg, "use device auth mode") {
 		t.Fatalf("error missing device hint: %v", err)
 	}
+}
+
+func occupyPortIfAvailable(t *testing.T, addr string) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		// Another process already occupies the port, which satisfies the busy-port precondition.
+		return nil
+	}
+	return ln
 }
 
 func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T) {
@@ -643,6 +650,68 @@ func TestServiceCallbackServer_ShutsDownAfterAbandonedBrowserSessionExpiry(t *te
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("expected session %s to be evicted after expiry", started.SessionID)
+}
+
+func TestServiceCancelBrowserSession_ReleasesCallbackPortPromptly(t *testing.T) {
+	callbackAddr := reserveCallbackAddr(t)
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		CallbackListenAddr: callbackAddr,
+		CallbackIdleTTL:    20 * time.Millisecond,
+	})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start browser auth: %v", err)
+	}
+	if err := svc.Cancel(start.SessionID); err != nil {
+		t.Fatalf("cancel browser auth: %v", err)
+	}
+	waitForCallbackPortRelease(t, callbackAddr, time.Second)
+}
+
+func TestServiceStartDeviceAuth_DoesNotBindCallbackPort(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"device_auth_id":"dev_123","user_code":"ABCD-1234","interval":"5"}`))
+	}))
+	defer tokenSrv.Close()
+	callbackAddr := reserveCallbackAddr(t)
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		CallbackListenAddr: callbackAddr,
+	})
+	origDeviceUserCodeURL := deviceUserCodeURL
+	deviceUserCodeURL = tokenSrv.URL
+	t.Cleanup(func() {
+		deviceUserCodeURL = origDeviceUserCodeURL
+	})
+	if _, err := svc.Start(context.Background(), StartInput{AuthMode: "device"}); err != nil {
+		t.Fatalf("start device auth: %v", err)
+	}
+	ln, err := net.Listen("tcp", callbackAddr)
+	if err != nil {
+		t.Fatalf("expected callback port to remain free for device auth: %v", err)
+	}
+	_ = ln.Close()
+}
+
+func TestServiceStartBrowser_WhenAuthorizeURLBuildFails_ClosesIdleCallbackListener(t *testing.T) {
+	callbackAddr := reserveCallbackAddr(t)
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		AuthorizeURL:       ":bad-url",
+		CallbackListenAddr: callbackAddr,
+	})
+	if _, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"}); err == nil {
+		t.Fatal("expected start failure from invalid authorize URL")
+	}
+	waitForCallbackPortRelease(t, callbackAddr, time.Second)
+}
+
+func TestServiceStart_RequiresExplicitSupportedAuthMode(t *testing.T) {
+	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
+	if _, err := svc.Start(context.Background(), StartInput{}); err == nil {
+		t.Fatal("expected missing auth mode to fail")
+	}
+	if _, err := svc.Start(context.Background(), StartInput{AuthMode: "interactive"}); err == nil {
+		t.Fatal("expected unsupported auth mode to fail")
+	}
 }
 
 func waitForCallbackPortRelease(t *testing.T, addr string, timeout time.Duration) {
