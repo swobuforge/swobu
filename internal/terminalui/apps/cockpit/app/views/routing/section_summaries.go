@@ -39,7 +39,7 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 		if state.CreateDraftCredentialStrategySelectable(provider) {
 			return "missing"
 		}
-		if !providerCredentialSelectionRequired(provider, baseURL, "") {
+		if !state.ProviderCredentialSelectionRequired(provider, baseURL, "") {
 			return "external"
 		}
 		return "missing"

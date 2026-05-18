@@ -25,7 +25,7 @@ func addModelCreateReady(draft state.ProviderConfigSnapshot) bool {
 	}
 	return strings.TrimSpace(draft.ProviderSpec) != "" && // swobu:io-string source=boundary
 		strings.TrimSpace(draft.ModelID) != "" && // swobu:io-string source=boundary
-		(requiresInteractiveAuth || !providerCredentialSelectionRequired(draft.ProviderSpec, draft.BaseURL, draft.CredentialRef) || strings.TrimSpace(draft.CredentialRef) != "") && // swobu:io-string source=boundary
+		(requiresInteractiveAuth || !state.ProviderCredentialSelectionRequired(draft.ProviderSpec, draft.BaseURL, draft.CredentialRef) || strings.TrimSpace(draft.CredentialRef) != "") && // swobu:io-string source=boundary
 		!isEmptyFileCredentialRef(draft.CredentialRef) &&
 		(!strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "openai_compatible") || strings.TrimSpace(draft.BaseURL) != "") // swobu:io-string source=boundary
 }

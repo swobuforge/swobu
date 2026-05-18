@@ -107,7 +107,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	}
 	modelID := strings.TrimSpace(draft.ModelID) // swobu:io-string source=boundary
 	modelIDs, modelErr := spec.Binding.Catalog(model)
-	authFailed := providerModelCatalogAuthFailed(modelErr)
+	authFailed := state.ProviderModelCatalogAuthFailed(modelErr)
 
 	modelSummary := selectors.EmptyOr(modelID, "not set")
 	if _, ok := spec.Binding.(addDraftModelBinding); ok && modelID == "" {
@@ -116,7 +116,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	if spec.PickerOpen && modelID == "" {
 		modelSummary = "choose a model"
 	}
-	blocked := providerModelCatalogLoadBlocked(provider, baseURL, cred) || authFailed
+	blocked := state.ProviderModelCatalogLoadBlocked(provider, baseURL, cred) || authFailed
 	if _, ok := spec.Binding.(createDraftModelBinding); ok {
 		flow := state.EvaluateCreateDraftRouteSetup(draft)
 		if flow.ModelState == state.RouteSetupSlotBlocked {
@@ -212,7 +212,7 @@ func isCreateDraftModelBinding(binding draftModelBinding) bool {
 
 func draftModelBlockedMessage(provider, baseURL, cred, modelErr string, authFailed bool, createMode bool, draft state.ProviderConfigSnapshot) (string, bool) {
 	if authFailed {
-		return strings.TrimSpace(providerModelCatalogAuthFailureMessage(modelErr)), true // swobu:io-string source=boundary
+		return strings.TrimSpace(state.ProviderModelCatalogAuthFailureMessage(modelErr)), true // swobu:io-string source=boundary
 	}
 	if createMode {
 		flow := state.EvaluateCreateDraftRouteSetup(draft)
@@ -220,7 +220,7 @@ func draftModelBlockedMessage(provider, baseURL, cred, modelErr string, authFail
 			return flow.ModelBlocker, true
 		}
 	}
-	if message := strings.TrimSpace(providerModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" { // swobu:io-string source=boundary
+	if message := strings.TrimSpace(state.ProviderModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" { // swobu:io-string source=boundary
 		return message, true
 	}
 	return "", false

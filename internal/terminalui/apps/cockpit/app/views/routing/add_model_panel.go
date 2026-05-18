@@ -106,7 +106,7 @@ func buildWorkspaceAddModelDetailRows(
 	if strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(authVariant) {
 		authViewState = classifyInteractiveAuthPhase(model, strings.TrimSpace(snapshot.Name), draft, authVariant) // swobu:io-string source=boundary
 	}
-	modelCatalogBlocked := providerModelCatalogLoadBlocked(
+	modelCatalogBlocked := state.ProviderModelCatalogLoadBlocked(
 		providerSpec,
 		strings.TrimSpace(draft.BaseURL), // swobu:io-string source=boundary
 		effectiveCredentialRef,
@@ -229,7 +229,7 @@ func appendWorkspaceAddModelCredentialRows(
 		authState := addModelAuthStateForDraft(model, endpointName, draft)
 		authFailed := strings.EqualFold(strings.TrimSpace(authState.SessionState), "failed") // swobu:io-string source=boundary
 		if !authFailed {
-			if message := strings.TrimSpace(providerModelCatalogBlockedMessage(providerSpec, strings.TrimSpace(draft.BaseURL), strings.TrimSpace(draft.CredentialRef))); message != "" { // swobu:io-string source=boundary
+			if message := strings.TrimSpace(state.ProviderModelCatalogBlockedMessage(providerSpec, strings.TrimSpace(draft.BaseURL), strings.TrimSpace(draft.CredentialRef))); message != "" { // swobu:io-string source=boundary
 				rows = append(rows, views.DisclosureNoteRows(message)...)
 			}
 		}
@@ -306,7 +306,7 @@ func buildAddModelProviderItems(model state.Model, endpointName string, draft st
 			panel.setModelPickerOpen(false)
 			panel.setCredentialUI(closeAddModelCredentialUIState(panel.credentialUI))
 			focusKey := "add-model/model"
-			if providerCredentialSelectionRequired(strings.TrimSpace(next.ProviderSpec), strings.TrimSpace(next.BaseURL), strings.TrimSpace(next.CredentialRef)) { // swobu:io-string source=boundary
+			if state.ProviderCredentialSelectionRequired(strings.TrimSpace(next.ProviderSpec), strings.TrimSpace(next.BaseURL), strings.TrimSpace(next.CredentialRef)) { // swobu:io-string source=boundary
 				focusKey = "add-model/credentials"
 			}
 			actions := []update.Action{
