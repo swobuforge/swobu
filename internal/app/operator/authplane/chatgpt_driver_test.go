@@ -17,7 +17,10 @@ func TestChatGPTMethodDriverStartAndPoll(t *testing.T) {
 	}))
 	defer tokenSrv.Close()
 
-	svc := chatgptlogin.NewService(http.DefaultClient, chatgptlogin.ServiceConfig{TokenURL: tokenSrv.URL})
+	svc := chatgptlogin.NewService(http.DefaultClient, chatgptlogin.ServiceConfig{
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "127.0.0.1:0",
+	})
 	driver, err := NewChatGPTAuthMethodDriver(svc)
 	if err != nil {
 		t.Fatalf("NewChatGPTAuthMethodDriver error: %v", err)
