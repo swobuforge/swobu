@@ -3,8 +3,8 @@ package routing
 import (
 	"strings"
 
-	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 const bedrockDefaultRegion = "us-east-1"
