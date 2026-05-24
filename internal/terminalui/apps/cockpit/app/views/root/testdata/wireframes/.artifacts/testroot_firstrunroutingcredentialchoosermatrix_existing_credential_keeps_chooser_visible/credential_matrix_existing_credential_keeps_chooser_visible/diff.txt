@@ -1,3 +1,0 @@
-line 10
--      credential        env var missing                                choose ↵
-+      credential        env var missing

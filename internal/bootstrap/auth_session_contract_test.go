@@ -27,7 +27,7 @@ endpoints:
     provider_configs:
       - ref: chatgpt-main
         provider_spec: chatgpt
-        protocol_kind: responses
+        provider_protocol: responses
         base_url: http://127.0.0.1:8317/v1
         model_id: gpt-4.1
 `

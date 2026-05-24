@@ -1,3 +1,0 @@
-line 12
--       -> set credential file before loading models
-+       -> set credential before loading models

@@ -209,6 +209,8 @@ func TestWrapEvidenceEnvelopeWithUsageReconciliation_CompletedResponseEmitsTermi
 		"cred-1",
 		"chat_completions",
 		"",
+		"",
+		"",
 	)
 	wrapped := wrapEvidenceEnvelopeWithUsageReconciliation(
 		context.Background(),
@@ -258,6 +260,8 @@ func TestWrapEvidenceEnvelopeWithUsageReconciliation_NoCompletedResponseDoesNotE
 		"http://localhost:8080/v1",
 		"cred-1",
 		"chat_completions",
+		"",
+		"",
 		"",
 	)
 	wrapped := wrapEvidenceEnvelopeWithUsageReconciliation(

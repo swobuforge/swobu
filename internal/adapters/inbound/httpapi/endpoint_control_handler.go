@@ -10,6 +10,7 @@ import (
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)
@@ -37,14 +38,13 @@ type endpointDocument struct {
 }
 
 type providerConfigDocument struct {
-	Ref           string `json:"ref"`
-	ProviderSpec  string `json:"provider_spec"`
-	BaseURL       string `json:"base_url,omitempty"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	ModelID       string `json:"model_id,omitempty"`
-	TargetAlias   string `json:"target_alias,omitempty"`
-	SelectedFrame string `json:"selected_frame,omitempty"`
-	ProtocolKind  string `json:"protocol_kind,omitempty"`
+	Ref              string `json:"ref"`
+	ProviderSpec     string `json:"provider_spec"`
+	BaseURL          string `json:"base_url,omitempty"`
+	CredentialRef    string `json:"credential_ref,omitempty"`
+	ModelID          string `json:"model_id,omitempty"`
+	TargetAlias      string `json:"target_alias,omitempty"`
+	ProviderProtocol string `json:"provider_protocol,omitempty"`
 }
 
 // EndpointControlHandler renders the daemon-owned operator control plane for
@@ -213,15 +213,15 @@ func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
 		ProviderConfigs:           make([]providerConfigDocument, 0, len(providerConfigs)),
 	}
 	for _, providerConfig := range providerConfigs {
+		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
 		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
-			Ref:           providerConfig.Ref().String(),
-			ProviderSpec:  providerConfig.ProviderSpec().String(),
-			BaseURL:       providerConfig.BaseURL(),
-			CredentialRef: providerConfig.CredentialRef(),
-			ModelID:       providerConfig.ModelID(),
-			TargetAlias:   providerConfig.TargetAlias(),
-			SelectedFrame: providerConfig.SelectedFrame(),
-			ProtocolKind:  providerConfig.ProtocolKind().String(),
+			Ref:              providerConfig.Ref().String(),
+			ProviderSpec:     providerConfig.ProviderSpec().String(),
+			BaseURL:          providerConfig.BaseURL(),
+			CredentialRef:    providerConfig.CredentialRef(),
+			ModelID:          providerConfig.ModelID(),
+			TargetAlias:      providerConfig.TargetAlias(),
+			ProviderProtocol: providerProtocol,
 		})
 	}
 	return doc
@@ -250,8 +250,12 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		if strings.TrimSpace(encoded.SelectedFrame) != "" { // swobu:io-string source=boundary
-			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
+		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
+		}
+		if providerProtocol != "" {
+			providerConfig, err = providerConfig.WithProviderProtocol(providerProtocol)
 			if err != nil {
 				return endpointintent.Endpoint{}, err
 			}

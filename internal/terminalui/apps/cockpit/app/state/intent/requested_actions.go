@@ -38,8 +38,8 @@ type SetCreateDraftTargetAlias struct {
 	TargetAlias string
 }
 
-type SetCreateDraftSelectedFrame struct {
-	SelectedFrame string
+type SetCreateDraftProviderProtocol struct {
+	ProviderProtocol string
 }
 
 type RenameCurrentEndpoint struct {
@@ -189,8 +189,19 @@ const (
 // LoadRoutingModelCatalogRequestedAction asks reducer to load provider-backed
 // model catalog choices for routing composition across scopes.
 type LoadRoutingModelCatalogRequestedAction struct {
-	Scope         string
-	ProviderSpec  string
-	BaseURL       string
-	CredentialRef string
+	Scope            string
+	ProviderSpec     string
+	BaseURL          string
+	CredentialRef    string
+	ProviderProtocol string
+}
+
+// ProbeCreateDraftModelRequestedAction asks reducer to run one real provider
+// probe for the current create draft, using the daemon ephemeral execute path.
+type ProbeCreateDraftModelRequestedAction struct {
+	ProviderSpec     string
+	BaseURL          string
+	CredentialRef    string
+	ModelID          string
+	ProviderProtocol string
 }

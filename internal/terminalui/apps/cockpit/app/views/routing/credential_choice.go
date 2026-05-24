@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
@@ -42,11 +43,13 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 		current = selectors.CredentialSummaryFromProviderConfig(pc)
 	}
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	parent := views.RowChoiceWithCancel(views.RowUseKeyFrom, current, func() []update.Action {
 		nextOpen := !open
 		setOpen(nextOpen)
 		mode := state.InteractionModeManageList
 		if nextOpen {
+			views.ResetFilterablePickerState(setPicker)
 			mode = state.InteractionModePickOne
 		}
 		return []update.Action{state.SetInteractionMode{Mode: mode}}
@@ -64,18 +67,41 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("authentication needed - choose a credential ref to save")...)
 		}
 	} else {
-		rows := credentialOptionRows(current, func(value string) []update.Action {
+		items := credentialOptionItems(current, func(value string) []update.Action {
 			setOpen(false)
 			actions := applyProviderCredentialSelection(value, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
 			actions = append(actions, state.SetInteractionMode{Mode: state.InteractionModeManageList})
+			if focusKey := credentialPostSelectionFocusKey(value); focusKey != "" {
+				actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+			}
 			return actions
-		}, func() []update.Action {
-			setOpen(false)
-			return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeManageList}}
-		}, providerSpec, spec.CreateMode)
-		out = toolkitviews.NewAnchoredDisclosure(parent, rows...)
+		}, providerSpec)
+		out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
+			KeyPrefix:      "credential-source-option",
+			BuildOptionRow: views.ChoicePickerOptionRow(true),
+			WindowSize:     6,
+			NonFilterable:  true,
+			OnCancel: func() []update.Action {
+				setOpen(false)
+				return []update.Action{
+					state.SetInteractionMode{Mode: state.InteractionModeManageList},
+					interaction.FocusKeyAction{Key: "credential"},
+				}
+			},
+		})
 	}
 	return out
+}
+
+func credentialPostSelectionFocusKey(raw string) string {
+	lowered := strings.ToLower(strings.TrimSpace(raw)) // swobu:io-string source=boundary
+	if lowered == "file" {
+		return "credential-file"
+	}
+	if lowered == "env" || lowered == "env var" {
+		return "env"
+	}
+	return ""
 }
 
 func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
@@ -112,13 +138,11 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // swobu:io-string source=boundary
 }
 
-func credentialOptionRows(
+func credentialOptionItems(
 	current string,
 	onChoose func(string) []update.Action,
-	onCancel func() []update.Action,
 	providerSpec string,
-	createMode bool,
-) []retained.ViewSpec[state.Model] {
+) []views.FilterablePickerItem {
 	type option struct {
 		Value string
 		Label string
@@ -134,6 +158,10 @@ func credentialOptionRows(
 	descriptors := authModeDescriptorsForSpec(providerSpec)
 	options := make([]option, 0, len(descriptors))
 	for _, descriptor := range descriptors {
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == providercatalog.AuthVariantAWSEnvSession { // swobu:io-string source=boundary
+			// Bedrock exposes one canonical AWS chain affordance in UI.
+			continue
+		}
 		label := descriptor.Label
 		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == providercatalog.AuthVariantEnv { // swobu:io-string source=boundary
 			label = "Bedrock API key"
@@ -147,20 +175,41 @@ func credentialOptionRows(
 	if current != "" && current != "missing" && current != "signed in" && !containsOptionValue(options, current) {
 		options = append([]option{{Value: current, Label: current}}, options...)
 	}
-	rows := make([]retained.ViewSpec[state.Model], 0, len(options))
+	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
 		choice := option
-		rows = append(rows, toolkitviews.ListItemRow[state.Model](
-			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3), // swobu:io-string source=boundary
-			choice.Value == current,
-			true,
-			true,
-			func() []update.Action {
+		items = append(items, views.FilterablePickerItem{
+			Label:    strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
+			Search:   choice.Value + " " + strings.TrimSpace(choice.Label),
+			Selected: choice.Value == current,
+			OnChoose: func() []update.Action {
 				if onChoose != nil {
 					return onChoose(choice.Value)
 				}
 				return nil
 			},
+		})
+	}
+	return items
+}
+
+func credentialOptionRows(
+	current string,
+	onChoose func(string) []update.Action,
+	onCancel func() []update.Action,
+	providerSpec string,
+	_ bool,
+) []retained.ViewSpec[state.Model] {
+	items := credentialOptionItems(current, onChoose, providerSpec)
+	rows := make([]retained.ViewSpec[state.Model], 0, len(items))
+	for _, item := range items {
+		choice := item
+		rows = append(rows, toolkitviews.ListItemRow[state.Model](
+			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3),
+			choice.Selected,
+			true,
+			true,
+			choice.OnChoose,
 			onCancel,
 		))
 	}

@@ -1,6 +1,7 @@
 package effect
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,6 +87,43 @@ func loadJSONValidatedWithClient[T any](ctx context.Context, rawURL string, vali
 		if err := validate(result); err != nil {
 			return zero, err
 		}
+	}
+	return result, nil
+}
+
+func postJSONWithTimeout[T any](ctx context.Context, rawURL string, payload any, timeout time.Duration) (T, error) {
+	var zero T
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return zero, fmt.Errorf("request could not be built")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return zero, fmt.Errorf("request could not be built")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClientWithTimeout(timeout).Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return zero, fmt.Errorf("request timed out")
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return zero, fmt.Errorf("request timed out")
+		}
+		return zero, fmt.Errorf("request failed")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return zero, fmt.Errorf("returned status %d", resp.StatusCode)
+	}
+	var result T
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&result); err != nil {
+		return zero, fmt.Errorf("response could not be decoded")
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return zero, fmt.Errorf("response could not be decoded")
 	}
 	return result, nil
 }

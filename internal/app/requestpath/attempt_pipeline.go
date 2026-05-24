@@ -294,7 +294,6 @@ func withResponseToolChoiceMode(request canonical.GenerationCanonicalRequest, mo
 		Thread:               request.Thread(),
 		LastTurn:             request.LastTurn(),
 		PreviousResponseID:   request.PreviousResponseID(),
-		ConversationID:       request.ConversationID(),
 		ToolMode:             mode,
 		PromptCacheKey:       request.PromptCacheKey(),
 		PromptCacheRetention: request.PromptCacheRetention(),

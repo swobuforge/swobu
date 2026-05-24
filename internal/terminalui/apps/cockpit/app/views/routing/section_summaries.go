@@ -50,7 +50,7 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 	cred := credentialSource(resolvedRef)
 	if cred != "" {
 		if strings.EqualFold(provider, "bedrock") && isBedrockAWSProfileCredentialRef(resolvedRef) {
-			return "external: AWS profile"
+			return "external: AWS chain"
 		}
 		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(cred))) // swobu:io-string source=boundary
 		if providercatalog.SupportsAuthVariant(provider, variant) {
@@ -163,12 +163,26 @@ func defaultCreateDraftCredentialRef(provider string) string {
 	return "env"
 }
 
-func effectiveCreateDraftBaseURL(model state.Model, provider string) string {
-	baseURL := model.CreateDraftProviderConfig.BaseURL
+func effectiveDraftBaseURL(draft state.ProviderConfigSnapshot) string {
+	provider := strings.TrimSpace(draft.ProviderSpec) // swobu:io-string source=boundary
+	baseURL := strings.TrimSpace(draft.BaseURL)       // swobu:io-string source=boundary
 	if baseURL != "" {
 		return baseURL
 	}
+	if strings.EqualFold(provider, "bedrock") {
+		if region := strings.TrimSpace(bedrockResolvedRegion(draft.Region, draft.BaseURL)); region != "" { // swobu:io-string source=boundary
+			return strings.TrimSpace(bedrockBaseURLForRegion(region)) // swobu:io-string source=boundary
+		}
+	}
 	return strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(provider)) // swobu:io-string source=boundary
+}
+
+func effectiveCreateDraftBaseURL(model state.Model, provider string) string {
+	draft := model.CreateDraftProviderConfig
+	if strings.TrimSpace(draft.ProviderSpec) == "" { // swobu:io-string source=boundary
+		draft.ProviderSpec = strings.TrimSpace(provider) // swobu:io-string source=boundary
+	}
+	return effectiveDraftBaseURL(draft)
 }
 
 func createSectionSummary(provider, modelID, credSummary string) string {

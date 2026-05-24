@@ -66,6 +66,8 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 		"keychain:chatgpt/acct_plus",
 		protocolkind.ChatCompletions,
 		"credential_ref",
+		"",
+		"",
 	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -86,6 +88,8 @@ func TestListModels_UsesTierFromCredentialRefPathSegment(t *testing.T) {
 		"keychain:chatgpt/plus/sess_abc",
 		protocolkind.ChatCompletions,
 		"credential_ref",
+		"",
+		"",
 	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -113,6 +117,8 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 		"keychain:chatgpt/default",
 		protocolkind.ChatCompletions,
 		"credential_ref",
+		"",
+		"",
 	))
 	if err == nil {
 		t.Fatalf("expected error, got models=%v", models)
@@ -140,6 +146,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
 			"backend_chatgpt",
+			"", "responses_stream",
 		),
 	)
 	resp, err := exec.Execute(context.Background(), req)
@@ -198,6 +205,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
 			"backend_chatgpt",
+			"", "responses_stream",
 		),
 	)
 	if _, err := exec.Execute(context.Background(), req); err != nil {
@@ -230,6 +238,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
 			"backend_chatgpt",
+			"", "responses_stream",
 		),
 	)
 	_, err := exec.Execute(context.Background(), req)
@@ -300,6 +309,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 			ref,
 			protocolkind.Responses,
 			"backend_chatgpt",
+			"", "responses_stream",
 		),
 	)
 	resp, err := exec.Execute(context.Background(), req)
@@ -349,6 +359,7 @@ func TestExecute_StreamingReturnsCanonicalStream(t *testing.T) {
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
 			"backend_chatgpt",
+			"", "responses_stream",
 		),
 	)
 	resp, err := exec.Execute(context.Background(), req)

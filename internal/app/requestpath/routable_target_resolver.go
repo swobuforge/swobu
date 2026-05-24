@@ -35,5 +35,6 @@ func routableTargetFromResolved(resolved routetarget.ResolvedRoutableTarget) por
 		providerConfig.ProtocolKind(),
 		string(resolved.RouteProfile.AuthKind),
 		providerConfig.SelectedFrame(),
+		providerConfig.ProviderProtocol(),
 	)
 }

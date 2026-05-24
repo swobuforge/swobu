@@ -1,7 +1,6 @@
 package root
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -54,6 +53,30 @@ func TestRoot_RendersMinimumViewportMessageBelow60x18(t *testing.T) {
 	out := rt.Render(geom.Rect{W: 40, H: 12}).String()
 	if !strings.Contains(out, "Terminal too small") {
 		t.Fatalf("render = %q, want minimum viewport message", out)
+	}
+}
+
+func TestRoot_SmallViewportGuardAppliesAfterBodyFocusTraversal(t *testing.T) {
+	normal := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		Endpoints:       []string{"acme"},
+		CurrentEndpoint: "acme",
+	})
+	normalViewport := geom.Rect{W: 80, H: 24}
+	normal.Rebuild(Root(), normalViewport)
+	focusRowContaining(t, normal, normalViewport, "endpoint")
+	normal.DispatchEvent(updateKey(interaction.KeyDown))
+	normal.DispatchEvent(updateKey(interaction.KeyDown))
+	normal.Rebuild(Root(), normalViewport)
+	_ = normal.Render(normalViewport).String()
+
+	small := newTestRuntime(state.Model{})
+	smallViewport := geom.Rect{W: 40, H: 12}
+	small.Rebuild(Root(), smallViewport)
+	out := small.Render(smallViewport).String()
+	if !strings.Contains(out, "Terminal too small") {
+		t.Fatalf("render = %q, want minimum viewport message after focus traversal", out)
 	}
 }
 
@@ -162,11 +185,11 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 		DaemonState:     "up",
 		CreateDraftName: "acme",
 		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
-			Ref:           state.DraftProviderRef,
-			ProviderSpec:  "openai",
-			ProtocolKind:  "chat_completions",
-			CredentialRef: "env:OPENAI_API_KEY",
-			ModelID:       "gpt-5.3",
+			Ref:              state.DraftProviderRef,
+			ProviderSpec:     "openai",
+			ProviderProtocol: "protocol_auto",
+			CredentialRef:    "env:OPENAI_API_KEY",
+			ModelID:          "gpt-5.3",
 		},
 	})
 	viewport := geom.Rect{W: 80, H: 24}
@@ -177,7 +200,7 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	assertVisualByKey(t, out, "routing_collapsed_by_esc")
+	assertRootScenario(t, out, "routing_collapsed_by_esc")
 }
 
 func TestRoot_ClientActionPayloadDisclosure_CopyRevealsOnActivateOnly(t *testing.T) {
@@ -337,7 +360,7 @@ func TestRoot_FirstRunBedrockCreateFlow_RequiresScopeBeforeModel(t *testing.T) {
 	out := rt.Render(viewport).String()
 
 	// Canonical slot grammar must remain stable for Bedrock in first-run.
-	assertContainsInOrder(t, out, "provider", "credential", "region", "model", "delivery")
+	assertContainsInOrder(t, out, "provider", "credential", "region", "model", "protocol", "create")
 	// Model must remain blocked until scope is explicit.
 	if !strings.Contains(out, "model") || !strings.Contains(strings.ToLower(out), "blocked") {
 		t.Fatalf("bedrock first-run model should be blocked before scope is resolved; render=%q", out)
@@ -392,7 +415,33 @@ func TestRoot_FirstRunBedrockCreateFlow_DerivesRegionFromEnvWhenURLMissing(t *te
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
 	out := rt.Render(viewport).String()
-	assertVisualByKey(t, out, "bedrock_region_derived_from_env")
+	assertRootScenario(t, out, "bedrock_region_derived_from_env")
+}
+
+func TestRoot_FirstRunBedrockCreateFlow_NoAWSProfilesFound_ShowsExplicitProfileState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_REGION", "eu-west-1")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "test",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           state.DraftProviderRef,
+			ProviderSpec:  "bedrock",
+			CredentialRef: "aws_env_session",
+			BaseURL:       "",
+			ModelID:       "",
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 26}
+	rt.Rebuild(Root(), viewport)
+	out := rt.Render(viewport).String()
+	assertRootScenario(t, out, "bedrock_no_aws_profiles_found")
 }
 
 func TestFirstRunPrimaryEnterActions_ReadyRoutingFocusDispatchesCreate(t *testing.T) {
@@ -554,6 +603,58 @@ func TestRoot_ClientPickerKeepsFocusedChoiceVisibleInCompactViewport(t *testing.
 	}
 }
 
+func TestRoot_ClientsSectionReachableFromLocalDisclosureFocusStates(t *testing.T) {
+	t.Parallel()
+
+	viewport := geom.Rect{W: 100, H: 28}
+	seeds := []struct {
+		name string
+		seed func(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect)
+	}{
+		{
+			name: "client-chooser-open",
+			seed: func(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
+				focusRowContaining(t, rt, viewport, "clients")
+				rt.DispatchEvent(updateKey(interaction.KeyEnter))
+				rt.Rebuild(Root(), viewport)
+				focusRowContaining(t, rt, viewport, "client            ")
+				rt.DispatchEvent(updateKey(interaction.KeyEnter))
+				rt.Rebuild(Root(), viewport)
+				focusChooserOptionContaining(t, rt, viewport, "Codex")
+			},
+		},
+		{
+			name: "client-action-disclosure-open",
+			seed: func(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
+				selectClientFromChooser(t, rt, viewport, "Codex")
+				focusRowContaining(t, rt, viewport, "file config")
+				rt.DispatchEvent(updateKey(interaction.KeyEnter))
+				rt.Rebuild(Root(), viewport)
+			},
+		},
+	}
+
+	for _, tc := range seeds {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			rt := newTestRuntime(state.Model{
+				HeaderStatus:    "ready",
+				DaemonState:     "up",
+				CreateDraftName: "acme",
+				Endpoints:       []string{"acme"},
+				CurrentEndpoint: "acme",
+				EndpointSnapshots: []state.EndpointSnapshot{
+					{Name: "acme"},
+				},
+			})
+			rt.Rebuild(Root(), viewport)
+			tc.seed(t, rt, viewport)
+
+			ensureClientsSectionOpenFromAnyFocusState(t, rt, viewport)
+		})
+	}
+}
+
 func TestRoot_ClientActionPayloadDisclosure_ManualRunRevealsOnActivateOnly(t *testing.T) {
 	t.Parallel()
 
@@ -598,11 +699,11 @@ func TestRoot_EscClosesAddModelProviderDrawer(t *testing.T) {
 				SelectedProviderConfigRef: "ollama:gemma4",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:           "ollama:gemma4",
-						ProviderSpec:  "ollama",
-						ModelID:       "gemma4:e4b",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "",
+						Ref:              "ollama:gemma4",
+						ProviderSpec:     "ollama",
+						ModelID:          "gemma4:e4b",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "",
 					},
 				},
 			},
@@ -658,10 +759,10 @@ func TestRoot_WorkspaceAddModelSelectingFileCredentialShowsFileRow(t *testing.T)
 				SelectedProviderConfigRef: "ollama:gemma4",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:          "ollama:gemma4",
-						ProviderSpec: "ollama",
-						ModelID:      "gemma4:e4b",
-						ProtocolKind: "chat_completions",
+						Ref:              "ollama:gemma4",
+						ProviderSpec:     "ollama",
+						ModelID:          "gemma4:e4b",
+						ProviderProtocol: "protocol_auto",
 					},
 				},
 			},
@@ -690,7 +791,7 @@ func TestRoot_WorkspaceAddModelSelectingFileCredentialShowsFileRow(t *testing.T)
 
 	selectAddModelFileCredential(t, rt, viewport)
 	out := rt.Render(viewport).String()
-	assertVisualByKey(t, out, "file_auth_blocked")
+	assertRootScenario(t, out, "file_auth_blocked")
 }
 
 func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoherent(t *testing.T) {
@@ -707,10 +808,10 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 				SelectedProviderConfigRef: "ollama:gemma4",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:          "ollama:gemma4",
-						ProviderSpec: "ollama",
-						ModelID:      "gemma4:e4b",
-						ProtocolKind: "chat_completions",
+						Ref:              "ollama:gemma4",
+						ProviderSpec:     "ollama",
+						ModelID:          "gemma4:e4b",
+						ProviderProtocol: "protocol_auto",
 					},
 				},
 			},
@@ -756,13 +857,13 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 	}
 
 	out := chooseCredential("env")
-	assertVisualByKey(t, out, "env_selected")
+	assertRootScenario(t, out, "env_selected")
 
 	out = chooseCredential("file")
-	assertVisualByKey(t, out, "file_selected")
+	assertRootScenario(t, out, "file_selected")
 
 	out = chooseCredential("env")
-	assertVisualByKey(t, out, "env_reselected")
+	assertRootScenario(t, out, "env_reselected")
 }
 
 func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
@@ -779,18 +880,18 @@ func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 				SelectedProviderConfigRef: "openai:gpt-5.3",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:           "openai:gpt-5.3",
-						ProviderSpec:  "openai",
-						ModelID:       "gpt-5.3",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "env:OPENAI_API_KEY",
+						Ref:              "openai:gpt-5.3",
+						ProviderSpec:     "openai",
+						ModelID:          "gpt-5.3",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "env:OPENAI_API_KEY",
 					},
 					{
-						Ref:           "anthropic:opus",
-						ProviderSpec:  "anthropic",
-						ModelID:       "opus",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "env:ANTHROPIC_API_KEY",
+						Ref:              "anthropic:opus",
+						ProviderSpec:     "anthropic",
+						ModelID:          "opus",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "env:ANTHROPIC_API_KEY",
 					},
 				},
 			},
@@ -821,7 +922,7 @@ func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 	rt.Rebuild(Root(), viewport)
 
 	out = rt.Render(viewport).String()
-	assertVisualByKey(t, out, "add_model_open")
+	assertRootScenario(t, out, "add_model_open")
 }
 
 func TestRoot_RoutingAliasEditsInline(t *testing.T) {
@@ -838,11 +939,11 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 				SelectedProviderConfigRef: "chatgpt:gpt-5.3-codex:model-1",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:           "chatgpt:gpt-5.3-codex:model-1",
-						ProviderSpec:  "chatgpt",
-						ModelID:       "gpt-5.3-codex",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "chatgpt_login",
+						Ref:              "chatgpt:gpt-5.3-codex:model-1",
+						ProviderSpec:     "chatgpt",
+						ModelID:          "gpt-5.3-codex",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "chatgpt_login",
 					},
 				},
 			},
@@ -860,14 +961,14 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	assertVisualByKey(t, out, "alias_row_closed")
+	assertRootScenario(t, out, "alias_row_closed")
 
 	focusRowContaining(t, rt, viewport, "alias")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
 	out = rt.Render(viewport).String()
-	assertVisualByKey(t, out, "alias_row_inline_open")
+	assertRootScenario(t, out, "alias_row_inline_open")
 }
 
 func TestRoot_FirstRunRunOnChooser_IncludesChatGPT(t *testing.T) {
@@ -1034,11 +1135,11 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 				SelectedProviderConfigRef: "openai:gpt-3.5-turbo",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:           "openai:gpt-3.5-turbo",
-						ProviderSpec:  "openai",
-						ModelID:       "gpt-3.5-turbo",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "env:OPENAI_API_KEY",
+						Ref:              "openai:gpt-3.5-turbo",
+						ProviderSpec:     "openai",
+						ModelID:          "gpt-3.5-turbo",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "env:OPENAI_API_KEY",
 					},
 				},
 			},
@@ -1052,7 +1153,7 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		rt.Rebuild(Root(), viewport)
 		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
 		out := rt.Render(viewport).String()
-		assertVisualByKey(t, out, "browser_not_started")
+		assertRootScenario(t, out, "browser_not_started")
 	})
 
 	t.Run("device_in_progress", func(t *testing.T) {
@@ -1081,7 +1182,7 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		rt.Model.InteractionMode = state.InteractionModeManageList
 		rt.Rebuild(Root(), viewport)
 		out := rt.Render(viewport).String()
-		assertVisualByKey(t, out, "device_in_progress")
+		assertRootScenario(t, out, "device_in_progress")
 	})
 	t.Run("signed_in", func(t *testing.T) {
 		rt := newTestRuntime(base)
@@ -1103,7 +1204,7 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		})
 		rt.Rebuild(Root(), viewport)
 		out := rt.Render(viewport).String()
-		assertVisualByKey(t, out, "signed_in")
+		assertRootScenario(t, out, "signed_in")
 	})
 }
 
@@ -1121,18 +1222,18 @@ func TestRoot_EscOnExpandedRoutingModelClosesNearestModelDisclosure(t *testing.T
 				SelectedProviderConfigRef: "openai:gpt-5.3",
 				ProviderConfigs: []state.ProviderConfigSnapshot{
 					{
-						Ref:           "openai:gpt-5.3",
-						ProviderSpec:  "openai",
-						ModelID:       "gpt-5.3",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "env:OPENAI_API_KEY",
+						Ref:              "openai:gpt-5.3",
+						ProviderSpec:     "openai",
+						ModelID:          "gpt-5.3",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "env:OPENAI_API_KEY",
 					},
 					{
-						Ref:           "anthropic:opus",
-						ProviderSpec:  "anthropic",
-						ModelID:       "opus",
-						ProtocolKind:  "chat_completions",
-						CredentialRef: "env:ANTHROPIC_API_KEY",
+						Ref:              "anthropic:opus",
+						ProviderSpec:     "anthropic",
+						ModelID:          "opus",
+						ProviderProtocol: "protocol_auto",
+						CredentialRef:    "env:ANTHROPIC_API_KEY",
 					},
 				},
 			},
@@ -1149,14 +1250,57 @@ func TestRoot_EscOnExpandedRoutingModelClosesNearestModelDisclosure(t *testing.T
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 	out := rt.Render(viewport).String()
-	assertVisualByKey(t, out, "models_disclosure_open")
+	assertRootScenario(t, out, "models_disclosure_open")
 
 	focusRowContaining(t, rt, viewport, "models")
 	rt.DispatchEvent(updateKey(interaction.KeyEsc))
 	rt.Rebuild(Root(), viewport)
 
 	out = rt.Render(viewport).String()
-	assertVisualByKey(t, out, "models_disclosure_closed_by_esc")
+	assertRootScenario(t, out, "models_disclosure_closed_by_esc")
+}
+
+func TestRoot_FirstRunOpeningModelClosesCredentialChooserDisclosure(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		CreateDraftName: "acme",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			Ref:           state.DraftProviderRef,
+			ProviderSpec:  "bedrock",
+			BaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+			CredentialRef: "profile:default",
+		},
+		CreateDraftModelIDs:           []string{"amazon.nova-pro-v1:0"},
+		CreateDraftModelProviderSpec:  "bedrock",
+		CreateDraftModelBaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		CreateDraftModelCredentialRef: "profile:default",
+	})
+	viewport := geom.Rect{W: 110, H: 34}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "credential")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+	if out := rt.Render(viewport).String(); !strings.Contains(out, "Bedrock API key") {
+		t.Fatalf("expected credential chooser open with Bedrock options; render=%q", out)
+	}
+
+	rt.DispatchEvent(updateKey(interaction.KeyEsc))
+	rt.Rebuild(Root(), viewport)
+	focusRowContaining(t, rt, viewport, "model")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	out := rt.Render(viewport).String()
+	if strings.Contains(out, "Bedrock API key") {
+		t.Fatalf("credential chooser should close when model chooser opens; render=%q", out)
+	}
+	if !strings.Contains(out, "loading models") {
+		t.Fatalf("expected model load state after opening model row; render=%q", out)
+	}
 }
 
 func TestRoot_WorkspaceSavedStatusDoesNotRenderCopyEndpointHintRows(t *testing.T) {
@@ -1202,366 +1346,4 @@ func TestRoot_ControlPlaneIncompatibleRendersHardStopCompatibilityScreen(t *test
 	if strings.Contains(out, "workspace") || strings.Contains(out, "traffic") {
 		t.Fatalf("hard-stop compatibility screen should hide normal sections: %q", out)
 	}
-}
-
-func TestRoot_TrafficRowsRemainNavigableAfterOpeningRow(t *testing.T) {
-	t.Parallel()
-
-	rt := newTestRuntime(state.Model{
-		HeaderStatus:    "ready",
-		DaemonState:     "up",
-		Endpoints:       []string{"acme"},
-		CurrentEndpoint: "acme",
-		TrafficRows: []state.TrafficRow{
-			{RequestID: "req-3", OperationFamily: "responses", Target: "backend-a", Result: "in_progress", StatusCode: 0, ObservedAt: "11:11:03"},
-			{RequestID: "req-2", OperationFamily: "responses", Target: "backend-a", Result: "in_progress", StatusCode: 0, ObservedAt: "11:11:02"},
-			{RequestID: "req-1", OperationFamily: "responses", Target: "backend-a", Result: "in_progress", StatusCode: 0, ObservedAt: "11:11:01"},
-		},
-	})
-	viewport := geom.Rect{W: 120, H: 40}
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "traffic")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "11:11:03")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "11:11:02")
-}
-
-func TestRoot_TrafficRows_WindowedListPreventsOverflow(t *testing.T) {
-	t.Parallel()
-
-	var trafficRows []state.TrafficRow
-	for i := 1; i <= 12; i++ {
-		id := fmt.Sprintf("req-%02d", i)
-		when := fmt.Sprintf("11:22:%02d", i)
-		trafficRows = append(trafficRows, state.TrafficRow{
-			RequestID:       id,
-			OperationFamily: "responses",
-			Target:          "backend-a",
-			Result:          "in_progress",
-			StatusCode:      0,
-			ObservedAt:      when,
-		})
-	}
-
-	rt := newTestRuntime(state.Model{
-		HeaderStatus:    "ready",
-		DaemonState:     "up",
-		Endpoints:       []string{"acme"},
-		CurrentEndpoint: "acme",
-		TrafficRows:     trafficRows,
-	})
-	viewport := geom.Rect{W: 120, H: 40}
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "traffic")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	out := rt.Render(viewport).String()
-	const expectedWindow = 5
-	if got := strings.Count(out, "11:22:"); got != expectedWindow {
-		t.Fatalf("visible traffic rows=%d want %d; render=%q", got, expectedWindow, out)
-	}
-}
-
-func TestRoot_TrafficRows_DownAtWindowEdgeScrollsWithinTrafficList(t *testing.T) {
-	t.Parallel()
-
-	var trafficRows []state.TrafficRow
-	for i := 1; i <= 8; i++ {
-		id := fmt.Sprintf("req-%02d", i)
-		when := fmt.Sprintf("12:34:%02d", i)
-		trafficRows = append(trafficRows, state.TrafficRow{
-			RequestID:       id,
-			OperationFamily: "responses",
-			Target:          "backend-a",
-			Result:          "in_progress",
-			StatusCode:      0,
-			ObservedAt:      when,
-		})
-	}
-
-	rt := newTestRuntime(state.Model{
-		HeaderStatus:    "ready",
-		DaemonState:     "up",
-		Endpoints:       []string{"acme"},
-		CurrentEndpoint: "acme",
-		TrafficRows:     trafficRows,
-	})
-	viewport := geom.Rect{W: 120, H: 40}
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "traffic")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "12:34:08")
-	const windowRows = 5
-	for i := 0; i < windowRows-1; i++ {
-		rt.DispatchEvent(updateKey(interaction.KeyDown))
-		rt.Rebuild(Root(), viewport)
-	}
-	focusRowContaining(t, rt, viewport, "12:34:04")
-
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "12:34:03")
-}
-
-func TestRoot_TrafficEmptyOpenRendersSummaryLineInsteadOfKVPadding(t *testing.T) {
-	t.Parallel()
-
-	rt := newTestRuntime(state.Model{
-		HeaderStatus:    "ready",
-		DaemonState:     "up",
-		Endpoints:       []string{"acme"},
-		CurrentEndpoint: "acme",
-	})
-	viewport := geom.Rect{W: 80, H: 24}
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "traffic")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	out := rt.Render(viewport).String()
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "no traffic yet") {
-			continue
-		}
-		leadingSpaces := len(line) - len(strings.TrimLeft(line, " "))
-		if leadingSpaces > 6 {
-			t.Fatalf("traffic empty line has key/value style padding, want summary indent: %q", line)
-		}
-		return
-	}
-	t.Fatalf("render missing no-traffic line: %q", out)
-}
-
-func TestRoot_FirstRunRoutingCredentialChooserMatrix(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name          string
-		provider      string
-		baseURL       string
-		credentialRef string
-		summary       string
-		chooser       bool
-	}{
-		{
-			name:     "openrouter requires chooser",
-			provider: "openrouter",
-			baseURL:  "https://openrouter.ai/api/v1",
-			summary:  "choose a key source",
-			chooser:  true,
-		},
-		{
-			name:     "ollama local hides chooser",
-			provider: "ollama",
-			baseURL:  "http://127.0.0.1:11434/v1",
-			summary:  "not required",
-			chooser:  false,
-		},
-		{
-			name:     "OpenAI-compatible remote requires chooser",
-			provider: "openai_compatible",
-			baseURL:  "https://api.example.com/v1",
-			summary:  "choose a key source",
-			chooser:  true,
-		},
-		{
-			name:     "OpenAI-compatible local hides chooser",
-			provider: "openai_compatible",
-			baseURL:  "http://localhost:11434/v1",
-			summary:  "not required",
-			chooser:  false,
-		},
-		{
-			name:          "existing credential keeps chooser visible",
-			provider:      "ollama",
-			baseURL:       "http://127.0.0.1:11434/v1",
-			credentialRef: "env:OLLAMA_API_KEY",
-			summary:       "env",
-			chooser:       true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			rt := newTestRuntime(state.Model{
-				HeaderStatus:    "ready",
-				DaemonState:     "up",
-				CreateDraftName: "acme",
-				CreateDraftProviderConfig: state.ProviderConfigSnapshot{
-					Ref:           state.DraftProviderRef,
-					ProviderSpec:  tt.provider,
-					BaseURL:       tt.baseURL,
-					CredentialRef: tt.credentialRef,
-					ProtocolKind:  "chat_completions",
-				},
-			})
-			viewport := geom.Rect{W: 80, H: 24}
-			rt.Rebuild(Root(), viewport)
-			out := rt.Render(viewport).String()
-			assertVisualByKey(t, out, "credential_matrix_"+normalizeVisualToken(tt.name))
-		})
-	}
-}
-
-func newTestRuntime(model state.Model) *loop.AppLoop[state.Model] {
-	return loop.New(model, state.Reduce)
-}
-
-func updateKey(key interaction.Key) interaction.Event {
-	return interaction.Event{Kind: interaction.EventKey, Key: key}
-}
-
-func assertContainsInOrder(t *testing.T, text string, patterns ...string) {
-	t.Helper()
-	offset := 0
-	for _, pattern := range patterns {
-		index := strings.Index(text[offset:], pattern)
-		if index < 0 {
-			t.Fatalf("render missing %q in order: %q", pattern, text)
-		}
-		offset += index + len(pattern)
-	}
-}
-
-func assertCockpitVocabulary(t *testing.T, out string) {
-	t.Helper()
-	for _, forbidden := range []string{
-		"selected target",
-		"targets",
-		"provider config",
-		"credential source",
-		"quick launch",
-		"\nbehavior\n",
-	} {
-		if strings.Contains(out, forbidden) {
-			t.Fatalf("render contains forbidden cockpit label %q: %q", forbidden, out)
-		}
-	}
-}
-
-func focusRowContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, pattern string) {
-	t.Helper()
-	for i := 0; i < 20; i++ {
-		out := rt.Render(viewport).String()
-		for _, line := range strings.Split(out, "\n") {
-			if strings.Contains(line, ">") && strings.Contains(line, pattern) {
-				return
-			}
-		}
-		rt.DispatchEvent(updateKey(interaction.KeyDown))
-		rt.Rebuild(Root(), viewport)
-	}
-	t.Fatalf("could not focus row containing %q; render=%q", pattern, rt.Render(viewport).String())
-}
-
-func focusChooserOptionContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, pattern string) {
-	t.Helper()
-	for i := 0; i < 30; i++ {
-		out := rt.Render(viewport).String()
-		for _, line := range strings.Split(out, "\n") {
-			normalized := strings.ToLower(strings.TrimSpace(line))
-			if !strings.Contains(line, ">") || !strings.Contains(line, pattern) {
-				continue
-			}
-			if strings.Contains(normalized, "provider") || strings.Contains(normalized, "credential") {
-				continue
-			}
-			return
-		}
-		rt.DispatchEvent(updateKey(interaction.KeyDown))
-		rt.Rebuild(Root(), viewport)
-	}
-	t.Fatalf("could not focus chooser option containing %q; render=%q", pattern, rt.Render(viewport).String())
-}
-
-func openAddModelAndChooseProvider(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, providerName string) {
-	t.Helper()
-	focusRowContaining(t, rt, viewport, "routing")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "models")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "add model")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "provider")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusChooserOptionContaining(t, rt, viewport, providerName)
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-}
-
-func chooseAddModelAuthOption(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, option string) {
-	t.Helper()
-	focusRowContaining(t, rt, viewport, "credential")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusChooserOptionContaining(t, rt, viewport, option)
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-}
-
-func selectClientFromChooser(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, label string) {
-	t.Helper()
-	focusRowContaining(t, rt, viewport, "clients")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, "client            ")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	focusRowContaining(t, rt, viewport, label)
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-}
-
-func currentCredentialPickerPath(out string) string {
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "path") {
-			continue
-		}
-		idx := strings.Index(line, "path")
-		if idx < 0 {
-			continue
-		}
-		return strings.TrimSpace(line[idx+len("path"):])
-	}
-	return ""
-}
-
-func selectAddModelFileCredential(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
-	t.Helper()
-
-	focusRowContaining(t, rt, viewport, "add model")
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
-	rt.DispatchEvent(updateKey(interaction.KeyDown))
-	rt.Rebuild(Root(), viewport)
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	focusChooserOptionContaining(t, rt, viewport, "file")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	if strings.Contains(rt.Render(viewport).String(), "credential file") {
-		return
-	}
-	t.Fatalf("unable to select file credential option in add-model flow; render=%q", rt.Render(viewport).String())
 }

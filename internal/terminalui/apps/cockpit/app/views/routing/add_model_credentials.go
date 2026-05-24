@@ -157,10 +157,11 @@ func buildAddModelEnvKeyRow(_ *retained.Context[state.Model], model state.Model,
 				panel.setDraft(next)
 				return []update.Action{
 					state.LoadRoutingModelCatalogRequestedAction{
-						Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-						ProviderSpec:  strings.TrimSpace(next.ProviderSpec),  // swobu:io-string source=boundary
-						BaseURL:       strings.TrimSpace(next.BaseURL),       // swobu:io-string source=boundary
-						CredentialRef: strings.TrimSpace(next.CredentialRef), // swobu:io-string source=boundary // swobu:io-string source=boundary
+						Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+						ProviderSpec:     strings.TrimSpace(next.ProviderSpec),     // swobu:io-string source=boundary
+						ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
+						BaseURL:          strings.TrimSpace(next.BaseURL),          // swobu:io-string source=boundary
+						CredentialRef:    strings.TrimSpace(next.CredentialRef),    // swobu:io-string source=boundary // swobu:io-string source=boundary
 					},
 					state.SetInteractionMode{Mode: state.InteractionModeManageList},
 					interaction.FocusKeyAction{Key: "add-model/env-key"},

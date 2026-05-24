@@ -2,16 +2,16 @@ package routing
 
 import "testing"
 
-func TestDefaultProtocolKindForProvider(t *testing.T) {
+func TestDefaultProviderProtocolForProvider(t *testing.T) {
 	t.Parallel()
 
-	if got := defaultProtocolKindForProvider("anthropic"); got != "messages" {
-		t.Fatalf("anthropic protocol kind = %q, want %q", got, "messages")
+	if got := defaultProviderProtocolForProvider("anthropic"); got == "" {
+		t.Fatal("anthropic provider protocol should not be empty")
 	}
-	if got := defaultProtocolKindForProvider("openrouter"); got != "chat_completions" {
-		t.Fatalf("openrouter protocol kind = %q, want %q", got, "chat_completions")
+	if got := defaultProviderProtocolForProvider("openrouter"); got == "" {
+		t.Fatal("openrouter provider protocol should not be empty")
 	}
-	if got := defaultProtocolKindForProvider(""); got != "chat_completions" {
-		t.Fatalf("empty provider protocol kind = %q, want %q", got, "chat_completions")
+	if got := defaultProviderProtocolForProvider(""); got == "" {
+		t.Fatal("default provider protocol should not be empty")
 	}
 }

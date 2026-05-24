@@ -659,7 +659,7 @@ func (h *capturingRequestHandler) Handle(_ context.Context, in requestpath.Handl
 				"stop",
 			),
 		),
-		Target: ports.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", ""),
+		Target: ports.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "", ""),
 	}, nil
 }
 

@@ -1,3 +1,0 @@
-line 9
--      run on             openai:gpt-5.3:2310255c                                           choose ↵
-+      provider           openai:gpt-5.3:2310255c                                           choose ↵

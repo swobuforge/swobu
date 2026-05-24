@@ -69,14 +69,7 @@ func BuildWorkspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec
 			rows = []retained.ViewSpec[state.Model]{
 				RowStatic(RowName, selectors.EmptyOr(currentCreateName(model), "choose a workspace name")),
 				RowStatic(RowEndpoint, selectors.EmptyOr(endpoint, "none")),
-				busyCreateRow("creating…"),
 			}
-		} else if len(createWorkspaceActions(model)) == 0 {
-			rows = append(rows, RowKVWithHooks("create", createWorkspaceStatus(model), "", nil, nil, focusAffordance("create", false)))
-		} else {
-			rows = append(rows, RowActionWithHooks("create", createWorkspaceStatus(model), "create", func() []update.Action {
-				return createWorkspaceActions(model)
-			}, nil, focusAffordance("create", false)))
 		}
 		out = retained.Named[state.Model](
 			"workspace-create",
@@ -228,17 +221,6 @@ func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
 		}
 		return []update.Action{state.WorkspaceDeleteRequested{Name: endpoint}}
 	}, nil, focusAffordance("delete", false))
-}
-
-func busyCreateRow(value string) retained.ViewSpec[state.Model] {
-	value = strings.TrimSpace(value) // swobu:io-string source=boundary
-	return retained.FromRenderNode[state.Model](toolkitviews.NewAction(6+toolkitviews.RuneLen(value), true, false, func(_ bool, width int) string {
-		line := ">   create"
-		if value != "" {
-			line += "            " + value
-		}
-		return toolkitviews.PadRight(toolkitviews.TrimToWidth(line, width), width)
-	}, func(string) []update.Action { return nil }, nil))
 }
 
 func createWorkspaceActions(model state.Model) []update.Action {

@@ -18,7 +18,6 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -64,7 +63,11 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	if req.Request == nil {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
-	wireReq, err := codexwire.EncodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
+	streaming, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
+	if err != nil {
+		return ports.ProviderResponse{}, err
+	}
+	wireReq, err := codexwire.EncodeRequest(req.Request, streaming)
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -135,7 +138,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		defer func() { _ = resp.Body.Close() }()
 		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	decoder, err := chatGPTResponseDecoder(req.Target.ProviderID(), protocolkind.Responses, req.Contract.ProviderCallMode.Streaming())
+	decoder, err := chatGPTResponseDecoder(req.Target.ProviderID(), streaming)
 	if err != nil {
 		_ = resp.Body.Close()
 		return ports.ProviderResponse{}, err
@@ -300,15 +303,9 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 	return strings.TrimRight(base, "/")
 }
 
-func chatGPTResponseDecoder(providerIDRaw string, protocolKind protocolkind.ProtocolKind, delivery bool) (providersruntime.ResponseDecoder, error) {
-	if err := providersruntime.RequireProviderAndProtocol(
-		providerIDRaw,
-		providercatalog.ProviderSpecChatGPT,
-		protocolKind,
-		protocolkind.Responses,
-		"chatgpt",
-	); err != nil {
-		return nil, err
+func chatGPTResponseDecoder(providerIDRaw string, streaming bool) (providersruntime.ResponseDecoder, error) {
+	if providerIDRaw != string(providercatalog.ProviderSpecChatGPT) {
+		return nil, canonical.BadEndpoint("provider id is unsupported for chatgpt adapter runtime")
 	}
 	streamingDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
 		return ports.NewEnvelopeStreamingProviderResponse(responses.DecodeResponseStream(body, "provider_stream:chatgpt_responses")), nil
@@ -325,9 +322,27 @@ func chatGPTResponseDecoder(providerIDRaw string, protocolKind protocolkind.Prot
 		}
 		return ports.NewBufferedProviderResponse(result), nil
 	}
-	decoder, ok := providersruntime.SelectResponseDecoder(delivery, streamingDecoder, bufferedDecoder)
+	decoder, ok := providersruntime.SelectResponseDecoder(streaming, streamingDecoder, bufferedDecoder)
 	if !ok {
 		return nil, canonical.UnsupportedDelivery("chatgpt provider delivery variant is not implemented")
 	}
 	return decoder, nil
+}
+
+func resolveChatGPTProviderProtocol(providerProtocol string) (bool, error) {
+	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
+	if providerProtocol == "" || providerProtocol == providercatalog.ProviderProtocolAuto {
+		return false, canonical.BadEndpoint("chatgpt provider protocol must be concrete")
+	}
+	if !providercatalog.SupportsProviderProtocolForSpec(string(providercatalog.ProviderSpecChatGPT), providerProtocol) {
+		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
+	}
+	switch providerProtocol {
+	case "responses":
+		return false, nil
+	case "responses_stream":
+		return true, nil
+	default:
+		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
+	}
 }

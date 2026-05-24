@@ -3,6 +3,8 @@ package model
 import "testing"
 
 func TestEvaluateCreateDraftRouteSetup_BedrockMissingScopeBlocksModel(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
 	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
 		ProviderSpec:  "bedrock",
 		CredentialRef: "",
@@ -78,6 +80,8 @@ func TestCreateDraftCredentialStrategySelectable_ProviderDeclaredVariants(t *tes
 }
 
 func TestEvaluateCreateDraftRouteSetup_BedrockMissingCredentialBlocksBeforeScope(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
 	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
 		ProviderSpec: "bedrock",
 		BaseURL:      "",
@@ -92,6 +96,8 @@ func TestEvaluateCreateDraftRouteSetup_BedrockMissingCredentialBlocksBeforeScope
 }
 
 func TestEvaluateCreateDraftRouteSetup_BedrockMissingRegionUsesRegionBlocker(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
 	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
 		ProviderSpec:  "bedrock",
 		CredentialRef: "profile:default",

@@ -81,7 +81,6 @@ func codexClientSpec() capabilityClientSpec {
 				Content: strings.Join([]string{
 					"model = \"{{primary_model}}\"",
 					"model_provider = \"swobu\"",
-					"forced_login_method = \"api\"",
 					"",
 					"[model_providers.swobu]",
 					"name = \"Swobu\"",
@@ -96,11 +95,16 @@ func codexClientSpec() capabilityClientSpec {
 		Run: &capabilityRunSpec{
 			Binary: "codex",
 			Args: []string{
+				"exec",
+				"--color", "never",
 				"-c", "model=\"{{primary_model}}\"",
 				"-c", "model_provider=\"swobu\"",
 				"-c", "model_providers.swobu.name=\"Swobu\"",
 				"-c", "model_providers.swobu.base_url=\"{{openai_base_url}}\"",
-				"-c", "forced_login_method=\"api\"",
+				"Reply with exactly: swobu-e2e-codex-run-ok",
+			},
+			Env: map[string]string{
+				"OPENAI_API_KEY": "swobu-placeholder",
 			},
 		},
 	}
@@ -157,6 +161,8 @@ func aiderClientSpec() capabilityClientSpec {
 			Binary: "aider",
 			Args: []string{
 				"--model", "openai/{{primary_model}}",
+				"--message", "Reply with exactly: swobu-e2e-aider-run-ok",
+				"--exit",
 			},
 			Env: map[string]string{
 				"AIDER_OPENAI_API_BASE": "{{openai_base_url}}",
@@ -185,7 +191,7 @@ func continueClientSpec() capabilityClientSpec {
 			Binary: "cn",
 			Args: []string{
 				"--config", "./swobu.continue.yaml",
-				"--print", "Explain this codebase",
+				"-p", "Explain this codebase",
 			},
 			Prepare: &capabilityRunPrepareSpec{
 				Path:           "./swobu.continue.yaml",

@@ -160,7 +160,7 @@ func createProviderPropertyRows(
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
 		}),
-		Delivery: providerFrameChoiceRow(providerFrameChoiceRowSpec{
+		Protocol: providerProtocolChoiceRow(providerProtocolChoiceRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,

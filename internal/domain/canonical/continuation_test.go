@@ -2,27 +2,25 @@ package canonical
 
 import "testing"
 
-func TestPreviousResponseIDFromRequest_RejectsBothSelectors(t *testing.T) {
+func TestPreviousResponseIDFromRequest_AcceptsPreviousResponseID(t *testing.T) {
 	_, ok, err := PreviousResponseIDFromRequest(NewGenerationRequest(GenerationRequestParams{
 		Model:              "m",
 		PreviousResponseID: "resp_1",
-		ConversationID:     "conv_1",
 	}))
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if ok {
-		t.Fatal("ok = true, want false")
+	if !ok {
+		t.Fatal("ok = false, want true")
 	}
 }
 
-func TestPreviousResponseIDFromRequest_RejectsConversation(t *testing.T) {
+func TestPreviousResponseIDFromRequest_MissingSelectorReturnsFalse(t *testing.T) {
 	_, ok, err := PreviousResponseIDFromRequest(NewGenerationRequest(GenerationRequestParams{
-		Model:          "m",
-		ConversationID: "conv_1",
+		Model: "m",
 	}))
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if ok {
 		t.Fatal("ok = true, want false")

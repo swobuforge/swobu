@@ -464,11 +464,13 @@ func testResponsesEndpointWithFrame(t *testing.T, selectedFrame string) endpoint
 	if err != nil {
 		t.Fatalf("WithModelID returned error: %v", err)
 	}
-	if selectedFrame != "" {
-		config, err = config.WithSelectedFrame(selectedFrame)
-		if err != nil {
-			t.Fatalf("WithSelectedFrame returned error: %v", err)
-		}
+	providerProtocol := "responses"
+	if selectedFrame == providercatalog.FrameSSEEvent {
+		providerProtocol = "responses_stream"
+	}
+	config, err = config.WithProviderProtocol(providerProtocol)
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}
 	return mustEndpoint(t, name, []endpointintent.ProviderConfig{config}, ref)
 }
@@ -495,6 +497,10 @@ func testChatCompletionsEndpoint(t *testing.T) endpointintent.Endpoint {
 	config, err = config.WithModelID("m")
 	if err != nil {
 		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	config, err = config.WithProviderProtocol("responses")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}
 	return mustEndpoint(t, name, []endpointintent.ProviderConfig{config}, ref)
 }
@@ -526,6 +532,10 @@ func testDualProviderResponsesEndpoint(t *testing.T) endpointintent.Endpoint {
 	if err != nil {
 		t.Fatalf("WithModelID A returned error: %v", err)
 	}
+	configA, err = configA.WithProviderProtocol("responses")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol A returned error: %v", err)
+	}
 	configB, err := endpointintent.NewProviderConfig(refB, spec, "https://b.test/v1", "")
 	if err != nil {
 		t.Fatalf("NewProviderConfig B returned error: %v", err)
@@ -533,6 +543,10 @@ func testDualProviderResponsesEndpoint(t *testing.T) endpointintent.Endpoint {
 	configB, err = configB.WithModelID("m2")
 	if err != nil {
 		t.Fatalf("WithModelID B returned error: %v", err)
+	}
+	configB, err = configB.WithProviderProtocol("responses")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol B returned error: %v", err)
 	}
 	return mustEndpoint(t, name, []endpointintent.ProviderConfig{configA, configB}, refA)
 }
@@ -560,6 +574,10 @@ func testProviderChatStrictToolModelEndpoint(t *testing.T) endpointintent.Endpoi
 	if err != nil {
 		t.Fatalf("WithModelID returned error: %v", err)
 	}
+	config, err = config.WithProviderProtocol("responses")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
 	return mustEndpoint(t, name, []endpointintent.ProviderConfig{config}, ref)
 }
 
@@ -582,11 +600,13 @@ func testChatGPTResponsesEndpointWithFrame(t *testing.T, selectedFrame string) e
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
-	if selectedFrame != "" {
-		config, err = config.WithSelectedFrame(selectedFrame)
-		if err != nil {
-			t.Fatalf("WithSelectedFrame returned error: %v", err)
-		}
+	providerProtocol := "responses"
+	if selectedFrame == providercatalog.FrameSSEEvent {
+		providerProtocol = "responses_stream"
+	}
+	config, err = config.WithProviderProtocol(providerProtocol)
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}
 	config, err = config.WithModelID("m")
 	if err != nil {

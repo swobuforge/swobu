@@ -34,7 +34,7 @@ func TestProviderModelCatalogChoicesAvailable_CreateModeUsesDraftFlow(t *testing
 	}
 }
 
-func TestProviderModelCatalogChoicesAvailable_CustomProviderUsesManualEditor(t *testing.T) {
+func TestProviderModelCatalogChoicesAvailable_OpenAICompatibleUsesPicker(t *testing.T) {
 	t.Parallel()
 
 	spec := providerModelChoiceRowSpec{
@@ -43,7 +43,7 @@ func TestProviderModelCatalogChoicesAvailable_CustomProviderUsesManualEditor(t *
 			ProviderSpec: "openai_compatible",
 		},
 	}
-	if providerModelCatalogChoicesAvailable(spec) {
-		t.Fatalf("OpenAI-compatible provider should use manual model editor")
+	if !providerModelCatalogChoicesAvailable(spec) {
+		t.Fatalf("OpenAI-compatible provider should use model picker UX")
 	}
 }

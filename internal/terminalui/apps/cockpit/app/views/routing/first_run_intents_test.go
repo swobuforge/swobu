@@ -1,0 +1,61 @@
+package routing
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/testharness"
+)
+
+func TestFirstRunCredentialSummaryMatrix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		provider      string
+		baseURL       string
+		credentialRef string
+		want          string
+	}{
+		{name: "openrouter requires chooser", provider: "openrouter", baseURL: "https://openrouter.ai/api/v1", want: "missing"},
+		{name: "ollama local defaults external", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", want: "external"},
+		{name: "openai-compatible remote requires chooser", provider: "openai_compatible", baseURL: "https://api.example.com/v1", want: "missing"},
+		{name: "openai-compatible local still requires explicit credential", provider: "openai_compatible", baseURL: "http://localhost:11434/v1", want: "missing"},
+		{name: "existing credential without env is surfaced as missing", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", credentialRef: "env:OLLAMA_API_KEY", want: "env var missing"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := firstRunCredentialSummary(tt.provider, tt.baseURL, tt.credentialRef)
+			if got != tt.want {
+				t.Fatalf("firstRunCredentialSummary(provider=%q baseURL=%q credentialRef=%q)=%q want %q", tt.provider, tt.baseURL, tt.credentialRef, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateDraftProtocolModeRow_DefaultsAndResolvesProviderProtocol(t *testing.T) {
+	t.Parallel()
+
+	t.Run("openai-default-resolves-catalog-default", func(t *testing.T) {
+		t.Parallel()
+		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "openai", ProviderProtocol: ""}}
+		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+		if !strings.Contains(out, "protocol") || !strings.Contains(out, "responses_stream") {
+			t.Fatalf("expected protocol row with resolved default responses_stream; render=%q", out)
+		}
+	})
+
+	t.Run("anthropic-resolves-messages-stream", func(t *testing.T) {
+		t.Parallel()
+		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "anthropic", ProviderProtocol: ""}}
+		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+		if !strings.Contains(out, "protocol") || !strings.Contains(out, "messages_stream") {
+			t.Fatalf("expected protocol row with resolved anthropic protocol; render=%q", out)
+		}
+	})
+}

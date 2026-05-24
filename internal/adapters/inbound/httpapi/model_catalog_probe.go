@@ -14,8 +14,9 @@ import (
 )
 
 type modelCatalogProbeResult struct {
-	ModelIDs []string `json:"model_ids,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	ModelIDs                 []string `json:"model_ids,omitempty"`
+	Error                    string   `json:"error,omitempty"`
+	ResolvedProviderProtocol string   `json:"resolved_provider_protocol,omitempty"`
 }
 
 // ModelCatalogProbeHandler probes provider-backed model ids for one draft route.
@@ -47,15 +48,16 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 	}
-	credentialRef := strings.TrimSpace(query.Get("credential_ref")) // swobu:io-string source=boundary
-
-	models, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, credentialRef)
+	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
+	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
+	models, resolvedVariant, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, credentialRef, providerProtocol)
 	result := modelCatalogProbeResult{}
 	if probeErr != nil {
 		slog.Warn("model catalog probe failed",
 			"provider_spec", providerSpec,
 			"base_url", baseURL,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
+			"provider_protocol", providerProtocol,
 			"error", probeErr.Error(),
 		)
 		result.Error = normalizeModelCatalogProbeError(probeErr.Error(), credentialRef)
@@ -64,9 +66,11 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 			"provider_spec", providerSpec,
 			"base_url", baseURL,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
+			"provider_protocol", resolvedVariant,
 			"model_count", len(models),
 		)
 		result.ModelIDs = models
+		result.ResolvedProviderProtocol = resolvedVariant
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
@@ -76,27 +80,70 @@ func credentialRefKindForProbe(credentialRef string) string {
 	return string(credentialref.Parse(credentialRef).Kind())
 }
 
-func probeModelIDs(ctx context.Context, providers ports.ProviderModelCatalog, providerSpec string, baseURL string, credentialRef string) ([]string, error) {
+func probeModelIDs(
+	ctx context.Context,
+	providers ports.ProviderModelCatalog,
+	providerSpec string,
+	baseURL string,
+	credentialRef string,
+	providerProtocol string,
+) ([]string, string, error) {
 	routeProfile, ok := providercatalog.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
 	if !ok {
-		return nil, canonical.BadEndpoint("selected provider route is unsupported")
+		return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}
-	target := ports.NewRoutableTarget(
-		"draft",
-		providerSpec,
-		baseURL,
-		credentialRef,
-		"",
-		string(routeProfile.AuthKind),
-	)
-	if err := providers.ValidateCredentials(ctx, target); err != nil {
-		return nil, err
+	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
+	if providerProtocol != "" && providerProtocol != providercatalog.ProviderProtocolAuto {
+		protocol, frame, ok := providercatalog.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
+		if !ok {
+			return nil, "", canonical.BadEndpoint("selected provider protocol is unsupported")
+		}
+		target := ports.NewRoutableTarget(
+			"draft",
+			providerSpec,
+			baseURL,
+			credentialRef,
+			protocol,
+			string(routeProfile.AuthKind),
+			frame,
+			providerProtocol,
+		)
+		models, err := providers.ListModels(ctx, target)
+		if err != nil {
+			return nil, "", err
+		}
+		return ports.CloneModelIDs(models), providerProtocol, nil
 	}
-	models, err := providers.ListModels(ctx, target)
-	if err != nil {
-		return nil, err
+	variants := providercatalog.SupportedProviderProtocolsForSpec(providerSpec)
+	var lastErr error
+	for _, variant := range variants {
+		if variant == providercatalog.ProviderProtocolAuto {
+			continue
+		}
+		protocol, frame, ok := providercatalog.ProviderProtocolKindAndFrame(providerSpec, variant)
+		if !ok {
+			continue
+		}
+		target := ports.NewRoutableTarget(
+			"draft",
+			providerSpec,
+			baseURL,
+			credentialRef,
+			protocol,
+			string(routeProfile.AuthKind),
+			frame,
+			variant,
+		)
+		models, err := providers.ListModels(ctx, target)
+		if err == nil {
+			return ports.CloneModelIDs(models), variant, nil
+		}
+		lastErr = err
 	}
-	return ports.CloneModelIDs(models), nil
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+	return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
 }
 
 func normalizeModelCatalogProbeError(message string, credentialRef string) string {

@@ -7,6 +7,70 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
+func TestHandleFilterableEsc_ClearsQueryBeforeClose(t *testing.T) {
+	setCalled := false
+	var gotState FilterablePickerState
+	cancelCalled := false
+	handled, actions := handleFilterableEsc(
+		FilterablePickerState{Query: "claude", Cursor: 2, Offset: 1},
+		func(next FilterablePickerState) {
+			setCalled = true
+			gotState = next
+		},
+		[]FilterablePickerItem{{Label: "claude-sonnet-4-20250514"}},
+		FilterablePickerConfig{
+			KeyPrefix: "provider-model-option",
+			OnCancel: func() []update.Action {
+				cancelCalled = true
+				return []update.Action{interaction.FocusKeyAction{Key: "model"}}
+			},
+		},
+	)
+	if !handled {
+		t.Fatal("esc should be handled")
+	}
+	if !setCalled {
+		t.Fatal("esc with non-empty query must reset picker state")
+	}
+	if gotState.Query != "" || gotState.Cursor != 0 || gotState.Offset != 0 {
+		t.Fatalf("state=%+v want query=\"\" cursor=0 offset=0", gotState)
+	}
+	if cancelCalled {
+		t.Fatal("first esc with non-empty query must not close picker")
+	}
+	if len(actions) == 0 {
+		t.Fatal("expected focus action after clearing query")
+	}
+}
+
+func TestHandleFilterableEsc_ClosesWhenQueryEmpty(t *testing.T) {
+	setCalled := false
+	cancelCalled := false
+	handled, actions := handleFilterableEsc(
+		FilterablePickerState{},
+		func(FilterablePickerState) { setCalled = true },
+		nil,
+		FilterablePickerConfig{
+			OnCancel: func() []update.Action {
+				cancelCalled = true
+				return []update.Action{interaction.FocusKeyAction{Key: "model"}}
+			},
+		},
+	)
+	if !handled {
+		t.Fatal("esc should be handled")
+	}
+	if setCalled {
+		t.Fatal("empty-query esc must not reset state")
+	}
+	if !cancelCalled {
+		t.Fatal("empty-query esc must close picker via OnCancel")
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions len=%d want 1", len(actions))
+	}
+}
+
 func TestFilterablePickerItems_FiltersBySearchOrLabel(t *testing.T) {
 	items := []FilterablePickerItem{
 		{Label: "OpenAI", Search: "openai provider"},

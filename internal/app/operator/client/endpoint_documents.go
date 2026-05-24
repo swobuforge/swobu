@@ -1,9 +1,8 @@
 package operatorclient
 
 import (
-	"strings"
-
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 // endpointDocument mirrors the HTTP wire format for a single endpoint.
@@ -14,14 +13,13 @@ type endpointDocument struct {
 }
 
 type providerConfigDocument struct {
-	Ref           string `json:"ref"`
-	ProviderSpec  string `json:"provider_spec"`
-	BaseURL       string `json:"base_url,omitempty"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	ModelID       string `json:"model_id,omitempty"`
-	TargetAlias   string `json:"target_alias,omitempty"`
-	SelectedFrame string `json:"selected_frame,omitempty"`
-	ProtocolKind  string `json:"protocol_kind,omitempty"`
+	Ref              string `json:"ref"`
+	ProviderSpec     string `json:"provider_spec"`
+	BaseURL          string `json:"base_url,omitempty"`
+	CredentialRef    string `json:"credential_ref,omitempty"`
+	ModelID          string `json:"model_id,omitempty"`
+	TargetAlias      string `json:"target_alias,omitempty"`
+	ProviderProtocol string `json:"provider_protocol,omitempty"`
 }
 
 type endpointListDocument struct {
@@ -37,14 +35,13 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 	}
 	for _, pc := range providerConfigs {
 		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
-			Ref:           pc.Ref().String(),
-			ProviderSpec:  pc.ProviderSpec().String(),
-			BaseURL:       pc.BaseURL(),
-			CredentialRef: pc.CredentialRef(),
-			ModelID:       pc.ModelID(),
-			TargetAlias:   pc.TargetAlias(),
-			SelectedFrame: pc.SelectedFrame(),
-			ProtocolKind:  pc.ProtocolKind().String(),
+			Ref:              pc.Ref().String(),
+			ProviderSpec:     pc.ProviderSpec().String(),
+			BaseURL:          pc.BaseURL(),
+			CredentialRef:    pc.CredentialRef(),
+			ModelID:          pc.ModelID(),
+			TargetAlias:      pc.TargetAlias(),
+			ProviderProtocol: providercatalog.EncodeProviderProtocolForPersistence(pc.ProviderProtocol()),
 		})
 	}
 	return doc
@@ -73,8 +70,12 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		if strings.TrimSpace(pc.SelectedFrame) != "" { // swobu:io-string source=boundary
-			config, err = config.WithSelectedFrame(pc.SelectedFrame)
+		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), pc.ProviderProtocol)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
+		}
+		if providerProtocol != "" {
+			config, err = config.WithProviderProtocol(providerProtocol)
 			if err != nil {
 				return endpointintent.Endpoint{}, err
 			}

@@ -15,7 +15,6 @@ func assertNoTestHarnessArtifacts(t *testing.T, value string) {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	for _, token := range []string{
 		"hermetic-",
-		"reply with exactly:",
 		"swobu-local",
 	} {
 		if strings.Contains(lower, token) {
@@ -105,7 +104,7 @@ func TestClientRunSpecForID(t *testing.T) {
 		t.Fatalf("OPENAI_API_KEY=%q", got)
 	}
 	joinedAiderArgs := strings.Join(spec.args, " ")
-	if got := joinedAiderArgs; got != "--model openai/"+requestpath.PublicModelIDSwobu {
+	if got := joinedAiderArgs; got != "--model openai/"+requestpath.PublicModelIDSwobu+" --message Reply with exactly: swobu-e2e-aider-run-ok --exit" {
 		t.Fatalf("aider args=%q", got)
 	}
 	if strings.Contains(joinedAiderArgs, "hermetic-aider-token") {
@@ -115,8 +114,11 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `-c model="`+requestpath.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" -c forced_login_method="api"` {
+	if got := strings.Join(codex.args, " "); got != `exec --color never -c model="`+requestpath.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" Reply with exactly: swobu-e2e-codex-run-ok` {
 		t.Fatalf("codex args=%q", got)
+	}
+	if got := codex.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
+		t.Fatalf("codex env OPENAI_API_KEY=%q", got)
 	}
 	claude, ok := clientRunSpecForID("claude", "http://127.0.0.1:7926/c/acme/", "")
 	if !ok || claude.binary != "claude" {
@@ -148,7 +150,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || continueSpec.binary != "cn" {
 		t.Fatalf("continue spec=%+v ok=%v", continueSpec, ok)
 	}
-	if got := strings.Join(continueSpec.args, " "); got != `--config ./swobu.continue.yaml --print Explain this codebase` {
+	if got := strings.Join(continueSpec.args, " "); got != `--config ./swobu.continue.yaml -p Explain this codebase` {
 		t.Fatalf("continue args=%q", got)
 	}
 }
@@ -158,7 +160,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("aider command missing")
 	}
-	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 aider --model openai/" + requestpath.PublicModelIDSwobu; cmd != want {
+	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 aider --model openai/" + requestpath.PublicModelIDSwobu + " --message Reply with exactly: swobu-e2e-aider-run-ok --exit"; cmd != want {
 		t.Fatalf("aider command=%q want=%q", cmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, cmd)
@@ -166,7 +168,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `codex -c model="` + requestpath.PublicModelIDSwobu + `" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" -c forced_login_method="api"`; codex != want {
+	if want := `codex exec --color never -c model="` + requestpath.PublicModelIDSwobu + `" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" Reply with exactly: swobu-e2e-codex-run-ok`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -190,7 +192,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("continue command missing")
 	}
-	if want := `cn --config ./swobu.continue.yaml --print Explain this codebase`; continueCmd != want {
+	if want := `cn --config ./swobu.continue.yaml -p Explain this codebase`; continueCmd != want {
 		t.Fatalf("continue command=%q want=%q", continueCmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, continueCmd)

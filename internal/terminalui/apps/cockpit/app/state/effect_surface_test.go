@@ -20,3 +20,4 @@ type RefreshEndpointsEffect = stateeffect.RefreshEndpointsEffect
 type RefreshStatusProjectionEffect = stateeffect.RefreshStatusProjectionEffect
 type LoadRoutingModelCatalogEffect = stateeffect.LoadRoutingModelCatalogEffect
 type RoutingModelCatalogLoaded = stateeffect.RoutingModelCatalogLoaded
+type CreateDraftModelProbeCompletedAction = stateeffect.CreateDraftModelProbeCompletedAction

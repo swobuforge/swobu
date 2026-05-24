@@ -27,13 +27,14 @@ func providerModelChoiceRow(spec providerModelChoiceRowSpec) retained.ViewSpec[s
 }
 
 func buildProviderModelChoiceRow(ctx *retained.Context[state.Model], spec providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
-	var out retained.ViewSpec[state.Model]
 	if providerModelCatalogChoicesAvailable(spec) {
-		out = buildProviderModelCatalogChoiceRow(ctx, spec)
-	} else {
-		out = buildProviderModelManualEditorRow(ctx, spec)
+		return buildProviderModelCatalogChoiceRow(ctx, spec)
 	}
-	return out
+	return retained.VStack(
+		ctx,
+		views.RowStatic(views.RowModel, "blocked"),
+		views.RowStatic("", "-> model selection requires catalog-backed provider"),
+	)
 }
 
 func providerModelCatalogChoicesAvailable(w providerModelChoiceRowSpec) bool {
@@ -41,14 +42,27 @@ func providerModelCatalogChoicesAvailable(w providerModelChoiceRowSpec) bool {
 		return false
 	}
 	spec := strings.TrimSpace(w.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
-	if strings.EqualFold(spec, "openai_compatible") {
-		return false
-	}
 	return state.ProviderSupportsCatalog(spec)
 }
 
 func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
+	if w.ProviderConfig == nil {
+		return views.RowStatic(views.RowModel, "blocked")
+	}
+	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
+		ProviderSpec:      strings.TrimSpace(w.ProviderConfig.ProviderSpec),  // swobu:io-string source=boundary
+		BaseURL:           strings.TrimSpace(w.ProviderConfig.BaseURL),       // swobu:io-string source=boundary
+		CredentialRef:     strings.TrimSpace(w.ProviderConfig.CredentialRef), // swobu:io-string source=boundary
+		ModelCatalogError: model.AddModelDraftModelError,
+	})
+	if readiness.Blocked {
+		blockedRows := []retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, "blocked")}
+		if message := strings.TrimSpace(readiness.Message); message != "" { // swobu:io-string source=boundary
+			blockedRows = append(blockedRows, views.DisclosureNoteRows(message)...)
+		}
+		return retained.VStack(ctx, blockedRows...)
+	}
 	current := selectedModelID(model, w.ProviderConfig, w.CreateMode)
 	if current == "" {
 		current = "not set"
@@ -73,10 +87,11 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		if nextOpen {
 			pc := *w.ProviderConfig
 			actions = append(actions, state.LoadRoutingModelCatalogRequestedAction{
-				Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-				ProviderSpec:  strings.TrimSpace(pc.ProviderSpec),  // swobu:io-string source=boundary
-				BaseURL:       strings.TrimSpace(pc.BaseURL),       // swobu:io-string source=boundary
-				CredentialRef: strings.TrimSpace(pc.CredentialRef), // swobu:io-string source=boundary // swobu:io-string source=boundary
+				Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+				ProviderSpec:     strings.TrimSpace(pc.ProviderSpec),     // swobu:io-string source=boundary
+				ProviderProtocol: strings.TrimSpace(pc.ProviderProtocol), // swobu:io-string source=boundary
+				BaseURL:          strings.TrimSpace(pc.BaseURL),          // swobu:io-string source=boundary
+				CredentialRef:    strings.TrimSpace(pc.CredentialRef),    // swobu:io-string source=boundary // swobu:io-string source=boundary
 			})
 			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("provider-model-option", 0)})
 		}
@@ -116,31 +131,19 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		})
 	}
 	if model.AddModelDraftModelError != "" || len(options) == 0 {
-		current := selectedModelID(model, w.ProviderConfig, w.CreateMode)
-		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(current, "not set"), current, "model id", func(value string) []update.Action {
-			setOpen(false)
-			actions := applyProviderModelSelection(value, w.ProviderConfig, w.EndpointName, w.CreateMode)
-			actions = append(actions, []update.Action{
-				state.SetInteractionMode{Mode: closeMode},
-				interaction.FocusKeyAction{Key: "model"},
-			}...)
-			return actions
-		})
+		rows := []retained.ViewSpec[state.Model]{parent}
+		if model.AddModelDraftModelError != "" {
+			rows = append(rows, views.DisclosureNoteRows(model.AddModelDraftModelError)...)
+		} else {
+			rows = append(rows, views.DisclosureNoteRows("no models available for current auth/provider configuration")...)
+		}
+		return retained.VStack(ctx, rows...)
 	}
 	return renderModelPickerDisclosure(ctx, modelPickerRenderSpec{
 		Parent:    parent,
 		Picker:    picker,
 		SetPicker: setPicker,
 		Options:   options,
-		OnChooseRawID: func(rawID string) []update.Action {
-			setOpen(false)
-			actions := applyProviderModelSelection(rawID, w.ProviderConfig, w.EndpointName, w.CreateMode)
-			actions = append(actions, []update.Action{
-				state.SetInteractionMode{Mode: closeMode},
-				interaction.FocusKeyAction{Key: "model"},
-			}...)
-			return actions
-		},
 		KeyPrefix: "provider-model-option",
 		FocusKey:  "model",
 		CloseDisclosure: func() []update.Action {
@@ -151,22 +154,6 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 			}
 		},
 	})
-}
-
-func buildProviderModelManualEditorRow(ctx *retained.Context[state.Model], w providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
-	current := selectedModelID(ctx.Model(), w.ProviderConfig, w.CreateMode)
-	summary := selectors.EmptyOr(current, "not set")
-	parent := backendURLEditorRow(
-		ctx,
-		views.RowModel,
-		summary,
-		current,
-		"model id",
-		func(value string) []update.Action {
-			return applyProviderModelSelection(value, w.ProviderConfig, w.EndpointName, w.CreateMode)
-		},
-	)
-	return parent
 }
 
 func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.ProviderConfigSnapshot) bool {
@@ -180,6 +167,9 @@ func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.
 		return false
 	}
 	if model.AddModelDraftCredentialRef != providerConfig.CredentialRef {
+		return false
+	}
+	if model.AddModelDraftProviderProtocol != providerConfig.ProviderProtocol {
 		return false
 	}
 	return true
@@ -203,7 +193,7 @@ func selectedModelID(model state.Model, providerConfig *state.ProviderConfigSnap
 	if pc == nil {
 		return ""
 	}
-	return strings.TrimSpace(pc.ModelID) // swobu:io-string source=boundary
+	return pc.ModelID
 }
 
 func selectedProvider(model state.Model, providerConfig *state.ProviderConfigSnapshot, createMode bool) *state.ProviderConfigSnapshot {

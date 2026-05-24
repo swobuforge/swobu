@@ -18,7 +18,6 @@ endpoints:
     provider_configs:
       - ref: backend-a
         provider_spec: openai_compatible
-        protocol_kind: chat_completions
         base_url: https://example.test/v1
         model_id: gpt-4.1-mini
         target_alias: fast
@@ -79,7 +78,6 @@ endpoints:
     provider_configs:
       - ref: backend-a
         provider_spec: openai_compatible
-        protocol_kind: chat_completions
 `
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
@@ -91,6 +89,31 @@ endpoints:
 	}
 	if !strings.Contains(err.Error(), "base_url") {
 		t.Fatalf("error = %v, want base_url validation failure", err)
+	}
+}
+
+func TestLoad_RejectsProtocolAutoAtDaemonBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	raw := `
+endpoints:
+  - name: alpha
+    selected_provider_config_ref: backend-a
+    provider_configs:
+      - ref: backend-a
+        provider_spec: openai
+        provider_protocol: protocol_auto
+        credential_ref: env:OPENAI_API_KEY
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "protocol_auto") {
+		t.Fatalf("error = %v, want protocol_auto failure", err)
 	}
 }
 
@@ -172,13 +195,11 @@ endpoints:
     provider_configs:
       - ref: chatgpt-work
         provider_spec: chatgpt
-        protocol_kind: chat_completions
         credential_ref: keychain:chatgpt/work_account
         model_id: gpt-5.3-codex
         target_alias: work-fast
       - ref: chatgpt-personal
         provider_spec: chatgpt
-        protocol_kind: chat_completions
         credential_ref: keychain:chatgpt/personal_account
         model_id: gpt-5.3-codex
         target_alias: personal-safe
@@ -226,7 +247,6 @@ func TestSaveLoad_RoundTripMultiProviderCredentialRefsAndAliases_JSON(t *testing
         {
           "ref": "chatgpt-work",
           "provider_spec": "chatgpt",
-          "protocol_kind": "chat_completions",
           "credential_ref": "keychain:chatgpt/work_account",
           "model_id": "gpt-5.3-codex",
           "target_alias": "work-fast"
@@ -234,7 +254,6 @@ func TestSaveLoad_RoundTripMultiProviderCredentialRefsAndAliases_JSON(t *testing
         {
           "ref": "chatgpt-personal",
           "provider_spec": "chatgpt",
-          "protocol_kind": "chat_completions",
           "credential_ref": "keychain:chatgpt/personal_account",
           "model_id": "gpt-5.3-codex",
           "target_alias": "personal-safe"

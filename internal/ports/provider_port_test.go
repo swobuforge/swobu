@@ -23,6 +23,8 @@ func TestNewExecuteRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 		"cred-1",
 		"chat_completions",
 		"",
+		"",
+		"",
 	)
 	req := NewProviderRequest(request, NewExecutionContract(true), target)
 

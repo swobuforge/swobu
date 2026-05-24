@@ -1,23 +1,28 @@
 package routing
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
-)
-
-func TestApplyProviderEnvKeySelection_CreateModeLoadsCatalogScope(t *testing.T) {
-	t.Parallel()
-
-	actions := applyProviderEnvKeySelection("anthropic", "ANTHROPIC_API_KEY", nil, "", true, "")
-	if len(actions) != 3 {
-		t.Fatalf("action count = %d, want 3", len(actions))
+func TestResolveOpenAICompatibleBedrockBaseURL_AutoSetsMantleForBedrockEnvToken(t *testing.T) {
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	got := resolveOpenAICompatibleBedrockBaseURL("openai_compatible", "AWS_BEARER_TOKEN_BEDROCK", "")
+	want := "https://bedrock-mantle.us-east-1.api.aws/v1"
+	if got != want {
+		t.Fatalf("baseURL=%q want %q", got, want)
 	}
-	load, ok := actions[2].(state.LoadRoutingModelCatalogRequestedAction)
-	if !ok {
-		t.Fatalf("action[2] = %T, want state.LoadRoutingModelCatalogRequestedAction", actions[2])
+}
+
+func TestResolveOpenAICompatibleBedrockBaseURL_PreservesExistingBaseURL(t *testing.T) {
+	existing := "https://custom.example/v1"
+	got := resolveOpenAICompatibleBedrockBaseURL("openai_compatible", "AWS_BEARER_TOKEN_BEDROCK", existing)
+	if got != existing {
+		t.Fatalf("baseURL=%q want %q", got, existing)
 	}
-	if load.Scope != state.RoutingModelCatalogScopeCreateDraft {
-		t.Fatalf("scope = %q, want %q", load.Scope, state.RoutingModelCatalogScopeCreateDraft)
+}
+
+func TestResolveOpenAICompatibleBedrockBaseURL_NonBedrockEnvKeepsBaseURL(t *testing.T) {
+	got := resolveOpenAICompatibleBedrockBaseURL("openai_compatible", "OPENAI_API_KEY", "")
+	if got != "" {
+		t.Fatalf("baseURL=%q want empty", got)
 	}
 }

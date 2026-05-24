@@ -26,8 +26,7 @@ import (
 	uimode "github.com/swobuforge/swobu/internal/terminalui/session"
 )
 
-// ExitCode is contract-bearing for `swobu status`: healthy=0, reachable but
-// uninitialized=1, and daemon unreachable=2.
+// ExitCode is contract-bearing for `swobu status`: healthy=0, uninitialized=1, daemon unreachable=2.
 type ExitCode int
 
 const (
@@ -38,7 +37,6 @@ const (
 )
 
 type StatusPayload = daemonlifecycle.StatusPayload
-
 type Runner struct {
 	Stdin               io.Reader
 	Stdout              io.Writer
@@ -165,6 +163,11 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 	}
 	spec.sleep(spec.startupHandoffFloor)
 	uicli.NewStartupConsolePresenter(startupOut).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
+	debugHandoff := platformconfig.EnvTruthy(os.Getenv("SWOBU_E2E_DEBUG_HANDOFF"))
+	if debugHandoff {
+		_, _ = fmt.Fprintln(startupOut, "swobu handoff: switching session mode to interactive")
+		_, _ = fmt.Fprintln(startupErr, "swobu handoff: switching session mode to interactive")
+	}
 	if err := spec.uiMode.SetMode(uimode.ModeInteractive); err != nil {
 		_, _ = fmt.Fprintln(startupErr, err.Error())
 		return ExitDown
@@ -182,9 +185,20 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 	bridgedLogger := slog.New(platformlogging.NewSessionBufferedHandler(prevLogger.Handler(), spec.uiMode))
 	slog.SetDefault(bridgedLogger)
 	defer slog.SetDefault(prevLogger)
+	if debugHandoff {
+		_, _ = fmt.Fprintln(startupOut, "swobu handoff: launching cockpit interactive app")
+		_, _ = fmt.Fprintln(startupErr, "swobu handoff: launching cockpit interactive app")
+	}
 	if err := spec.launchInteractive(ctx, spec.stdin, cockpitOut, cockpitErr); err != nil {
+		// Mirror launch failure into transcript stderr as well; if interactive
+		// mode failed before drawing, cockpitErr may be invisible to operators.
+		_, _ = fmt.Fprintln(startupErr, err.Error())
 		_, _ = fmt.Fprintln(cockpitErr, err.Error())
 		return ExitDown
+	}
+	if debugHandoff {
+		_, _ = fmt.Fprintln(startupOut, "swobu handoff: cockpit interactive app exited cleanly")
+		_, _ = fmt.Fprintln(startupErr, "swobu handoff: cockpit interactive app exited cleanly")
 	}
 	return ExitHealthy
 }
@@ -288,6 +302,9 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 }
 
 func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
+	if platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvSkipTelemetryNotice)) {
+		return nil
+	}
 	store := telemetry.NewStore()
 	state, err := store.LoadOrCreate()
 	if err != nil {
@@ -371,7 +388,6 @@ func fetchStatus(ctx context.Context, client *http.Client, daemonURL string) (St
 		return StatusPayload{State: "down"}, ExitDown
 	}
 }
-
 func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, client *http.Client) error {
 	_, err := daemonlifecycle.AttachOrStart(ctx, daemonlifecycle.AttachOrStartInput{
 		DaemonURL:            platformconfig.DefaultDaemonURL(),

@@ -106,7 +106,7 @@ func TestProviderConfig_DerivesProtocolFromProviderSpec(t *testing.T) {
 	}
 }
 
-func TestProviderConfig_WithProtocolKind(t *testing.T) {
+func TestProviderConfig_WithProviderProtocol(t *testing.T) {
 	ref, err := ParseProviderConfigRef("cfg-openai")
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
@@ -120,19 +120,19 @@ func TestProviderConfig_WithProtocolKind(t *testing.T) {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
 
-	cfg, err = cfg.WithProtocolKind(protocolkind.Responses)
+	cfg, err = cfg.WithProviderProtocol("responses")
 	if err != nil {
-		t.Fatalf("WithProtocolKind returned error: %v", err)
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}
 	if got := cfg.ProtocolKind(); got != protocolkind.Responses {
 		t.Fatalf("protocol kind = %q, want %q", got, protocolkind.Responses)
 	}
-	if got := cfg.SelectedFrame(); got == "" {
-		t.Fatal("selected frame must be set after protocol switch")
+	if got := cfg.ProviderProtocol(); got != "responses" {
+		t.Fatalf("provider protocol = %q, want responses", got)
 	}
 }
 
-func TestProviderConfig_WithProtocolKindRejectsUnsupportedProtocol(t *testing.T) {
+func TestProviderConfig_WithProviderProtocolRejectsUnsupportedProtocol(t *testing.T) {
 	ref, err := ParseProviderConfigRef("cfg-anthropic")
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
@@ -145,7 +145,7 @@ func TestProviderConfig_WithProtocolKindRejectsUnsupportedProtocol(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
-	if _, err := cfg.WithProtocolKind(protocolkind.Completions); !errors.Is(err, ErrInvalidProviderConfig) {
-		t.Fatalf("WithProtocolKind(completions) error = %v, want ErrInvalidProviderConfig", err)
+	if _, err := cfg.WithProviderProtocol("completions"); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithProviderProtocol(completions) error = %v, want ErrInvalidProviderConfig", err)
 	}
 }

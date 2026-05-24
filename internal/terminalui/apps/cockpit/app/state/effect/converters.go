@@ -27,8 +27,8 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}
-	if strings.TrimSpace(pc.SelectedFrame) != "" { // swobu:io-string source=boundary
-		config, err = config.WithSelectedFrame(pc.SelectedFrame)
+	if strings.TrimSpace(pc.ProviderProtocol) != "" { // swobu:io-string source=boundary
+		config, err = config.WithProviderProtocol(pc.ProviderProtocol)
 		if err != nil {
 			return endpointintent.ProviderConfig{}, err
 		}
@@ -53,15 +53,14 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 	}
 	for _, pc := range providerConfigs {
 		snapshot.ProviderConfigs = append(snapshot.ProviderConfigs, stateModel.ProviderConfigSnapshot{
-			Ref:           pc.Ref().String(),
-			ProviderSpec:  pc.ProviderSpec().String(),
-			Region:        stateModel.BedrockRegionFromBaseURL(pc.BaseURL()),
-			BaseURL:       pc.BaseURL(),
-			CredentialRef: pc.CredentialRef(),
-			ModelID:       pc.ModelID(),
-			TargetAlias:   pc.TargetAlias(),
-			SelectedFrame: pc.SelectedFrame(),
-			ProtocolKind:  pc.ProtocolKind().String(),
+			Ref:              pc.Ref().String(),
+			ProviderSpec:     pc.ProviderSpec().String(),
+			Region:           stateModel.BedrockRegionFromBaseURL(pc.BaseURL()),
+			BaseURL:          pc.BaseURL(),
+			CredentialRef:    pc.CredentialRef(),
+			ModelID:          pc.ModelID(),
+			TargetAlias:      pc.TargetAlias(),
+			ProviderProtocol: pc.ProviderProtocol(),
 		})
 	}
 	return snapshot

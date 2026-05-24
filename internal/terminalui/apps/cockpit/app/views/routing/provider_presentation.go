@@ -25,7 +25,9 @@ func authVariantDisplayLabel(variant providercatalog.AuthVariant) string {
 	case providercatalog.AuthVariantFile:
 		return "file"
 	case providercatalog.AuthVariantAWSProfile:
-		return "AWS profile"
+		return "AWS chain"
+	case providercatalog.AuthVariantAWSEnvSession:
+		return "AWS chain"
 	default:
 		return string(variant)
 	}

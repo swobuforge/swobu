@@ -46,6 +46,21 @@ func initialCredentialFileBrowseState(currentPath string) credentialFileBrowseSt
 			return credentialFileBrowseState{Dir: candidate}
 		}
 	}
+	for _, envKey := range []string{
+		"SWOBU_ANTHROPIC_KEY_FILE",
+		"SWOBU_OPENAI_KEY_FILE",
+		"SWOBU_OPENROUTER_KEY_FILE",
+		"SWOBU_BEDROCK_KEY_FILE",
+	} {
+		if hinted := strings.TrimSpace(os.Getenv(envKey)); hinted != "" { // swobu:io-string source=boundary
+			if info, err := os.Stat(hinted); err == nil {
+				if info.IsDir() {
+					return credentialFileBrowseState{Dir: hinted}
+				}
+				return credentialFileBrowseState{Dir: filepath.Dir(hinted)}
+			}
+		}
+	}
 	configDir := filepath.Dir(platformconfig.DefaultConfigPath())
 	if info, err := os.Stat(configDir); err == nil && info.IsDir() {
 		return credentialFileBrowseState{Dir: configDir}

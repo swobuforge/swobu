@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
-	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
@@ -26,31 +25,45 @@ func bedrockAuthProfileEditor(spec bedrockAuthProfileEditorSpec) retained.ViewSp
 		if !isBedrockAWSProfileCredentialRef(pc.CredentialRef) {
 			return nil
 		}
+		profiles := bedrockDiscoveredAWSProfiles()
 		profile := trimRoutingInput(bedrockProfileFromCredentialRef(pc.CredentialRef))
-		return backendURLEditorRow(ctx, "profile", selectorsEmptyOr(profile, "default"), profile, "work-prod", func(value string) []update.Action {
-			ref := encodeBedrockProfileCredentialRef(value)
-			if spec.CreateMode {
-				baseURL := trimRoutingInput(model.CreateDraftProviderConfig.BaseURL)
-				if baseURL == "" {
-					baseURL = trimRoutingInput(pc.BaseURL)
+		if profile == "" {
+			profile = bedrockDefaultProfileFromEnvOrList(profiles)
+		}
+		return bedrockProfilePickerRow(ctx, bedrockProfilePickerRowSpec{
+			Summary:   selectorsEmptyOr(profile, "no profiles found"),
+			Current:   profile,
+			Profiles:  profiles,
+			CloseMode: state.InteractionModeManageList,
+			FocusKey:  "profile",
+			OnSave: func(value string) []update.Action {
+				ref := encodeBedrockProfileCredentialRef(value)
+				if strings.TrimSpace(ref) == "" {
+					return nil
 				}
-				return []update.Action{
-					state.SetCreateDraftCredentialRef{CredentialRef: ref},
-					state.SetCreateDraftModelIDAction{ModelID: ""},
-					state.LoadRoutingModelCatalogRequestedAction{
-						Scope:         state.RoutingModelCatalogScopeCreateDraft,
-						ProviderSpec:  "bedrock",
-						BaseURL:       baseURL,
-						CredentialRef: ref,
-					},
+				if spec.CreateMode {
+					next := model.CreateDraftProviderConfig
+					next.CredentialRef = ref
+					baseURL := effectiveDraftBaseURL(next)
+					return []update.Action{
+						state.SetCreateDraftCredentialRef{CredentialRef: ref},
+						state.SetCreateDraftModelIDAction{ModelID: ""},
+						state.LoadRoutingModelCatalogRequestedAction{
+							Scope:            state.RoutingModelCatalogScopeCreateDraft,
+							ProviderSpec:     "bedrock",
+							ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
+							BaseURL:          baseURL,
+							CredentialRef:    ref,
+						},
+					}
 				}
-			}
-			if spec.ProviderConfig == nil || trimRoutingInput(spec.EndpointName) == "" {
-				return nil
-			}
-			next := *spec.ProviderConfig
-			next.CredentialRef = ref
-			return routingSaveProviderConfigActions(trimRoutingInput(spec.EndpointName), next, "provider/bedrock/profile")
+				if spec.ProviderConfig == nil || trimRoutingInput(spec.EndpointName) == "" {
+					return nil
+				}
+				next := *spec.ProviderConfig
+				next.CredentialRef = ref
+				return routingSaveProviderConfigActions(trimRoutingInput(spec.EndpointName), next, "provider/bedrock/profile")
+			},
 		})
 	})
 }
@@ -77,7 +90,7 @@ func bedrockAuthRegionEditor(spec bedrockAuthRegionEditorSpec) retained.ViewSpec
 			summary = "region missing"
 		}
 		closeMode := state.InteractionModeManageList
-		focusKey := "scope"
+		focusKey := "region"
 		if spec.CreateMode {
 			closeMode = state.InteractionModeNAV
 		}
@@ -106,10 +119,11 @@ func bedrockAuthRegionEditor(spec bedrockAuthRegionEditorSpec) retained.ViewSpec
 						state.SetCreateDraftBaseURL{BaseURL: baseURL},
 						state.SetCreateDraftModelIDAction{ModelID: ""},
 						state.LoadRoutingModelCatalogRequestedAction{
-							Scope:         state.RoutingModelCatalogScopeCreateDraft,
-							ProviderSpec:  "bedrock",
-							BaseURL:       baseURL,
-							CredentialRef: credentialRef,
+							Scope:            state.RoutingModelCatalogScopeCreateDraft,
+							ProviderSpec:     "bedrock",
+							ProviderProtocol: trimRoutingInput(pc.ProviderProtocol),
+							BaseURL:          baseURL,
+							CredentialRef:    credentialRef,
 						},
 					}
 				}
@@ -132,22 +146,34 @@ func addModelBedrockAuthProfileEditor(ctx *retained.Context[state.Model], draft 
 	if !isBedrockAWSProfileCredentialRef(draft.CredentialRef) {
 		return nil
 	}
+	profiles := bedrockDiscoveredAWSProfiles()
 	profile := trimRoutingInput(bedrockProfileFromCredentialRef(draft.CredentialRef))
-	return backendURLEditorRow(ctx, "profile", selectorsEmptyOr(profile, "default"), profile, "work-prod", func(value string) []update.Action {
-		next := draft
-		next.CredentialRef = encodeBedrockProfileCredentialRef(value)
-		next.ModelID = ""
-		panel.setDraft(next)
-		return []update.Action{
-			state.LoadRoutingModelCatalogRequestedAction{
-				Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-				ProviderSpec:  trimRoutingInput(next.ProviderSpec),
-				BaseURL:       trimRoutingInput(next.BaseURL),
-				CredentialRef: trimRoutingInput(next.CredentialRef),
-			},
-			state.SetInteractionMode{Mode: state.InteractionModeManageList},
-			interaction.FocusKeyAction{Key: "add-model/profile"},
-		}
+	if profile == "" {
+		profile = bedrockDefaultProfileFromEnvOrList(profiles)
+	}
+	return bedrockProfilePickerRow(ctx, bedrockProfilePickerRowSpec{
+		Summary:   selectorsEmptyOr(profile, "no profiles found"),
+		Current:   profile,
+		Profiles:  profiles,
+		CloseMode: state.InteractionModeManageList,
+		FocusKey:  "add-model/profile",
+		OnSave: func(value string) []update.Action {
+			next := draft
+			next.CredentialRef = encodeBedrockProfileCredentialRef(value)
+			next.ModelID = ""
+			panel.setDraft(next)
+			return []update.Action{
+				state.LoadRoutingModelCatalogRequestedAction{
+					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
+					BaseURL:          trimRoutingInput(next.BaseURL),
+					CredentialRef:    trimRoutingInput(next.CredentialRef),
+				},
+				state.SetInteractionMode{Mode: state.InteractionModeManageList},
+				interaction.FocusKeyAction{Key: "add-model/profile"},
+			}
+		},
 	})
 }
 
@@ -178,10 +204,11 @@ func addModelBedrockAuthRegionEditor(ctx *retained.Context[state.Model], draft s
 			panel.setDraft(next)
 			return []update.Action{
 				state.LoadRoutingModelCatalogRequestedAction{
-					Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-					ProviderSpec:  trimRoutingInput(next.ProviderSpec),
-					BaseURL:       trimRoutingInput(next.BaseURL),
-					CredentialRef: trimRoutingInput(next.CredentialRef),
+					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
+					BaseURL:          trimRoutingInput(next.BaseURL),
+					CredentialRef:    trimRoutingInput(next.CredentialRef),
 				},
 				state.SetInteractionMode{Mode: state.InteractionModeManageList},
 				interaction.FocusKeyAction{Key: "add-model/region"},
@@ -211,108 +238,15 @@ func addModelBedrockAuthEnvEditor(ctx *retained.Context[state.Model], draft stat
 			panel.setDraft(next)
 			return []update.Action{
 				state.LoadRoutingModelCatalogRequestedAction{
-					Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-					ProviderSpec:  trimRoutingInput(next.ProviderSpec),
-					BaseURL:       trimRoutingInput(next.BaseURL),
-					CredentialRef: trimRoutingInput(next.CredentialRef),
+					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
+					BaseURL:          trimRoutingInput(next.BaseURL),
+					CredentialRef:    trimRoutingInput(next.CredentialRef),
 				},
 				state.SetInteractionMode{Mode: state.InteractionModeManageList},
 				interaction.FocusKeyAction{Key: "add-model/env-key"},
 			}
 		},
 	)
-}
-
-func selectorsEmptyOr(value, fallback string) string {
-	value = trimRoutingInput(value)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-type bedrockRegionPickerRowSpec struct {
-	Label      string
-	Summary    string
-	Current    string
-	CloseMode  string
-	FocusKey   string
-	EditorHint string
-	OnSave     func(string) []update.Action
-}
-
-func bedrockRegionPickerRow(ctx *retained.Context[state.Model], spec bedrockRegionPickerRowSpec) retained.ViewSpec[state.Model] {
-	regions := bedrockRegions()
-	if len(regions) == 0 {
-		return backendURLEditorRow(ctx, spec.Label, spec.Summary, spec.Current, spec.EditorHint, spec.OnSave)
-	}
-	open, setOpen := retained.UseState(ctx, func() bool { return false })
-	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	parent := views.RowChoiceWithCancel(spec.Label, spec.Summary, func() []update.Action {
-		nextOpen := !open
-		setOpen(nextOpen)
-		if nextOpen {
-			views.ResetFilterablePickerState(setPicker)
-			return []update.Action{
-				state.SetInteractionMode{Mode: state.InteractionModePickOne},
-				interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("bedrock-region-option", 0)},
-			}
-		}
-		return []update.Action{
-			state.SetInteractionMode{Mode: spec.CloseMode},
-			interaction.FocusKeyAction{Key: spec.FocusKey},
-		}
-	}, func() []update.Action {
-		if !open {
-			return nil
-		}
-		setOpen(false)
-		return []update.Action{
-			state.SetInteractionMode{Mode: spec.CloseMode},
-			interaction.FocusKeyAction{Key: spec.FocusKey},
-		}
-	})
-	if !open {
-		return parent
-	}
-	items := make([]views.FilterablePickerItem, 0, len(regions))
-	for _, region := range regions {
-		choice := trimRoutingInput(region)
-		if choice == "" {
-			continue
-		}
-		items = append(items, views.FilterablePickerItem{
-			Label:    choice,
-			Search:   choice,
-			Selected: strings.EqualFold(choice, trimRoutingInput(spec.Current)),
-			OnChoose: func() []update.Action {
-				setOpen(false)
-				actions := spec.OnSave(choice)
-				return append(actions,
-					state.SetInteractionMode{Mode: spec.CloseMode},
-					interaction.FocusKeyAction{Key: spec.FocusKey},
-				)
-			},
-		})
-	}
-	if len(items) == 0 {
-		return backendURLEditorRow(ctx, spec.Label, spec.Summary, spec.Current, spec.EditorHint, spec.OnSave)
-	}
-	return views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
-		KeyPrefix:      "bedrock-region-option",
-		BuildOptionRow: views.ChoicePickerOptionRow(false),
-		WindowSize:     8,
-		FindLabel:      "find",
-		ShowSelected:   true,
-		OnNoMatchFocus: func() []update.Action {
-			return []update.Action{interaction.FocusKeyAction{Key: spec.FocusKey}}
-		},
-		OnCancel: func() []update.Action {
-			setOpen(false)
-			return []update.Action{
-				state.SetInteractionMode{Mode: spec.CloseMode},
-				interaction.FocusKeyAction{Key: spec.FocusKey},
-			}
-		},
-	})
 }

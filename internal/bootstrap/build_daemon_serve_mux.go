@@ -49,6 +49,7 @@ func buildDaemonServeMux(
 		return nil
 	}))
 	mux.Handle("/_swobu/model-catalog/probe", httpapi.NewModelCatalogProbeHandler(modelCatalog))
+	mux.Handle("/_swobu/ephemeral-executions", httpapi.NewEphemeralExecuteHandler(orchestrator.HandleWithEndpoint))
 	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
 		PublicBaseURL: daemonPublicBaseURLFromBindAddr(bindAddr),

@@ -44,54 +44,13 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		applyFocusedRowFooterAffordance(model, value)
 		return nil
 	case LoadRoutingModelCatalogRequestedAction:
-		scope := strings.TrimSpace(value.Scope)                 // swobu:io-string source=boundary
-		spec := strings.TrimSpace(value.ProviderSpec)           // swobu:io-string source=boundary
-		baseURL := strings.TrimSpace(value.BaseURL)             // swobu:io-string source=boundary
-		credentialRef := strings.TrimSpace(value.CredentialRef) // swobu:io-string source=boundary
-		if scope == RoutingModelCatalogScopeCreateDraft {
-			if spec == "" {
-				model.CreateDraftModelIDs = nil
-				model.CreateDraftModelError = ""
-				return nil
-			}
-			model.CreateDraftModelIDs = nil
-			model.CreateDraftModelError = ""
-		} else if scope == RoutingModelCatalogScopeAddModelDraft {
-			if spec == "" {
-				model.AddModelDraftModelIDs = nil
-				model.AddModelDraftModelError = ""
-				model.AddModelDraftProviderSpec = ""
-				model.AddModelDraftBaseURL = ""
-				model.AddModelDraftCredentialRef = ""
-				return nil
-			}
-			model.AddModelDraftProviderSpec = spec
-			model.AddModelDraftBaseURL = baseURL
-			model.AddModelDraftCredentialRef = credentialRef
-			model.AddModelDraftModelIDs = nil
-			model.AddModelDraftModelError = ""
-		} else {
-			return nil
-		}
-		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
-			Scope:         scope,
-			ProviderSpec:  spec,
-			BaseURL:       baseURL,
-			CredentialRef: credentialRef, // swobu:io-string source=boundary
-		}}
+		return handleLoadRoutingModelCatalogRequested(model, value)
+	case ProbeCreateDraftModelRequestedAction:
+		return handleProbeCreateDraftModelRequested(model, value)
 	case stateeffect.RoutingModelCatalogLoaded:
-		scope := strings.TrimSpace(value.Scope)                                                                                                                             // swobu:io-string source=boundary
-		if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef)) { // swobu:io-string source=boundary
-			return nil
-		}
-		if scope == RoutingModelCatalogScopeCreateDraft {
-			model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
-			model.CreateDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
-		} else if scope == RoutingModelCatalogScopeAddModelDraft {
-			model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
-			model.AddModelDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
-		}
-		return nil
+		return handleRoutingModelCatalogLoaded(model, value)
+	case stateeffect.CreateDraftModelProbeCompletedAction:
+		return handleCreateDraftModelProbeCompleted(model, value)
 	case FocusNextAfterRebuildRequested:
 		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
 	case EndpointCopyRequested:
@@ -252,16 +211,19 @@ func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
 	}, "\n")
 }
 
-func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef string) bool {
+func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef, providerProtocol string) bool {
 	normalizedScope := strings.TrimSpace(scope)
 	if normalizedScope == RoutingModelCatalogScopeCreateDraft {
-		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) != providerSpec { // swobu:io-string source=boundary
+		if strings.TrimSpace(model.CreateDraftModelProviderSpec) != providerSpec { // swobu:io-string source=boundary
 			return false
 		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) != baseURL { // swobu:io-string source=boundary
+		if strings.TrimSpace(model.CreateDraftModelBaseURL) != baseURL { // swobu:io-string source=boundary
 			return false
 		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) != credentialRef { // swobu:io-string source=boundary
+		if strings.TrimSpace(model.CreateDraftModelCredentialRef) != credentialRef { // swobu:io-string source=boundary
+			return false
+		}
+		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderProtocol) != providerProtocol { // swobu:io-string source=boundary
 			return false
 		}
 		return true
@@ -274,6 +236,9 @@ func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, 
 			return false
 		}
 		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef { // swobu:io-string source=boundary
+			return false
+		}
+		if strings.TrimSpace(model.AddModelDraftProviderProtocol) != providerProtocol { // swobu:io-string source=boundary
 			return false
 		}
 		return true

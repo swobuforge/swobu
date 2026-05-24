@@ -107,7 +107,22 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	if err != nil {
 		return HandleOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
+	return o.HandleWithEndpoint(ctx, endpoint, in)
+}
 
+// HandleWithEndpoint executes one request against an explicit endpoint intent.
+// It is used by operator-only ephemeral execution paths to reuse exactly the
+// same request orchestration as durable /c/* routes.
+func (o RequestHandler) HandleWithEndpoint(ctx context.Context, endpoint endpointintent.Endpoint, in HandleInput) (HandleOutput, error) {
+	if in.Request == nil {
+		return HandleOutput{}, canonical.BadRequest("canonical request is required")
+	}
+	if o.providers == nil {
+		return HandleOutput{}, canonical.InternalError("provider executor is not configured")
+	}
+	if o.routingPolicy == nil {
+		return HandleOutput{}, canonical.InternalError("routing policy is not configured")
+	}
 	intent := ClientIntent{
 		EndpointName:   in.EndpointName,
 		RequestID:      in.RequestID,
@@ -136,7 +151,12 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	)
 	for i, candidate := range routes {
 		resolvedRequest := materializeRequestForExecution(intent.Request, candidate.EffectiveModel)
-		protocolKind, err := resolveProviderProtocolForRequest(candidate.Target.ProviderID(), candidate.Target.ProtocolKind, resolvedRequest)
+		protocolKind, err := resolveProviderProtocolForRequestWithVariant(
+			candidate.Target.ProviderID(),
+			candidate.Target.ProviderProtocol,
+			candidate.Target.ProtocolKind,
+			resolvedRequest,
+		)
 		if err != nil {
 			return HandleOutput{}, err
 		}
@@ -228,7 +248,6 @@ func materializeRequestForExecution(request canonical.CanonicalRequest, modelID 
 			Thread:               typed.Thread(),
 			LastTurn:             typed.LastTurn(),
 			PreviousResponseID:   typed.PreviousResponseID(),
-			ConversationID:       typed.ConversationID(),
 			ToolMode:             typed.ToolMode(),
 			PromptCacheKey:       typed.PromptCacheKey(),
 			PromptCacheRetention: typed.PromptCacheRetention(),

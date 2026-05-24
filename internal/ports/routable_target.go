@@ -12,9 +12,10 @@ type RoutableTarget struct {
 	// surface, not a vendor umbrella and not a client-ingress selector.
 	// Client ingress is normalized to canonical operations before provider
 	// encoding.
-	ProtocolKind  protocolkind.ProtocolKind
-	AuthKind      string
-	SelectedFrame string
+	ProtocolKind     protocolkind.ProtocolKind
+	AuthKind         string
+	SelectedFrame    string
+	ProviderProtocol string
 }
 
 func NewRoutableTarget(
@@ -24,20 +25,22 @@ func NewRoutableTarget(
 	credentialRef string,
 	protocolKind protocolkind.ProtocolKind,
 	authKind string,
-	extras ...string,
+	selectedFrame string,
+	providerProtocol ...string,
 ) RoutableTarget {
-	selectedFrame := ""
-	if len(extras) > 0 {
-		selectedFrame = extras[0]
+	resolvedProviderProtocol := ""
+	if len(providerProtocol) > 0 {
+		resolvedProviderProtocol = providerProtocol[0]
 	}
 	return RoutableTarget{
-		BackendRef:    backendRef,
-		ProviderSpec:  providerSpec,
-		BaseURL:       baseURL,
-		CredentialRef: credentialRef,
-		ProtocolKind:  protocolKind,
-		AuthKind:      authKind,
-		SelectedFrame: selectedFrame,
+		BackendRef:       backendRef,
+		ProviderSpec:     providerSpec,
+		BaseURL:          baseURL,
+		CredentialRef:    credentialRef,
+		ProtocolKind:     protocolKind,
+		AuthKind:         authKind,
+		SelectedFrame:    selectedFrame,
+		ProviderProtocol: resolvedProviderProtocol,
 	}
 }
 
@@ -51,6 +54,7 @@ func (t RoutableTarget) Clone() RoutableTarget {
 		t.ProtocolKind,
 		t.AuthKind,
 		t.SelectedFrame,
+		t.ProviderProtocol,
 	)
 }
 

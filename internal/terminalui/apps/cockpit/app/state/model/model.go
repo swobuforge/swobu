@@ -16,27 +16,35 @@ type Model struct {
 	EndpointSnapshots []EndpointSnapshot
 	CurrentEndpoint   string
 
-	Catalog                    []CatalogEntry
-	CatalogError               string
-	StreamEnabled              bool
-	CreateDraftName            string
-	CreateDraftProviderConfig  ProviderConfigSnapshot
-	CreateDraftModelIDs        []string
-	CreateDraftModelError      string
-	AddModelDraftModelIDs      []string
-	AddModelDraftModelError    string
-	AddModelDraftProviderSpec  string
-	AddModelDraftBaseURL       string
-	AddModelDraftCredentialRef string
-	WorkspaceSaveError         string
-	WorkspaceCopyNote          string
-	ClientCopyNote             string
-	ClientLaunchNote           string
-	ClientAccessStatus         string
-	ClientAccessNote           string
-	SaveErrors                 map[string]string
-	LastStoredKeyProviderSpec  string
-	LastStoredKeySlotName      string
+	Catalog                        []CatalogEntry
+	CatalogError                   string
+	StreamEnabled                  bool
+	CreateDraftName                string
+	CreateDraftProviderConfig      ProviderConfigSnapshot
+	CreateDraftModelIDs            []string
+	CreateDraftModelError          string
+	CreateDraftModelProbePending   bool
+	CreateDraftModelProviderSpec   string
+	CreateDraftModelBaseURL        string
+	CreateDraftModelCredentialRef  string
+	CreateDraftModelTestProtocol   string
+	CreateDraftModelTestPassed     bool
+	AddModelDraftModelIDs          []string
+	AddModelDraftModelError        string
+	AddModelDraftModelProbePending bool
+	AddModelDraftProviderSpec      string
+	AddModelDraftProviderProtocol  string
+	AddModelDraftBaseURL           string
+	AddModelDraftCredentialRef     string
+	WorkspaceSaveError             string
+	WorkspaceCopyNote              string
+	ClientCopyNote                 string
+	ClientLaunchNote               string
+	ClientAccessStatus             string
+	ClientAccessNote               string
+	SaveErrors                     map[string]string
+	LastStoredKeyProviderSpec      string
+	LastStoredKeySlotName          string
 	// Invariant: AuthSessions payloads are canonicalized at write seams.
 	// UI readers must not re-trim session fields.
 	AuthSessions map[string]AuthSessionViewState
@@ -86,22 +94,20 @@ type EndpointSnapshot struct {
 }
 
 type ProviderConfigSnapshot struct {
-	Ref           string `json:"ref"`
-	ProviderSpec  string `json:"provider_spec"`
-	Region        string `json:"region,omitempty"`
-	BaseURL       string `json:"base_url,omitempty"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	ModelID       string `json:"model_id,omitempty"`
-	TargetAlias   string `json:"target_alias,omitempty"`
-	SelectedFrame string `json:"selected_frame,omitempty"`
-	ProtocolKind  string `json:"protocol_kind"`
+	Ref              string `json:"ref"`
+	ProviderSpec     string `json:"provider_spec"`
+	Region           string `json:"region,omitempty"`
+	BaseURL          string `json:"base_url,omitempty"`
+	CredentialRef    string `json:"credential_ref,omitempty"`
+	ModelID          string `json:"model_id,omitempty"`
+	TargetAlias      string `json:"target_alias,omitempty"`
+	ProviderProtocol string `json:"provider_protocol,omitempty"`
 }
 
 type CatalogEntry struct {
 	EndpointName      string   `json:"endpoint_name"`
 	ProviderConfigRef string   `json:"provider_config_ref"`
 	ProviderSpec      string   `json:"provider_spec"`
-	ProtocolKind      string   `json:"protocol_kind"`
 	ModelIDs          []string `json:"model_ids,omitempty"`
 	Error             string   `json:"error,omitempty"`
 }

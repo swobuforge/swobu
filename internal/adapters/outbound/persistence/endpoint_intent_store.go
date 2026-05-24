@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 const endpointIntentSchemaVersion = 1
@@ -38,13 +39,12 @@ type endpointDTO struct {
 }
 
 type providerConfigDTO struct {
-	Ref           string `json:"ref"`
-	ProviderSpec  string `json:"provider_spec"`
-	BaseURL       string `json:"base_url,omitempty"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	ModelID       string `json:"model_id,omitempty"`
-	SelectedFrame string `json:"selected_frame,omitempty"`
-	ProtocolKind  string `json:"protocol_kind,omitempty"`
+	Ref              string `json:"ref"`
+	ProviderSpec     string `json:"provider_spec"`
+	BaseURL          string `json:"base_url,omitempty"`
+	CredentialRef    string `json:"credential_ref,omitempty"`
+	ModelID          string `json:"model_id,omitempty"`
+	ProviderProtocol string `json:"provider_protocol,omitempty"`
 }
 
 func NewEndpointIntentStore(cfg EndpointIntentStoreConfig) (EndpointIntentStore, error) {
@@ -151,8 +151,12 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		if encoded.SelectedFrame != "" {
-			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
+		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
+		}
+		if providerProtocol != "" {
+			providerConfig, err = providerConfig.WithProviderProtocol(providerProtocol)
 			if err != nil {
 				return endpointintent.Endpoint{}, err
 			}
@@ -170,14 +174,14 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 	providerConfigs := endpoint.ProviderConfigs()
 	encodedProviderConfigs := make([]providerConfigDTO, 0, len(providerConfigs))
 	for _, providerConfig := range providerConfigs {
+		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
 		encodedProviderConfigs = append(encodedProviderConfigs, providerConfigDTO{
-			Ref:           providerConfig.Ref().String(),
-			ProviderSpec:  providerConfig.ProviderSpec().String(),
-			BaseURL:       providerConfig.BaseURL(),
-			CredentialRef: providerConfig.CredentialRef(),
-			ModelID:       providerConfig.ModelID(),
-			SelectedFrame: providerConfig.SelectedFrame(),
-			ProtocolKind:  providerConfig.ProtocolKind().String(),
+			Ref:              providerConfig.Ref().String(),
+			ProviderSpec:     providerConfig.ProviderSpec().String(),
+			BaseURL:          providerConfig.BaseURL(),
+			CredentialRef:    providerConfig.CredentialRef(),
+			ModelID:          providerConfig.ModelID(),
+			ProviderProtocol: providerProtocol,
 		})
 	}
 	return endpointDTO{

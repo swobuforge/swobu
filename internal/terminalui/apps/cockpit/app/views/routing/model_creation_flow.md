@@ -11,7 +11,7 @@ Canonical semantic slot order for model creation and edit surfaces:
 3. `scope` (only when provider requires one)
 4. `credential dependency actions` (only when a pre-model dependency must be completed, for example `sign in`)
 5. `model`
-6. `delivery`
+6. `protocol`
 
 Rules:
 
@@ -20,7 +20,7 @@ Rules:
 - model must not render before unresolved credential dependency actions
   (for example `sign in`)
 - do not render `auth not required`; use `external` when Swobu is not the credential authority
-- delivery is user-language first (`auto`, `streaming`, `non-streaming`)
+- protocol is provider-native (`protocol_auto` or one concrete provider protocol)
 - create readiness must derive from the same evaluator terminal state (`Ready`)
   used by routing rows; do not add provider-specific bypass checks in separate
   readiness paths
@@ -31,17 +31,18 @@ Rules:
   explicitly informational with no action label
 - do not render "choose ↵" on a row if no edit action exists for that row state
 - blocker hints belong to the blocked row only (for example model blockers render
-  under `model`, never under `delivery`)
+  under `model`, never under `protocol`)
 
 ## Bedrock Credential And Catalog Law
 
-- Bedrock supports two credential strategies in this flow:
+- Bedrock supports three credential strategies in this flow:
   - `aws_profile` (default chain/profile; external authority)
+  - `aws_env_session` (default chain via AWS env session keys)
   - `env:AWS_BEARER_TOKEN_BEDROCK` (bearer token env reference)
 - model catalog source depends on credential strategy:
-  - `aws_profile` -> AWS SDK Bedrock `ListFoundationModels`
+  - `aws_profile` / `aws_env_session` -> AWS SDK Bedrock `ListFoundationModels`
   - `env:*` -> OpenAI-compatible `/models` endpoint with bearer auth
 - validation path must follow the same split; never probe `/models` for
-  `aws_profile` mode.
+  `aws_profile`/`aws_env_session` modes.
 - Bedrock region defaults are sourced from bundled opencore list assets under
   `internal/terminalui/apps/cockpit/app/views/routing/data/bedrock_regions.json`.

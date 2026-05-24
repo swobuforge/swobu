@@ -39,7 +39,7 @@ func ToolChoiceCapabilityFacts() []ToolChoiceCapabilityFact {
 		})
 	}
 
-	// Real-world-derived chat model facts from live matrix captures:
+	// Real-world-derived chat model facts from scenario capture captures:
 	// some OpenRouter-routed models reject strict tool_choice while still
 	// supporting auto tool_choice behavior.
 	out = append(out,

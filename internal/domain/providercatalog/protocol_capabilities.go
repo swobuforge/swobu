@@ -1,31 +1,24 @@
 package providercatalog
 
 import (
-	"strings"
-
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func SupportedExecutionProtocolsForSpec(spec string) []protocolkind.ProtocolKind {
-	if !SupportsSpec(spec) {
+	profile, ok := profileFor(spec)
+	if !ok {
 		return nil
 	}
-	normalizedSpec := strings.TrimSpace(strings.ToLower(spec)) // swobu:io-string source=provider-config
-	switch normalizedSpec {
-	case "anthropic":
-		return []protocolkind.ProtocolKind{protocolkind.Messages}
-	case "chatgpt":
-		return []protocolkind.ProtocolKind{
-			protocolkind.ChatCompletions,
-			protocolkind.Responses,
+	supported := make([]protocolkind.ProtocolKind, 0, len(profile.ProviderProtocols))
+	seen := map[protocolkind.ProtocolKind]bool{}
+	for _, protocol := range profile.ProviderProtocols {
+		if seen[protocol.Kind] {
+			continue
 		}
-	default:
-		return []protocolkind.ProtocolKind{
-			protocolkind.ChatCompletions,
-			protocolkind.Responses,
-			protocolkind.Completions,
-		}
+		seen[protocol.Kind] = true
+		supported = append(supported, protocol.Kind)
 	}
+	return supported
 }
 
 func SupportsExecutionProtocolForSpec(spec string, protocolKind protocolkind.ProtocolKind) bool {

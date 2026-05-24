@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/gdamore/tcell/v2"
@@ -68,6 +69,7 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
+			slog.Debug("tcell runner exiting on context cancellation", "error", ctx.Err())
 			return ctx.Err()
 		case call := <-r.foregroundRequests:
 			r.executeForegroundHandoffCall(call)
@@ -77,12 +79,14 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 			}
 			quit, resized := r.handleEvent(ev)
 			if quit {
+				slog.Debug("tcell runner exiting on quit event")
 				return nil
 			}
 			if resized || r.Loop.NeedsRebuild() {
 				bounds = screenBounds(r.Screen)
 				lifecycle := r.Loop.RebuildPending(r.Root, bounds)
 				if quit := r.flush(bounds); quit {
+					slog.Debug("tcell runner exiting on flush quit flag")
 					return nil
 				}
 				for _, eff := range lifecycle {
@@ -97,6 +101,7 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 				bounds = screenBounds(r.Screen)
 				lifecycle := r.Loop.RebuildPending(r.Root, bounds)
 				if quit := r.flush(bounds); quit {
+					slog.Debug("tcell runner exiting on flush quit flag")
 					return nil
 				}
 				for _, eff := range lifecycle {
@@ -122,6 +127,7 @@ func (r *Runner[M]) handleEvent(ev tcell.Event) (quit bool, resized bool) {
 		return false, true
 	case *tcell.EventKey:
 		if current.Key() == tcell.KeyCtrlC {
+			slog.Debug("tcell runner quit requested by Ctrl+C")
 			r.quit = true
 			if r.OnQuit != nil {
 				r.OnQuit()
@@ -129,14 +135,7 @@ func (r *Runner[M]) handleEvent(ev tcell.Event) (quit bool, resized bool) {
 			return true, false
 		}
 		mapped := mapKeyEvent(current)
-		handled := r.Loop.DispatchEvent(mapped)
-		if mapped.Kind == interaction.EventKey && mapped.Key == interaction.KeyEsc && !handled {
-			r.quit = true
-			if r.OnQuit != nil {
-				r.OnQuit()
-			}
-			return true, false
-		}
+		_ = r.Loop.DispatchEvent(mapped)
 	case *tcell.EventMouse:
 		_ = r.Loop.DispatchEvent(mapMouseEvent(current))
 	}

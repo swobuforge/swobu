@@ -167,7 +167,12 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		return ports.ProviderResponse{}, canonical.BadEndpoint(providerCredentialRequiredMessage(req.Target.ProviderID()))
 	}
 
-	wireReq, err := e.encodeRequest(req.Target, req.Request, req.Contract.ProviderCallMode.Streaming())
+	dispatch, streaming, err := resolveProviderProtocolDispatch(req.Target)
+	if err != nil {
+		return ports.ProviderResponse{}, err
+	}
+
+	wireReq, err := dispatch.realize(req.Request, streaming)
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -205,8 +210,12 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		return ports.ProviderResponse{}, classifyBackendError(backendErr)
 	}
 
-	if req.Contract.ProviderCallMode.Streaming() {
-		return e.decodeStreamingResponse(req.Target, resp.Body)
+	if streaming {
+		if dispatch.decodeStream == nil {
+			_ = resp.Body.Close()
+			return ports.ProviderResponse{}, canonical.UnsupportedDelivery("OpenAI-compatible provider streaming delivery is not implemented")
+		}
+		return dispatch.decodeStream(resp.Body)
 	}
 	defer func() {
 		_ = resp.Body.Close()
@@ -215,15 +224,10 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	if err != nil {
 		return ports.ProviderResponse{}, canonical.InternalError("backend success response could not be read")
 	}
-	return e.decodeBufferedResponse(req.Target, raw)
-}
-
-func (e ProviderExecutorAdapter) encodeRequest(target ports.RoutableTarget, req canonical.CanonicalRequest, deliveryMode bool) (protocols.WireRequest, error) {
-	dispatch, err := protocolCodecDispatchFor(target.ProviderID(), target.ProtocolKind)
-	if err != nil {
-		return protocols.WireRequest{}, err
+	if dispatch.decodeBuffered == nil {
+		return ports.ProviderResponse{}, canonical.UnsupportedDelivery("OpenAI-compatible provider buffered delivery is not implemented")
 	}
-	return dispatch.realize(req, deliveryMode)
+	return dispatch.decodeBuffered(raw)
 }
 
 // applyCredential keeps auth resolution at the provider edge so canonicals and
@@ -246,32 +250,21 @@ func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.
 	return nil
 }
 
-// decodeBufferedResponse converts backend success payloads into canonical
-// buffered results before they leave provider adaptation.
-func (e ProviderExecutorAdapter) decodeBufferedResponse(target ports.RoutableTarget, raw []byte) (ports.ProviderResponse, error) {
-	dispatch, err := protocolCodecDispatchFor(target.ProviderID(), target.ProtocolKind)
+func resolveProviderProtocolDispatch(target ports.RoutableTarget) (protocolCodecDispatchSpec, bool, error) {
+	providerProtocol := strings.TrimSpace(target.ProviderProtocol) // swobu:io-string source=boundary
+	if providerProtocol == "" || providerProtocol == providercatalog.ProviderProtocolAuto {
+		return protocolCodecDispatchSpec{}, false, canonical.BadEndpoint("OpenAI-compatible provider protocol must be concrete")
+	}
+	kind, _, ok := providercatalog.ProviderProtocolKindAndFrame(target.ProviderID(), providerProtocol)
+	if !ok {
+		return protocolCodecDispatchSpec{}, false, canonical.BadEndpoint("selected provider protocol is unsupported")
+	}
+	dispatch, err := protocolCodecDispatchFor(target.ProviderID(), kind)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return protocolCodecDispatchSpec{}, false, err
 	}
-	if dispatch.decodeBuffered == nil {
-		return ports.ProviderResponse{}, canonical.UnsupportedDelivery("OpenAI-compatible provider buffered delivery is not implemented")
-	}
-	return dispatch.decodeBuffered(raw)
-}
-
-// decodeStreamingResponse converts backend success streams into canonical output-event streams.
-// Provider SSE frames must not leak past this boundary as transport-shaped success semantics.
-func (e ProviderExecutorAdapter) decodeStreamingResponse(target ports.RoutableTarget, body io.ReadCloser) (ports.ProviderResponse, error) {
-	dispatch, err := protocolCodecDispatchFor(target.ProviderID(), target.ProtocolKind)
-	if err != nil {
-		_ = body.Close()
-		return ports.ProviderResponse{}, err
-	}
-	if dispatch.decodeStream == nil {
-		_ = body.Close()
-		return ports.ProviderResponse{}, canonical.UnsupportedDelivery("OpenAI-compatible provider streaming delivery is not implemented")
-	}
-	return dispatch.decodeStream(body)
+	streaming := strings.HasSuffix(providerProtocol, "_stream")
+	return dispatch, streaming, nil
 }
 
 func protocolCodecDispatchFor(providerIDRaw string, kind protocolkind.ProtocolKind) (protocolCodecDispatchSpec, error) {

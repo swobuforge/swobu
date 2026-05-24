@@ -15,8 +15,7 @@ endpoints: *[] | [...#Endpoint]
 	credential_ref?: string
 	model_id?: string
 	target_alias?: string
-	protocol_kind?: string
-	selected_frame?: string
+	provider_protocol?: string
 	if provider_spec == "openai_compatible" {
 		base_url!: string
 	}

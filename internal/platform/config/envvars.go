@@ -19,6 +19,7 @@ const (
 	EnvTelemetryErrorTraceMaxPerTick  = "SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK"
 	EnvDoNotTrack                     = "DO_NOT_TRACK"
 	EnvSkipVersionNotice              = "SWOBU_SKIP_VERSION_NOTICE"
+	EnvSkipTelemetryNotice            = "SWOBU_SKIP_TELEMETRY_NOTICE"
 )
 
 func EnvTruthy(value string) bool {

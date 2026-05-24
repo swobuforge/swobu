@@ -75,16 +75,16 @@ func newDecoder(contentEncoding string, body io.Reader) (io.ReadCloser, error) {
 		if err != nil {
 			return nil, err
 		}
-		return zstdReadCloser{Decoder: reader}, nil
+		return zstdDecoderWriterCloser{Decoder: reader}, nil
 	}
 	return nil, fmt.Errorf("unsupported content encoding %q", contentEncoding)
 }
 
-type zstdReadCloser struct {
+type zstdDecoderWriterCloser struct {
 	*zstd.Decoder
 }
 
-func (r zstdReadCloser) Close() error {
+func (r zstdDecoderWriterCloser) Close() error {
 	r.Decoder.Close()
 	return nil
 }

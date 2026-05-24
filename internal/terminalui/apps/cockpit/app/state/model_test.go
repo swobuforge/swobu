@@ -73,6 +73,27 @@ func TestReduce_CreateDraftSelectionAndCreateSuccessClearsDraft(t *testing.T) {
 	}
 }
 
+func TestReduce_CreateDraftModelAndCredentialChanges_DoNotMutateProtocolFields(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			Ref:              DraftProviderRef,
+			ProviderSpec:     "openai",
+			BaseURL:          "https://api.openai.com/v1",
+			CredentialRef:    "env:OPENAI_API_KEY",
+			ProviderProtocol: "responses_stream",
+		},
+	}
+
+	Reduce(&model, SetCreateDraftModelIDAction{ModelID: "gpt-4.1-mini"})
+	Reduce(&model, SetCreateDraftCredentialRef{CredentialRef: "env:OPENAI_API_KEY"})
+
+	if got := model.CreateDraftProviderConfig.ProviderProtocol; got != "responses_stream" {
+		t.Fatalf("provider protocol mutated to %q; want responses_stream", got)
+	}
+}
+
 func TestReduce_WorkspaceRequestActionsEmitSaveEffects(t *testing.T) {
 	t.Parallel()
 
@@ -321,13 +342,13 @@ func TestProviderConfigForSpecUsesLegacyProviderDefaults(t *testing.T) {
 	}
 
 	anthropic := ProviderConfigForSpec("anthropic", ProviderConfigSnapshot{})
-	if got := anthropic.ProtocolKind; got != "messages" {
-		t.Fatalf("anthropic protocol kind = %q, want %q", got, "messages")
+	if got := anthropic.ProviderProtocol; got == "" {
+		t.Fatal("anthropic provider protocol should be initialized")
 	}
 
-	switching := ProviderConfigForSpec("anthropic", ProviderConfigSnapshot{ProtocolKind: "chat_completions"})
-	if got := switching.ProtocolKind; got != "messages" {
-		t.Fatalf("switching protocol kind = %q, want %q", got, "messages")
+	switching := ProviderConfigForSpec("anthropic", ProviderConfigSnapshot{ProviderProtocol: "chat_completions"})
+	if got := switching.ProviderProtocol; got == "" {
+		t.Fatal("switching provider protocol should resolve to supported value")
 	}
 
 	cleared := ProviderConfigForSpec("openrouter", ProviderConfigSnapshot{
@@ -386,10 +407,11 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 
 	model := Model{}
 	effects := Reduce(&model, LoadRoutingModelCatalogRequestedAction{
-		Scope:         RoutingModelCatalogScopeAddModelDraft,
-		ProviderSpec:  "openrouter",
-		BaseURL:       "https://openrouter.ai/api/v1",
-		CredentialRef: "env:OPENROUTER_API_KEY",
+		Scope:            RoutingModelCatalogScopeAddModelDraft,
+		ProviderSpec:     "openrouter",
+		ProviderProtocol: "protocol_auto",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		CredentialRef:    "env:OPENROUTER_API_KEY",
 	})
 	if len(effects) != 1 {
 		t.Fatalf("effect count=%d want 1", len(effects))
@@ -400,27 +422,79 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 	if got := model.AddModelDraftProviderSpec; got != "openrouter" {
 		t.Fatalf("provider spec=%q", got)
 	}
+	if !model.AddModelDraftModelProbePending {
+		t.Fatal("add-model catalog probe should be pending after load request")
+	}
 
 	Reduce(&model, RoutingModelCatalogLoaded{
-		Scope:         RoutingModelCatalogScopeAddModelDraft,
-		ProviderSpec:  "openrouter",
-		BaseURL:       "https://openrouter.ai/api/v1",
-		CredentialRef: "env:OPENROUTER_API_KEY",
-		ModelIDs:      []string{"openai/gpt-4.1"},
+		Scope:            RoutingModelCatalogScopeAddModelDraft,
+		ProviderSpec:     "openrouter",
+		ProviderProtocol: "protocol_auto",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		CredentialRef:    "env:OPENROUTER_API_KEY",
+		ModelIDs:         []string{"openai/gpt-4.1"},
 	})
 	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "openai/gpt-4.1" {
 		t.Fatalf("model ids=%v", model.AddModelDraftModelIDs)
 	}
+	if model.AddModelDraftModelProbePending {
+		t.Fatal("add-model catalog probe pending should clear after load result")
+	}
 
 	Reduce(&model, RoutingModelCatalogLoaded{
-		Scope:         RoutingModelCatalogScopeAddModelDraft,
-		ProviderSpec:  "anthropic",
-		BaseURL:       "https://api.anthropic.com",
-		CredentialRef: "env:ANTHROPIC_API_KEY",
-		ModelIDs:      []string{"claude-sonnet-4"},
+		Scope:            RoutingModelCatalogScopeAddModelDraft,
+		ProviderSpec:     "anthropic",
+		ProviderProtocol: "protocol_auto",
+		BaseURL:          "https://api.anthropic.com",
+		CredentialRef:    "env:ANTHROPIC_API_KEY",
+		ModelIDs:         []string{"claude-sonnet-4"},
 	})
 	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "openai/gpt-4.1" {
 		t.Fatalf("mismatched tuple should be ignored; model ids=%v", model.AddModelDraftModelIDs)
+	}
+}
+
+func TestReduce_LoadRoutingModelCatalogCreateDraft_AppliesMatchingResultAgainstRequestedTuple(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			ProviderSpec:     "bedrock",
+			ProviderProtocol: "protocol_auto",
+			BaseURL:          "",
+			CredentialRef:    "profile:swobu-bedrock",
+		},
+	}
+	effects := Reduce(&model, LoadRoutingModelCatalogRequestedAction{
+		Scope:            RoutingModelCatalogScopeCreateDraft,
+		ProviderSpec:     "bedrock",
+		ProviderProtocol: "protocol_auto",
+		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		CredentialRef:    "profile:swobu-bedrock",
+	})
+	if len(effects) != 1 {
+		t.Fatalf("effect count=%d want 1", len(effects))
+	}
+	if _, ok := effects[0].(LoadRoutingModelCatalogEffect); !ok {
+		t.Fatalf("effect type=%T want LoadRoutingModelCatalogEffect", effects[0])
+	}
+	if !model.CreateDraftModelProbePending {
+		t.Fatal("create-draft catalog probe should be pending after load request")
+	}
+
+	Reduce(&model, RoutingModelCatalogLoaded{
+		Scope:            RoutingModelCatalogScopeCreateDraft,
+		ProviderSpec:     "bedrock",
+		ProviderProtocol: "protocol_auto",
+		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		CredentialRef:    "profile:swobu-bedrock",
+		ModelIDs:         []string{"anthropic.claude-sonnet-4-5-20250929-v1:0"},
+	})
+	if len(model.CreateDraftModelIDs) != 1 {
+		t.Fatalf("model ids=%v", model.CreateDraftModelIDs)
+	}
+	if model.CreateDraftModelProbePending {
+		t.Fatal("create-draft catalog probe pending should clear after load result")
 	}
 }
 
@@ -472,5 +546,65 @@ func TestReduce_DaemonRefreshTickInCompatibilityModeOnlyRefreshesStatus(t *testi
 	}
 	if _, ok := effects[1].(ScheduleDaemonRefreshEffect); !ok {
 		t.Fatalf("effect[1] = %T, want ScheduleDaemonRefreshEffect", effects[1])
+	}
+}
+
+func TestReduce_CreateDraftProbeCompleted_PersistsResolvedProviderProtocol(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			ProviderSpec:     "bedrock",
+			ProviderProtocol: "protocol_auto",
+			BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com",
+			CredentialRef:    "profile:default",
+			ModelID:          "anthropic.claude-sonnet-4-5-20250929-v1:0",
+		},
+		CreateDraftModelProbePending: true,
+	}
+
+	Reduce(&model, CreateDraftModelProbeCompletedAction{
+		ProviderSpec:             "bedrock",
+		ProviderProtocol:         "protocol_auto",
+		BaseURL:                  "https://bedrock-runtime.us-east-1.amazonaws.com",
+		CredentialRef:            "profile:default",
+		ModelID:                  "anthropic.claude-sonnet-4-5-20250929-v1:0",
+		ResolvedProviderProtocol: "converse_stream",
+	})
+
+	if got := model.CreateDraftProviderConfig.ProviderProtocol; got != "converse_stream" {
+		t.Fatalf("provider variant = %q, want converse_stream", got)
+	}
+	if !model.CreateDraftModelTestPassed {
+		t.Fatal("model probe should be marked passed when no error is returned")
+	}
+}
+
+func TestReduce_AddModelCatalogResult_IgnoresMismatchedProviderProtocol(t *testing.T) {
+	t.Parallel()
+
+	model := Model{}
+	Reduce(&model, LoadRoutingModelCatalogRequestedAction{
+		Scope:            RoutingModelCatalogScopeAddModelDraft,
+		ProviderSpec:     "bedrock",
+		ProviderProtocol: "converse",
+		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com",
+		CredentialRef:    "profile:default",
+	})
+
+	Reduce(&model, RoutingModelCatalogLoaded{
+		Scope:            RoutingModelCatalogScopeAddModelDraft,
+		ProviderSpec:     "bedrock",
+		ProviderProtocol: "invoke_model",
+		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com",
+		CredentialRef:    "profile:default",
+		ModelIDs:         []string{"should-not-apply"},
+	})
+
+	if len(model.AddModelDraftModelIDs) != 0 {
+		t.Fatalf("mismatched provider variant should be ignored; model ids=%v", model.AddModelDraftModelIDs)
+	}
+	if !model.AddModelDraftModelProbePending {
+		t.Fatal("pending flag should remain true when mismatched result is ignored")
 	}
 }

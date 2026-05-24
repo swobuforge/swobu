@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/shared/daemonstate"
 )
@@ -92,7 +93,11 @@ func ClientBaseURL(model state.Model) string {
 	if current == "" {
 		return "none"
 	}
-	return "http://127.0.0.1:7926/c/" + current + "/"
+	base := strings.TrimSpace(strings.TrimRight(platformconfig.DefaultDaemonURL(), "/")) // swobu:io-string source=boundary
+	if base == "" {
+		base = "http://127.0.0.1:7926"
+	}
+	return base + "/c/" + current + "/"
 }
 
 func CurrentEndpoint(model state.Model) string {

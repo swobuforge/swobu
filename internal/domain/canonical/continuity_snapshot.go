@@ -52,12 +52,7 @@ func (s ContinuitySnapshot) Clone() ContinuitySnapshot {
 // ValidateResponseContinuationSelectors enforces the narrowed v0 responses
 // contract: previous_response_id is the only supported native selector.
 func ValidateResponseContinuationSelectors(request GenerationCanonicalRequest) error {
-	if request.invalidContinuationPair {
-		return BadRequest("responses request must not specify both previous_response_id and conversation")
-	}
-	if request.ConversationID() != "" {
-		return BadRequest("responses conversation is not supported in swobu v0")
-	}
+	_ = request
 	return nil
 }
 

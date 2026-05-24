@@ -47,8 +47,9 @@ func buildProviderBackendURLRow(ctx *retained.Context[state.Model], spec provide
 func backendURLEditorRow(ctx *retained.Context[state.Model], label, summary, currentValue, emptyStateLabel string, save func(string) []update.Action) retained.ViewSpec[state.Model] {
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	draft, setDraft := retained.UseState(ctx, func() string { return currentValue })
+	editorNodeName := "inline-editor/" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(label), " ", "-")) // swobu:io-string source=boundary
 	if open {
-		return retained.Named[state.Model]("inline-editor", views.InlineEditor(
+		return retained.Named[state.Model](editorNodeName, views.InlineEditor(
 			label,
 			draft,
 			emptyStateLabel,

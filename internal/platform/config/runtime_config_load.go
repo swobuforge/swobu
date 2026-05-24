@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 //go:embed runtime.cue
@@ -49,14 +50,13 @@ type endpointDTO struct {
 }
 
 type providerConfigDTO struct {
-	Ref           string `json:"ref" yaml:"ref"`
-	ProviderSpec  string `json:"provider_spec" yaml:"provider_spec"`
-	BaseURL       string `json:"base_url" yaml:"base_url"`
-	CredentialRef string `json:"credential_ref" yaml:"credential_ref"`
-	ModelID       string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
-	TargetAlias   string `json:"target_alias,omitempty" yaml:"target_alias,omitempty"`
-	SelectedFrame string `json:"selected_frame,omitempty" yaml:"selected_frame,omitempty"`
-	ProtocolKind  string `json:"protocol_kind,omitempty" yaml:"protocol_kind,omitempty"`
+	Ref              string `json:"ref" yaml:"ref"`
+	ProviderSpec     string `json:"provider_spec" yaml:"provider_spec"`
+	BaseURL          string `json:"base_url" yaml:"base_url"`
+	CredentialRef    string `json:"credential_ref" yaml:"credential_ref"`
+	ModelID          string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
+	TargetAlias      string `json:"target_alias,omitempty" yaml:"target_alias,omitempty"`
+	ProviderProtocol string `json:"provider_protocol,omitempty" yaml:"provider_protocol,omitempty"`
 }
 
 func (c RuntimeConfig) WithDefaults() RuntimeConfig {
@@ -279,8 +279,12 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		if strings.TrimSpace(encoded.SelectedFrame) != "" { // swobu:io-string source=boundary
-			providerConfig, err = providerConfig.WithSelectedFrame(encoded.SelectedFrame)
+		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
+		}
+		if providerProtocol != "" {
+			providerConfig, err = providerConfig.WithProviderProtocol(providerProtocol)
 			if err != nil {
 				return endpointintent.Endpoint{}, err
 			}
@@ -298,15 +302,15 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 	providerConfigs := endpoint.ProviderConfigs()
 	encodedProviderConfigs := make([]providerConfigDTO, 0, len(providerConfigs))
 	for _, providerConfig := range providerConfigs {
+		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
 		encodedProviderConfigs = append(encodedProviderConfigs, providerConfigDTO{
-			Ref:           providerConfig.Ref().String(),
-			ProviderSpec:  providerConfig.ProviderSpec().String(),
-			BaseURL:       providerConfig.BaseURL(),
-			CredentialRef: providerConfig.CredentialRef(),
-			ModelID:       providerConfig.ModelID(),
-			TargetAlias:   providerConfig.TargetAlias(),
-			SelectedFrame: providerConfig.SelectedFrame(),
-			ProtocolKind:  providerConfig.ProtocolKind().String(),
+			Ref:              providerConfig.Ref().String(),
+			ProviderSpec:     providerConfig.ProviderSpec().String(),
+			BaseURL:          providerConfig.BaseURL(),
+			CredentialRef:    providerConfig.CredentialRef(),
+			ModelID:          providerConfig.ModelID(),
+			TargetAlias:      providerConfig.TargetAlias(),
+			ProviderProtocol: providerProtocol,
 		})
 	}
 	return endpointDTO{

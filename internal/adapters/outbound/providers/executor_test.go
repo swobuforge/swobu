@@ -40,7 +40,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	openAIReq := ports.NewProviderRequest(
 		canonical.NewDialogRequest("m", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}),
 		ports.NewExecutionContract(false),
-		ports.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref"),
+		ports.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	)
 	if _, err := services.Execution.Execute(context.Background(), openAIReq); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
@@ -49,7 +49,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	anthropicReq := ports.NewProviderRequest(
 		canonical.NewDialogRequest("m", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}),
 		ports.NewExecutionContract(false),
-		ports.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref"),
+		ports.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)
 	if _, err := services.Execution.Execute(context.Background(), anthropicReq); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
@@ -72,7 +72,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
 
 	openAIModels, err := services.ModelCatalog.ListModels(context.Background(), ports.NewRoutableTarget(
-		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref",
+		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
 		t.Fatalf("openai model catalog failed: %v", err)
@@ -82,7 +82,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}
 
 	_, err = services.ModelCatalog.ListModels(context.Background(), ports.NewRoutableTarget(
-		"backend-b", "chatgpt", upstream.URL+"/v1", "keychain:chatgpt/default", protocolkind.ChatCompletions, "credential_ref",
+		"backend-b", "chatgpt", upstream.URL+"/v1", "keychain:chatgpt/default", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
 		t.Fatalf("chatgpt catalog dispatch must use chatgpt adapter tier validation, got err=%v", err)
@@ -96,7 +96,7 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	_, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
 		canonical.NewPromptRequest("m", "hi"),
 		ports.NewExecutionContract(false),
-		ports.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref"),
+		ports.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
 		t.Fatalf("unknown provider must fail fast, got err=%v", err)
@@ -118,7 +118,7 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 
 	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
 	err := services.ModelCatalog.ValidateCredentials(context.Background(), ports.NewRoutableTarget(
-		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref",
+		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
 		t.Fatalf("openai validate credentials failed: %v", err)

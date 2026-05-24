@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -48,8 +47,9 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 }
 
 func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
-	if req.Target.ProtocolKind != protocolkind.Messages {
-		return ports.ProviderResponse{}, canonical.UnsupportedOperation("anthropic provider requires messages protocol")
+	streaming, err := resolveAnthropicProviderProtocol(req.Target.ProviderProtocol)
+	if err != nil {
+		return ports.ProviderResponse{}, err
 	}
 	if req.Request == nil {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
@@ -58,7 +58,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
 
-	wireReq, err := messages.EncodeRequest(req.Request, req.Contract.ProviderCallMode.Streaming())
+	wireReq, err := messages.EncodeRequest(req.Request, streaming)
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -93,7 +93,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		}()
 		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), req.Target.ProtocolKind, req.Contract.ProviderCallMode.Streaming())
+	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), streaming)
 	if err != nil {
 		_ = resp.Body.Close()
 		return ports.ProviderResponse{}, err
@@ -140,15 +140,9 @@ func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target
 	return err
 }
 
-func anthropicResponseDecoder(providerIDRaw string, protocolKind protocolkind.ProtocolKind, delivery bool) (providersruntime.ResponseDecoder, error) {
-	if err := providersruntime.RequireProviderAndProtocol(
-		providerIDRaw,
-		providercatalog.ProviderSpecAnthropic,
-		protocolKind,
-		protocolkind.Messages,
-		"anthropic",
-	); err != nil {
-		return nil, err
+func anthropicResponseDecoder(providerIDRaw string, streaming bool) (providersruntime.ResponseDecoder, error) {
+	if providerIDRaw != string(providercatalog.ProviderSpecAnthropic) {
+		return nil, canonical.BadEndpoint("provider id is unsupported for anthropic adapter runtime")
 	}
 	streamingDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
 		return ports.NewEnvelopeStreamingProviderResponse(messages.DecodeResponseStream(body, "provider_stream:anthropic_messages")), nil
@@ -167,11 +161,29 @@ func anthropicResponseDecoder(providerIDRaw string, protocolKind protocolkind.Pr
 		}
 		return ports.NewBufferedProviderResponse(result), nil
 	}
-	decoder, ok := providersruntime.SelectResponseDecoder(delivery, streamingDecoder, bufferedDecoder)
+	decoder, ok := providersruntime.SelectResponseDecoder(streaming, streamingDecoder, bufferedDecoder)
 	if !ok {
 		return nil, canonical.UnsupportedDelivery("anthropic provider delivery variant is not implemented")
 	}
 	return decoder, nil
+}
+
+func resolveAnthropicProviderProtocol(providerProtocol string) (bool, error) {
+	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
+	if providerProtocol == "" || providerProtocol == providercatalog.ProviderProtocolAuto {
+		return false, canonical.BadEndpoint("anthropic provider protocol must be concrete")
+	}
+	if !providercatalog.SupportsProviderProtocolForSpec(string(providercatalog.ProviderSpecAnthropic), providerProtocol) {
+		return false, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
+	}
+	switch providerProtocol {
+	case "messages":
+		return false, nil
+	case "messages_stream":
+		return true, nil
+	default:
+		return false, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
+	}
 }
 
 func (e ProviderExecutorAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {

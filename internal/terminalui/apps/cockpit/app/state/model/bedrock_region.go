@@ -20,6 +20,9 @@ func BedrockRegionFromBaseURL(baseURL string) string {
 	if len(parts) >= 4 && strings.HasPrefix(parts[0], "bedrock-runtime") {
 		return strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
 	}
+	if len(parts) >= 4 && strings.HasPrefix(parts[0], "bedrock-mantle") {
+		return strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
+	}
 	return ""
 }
 
@@ -29,4 +32,12 @@ func BedrockBaseURLForRegion(region string) string {
 		return ""
 	}
 	return fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/openai/v1", region)
+}
+
+func BedrockOpenAICompatibleBaseURLForRegion(region string) string {
+	region = strings.TrimSpace(region) // swobu:io-string source=boundary
+	if region == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://bedrock-mantle.%s.api.aws/v1", region)
 }

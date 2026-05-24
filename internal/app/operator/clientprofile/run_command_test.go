@@ -21,7 +21,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "aider",
 			binary:   "aider",
-			contains: []string{"--model", "openai/" + requestpath.PublicModelIDSwobu},
+			contains: []string{"--model", "openai/" + requestpath.PublicModelIDSwobu, "--message", "Reply with exactly: swobu-e2e-aider-run-ok", "--exit"},
 			envChecks: map[string]string{
 				"AIDER_OPENAI_API_BASE": "http://127.0.0.1:7926/c/acme/v1",
 				"OPENAI_API_KEY":        "swobu-placeholder",
@@ -31,10 +31,14 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			clientID: "codex",
 			binary:   "codex",
 			contains: []string{
+				`exec`,
 				`model="` + requestpath.PublicModelIDSwobu + `"`,
 				`model_provider="swobu"`,
 				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
-				`forced_login_method="api"`,
+				`Reply with exactly: swobu-e2e-codex-run-ok`,
+			},
+			envChecks: map[string]string{
+				"OPENAI_API_KEY": "swobu-placeholder",
 			},
 		},
 		{
@@ -49,7 +53,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID:    "continue",
 			binary:      "cn",
-			contains:    []string{"--config", "./swobu.continue.yaml", "--print", "Explain this codebase"},
+			contains:    []string{"--config", "./swobu.continue.yaml", "-p", "Explain this codebase"},
 			preparePath: "./swobu.continue.yaml",
 		},
 		{

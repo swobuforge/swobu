@@ -66,14 +66,17 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 
 	bedrockModes := AllowedAuthModesForSpec("bedrock")
-	if len(bedrockModes) != 2 {
-		t.Fatalf("bedrock allowed auth modes=%v want exactly 2", bedrockModes)
+	if len(bedrockModes) != 3 {
+		t.Fatalf("bedrock allowed auth modes=%v want exactly 3", bedrockModes)
 	}
 	if bedrockModes[0].ID != AuthModeAWSProfile || bedrockModes[0].Variant != AuthVariantAWSProfile {
 		t.Fatalf("bedrock mode[0]=%+v", bedrockModes[0])
 	}
-	if bedrockModes[1].ID != AuthModeTokenEnv || bedrockModes[1].Variant != AuthVariantEnv {
+	if bedrockModes[1].ID != AuthModeAWSEnvSession || bedrockModes[1].Variant != AuthVariantAWSEnvSession {
 		t.Fatalf("bedrock mode[1]=%+v", bedrockModes[1])
+	}
+	if bedrockModes[2].ID != AuthModeTokenEnv || bedrockModes[2].Variant != AuthVariantEnv {
+		t.Fatalf("bedrock mode[2]=%+v", bedrockModes[2])
 	}
 }
 

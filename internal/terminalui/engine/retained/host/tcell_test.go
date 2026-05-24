@@ -24,7 +24,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
-func TestRunner_RendersCockpitAndHandlesTabAndEscStepBackThenQuit(t *testing.T) {
+func TestRunner_RendersCockpitAndIgnoresEscThenQuitsOnCtrlC(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/_swobu/status":
@@ -69,14 +69,14 @@ func TestRunner_RendersCockpitAndHandlesTabAndEscStepBackThenQuit(t *testing.T) 
 	default:
 	}
 
-	screen.InjectKey(tcell.KeyEsc, 0, 0)
+	screen.InjectKey(tcell.KeyCtrlC, 0, 0)
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatalf("runner returned error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("runner did not exit after esc")
+		t.Fatal("runner did not exit after ctrl+c")
 	}
 }
 
@@ -106,14 +106,14 @@ func TestRunner_FlushesFirstFrameBeforeBlockingBootEffect(t *testing.T) {
 	})
 
 	close(block)
-	screen.InjectKey(tcell.KeyEsc, 0, 0)
+	screen.InjectKey(tcell.KeyCtrlC, 0, 0)
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatalf("runner returned error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("runner did not exit after esc")
+		t.Fatal("runner did not exit after ctrl+c")
 	}
 	_ = block
 }

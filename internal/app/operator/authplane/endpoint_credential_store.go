@@ -150,7 +150,7 @@ func cloneProviderConfigWithCredentialRef(cfg endpointintent.ProviderConfig, pro
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}
-	next, err = next.WithSelectedFrame(cfg.SelectedFrame())
+	next, err = next.WithProviderProtocol(cfg.ProviderProtocol())
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}

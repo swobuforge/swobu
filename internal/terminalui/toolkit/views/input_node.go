@@ -87,7 +87,9 @@ func (i *InputRenderNode) HandleScopedEvent(ev interaction.Event, _ *layout.Layo
 		}
 		return true, i.change(i.Value + string(ev.Rune))
 	}
-	return false, nil
+	// Consume non-text keys while editor is open to prevent key leakage into
+	// parent row navigation/state.
+	return true, nil
 }
 
 func (i *InputRenderNode) CanFocus(*layout.LayoutNode) bool { return true }

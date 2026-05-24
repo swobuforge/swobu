@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -69,9 +68,8 @@ func toggleAddModelLane(snapshot *state.EndpointSnapshot, panel addModelPanelSta
 		return nil
 	}
 	draft := state.ProviderConfigSnapshot{
-		Ref:           nextProviderDraftKey(snapshot),
-		ProtocolKind:  defaultProtocolKindForProvider(""),
-		SelectedFrame: defaultSelectedFrameForProvider(""),
+		Ref:              nextProviderDraftKey(snapshot),
+		ProviderProtocol: defaultProviderProtocolForProvider(""),
 	}
 	panel.setDraft(draft)
 	panel.setOpen(true)
@@ -106,17 +104,22 @@ func buildWorkspaceAddModelDetailRows(
 	if strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(authVariant) {
 		authViewState = classifyInteractiveAuthPhase(model, strings.TrimSpace(snapshot.Name), draft, authVariant) // swobu:io-string source=boundary
 	}
-	modelCatalogBlocked := state.ProviderModelCatalogLoadBlocked(
-		providerSpec,
-		strings.TrimSpace(draft.BaseURL), // swobu:io-string source=boundary
-		effectiveCredentialRef,
-	)
-	rows = appendWorkspaceAddModelCredentialRows(ctx, model, strings.TrimSpace(snapshot.Name), modelCatalogBlocked, rows, draft, panel) // swobu:io-string source=boundary
+	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
+		ProviderSpec:            providerSpec,
+		BaseURL:                 strings.TrimSpace(draft.BaseURL), // swobu:io-string source=boundary
+		CredentialRef:           effectiveCredentialRef,
+		InteractiveAuthResolved: authViewState == interactiveAuthPhaseResolved,
+	})
+	modelCatalogBlocked := readiness.Blocked
+	rows = appendWorkspaceAddModelCredentialRows(ctx, model, strings.TrimSpace(snapshot.Name), rows, draft, panel) // swobu:io-string source=boundary
 	if providerSpec != "" && !modelCatalogBlocked {
 		rows = append(rows, retained.Named[state.Model]("add-model/model", buildAddModelModelChoiceRow(ctx, model, panel)))
-	} else if providerSpec != "" && modelCatalogBlocked &&
-		!(strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(authVariant) && authViewState != interactiveAuthPhaseResolved) {
-		rows = append(rows, retained.Named[state.Model]("add-model/model-blocked", views.RowStatic("model", "choose after auth")))
+	} else if providerSpec != "" && modelCatalogBlocked {
+		blockedRows := []retained.ViewSpec[state.Model]{views.RowStatic("model", "blocked")}
+		if message := trimRoutingInput(readiness.Message); message != "" {
+			blockedRows = append(blockedRows, views.DisclosureNoteRows(message)...)
+		}
+		rows = append(rows, retained.Named[state.Model]("add-model/model-blocked", retained.VStack(ctx, blockedRows...)))
 	}
 	if providerSpec != "" && !modelCatalogBlocked && strings.TrimSpace(draft.ModelID) != "" { // swobu:io-string source=boundary
 		rows = append(rows, retained.Named[state.Model]("add-model/id", aliasInlineEditorRow(ctx, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), "not set"), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action { // swobu:io-string source=boundary
@@ -126,46 +129,35 @@ func buildWorkspaceAddModelDetailRows(
 			return nil
 		})))
 	}
-	rows = append(rows, retained.Named[state.Model]("add-model/delivery", buildAddModelFrameRow(draft, panel)))
+	rows = append(rows, retained.Named[state.Model]("add-model/protocol", buildAddModelProtocolRow(draft, panel)))
 	if createRow := buildAddModelCreateRow(model, snapshot, draft, panel); createRow != nil {
 		rows = append(rows, createRow)
 	}
 	return rows
 }
 
-func buildAddModelFrameRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+func buildAddModelProtocolRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		_ = ctx
-		frames := providercatalog.SupportedFramesForSpecProtocol(
-			draft.ProviderSpec,
-			protocolkind.ProtocolKind(defaultProtocolKindForProvider(draft.ProviderSpec)),
-		)
-		selected := strings.TrimSpace(draft.SelectedFrame) // swobu:io-string source=boundary
-		if selected == "" && len(frames) > 0 {
-			selected = frames[0]
+		protocols := providercatalog.SupportedProviderProtocolsForSpec(draft.ProviderSpec)
+		if len(protocols) == 0 {
+			return views.RowStatic("protocol", "not set")
 		}
-		if selected == "" {
-			selected = "not set"
-		}
-		summary := "auto"
-		if strings.TrimSpace(draft.ModelID) != "" { // swobu:io-string source=boundary
-			summary = presentDeliveryFrameForProvider(
-				draft.ProviderSpec,
-				protocolkind.ProtocolKind(defaultProtocolKindForProvider(draft.ProviderSpec)),
-				selected,
-			)
+		current := strings.TrimSpace(draft.ProviderProtocol) // swobu:io-string source=boundary
+		if current == "" {
+			current = defaultProviderProtocolForProvider(draft.ProviderSpec)
 		}
 		return views.RowActionWithCancel(
-			providerDeliveryRowLabel,
-			summary,
+			"protocol",
+			current,
 			"next",
 			func() []update.Action {
-				next := nextFrameSelection(frames, strings.TrimSpace(draft.SelectedFrame)) // swobu:io-string source=boundary
+				next := nextProviderProtocolSelection(protocols, strings.TrimSpace(draft.ProviderProtocol)) // swobu:io-string source=boundary
 				if next == "" {
 					return nil
 				}
 				updated := draft
-				updated.SelectedFrame = next
+				updated.ProviderProtocol = next
 				panel.setDraft(updated)
 				return nil
 			},
@@ -193,20 +185,12 @@ func appendWorkspaceAddModelCredentialRows(
 	ctx *retained.Context[state.Model],
 	model state.Model,
 	endpointName string,
-	modelCatalogBlocked bool,
 	rows []retained.ViewSpec[state.Model],
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
 ) []retained.ViewSpec[state.Model] {
 	providerSpec := strings.TrimSpace(draft.ProviderSpec)              // swobu:io-string source=boundary
 	source := credentialSource(strings.TrimSpace(draft.CredentialRef)) // swobu:io-string source=boundary
-	authViewState := interactiveAuthPhaseNone
-	if strings.EqualFold(providerSpec, "chatgpt") {
-		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source))) // swobu:io-string source=boundary
-		if providercatalog.IsInteractiveAuthVariant(variant) {
-			authViewState = classifyInteractiveAuthPhase(model, strings.TrimSpace(endpointName), draft, variant) // swobu:io-string source=boundary
-		}
-	}
 	rows = append(rows, interactiveAddModelCredentialRows(model, providerSpec, endpointName, draft, source)...)
 	if strings.EqualFold(source, "env") {
 		if strings.EqualFold(providerSpec, "bedrock") {
@@ -223,16 +207,6 @@ func appendWorkspaceAddModelCredentialRows(
 	if strings.EqualFold(source, "file") {
 		rows = append(rows, retained.Named[state.Model]("add-model/credential-file", buildAddModelCredentialFileRow(ctx, draft, panel)))
 		rows = append(rows, authModeRendererForCredentialRef(draft.CredentialRef).RenderAddModelExtras(providerSpec, draft.CredentialRef)...)
-	}
-	if modelCatalogBlocked && strings.TrimSpace(source) != "" && // swobu:io-string source=boundary
-		!(strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))) && authViewState != interactiveAuthPhaseResolved) { // swobu:io-string source=boundary
-		authState := addModelAuthStateForDraft(model, endpointName, draft)
-		authFailed := strings.EqualFold(strings.TrimSpace(authState.SessionState), "failed") // swobu:io-string source=boundary
-		if !authFailed {
-			if message := strings.TrimSpace(state.ProviderModelCatalogBlockedMessage(providerSpec, strings.TrimSpace(draft.BaseURL), strings.TrimSpace(draft.CredentialRef))); message != "" { // swobu:io-string source=boundary
-				rows = append(rows, views.DisclosureNoteRows(message)...)
-			}
-		}
 	}
 	return rows
 }

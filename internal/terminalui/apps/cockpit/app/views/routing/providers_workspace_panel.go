@@ -55,9 +55,8 @@ func buildProvidersWorkspaceConfiguredPanel(ctx *retained.Context[state.Model], 
 	addOpen, setAddOpen := retained.UseState(ctx, func() bool { return false })
 	addDraft, setAddDraft := retained.UseState(ctx, func() state.ProviderConfigSnapshot {
 		return state.ProviderConfigSnapshot{
-			Ref:           nextProviderDraftKey(snapshot),
-			ProtocolKind:  defaultProtocolKindForProvider(""),
-			SelectedFrame: defaultSelectedFrameForProvider(""),
+			Ref:              nextProviderDraftKey(snapshot),
+			ProviderProtocol: defaultProviderProtocolForProvider(""),
 		}
 	})
 	addProviderPicker, setAddProviderPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })

@@ -85,14 +85,13 @@ func (s ProviderSpec) String() string {
 }
 
 type ProviderConfig struct {
-	ref           ProviderConfigRef
-	providerSpec  ProviderSpec
-	baseURL       string
-	credentialRef string
-	protocolKind  protocolkind.ProtocolKind
-	selectedFrame string
-	modelID       string
-	targetAlias   string
+	ref              ProviderConfigRef
+	providerSpec     ProviderSpec
+	baseURL          string
+	credentialRef    string
+	providerProtocol string
+	modelID          string
+	targetAlias      string
 }
 
 var targetAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -120,23 +119,18 @@ func NewProviderConfig(
 	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=domain
 		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-compatible provider configs require a base URL", ErrInvalidProviderConfig)
 	}
-	protocolKind, ok := providercatalog.DefaultExecutionProtocolForSpec(spec.value)
+	providerProtocol, ok := providercatalog.DefaultProviderProtocolForSpec(spec.value)
 	if !ok {
-		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no supported execution protocols", ErrInvalidProviderConfig)
-	}
-	selectedFrame, ok := providercatalog.DefaultFrameForSpecProtocol(spec.value, protocolKind)
-	if !ok {
-		return ProviderConfig{}, fmt.Errorf("%w: provider protocol has no supported execution frames", ErrInvalidProviderConfig)
+		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no default provider protocol", ErrInvalidProviderConfig)
 	}
 	return ProviderConfig{
-		ref:           ref,
-		providerSpec:  spec,
-		baseURL:       baseURL,
-		credentialRef: credentialRef,
-		protocolKind:  protocolKind,
-		selectedFrame: selectedFrame,
-		modelID:       "",
-		targetAlias:   "",
+		ref:              ref,
+		providerSpec:     spec,
+		baseURL:          baseURL,
+		credentialRef:    credentialRef,
+		providerProtocol: providerProtocol,
+		modelID:          "",
+		targetAlias:      "",
 	}, nil
 }
 
@@ -157,52 +151,53 @@ func (c ProviderConfig) CredentialRef() string {
 }
 
 func (c ProviderConfig) ProtocolKind() protocolkind.ProtocolKind {
-	return c.protocolKind
+	kind, _, ok := providercatalog.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
+	if ok {
+		return kind
+	}
+	return ""
 }
 
-func (c ProviderConfig) WithProtocolKind(protocolKind protocolkind.ProtocolKind) (ProviderConfig, error) {
+func (c ProviderConfig) ProviderProtocol() string {
+	return c.providerProtocol
+}
+
+func (c ProviderConfig) WithProviderProtocol(providerProtocol string) (ProviderConfig, error) {
+	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=domain
+	if providerProtocol == "" {
+		return ProviderConfig{}, fmt.Errorf("%w: provider protocol is required", ErrInvalidProviderConfig)
+	}
+	if !providercatalog.SupportsProviderProtocolForSpec(c.providerSpec.String(), providerProtocol) {
+		return ProviderConfig{}, fmt.Errorf(
+			"%w: provider protocol %q is unsupported for provider %q",
+			ErrInvalidProviderConfig,
+			providerProtocol,
+			c.providerSpec.String(),
+		)
+	}
+	protocolKind, _, ok := providercatalog.ProviderProtocolKindAndFrame(c.providerSpec.String(), providerProtocol)
+	if !ok {
+		return ProviderConfig{}, fmt.Errorf("%w: provider protocol %q has no protocol mapping", ErrInvalidProviderConfig, providerProtocol)
+	}
 	if !providercatalog.SupportsExecutionProtocolForSpec(c.providerSpec.String(), protocolKind) {
 		return ProviderConfig{}, fmt.Errorf(
-			"%w: protocol %q is unsupported for provider %q",
+			"%w: provider protocol %q protocol %q is unsupported for provider %q",
 			ErrInvalidProviderConfig,
+			providerProtocol,
 			protocolKind,
 			c.providerSpec.String(),
 		)
 	}
-	selectedFrame, ok := providercatalog.DefaultFrameForSpecProtocol(c.providerSpec.String(), protocolKind)
-	if !ok {
-		return ProviderConfig{}, fmt.Errorf(
-			"%w: provider %q protocol %q has no supported execution frames",
-			ErrInvalidProviderConfig,
-			c.providerSpec.String(),
-			protocolKind,
-		)
-	}
-	c.protocolKind = protocolKind
-	c.selectedFrame = selectedFrame
+	c.providerProtocol = providerProtocol
 	return c, nil
 }
 
 func (c ProviderConfig) SelectedFrame() string {
-	return c.selectedFrame
-}
-
-func (c ProviderConfig) WithSelectedFrame(selectedFrame string) (ProviderConfig, error) {
-	selectedFrame = strings.TrimSpace(selectedFrame) // swobu:io-string source=domain
-	if selectedFrame == "" {
-		return ProviderConfig{}, fmt.Errorf("%w: selected frame is required", ErrInvalidProviderConfig)
+	_, frame, ok := providercatalog.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
+	if ok {
+		return frame
 	}
-	if !providercatalog.SupportsFrameForSpecProtocol(c.providerSpec.String(), c.protocolKind, selectedFrame) {
-		return ProviderConfig{}, fmt.Errorf(
-			"%w: selected frame %q is unsupported for provider %q protocol %q",
-			ErrInvalidProviderConfig,
-			selectedFrame,
-			c.providerSpec.String(),
-			c.protocolKind,
-		)
-	}
-	c.selectedFrame = selectedFrame
-	return c, nil
+	return ""
 }
 
 func (c ProviderConfig) ModelID() string {

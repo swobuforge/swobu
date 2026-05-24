@@ -13,10 +13,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
+	smithybearer "github.com/aws/smithy-go/auth/bearer"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type bedrockAuthMode string
@@ -25,25 +25,6 @@ const (
 	bedrockAuthModeAWSProfile bedrockAuthMode = "aws_profile"
 	bedrockAuthModeAPIKeyEnv  bedrockAuthMode = "api_key_env"
 )
-
-func listBedrockModelsViaSDK(ctx context.Context, target ports.RoutableTarget, profile string) ([]string, error) {
-	if trimBedrockInput(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
-	}
-	region, err := bedrockSigningRegion(ctx, mustParseURL(target.BaseURL), profile)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := loadBedrockAWSConfig(ctx, region, profile)
-	if err != nil {
-		return nil, err
-	}
-	models, err := bedrockListFoundationModelIDs(ctx, cfg)
-	if err != nil {
-		return nil, canonical.BadEndpoint("bedrock AWS model catalog request failed")
-	}
-	return models, nil
-}
 
 func mustParseURL(raw string) *url.URL {
 	u, err := url.Parse(raw)
@@ -78,7 +59,7 @@ func signBedrockRequestWithAWSProfile(ctx context.Context, profile string, req *
 	if err != nil {
 		return err
 	}
-	cfg, err := loadBedrockAWSConfig(ctx, region, profile)
+	cfg, err := loadBedrockAWSConfig(ctx, region, bedrockAuthModeAWSProfile, profile)
 	if err != nil {
 		return err
 	}
@@ -101,10 +82,34 @@ func signBedrockRequestWithAWSProfile(ctx context.Context, profile string, req *
 	}, req, sha256Hex(payload), bedrockSigningService, region, time.Now().UTC())
 }
 
-func loadBedrockAWSConfig(ctx context.Context, region, profile string) (aws.Config, error) {
+func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMode, value string) (aws.Config, error) {
+	profile := ""
+	if mode == bedrockAuthModeAWSProfile {
+		profile = value
+	}
 	loadOptions := []func(*config.LoadOptions) error{config.WithRegion(region)}
-	if trimBedrockInput(profile) != "" {
-		loadOptions = append(loadOptions, config.WithSharedConfigProfile(trimBedrockInput(profile)))
+	switch mode {
+	case bedrockAuthModeAWSProfile:
+		if trimBedrockInput(profile) != "" {
+			loadOptions = append(loadOptions, config.WithSharedConfigProfile(trimBedrockInput(profile)))
+		}
+	case bedrockAuthModeAPIKeyEnv:
+		envKey := value
+		if envKey == "" {
+			envKey = "AWS_BEARER_TOKEN_BEDROCK"
+		}
+		token := trimBedrockInput(platformconfig.ReadEnvTrim(envKey))
+		if token == "" {
+			return aws.Config{}, canonical.BadEndpoint("bedrock API key env var is missing: " + envKey)
+		}
+		return aws.Config{
+			Region: region,
+			BearerAuthTokenProvider: smithybearer.StaticTokenProvider{
+				Token: smithybearer.Token{Value: token},
+			},
+		}, nil
+	default:
+		return aws.Config{}, canonical.BadEndpoint("bedrock auth mode is unsupported")
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, loadOptions...)
 	if err != nil {
@@ -112,6 +117,18 @@ func loadBedrockAWSConfig(ctx context.Context, region, profile string) (aws.Conf
 			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS profile %q could not be loaded", profile))
 		}
 		return aws.Config{}, canonical.BadEndpoint("bedrock AWS default credential chain could not be loaded")
+	}
+	if mode == bedrockAuthModeAWSProfile {
+		// Bedrock runtime execution for aws_profile/aws_env_session must use SigV4.
+		// Some shared config chains can surface bearer providers (for example SSO),
+		// which breaks local/http test endpoints and non-bearer runtime flows.
+		cfg.BearerAuthTokenProvider = nil
+		if _, credErr := cfg.Credentials.Retrieve(ctx); credErr != nil {
+			if trimBedrockInput(profile) != "" {
+				return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials for profile %q are unavailable or expired: %v", profile, credErr))
+			}
+			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials are unavailable or expired: %v", credErr))
+		}
 	}
 	return cfg, nil
 }
@@ -121,12 +138,11 @@ func parseBedrockAuthMode(credentialRef string) (mode bedrockAuthMode, value str
 	if ref == "" || strings.EqualFold(ref, string(providercatalog.AuthVariantAWSProfile)) {
 		return bedrockAuthModeAWSProfile, ""
 	}
+	if strings.EqualFold(ref, string(providercatalog.AuthVariantAWSEnvSession)) {
+		return bedrockAuthModeAWSProfile, ""
+	}
 	if strings.HasPrefix(lowerBedrockInput(ref), "profile:") { // swobu:io-string source=boundary
 		return bedrockAuthModeAWSProfile, trimBedrockInput(ref[len("profile:"):])
-	}
-	// Backward-compat: preserve previous bedrock_api_key_env spelling.
-	if strings.EqualFold(ref, "bedrock_api_key_env") {
-		return bedrockAuthModeAPIKeyEnv, "AWS_BEARER_TOKEN_BEDROCK"
 	}
 	if strings.EqualFold(ref, string(providercatalog.AuthVariantEnv)) {
 		return bedrockAuthModeAPIKeyEnv, "AWS_BEARER_TOKEN_BEDROCK"
@@ -144,13 +160,11 @@ func bedrockSigningRegion(ctx context.Context, u *url.URL, profile string) (stri
 	if envRegion := trimBedrockInput(platformconfig.ReadEnvTrim("AWS_DEFAULT_REGION")); envRegion != "" { // swobu:io-string source=boundary
 		return envRegion, nil
 	}
+	if _, hostRegion := bedrockEndpointClassAndRegion(u.String()); hostRegion != "" {
+		return hostRegion, nil
+	}
 	if sdkRegion := bedrockRegionFromSDKConfig(ctx, profile); sdkRegion != "" {
 		return sdkRegion, nil
-	}
-	host := trimBedrockInput(u.Hostname())
-	parts := strings.Split(host, ".")
-	if len(parts) >= 4 && strings.HasPrefix(parts[0], "bedrock-runtime") {
-		return parts[1], nil
 	}
 	// TODO(bedrock-auth-ontology): allow explicit region in durable provider config once auth ontology supports non-token credential parameters.
 	return "", canonical.BadEndpoint("bedrock signing region is required (set AWS_REGION/AWS_DEFAULT_REGION or use a bedrock-runtime.<region> host)")

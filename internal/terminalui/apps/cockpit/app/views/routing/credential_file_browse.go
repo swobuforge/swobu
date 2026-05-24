@@ -63,6 +63,13 @@ func buildProviderCredentialFileBrowseRow(ctx *retained.Context[state.Model], sp
 		}
 		return nil
 	})
+	// Invariant: once a concrete credential file path is set, the browser
+	// disclosure should not remain open. This prevents mixed disclosure state
+	// (file browser + unrelated picker) and keeps routing interactions local.
+	if open && strings.TrimSpace(currentPath) != "" { // swobu:io-string source=boundary
+		setOpen(false)
+		return parent
+	}
 	out := parent
 	if !open {
 	} else {
@@ -73,12 +80,10 @@ func buildProviderCredentialFileBrowseRow(ctx *retained.Context[state.Model], sp
 			}
 		}, currentPath, func(path string) []update.Action {
 			setOpen(false)
-			actions := applyProviderCredentialFileSelection(path, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
-			actions = append(actions,
-				state.SetInteractionMode{Mode: closeMode},
-				interaction.FocusKeyAction{Key: "credential-file"},
+			return postCredentialFileSelectionActions(
+				applyProviderCredentialFileSelection(path, spec.ProviderConfig, spec.EndpointName, spec.CreateMode),
+				closeMode,
 			)
-			return actions
 		})
 		if err != nil {
 			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(err.Error())...)
@@ -104,6 +109,17 @@ func buildProviderCredentialFileBrowseRow(ctx *retained.Context[state.Model], sp
 		}
 	}
 	return out
+}
+
+func postCredentialFileSelectionActions(base []update.Action, closeMode string) []update.Action {
+	// Keep routing disclosures single-owner after concrete file selection:
+	// close picker mode and hand focus to model-row next.
+	actions := append([]update.Action(nil), base...)
+	actions = append(actions,
+		state.SetInteractionMode{Mode: closeMode},
+		interaction.FocusKeyAction{Key: "model"},
+	)
+	return actions
 }
 
 func applyProviderCredentialFileSelection(path string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {

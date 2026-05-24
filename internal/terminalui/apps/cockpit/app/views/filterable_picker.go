@@ -21,9 +21,10 @@ type FilterablePickerItem struct {
 }
 
 type FilterablePickerState struct {
-	Query  string
-	Cursor int
-	Offset int
+	Query           string
+	Cursor          int
+	Offset          int
+	IgnoreNextEnter bool
 }
 
 type FilterablePickerConfig struct {
@@ -32,6 +33,7 @@ type FilterablePickerConfig struct {
 	WindowSize        int
 	MinOptionsForFind int
 	ShowSelected      bool
+	NonFilterable     bool
 	FindLabel         string
 	NoMatchesLabel    string
 	HeaderRows        []retained.ViewSpec[state.Model]
@@ -40,7 +42,7 @@ type FilterablePickerConfig struct {
 }
 
 func DefaultFilterablePickerState() FilterablePickerState {
-	return FilterablePickerState{Query: "", Cursor: 0, Offset: 0}
+	return FilterablePickerState{Query: "", Cursor: 0, Offset: 0, IgnoreNextEnter: true}
 }
 
 func ResetFilterablePickerState(set func(FilterablePickerState)) {
@@ -72,77 +74,133 @@ func RenderFilterablePickerDisclosure(
 	}
 	disclosure := toolkitviews.NewAnchoredDisclosure(parent, rows...)
 	return toolkitviews.KeyScope(disclosure, func(_ *retained.Context[state.Model], ev interaction.Event) (bool, []update.Action) {
-		if ev.Kind != interaction.EventKey {
-			return false, nil
-		}
-		cur := nextState
-		filteredNow := filterablePickerItems(items, cur.Query)
-		switch ev.Key {
-		case interaction.KeyUp:
-			if len(filteredNow) == 0 || cur.Cursor <= 0 {
-				return true, nil
-			}
-			cur.Cursor--
-			if cur.Cursor < cur.Offset {
-				cur.Offset = cur.Cursor
-			}
-			setState(cur)
-			return true, []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
-		case interaction.KeyDown:
-			if len(filteredNow) == 0 || cur.Cursor >= len(filteredNow)-1 {
-				return true, nil
-			}
-			cur.Cursor++
-			window := cfg.WindowSize
-			if window <= 0 {
-				window = ListMaxHeight
-			}
-			if window <= 0 {
-				window = 6
-			}
-			if cur.Cursor >= cur.Offset+window {
-				cur.Offset = cur.Cursor - window + 1
-			}
-			setState(cur)
-			return true, []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
-		case interaction.KeyBackspace:
-			cur.Query = trimLastRune(cur.Query)
-			cur.Cursor = 0
-			cur.Offset = 0
-			setState(cur)
-			return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
-		case interaction.KeyEsc:
-			if strings.TrimSpace(cur.Query) != "" { // swobu:io-string source=boundary
-				cur.Query = ""
-				cur.Cursor = 0
-				cur.Offset = 0
-				setState(cur)
-				return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
-			}
-			if cfg.OnCancel != nil {
-				return true, cfg.OnCancel()
-			}
-			return true, nil
-		case interaction.KeyEnter:
-			if len(filteredNow) == 0 {
-				return true, nil
-			}
-			selected := filteredNow[cur.Cursor]
-			if selected.OnChoose == nil {
-				return true, nil
-			}
-			return true, selected.OnChoose()
-		case interaction.KeySpace:
-			return handleFilterableQueryInput(nextState, setState, items, cfg, ' ')
-		case interaction.KeyRune:
-			if ev.Rune < 0x20 || ev.Rune == 0x7f {
-				return true, nil
-			}
-			return handleFilterableQueryInput(nextState, setState, items, cfg, ev.Rune)
-		default:
-			return false, nil
-		}
+		return handleFilterablePickerEvent(ev, nextState, setState, items, cfg)
 	})
+}
+
+func handleFilterablePickerEvent(
+	ev interaction.Event,
+	nextState FilterablePickerState,
+	setState func(FilterablePickerState),
+	items []FilterablePickerItem,
+	cfg FilterablePickerConfig,
+) (bool, []update.Action) {
+	if ev.Kind != interaction.EventKey {
+		return false, nil
+	}
+	cur := nextState
+	filteredNow := filterablePickerItems(items, cur.Query)
+	switch ev.Key {
+	case interaction.KeyUp:
+		return handleFilterableKeyUp(cur, setState, filteredNow, cfg)
+	case interaction.KeyDown:
+		return handleFilterableKeyDown(cur, setState, filteredNow, cfg)
+	case interaction.KeyBackspace:
+		return handleFilterableKeyBackspace(cur, setState, items, cfg)
+	case interaction.KeyEsc:
+		return handleFilterableEsc(cur, setState, items, cfg)
+	case interaction.KeyEnter:
+		return handleFilterableKeyEnter(cur, setState, filteredNow)
+	case interaction.KeySpace:
+		return handleFilterableKeyRune(cur, setState, items, cfg, ' ')
+	case interaction.KeyRune:
+		if ev.Rune < 0x20 || ev.Rune == 0x7f {
+			return true, nil
+		}
+		return handleFilterableKeyRune(cur, setState, items, cfg, ev.Rune)
+	default:
+		return true, nil
+	}
+}
+
+func handleFilterableKeyUp(cur FilterablePickerState, setState func(FilterablePickerState), filteredNow []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
+	cur.IgnoreNextEnter = false
+	if len(filteredNow) == 0 || cur.Cursor <= 0 {
+		return true, nil
+	}
+	cur.Cursor--
+	if cur.Cursor < cur.Offset {
+		cur.Offset = cur.Cursor
+	}
+	setState(cur)
+	return true, []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
+}
+
+func handleFilterableKeyDown(cur FilterablePickerState, setState func(FilterablePickerState), filteredNow []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
+	cur.IgnoreNextEnter = false
+	if len(filteredNow) == 0 || cur.Cursor >= len(filteredNow)-1 {
+		return true, nil
+	}
+	cur.Cursor++
+	window := cfg.WindowSize
+	if window <= 0 {
+		window = ListMaxHeight
+	}
+	if window <= 0 {
+		window = 6
+	}
+	if cur.Cursor >= cur.Offset+window {
+		cur.Offset = cur.Cursor - window + 1
+	}
+	setState(cur)
+	return true, []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
+}
+
+func handleFilterableKeyBackspace(cur FilterablePickerState, setState func(FilterablePickerState), items []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
+	if !filterablePickerFilterable(cfg) {
+		return true, nil
+	}
+	cur.IgnoreNextEnter = false
+	cur.Query = trimLastRune(cur.Query)
+	cur.Cursor = 0
+	cur.Offset = 0
+	setState(cur)
+	return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
+}
+
+func handleFilterableKeyEnter(cur FilterablePickerState, setState func(FilterablePickerState), filteredNow []FilterablePickerItem) (bool, []update.Action) {
+	if cur.IgnoreNextEnter {
+		cur.IgnoreNextEnter = false
+		setState(cur)
+		return true, nil
+	}
+	if len(filteredNow) == 0 {
+		return true, nil
+	}
+	selected := filteredNow[cur.Cursor]
+	if selected.OnChoose == nil {
+		return true, nil
+	}
+	return true, selected.OnChoose()
+}
+
+func handleFilterableKeyRune(cur FilterablePickerState, setState func(FilterablePickerState), items []FilterablePickerItem, cfg FilterablePickerConfig, input rune) (bool, []update.Action) {
+	if !filterablePickerFilterable(cfg) {
+		return true, nil
+	}
+	cur.IgnoreNextEnter = false
+	setState(cur)
+	return handleFilterableQueryInput(cur, setState, items, cfg, input)
+}
+
+func handleFilterableEsc(
+	current FilterablePickerState,
+	setState func(FilterablePickerState),
+	items []FilterablePickerItem,
+	cfg FilterablePickerConfig,
+) (bool, []update.Action) {
+	cur := current
+	if strings.TrimSpace(cur.Query) != "" { // swobu:io-string source=boundary
+		cur.Query = ""
+		cur.Cursor = 0
+		cur.Offset = 0
+		setState(cur)
+		return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
+	}
+	if cfg.OnCancel != nil {
+		return true, cfg.OnCancel()
+	}
+	return true, nil
 }
 
 func filterablePickerRows(
@@ -223,6 +281,9 @@ func filterablePickerWindowSize(cfg FilterablePickerConfig) int {
 }
 
 func filterablePickerShowFindRow(cfg FilterablePickerConfig, totalItems int, query string) bool {
+	if !filterablePickerFilterable(cfg) {
+		return false
+	}
 	if strings.TrimSpace(query) != "" { // swobu:io-string source=boundary
 		return true
 	}
@@ -270,6 +331,10 @@ func handleFilterableQueryInput(
 
 func filterableQueryDisplay(query string) string {
 	return query + "_"
+}
+
+func filterablePickerFilterable(cfg FilterablePickerConfig) bool {
+	return !cfg.NonFilterable
 }
 
 func trimLastRune(s string) string {

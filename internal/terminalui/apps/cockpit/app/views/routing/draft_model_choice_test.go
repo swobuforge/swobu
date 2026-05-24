@@ -30,6 +30,28 @@ func TestCreateDraftModelBinding_LoadCatalogUsesCreateAction(t *testing.T) {
 	}
 }
 
+func TestCreateDraftModelBinding_LoadCatalogDerivesBedrockBaseURLFromRegion(t *testing.T) {
+	t.Parallel()
+
+	binding := createDraftModelBinding{}
+	actions := binding.LoadCatalog(state.ProviderConfigSnapshot{
+		ProviderSpec:  "bedrock",
+		Region:        "eu-west-2",
+		CredentialRef: "profile:swobu-bedrock",
+	})
+	if len(actions) != 1 {
+		t.Fatalf("actions len=%d want 1", len(actions))
+	}
+	load, ok := actions[0].(state.LoadRoutingModelCatalogRequestedAction)
+	if !ok {
+		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequestedAction", actions[0])
+	}
+	wantBaseURL := "https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1"
+	if load.BaseURL != wantBaseURL {
+		t.Fatalf("base URL=%q want %q", load.BaseURL, wantBaseURL)
+	}
+}
+
 func TestAddDraftModelBinding_LoadCatalogUsesAddDraftAction(t *testing.T) {
 	t.Parallel()
 
@@ -132,27 +154,20 @@ func TestProviderModelCatalogAuthFailureMessage_OnlyPresentForAuthErrors(t *test
 	}
 }
 
-func TestDraftModelBlockedMessage_AuthFailureUsesRawProbeError(t *testing.T) {
+func TestEvaluateModelCatalogReadiness_AuthFailureUsesRawProbeError(t *testing.T) {
 	t.Parallel()
 
-	draft := state.ProviderConfigSnapshot{
-		ProviderSpec: "bedrock",
-		BaseURL:      "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
-	}
 	errText := "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK"
-	got, ok := draftModelBlockedMessage(
-		draft.ProviderSpec,
-		draft.BaseURL,
-		"env:AWS_BEARER_TOKEN_BEDROCK",
-		errText,
-		true,
-		false,
-		draft,
-	)
-	if !ok {
+	got := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
+		ProviderSpec:      "bedrock",
+		BaseURL:           "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		CredentialRef:     "env:AWS_BEARER_TOKEN_BEDROCK",
+		ModelCatalogError: errText,
+	})
+	if !got.Blocked {
 		t.Fatal("expected blocked message for auth failure")
 	}
-	if got != errText {
-		t.Fatalf("blocked message=%q want raw probe error %q", got, errText)
+	if got.Message != errText {
+		t.Fatalf("blocked message=%q want raw probe error %q", got.Message, errText)
 	}
 }

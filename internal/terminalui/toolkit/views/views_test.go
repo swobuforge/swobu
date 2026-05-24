@@ -312,6 +312,30 @@ func TestInlineEditor_TypeThenCancel_UsesCancelPath(t *testing.T) {
 	}
 }
 
+func TestInlineEditor_ConsumesArrowKeys_NoLeak(t *testing.T) {
+	t.Parallel()
+
+	editor := build(NewInlineEditor[struct{}](
+		"name",
+		"acme",
+		"workspace",
+		DefaultLineLayoutPolicy(),
+		func(string) []update.Action { return nil },
+		func(string) []update.Action { return nil },
+		func() []update.Action { return nil },
+	))
+	in, ok := editor.(*InputRenderNode)
+	if !ok {
+		t.Fatalf("editor node type = %T, want *InputRenderNode", editor)
+	}
+	if handled, _ := in.HandleScopedEvent(interactionKey(interaction.KeyDown), nil); !handled {
+		t.Fatalf("down key should be consumed by inline editor")
+	}
+	if handled, _ := in.HandleScopedEvent(interactionKey(interaction.KeyUp), nil); !handled {
+		t.Fatalf("up key should be consumed by inline editor")
+	}
+}
+
 func TestAnchoredDisclosure_RendersParentThenDetails(t *testing.T) {
 	t.Parallel()
 

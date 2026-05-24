@@ -18,6 +18,7 @@ type draftModelBinding interface {
 	SetSnapshot(next state.ProviderConfigSnapshot) []update.Action
 	LoadCatalog(next state.ProviderConfigSnapshot) []update.Action
 	Catalog(model state.Model) ([]string, string)
+	ProbePending(model state.Model) bool
 	CloseMode() string
 }
 
@@ -35,18 +36,24 @@ func (createDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []
 
 func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
 	provider := strings.TrimSpace(next.ProviderSpec) // swobu:io-string source=boundary
+	baseURL := effectiveDraftBaseURL(next)
 	return []update.Action{
 		state.LoadRoutingModelCatalogRequestedAction{
-			Scope:         state.RoutingModelCatalogScopeCreateDraft,
-			ProviderSpec:  provider,
-			BaseURL:       strings.TrimSpace(next.BaseURL),       // swobu:io-string source=boundary
-			CredentialRef: strings.TrimSpace(next.CredentialRef), // swobu:io-string source=boundary
+			Scope:            state.RoutingModelCatalogScopeCreateDraft,
+			ProviderSpec:     provider,
+			ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
+			BaseURL:          baseURL,
+			CredentialRef:    strings.TrimSpace(next.CredentialRef), // swobu:io-string source=boundary
 		},
 	}
 }
 
 func (createDraftModelBinding) Catalog(model state.Model) ([]string, string) {
 	return model.CreateDraftModelIDs, model.CreateDraftModelError
+}
+
+func (createDraftModelBinding) ProbePending(model state.Model) bool {
+	return model.CreateDraftModelProbePending
 }
 
 func (createDraftModelBinding) CloseMode() string { return state.InteractionModeNAV }
@@ -72,16 +79,21 @@ func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []u
 	credentialRef = effectiveAddModelCredentialRef(b.model, next)
 	return []update.Action{
 		state.LoadRoutingModelCatalogRequestedAction{
-			Scope:         state.RoutingModelCatalogScopeAddModelDraft,
-			ProviderSpec:  provider,
-			BaseURL:       strings.TrimSpace(next.BaseURL), // swobu:io-string source=boundary
-			CredentialRef: credentialRef,
+			Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+			ProviderSpec:     provider,
+			ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(next.BaseURL),          // swobu:io-string source=boundary
+			CredentialRef:    credentialRef,
 		},
 	}
 }
 
 func (addDraftModelBinding) Catalog(model state.Model) ([]string, string) {
 	return model.AddModelDraftModelIDs, model.AddModelDraftModelError
+}
+
+func (addDraftModelBinding) ProbePending(model state.Model) bool {
+	return model.AddModelDraftModelProbePending
 }
 
 func (addDraftModelBinding) CloseMode() string { return state.InteractionModeManageList }
@@ -94,6 +106,7 @@ type draftModelRowSpec struct {
 	SetPickerState func(views.FilterablePickerState)
 	KeyPrefix      string
 	FocusKey       string
+	OnOpen         func()
 }
 
 func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftModelRowSpec) retained.ViewSpec[state.Model] {
@@ -107,7 +120,13 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	}
 	modelID := strings.TrimSpace(draft.ModelID) // swobu:io-string source=boundary
 	modelIDs, modelErr := spec.Binding.Catalog(model)
-	authFailed := state.ProviderModelCatalogAuthFailed(modelErr)
+	pending := spec.Binding.ProbePending(model)
+	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
+		ProviderSpec:      provider,
+		BaseURL:           baseURL,
+		CredentialRef:     cred,
+		ModelCatalogError: modelErr,
+	})
 
 	modelSummary := selectors.EmptyOr(modelID, "not set")
 	if _, ok := spec.Binding.(addDraftModelBinding); ok && modelID == "" {
@@ -116,16 +135,21 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	if spec.PickerOpen && modelID == "" {
 		modelSummary = "choose a model"
 	}
-	blocked := state.ProviderModelCatalogLoadBlocked(provider, baseURL, cred) || authFailed
 	if _, ok := spec.Binding.(createDraftModelBinding); ok {
-		flow := state.EvaluateCreateDraftRouteSetup(draft)
-		if flow.ModelState == state.RouteSetupSlotBlocked {
-			blocked = true
-		}
+		readiness = state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
+			ProviderSpec:      provider,
+			BaseURL:           baseURL,
+			CredentialRef:     cred,
+			ModelCatalogError: modelErr,
+			CreateDraft:       &draft,
+		})
 	}
 	modelRow := views.RowChoiceWithHooks(views.RowModel, modelSummary, func() []update.Action {
-		if provider == "" || blocked {
+		if provider == "" || readiness.Blocked {
 			return nil
+		}
+		if spec.OnOpen != nil {
+			spec.OnOpen()
 		}
 		spec.SetPickerOpen(true)
 		views.ResetFilterablePickerState(spec.SetPickerState)
@@ -136,8 +160,11 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		)
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
-	if blocked {
-		if message, hasMessage := draftModelBlockedMessage(provider, baseURL, cred, modelErr, authFailed, isCreateDraftModelBinding(spec.Binding), draft); hasMessage {
+	if readiness.Blocked {
+		if _, isCreate := spec.Binding.(createDraftModelBinding); isCreate && strings.TrimSpace(modelErr) != "" {
+			return manualCreateDraftModelEditor(ctx, draft, modelSummary, strings.TrimSpace(readiness.Message), spec)
+		}
+		if message := trimRoutingInput(readiness.Message); message != "" {
 			notes := views.DisclosureNoteRows(message)
 			return retained.VStack(ctx, append([]retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, "blocked")}, notes...)...)
 		}
@@ -146,18 +173,23 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	if provider == "" || !spec.PickerOpen {
 		return modelRow
 	}
-	if strings.TrimSpace(modelErr) != "" || len(modelIDs) == 0 { // swobu:io-string source=boundary
-		return backendURLEditorRow(ctx, views.RowModel, selectors.EmptyOr(strings.TrimSpace(draft.ModelID), "not set"), strings.TrimSpace(draft.ModelID), "model id", func(value string) []update.Action { // swobu:io-string source=boundary
-			next := draft
-			next.ModelID = strings.TrimSpace(value) // swobu:io-string source=boundary
-			actions := spec.Binding.SetSnapshot(next)
-			spec.SetPickerOpen(false)
-			actions = append(actions,
-				state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
-				interaction.FocusKeyAction{Key: spec.FocusKey},
-			)
-			return actions
-		})
+	if strings.TrimSpace(modelErr) != "" { // swobu:io-string source=boundary
+		if _, isCreate := spec.Binding.(createDraftModelBinding); isCreate {
+			return manualCreateDraftModelEditor(ctx, draft, modelSummary, strings.TrimSpace(modelErr), spec)
+		}
+		rows := []retained.ViewSpec[state.Model]{modelRow}
+		rows = append(rows, views.DisclosureNoteRows(strings.TrimSpace(modelErr))...)
+		return retained.VStack(ctx, rows...)
+	}
+	if pending {
+		rows := []retained.ViewSpec[state.Model]{modelRow}
+		rows = append(rows, views.DisclosureNoteRows("loading models…")...)
+		return retained.VStack(ctx, rows...)
+	}
+	if len(modelIDs) == 0 {
+		rows := []retained.ViewSpec[state.Model]{modelRow}
+		rows = append(rows, views.DisclosureNoteRows("no models returned by provider catalog for current auth/provider configuration")...)
+		return retained.VStack(ctx, rows...)
 	}
 	options := make([]modelPickerOption, 0, len(modelIDs))
 	for _, choice := range modelIDs {
@@ -182,17 +214,6 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		Picker:    spec.PickerState,
 		SetPicker: spec.SetPickerState,
 		Options:   options,
-		OnChooseRawID: func(rawID string) []update.Action {
-			next := draft
-			next.ModelID = strings.TrimSpace(rawID) // swobu:io-string source=boundary
-			actions := spec.Binding.SetSnapshot(next)
-			spec.SetPickerOpen(false)
-			actions = append(actions,
-				state.SetInteractionMode{Mode: spec.Binding.CloseMode()},
-				interaction.FocusKeyAction{Key: spec.FocusKey},
-			)
-			return actions
-		},
 		KeyPrefix: spec.KeyPrefix,
 		FocusKey:  spec.FocusKey,
 		CloseDisclosure: func() []update.Action {
@@ -205,23 +226,29 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	})
 }
 
-func isCreateDraftModelBinding(binding draftModelBinding) bool {
-	_, ok := binding.(createDraftModelBinding)
-	return ok
-}
-
-func draftModelBlockedMessage(provider, baseURL, cred, modelErr string, authFailed bool, createMode bool, draft state.ProviderConfigSnapshot) (string, bool) {
-	if authFailed {
-		return strings.TrimSpace(state.ProviderModelCatalogAuthFailureMessage(modelErr)), true // swobu:io-string source=boundary
+func manualCreateDraftModelEditor(
+	ctx *retained.Context[state.Model],
+	draft state.ProviderConfigSnapshot,
+	modelSummary string,
+	readinessMessage string,
+	spec draftModelRowSpec,
+) retained.ViewSpec[state.Model] {
+	editor := backendURLEditorRow(
+		ctx,
+		views.RowModel,
+		modelSummary,
+		strings.TrimSpace(draft.ModelID),
+		"provider model id",
+		func(value string) []update.Action {
+			next := draft
+			next.ModelID = strings.TrimSpace(value) // swobu:io-string source=boundary
+			actions := spec.Binding.SetSnapshot(next)
+			return append(actions, state.SetInteractionMode{Mode: state.InteractionModeNAV})
+		},
+	)
+	if strings.TrimSpace(readinessMessage) == "" {
+		return editor
 	}
-	if createMode {
-		flow := state.EvaluateCreateDraftRouteSetup(draft)
-		if flow.ModelBlocker != "" {
-			return flow.ModelBlocker, true
-		}
-	}
-	if message := strings.TrimSpace(state.ProviderModelCatalogBlockedMessage(provider, baseURL, cred)); message != "" { // swobu:io-string source=boundary
-		return message, true
-	}
-	return "", false
+	rows := append([]retained.ViewSpec[state.Model]{editor}, views.DisclosureNoteRows(strings.TrimSpace(readinessMessage))...)
+	return retained.VStack(ctx, rows...)
 }

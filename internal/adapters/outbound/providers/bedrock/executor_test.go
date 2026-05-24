@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -46,11 +46,30 @@ func TestBedrockSigningRegion_RejectsUnknownHostWithoutEnv(t *testing.T) {
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "missing-config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "missing-credentials"))
+	t.Setenv("AWS_PROFILE", "swobu-bedrock-missing")
 
 	u, _ := url.Parse("https://example.test/openai/v1")
 	_, err := bedrockSigningRegion(context.Background(), u, "")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestValidateBedrockOpenAIEndpoint_RejectsControlPlaneHost(t *testing.T) {
+	err := validateBedrockRuntimeEndpoint("https://bedrock.us-east-1.amazonaws.com")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestValidateBedrockOpenAIEndpoint_AcceptsRuntimeAndMantle(t *testing.T) {
+	if err := validateBedrockRuntimeEndpoint("https://bedrock-runtime.us-east-1.amazonaws.com"); err != nil {
+		t.Fatalf("runtime endpoint rejected: %v", err)
+	}
+	if err := validateBedrockRuntimeEndpoint("https://bedrock-mantle.us-east-1.api.aws"); err != nil {
+		t.Fatalf("mantle endpoint rejected: %v", err)
 	}
 }
 
@@ -98,53 +117,183 @@ func TestParseBedrockAuthMode_APIKeyEnvRef(t *testing.T) {
 	}
 }
 
-func TestListModels_AWSProfileMode_UsesSDKCatalogPath(t *testing.T) {
-	original := bedrockListFoundationModelIDs
-	t.Cleanup(func() { bedrockListFoundationModelIDs = original })
-	bedrockListFoundationModelIDs = func(ctx context.Context, cfg aws.Config) ([]string, error) {
-		return []string{"amazon.nova-lite-v1", "anthropic.claude-3-5-sonnet"}, nil
-	}
-	t.Setenv("AWS_REGION", "eu-central-1")
-	t.Setenv("AWS_ACCESS_KEY_ID", "ASIAFAKEACCESSKEY000")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "fake-secret-key")
-	t.Setenv("AWS_SESSION_TOKEN", "fake-session-token")
-
-	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
-		"backend-a", "bedrock", "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1", "", protocolkind.ChatCompletions, "",
-	))
-	if err != nil {
-		t.Fatalf("ListModels error: %v", err)
-	}
-	if len(models) != 2 {
-		t.Fatalf("models len=%d want=2", len(models))
+func TestParseBedrockAuthMode_AWSEnvSessionRef(t *testing.T) {
+	mode, value := parseBedrockAuthMode("aws_env_session")
+	if mode != "aws_profile" || value != "" {
+		t.Fatalf("mode=%q value=%q", mode, value)
 	}
 }
 
-func TestListModels_EnvMode_UsesHTTPModelsPath(t *testing.T) {
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
-	getCalls := 0
+func TestListModels_AWSProfileMode_UsesControlPlaneHTTP(t *testing.T) {
+	t.Setenv("AWS_REGION", "eu-central-1")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_DEFAULT_PROFILE", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", "ASIAFAKEACCESSKEY000")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "fake-secret-key")
+	t.Setenv("AWS_SESSION_TOKEN", "fake-session-token")
+	originalControlURL := bedrockControlPlaneBaseURL
+	t.Cleanup(func() { bedrockControlPlaneBaseURL = originalControlURL })
+
+	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/openai/v1/models" {
-			t.Fatalf("method/path=%s %s", r.Method, r.URL.Path)
+		requests++
+		if r.URL.Path != "/foundation-models" {
+			t.Fatalf("path=%q want /foundation-models", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "AWS4-HMAC-SHA256 ") {
+			t.Fatalf("authorization=%q want SigV4 header", got)
 		}
-		getCalls++
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}]}`))
+		if got := r.Header.Get("X-Amz-Security-Token"); got == "" {
+			t.Fatal("expected X-Amz-Security-Token")
+		}
+		_, _ = w.Write([]byte(`{"modelSummaries":[{"modelId":"amazon.nova-lite-v1"},{"modelId":"anthropic.claude-3-5-sonnet"}]}`))
 	}))
 	defer upstream.Close()
+	bedrockControlPlaneBaseURL = func(region string) string {
+		if region != "eu-central-1" {
+			t.Fatalf("region=%q want eu-central-1", region)
+		}
+		return upstream.URL
+	}
 
-	exec := NewExecutor(upstream.Client())
+	exec := NewExecutor(nil)
 	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
-		"backend-a", "bedrock", upstream.URL+"/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "",
+		"backend-a", "bedrock", "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1", "", protocolkind.ChatCompletions, "", "", "",
 	))
 	if err != nil {
 		t.Fatalf("ListModels error: %v", err)
 	}
-	if getCalls != 1 || len(models) != 1 || models[0] != "m1" {
-		t.Fatalf("calls=%d models=%v", getCalls, models)
+	if requests != 1 {
+		t.Fatalf("requests=%d want=1", requests)
+	}
+	if len(models) != 2 || models[0] != "amazon.nova-lite-v1" {
+		t.Fatalf("models=%v", models)
+	}
+}
+
+func TestListModels_EnvMode_UsesControlPlaneHTTP(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
+	t.Setenv("AWS_REGION", "us-east-1")
+	originalControlURL := bedrockControlPlaneBaseURL
+	t.Cleanup(func() { bedrockControlPlaneBaseURL = originalControlURL })
+
+	requests := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/foundation-models" {
+			t.Fatalf("path=%q want /foundation-models", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("authorization=%q want Bearer test-token", got)
+		}
+		_, _ = w.Write([]byte(`{"modelSummaries":[{"modelId":"m1"}]}`))
+	}))
+	defer upstream.Close()
+	bedrockControlPlaneBaseURL = func(region string) string {
+		if region != "us-east-1" {
+			t.Fatalf("region=%q want us-east-1", region)
+		}
+		return upstream.URL
+	}
+
+	exec := NewExecutor(nil)
+	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+		"backend-a", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "", "", "",
+	))
+	if err != nil {
+		t.Fatalf("ListModels error: %v", err)
+	}
+	if len(models) != 1 || models[0] != "m1" {
+		t.Fatalf("models=%v", models)
+	}
+	if requests != 1 {
+		t.Fatalf("requests=%d want=1", requests)
+	}
+}
+
+func TestListModels_EnvMode_MissingTokenFails(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	exec := NewExecutor(nil)
+	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+		"backend-a", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "", "", "",
+	))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := err.Error(); got != "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK" {
+		t.Fatalf("error=%q", got)
+	}
+}
+
+func TestBedrockEndpointClassAndRegion(t *testing.T) {
+	class, region := bedrockEndpointClassAndRegion("https://bedrock-mantle.us-east-1.api.aws/v1")
+	if class != "bedrock_mantle_openai_compat" || region != "us-east-1" {
+		t.Fatalf("class=%q region=%q", class, region)
+	}
+	class, region = bedrockEndpointClassAndRegion("https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1")
+	if class != "bedrock_runtime_openai_compat" || region != "eu-west-2" {
+		t.Fatalf("class=%q region=%q", class, region)
+	}
+}
+
+func TestBedrockModelIDFromPayload(t *testing.T) {
+	raw := []byte(`{"model":"openai.gpt-oss-20b","messages":[{"role":"user","content":"ping"}]}`)
+	if got := bedrockModelIDFromPayload(raw); got != "openai.gpt-oss-20b" {
+		t.Fatalf("model id=%q", got)
+	}
+	if got := bedrockModelIDFromPayload([]byte(`{"messages":[]}`)); got != "" {
+		t.Fatalf("model id=%q want empty", got)
+	}
+}
+
+func TestBedrockModelARNCandidates(t *testing.T) {
+	foundation, inference := bedrockModelARNCandidates("us-east-1", "amazon.nova-lite-v1:0")
+	if foundation != "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0" {
+		t.Fatalf("foundation=%q", foundation)
+	}
+	if inference != "arn:aws:bedrock:us-east-1::inference-profile/amazon.nova-lite-v1:0" {
+		t.Fatalf("inference=%q", inference)
+	}
+}
+
+func TestResolveBedrockOperation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		variant       string
+		wantInvoke    bool
+		wantStreaming bool
+		wantErr       bool
+	}{
+		{name: "converse", variant: "converse"},
+		{name: "converse stream", variant: "converse_stream", wantStreaming: true},
+		{name: "invoke model", variant: "invoke_model", wantInvoke: true},
+		{name: "invoke model stream", variant: "invoke_model_stream", wantInvoke: true, wantStreaming: true},
+		{name: "empty rejected", variant: "", wantErr: true},
+		{name: "protocol auto rejected", variant: "protocol_auto", wantErr: true},
+		{name: "unsupported rejected", variant: "responses", wantErr: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveBedrockOperation(tc.variant)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("resolveBedrockOperation(%q) expected error", tc.variant)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveBedrockOperation(%q) error: %v", tc.variant, err)
+			}
+			if got.invokeModel != tc.wantInvoke || got.streaming != tc.wantStreaming {
+				t.Fatalf("resolveBedrockOperation(%q)=%+v want invoke=%v streaming=%v", tc.variant, got, tc.wantInvoke, tc.wantStreaming)
+			}
+		})
 	}
 }

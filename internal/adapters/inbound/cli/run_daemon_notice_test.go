@@ -51,3 +51,26 @@ func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
 		t.Fatalf("splash must render before telemetry disclosure; stdout=%q", out)
 	}
 }
+
+func TestRunner_DaemonSkipsTelemetryNoticeWhenEnvSet(t *testing.T) {
+	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
+	t.Setenv("SWOBU_SKIP_TELEMETRY_NOTICE", "1")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := Runner{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Start: func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error) {
+			return nil, fmt.Errorf("stop after notice check")
+		},
+	}
+
+	exitCode := runner.Run(context.Background(), []string{"daemon", "--config", "/tmp/swobu-config.yaml"})
+	if exitCode != ExitDown {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
+	}
+	if strings.Contains(stdout.String(), "telemetry disclosure") {
+		t.Fatalf("stdout should not contain telemetry disclosure when skip env is set; stdout=%q", stdout.String())
+	}
+}

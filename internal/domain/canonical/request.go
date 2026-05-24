@@ -62,13 +62,11 @@ type GenerationCanonicalRequest struct {
 	// lastTurn is an optional derived suffix used when a target protocol can
 	// exploit continuation truthfully, including native responses chaining and
 	// canonical * -> responses realization when prior thread state is available.
-	lastTurn                []CanonicalItem
-	previousResponseID      string
-	unsupportedConversation string
-	invalidContinuationPair bool
-	toolMode                ToolMode
-	promptCacheKey          string
-	promptCacheRetention    string
+	lastTurn             []CanonicalItem
+	previousResponseID   string
+	toolMode             ToolMode
+	promptCacheKey       string
+	promptCacheRetention string
 }
 
 // GenerationRequestParams accepts both authored wire-like input and already
@@ -82,7 +80,6 @@ type GenerationRequestParams struct {
 	Thread               []CanonicalItem
 	LastTurn             []CanonicalItem
 	PreviousResponseID   string
-	ConversationID       string
 	ToolMode             ToolMode
 	PromptCacheKey       string
 	PromptCacheRetention string
@@ -93,8 +90,6 @@ type GenerationRequestParams struct {
 // cost- and behavior-sensitive response API features explicitly.
 func NewGenerationRequest(params GenerationRequestParams) GenerationCanonicalRequest {
 	previousResponseID := strings.TrimSpace(params.PreviousResponseID) // swobu:io-string source=domain
-	conversationID := strings.TrimSpace(params.ConversationID)         // swobu:io-string source=domain
-	invalidContinuationPair := previousResponseID != "" && conversationID != ""
 
 	authoredThread := cloneCanonicalItems(params.Items)
 	if params.InputText != "" {
@@ -109,15 +104,13 @@ func NewGenerationRequest(params GenerationRequestParams) GenerationCanonicalReq
 		lastTurn = authoredThread
 	}
 	return GenerationCanonicalRequest{
-		model:                   params.Model,
-		thread:                  thread,
-		lastTurn:                lastTurn,
-		previousResponseID:      previousResponseID,
-		unsupportedConversation: conversationID,
-		invalidContinuationPair: invalidContinuationPair,
-		toolMode:                params.ToolMode,
-		promptCacheKey:          params.PromptCacheKey,
-		promptCacheRetention:    params.PromptCacheRetention,
+		model:                params.Model,
+		thread:               thread,
+		lastTurn:             lastTurn,
+		previousResponseID:   previousResponseID,
+		toolMode:             params.ToolMode,
+		promptCacheKey:       params.PromptCacheKey,
+		promptCacheRetention: params.PromptCacheRetention,
 	}
 }
 
@@ -139,10 +132,6 @@ func (r GenerationCanonicalRequest) LastTurn() []CanonicalItem {
 
 func (r GenerationCanonicalRequest) PreviousResponseID() string {
 	return r.previousResponseID
-}
-
-func (r GenerationCanonicalRequest) ConversationID() string {
-	return r.unsupportedConversation
 }
 
 func (r GenerationCanonicalRequest) ToolMode() ToolMode {
@@ -171,7 +160,6 @@ func (r GenerationCanonicalRequest) Clone() CanonicalRequest {
 		Thread:               r.thread,
 		LastTurn:             r.lastTurn,
 		PreviousResponseID:   r.previousResponseID,
-		ConversationID:       r.unsupportedConversation,
 		ToolMode:             r.toolMode,
 		PromptCacheKey:       r.promptCacheKey,
 		PromptCacheRetention: r.promptCacheRetention,

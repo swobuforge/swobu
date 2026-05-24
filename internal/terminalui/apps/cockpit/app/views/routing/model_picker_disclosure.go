@@ -1,8 +1,6 @@
 package routing
 
 import (
-	"strings"
-
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -22,14 +20,13 @@ type modelPickerRenderSpec struct {
 	SetPicker       func(views.FilterablePickerState)
 	Options         []modelPickerOption
 	HeaderRows      []retained.ViewSpec[state.Model]
-	OnChooseRawID   func(string) []update.Action
 	KeyPrefix       string
 	FocusKey        string
 	CloseDisclosure func() []update.Action
 }
 
 func renderModelPickerDisclosure(ctx *retained.Context[state.Model], spec modelPickerRenderSpec) retained.ViewSpec[state.Model] {
-	items := buildModelPickerItems(spec.Options, spec.Picker.Query, spec.OnChooseRawID)
+	items := buildModelPickerItems(spec.Options)
 	return views.RenderFilterablePickerDisclosure(ctx, spec.Parent, spec.Picker, spec.SetPicker, items, views.FilterablePickerConfig{
 		KeyPrefix:      spec.KeyPrefix,
 		BuildOptionRow: views.ChoicePickerOptionRow(false),
@@ -41,8 +38,8 @@ func renderModelPickerDisclosure(ctx *retained.Context[state.Model], spec modelP
 	})
 }
 
-func buildModelPickerItems(options []modelPickerOption, query string, onChooseRawID func(string) []update.Action) []views.FilterablePickerItem {
-	items := make([]views.FilterablePickerItem, 0, len(options)+1)
+func buildModelPickerItems(options []modelPickerOption) []views.FilterablePickerItem {
+	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, opt := range options {
 		option := opt
 		items = append(items, views.FilterablePickerItem{
@@ -51,19 +48,5 @@ func buildModelPickerItems(options []modelPickerOption, query string, onChooseRa
 			OnChoose: option.OnChoose,
 		})
 	}
-	rawID := strings.TrimSpace(query) // swobu:io-string source=boundary
-	if rawID == "" || onChooseRawID == nil {
-		return items
-	}
-	for _, opt := range options {
-		if strings.EqualFold(strings.TrimSpace(opt.Label), rawID) { // swobu:io-string source=boundary
-			return items
-		}
-	}
-	items = append([]views.FilterablePickerItem{{
-		Label:    "use: " + rawID,
-		Selected: false,
-		OnChoose: func() []update.Action { return onChooseRawID(rawID) },
-	}}, items...)
 	return items
 }

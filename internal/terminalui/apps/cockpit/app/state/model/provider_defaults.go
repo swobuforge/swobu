@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
@@ -36,12 +35,13 @@ func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) Provider
 	if trimModelInput(next.Ref) == "" {
 		next.Ref = DraftProviderRef
 	}
-	currentProtocol := protocolkind.ProtocolKind(trimModelInput(next.ProtocolKind))
-	if currentProtocol == "" || !supportsDraftProtocolForSpec(spec, currentProtocol) {
-		next.ProtocolKind = defaultDraftProtocolForSpec(spec).String()
-	}
-	if frame, ok := providercatalog.DefaultFrameForSpecProtocol(spec, protocolkind.ProtocolKind(trimModelInput(next.ProtocolKind))); ok {
-		next.SelectedFrame = frame
+	currentProtocol := trimModelInput(next.ProviderProtocol)
+	if currentProtocol == "" || !providercatalog.SupportsProviderProtocolForSpec(spec, currentProtocol) {
+		if def, ok := providercatalog.DefaultProviderProtocolForSpec(spec); ok {
+			next.ProviderProtocol = def
+		} else {
+			next.ProviderProtocol = providercatalog.ProviderProtocolAuto
+		}
 	}
 	next.ProviderSpec = spec
 	defaultBaseURL := trimModelInput(providercatalog.DefaultExecuteBaseURL(spec))
@@ -64,26 +64,6 @@ func ProviderRequiresCredential(spec, baseURL string) bool {
 
 func ProviderSupportsCatalog(spec string) bool {
 	return providercatalog.SupportsCapability(spec, providercatalog.CapabilityModelCatalog)
-}
-
-func defaultDraftProtocolForSpec(spec string) protocolkind.ProtocolKind {
-	if !providercatalog.SupportsSpec(spec) {
-		return protocolkind.ChatCompletions
-	}
-	if strings.EqualFold(trimModelInput(spec), "anthropic") {
-		return protocolkind.Messages
-	}
-	return protocolkind.ChatCompletions
-}
-
-func supportsDraftProtocolForSpec(spec string, protocol protocolkind.ProtocolKind) bool {
-	if !providercatalog.SupportsSpec(spec) {
-		return false
-	}
-	if strings.EqualFold(trimModelInput(spec), "anthropic") {
-		return protocol == protocolkind.Messages
-	}
-	return protocol == protocolkind.ChatCompletions || protocol == protocolkind.Responses || protocol == protocolkind.Completions
 }
 
 func trimModelInput(value string) string {

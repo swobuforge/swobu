@@ -7,13 +7,13 @@ import (
 
 // canonicalProviderConfigLayout holds the core provider-config row set shared by
 // create/workspace-edit/add-model flows. Keeping this list centralized avoids
-// drift where one flow silently drops a core field (for example frame).
+// drift where one flow silently drops a core field.
 type canonicalProviderConfigLayout struct {
 	Provider   retained.ViewSpec[state.Model]
 	Credential retained.ViewSpec[state.Model]
 	Scope      retained.ViewSpec[state.Model]
 	Model      retained.ViewSpec[state.Model]
-	Delivery   retained.ViewSpec[state.Model]
+	Protocol   retained.ViewSpec[state.Model]
 }
 
 func appendCanonicalProviderConfigLayout(rows []retained.ViewSpec[state.Model], keyPrefix string, shared canonicalProviderConfigLayout) []retained.ViewSpec[state.Model] {
@@ -35,8 +35,8 @@ func appendCanonicalProviderConfigLayout(rows []retained.ViewSpec[state.Model], 
 	if shared.Model != nil {
 		rows = append(rows, retained.Named[state.Model](key("model"), shared.Model))
 	}
-	if shared.Delivery != nil {
-		rows = append(rows, retained.Named[state.Model](key("delivery"), shared.Delivery))
+	if shared.Protocol != nil {
+		rows = append(rows, retained.Named[state.Model](key("protocol"), shared.Protocol))
 	}
 	return rows
 }

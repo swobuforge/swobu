@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
@@ -38,6 +40,14 @@ func bedrockBaseURLForRegion(region string) string {
 	return stateModel.BedrockBaseURLForRegion(region)
 }
 
+func bedrockOpenAICompatibleBaseURLForRegion(region string) string {
+	region = trimRoutingInput(region)
+	if region == "" {
+		region = bedrockDefaultRegionFromList()
+	}
+	return stateModel.BedrockOpenAICompatibleBaseURLForRegion(region)
+}
+
 func bedrockDefaultRegionFromList() string {
 	regions := bedrockRegions()
 	if len(regions) == 0 {
@@ -67,12 +77,85 @@ func encodeBedrockProfileCredentialRef(profile string) string {
 	return "profile:" + profile
 }
 
+func bedrockDiscoveredAWSProfiles() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	configPath := filepath.Join(home, ".aws", "config")
+	credentialsPath := filepath.Join(home, ".aws", "credentials")
+	seen := map[string]bool{}
+	out := make([]string, 0, 8)
+	appendUnique := func(name string) {
+		name = trimRoutingInput(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	if raw, err := os.ReadFile(configPath); err == nil {
+		for _, profile := range parseAWSINIProfiles(string(raw), true) {
+			appendUnique(profile)
+		}
+	}
+	if raw, err := os.ReadFile(credentialsPath); err == nil {
+		for _, profile := range parseAWSINIProfiles(string(raw), false) {
+			appendUnique(profile)
+		}
+	}
+	return out
+}
+
+func parseAWSINIProfiles(raw string, fromConfig bool) []string {
+	lines := strings.Split(raw, "\n")
+	out := make([]string, 0, 8)
+	for _, line := range lines {
+		line = trimRoutingInput(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if !strings.HasPrefix(line, "[") || !strings.HasSuffix(line, "]") {
+			continue
+		}
+		section := trimRoutingInput(line[1 : len(line)-1])
+		if section == "" {
+			continue
+		}
+		if fromConfig {
+			if strings.EqualFold(section, "default") {
+				out = append(out, "default")
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(section), "profile ") {
+				out = append(out, trimRoutingInput(section[len("profile "):]))
+			}
+			continue
+		}
+		out = append(out, section)
+	}
+	return out
+}
+
+func bedrockDefaultProfileFromEnvOrList(profiles []string) string {
+	if fromEnv := trimRoutingInput(platformconfig.ReadEnvTrim("AWS_PROFILE")); fromEnv != "" {
+		return fromEnv
+	}
+	if len(profiles) == 0 {
+		return ""
+	}
+	return trimRoutingInput(profiles[0])
+}
+
 func isBedrockAWSProfileCredentialRef(ref string) bool {
 	trimmed := trimRoutingInput(ref)
 	if trimmed == "" {
 		return true
 	}
 	if strings.EqualFold(trimmed, "aws_profile") {
+		return true
+	}
+	if strings.EqualFold(trimmed, "aws_env_session") {
 		return true
 	}
 	return strings.HasPrefix(lowerRoutingInput(trimmed), "profile:")

@@ -35,6 +35,8 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 		"env:OPENROUTER_API_KEY",
 		protocolkind.ChatCompletions,
 		"credential_ref",
+		"",
+		"",
 	))
 	if err == nil {
 		t.Fatal("expected backend error for non-chatgpt provider")
@@ -59,6 +61,8 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 		"",
 		protocolkind.ChatCompletions,
 		"credential_ref",
+		"",
+		"",
 	))
 	if err == nil {
 		t.Fatal("expected missing credential ref error")
@@ -90,6 +94,8 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 		"",
 		protocolkind.ChatCompletions,
 		"credential_ref",
+		"",
+		"",
 	))
 	if err == nil {
 		t.Fatal("expected missing credential ref error")

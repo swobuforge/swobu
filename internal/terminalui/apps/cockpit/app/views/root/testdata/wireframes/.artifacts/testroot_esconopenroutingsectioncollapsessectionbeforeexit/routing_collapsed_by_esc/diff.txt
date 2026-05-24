@@ -1,3 +1,0 @@
-line 24
-- ↑↓ move   ↵ create   ? help   esc back
-+ ↑↓ move   ↵ open   ? help   esc back
