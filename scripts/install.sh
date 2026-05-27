@@ -9,16 +9,39 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${VERSION:-}"
 DRY_RUN="${DRY_RUN:-false}"
 EXPECTED_SHA256="${EXPECTED_SHA256:-}"
+VERBOSE="${VERBOSE:-false}"
+
+say() { printf '%s\n' "$*" >&2; }
+step() { say "→ $*"; }
+ok() { say "✓ $*"; }
+warn() { say "warning: $*"; }
+die() {
+  say "error: $*"
+  exit 1
+}
+debug() {
+  if [ "$VERBOSE" = "true" ]; then
+    say "debug: $*"
+  fi
+}
 
 usage() {
-  cat <<'EOF'
-Install swobu from GitHub Releases.
+  cat <<EOF
+Install Swobu.
 
 Usage:
-  install.sh [--version vX.Y.Z] [--bin-dir /path] [--checksum <sha256>] [--dry-run]
+  install.sh [options]
+
+Options:
+  --version <tag>       Install a specific version, e.g. v0.3.1
+  --bin-dir <path>      Install directory. Default: $HOME/.local/bin
+  --checksum <sha256>   Require an exact SHA-256 checksum
+  --dry-run             Show what would happen without installing
+  --verbose             Show debug output
+  -h, --help            Show help
 
 Environment overrides:
-  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256
+  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE
 EOF
 }
 
@@ -28,8 +51,22 @@ have_cmd() {
 
 need_cmd() {
   if ! have_cmd "$1"; then
-    echo "required command not found: $1" >&2
-    exit 1
+    case "$1" in
+      curl)
+        die "curl is required.
+
+Install it:
+  macOS: brew install curl
+  Ubuntu/Debian: sudo apt-get install curl
+  Fedora: sudo dnf install curl"
+        ;;
+      tar)
+        die "tar is required to unpack the Swobu archive."
+        ;;
+      *)
+        die "required command not found: $1"
+        ;;
+    esac
   fi
 }
 
@@ -38,8 +75,7 @@ detect_os() {
   case "$os" in
     linux|darwin) printf "%s" "$os" ;;
     *)
-      echo "unsupported OS: $os (supported: linux, darwin)" >&2
-      exit 1
+      die "unsupported OS: $os (supported: linux, darwin)"
       ;;
   esac
 }
@@ -50,8 +86,7 @@ detect_arch() {
     x86_64|amd64) printf "amd64" ;;
     arm64|aarch64) printf "arm64" ;;
     *)
-      echo "unsupported architecture: $arch (supported: amd64, arm64)" >&2
-      exit 1
+      die "unsupported architecture: $arch (supported: amd64, arm64)"
       ;;
   esac
 }
@@ -60,6 +95,7 @@ http_get() {
   url="$1"
   out="$2"
   need_cmd curl
+  curl_common_flags="-fL --retry 3 --retry-delay 1 --connect-timeout 15"
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
   download_release_asset_via_api() {
     rel_url="$1"
@@ -72,10 +108,10 @@ http_get() {
       return 1
     fi
     release_api="https://api.github.com/repos/$owner/$repo/releases/tags/$tag"
-    release_json="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$release_api")" || return 1
+    release_json="$(curl -sS $curl_common_flags -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$release_api")" || return 1
     asset_id="$(printf '%s' "$release_json" | awk -v name="$asset_name" '
       BEGIN { RS="{"; FS="," }
-      $0 ~ "\"name\":\"" name "\"" {
+      index($0, "\"name\":\"" name "\"") || index($0, "\"name\": \"" name "\"") {
         for (i = 1; i <= NF; i++) {
           if ($i ~ /"id":[0-9]+/) {
             id = $i
@@ -94,7 +130,7 @@ http_get() {
   }
   curl_cmd() {
     if [ -n "$token" ]; then
-      curl -fsSL -H "Authorization: Bearer $token" "$url" -o "$out" || {
+      curl -sS $curl_common_flags -H "Authorization: Bearer $token" "$url" -o "$out" || {
         case "$url" in
           https://github.com/*/releases/download/*)
             download_release_asset_via_api "$url" "$out"
@@ -105,33 +141,14 @@ http_get() {
         esac
       }
     else
-      curl -fsSL "$url" -o "$out"
+      if [ -t 2 ]; then
+        curl -# $curl_common_flags "$url" -o "$out"
+      else
+        curl -sS $curl_common_flags "$url" -o "$out"
+      fi
     fi
   }
-  if [ -t 2 ]; then
-    curl_cmd &
-    curl_pid="$!"
-    spinner_idx=0
-    while kill -0 "$curl_pid" 2>/dev/null; do
-      case "$spinner_idx" in
-        0) spinner='|' ;;
-        1) spinner='/' ;;
-        2) spinner='-' ;;
-        3) spinner='\\' ;;
-      esac
-      printf '\r  progress: %s' "$spinner" >&2
-      spinner_idx=$(( (spinner_idx + 1) % 4 ))
-      sleep 1
-    done
-    if wait "$curl_pid"; then
-      printf '\r  progress: done\n' >&2
-    else
-      printf '\r  progress: failed\n' >&2
-      return 1
-    fi
-  else
-    curl_cmd
-  fi
+  curl_cmd
 }
 
 resolve_version() {
@@ -144,8 +161,7 @@ resolve_version() {
   http_get "$latest_url" "$latest_json"
   tag="$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$latest_json" | head -n 1)"
   if [ -z "$tag" ]; then
-    echo "failed to resolve latest release tag from $latest_url" >&2
-    exit 1
+    die "failed to resolve latest release tag from $latest_url"
   fi
   printf "%s" "$tag"
 }
@@ -160,19 +176,16 @@ sha256_of() {
     shasum -a 256 "$file" | awk '{print $1}'
     return
   fi
-  echo "sha256 tool not found (need sha256sum or shasum)" >&2
-  exit 1
+  die "sha256 tool not found (need sha256sum or shasum)"
 }
 
 normalize_hex256() {
   value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$value" in
-    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) printf "%s" "$value" ;;
-    *)
-      echo "invalid sha256 value: $1" >&2
-      exit 1
-      ;;
-  esac
+  if printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$'; then
+    printf '%s' "$value"
+    return
+  fi
+  die "invalid sha256 value: $1"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -190,9 +203,12 @@ while [ "$#" -gt 0 ]; do
     --dry-run)
       DRY_RUN=true
       ;;
+    --verbose)
+      VERBOSE=true
+      ;;
     --checksum)
       shift
-      [ "$#" -gt 0 ] || { echo "--checksum requires a value" >&2; exit 1; }
+      [ "$#" -gt 0 ] || { die "--checksum requires a value"; }
       EXPECTED_SHA256="$1"
       ;;
     -h|--help)
@@ -200,7 +216,7 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     *)
-      echo "unknown argument: $1" >&2
+      say "unknown argument: $1"
       usage >&2
       exit 1
       ;;
@@ -211,7 +227,16 @@ done
 os="$(detect_os)"
 arch="$(detect_arch)"
 tmp_root="$(mktemp -d)"
-trap 'rm -rf "$tmp_root"' EXIT INT TERM
+tmp_install=""
+cleanup() {
+  rm -rf "$tmp_root"
+  if [ -n "${tmp_install:-}" ] && [ -f "$tmp_install" ]; then
+    rm -f "$tmp_install"
+  fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 tag="$(resolve_version)"
 archive="${PROJECT_NAME}_${tag}_${os}_${arch}.tar.gz"
@@ -220,6 +245,7 @@ archive_url="$base_url/$archive"
 checksums_url="$base_url/checksums.txt"
 
 if [ "$DRY_RUN" = "true" ]; then
+  say "Swobu installer dry-run"
   echo "tag=$tag"
   echo "os=$os"
   echo "arch=$arch"
@@ -234,17 +260,20 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 need_cmd tar
-mkdir -p "$INSTALL_DIR"
+step "Detecting platform... $os $arch"
+step "Resolving release... $tag"
+step "Preparing install directory... $INSTALL_DIR"
+mkdir -p "$INSTALL_DIR" || die "failed to create install directory: $INSTALL_DIR"
 
 archive_path="$tmp_root/$archive"
 checksums_path="$tmp_root/checksums.txt"
 
-echo "downloading: $archive_url"
+step "Downloading $archive"
 http_get "$archive_url" "$archive_path"
-echo "downloading: $checksums_url"
+step "Downloading checksums"
 http_get "$checksums_url" "$checksums_path"
 
-echo "Verifying artifact checksum"
+step "Verifying checksum"
 expected="$(awk -v name="$archive" '
   NF >= 2 {
     f = $2
@@ -256,60 +285,103 @@ expected="$(awk -v name="$archive" '
   }
 ' "$checksums_path")"
 if [ -z "$expected" ]; then
-  echo "archive $archive not found in checksums.txt" >&2
-  exit 1
+  die "archive $archive not found in checksums.txt"
 fi
 actual="$(sha256_of "$archive_path")"
 expected="$(normalize_hex256 "$expected")"
 actual="$(normalize_hex256 "$actual")"
 if [ "$expected" != "$actual" ]; then
-  echo "error: checksum mismatch for $archive" >&2
-  exit 1
+  die "checksum mismatch for $archive"
 fi
 if [ -n "$EXPECTED_SHA256" ]; then
   pinned="$(normalize_hex256 "$EXPECTED_SHA256")"
   if [ "$pinned" != "$actual" ]; then
-    echo "pinned checksum mismatch for $archive" >&2
-    exit 1
+    die "pinned checksum mismatch for $archive"
   fi
-else
-  echo "warning: no pinned checksum provided; integrity checked via release checksums only" >&2
 fi
 
 extract_dir="$tmp_root/extract"
 mkdir -p "$extract_dir"
 if ! tar -tzf "$archive_path" | grep -qx "$BIN_NAME"; then
-  echo "archive missing binary entry: $BIN_NAME" >&2
-  exit 1
+  die "archive missing binary entry: $BIN_NAME"
 fi
 tar -xzf "$archive_path" -C "$extract_dir" -- "$BIN_NAME"
 
 if [ ! -f "$extract_dir/$BIN_NAME" ]; then
-  echo "archive missing binary: $BIN_NAME" >&2
-  exit 1
+  die "archive missing binary: $BIN_NAME"
 fi
 if [ -L "$extract_dir/$BIN_NAME" ]; then
-  echo "refusing symlink binary payload: $BIN_NAME" >&2
-  exit 1
+  die "refusing symlink binary payload: $BIN_NAME"
 fi
 
 install_path="$INSTALL_DIR/$BIN_NAME"
+if [ -d "$install_path" ]; then
+  die "$install_path exists and is a directory"
+fi
+if [ ! -w "$INSTALL_DIR" ]; then
+  die "install directory is not writable: $INSTALL_DIR
+
+Try:
+  install.sh --bin-dir /path/you/can/write
+
+Or:
+  sudo INSTALL_DIR=/usr/local/bin sh install.sh"
+fi
+if [ -x "$install_path" ]; then
+  existing_version="$("$install_path" --version 2>/dev/null || true)"
+  if [ -n "$existing_version" ]; then
+    step "Found existing $BIN_NAME: $existing_version"
+  else
+    step "Found existing $BIN_NAME at $install_path"
+  fi
+fi
 tmp_install="$INSTALL_DIR/.${BIN_NAME}.tmp.$$"
-echo "Installing to $install_path"
+step "Installing to $install_path"
 cp "$extract_dir/$BIN_NAME" "$tmp_install"
 chmod 0755 "$tmp_install"
 mv -f "$tmp_install" "$install_path"
-echo "$BIN_NAME installed successfully"
-echo
-echo "Run:"
-echo "  $install_path --version"
+step "Checking installation"
+if "$install_path" --version >/dev/null 2>&1; then
+  ok "$BIN_NAME $tag installed"
+else
+  warn "$BIN_NAME was installed, but '$BIN_NAME --version' failed."
+  say "Try:"
+  say "  $install_path --version"
+fi
 
-path_case=":$PATH:"
+say ""
+say "Try it:"
+if command -v "$BIN_NAME" >/dev/null 2>&1; then
+  say "  $BIN_NAME --version"
+else
+  say "  $install_path --version"
+fi
+say ""
+say "Start:"
+say "  $BIN_NAME --help"
+
+print_path_help() {
+  case "${SHELL:-}" in
+    */zsh) profile="$HOME/.zshrc" ;;
+    */bash) profile="$HOME/.bashrc" ;;
+    */fish)
+      say ""
+      warn "$INSTALL_DIR is not on your PATH."
+      say "For fish, run:"
+      say "  fish_add_path $INSTALL_DIR"
+      return
+      ;;
+    *) profile="$HOME/.profile" ;;
+  esac
+  say ""
+  warn "$INSTALL_DIR is not on your PATH."
+  say "Add it:"
+  say "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> $profile"
+  say "  . $profile"
+}
+
+path_case=":${PATH:-}:"
 case "$path_case" in
   *":$INSTALL_DIR:"*) ;;
-  *)
-    echo
-    echo "Note: $INSTALL_DIR is not on your PATH."
-    echo "Add it to your shell profile before running $BIN_NAME from a new terminal."
-    ;;
+  *) print_path_help ;;
 esac

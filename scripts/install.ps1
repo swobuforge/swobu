@@ -3,6 +3,7 @@ param(
   [string]$BinDir = '',
   [string]$Checksum = '',
   [switch]$DryRun,
+  [switch]$Verbose,
   [switch]$Help
 )
 
@@ -16,16 +17,30 @@ $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } elseif ($BinDir) { $Bin
 if (-not $Version -and $env:VERSION) { $Version = $env:VERSION }
 if (-not $DryRun -and $env:DRY_RUN) { $DryRun = [System.Convert]::ToBoolean($env:DRY_RUN) }
 if (-not $Checksum -and $env:EXPECTED_SHA256) { $Checksum = $env:EXPECTED_SHA256 }
+if (-not $Verbose -and $env:VERBOSE) { $Verbose = [System.Convert]::ToBoolean($env:VERBOSE) }
+
+function Say { param([string]$Message) Write-Host $Message }
+function Step { param([string]$Message) Write-Host "→ $Message" }
+function Ok { param([string]$Message) Write-Host "✓ $Message" }
+function Warn { param([string]$Message) Write-Warning $Message }
+function DebugLog {
+  param([string]$Message)
+  if ($Verbose) { Write-Host "debug: $Message" }
+}
+function Die {
+  param([string]$Message)
+  throw "error: $Message"
+}
 
 function Show-Usage {
   @"
 Install swobu from GitHub Releases.
 
 Usage:
-  install.ps1 [-Version vX.Y.Z] [-BinDir /path] [-Checksum <sha256>] [-DryRun]
+  install.ps1 [-Version vX.Y.Z] [-BinDir /path] [-Checksum <sha256>] [-DryRun] [-Verbose]
 
 Environment overrides:
-  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256
+  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE
 "@
 }
 
@@ -33,7 +48,7 @@ function Normalize-Sha256 {
   param([Parameter(Mandatory = $true)][string]$Value)
   $trimmed = $Value.Trim().ToLowerInvariant()
   if ($trimmed -notmatch '^[0-9a-f]{64}$') {
-    throw "invalid sha256 value: $Value"
+    Die "invalid sha256 value: $Value"
   }
   return $trimmed
 }
@@ -108,9 +123,10 @@ if ($Help) {
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $latestUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+  Step "Resolving latest release..."
   $latest = Invoke-RestMethod -Uri $latestUrl
   if (-not $latest.tag_name) {
-    throw "failed to resolve latest release tag from $latestUrl"
+    Die "failed to resolve latest release tag from $latestUrl"
   }
   $Version = [string]$latest.tag_name
 }
@@ -120,7 +136,7 @@ $archRaw = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.T
 switch ($archRaw) {
   'x64' { $arch = 'amd64' }
   'arm64' { $arch = 'arm64' }
-  default { throw "unsupported architecture: $archRaw (supported: amd64, arm64)" }
+  default { Die "unsupported architecture: $archRaw (supported: amd64, arm64)" }
 }
 
 $archive = "${ProjectName}_${Version}_${os}_${arch}.zip"
@@ -129,6 +145,7 @@ $archiveUrl = "$baseUrl/$archive"
 $checksumsUrl = "$baseUrl/checksums.txt"
 
 if ($DryRun) {
+  Say "Swobu installer dry-run"
   Write-Output "tag=$Version"
   Write-Output "os=$os"
   Write-Output "arch=$arch"
@@ -142,6 +159,10 @@ if ($DryRun) {
   exit 0
 }
 
+Say "Swobu installer"
+Say ''
+Step "Detecting platform... $os $arch"
+Step "Preparing install directory... $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("swobu-install-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
@@ -150,44 +171,71 @@ try {
   $archivePath = Join-Path $tmpRoot $archive
   $checksumsPath = Join-Path $tmpRoot 'checksums.txt'
 
-  Write-Output "downloading: $archiveUrl"
+  Step "Downloading $archive"
   Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
-  Write-Output "downloading: $checksumsUrl"
+  Step "Downloading checksums"
   Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath
 
-  Write-Output 'Verifying artifact checksum'
+  Step 'Verifying checksum'
   $expected = Get-ExpectedChecksumFromFile -ChecksumsPath $checksumsPath -ArchiveName $archive
   $actual = Normalize-Sha256 -Value (Get-FileHash -Algorithm SHA256 -Path $archivePath).Hash
   if ($expected -ne $actual) {
-    throw "error: checksum mismatch for $archive"
+    Die "checksum mismatch for $archive"
   }
   if ($Checksum) {
     $pinned = Normalize-Sha256 -Value $Checksum
     if ($pinned -ne $actual) {
-      throw "pinned checksum mismatch for $archive"
+      Die "pinned checksum mismatch for $archive"
     }
   }
-  else { Write-Output 'pinned checksum not provided; integrity checked via release checksums.' }
 
   $extractDir = Join-Path $tmpRoot 'extract'
   $sourceExe = Join-Path $extractDir ("$BinName.exe")
   Extract-ZipEntrySafely -ArchivePath $archivePath -EntryName "$BinName.exe" -DestinationPath $sourceExe
 
   $installPath = Join-Path $InstallDir ("$BinName.exe")
+  if (Test-Path -Path $installPath -PathType Container) {
+    Die "$installPath exists and is a directory"
+  }
+  if (Test-Path -Path $installPath -PathType Leaf) {
+    $existingVersion = (& $installPath --version 2>$null) -join "`n"
+    if (-not [string]::IsNullOrWhiteSpace($existingVersion)) {
+      Step "Found existing ${BinName}: $existingVersion"
+    }
+    else {
+      Step "Found existing $BinName at $installPath"
+    }
+  }
   $tmpInstallPath = Join-Path $InstallDir (".$BinName.exe.tmp")
-  Write-Output "Installing to $installPath"
+  Step "Installing to $installPath"
   Copy-Item -Path $sourceExe -Destination $tmpInstallPath -Force
   Move-Item -Path $tmpInstallPath -Destination $installPath -Force
-  Write-Output "$BinName installed successfully"
-  Write-Output ''
-  Write-Output 'Run:'
-  Write-Output "  $installPath --version"
+  Step 'Checking installation'
+  try {
+    & $installPath --version *> $null
+    Ok "$BinName $Version installed"
+  }
+  catch {
+    Warn "$BinName was installed, but '$BinName --version' failed."
+    Say "Try:"
+    Say "  $installPath --version"
+  }
+  Say ''
+  Say 'Try it:'
+  Say "  $installPath --version"
+  Say ''
+  Say 'Start:'
+  Say "  $BinName --help"
 
-  $pathEntries = ($env:PATH -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+  $pathValue = if ($null -ne $env:PATH) { $env:PATH } else { '' }
+  $pathEntries = ($pathValue -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
   if ($pathEntries -notcontains $InstallDir) {
-    Write-Output ''
-    Write-Output "Note: $InstallDir is not on your PATH."
-    Write-Output "Add it to your PowerShell profile before running $BinName from a new terminal."
+    Say ''
+    Warn "$InstallDir is not on your PATH."
+    Say "Add it:"
+    Say "  `$env:Path = ""$InstallDir;`$env:Path"""
+    Say "Persist it:"
+    Say "  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$InstallDir', 'User')"
   }
 }
 finally {
