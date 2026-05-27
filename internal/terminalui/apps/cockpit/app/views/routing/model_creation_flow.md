@@ -20,7 +20,7 @@ Rules:
 - model must not render before unresolved credential dependency actions
   (for example `sign in`)
 - do not render `auth not required`; use `external` when Swobu is not the credential authority
-- protocol is provider-native (`protocol_auto` or one concrete provider protocol)
+- protocol is provider-native (`auto` or one concrete provider protocol)
 - create readiness must derive from the same evaluator terminal state (`Ready`)
   used by routing rows; do not add provider-specific bypass checks in separate
   readiness paths

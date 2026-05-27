@@ -19,11 +19,11 @@ func TestFirstRunCredentialSummaryMatrix(t *testing.T) {
 		credentialRef string
 		want          string
 	}{
-		{name: "openrouter requires chooser", provider: "openrouter", baseURL: "https://openrouter.ai/api/v1", want: "missing"},
-		{name: "ollama local defaults external", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", want: "external"},
-		{name: "openai-compatible remote requires chooser", provider: "openai_compatible", baseURL: "https://api.example.com/v1", want: "missing"},
-		{name: "openai-compatible local still requires explicit credential", provider: "openai_compatible", baseURL: "http://localhost:11434/v1", want: "missing"},
-		{name: "existing credential without env is surfaced as missing", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", credentialRef: "env:OLLAMA_API_KEY", want: "env var missing"},
+		{name: "openrouter requires chooser", provider: "openrouter", baseURL: "https://openrouter.ai/api/v1", want: "required"},
+		{name: "ollama local defaults auto", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", want: "auto"},
+		{name: "openai-compatible remote requires chooser", provider: "openai_compatible", baseURL: "https://api.example.com/v1", want: "required"},
+		{name: "openai-compatible local still requires explicit credential", provider: "openai_compatible", baseURL: "http://localhost:11434/v1", want: "required"},
+		{name: "existing credential without env is surfaced as required", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", credentialRef: "env:OLLAMA_API_KEY", want: "required"},
 	}
 
 	for _, tt := range tests {
@@ -41,21 +41,56 @@ func TestFirstRunCredentialSummaryMatrix(t *testing.T) {
 func TestCreateDraftProtocolModeRow_DefaultsAndResolvesProviderProtocol(t *testing.T) {
 	t.Parallel()
 
-	t.Run("openai-default-resolves-catalog-default", func(t *testing.T) {
+	t.Run("openai-default-resolves-auto", func(t *testing.T) {
 		t.Parallel()
 		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "openai", ProviderProtocol: ""}}
 		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-		if !strings.Contains(out, "protocol") || !strings.Contains(out, "responses_stream") {
-			t.Fatalf("expected protocol row with resolved default responses_stream; render=%q", out)
+		if !strings.Contains(out, "protocol") || !strings.Contains(out, "auto") {
+			t.Fatalf("expected protocol row with default auto; render=%q", out)
 		}
 	})
 
-	t.Run("anthropic-resolves-messages-stream", func(t *testing.T) {
+	t.Run("anthropic-default-resolves-auto", func(t *testing.T) {
 		t.Parallel()
 		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "anthropic", ProviderProtocol: ""}}
 		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-		if !strings.Contains(out, "protocol") || !strings.Contains(out, "messages_stream") {
-			t.Fatalf("expected protocol row with resolved anthropic protocol; render=%q", out)
+		if !strings.Contains(out, "protocol") || !strings.Contains(out, "auto") {
+			t.Fatalf("expected protocol row with default auto; render=%q", out)
 		}
 	})
+}
+
+func TestCreateDraftProtocolModeRow_DefaultsToAuto_Regression(t *testing.T) {
+	t.Parallel()
+
+	model := state.Model{
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec:     "openai",
+			ProviderProtocol: "",
+		},
+	}
+	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+	if !strings.Contains(out, "protocol") || !strings.Contains(out, "auto") {
+		t.Fatalf("expected protocol row with auto default; render=%q", out)
+	}
+}
+
+func TestCreateDraftTestOrCreateRow_ReadyWithoutProbeGate(t *testing.T) {
+	t.Parallel()
+
+	model := state.Model{
+		CreateDraftName: "acme",
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec:     "openai",
+			BaseURL:          "https://api.openai.com/v1",
+			CredentialRef:    "env:OPENAI_API_KEY",
+			ProviderProtocol: "responses_stream",
+			ModelID:          "gpt-5.4-mini",
+		},
+	}
+
+	ready := testharness.RenderSpec(model, createDraftTestOrCreateRow(model), geom.Rect{W: 100, H: 2}).String()
+	if !strings.Contains(ready, "ready") || !strings.Contains(ready, "create") {
+		t.Fatalf("expected ready create row state; render=%q", ready)
+	}
 }

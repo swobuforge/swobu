@@ -1,6 +1,6 @@
 package layout
 
-// Cell is the canonical spatial unit for terminal layout algebra.
+// Cell is the canonical spatial unit for terminal layout core.
 type Cell int
 
 type Size struct {

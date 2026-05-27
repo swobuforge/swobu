@@ -25,13 +25,13 @@ func assertNoTestHarnessArtifacts(t *testing.T, value string) {
 
 func TestRunClientOnceMessage_ValidatesInputs(t *testing.T) {
 	t.Parallel()
-	if got := runClientOnceMessage(context.Background(), "", "codex", ""); got != "select a workspace before run once" {
+	if got := runClientOnceMessage(context.Background(), "", "codex", ""); got != "select a workspace before run" {
 		t.Fatalf("message=%q", got)
 	}
-	if got := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/acme/", "", ""); got != "choose a client before run once" {
+	if got := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/acme/", "", ""); got != "choose a client before run" {
 		t.Fatalf("message=%q", got)
 	}
-	if got := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/acme/", "other", ""); got != "run once is not configured for this client yet" {
+	if got := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/acme/", "other", ""); got != "run is not configured for this client yet" {
 		t.Fatalf("message=%q", got)
 	}
 }
@@ -104,7 +104,7 @@ func TestClientRunSpecForID(t *testing.T) {
 		t.Fatalf("OPENAI_API_KEY=%q", got)
 	}
 	joinedAiderArgs := strings.Join(spec.args, " ")
-	if got := joinedAiderArgs; got != "--model openai/"+requestpath.PublicModelIDSwobu+" --message Reply with exactly: swobu-e2e-aider-run-ok --exit" {
+	if got := joinedAiderArgs; got != "--model openai/"+requestpath.PublicModelIDSwobu {
 		t.Fatalf("aider args=%q", got)
 	}
 	if strings.Contains(joinedAiderArgs, "hermetic-aider-token") {
@@ -114,7 +114,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `exec --color never -c model="`+requestpath.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" Reply with exactly: swobu-e2e-codex-run-ok` {
+	if got := strings.Join(codex.args, " "); got != `-c model="`+requestpath.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
 		t.Fatalf("codex args=%q", got)
 	}
 	if got := codex.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
@@ -150,7 +150,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || continueSpec.binary != "cn" {
 		t.Fatalf("continue spec=%+v ok=%v", continueSpec, ok)
 	}
-	if got := strings.Join(continueSpec.args, " "); got != `--config ./swobu.continue.yaml -p Explain this codebase` {
+	if got := strings.Join(continueSpec.args, " "); got != `--config ./swobu.continue.yaml` {
 		t.Fatalf("continue args=%q", got)
 	}
 }
@@ -160,7 +160,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("aider command missing")
 	}
-	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 aider --model openai/" + requestpath.PublicModelIDSwobu + " --message Reply with exactly: swobu-e2e-aider-run-ok --exit"; cmd != want {
+	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 OPENAI_API_KEY=swobu-placeholder aider --model openai/" + requestpath.PublicModelIDSwobu; cmd != want {
 		t.Fatalf("aider command=%q want=%q", cmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, cmd)
@@ -168,7 +168,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `codex exec --color never -c model="` + requestpath.PublicModelIDSwobu + `" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1" Reply with exactly: swobu-e2e-codex-run-ok`; codex != want {
+	if want := `OPENAI_API_KEY=swobu-placeholder codex -c 'model="` + requestpath.PublicModelIDSwobu + `"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -184,7 +184,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode command missing")
 	}
-	if want := `opencode`; opencode != want {
+	if want := `OPENAI_API_KEY=swobu-placeholder opencode`; opencode != want {
 		t.Fatalf("opencode command=%q want=%q", opencode, want)
 	}
 	assertNoTestHarnessArtifacts(t, opencode)
@@ -192,7 +192,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("continue command missing")
 	}
-	if want := `cn --config ./swobu.continue.yaml -p Explain this codebase`; continueCmd != want {
+	if want := `cn --config ./swobu.continue.yaml`; continueCmd != want {
 		t.Fatalf("continue command=%q want=%q", continueCmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, continueCmd)
@@ -228,5 +228,47 @@ func TestRunClientOnceMessage_ContinueWritesConfigWhenMissing(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "apiBase: http://127.0.0.1:7926/c/acme/v1") {
 		t.Fatalf("continue config body=%q", string(body))
+	}
+}
+
+func TestRunClientOnceMessage_ContinueAlwaysOverwritesPreparedConfig(t *testing.T) {
+	origFind := findClientExecutable
+	origRun := runForegroundClient
+	findClientExecutable = func(binary string) (string, error) { return "/usr/bin/" + binary, nil }
+	runForegroundClient = func(context.Context, string, []string, map[string]string) (int, error) { return 0, nil }
+	t.Cleanup(func() {
+		findClientExecutable = origFind
+		runForegroundClient = origRun
+	})
+
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Chdir temp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	first := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/acme/", "continue", "")
+	if first != "cn exited with code 0" {
+		t.Fatalf("first message=%q", first)
+	}
+	second := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/other/", "continue", "")
+	if second != "cn exited with code 0" {
+		t.Fatalf("second message=%q", second)
+	}
+
+	body, err := os.ReadFile("swobu.continue.yaml")
+	if err != nil {
+		t.Fatalf("read continue config: %v", err)
+	}
+	content := string(body)
+	if !strings.Contains(content, "apiBase: http://127.0.0.1:7926/c/other/v1") {
+		t.Fatalf("continue config missing updated base URL: %q", content)
+	}
+	if strings.Contains(content, "apiBase: http://127.0.0.1:7926/c/acme/v1") {
+		t.Fatalf("continue config retained stale base URL: %q", content)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"sync"
 
@@ -58,15 +57,15 @@ func SetForegroundClientRunner(run func(context.Context, string, []string, map[s
 
 func runClientOnceMessage(ctx context.Context, baseURL, clientID, modelID string) string {
 	if strings.TrimSpace(baseURL) == "" || baseURL == "none" { // swobu:io-string source=boundary
-		return "select a workspace before run once"
+		return "select a workspace before run"
 	}
 	clientID = strings.TrimSpace(clientID) // swobu:io-string source=boundary
 	if clientID == "" {
-		return "choose a client before run once"
+		return "choose a client before run"
 	}
 	spec, ok := clientRunSpecForID(clientID, baseURL, modelID)
 	if !ok {
-		return "run once is not configured for this client yet"
+		return "run is not configured for this client yet"
 	}
 	if spec.prepare != nil {
 		if err := spec.prepare(); err != nil {
@@ -81,10 +80,10 @@ func runClientOnceMessage(ctx context.Context, baseURL, clientID, modelID string
 	exitCode, err := run(ctx, executable, spec.args, spec.env)
 	if err != nil {
 		if errors.Is(err, ErrForegroundClientActive) {
-			return "run once is already active"
+			return "run is already active"
 		}
 		if errors.Is(err, ErrForegroundClientUnavailable) {
-			return "run once is unavailable until cockpit is active"
+			return "run is unavailable until cockpit is active"
 		}
 		return "failed to start " + spec.binary + ": " + strings.TrimSpace(err.Error()) // swobu:io-string source=boundary
 	}
@@ -135,11 +134,6 @@ func ensurePreparedRunFile(prepare clientprofile.RunPrepareFileSpec) error {
 	if path == "" {
 		return fmt.Errorf("empty run preparation file path")
 	}
-	if prepare.WriteIfMissing {
-		if _, err := os.Stat(path); err == nil {
-			return nil
-		}
-	}
 	mode := prepare.Mode
 	if mode == 0 {
 		mode = 0o600
@@ -154,21 +148,11 @@ func RunClientDisplayCommand(clientID, baseURL, modelID string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	parts := make([]string, 0, len(spec.env)+1+len(spec.args))
-	if len(spec.env) > 0 {
-		keys := make([]string, 0, len(spec.env))
-		for key := range spec.env {
-			if strings.EqualFold(strings.TrimSpace(key), "OPENAI_API_KEY") { // swobu:io-string source=boundary
-				continue
-			}
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			parts = append(parts, key+"="+spec.env[key])
-		}
+	command := clientprofile.RunCommandSpec{
+		ClientID: spec.clientID,
+		Binary:   spec.binary,
+		Args:     append([]string(nil), spec.args...),
+		Env:      cloneStringMap(spec.env),
 	}
-	parts = append(parts, spec.binary)
-	parts = append(parts, spec.args...)
-	return strings.Join(parts, " "), true
+	return clientprofile.RenderRunCommand(command), true
 }

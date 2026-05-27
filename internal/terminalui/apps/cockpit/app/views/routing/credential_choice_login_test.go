@@ -39,3 +39,31 @@ func TestCredentialOptionRows_ChatGPTShowsLoginAndTokenSources(t *testing.T) {
 		t.Fatalf("rows len=%d want 2", len(rows))
 	}
 }
+
+func TestCredentialOptionItems_Bedrock_DoesNotExposeProfileRefAsCredentialChoice(t *testing.T) {
+	t.Parallel()
+	items := credentialOptionItems("profile:swobu-bedrock", nil, "bedrock")
+	if len(items) == 0 {
+		t.Fatal("expected non-empty credential items")
+	}
+	for _, item := range items {
+		if item.Label == "profile:swobu-bedrock" {
+			t.Fatal("bedrock credential options must not expose serialized profile ref")
+		}
+	}
+}
+
+func TestCredentialOptionItems_Bedrock_IncludesCanonicalModesOnly(t *testing.T) {
+	t.Parallel()
+	items := credentialOptionItems("profile:swobu-bedrock", nil, "bedrock")
+	labels := map[string]bool{}
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["AWS chain"] {
+		t.Fatalf("labels=%v; missing AWS chain", labels)
+	}
+	if !labels["Bedrock API key"] {
+		t.Fatalf("labels=%v; missing Bedrock API key", labels)
+	}
+}

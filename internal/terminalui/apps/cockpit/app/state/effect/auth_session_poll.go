@@ -75,18 +75,18 @@ func (eff PollProviderAuthSessionEffect) Execute(ctx context.Context) []update.A
 	case "succeeded":
 		credentialRef := strings.TrimSpace(status.CredentialRef) // swobu:io-string source=boundary
 		if credentialRef == "" {
-			return append(actions, ProviderAuthSessionFailedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), Message: "login completed without credential reference"})
+			return append(actions, ProviderAuthSessionFailedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), Message: "login completed without credential reference"}) // swobu:io-string source=boundary
 		}
-		return append(actions, ProviderAuthSessionCredentialResolvedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), CredentialRef: credentialRef})
+		return append(actions, ProviderAuthSessionCredentialResolvedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), CredentialRef: credentialRef}) // swobu:io-string source=boundary
 	case "failed", "expired", "canceled":
 		msg := strings.TrimSpace(status.ErrorMessage) // swobu:io-string source=boundary
 		if msg == "" {
 			msg = fmt.Sprintf("%s login %s", strings.TrimSpace(status.ProviderSpec), stateValue) // swobu:io-string source=boundary
 		}
-		return append(actions, ProviderAuthSessionFailedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), Message: msg})
+		return append(actions, ProviderAuthSessionFailedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), Message: msg}) // swobu:io-string source=boundary
 	default:
 		if eff.AttemptsLeft <= 1 {
-			return append(actions, ProviderAuthSessionFailedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), Message: "login timed out; retry"})
+			return append(actions, ProviderAuthSessionFailedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), Message: "login timed out; retry"}) // swobu:io-string source=boundary
 		}
 		timer := time.NewTimer(1 * time.Second)
 		defer timer.Stop()
@@ -95,7 +95,7 @@ func (eff PollProviderAuthSessionEffect) Execute(ctx context.Context) []update.A
 			return nil
 		case <-timer.C:
 		}
-		return append(actions, PollProviderAuthSessionRequestedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), SessionID: sessionID, AttemptsLeft: eff.AttemptsLeft - 1})
+		return append(actions, PollProviderAuthSessionRequestedAction{EndpointName: strings.TrimSpace(eff.EndpointName), ProviderConfig: eff.ProviderConfig, OwnerKey: strings.TrimSpace(eff.OwnerKey), AuthScope: strings.TrimSpace(eff.AuthScope), SessionID: sessionID, AttemptsLeft: eff.AttemptsLeft - 1}) // swobu:io-string source=boundary
 	}
 }
 

@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	modelcatalogopenaicompat "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalogprotocols/openaicompat"
-	messages "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/messages"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
+	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -51,14 +52,18 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
-	if req.Request == nil {
+	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
 	if strings.TrimSpace(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
 		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
+	codec, err := protocolregistry.ForProtocolKind(protocolkind.Messages)
+	if err != nil {
+		return ports.ProviderResponse{}, err
+	}
 
-	wireReq, err := messages.EncodeRequest(req.Request, streaming)
+	wireReq, err := codec.EncodeRequest(req.Request, streaming)
 	if err != nil {
 		return ports.ProviderResponse{}, err
 	}
@@ -93,7 +98,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		}()
 		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), streaming)
+	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), streaming, codec)
 	if err != nil {
 		_ = resp.Body.Close()
 		return ports.ProviderResponse{}, err
@@ -128,7 +133,7 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	if resp.StatusCode >= 400 {
 		return nil, httpedge.ReadBackendHTTPError(resp, target.BackendRef)
 	}
-	models, err := modelcatalogopenaicompat.DecodeModelIDs(resp.Body)
+	models, err := modelcatalogopenai.DecodeModelIDs(resp.Body)
 	if err != nil {
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
@@ -140,12 +145,12 @@ func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target
 	return err
 }
 
-func anthropicResponseDecoder(providerIDRaw string, streaming bool) (providersruntime.ResponseDecoder, error) {
+func anthropicResponseDecoder(providerIDRaw string, streaming bool, codec protocolregistry.EgressCodec) (providersruntime.ResponseDecoder, error) {
 	if providerIDRaw != string(providercatalog.ProviderSpecAnthropic) {
 		return nil, canonical.BadEndpoint("provider id is unsupported for anthropic adapter runtime")
 	}
 	streamingDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		return ports.NewEnvelopeStreamingProviderResponse(messages.DecodeResponseStream(body, "provider_stream:anthropic_messages")), nil
+		return ports.NewEnvelopeStreamingProviderResponse(codec.DecodeResponseStream(body, "provider_stream:anthropic_messages")), nil
 	}
 	bufferedDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
 		defer func() {
@@ -155,7 +160,7 @@ func anthropicResponseDecoder(providerIDRaw string, streaming bool) (providersru
 		if err != nil {
 			return ports.ProviderResponse{}, canonical.InternalError("backend success response could not be read")
 		}
-		result, err := messages.DecodeResponseBuffered(raw)
+		result, err := codec.DecodeResponse(raw)
 		if err != nil {
 			return ports.ProviderResponse{}, err
 		}

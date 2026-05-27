@@ -24,7 +24,7 @@ type InlineItemSpec struct {
 	AlignRight bool
 }
 
-// InlineLayoutSpec is a minimal row/inline algebra for transcript/retained
+// InlineLayoutSpec is a minimal row/inline primitives for transcript/retained
 // text rows. It resolves slot widths from constraints and renders one line.
 type InlineLayoutSpec struct {
 	Gap   int

@@ -146,15 +146,15 @@ func TestProviderModelCatalogAuthFailureMessage_OnlyPresentForAuthErrors(t *test
 	t.Parallel()
 
 	errText := "BAD_ENDPOINT: credential reference could not be resolved"
-	if got := state.ProviderModelCatalogAuthFailureMessage(errText); got != errText {
-		t.Fatalf("auth failure message=%q want passthrough error %q", got, errText)
+	if got := state.ProviderModelCatalogAuthFailureMessage("openai", "env:OPENAI_API_KEY", errText); got != "credential reference could not be resolved" {
+		t.Fatalf("auth failure message=%q", got)
 	}
-	if got := state.ProviderModelCatalogAuthFailureMessage("request timed out"); got != "" {
+	if got := state.ProviderModelCatalogAuthFailureMessage("openai", "env:OPENAI_API_KEY", "request timed out"); got != "" {
 		t.Fatalf("auth failure message=%q want empty for non-auth errors", got)
 	}
 }
 
-func TestEvaluateModelCatalogReadiness_AuthFailureUsesRawProbeError(t *testing.T) {
+func TestEvaluateModelCatalogReadiness_AuthFailureNormalizesProbeError(t *testing.T) {
 	t.Parallel()
 
 	errText := "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK"
@@ -167,7 +167,7 @@ func TestEvaluateModelCatalogReadiness_AuthFailureUsesRawProbeError(t *testing.T
 	if !got.Blocked {
 		t.Fatal("expected blocked message for auth failure")
 	}
-	if got.Message != errText {
-		t.Fatalf("blocked message=%q want raw probe error %q", got.Message, errText)
+	if got.Message != "bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK" {
+		t.Fatalf("blocked message=%q", got.Message)
 	}
 }

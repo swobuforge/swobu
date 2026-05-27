@@ -27,19 +27,15 @@ func providerProtocolChoiceRow(spec providerProtocolChoiceRowSpec) retained.View
 
 func buildProviderProtocolChoiceRow(model state.Model, spec providerProtocolChoiceRowSpec) retained.ViewSpec[state.Model] {
 	if spec.ProviderConfig == nil {
-		return views.RowStatic(providerProtocolRowLabel, "not set")
+		return views.RowStatic(providerProtocolRowLabel, views.ValueRequired)
 	}
 	protocols := providercatalog.SupportedProviderProtocolsForSpec(spec.ProviderConfig.ProviderSpec)
 	if len(protocols) == 0 {
-		return views.RowStatic(providerProtocolRowLabel, "not set")
+		return views.RowStatic(providerProtocolRowLabel, views.ValueRequired)
 	}
-	current := strings.TrimSpace(spec.ProviderConfig.ProviderProtocol)
+	current := strings.TrimSpace(spec.ProviderConfig.ProviderProtocol) // swobu:io-string source=boundary
 	if current == "" {
-		if def, ok := providercatalog.DefaultProviderProtocolForSpec(spec.ProviderConfig.ProviderSpec); ok {
-			current = def
-		} else {
-			current = providercatalog.ProviderProtocolAuto
-		}
+		current = defaultProviderProtocolForProvider(spec.ProviderConfig.ProviderSpec)
 	}
 	return views.RowActionWithHooks(providerProtocolRowLabel, current, "next", func() []update.Action {
 		if spec.CreateMode {
@@ -54,12 +50,12 @@ func buildProviderProtocolChoiceRow(model state.Model, spec providerProtocolChoi
 		if spec.CreateMode {
 			return []update.Action{state.SetCreateDraftProviderProtocol{ProviderProtocol: next}}
 		}
-		if strings.TrimSpace(spec.EndpointName) == "" {
+		if strings.TrimSpace(spec.EndpointName) == "" { // swobu:io-string source=boundary
 			return nil
 		}
 		updated := *spec.ProviderConfig
 		updated.ProviderProtocol = next
-		return routingSaveProviderConfigActions(strings.TrimSpace(spec.EndpointName), updated, "provider/protocol")
+		return routingSaveProviderConfigActions(strings.TrimSpace(spec.EndpointName), updated, "provider/protocol") // swobu:io-string source=boundary
 	}, nil, views.FocusAffordance("next", false))
 }
 
@@ -87,7 +83,7 @@ func nextProviderProtocolSelection(protocols []string, current string) string {
 	if len(protocols) == 0 {
 		return ""
 	}
-	current = strings.TrimSpace(current)
+	current = strings.TrimSpace(current) // swobu:io-string source=boundary
 	for i, protocol := range protocols {
 		if protocol != current {
 			continue

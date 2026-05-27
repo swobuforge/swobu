@@ -184,3 +184,114 @@ func TestFocusActionsAfterQueryChange_NoMatchesDoesNotStealFocus(t *testing.T) {
 		t.Fatalf("actions len=%d want 0 when query has no matches", len(actions))
 	}
 }
+
+func TestHandleFilterableKeyUp_AtTopClosesPickerViaOnCancel(t *testing.T) {
+	t.Parallel()
+	cancelCalled := false
+	handled, actions := handleFilterableKeyUp(
+		FilterablePickerState{Cursor: 0},
+		func(FilterablePickerState) {},
+		[]FilterablePickerItem{{Label: "a"}},
+		FilterablePickerConfig{
+			OnCancel: func() []update.Action {
+				cancelCalled = true
+				return []update.Action{interaction.FocusKeyAction{Key: "credential"}}
+			},
+		},
+	)
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if !cancelCalled {
+		t.Fatal("expected OnCancel call at top-boundary key up")
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions len=%d want 1", len(actions))
+	}
+}
+
+func TestHandleFilterableKeyDown_AtBottomClosesPickerViaOnCancel(t *testing.T) {
+	t.Parallel()
+	cancelCalled := false
+	handled, actions := handleFilterableKeyDown(
+		FilterablePickerState{Cursor: 1},
+		func(FilterablePickerState) {},
+		[]FilterablePickerItem{{Label: "a"}, {Label: "b"}},
+		FilterablePickerConfig{
+			OnCancel: func() []update.Action {
+				cancelCalled = true
+				return []update.Action{interaction.FocusKeyAction{Key: "credential"}}
+			},
+		},
+	)
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if !cancelCalled {
+		t.Fatal("expected OnCancel call at bottom-boundary key down")
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions len=%d want 1", len(actions))
+	}
+}
+
+func TestHandleFilterableKeyUp_WithEarlierItems_DoesNotCloseAndMovesWithinPicker(t *testing.T) {
+	t.Parallel()
+	cancelCalled := false
+	var got FilterablePickerState
+	handled, actions := handleFilterableKeyUp(
+		FilterablePickerState{Cursor: 3, Offset: 3},
+		func(next FilterablePickerState) { got = next },
+		[]FilterablePickerItem{{Label: "a"}, {Label: "b"}, {Label: "c"}, {Label: "d"}, {Label: "e"}},
+		FilterablePickerConfig{
+			KeyPrefix: "opt",
+			OnCancel: func() []update.Action {
+				cancelCalled = true
+				return nil
+			},
+		},
+	)
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if cancelCalled {
+		t.Fatal("must not close while picker can still move upward")
+	}
+	if got.Cursor != 2 || got.Offset != 2 {
+		t.Fatalf("state=%+v want cursor=2 offset=2", got)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions len=%d want 1", len(actions))
+	}
+}
+
+func TestHandleFilterableKeyDown_WithLaterItems_DoesNotCloseAndMovesWithinPicker(t *testing.T) {
+	t.Parallel()
+	cancelCalled := false
+	var got FilterablePickerState
+	handled, actions := handleFilterableKeyDown(
+		FilterablePickerState{Cursor: 1, Offset: 0},
+		func(next FilterablePickerState) { got = next },
+		[]FilterablePickerItem{{Label: "a"}, {Label: "b"}, {Label: "c"}, {Label: "d"}, {Label: "e"}},
+		FilterablePickerConfig{
+			KeyPrefix:  "opt",
+			WindowSize: 2,
+			OnCancel: func() []update.Action {
+				cancelCalled = true
+				return nil
+			},
+		},
+	)
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if cancelCalled {
+		t.Fatal("must not close while picker can still move downward")
+	}
+	if got.Cursor != 2 || got.Offset != 1 {
+		t.Fatalf("state=%+v want cursor=2 offset=1", got)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions len=%d want 1", len(actions))
+	}
+}

@@ -261,73 +261,6 @@ type LoadRoutingModelCatalogEffect struct {
 	ProviderProtocol string
 }
 
-// ProbeCreateDraftModelEffect runs one real provider execution probe for the
-// create draft through daemon ephemeral execution path.
-type ProbeCreateDraftModelEffect struct {
-	ProviderSpec     string
-	BaseURL          string
-	CredentialRef    string
-	ModelID          string
-	ProviderProtocol string
-}
-
-func (eff ProbeCreateDraftModelEffect) Execute(ctx context.Context) []update.Action {
-	type providerConfigDocument struct {
-		Ref              string `json:"ref"`
-		ProviderSpec     string `json:"provider_spec"`
-		BaseURL          string `json:"base_url,omitempty"`
-		CredentialRef    string `json:"credential_ref,omitempty"`
-		ModelID          string `json:"model_id,omitempty"`
-		ProviderProtocol string `json:"provider_protocol,omitempty"`
-	}
-	type endpointDocument struct {
-		Name                      string                   `json:"name"`
-		SelectedProviderConfigRef string                   `json:"selected_provider_config_ref"`
-		ProviderConfigs           []providerConfigDocument `json:"provider_configs"`
-	}
-	type probeBody struct {
-		Endpoint endpointDocument `json:"endpoint"`
-	}
-	type probeResult struct {
-		Error                    string `json:"error,omitempty"`
-		ResolvedProviderProtocol string `json:"resolved_provider_protocol,omitempty"`
-	}
-	body := probeBody{
-		Endpoint: endpointDocument{
-			Name:                      "ephemeral-probe",
-			SelectedProviderConfigRef: "selected",
-			ProviderConfigs: []providerConfigDocument{{
-				Ref:              "selected",
-				ProviderSpec:     strings.TrimSpace(eff.ProviderSpec),     // swobu:io-string source=boundary
-				BaseURL:          strings.TrimSpace(eff.BaseURL),          // swobu:io-string source=boundary
-				CredentialRef:    strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
-				ModelID:          strings.TrimSpace(eff.ModelID),          // swobu:io-string source=boundary
-				ProviderProtocol: strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
-			}},
-		},
-	}
-	result, err := postJSONWithTimeout[probeResult](ctx, platformconfig.DefaultDaemonURL()+"/_swobu/ephemeral-executions", body, modelCatalogProbeLoadTimeout)
-	if err != nil {
-		return []update.Action{CreateDraftModelProbeCompletedAction{
-			ProviderSpec:     strings.TrimSpace(eff.ProviderSpec),     // swobu:io-string source=boundary
-			BaseURL:          strings.TrimSpace(eff.BaseURL),          // swobu:io-string source=boundary
-			CredentialRef:    strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
-			ModelID:          strings.TrimSpace(eff.ModelID),          // swobu:io-string source=boundary
-			ProviderProtocol: strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
-			Error:            normalizeModelCatalogProbeLoadError(err),
-		}}
-	}
-	return []update.Action{CreateDraftModelProbeCompletedAction{
-		ProviderSpec:             strings.TrimSpace(eff.ProviderSpec),                // swobu:io-string source=boundary
-		BaseURL:                  strings.TrimSpace(eff.BaseURL),                     // swobu:io-string source=boundary
-		CredentialRef:            strings.TrimSpace(eff.CredentialRef),               // swobu:io-string source=boundary
-		ModelID:                  strings.TrimSpace(eff.ModelID),                     // swobu:io-string source=boundary
-		ProviderProtocol:         strings.TrimSpace(eff.ProviderProtocol),            // swobu:io-string source=boundary
-		Error:                    strings.TrimSpace(result.Error),                    // swobu:io-string source=boundary
-		ResolvedProviderProtocol: strings.TrimSpace(result.ResolvedProviderProtocol), // swobu:io-string source=boundary
-	}}
-}
-
 func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.Action {
 	query := url.Values{}
 	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec)) // swobu:io-string source=boundary
@@ -345,7 +278,7 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 		Error                    string   `json:"error,omitempty"`
 		ResolvedProviderProtocol string   `json:"resolved_provider_protocol,omitempty"`
 	}
-	result, err := loadJSONWithTimeout[probeResult](ctx, platformconfig.DefaultDaemonURL()+"/_swobu/model-catalog/probe?"+query.Encode(), modelCatalogProbeLoadTimeout)
+	result, err := loadJSONWithTimeout[probeResult](ctx, platformconfig.DefaultDaemonURL()+"/_swobu/model-catalog?"+query.Encode(), modelCatalogProbeLoadTimeout)
 	if err != nil {
 		normalized := normalizeModelCatalogProbeLoadError(err)
 		return []update.Action{RoutingModelCatalogLoaded{

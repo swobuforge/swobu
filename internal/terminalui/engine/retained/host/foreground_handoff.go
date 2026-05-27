@@ -1,9 +1,11 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -146,14 +148,22 @@ func runForegroundCommandOnHost(ctx context.Context, executable string, args []s
 	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), envPairs(env)...)
 	}
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode(), nil
+			detail := strings.TrimSpace(stderr.String()) // swobu:io-string source=boundary
+			if detail == "" {
+				return exitErr.ExitCode(), nil
+			}
+			if len(detail) > 240 {
+				detail = detail[:240]
+			}
+			return exitErr.ExitCode(), fmt.Errorf("stderr: %s", detail)
 		}
 		return 0, err
 	}

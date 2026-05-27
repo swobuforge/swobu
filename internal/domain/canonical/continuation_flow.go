@@ -31,14 +31,13 @@ func NewContinuationRuntime(store ContinuationStore) ContinuationRuntime {
 // I/O is allowed to influence request preparation; the canonical request values
 // themselves remain pure semantic data.
 func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace ContinuationNamespace, targetProtocol protocolkind.ProtocolKind, request CanonicalRequest) (CanonicalRequest, error) {
-	switch typed := request.(type) {
-	case GenerationCanonicalRequest:
-		return m.prepareResponseRequest(ctx, typed)
-	case DialogCanonicalRequest:
-		return m.prepareConversationRequest(ctx, namespace, targetProtocol, typed)
-	default:
-		return CloneCanonicalRequest(request), nil
+	if strings.TrimSpace(request.PreviousResponseID()) != "" { // swobu:io-string source=domain
+		return m.prepareResponseRequest(ctx, request)
 	}
+	if targetProtocol == protocolkind.Responses {
+		return m.prepareConversationRequest(ctx, namespace, targetProtocol, request)
+	}
+	return CloneCanonicalRequest(request), nil
 }
 
 func (m ContinuationRuntime) loadSnapshot(ctx context.Context, request CanonicalRequest) (*ContinuitySnapshot, error) {
@@ -63,9 +62,9 @@ func (m ContinuationRuntime) loadSnapshot(ctx context.Context, request Canonical
 	return &cloned, nil
 }
 
-func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request GenerationCanonicalRequest) (CanonicalRequest, error) {
+func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request CanonicalRequest) (CanonicalRequest, error) {
 	if err := ValidateResponseContinuationSelectors(request); err != nil {
-		return nil, err
+		return CanonicalRequest{}, err
 	}
 	previousResponseID := request.PreviousResponseID()
 	hasParent := strings.TrimSpace(previousResponseID) != "" // swobu:io-string source=domain
@@ -76,18 +75,17 @@ func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request
 			currentLastTurn = currentThread
 		}
 		return NewGenerationRequest(GenerationRequestParams{
-			Model:                request.Model(),
-			Thread:               currentThread,
-			LastTurn:             currentLastTurn,
-			ToolMode:             request.ToolMode(),
-			PromptCacheKey:       request.PromptCacheKey(),
-			PromptCacheRetention: request.PromptCacheRetention(),
+			Model:       request.Model(),
+			Thread:      currentThread,
+			LastTurn:    currentLastTurn,
+			ToolMode:    request.ToolMode(),
+			CacheIntent: request.CacheIntent(),
 		}), nil
 	}
 
 	snapshot, err := m.loadSnapshot(ctx, request)
 	if err != nil {
-		return nil, err
+		return CanonicalRequest{}, err
 	}
 	anchor := snapshot.Thread
 	prefixLen := longestCommonPrefixLength(anchor, currentThread)
@@ -123,13 +121,12 @@ func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request
 	}
 
 	return NewGenerationRequest(GenerationRequestParams{
-		Model:                request.Model(),
-		Thread:               thread,
-		LastTurn:             lastTurn,
-		PreviousResponseID:   preparedPreviousResponseID,
-		ToolMode:             request.ToolMode(),
-		PromptCacheKey:       request.PromptCacheKey(),
-		PromptCacheRetention: request.PromptCacheRetention(),
+		Model:              request.Model(),
+		Thread:             thread,
+		LastTurn:           lastTurn,
+		PreviousResponseID: preparedPreviousResponseID,
+		ToolMode:           request.ToolMode(),
+		CacheIntent:        request.CacheIntent(),
 	}), nil
 }
 
@@ -137,7 +134,7 @@ func (m ContinuationRuntime) prepareConversationRequest(
 	ctx context.Context,
 	namespace ContinuationNamespace,
 	targetProtocol protocolkind.ProtocolKind,
-	request DialogCanonicalRequest,
+	request CanonicalRequest,
 ) (CanonicalRequest, error) {
 	if targetProtocol != protocolkind.Responses {
 		return CloneCanonicalRequest(request), nil
@@ -149,7 +146,7 @@ func (m ContinuationRuntime) prepareConversationRequest(
 	if m.store != nil && !namespace.IsZero() {
 		match, ok, err := m.store.MatchPrefix(ctx, namespace, thread)
 		if err != nil {
-			return nil, InternalError("response continuity state could not be loaded")
+			return CanonicalRequest{}, InternalError("response continuity state could not be loaded")
 		}
 		if ok {
 			anchor := match.Snapshot.Thread
@@ -163,9 +160,10 @@ func (m ContinuationRuntime) prepareConversationRequest(
 	}
 
 	return NewGenerationRequest(GenerationRequestParams{
-		Model:    request.Model(),
-		Thread:   thread,
-		LastTurn: lastTurn,
+		Model:       request.Model(),
+		Thread:      thread,
+		LastTurn:    lastTurn,
+		CacheIntent: request.CacheIntent(),
 	}), nil
 }
 

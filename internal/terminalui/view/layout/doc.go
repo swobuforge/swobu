@@ -1,4 +1,4 @@
-// Package layout defines strategy-neutral layout algebra and value objects
+// Package layout defines strategy-neutral layout primitives and value objects
 // shared by terminal view builders.
 //
 // The canonical spatial unit is Cell (terminal columns/rows). Layout

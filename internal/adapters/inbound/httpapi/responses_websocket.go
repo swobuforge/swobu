@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
 	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -143,7 +143,7 @@ func writeResponsesWebsocketEnvelope(conn *websocket.Conn, requestID string, env
 	if envelope == nil {
 		return canonical.InternalError("streaming provider response is missing an output event stream")
 	}
-	stats, err := drainEncodedFramesWithStats(context.Background(), envelope, responses.NewWireEnvelopeStreamEncoder(), websocketFrameSink{conn: conn})
+	stats, err := drainEncodedFramesWithStats(context.Background(), envelope, responses.NewJSONEnvelopeStreamEncoder(), websocketFrameSink{conn: conn})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil

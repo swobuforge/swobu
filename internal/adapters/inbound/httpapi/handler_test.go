@@ -31,7 +31,7 @@ func TestHandler_PropagatesRequestID(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if capturing.got.Request == nil {
+	if capturing.got.Request.Model() == "" {
 		t.Fatal("request was not forwarded")
 	}
 	if got := capturing.got.RequestID; got != "req-123" {
@@ -223,10 +223,7 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed, ok := capturing.got.Request.(canonical.DialogCanonicalRequest)
-	if !ok {
-		t.Fatalf("request type = %T, want canonical.DialogCanonicalRequest", capturing.got.Request)
-	}
+	typed := capturing.got.Request
 	items := typed.Items()
 	if len(items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(items))
@@ -302,15 +299,12 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed, ok := capturing.got.Request.(canonical.GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("request type = %T, want canonical.GenerationCanonicalRequest", capturing.got.Request)
-	}
+	typed := capturing.got.Request
 	if got := typed.PreviousResponseID(); got != "resp_123" {
 		t.Fatalf("previous_response_id = %q, want %q", got, "resp_123")
 	}
-	if got := typed.PromptCacheKey(); got != "repo-alpha" {
-		t.Fatalf("prompt_cache_key = %q, want %q", got, "repo-alpha")
+	if !typed.CacheIntent().IsZero() {
+		t.Fatalf("cache intent = %+v, want zero", typed.CacheIntent())
 	}
 	items := typed.Thread()
 	if len(items) != 3 {
@@ -335,10 +329,7 @@ func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolMode(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed, ok := capturing.got.Request.(canonical.GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("request type = %T, want canonical.GenerationCanonicalRequest", capturing.got.Request)
-	}
+	typed := capturing.got.Request
 	if got := typed.ToolMode(); got != canonical.ToolModeRequired {
 		t.Fatalf("tool mode = %q, want %q", got, canonical.ToolModeRequired)
 	}

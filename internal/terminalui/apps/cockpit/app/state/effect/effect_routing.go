@@ -14,6 +14,7 @@ import (
 
 const authSessionStartTimeout = 20 * time.Second
 const authSessionPollTimeout = 10 * time.Second
+const providerAuthSessionPollAttempts = 900
 
 // SaveSelectedTargetEffect saves the selected provider config ref for an endpoint.
 type SaveSelectedTargetEffect struct {
@@ -304,7 +305,7 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			SessionID:      sessionID,
-			AttemptsLeft:   120,
+			AttemptsLeft:   providerAuthSessionPollAttempts,
 		},
 	}
 }

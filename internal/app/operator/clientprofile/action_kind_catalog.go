@@ -19,7 +19,8 @@ type capabilityClientSpec struct {
 	Identity Identity
 	Vars     func(baseURL string) TemplateVars
 	Actions  []capabilityActionSpec
-	// Run is executable truth for run-once behavior and run payload rendering.
+	// Run is executable truth for interactive run behavior and run payload
+	// rendering. Never encode non-interactive one-shot probe semantics here.
 	Run *capabilityRunSpec
 }
 
@@ -95,13 +96,10 @@ func codexClientSpec() capabilityClientSpec {
 		Run: &capabilityRunSpec{
 			Binary: "codex",
 			Args: []string{
-				"exec",
-				"--color", "never",
 				"-c", "model=\"{{primary_model}}\"",
 				"-c", "model_provider=\"swobu\"",
 				"-c", "model_providers.swobu.name=\"Swobu\"",
 				"-c", "model_providers.swobu.base_url=\"{{openai_base_url}}\"",
-				"Reply with exactly: swobu-e2e-codex-run-ok",
 			},
 			Env: map[string]string{
 				"OPENAI_API_KEY": "swobu-placeholder",
@@ -161,8 +159,6 @@ func aiderClientSpec() capabilityClientSpec {
 			Binary: "aider",
 			Args: []string{
 				"--model", "openai/{{primary_model}}",
-				"--message", "Reply with exactly: swobu-e2e-aider-run-ok",
-				"--exit",
 			},
 			Env: map[string]string{
 				"AIDER_OPENAI_API_BASE": "{{openai_base_url}}",
@@ -191,7 +187,6 @@ func continueClientSpec() capabilityClientSpec {
 			Binary: "cn",
 			Args: []string{
 				"--config", "./swobu.continue.yaml",
-				"-p", "Explain this codebase",
 			},
 			Prepare: &capabilityRunPrepareSpec{
 				Path:           "./swobu.continue.yaml",

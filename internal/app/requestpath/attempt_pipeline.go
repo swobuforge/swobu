@@ -173,11 +173,10 @@ func continuationMiddleware() AttemptMiddleware {
 
 			outcome := next(ctx, preparedAttempt)
 			if outcome.Err != nil {
-				typed, ok := prepared.(canonical.GenerationCanonicalRequest)
-				if !ok || !canonical.IsPreviousResponseNotFoundBackendError(outcome.Err) {
+				if !canonical.IsPreviousResponseNotFoundBackendError(outcome.Err) {
 					return outcome
 				}
-				fallback, ok := fullThreadResponsesRequest(typed)
+				fallback, ok := fullThreadResponsesRequest(prepared)
 				if !ok {
 					return outcome
 				}
@@ -220,19 +219,15 @@ func continuationMiddleware() AttemptMiddleware {
 }
 
 func logContinuationPreparation(attempt ExecutionAttempt, prepared canonical.CanonicalRequest) {
-	typed, ok := prepared.(canonical.GenerationCanonicalRequest)
-	if !ok {
-		return
-	}
-	thread := typed.Thread()
-	lastTurn := typed.LastTurn()
+	thread := prepared.Thread()
+	lastTurn := prepared.LastTurn()
 	slog.Debug("continuation prepare",
 		"component", "requestpath",
 		"event", "continuation_prepare",
 		"request_id", attempt.Intent.RequestID,
 		"endpoint", attempt.Intent.EndpointName.String(),
 		"target_protocol", string(attempt.Route.Target.ProtocolKind),
-		"has_previous_response_id", strings.TrimSpace(typed.PreviousResponseID()) != "", // swobu:io-string source=boundary
+		"has_previous_response_id", strings.TrimSpace(prepared.PreviousResponseID()) != "", // swobu:io-string source=boundary
 		"thread_item_count", len(thread),
 		"last_turn_item_count", len(lastTurn),
 		"last_turn_tail_role", continuationTailRole(lastTurn),
@@ -257,15 +252,9 @@ func continuationTailRole(items []canonical.CanonicalItem) string {
 func (o RequestHandler) toolChoicePolicyMiddleware() AttemptMiddleware {
 	return func(next AttemptExecutorFn) AttemptExecutorFn {
 		return func(ctx context.Context, attempt ExecutionAttempt) AttemptOutcome {
-			typed, ok := attempt.Request.(canonical.GenerationCanonicalRequest)
-			if !ok {
-				return next(ctx, attempt)
-			}
+			typed := attempt.Request
 			outcome := next(ctx, attempt)
-			if outcome.Err != nil &&
-				attempt.DeclaredCapabilities.ToolChoice.ImmediateDowngradeRetry &&
-				typed.ToolMode() == canonical.ToolModeRequired &&
-				canonical.IsBackendErrorClass(outcome.Err, canonical.BackendErrorClassToolChoiceUnsupported) {
+			if outcome.Err != nil && typed.ToolMode() == canonical.ToolModeRequired {
 				retryAttempt := attempt
 				retryAttempt.Request = withResponseToolChoiceMode(typed, canonical.ToolModeAuto)
 				retryAttempt.Index = attempt.Index + 1
@@ -288,28 +277,26 @@ func (o RequestHandler) toolChoicePolicyMiddleware() AttemptMiddleware {
 	}
 }
 
-func withResponseToolChoiceMode(request canonical.GenerationCanonicalRequest, mode canonical.ToolMode) canonical.GenerationCanonicalRequest {
+func withResponseToolChoiceMode(request canonical.CanonicalRequest, mode canonical.ToolMode) canonical.CanonicalRequest {
 	return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
-		Model:                request.Model(),
-		Thread:               request.Thread(),
-		LastTurn:             request.LastTurn(),
-		PreviousResponseID:   request.PreviousResponseID(),
-		ToolMode:             mode,
-		PromptCacheKey:       request.PromptCacheKey(),
-		PromptCacheRetention: request.PromptCacheRetention(),
+		Model:              request.Model(),
+		Thread:             request.Thread(),
+		LastTurn:           request.LastTurn(),
+		PreviousResponseID: request.PreviousResponseID(),
+		ToolMode:           mode,
+		CacheIntent:        request.CacheIntent(),
 	})
 }
 
-func fullThreadResponsesRequest(request canonical.GenerationCanonicalRequest) (canonical.GenerationCanonicalRequest, bool) {
+func fullThreadResponsesRequest(request canonical.CanonicalRequest) (canonical.CanonicalRequest, bool) {
 	thread := request.Thread()
 	if len(thread) == 0 {
-		return canonical.GenerationCanonicalRequest{}, false
+		return canonical.CanonicalRequest{}, false
 	}
 	return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
-		Model:                request.Model(),
-		Thread:               thread,
-		ToolMode:             request.ToolMode(),
-		PromptCacheKey:       request.PromptCacheKey(),
-		PromptCacheRetention: request.PromptCacheRetention(),
+		Model:       request.Model(),
+		Thread:      thread,
+		ToolMode:    request.ToolMode(),
+		CacheIntent: request.CacheIntent(),
 	}), true
 }

@@ -93,33 +93,9 @@ func probeModelIDs(
 		return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	if providerProtocol != "" && providerProtocol != providercatalog.ProviderProtocolAuto {
-		protocol, frame, ok := providercatalog.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
-		if !ok {
-			return nil, "", canonical.BadEndpoint("selected provider protocol is unsupported")
-		}
-		target := ports.NewRoutableTarget(
-			"draft",
-			providerSpec,
-			baseURL,
-			credentialRef,
-			protocol,
-			string(routeProfile.AuthKind),
-			frame,
-			providerProtocol,
-		)
-		models, err := providers.ListModels(ctx, target)
-		if err != nil {
-			return nil, "", err
-		}
-		return ports.CloneModelIDs(models), providerProtocol, nil
-	}
-	variants := providercatalog.SupportedProviderProtocolsForSpec(providerSpec)
+	variants := modelCatalogProbeVariants(providerSpec, providerProtocol)
 	var lastErr error
 	for _, variant := range variants {
-		if variant == providercatalog.ProviderProtocolAuto {
-			continue
-		}
 		protocol, frame, ok := providercatalog.ProviderProtocolKindAndFrame(providerSpec, variant)
 		if !ok {
 			continue
@@ -144,6 +120,28 @@ func probeModelIDs(
 		return nil, "", lastErr
 	}
 	return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
+}
+
+func modelCatalogProbeVariants(providerSpec string, providerProtocol string) []string {
+	supported := providercatalog.ConcreteProviderProtocolsForSpec(providerSpec)
+	variants := make([]string, 0, len(supported))
+	seen := map[string]struct{}{}
+	appendVariant := func(variant string) {
+		variant = strings.TrimSpace(variant) // swobu:io-string source=boundary
+		if variant == "" {
+			return
+		}
+		if _, exists := seen[variant]; exists {
+			return
+		}
+		seen[variant] = struct{}{}
+		variants = append(variants, variant)
+	}
+	appendVariant(providerProtocol)
+	for _, variant := range supported {
+		appendVariant(variant)
+	}
+	return variants
 }
 
 func normalizeModelCatalogProbeError(message string, credentialRef string) string {

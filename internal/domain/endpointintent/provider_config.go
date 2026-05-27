@@ -119,7 +119,7 @@ func NewProviderConfig(
 	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=domain
 		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-compatible provider configs require a base URL", ErrInvalidProviderConfig)
 	}
-	providerProtocol, ok := providercatalog.DefaultProviderProtocolForSpec(spec.value)
+	providerProtocol, ok := providercatalog.ResolveConcreteProtocolForAutoAtBoundary(spec.value)
 	if !ok {
 		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no default provider protocol", ErrInvalidProviderConfig)
 	}

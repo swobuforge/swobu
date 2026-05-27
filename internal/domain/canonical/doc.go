@@ -8,6 +8,8 @@
 // Canonical outputs may also carry provider-neutral token usage and cache
 // accounting so adapters can expose runtime cost facts without provider-dialect
 // leakage into core nouns.
+// Canonical request cache intent remains minimal by law: only fields with at
+// least one active provider consumer are allowed in this package surface.
 // Provider-specific DTOs, realized wire payloads, and transport mechanics must
 // stay outside this package.
 package canonical

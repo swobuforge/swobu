@@ -58,29 +58,7 @@ func runActionContentTemplate(run *capabilityRunSpec) string {
 	if run == nil {
 		return ""
 	}
-	parts := make([]string, 0, 1+len(run.Args)+len(run.Env))
-	if len(run.Env) > 0 {
-		keys := make([]string, 0, len(run.Env))
-		for key := range run.Env {
-			if redactDisplayEnvKey(key) {
-				continue
-			}
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			parts = append(parts, key+"="+shellToken(run.Env[key]))
-		}
-	}
-	parts = append(parts, shellToken(run.Binary))
-	for _, arg := range run.Args {
-		parts = append(parts, shellToken(arg))
-	}
-	return strings.Join(parts, " ")
-}
-
-func redactDisplayEnvKey(key string) bool {
-	return strings.EqualFold(strings.TrimSpace(key), "OPENAI_API_KEY") // swobu:io-string source=boundary
+	return renderRunCommandDisplay(run.Binary, run.Args, run.Env)
 }
 
 func shellToken(raw string) string {
@@ -115,6 +93,30 @@ func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool)
 		}
 	}
 	return command, true
+}
+
+// RenderRunCommand renders the exact shell-style command from RunCommandSpec.
+func RenderRunCommand(command RunCommandSpec) string {
+	return renderRunCommandDisplay(command.Binary, command.Args, command.Env)
+}
+
+func renderRunCommandDisplay(binary string, args []string, env map[string]string) string {
+	parts := make([]string, 0, 1+len(args)+len(env))
+	if len(env) > 0 {
+		keys := make([]string, 0, len(env))
+		for key := range env {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			parts = append(parts, key+"="+shellToken(env[key]))
+		}
+	}
+	parts = append(parts, shellToken(binary))
+	for _, arg := range args {
+		parts = append(parts, shellToken(arg))
+	}
+	return strings.Join(parts, " ")
 }
 
 func capabilitySpecByID(clientID string) (capabilityClientSpec, bool) {

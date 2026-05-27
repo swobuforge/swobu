@@ -38,6 +38,24 @@ func TestArgsToProviderConfig_PreservesProviderProtocol(t *testing.T) {
 	}
 }
 
+func TestArgsToProviderConfig_ResolvesAutoProviderProtocolToCatalogDefaultConcrete(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := argsToProviderConfig(stateModel.ProviderConfigSnapshot{
+		Ref:              "backend-a",
+		ProviderSpec:     "openai",
+		ProviderProtocol: "auto",
+		ModelID:          "gpt-5.4-mini",
+		CredentialRef:    "env:OPENAI_API_KEY",
+	})
+	if err != nil {
+		t.Fatalf("argsToProviderConfig returned error: %v", err)
+	}
+	if got := cfg.ProviderProtocol(); got != "responses" {
+		t.Fatalf("provider protocol=%q want=%q", got, "responses")
+	}
+}
+
 func TestArgsToProviderConfig_BedrockRegionDerivesBaseURL(t *testing.T) {
 	t.Parallel()
 

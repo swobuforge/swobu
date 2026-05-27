@@ -147,10 +147,7 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectRequest error: %v", err)
 	}
-	typed, ok := rebuilt.(GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("rebuilt type = %T, want GenerationCanonicalRequest", rebuilt)
-	}
+	typed := rebuilt
 	if got := typed.Model(); got != "gpt-r" {
 		t.Fatalf("model = %q, want %q", got, "gpt-r")
 	}

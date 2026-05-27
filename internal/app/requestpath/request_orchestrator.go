@@ -90,7 +90,7 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	if in.EndpointName.IsZero() {
 		return HandleOutput{}, canonical.BadEndpoint("endpoint name is required")
 	}
-	if in.Request == nil {
+	if strings.TrimSpace(in.Request.Model()) == "" { // swobu:io-string source=boundary
 		return HandleOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	if o.endpoints == nil {
@@ -114,7 +114,7 @@ func (o RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 // It is used by operator-only ephemeral execution paths to reuse exactly the
 // same request orchestration as durable /c/* routes.
 func (o RequestHandler) HandleWithEndpoint(ctx context.Context, endpoint endpointintent.Endpoint, in HandleInput) (HandleOutput, error) {
-	if in.Request == nil {
+	if strings.TrimSpace(in.Request.Model()) == "" { // swobu:io-string source=boundary
 		return HandleOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	if o.providers == nil {
@@ -239,37 +239,18 @@ func materializeRequestForExecution(request canonical.CanonicalRequest, modelID 
 	if strings.TrimSpace(modelID) == "" { // swobu:io-string source=boundary
 		return request
 	}
-	switch typed := request.(type) {
-	case canonical.DialogCanonicalRequest:
-		return canonical.NewDialogRequest(strings.TrimSpace(modelID), typed.Items()) // swobu:io-string source=boundary
-	case canonical.GenerationCanonicalRequest:
-		return canonical.NewGenerationRequest(canonical.GenerationRequestParams{
-			Model:                strings.TrimSpace(modelID), // swobu:io-string source=boundary
-			Thread:               typed.Thread(),
-			LastTurn:             typed.LastTurn(),
-			PreviousResponseID:   typed.PreviousResponseID(),
-			ToolMode:             typed.ToolMode(),
-			PromptCacheKey:       typed.PromptCacheKey(),
-			PromptCacheRetention: typed.PromptCacheRetention(),
-		})
-	case canonical.PromptCanonicalRequest:
-		return canonical.NewPromptRequest(strings.TrimSpace(modelID), typed.Prompt()) // swobu:io-string source=boundary
-	default:
-		return request
-	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:              strings.TrimSpace(modelID), // swobu:io-string source=boundary
+		Items:              request.Items(),
+		LastTurn:           request.LastTurn(),
+		PreviousResponseID: request.PreviousResponseID(),
+		ToolMode:           request.ToolMode(),
+		CacheIntent:        request.CacheIntent(),
+	})
 }
 
 func requestModel(request canonical.CanonicalRequest) string {
-	switch typed := request.(type) {
-	case canonical.DialogCanonicalRequest:
-		return strings.TrimSpace(typed.Model()) // swobu:io-string source=boundary
-	case canonical.GenerationCanonicalRequest:
-		return strings.TrimSpace(typed.Model()) // swobu:io-string source=boundary
-	case canonical.PromptCanonicalRequest:
-		return strings.TrimSpace(typed.Model()) // swobu:io-string source=boundary
-	default:
-		return ""
-	}
+	return strings.TrimSpace(request.Model()) // swobu:io-string source=boundary
 }
 
 func effectiveModelIDForRequest(selectedModelID string) (string, error) {

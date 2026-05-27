@@ -95,3 +95,38 @@ func TestCatalog_ResolveRouteProfile(t *testing.T) {
 		t.Fatal("claude provider spec must be rejected; use anthropic")
 	}
 }
+
+func TestCatalog_ChatGPTProviderProtocols_AreStreamOnly(t *testing.T) {
+	t.Parallel()
+
+	protocols := SupportedProviderProtocolsForSpec("chatgpt")
+	if len(protocols) == 0 {
+		t.Fatal("chatgpt protocols must not be empty")
+	}
+	if SupportsProviderProtocolForSpec("chatgpt", "responses") {
+		t.Fatal("chatgpt must not declare buffered responses protocol")
+	}
+	if !SupportsProviderProtocolForSpec("chatgpt", "responses_stream") {
+		t.Fatal("chatgpt must declare responses_stream protocol")
+	}
+	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("chatgpt"); !ok || got != "responses_stream" {
+		t.Fatalf("chatgpt default protocol = %q (ok=%v), want responses_stream", got, ok)
+	}
+}
+
+func TestCatalog_ConcreteProviderProtocolsForSpec_OrderIsCanonical(t *testing.T) {
+	t.Parallel()
+
+	openAI := ConcreteProviderProtocolsForSpec("openai")
+	if len(openAI) < 2 {
+		t.Fatalf("openai concrete protocols=%v want at least 2", openAI)
+	}
+	if openAI[0] != "responses" || openAI[1] != "responses_stream" {
+		t.Fatalf("openai concrete protocol order=%v want [responses responses_stream ...]", openAI)
+	}
+
+	chatgpt := ConcreteProviderProtocolsForSpec("chatgpt")
+	if len(chatgpt) != 1 || chatgpt[0] != "responses_stream" {
+		t.Fatalf("chatgpt concrete protocols=%v want [responses_stream]", chatgpt)
+	}
+}

@@ -52,7 +52,11 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 			views.ResetFilterablePickerState(setPicker)
 			mode = state.InteractionModePickOne
 		}
-		return []update.Action{state.SetInteractionMode{Mode: mode}}
+		actions := []update.Action{state.SetInteractionMode{Mode: mode}}
+		if nextOpen {
+			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("credential-source-option", 0)})
+		}
+		return actions
 	}, func() []update.Action {
 		if open {
 			setOpen(false)
@@ -63,7 +67,7 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 	var out retained.ViewSpec[state.Model]
 	if !open {
 		out = parent
-		if current == "missing" {
+		if current == views.ValueRequired {
 			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("authentication needed - choose a credential ref to save")...)
 		}
 	} else {
@@ -155,6 +159,19 @@ func credentialOptionItems(
 		}
 		return false
 	}
+	shouldExposeCurrentAsOption := func(providerSpec string, current string) bool {
+		current = strings.TrimSpace(current)           // swobu:io-string source=boundary
+		providerSpec = strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
+		if current == "" || current == views.ValueRequired || current == "signed in" {
+			return false
+		}
+		if strings.EqualFold(providerSpec, "bedrock") && isBedrockAWSProfileCredentialRef(current) {
+			// Bedrock credential picker is mode-only; profile selection is owned by
+			// the dedicated profile row and must not leak encoded refs.
+			return false
+		}
+		return true
+	}
 	descriptors := authModeDescriptorsForSpec(providerSpec)
 	options := make([]option, 0, len(descriptors))
 	for _, descriptor := range descriptors {
@@ -172,15 +189,15 @@ func credentialOptionItems(
 		})
 	}
 	current = strings.TrimSpace(current) // swobu:io-string source=boundary
-	if current != "" && current != "missing" && current != "signed in" && !containsOptionValue(options, current) {
+	if shouldExposeCurrentAsOption(providerSpec, current) && !containsOptionValue(options, current) {
 		options = append([]option{{Value: current, Label: current}}, options...)
 	}
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
 		choice := option
 		items = append(items, views.FilterablePickerItem{
-			Label:    strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
-			Search:   choice.Value + " " + strings.TrimSpace(choice.Label),
+			Label:    strings.TrimSpace(choice.Label),                      // swobu:io-string source=boundary
+			Search:   choice.Value + " " + strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
 			Selected: choice.Value == current,
 			OnChoose: func() []update.Action {
 				if onChoose != nil {
@@ -205,7 +222,7 @@ func credentialOptionRows(
 	for _, item := range items {
 		choice := item
 		rows = append(rows, toolkitviews.ListItemRow[state.Model](
-			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3),
+			toolkitviews.InsetLabel(strings.TrimSpace(choice.Label), 3), // swobu:io-string source=boundary
 			choice.Selected,
 			true,
 			true,

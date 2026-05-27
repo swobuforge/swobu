@@ -37,11 +37,9 @@ func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) Provider
 	}
 	currentProtocol := trimModelInput(next.ProviderProtocol)
 	if currentProtocol == "" || !providercatalog.SupportsProviderProtocolForSpec(spec, currentProtocol) {
-		if def, ok := providercatalog.DefaultProviderProtocolForSpec(spec); ok {
-			next.ProviderProtocol = def
-		} else {
-			next.ProviderProtocol = providercatalog.ProviderProtocolAuto
-		}
+		// TUI defaults to auto for every provider.
+		// Concrete protocol is derived/resolved at execution/probe boundaries.
+		next.ProviderProtocol = providercatalog.ProviderProtocolAuto
 	}
 	next.ProviderSpec = spec
 	defaultBaseURL := trimModelInput(providercatalog.DefaultExecuteBaseURL(spec))

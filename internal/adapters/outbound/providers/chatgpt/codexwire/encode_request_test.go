@@ -54,8 +54,8 @@ func TestRealize_NormalizesCodexPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected object content[0], got %#v", content[0])
 	}
-	if got := part["type"]; got != "output_text" {
-		t.Fatalf("expected content type output_text, got %#v", got)
+	if got := part["type"]; got != "input_text" {
+		t.Fatalf("expected content type input_text, got %#v", got)
 	}
 }
 

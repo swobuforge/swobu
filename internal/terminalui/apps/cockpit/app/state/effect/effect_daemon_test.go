@@ -38,11 +38,11 @@ func TestLoadJSON_ModelProbe404_HasStaleDaemonHint(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := loadJSON[map[string]any](context.Background(), srv.URL+"/_swobu/model-catalog/probe?provider_spec=openai")
+	_, err := loadJSON[map[string]any](context.Background(), srv.URL+"/_swobu/model-catalog?provider_spec=openai")
 	if err == nil {
 		t.Fatal("loadJSON returned nil error, want stale-daemon hint")
 	}
-	if !strings.Contains(err.Error(), "/_swobu/model-catalog/probe") {
+	if !strings.Contains(err.Error(), "/_swobu/model-catalog") {
 		t.Fatalf("error = %q, want probe route hint", err.Error())
 	}
 }
@@ -70,7 +70,7 @@ func TestLoadJSON_AllowsUnknownFields(t *testing.T) {
 
 func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/_swobu/model-catalog/probe" {
+		if r.URL.Path != "/_swobu/model-catalog" {
 			http.NotFound(w, r)
 			return
 		}
@@ -108,7 +108,7 @@ func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) 
 
 func TestLoadRoutingModelCatalogEffect_ChatGPTTierlessCredentialErrorSurfaced(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/_swobu/model-catalog/probe" {
+		if r.URL.Path != "/_swobu/model-catalog" {
 			http.NotFound(w, r)
 			return
 		}

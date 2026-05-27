@@ -32,7 +32,7 @@ func buildProviderModelChoiceRow(ctx *retained.Context[state.Model], spec provid
 	}
 	return retained.VStack(
 		ctx,
-		views.RowStatic(views.RowModel, "blocked"),
+		views.RowStatic(views.RowModel, views.ValueBlocked),
 		views.RowStatic("", "-> model selection requires catalog-backed provider"),
 	)
 }
@@ -48,7 +48,7 @@ func providerModelCatalogChoicesAvailable(w providerModelChoiceRowSpec) bool {
 func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w providerModelChoiceRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	if w.ProviderConfig == nil {
-		return views.RowStatic(views.RowModel, "blocked")
+		return views.RowStatic(views.RowModel, views.ValueBlocked)
 	}
 	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
 		ProviderSpec:      strings.TrimSpace(w.ProviderConfig.ProviderSpec),  // swobu:io-string source=boundary
@@ -57,7 +57,7 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		ModelCatalogError: model.AddModelDraftModelError,
 	})
 	if readiness.Blocked {
-		blockedRows := []retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, "blocked")}
+		blockedRows := []retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, views.ValueBlocked)}
 		if message := strings.TrimSpace(readiness.Message); message != "" { // swobu:io-string source=boundary
 			blockedRows = append(blockedRows, views.DisclosureNoteRows(message)...)
 		}
@@ -65,7 +65,7 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 	}
 	current := selectedModelID(model, w.ProviderConfig, w.CreateMode)
 	if current == "" {
-		current = "not set"
+		current = views.ValueRequired
 	}
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })

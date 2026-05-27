@@ -95,12 +95,21 @@ func ProviderModelCatalogAuthFailed(probeError string) bool {
 	return false
 }
 
-func ProviderModelCatalogAuthFailureMessage(probeError string) string {
+func ProviderModelCatalogAuthFailureMessage(provider string, credentialRef string, probeError string) string {
 	trimmed := strings.TrimSpace(probeError) // swobu:io-string source=boundary
 	if !ProviderModelCatalogAuthFailed(trimmed) {
 		return ""
 	}
-	return trimmed
+	normalized := strings.TrimSpace(strings.TrimPrefix(trimmed, "BAD_ENDPOINT:")) // swobu:io-string source=boundary
+	if strings.EqualFold(normalized, "chatgpt subscription tier could not be resolved from credential") {
+		if strings.EqualFold(strings.TrimSpace(provider), "chatgpt") && // swobu:io-string source=boundary
+			!ProviderCredentialVariantIsInteractive(provider, credentialRef) &&
+			strings.TrimSpace(credentialRef) != "" { // swobu:io-string source=boundary
+			return "signed-in account could not resolve ChatGPT subscription tier; sign in another account"
+		}
+		return "sign in to resolve ChatGPT subscription tier"
+	}
+	return normalized
 }
 
 func credentialSource(credentialRef string) string {

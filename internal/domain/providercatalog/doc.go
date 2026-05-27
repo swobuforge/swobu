@@ -6,6 +6,9 @@
 // provider auth mode to concrete credential threading semantics (env/file/
 // interactive/AWS chain) used by runtime and proof lanes.
 //
+// Cache control capability facts are also owned here and are route-scoped
+// (`provider + protocol`), not provider-marketing scoped.
+//
 // Runtime adapter dispatch is owned by outbound provider composition, not by
 // this catalog.
 package providercatalog

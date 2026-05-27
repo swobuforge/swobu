@@ -18,18 +18,6 @@ type RoutingModelCatalogLoaded struct {
 	ResolvedProviderProtocol string
 }
 
-// CreateDraftModelProbeCompletedAction carries the result of one real execution
-// probe for create-draft readiness.
-type CreateDraftModelProbeCompletedAction struct {
-	ProviderSpec             string
-	BaseURL                  string
-	CredentialRef            string
-	ModelID                  string
-	ProviderProtocol         string
-	Error                    string
-	ResolvedProviderProtocol string
-}
-
 func normalizeOperatorSurfaceError(err error) string {
 	message := strings.TrimSpace(err.Error())                                    // swobu:io-string source=boundary
 	message = strings.TrimSpace(strings.TrimPrefix(message, "operator client:")) // swobu:io-string source=boundary

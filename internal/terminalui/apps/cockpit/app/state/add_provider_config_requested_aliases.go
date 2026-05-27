@@ -46,4 +46,3 @@ type StartProviderAuthSessionRequested = stateIntent.StartProviderAuthSessionReq
 type ResetAuthSessionUIRequestedAction = stateIntent.ResetAuthSessionUIRequestedAction
 type ResetAddModelAuthUIRequested = stateIntent.ResetAddModelAuthUIRequested
 type LoadRoutingModelCatalogRequestedAction = stateIntent.LoadRoutingModelCatalogRequestedAction
-type ProbeCreateDraftModelRequestedAction = stateIntent.ProbeCreateDraftModelRequestedAction

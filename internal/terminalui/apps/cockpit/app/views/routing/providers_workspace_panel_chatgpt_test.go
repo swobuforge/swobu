@@ -6,6 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 )
 
 func TestAddModelCreateReady_ChatGPTDoesNotRequireCredentialRef(t *testing.T) {
@@ -86,8 +87,29 @@ func TestAddModelCredentialSummary_InteractiveVariantShowsSignedInAfterResolutio
 		ProviderSpec:  "chatgpt",
 		CredentialRef: "chatgpt_login",
 	}
-	if got := addModelCredentialSummary(model, draft); got != "signed in" {
+	if got := addModelCredentialSummary(model, "acme", draft); got != "signed in" {
 		t.Fatalf("summary=%q want signed in", got)
+	}
+}
+
+func TestAddModelCredentialSummary_ResolvedPendingSessionShowsReauthInProgress(t *testing.T) {
+	t.Parallel()
+
+	ownerKey := stateModel.AddModelDraftAuthOwnerKey("acme", "cfg-a").String()
+	model := state.Model{
+		AddModelDraftProviderSpec:  "chatgpt",
+		AddModelDraftCredentialRef: "keychain:chatgpt/default",
+		AuthSessions: map[string]stateModel.AuthSessionViewState{
+			ownerKey: {SessionID: "sess-1", SessionState: "pending"},
+		},
+	}
+	draft := state.ProviderConfigSnapshot{
+		Ref:           "cfg-a",
+		ProviderSpec:  "chatgpt",
+		CredentialRef: "chatgpt_login",
+	}
+	if got := addModelCredentialSummary(model, "acme", draft); got != "signed in (re-auth in progress)" {
+		t.Fatalf("summary=%q want signed in (re-auth in progress)", got)
 	}
 }
 
@@ -99,7 +121,7 @@ func TestAddModelCredentialSummary_UsesDisplayLabelForAuthVariant(t *testing.T) 
 		ProviderSpec:  "chatgpt",
 		CredentialRef: "chatgpt_device_auth",
 	}
-	if got := addModelCredentialSummary(model, draft); got != "device code" {
+	if got := addModelCredentialSummary(model, "acme", draft); got != "device code" {
 		t.Fatalf("summary=%q want device code", got)
 	}
 }
@@ -112,8 +134,8 @@ func TestAddModelCredentialSummary_MissingWhenUnset(t *testing.T) {
 		ProviderSpec:  "chatgpt",
 		CredentialRef: "",
 	}
-	if got := addModelCredentialSummary(model, draft); got != "missing" {
-		t.Fatalf("summary=%q want missing", got)
+	if got := addModelCredentialSummary(model, "acme", draft); got != views.ValueRequired {
+		t.Fatalf("summary=%q want %s", got, views.ValueRequired)
 	}
 }
 

@@ -51,11 +51,10 @@ func resolveBedrockOperation(providerProtocol string) (bedrockDispatchPlan, erro
 }
 
 func bedrockMessagesFromRequest(req canonical.CanonicalRequest) ([]bedrocktypes.Message, error) {
-	dialog, err := coerceDialogRequest(req)
-	if err != nil {
-		return nil, err
+	items := req.Items()
+	if len(items) == 0 {
+		return nil, canonical.BadRequest("request does not contain replayable conversation input")
 	}
-	items := dialog.Items()
 	out := make([]bedrocktypes.Message, 0, len(items))
 	for _, item := range items {
 		if item.Kind != canonical.ItemKindText {
@@ -68,21 +67,6 @@ func bedrockMessagesFromRequest(req canonical.CanonicalRequest) ([]bedrocktypes.
 		out = append(out, bedrocktypes.Message{Role: role, Content: []bedrocktypes.ContentBlock{&bedrocktypes.ContentBlockMemberText{Value: item.Text}}})
 	}
 	return out, nil
-}
-
-func coerceDialogRequest(req canonical.CanonicalRequest) (canonical.DialogCanonicalRequest, error) {
-	switch typed := req.(type) {
-	case canonical.DialogCanonicalRequest:
-		return typed, nil
-	case canonical.GenerationCanonicalRequest:
-		thread := typed.Thread()
-		if len(thread) == 0 {
-			return canonical.DialogCanonicalRequest{}, canonical.BadRequest("response request does not contain replayable conversation input")
-		}
-		return canonical.NewDialogRequest(typed.Model(), thread), nil
-	default:
-		return canonical.DialogCanonicalRequest{}, canonical.UnsupportedOperation("bedrock converse does not implement this canonical semantic request")
-	}
 }
 
 func decodeConverseOutput(out *bedrockruntime.ConverseOutput) (text string, stopReason string, usage canonical.TokenUsage) {
@@ -228,24 +212,15 @@ func bedrockTextAt(root map[string]any, path ...string) string {
 }
 
 func bedrockModelFromRequest(req canonical.CanonicalRequest) string {
-	switch typed := req.(type) {
-	case canonical.DialogCanonicalRequest:
-		return typed.Model()
-	case canonical.GenerationCanonicalRequest:
-		return typed.Model()
-	case canonical.PromptCanonicalRequest:
-		return typed.Model()
-	default:
-		return ""
-	}
+	return req.Model()
 }
 
 func classifyBedrockSDKError(err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := strings.TrimSpace(err.Error())
-	lower := strings.ToLower(msg)
+	msg := strings.TrimSpace(err.Error()) // swobu:io-string source=boundary
+	lower := strings.ToLower(msg)         // swobu:io-string source=boundary
 	if strings.Contains(lower, "accessdenied") || strings.Contains(lower, "forbidden") || strings.Contains(lower, "statuscode: 403") {
 		return canonical.NewBackendError("bedrock", http.StatusForbidden, msg, "")
 	}

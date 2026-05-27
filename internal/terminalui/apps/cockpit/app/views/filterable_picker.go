@@ -116,6 +116,9 @@ func handleFilterablePickerEvent(
 func handleFilterableKeyUp(cur FilterablePickerState, setState func(FilterablePickerState), filteredNow []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
 	cur.IgnoreNextEnter = false
 	if len(filteredNow) == 0 || cur.Cursor <= 0 {
+		if cfg.OnCancel != nil {
+			return true, cfg.OnCancel()
+		}
 		return true, nil
 	}
 	cur.Cursor--
@@ -129,6 +132,9 @@ func handleFilterableKeyUp(cur FilterablePickerState, setState func(FilterablePi
 func handleFilterableKeyDown(cur FilterablePickerState, setState func(FilterablePickerState), filteredNow []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
 	cur.IgnoreNextEnter = false
 	if len(filteredNow) == 0 || cur.Cursor >= len(filteredNow)-1 {
+		if cfg.OnCancel != nil {
+			return true, cfg.OnCancel()
+		}
 		return true, nil
 	}
 	cur.Cursor++

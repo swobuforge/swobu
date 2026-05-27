@@ -145,7 +145,7 @@ func buildCreateRunOnRow(
 						nextBaseURL = bedrockBaseURLForRegion(region)
 					}
 				}
-				nextVariant, _ := providercatalog.DefaultProviderProtocolForSpec(specChoice)
+				nextVariant := providercatalog.ProviderProtocolAuto
 				return []update.Action{
 					state.SetCreateDraftProviderSpec{ProviderSpec: specChoice},
 					state.SetCreateDraftCredentialRef{CredentialRef: ""},
@@ -205,7 +205,10 @@ func buildCreateUseKeyFromRow(
 		closeCreateTransients()
 		setKeyPickerState("source-open")
 		views.ResetFilterablePickerState(setPickerState)
-		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
+		return []update.Action{
+			state.SetInteractionMode{Mode: state.InteractionModePickOne},
+			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("create-credential-source-option", 0)},
+		}
 	}, nil, views.FocusAffordance("choose", false))
 	if strings.TrimSpace(keyPickerState) != "source-open" { // swobu:io-string source=boundary
 		return useKeyFrom

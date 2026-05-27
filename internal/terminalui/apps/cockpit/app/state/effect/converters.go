@@ -27,8 +27,9 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}
-	if strings.TrimSpace(pc.ProviderProtocol) != "" { // swobu:io-string source=boundary
-		config, err = config.WithProviderProtocol(pc.ProviderProtocol)
+	providerProtocol := strings.TrimSpace(pc.ProviderProtocol) // swobu:io-string source=boundary
+	if providerProtocol != "" && providerProtocol != "auto" {
+		config, err = config.WithProviderProtocol(providerProtocol)
 		if err != nil {
 			return endpointintent.ProviderConfig{}, err
 		}

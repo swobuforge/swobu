@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	httpcodec "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/httpcodec"
-	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
+	streamwire "github.com/swobuforge/swobu/internal/adapters/wire/shared/streamwire"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -14,11 +14,11 @@ import (
 // -> response.output_text.delta -> response.output_text.done -> response.content_part.done
 // -> response.output_item.done -> response.completed
 func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.T) {
-	encoder := responses.NewResponsesClientStreamEncoderWire()
-	events := []httpcodec.StreamEvent{
-		{Kind: httpcodec.StreamEventStarted, ResultID: "resp_1", Model: "m"},
-		{Kind: httpcodec.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: httpcodec.StreamEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
+	encoder := responses.NewResponseStreamWireEncoder()
+	events := []streamwire.StreamEvent{
+		{Kind: streamwire.StreamEventStarted, ResultID: "resp_1", Model: "m"},
+		{Kind: streamwire.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: streamwire.StreamEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
 	}
 
 	frames := encodeAllFrames(t, &encoder, events)
@@ -71,13 +71,13 @@ func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.
 }
 
 func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T) {
-	encoder := responses.NewResponsesClientStreamEncoderWire()
-	events := []httpcodec.StreamEvent{
-		{Kind: httpcodec.StreamEventStarted, ResultID: "resp_2", Model: "m"},
-		{Kind: httpcodec.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: httpcodec.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
-		{Kind: httpcodec.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: httpcodec.StreamEventCompleted, FinishReason: "completed"},
+	encoder := responses.NewResponseStreamWireEncoder()
+	events := []streamwire.StreamEvent{
+		{Kind: streamwire.StreamEventStarted, ResultID: "resp_2", Model: "m"},
+		{Kind: streamwire.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: streamwire.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
+		{Kind: streamwire.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: streamwire.StreamEventCompleted, FinishReason: "completed"},
 	}
 	frames := encodeAllFrames(t, &encoder, events)
 	types := eventTypes(frames)
@@ -100,7 +100,7 @@ func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T)
 }
 
 func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
-	encoder := responses.NewResponsesClientStreamEncoderWire()
+	encoder := responses.NewResponseStreamWireEncoder()
 	input, output := 5, 2
 	cacheRead, cacheWrite := 0, 0
 	usage, err := canonical.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
@@ -108,10 +108,10 @@ func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroBut
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 
-	frames := encodeAllFrames(t, &encoder, []httpcodec.StreamEvent{
-		{Kind: httpcodec.StreamEventStarted, ResultID: "resp_usage_1", Model: "m"},
-		{Kind: httpcodec.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: httpcodec.StreamEventCompleted, Usage: usage},
+	frames := encodeAllFrames(t, &encoder, []streamwire.StreamEvent{
+		{Kind: streamwire.StreamEventStarted, ResultID: "resp_usage_1", Model: "m"},
+		{Kind: streamwire.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: streamwire.StreamEventCompleted, Usage: usage},
 	})
 
 	completed := frames[len(frames)-1]
@@ -129,11 +129,11 @@ func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroBut
 	}
 }
 
-func encodeAllFrames(t *testing.T, encoder *responses.ResponsesClientStreamEncoderWire, events []httpcodec.StreamEvent) []map[string]any {
+func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder, events []streamwire.StreamEvent) []map[string]any {
 	t.Helper()
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {
-		frames, err := encoder.Encode(httpcodec.StreamEvent{
+		frames, err := encoder.Encode(streamwire.StreamEvent{
 			Kind:           event.Kind,
 			ResultID:       event.ResultID,
 			Model:          event.Model,

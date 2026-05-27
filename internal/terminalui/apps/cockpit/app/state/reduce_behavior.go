@@ -45,12 +45,8 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		return nil
 	case LoadRoutingModelCatalogRequestedAction:
 		return handleLoadRoutingModelCatalogRequested(model, value)
-	case ProbeCreateDraftModelRequestedAction:
-		return handleProbeCreateDraftModelRequested(model, value)
 	case stateeffect.RoutingModelCatalogLoaded:
 		return handleRoutingModelCatalogLoaded(model, value)
-	case stateeffect.CreateDraftModelProbeCompletedAction:
-		return handleCreateDraftModelProbeCompleted(model, value)
 	case FocusNextAfterRebuildRequested:
 		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
 	case EndpointCopyRequested:
@@ -212,36 +208,13 @@ func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
 }
 
 func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef, providerProtocol string) bool {
-	normalizedScope := strings.TrimSpace(scope)
-	if normalizedScope == RoutingModelCatalogScopeCreateDraft {
-		if strings.TrimSpace(model.CreateDraftModelProviderSpec) != providerSpec { // swobu:io-string source=boundary
-			return false
-		}
-		if strings.TrimSpace(model.CreateDraftModelBaseURL) != baseURL { // swobu:io-string source=boundary
-			return false
-		}
-		if strings.TrimSpace(model.CreateDraftModelCredentialRef) != credentialRef { // swobu:io-string source=boundary
-			return false
-		}
-		if strings.TrimSpace(model.CreateDraftProviderConfig.ProviderProtocol) != providerProtocol { // swobu:io-string source=boundary
-			return false
-		}
-		return true
+	id := newRoutingProbeIdentity(scope, providerSpec, baseURL, credentialRef)
+	_ = strings.TrimSpace(providerProtocol) // provider protocol does not key model-catalog identity // swobu:io-string source=boundary
+	if id.Scope == RoutingModelCatalogScopeCreateDraft {
+		return id.matchesCreateDraft(model)
 	}
-	if normalizedScope == RoutingModelCatalogScopeAddModelDraft {
-		if strings.TrimSpace(model.AddModelDraftProviderSpec) != providerSpec { // swobu:io-string source=boundary
-			return false
-		}
-		if strings.TrimSpace(model.AddModelDraftBaseURL) != baseURL { // swobu:io-string source=boundary
-			return false
-		}
-		if strings.TrimSpace(model.AddModelDraftCredentialRef) != credentialRef { // swobu:io-string source=boundary
-			return false
-		}
-		if strings.TrimSpace(model.AddModelDraftProviderProtocol) != providerProtocol { // swobu:io-string source=boundary
-			return false
-		}
-		return true
+	if id.Scope == RoutingModelCatalogScopeAddModelDraft {
+		return id.matchesAddModelDraft(model)
 	}
 	return false
 }

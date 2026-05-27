@@ -83,8 +83,8 @@ func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, 
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	next.BaseURL = resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, strings.TrimSpace(next.BaseURL))
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/env") // swobu:io-string source=boundary
+	next.BaseURL = resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, strings.TrimSpace(next.BaseURL)) // swobu:io-string source=boundary
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/env")              // swobu:io-string source=boundary
 }
 
 func resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, currentBaseURL string) string {

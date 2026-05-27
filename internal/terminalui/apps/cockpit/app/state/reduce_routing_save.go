@@ -186,11 +186,22 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 		model.HeaderStatus = "login complete"
 		model.InteractionMode = InteractionModeManageList
 		clearSaveErrors(model)
-		model.CreateDraftProviderConfig.ProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
-		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)           // swobu:io-string source=boundary
-		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef)              // swobu:io-string source=boundary
-		clearAuthSession(model, strings.TrimSpace(value.OwnerKey))                                          // swobu:io-string source=boundary
-		return nil
+		model.CreateDraftProviderConfig.ProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec)  // swobu:io-string source=boundary
+		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)            // swobu:io-string source=boundary
+		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef)               // swobu:io-string source=boundary
+		model.CreateDraftModelProviderSpec = strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) // swobu:io-string source=boundary
+		model.CreateDraftModelBaseURL = strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)           // swobu:io-string source=boundary
+		model.CreateDraftModelCredentialRef = strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef)
+		model.CreateDraftModelError = ""
+		model.CreateDraftModelProbePending = true
+		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
+		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+			Scope:            RoutingModelCatalogScopeCreateDraft,
+			ProviderSpec:     strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec),  // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL),       // swobu:io-string source=boundary
+			CredentialRef:    strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef), // swobu:io-string source=boundary
+			ProviderProtocol: strings.TrimSpace(model.CreateDraftProviderConfig.ProviderProtocol),
+		}}
 	}
 	if stateModel.AuthOwnerKey(strings.TrimSpace(value.OwnerKey)).IsAddModelDraft() { // swobu:io-string source=boundary
 		model.HeaderStatus = "login complete"
@@ -199,8 +210,16 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 		model.AddModelDraftProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
 		model.AddModelDraftBaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)           // swobu:io-string source=boundary
 		model.AddModelDraftCredentialRef = strings.TrimSpace(value.CredentialRef)              // swobu:io-string source=boundary
-		clearAuthSession(model, strings.TrimSpace(value.OwnerKey))                             // swobu:io-string source=boundary
-		return nil
+		model.AddModelDraftModelError = ""
+		model.AddModelDraftModelProbePending = true
+		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
+		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+			Scope:            RoutingModelCatalogScopeAddModelDraft,
+			ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),     // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),          // swobu:io-string source=boundary
+			CredentialRef:    strings.TrimSpace(model.AddModelDraftCredentialRef),    // swobu:io-string source=boundary
+			ProviderProtocol: strings.TrimSpace(model.AddModelDraftProviderProtocol), // swobu:io-string source=boundary
+		}}
 	}
 	next := value.ProviderConfig
 	next.CredentialRef = strings.TrimSpace(value.CredentialRef) // swobu:io-string source=boundary

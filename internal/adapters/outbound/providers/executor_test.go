@@ -124,3 +124,55 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai validate credentials failed: %v", err)
 	}
 }
+
+func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_1","model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "m",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{
+			Key:       "repo-alpha",
+			Retention: canonical.CacheRetention24H,
+		}),
+	})
+
+	openAIResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
+		request,
+		ports.NewExecutionContract(false),
+		ports.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
+	))
+	if err != nil {
+		t.Fatalf("openai execution failed: %v", err)
+	}
+	if got := openAIResp.Metadata().DegradationWarnings; len(got) != 0 {
+		t.Fatalf("openai degradation warnings = %#v, want none", got)
+	}
+
+	ollamaResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
+		request,
+		ports.NewExecutionContract(false),
+		ports.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
+	))
+	if err != nil {
+		t.Fatalf("ollama execution failed: %v", err)
+	}
+	warnings := ollamaResp.Metadata().DegradationWarnings
+	if len(warnings) != 1 {
+		t.Fatalf("ollama degradation warnings len=%d want 1 (%#v)", len(warnings), warnings)
+	}
+	if warnings[0].Code != "cache_retention_unsupported" {
+		t.Fatalf("ollama degradation warning code=%q", warnings[0].Code)
+	}
+}

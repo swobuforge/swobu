@@ -27,18 +27,15 @@ func bedrockAuthProfileEditor(spec bedrockAuthProfileEditorSpec) retained.ViewSp
 		}
 		profiles := bedrockDiscoveredAWSProfiles()
 		profile := trimRoutingInput(bedrockProfileFromCredentialRef(pc.CredentialRef))
-		if profile == "" {
-			profile = bedrockDefaultProfileFromEnvOrList(profiles)
-		}
 		return bedrockProfilePickerRow(ctx, bedrockProfilePickerRowSpec{
-			Summary:   selectorsEmptyOr(profile, "no profiles found"),
+			Summary:   bedrockProfileSummary(profile),
 			Current:   profile,
 			Profiles:  profiles,
 			CloseMode: state.InteractionModeManageList,
 			FocusKey:  "profile",
 			OnSave: func(value string) []update.Action {
 				ref := encodeBedrockProfileCredentialRef(value)
-				if strings.TrimSpace(ref) == "" {
+				if strings.TrimSpace(ref) == "" { // swobu:io-string source=boundary
 					return nil
 				}
 				if spec.CreateMode {
@@ -148,11 +145,8 @@ func addModelBedrockAuthProfileEditor(ctx *retained.Context[state.Model], draft 
 	}
 	profiles := bedrockDiscoveredAWSProfiles()
 	profile := trimRoutingInput(bedrockProfileFromCredentialRef(draft.CredentialRef))
-	if profile == "" {
-		profile = bedrockDefaultProfileFromEnvOrList(profiles)
-	}
 	return bedrockProfilePickerRow(ctx, bedrockProfilePickerRowSpec{
-		Summary:   selectorsEmptyOr(profile, "no profiles found"),
+		Summary:   bedrockProfileSummary(profile),
 		Current:   profile,
 		Profiles:  profiles,
 		CloseMode: state.InteractionModeManageList,

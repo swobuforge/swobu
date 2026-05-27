@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,11 +14,12 @@ import (
 	"time"
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
-	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt/codexwire"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -60,7 +62,7 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 }
 
 func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
-	if req.Request == nil {
+	if strings.TrimSpace(req.Request.Model()) == "" {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
 	streaming, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
@@ -138,7 +140,12 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		defer func() { _ = resp.Body.Close() }()
 		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	decoder, err := chatGPTResponseDecoder(req.Target.ProviderID(), streaming)
+	codec, err := protocolregistry.ForProtocolKind(protocolkind.Responses)
+	if err != nil {
+		_ = resp.Body.Close()
+		return ports.ProviderResponse{}, err
+	}
+	decoder, err := chatGPTResponseDecoder(req.Target.ProviderID(), streaming, codec)
 	if err != nil {
 		_ = resp.Body.Close()
 		return ports.ProviderResponse{}, err
@@ -250,7 +257,7 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 }
 
 func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
-	tier, ok := resolveChatGPTSubscriptionTier(target.CredentialRef)
+	tier, ok := e.resolveChatGPTSubscriptionTier(ctx, target.ProviderID(), target.CredentialRef)
 	if !ok {
 		return nil, canonical.BadEndpoint("chatgpt subscription tier could not be resolved from credential")
 	}
@@ -266,26 +273,51 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	return models, nil
 }
 
+func (e ProviderExecutorAdapter) resolveChatGPTSubscriptionTier(_ context.Context, providerSpec string, credentialRef string) (string, bool) {
+	raw, err := outboundcredentials.ResolveStoredSecretByRef(providerSpec, credentialRef)
+	if err != nil {
+		return "", false
+	}
+	bundle, isBundle, err := outboundcredentials.DecodeTokenBundle(raw)
+	if err != nil || !isBundle {
+		return "", false
+	}
+	return parseChatGPTSubscriptionTierFromIDToken(bundle.IDToken)
+}
+
 func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
 	_, err := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, false)
 	return err
 }
 
-func resolveChatGPTSubscriptionTier(credentialRef string) (string, bool) {
-	ref := strings.ToLower(strings.TrimSpace(credentialRef)) // swobu:io-string source=boundary
-	for _, tier := range []string{"team", "pro", "plus", "free"} {
-		if strings.Contains(ref, "/"+tier) || strings.Contains(ref, ":"+tier) || strings.Contains(ref, "_"+tier) || strings.Contains(ref, "-"+tier) {
-			return tier, true
-		}
+func parseChatGPTSubscriptionTierFromIDToken(idToken string) (string, bool) {
+	idToken = strings.TrimSpace(idToken) // swobu:io-string source=boundary
+	if idToken == "" {
+		return "", false
 	}
-	if raw, err := url.QueryUnescape(ref); err == nil {
-		for _, tier := range []string{"team", "pro", "plus", "free"} {
-			if strings.Contains(raw, "tier="+tier) {
-				return tier, true
-			}
-		}
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return "", false
 	}
-	return "", false
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", false
+	}
+	var claims struct {
+		Auth struct {
+			ChatGPTPlanType string `json:"chatgpt_plan_type"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", false
+	}
+	planType := strings.ToLower(strings.TrimSpace(claims.Auth.ChatGPTPlanType)) // swobu:io-string source=provider-wire
+	switch planType {
+	case "free", "plus", "pro", "team":
+		return planType, true
+	default:
+		return "", false
+	}
 }
 
 func resolveChatGPTExecuteBaseURL(raw string) string {
@@ -303,12 +335,12 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 	return strings.TrimRight(base, "/")
 }
 
-func chatGPTResponseDecoder(providerIDRaw string, streaming bool) (providersruntime.ResponseDecoder, error) {
+func chatGPTResponseDecoder(providerIDRaw string, streaming bool, codec protocolregistry.EgressCodec) (providersruntime.ResponseDecoder, error) {
 	if providerIDRaw != string(providercatalog.ProviderSpecChatGPT) {
 		return nil, canonical.BadEndpoint("provider id is unsupported for chatgpt adapter runtime")
 	}
 	streamingDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		return ports.NewEnvelopeStreamingProviderResponse(responses.DecodeResponseStream(body, "provider_stream:chatgpt_responses")), nil
+		return ports.NewEnvelopeStreamingProviderResponse(codec.DecodeResponseStream(body, "provider_stream:chatgpt_responses")), nil
 	}
 	bufferedDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
 		defer func() { _ = body.Close() }()
@@ -316,7 +348,7 @@ func chatGPTResponseDecoder(providerIDRaw string, streaming bool) (providersrunt
 		if err != nil {
 			return ports.ProviderResponse{}, canonical.InternalError("backend success response could not be read")
 		}
-		result, err := responses.DecodeResponseBuffered(raw)
+		result, err := codec.DecodeResponse(raw)
 		if err != nil {
 			return ports.ProviderResponse{}, err
 		}
@@ -338,11 +370,9 @@ func resolveChatGPTProviderProtocol(providerProtocol string) (bool, error) {
 		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
 	}
 	switch providerProtocol {
-	case "responses":
-		return false, nil
 	case "responses_stream":
 		return true, nil
 	default:
-		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
+		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
 	}
 }

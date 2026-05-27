@@ -187,7 +187,7 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
 			Ref:              state.DraftProviderRef,
 			ProviderSpec:     "openai",
-			ProviderProtocol: "protocol_auto",
+			ProviderProtocol: "auto",
 			CredentialRef:    "env:OPENAI_API_KEY",
 			ModelID:          "gpt-5.3",
 		},
@@ -334,7 +334,7 @@ func TestRoot_OpenCodePayloadKeepsFooterVisibleInCompactViewport(t *testing.T) {
 	if !strings.Contains(out, "↑↓ move") || !strings.Contains(out, "tab tabs") {
 		t.Fatalf("expected footer hints visible in compact viewport during long payload disclosure; render=%q", out)
 	}
-	if !strings.Contains(out, "SWOBU 🧌") {
+	if !strings.Contains(out, "⛉ SWOBU") {
 		t.Fatalf("expected header rail visible in compact viewport during long payload disclosure; render=%q", out)
 	}
 }
@@ -702,7 +702,7 @@ func TestRoot_EscClosesAddModelProviderDrawer(t *testing.T) {
 						Ref:              "ollama:gemma4",
 						ProviderSpec:     "ollama",
 						ModelID:          "gemma4:e4b",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "",
 					},
 				},
@@ -762,7 +762,7 @@ func TestRoot_WorkspaceAddModelSelectingFileCredentialShowsFileRow(t *testing.T)
 						Ref:              "ollama:gemma4",
 						ProviderSpec:     "ollama",
 						ModelID:          "gemma4:e4b",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 					},
 				},
 			},
@@ -811,7 +811,7 @@ func TestRoot_WorkspaceAddModelCredentialSourceToggleDoesNotPanicAndKeepsRowsCoh
 						Ref:              "ollama:gemma4",
 						ProviderSpec:     "ollama",
 						ModelID:          "gemma4:e4b",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 					},
 				},
 			},
@@ -883,14 +883,14 @@ func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 						Ref:              "openai:gpt-5.3",
 						ProviderSpec:     "openai",
 						ModelID:          "gpt-5.3",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "env:OPENAI_API_KEY",
 					},
 					{
 						Ref:              "anthropic:opus",
 						ProviderSpec:     "anthropic",
 						ModelID:          "opus",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "env:ANTHROPIC_API_KEY",
 					},
 				},
@@ -942,7 +942,7 @@ func TestRoot_RoutingAliasEditsInline(t *testing.T) {
 						Ref:              "chatgpt:gpt-5.3-codex:model-1",
 						ProviderSpec:     "chatgpt",
 						ModelID:          "gpt-5.3-codex",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "chatgpt_login",
 					},
 				},
@@ -1020,8 +1020,8 @@ func TestRoot_FirstRunChatGPTBrowserLogin_ShowsAuthFlowRows(t *testing.T) {
 		!strings.Contains(strings.ToLower(out), "chatgpt · browser login") {
 		t.Fatalf("first-run browser login rows missing: %q", out)
 	}
-	if strings.Contains(out, "sign in") && !strings.Contains(out, "use device code") {
-		t.Fatalf("first-run browser login fallback missing: %q", out)
+	if strings.Contains(out, "use device code") {
+		t.Fatalf("first-run browser login should not show fallback before browser-start failure: %q", out)
 	}
 }
 
@@ -1138,7 +1138,7 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 						Ref:              "openai:gpt-3.5-turbo",
 						ProviderSpec:     "openai",
 						ModelID:          "gpt-3.5-turbo",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "env:OPENAI_API_KEY",
 					},
 				},
@@ -1160,7 +1160,6 @@ func TestRoot_ChatGPTAddModelAuthFlowVisualGrammar(t *testing.T) {
 		rt := newTestRuntime(base)
 		rt.Rebuild(Root(), viewport)
 		openAddModelAndChooseProvider(t, rt, viewport, "ChatGPT")
-		chooseAddModelAuthOption(t, rt, viewport, "device code")
 		rt.Dispatch([]update.Action{
 			stateeffect.ProviderAuthSessionStarted{
 				EndpointName: "acme",
@@ -1225,14 +1224,14 @@ func TestRoot_EscOnExpandedRoutingModelClosesNearestModelDisclosure(t *testing.T
 						Ref:              "openai:gpt-5.3",
 						ProviderSpec:     "openai",
 						ModelID:          "gpt-5.3",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "env:OPENAI_API_KEY",
 					},
 					{
 						Ref:              "anthropic:opus",
 						ProviderSpec:     "anthropic",
 						ModelID:          "opus",
-						ProviderProtocol: "protocol_auto",
+						ProviderProtocol: "auto",
 						CredentialRef:    "env:ANTHROPIC_API_KEY",
 					},
 				},

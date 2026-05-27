@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -112,6 +114,17 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 		return aws.Config{}, canonical.BadEndpoint("bedrock auth mode is unsupported")
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, loadOptions...)
+	if err != nil && mode == bedrockAuthModeAWSProfile && trimBedrockInput(profile) != "" {
+		sharedConfig, sharedCreds, ok := defaultAWSSharedFiles()
+		if ok {
+			fallbackOpts := append([]func(*config.LoadOptions) error{}, loadOptions...)
+			fallbackOpts = append(fallbackOpts,
+				config.WithSharedConfigFiles([]string{sharedConfig}),
+				config.WithSharedCredentialsFiles([]string{sharedCreds}),
+			)
+			cfg, err = config.LoadDefaultConfig(ctx, fallbackOpts...)
+		}
+	}
 	if err != nil {
 		if trimBedrockInput(profile) != "" {
 			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS profile %q could not be loaded", profile))
@@ -176,10 +189,39 @@ func bedrockRegionFromSDKConfig(ctx context.Context, profile string) string {
 		opts = append(opts, config.WithSharedConfigProfile(trimBedrockInput(profile)))
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	if err != nil && trimBedrockInput(profile) != "" {
+		sharedConfig, sharedCreds, ok := defaultAWSSharedFiles()
+		if ok {
+			fallbackOpts := append([]func(*config.LoadOptions) error{}, opts...)
+			fallbackOpts = append(fallbackOpts,
+				config.WithSharedConfigFiles([]string{sharedConfig}),
+				config.WithSharedCredentialsFiles([]string{sharedCreds}),
+			)
+			cfg, err = config.LoadDefaultConfig(ctx, fallbackOpts...)
+		}
+	}
 	if err != nil {
 		return ""
 	}
 	return trimBedrockInput(cfg.Region)
+}
+
+func defaultAWSSharedFiles() (configPath string, credentialsPath string, ok bool) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" { // swobu:io-string source=boundary
+		return "", "", false
+	}
+	configPath = filepath.Join(home, ".aws", "config")
+	credentialsPath = filepath.Join(home, ".aws", "credentials")
+	if !fileExists(configPath) || !fileExists(credentialsPath) {
+		return "", "", false
+	}
+	return configPath, credentialsPath, true
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func sha256Hex(payload []byte) string {

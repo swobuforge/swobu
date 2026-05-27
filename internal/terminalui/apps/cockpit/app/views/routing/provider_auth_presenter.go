@@ -57,17 +57,16 @@ func classifyInteractiveAuthPhase(model state.Model, endpointName string, draft 
 		return interactiveAuthPhaseStartUnavailable
 	}
 	sessionActive := strings.TrimSpace(authState.SessionID) != "" // swobu:io-string source=boundary
+	authSummary := addModelCredentialSummary(model, endpointName, draft)
+	authResolved := strings.HasPrefix(strings.ToLower(strings.TrimSpace(authSummary)), "signed in") // swobu:io-string source=boundary
+	if authResolved {
+		return interactiveAuthPhaseResolved
+	}
 	if sessionActive {
 		return interactiveAuthPhaseInProgress
 	}
 	if variant == providercatalog.AuthVariantChatGPTLogin {
-		if strings.EqualFold(addModelCredentialSummary(model, draft), "signed in") {
-			return interactiveAuthPhaseResolved
-		}
 		return interactiveAuthPhaseStartRequired
-	}
-	if strings.EqualFold(addModelCredentialSummary(model, draft), "signed in") {
-		return interactiveAuthPhaseResolved
 	}
 	return interactiveAuthPhaseNone
 }
@@ -140,7 +139,7 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 		}))
 	}
 	if variant == providercatalog.AuthVariantChatGPTLogin &&
-		(viewState == interactiveAuthPhaseStartRequired || viewState == interactiveAuthPhaseInProgress || viewState == interactiveAuthPhaseStartUnavailable) {
+		viewState == interactiveAuthPhaseStartUnavailable {
 		rows = append(rows, views.RowAction("fallback", "use device code", "switch", func() []update.Action {
 			next := draft
 			next.CredentialRef = string(providercatalog.AuthVariantChatGPTDeviceAuth)

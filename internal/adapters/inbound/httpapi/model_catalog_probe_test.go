@@ -42,7 +42,7 @@ func TestModelCatalogProbeHandler_LoadsModelIDsFromCatalogPath(t *testing.T) {
 	query.Set("provider_spec", "bedrock")
 	query.Set("base_url", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1")
 	query.Set("credential_ref", "env:AWS_BEARER_TOKEN_BEDROCK")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog/probe?"+query.Encode(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -75,7 +75,7 @@ func TestModelCatalogProbeHandler_ReturnsRawError(t *testing.T) {
 	query.Set("provider_spec", "bedrock")
 	query.Set("base_url", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1")
 	query.Set("credential_ref", "env:AWS_BEARER_TOKEN_BEDROCK")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog/probe?"+query.Encode(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -111,7 +111,7 @@ func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirst
 	query.Set("provider_spec", "openai")
 	query.Set("base_url", "https://api.openai.com/v1")
 	query.Set("credential_ref", "env:OPENAI_API_KEY")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog/probe?"+query.Encode(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 

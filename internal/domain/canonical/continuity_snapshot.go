@@ -51,20 +51,16 @@ func (s ContinuitySnapshot) Clone() ContinuitySnapshot {
 
 // ValidateResponseContinuationSelectors enforces the narrowed v0 responses
 // contract: previous_response_id is the only supported native selector.
-func ValidateResponseContinuationSelectors(request GenerationCanonicalRequest) error {
+func ValidateResponseContinuationSelectors(request CanonicalRequest) error {
 	_ = request
 	return nil
 }
 
 func PreviousResponseIDFromRequest(request CanonicalRequest) (string, bool, error) {
-	typed, ok := request.(GenerationCanonicalRequest)
-	if !ok {
-		return "", false, nil
-	}
-	if err := ValidateResponseContinuationSelectors(typed); err != nil {
+	if err := ValidateResponseContinuationSelectors(request); err != nil {
 		return "", false, err
 	}
-	value := strings.TrimSpace(typed.PreviousResponseID()) // swobu:io-string source=domain
+	value := strings.TrimSpace(request.PreviousResponseID()) // swobu:io-string source=domain
 	if value == "" {
 		return "", false, nil
 	}
@@ -75,16 +71,8 @@ func PreviousResponseIDFromRequest(request CanonicalRequest) (string, bool, erro
 // stays protocol-agnostic and therefore only understands canonical request
 // semantics.
 func ContinuationConversation(request CanonicalRequest) ([]CanonicalItem, bool, error) {
-	switch typed := request.(type) {
-	case DialogCanonicalRequest:
-		items := typed.Items()
-		return items, len(items) > 0, nil
-	case GenerationCanonicalRequest:
-		thread := typed.Thread()
-		return thread, len(thread) > 0, nil
-	default:
-		return nil, false, nil
-	}
+	items := request.Items()
+	return items, len(items) > 0, nil
 }
 
 // BuildContinuitySnapshot appends replayable successful output items to one

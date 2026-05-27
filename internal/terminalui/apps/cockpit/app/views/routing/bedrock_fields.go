@@ -77,9 +77,17 @@ func encodeBedrockProfileCredentialRef(profile string) string {
 	return "profile:" + profile
 }
 
+func bedrockProfileSummary(profile string) string {
+	profile = trimRoutingInput(profile)
+	if profile == "" {
+		return "auto"
+	}
+	return profile
+}
+
 func bedrockDiscoveredAWSProfiles() []string {
 	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
+	if err != nil || strings.TrimSpace(home) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	configPath := filepath.Join(home, ".aws", "config")
@@ -127,7 +135,7 @@ func parseAWSINIProfiles(raw string, fromConfig bool) []string {
 				out = append(out, "default")
 				continue
 			}
-			if strings.HasPrefix(strings.ToLower(section), "profile ") {
+			if strings.HasPrefix(strings.ToLower(section), "profile ") { // swobu:io-string source=boundary
 				out = append(out, trimRoutingInput(section[len("profile "):]))
 			}
 			continue

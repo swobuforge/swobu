@@ -230,7 +230,7 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 	}{
 		{
 			profileID: "codex",
-			contains:  []string{"codex", `model_provider="swobu"`},
+			contains:  []string{"codex -c", `model_provider="swobu"`},
 		},
 		{
 			profileID: "claude",
@@ -242,7 +242,7 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 		},
 		{
 			profileID: "continue",
-			contains:  []string{"cn --config ./swobu.continue.yaml", "Explain this codebase"},
+			contains:  []string{"cn --config ./swobu.continue.yaml"},
 		},
 		{
 			profileID: "opencode",

@@ -21,7 +21,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "aider",
 			binary:   "aider",
-			contains: []string{"--model", "openai/" + requestpath.PublicModelIDSwobu, "--message", "Reply with exactly: swobu-e2e-aider-run-ok", "--exit"},
+			contains: []string{"--model", "openai/" + requestpath.PublicModelIDSwobu},
 			envChecks: map[string]string{
 				"AIDER_OPENAI_API_BASE": "http://127.0.0.1:7926/c/acme/v1",
 				"OPENAI_API_KEY":        "swobu-placeholder",
@@ -31,11 +31,9 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			clientID: "codex",
 			binary:   "codex",
 			contains: []string{
-				`exec`,
 				`model="` + requestpath.PublicModelIDSwobu + `"`,
 				`model_provider="swobu"`,
 				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
-				`Reply with exactly: swobu-e2e-codex-run-ok`,
 			},
 			envChecks: map[string]string{
 				"OPENAI_API_KEY": "swobu-placeholder",
@@ -53,7 +51,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID:    "continue",
 			binary:      "cn",
-			contains:    []string{"--config", "./swobu.continue.yaml", "-p", "Explain this codebase"},
+			contains:    []string{"--config", "./swobu.continue.yaml"},
 			preparePath: "./swobu.continue.yaml",
 		},
 		{
@@ -108,6 +106,29 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 				t.Fatalf("prepare content=%q", command.Prepare.Content)
 			}
 		})
+	}
+}
+
+func TestResolveRunCommand_RejectsBatchProbeArgs(t *testing.T) {
+	t.Parallel()
+
+	baseURL := "http://127.0.0.1:7926/c/acme/"
+	for _, clientID := range []string{"codex", "aider", "claude", "continue", "opencode"} {
+		command, ok := ResolveRunCommand(clientID, baseURL, "")
+		if !ok {
+			t.Fatalf("ResolveRunCommand(%q) returned not ok", clientID)
+		}
+		joined := strings.ToLower(strings.Join(command.Args, " "))
+		for _, banned := range []string{
+			"reply with exactly:",
+			"--message",
+			"--exit",
+			" -p ",
+		} {
+			if strings.Contains(" "+joined+" ", banned) {
+				t.Fatalf("client %q run args must be interactive-only, found banned token %q in %q", clientID, banned, joined)
+			}
+		}
 	}
 }
 

@@ -87,10 +87,7 @@ func TestContinuationRuntime_PrepareRequest_RehydratesCanonicalState(t *testing.
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
-	typed, ok := request.(GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("request type = %T, want GenerationCanonicalRequest", request)
-	}
+	typed := request
 	if got := len(typed.Thread()); got != 2 {
 		t.Fatalf("thread len = %d, want 2", got)
 	}
@@ -125,10 +122,7 @@ func TestContinuationRuntime_PrepareRequest_DerivesLastTurnForConversationReques
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
-	typed, ok := request.(GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("request type = %T, want GenerationCanonicalRequest", request)
-	}
+	typed := request
 	if got := len(typed.Thread()); got != 3 {
 		t.Fatalf("thread len = %d, want 3", got)
 	}
@@ -164,10 +158,7 @@ func TestContinuationRuntime_PrepareRequest_DerivesLastTurnFromBestPrefixMatch(t
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
-	typed, ok := request.(GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("request type = %T, want GenerationCanonicalRequest", request)
-	}
+	typed := request
 	if got := len(typed.LastTurn()); got != 1 {
 		t.Fatalf("last turn len = %d, want 1", got)
 	}

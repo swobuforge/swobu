@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/chat_completions"
-	messages "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/protocols/chatcompletions"
+	messages "github.com/swobuforge/swobu/internal/adapters/wire/protocols/messages"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestChatCompletionsCodec_EncodeBuffered_MapsUsage(t *testing.T) {
+func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 100, 7, 64, 5)
 	output := canonical.NewConversationOutputWithUsage(
 		"chatcmpl_1",
@@ -19,7 +19,7 @@ func TestChatCompletionsCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 		"stop",
 		usage,
 	)
-	raw, err := (chatcompletions.ChatCompletionsFamilyCodec{}).EncodeBuffered(output)
+	raw, err := (chatcompletions.ChatCompletionsFamilyCodec{}).EncodeResponse(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestChatCompletionsCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.prompt_tokens_details.cache_write_tokens", 5)
 }
 
-func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
+func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 80, 9, 33, 2)
 	output := canonical.NewConversationOutputWithUsage(
 		"resp_1",
@@ -42,7 +42,7 @@ func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 		"completed",
 		usage,
 	)
-	raw, err := (responses.ResponsesFamilyCodec{}).EncodeBuffered(output)
+	raw, err := (responses.ResponsesFamilyCodec{}).EncodeResponse(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestResponsesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cache_write_tokens", 2)
 }
 
-func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
+func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
 	input, output := 12, 3
 	cacheRead, cacheWrite := 0, 0
 	usage, err := canonical.NewTokenUsageWithOptional(&input, &output, &cacheRead, &cacheWrite)
@@ -70,7 +70,7 @@ func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPrese
 		"completed",
 		usage,
 	)
-	raw, err := (responses.ResponsesFamilyCodec{}).EncodeBuffered(outputValue)
+	raw, err := (responses.ResponsesFamilyCodec{}).EncodeResponse(outputValue)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestResponsesCodec_EncodeBuffered_UsageIncludesCachedTokensWhenZeroButPrese
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cached_tokens", 0)
 }
 
-func TestMessagesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
+func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 51, 4, 20, 10)
 	output := canonical.NewConversationOutputWithUsage(
 		"msg_1",
@@ -90,7 +90,7 @@ func TestMessagesCodec_EncodeBuffered_MapsUsage(t *testing.T) {
 		"end_turn",
 		usage,
 	)
-	raw, err := (messages.MessagesFamilyCodec{}).EncodeBuffered(output)
+	raw, err := (messages.MessagesFamilyCodec{}).EncodeResponse(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}

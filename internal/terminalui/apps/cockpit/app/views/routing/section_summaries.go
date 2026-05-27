@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
@@ -25,24 +26,24 @@ func firstRunProviderChoiceRow(label string, onActivate func() []update.Action) 
 
 func firstRunRunOnSummary(provider string) string {
 	if strings.TrimSpace(provider) == "" { // swobu:io-string source=boundary
-		return "choose a provider"
+		return appviews.ValueRequired
 	}
 	return providerDisplayName(provider)
 }
 
 func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 	if strings.TrimSpace(provider) == "" { // swobu:io-string source=boundary
-		return "missing"
+		return appviews.ValueRequired
 	}
 	resolvedRef := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	if resolvedRef == "" {
 		if state.CreateDraftCredentialStrategySelectable(provider) {
-			return "missing"
+			return appviews.ValueRequired
 		}
 		if !state.ProviderCredentialSelectionRequired(provider, baseURL, "") {
-			return "external"
+			return appviews.ValueAuto
 		}
-		return "missing"
+		return appviews.ValueRequired
 	}
 	if isResolvedInteractiveCredential(provider, resolvedRef) {
 		return "signed in"
@@ -66,7 +67,7 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 			}
 			if key != "" {
 				if _, ok := os.LookupEnv(key); !ok {
-					return "env var missing"
+					return appviews.ValueRequired
 				}
 			}
 			return "env var"
@@ -74,10 +75,10 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 		if strings.EqualFold(cred, "file") {
 			path := strings.TrimSpace(credentialFilePath(resolvedRef)) // swobu:io-string source=boundary
 			if path == "" {
-				return "file missing"
+				return appviews.ValueRequired
 			}
 			if _, err := os.Stat(path); err != nil {
-				return "file missing"
+				return appviews.ValueRequired
 			}
 			return "file"
 		}
@@ -86,7 +87,7 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 		}
 		return cred
 	}
-	return "missing"
+	return appviews.ValueRequired
 }
 
 func isResolvedInteractiveCredential(provider, credentialRef string) bool {
@@ -188,7 +189,7 @@ func effectiveCreateDraftBaseURL(model state.Model, provider string) string {
 func createSectionSummary(provider, modelID, credSummary string) string {
 	summary := firstRunRunOnSummary(provider)
 	if provider != "" {
-		summary = providerDisplayName(provider) + " · " + selectors.EmptyOr(credSummary, "not set")
+		summary = providerDisplayName(provider) + " · " + selectors.EmptyOr(credSummary, appviews.ValueRequired)
 		if modelID != "" {
 			summary += " · " + modelID
 		}

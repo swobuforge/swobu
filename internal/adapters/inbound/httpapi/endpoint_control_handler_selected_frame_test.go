@@ -66,7 +66,7 @@ func TestEncodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	}
 }
 
-func TestDecodeEndpointDocument_RejectsProtocolAutoAtDaemonBoundary(t *testing.T) {
+func TestDecodeEndpointDocument_AcceptsProtocolAutoAsUnspecified(t *testing.T) {
 	t.Parallel()
 
 	doc := endpointDocument{
@@ -84,8 +84,15 @@ func TestDecodeEndpointDocument_RejectsProtocolAutoAtDaemonBoundary(t *testing.T
 		},
 	}
 
-	_, err := decodeEndpointDocument(doc)
-	if err == nil {
-		t.Fatal("expected decode failure for protocol_auto")
+	endpoint, err := decodeEndpointDocument(doc)
+	if err != nil {
+		t.Fatalf("decodeEndpointDocument returned error: %v", err)
+	}
+	providers := endpoint.ProviderConfigs()
+	if len(providers) != 1 {
+		t.Fatalf("provider configs len=%d want=1", len(providers))
+	}
+	if got := providers[0].ProviderProtocol(); got == providercatalog.ProviderProtocolAuto || got == "" {
+		t.Fatalf("provider protocol=%q want concrete default protocol", got)
 	}
 }

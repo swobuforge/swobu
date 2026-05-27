@@ -9,7 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/httpedge"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
@@ -47,7 +47,7 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 }
 
 func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
-	if req.Request == nil {
+	if trimBedrockInput(req.Request.Model()) == "" {
 		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
 	}
 	if trimBedrockInput(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
@@ -187,15 +187,11 @@ func (e ProviderExecutorAdapter) executeConverse(ctx context.Context, client *be
 }
 
 func (e ProviderExecutorAdapter) executeInvokeModel(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, streaming bool) (ports.ProviderResponse, error) {
-	promptReq, ok := req.Request.(canonical.PromptCanonicalRequest)
-	if !ok {
-		return ports.ProviderResponse{}, canonical.UnsupportedOperation("bedrock invoke_model requires prompt-generation canonical request")
-	}
-	modelID := trimBedrockInput(promptReq.Model())
+	modelID := trimBedrockInput(req.Request.Model())
 	if modelID == "" {
 		return ports.ProviderResponse{}, canonical.BadRequest("bedrock model id is required")
 	}
-	payload, err := json.Marshal(map[string]any{"inputText": promptReq.Prompt()})
+	payload, err := json.Marshal(map[string]any{"inputText": req.Request.Prompt()})
 	if err != nil {
 		return ports.ProviderResponse{}, canonical.BadRequest("bedrock invoke_model payload could not be encoded")
 	}

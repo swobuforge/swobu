@@ -124,6 +124,48 @@ func TestParseBedrockAuthMode_AWSEnvSessionRef(t *testing.T) {
 	}
 }
 
+func TestLoadBedrockAWSConfig_ProfileFallbackToDefaultSharedFiles(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("HOME", t.TempDir())
+	home := os.Getenv("HOME")
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir ~/.aws: %v", err)
+	}
+	configPath := filepath.Join(awsDir, "config")
+	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = us-east-1\n"), 0o600); err != nil {
+		t.Fatalf("write ~/.aws/config: %v", err)
+	}
+	credPath := filepath.Join(awsDir, "credentials")
+	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
+		t.Fatalf("write ~/.aws/credentials: %v", err)
+	}
+
+	injectedDir := t.TempDir()
+	injectedConfigPath := filepath.Join(injectedDir, "config")
+	injectedCredsPath := filepath.Join(injectedDir, "credentials")
+	if err := os.WriteFile(injectedConfigPath, []byte("[default]\nregion = us-west-2\n"), 0o600); err != nil {
+		t.Fatalf("write injected config: %v", err)
+	}
+	if err := os.WriteFile(injectedCredsPath, []byte("[default]\naws_access_key_id = injected\naws_secret_access_key = injected\n"), 0o600); err != nil {
+		t.Fatalf("write injected credentials: %v", err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", injectedConfigPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", injectedCredsPath)
+
+	cfg, err := loadBedrockAWSConfig(context.Background(), "us-east-1", bedrockAuthModeAWSProfile, "swobu-bedrock")
+	if err != nil {
+		t.Fatalf("loadBedrockAWSConfig error: %v", err)
+	}
+	creds, credErr := cfg.Credentials.Retrieve(context.Background())
+	if credErr != nil {
+		t.Fatalf("retrieve creds error: %v", credErr)
+	}
+	if creds.AccessKeyID != "test" {
+		t.Fatalf("access key id=%q want test", creds.AccessKeyID)
+	}
+}
+
 func TestListModels_AWSProfileMode_UsesControlPlaneHTTP(t *testing.T) {
 	t.Setenv("AWS_REGION", "eu-central-1")
 	t.Setenv("AWS_PROFILE", "")
@@ -274,7 +316,7 @@ func TestResolveBedrockOperation(t *testing.T) {
 		{name: "invoke model", variant: "invoke_model", wantInvoke: true},
 		{name: "invoke model stream", variant: "invoke_model_stream", wantInvoke: true, wantStreaming: true},
 		{name: "empty rejected", variant: "", wantErr: true},
-		{name: "protocol auto rejected", variant: "protocol_auto", wantErr: true},
+		{name: "protocol auto rejected", variant: "auto", wantErr: true},
 		{name: "unsupported rejected", variant: "responses", wantErr: true},
 	}
 	for _, tc := range cases {

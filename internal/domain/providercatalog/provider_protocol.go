@@ -7,20 +7,36 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-const ProviderProtocolAuto = "protocol_auto"
+const ProviderProtocolAuto = "auto"
 
 type ProviderProtocol string
 
-func SupportedProviderProtocolsForSpec(spec string) []string {
+// ConcreteProviderProtocolsForSpec returns provider-native concrete protocols in
+// the catalog-declared order. "auto" is intentionally excluded.
+func ConcreteProviderProtocolsForSpec(spec string) []string {
 	profile, ok := profileFor(spec)
 	if !ok {
 		return nil
 	}
-	protocols := make([]string, 0, len(profile.ProviderProtocols)+1)
-	protocols = append(protocols, ProviderProtocolAuto)
+	out := make([]string, 0, len(profile.ProviderProtocols))
 	for _, protocol := range profile.ProviderProtocols {
-		protocols = append(protocols, protocol.Name)
+		name := strings.TrimSpace(protocol.Name) // swobu:io-string source=domain
+		if name == "" {
+			continue
+		}
+		out = append(out, name)
 	}
+	return out
+}
+
+func SupportedProviderProtocolsForSpec(spec string) []string {
+	concrete := ConcreteProviderProtocolsForSpec(spec)
+	if len(concrete) == 0 {
+		return nil
+	}
+	protocols := make([]string, 0, len(concrete)+1)
+	protocols = append(protocols, ProviderProtocolAuto)
+	protocols = append(protocols, concrete...)
 	return protocols
 }
 
@@ -33,17 +49,14 @@ func SupportsProviderProtocolForSpec(spec string, providerProtocol string) bool 
 	return false
 }
 
-func DefaultProviderProtocolForSpec(spec string) (string, bool) {
-	profile, ok := profileFor(spec)
-	if !ok || len(profile.ProviderProtocols) == 0 {
+// ResolveConcreteProtocolForAutoAtBoundary chooses one concrete protocol for a
+// provider when callers require a concrete fallback value.
+func ResolveConcreteProtocolForAutoAtBoundary(spec string) (string, bool) {
+	concrete := ConcreteProviderProtocolsForSpec(spec)
+	if len(concrete) == 0 {
 		return "", false
 	}
-	for _, protocol := range profile.ProviderProtocols {
-		if protocol.Frame == FrameSSEEvent {
-			return protocol.Name, true
-		}
-	}
-	return profile.ProviderProtocols[0].Name, true
+	return concrete[0], true
 }
 
 func ProviderProtocolKindAndFrame(spec string, providerProtocol string) (protocolkind.ProtocolKind, string, bool) {
@@ -80,18 +93,15 @@ func EncodeProviderProtocolForPersistence(providerProtocol string) string {
 	return normalized
 }
 
-// DecodeProviderProtocolFromPersistence normalizes one persisted/operator-wire
-// provider protocol token. Empty means "unspecified" and is valid.
-//
-// protocol_auto is UI-only and must never cross daemon durability/control
-// boundaries; callers should fail fast when it appears.
+// DecodeProviderProtocolFromPersistence normalizes one persisted provider
+// protocol token. Empty means "unspecified" and is valid.
 func DecodeProviderProtocolFromPersistence(spec string, providerProtocol string) (string, error) {
 	normalized := strings.TrimSpace(providerProtocol) // swobu:io-string source=domain
 	if normalized == "" {
 		return "", nil
 	}
 	if normalized == ProviderProtocolAuto {
-		return "", fmt.Errorf("provider protocol %q is UI-only and unsupported at daemon boundaries", ProviderProtocolAuto)
+		return "", fmt.Errorf("provider protocol %q is not allowed in persisted config", ProviderProtocolAuto)
 	}
 	if !SupportsProviderProtocolForSpec(spec, normalized) {
 		return "", fmt.Errorf("provider protocol %q is unsupported for provider %q", normalized, spec)

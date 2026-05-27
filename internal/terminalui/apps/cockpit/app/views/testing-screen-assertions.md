@@ -35,3 +35,15 @@ Every non-trivial scenario should read as:
 - `Then`: declarative predicates (and negative predicates)
 
 If a helper hides this structure, delete it.
+
+## 5) Interaction harness grammar (loop-kind)
+
+For retained-loop interaction tests, use shared cockpit harness primitives from:
+- `internal/terminalui/testharness`
+
+Minimal grammar:
+- `Plan(...)`
+- `Do(key).Until(condition).Within(n)`
+- `Ensure(condition).Eventually(n)`
+
+Do not add new interaction traversal primitives under `views/root/*`; add them to shared harness or leaf seam.

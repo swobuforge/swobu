@@ -125,6 +125,13 @@ type ProviderResponseMetadata struct {
 	ClientResponseMode        string
 	ProviderCallMode          string
 	ConversionKind            string
+	DegradationWarnings       []DegradationWarning
+}
+
+type DegradationWarning struct {
+	Code   string
+	Field  string
+	Reason string
 }
 
 // NewBufferedProviderResponse returns a fully materialized canonical output from provider adaptation.

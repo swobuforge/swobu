@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/adapters/protocolsurface"
+	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
 	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -203,9 +203,9 @@ func decodeRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 }
 
 func decodeCanonicalRequest(family canonical.IngressFamily, raw []byte) (canonical.CanonicalRequest, bool, error) {
-	codec, err := protocolsurface.ForIngressFamily(family)
+	codec, err := protocolregistry.ForIngressFamily(family)
 	if err != nil {
-		return nil, false, err
+		return canonical.CanonicalRequest{}, false, err
 	}
 	return codec.DecodeRequest(raw)
 }
@@ -235,18 +235,8 @@ func logIngressRequestShape(
 }
 
 func requestShapeSummary(request canonical.CanonicalRequest) (int, string, bool) {
-	switch typed := request.(type) {
-	case canonical.DialogCanonicalRequest:
-		items := typed.Items()
-		return len(items), lastRoleFromItems(items), false
-	case canonical.GenerationCanonicalRequest:
-		items := typed.Thread()
-		return len(items), lastRoleFromItems(items), strings.TrimSpace(typed.PreviousResponseID()) != "" // swobu:io-string source=boundary
-	case canonical.PromptCanonicalRequest:
-		return 1, "user", false
-	default:
-		return 0, "", false
-	}
+	items := request.Items()
+	return len(items), lastRoleFromItems(items), strings.TrimSpace(request.PreviousResponseID()) != "" // swobu:io-string source=boundary
 }
 
 func lastRoleFromItems(items []canonical.CanonicalItem) string {

@@ -115,14 +115,14 @@ func buildWorkspaceAddModelDetailRows(
 	if providerSpec != "" && !modelCatalogBlocked {
 		rows = append(rows, retained.Named[state.Model]("add-model/model", buildAddModelModelChoiceRow(ctx, model, panel)))
 	} else if providerSpec != "" && modelCatalogBlocked {
-		blockedRows := []retained.ViewSpec[state.Model]{views.RowStatic("model", "blocked")}
+		blockedRows := []retained.ViewSpec[state.Model]{views.RowStatic("model", views.ValueBlocked)}
 		if message := trimRoutingInput(readiness.Message); message != "" {
 			blockedRows = append(blockedRows, views.DisclosureNoteRows(message)...)
 		}
 		rows = append(rows, retained.Named[state.Model]("add-model/model-blocked", retained.VStack(ctx, blockedRows...)))
 	}
 	if providerSpec != "" && !modelCatalogBlocked && strings.TrimSpace(draft.ModelID) != "" { // swobu:io-string source=boundary
-		rows = append(rows, retained.Named[state.Model]("add-model/id", aliasInlineEditorRow(ctx, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), "not set"), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action { // swobu:io-string source=boundary
+		rows = append(rows, retained.Named[state.Model]("add-model/id", aliasInlineEditorRow(ctx, selectors.EmptyOr(strings.TrimSpace(draft.TargetAlias), views.ValueAuto), strings.TrimSpace(draft.TargetAlias), "fast", func(value string) []update.Action { // swobu:io-string source=boundary
 			next := draft
 			next.TargetAlias = strings.TrimSpace(strings.ToLower(value)) // swobu:io-string source=boundary
 			panel.setDraft(next)
@@ -141,7 +141,7 @@ func buildAddModelProtocolRow(draft state.ProviderConfigSnapshot, panel addModel
 		_ = ctx
 		protocols := providercatalog.SupportedProviderProtocolsForSpec(draft.ProviderSpec)
 		if len(protocols) == 0 {
-			return views.RowStatic("protocol", "not set")
+			return views.RowStatic("protocol", views.ValueRequired)
 		}
 		current := strings.TrimSpace(draft.ProviderProtocol) // swobu:io-string source=boundary
 		if current == "" {
@@ -218,7 +218,7 @@ func buildAddModelProviderRow(
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
 ) retained.ViewSpec[state.Model] {
-	providerRow := views.RowActionWithCancel("provider", selectors.EmptyOr(providerDisplayName(strings.TrimSpace(draft.ProviderSpec)), "choose a provider"), "change", func() []update.Action { // swobu:io-string source=boundary
+	providerRow := views.RowActionWithCancel("provider", selectors.EmptyOr(providerDisplayName(strings.TrimSpace(draft.ProviderSpec)), views.ValueRequired), "change", func() []update.Action { // swobu:io-string source=boundary
 		panel.setProviderPickerOpen(true)
 		views.ResetFilterablePickerState(panel.setProviderPicker)
 		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}

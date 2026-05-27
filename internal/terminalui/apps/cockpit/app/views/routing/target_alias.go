@@ -28,7 +28,7 @@ func buildProviderTargetAliasRow(ctx *retained.Context[state.Model], spec provid
 		return nil
 	}
 	currentValue := strings.TrimSpace(pc.TargetAlias) // swobu:io-string source=boundary
-	summary := "not set"
+	summary := views.ValueAuto
 	if currentValue != "" {
 		summary = currentValue
 	}

@@ -28,16 +28,15 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	req := NewGenerationRequest(GenerationRequestParams{
 		Model:              "m",
 		PreviousResponseID: "resp_123",
-		PromptCacheKey:     "repo-alpha",
+		CacheIntent: NewCacheIntent(CacheIntentParams{
+			Key: "repo-alpha",
+		}),
 		Items: []CanonicalItem{
 			NewToolUseItem(ItemAuthorAssistant, "", "call_1", "grep", map[string]any{"pattern": "TODO"}),
 		},
 	})
 
-	cloned, ok := req.Clone().(GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("clone type = %T, want GenerationCanonicalRequest", req.Clone())
-	}
+	cloned := req.Clone()
 	items := cloned.Thread()
 	items[0].Input["pattern"] = "changed"
 
@@ -45,7 +44,7 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	if got[0].Input["pattern"] != "TODO" {
 		t.Fatalf("tool input = %v, want %q", got[0].Input["pattern"], "TODO")
 	}
-	if cloned.PreviousResponseID() != "resp_123" || cloned.PromptCacheKey() != "repo-alpha" {
+	if cloned.PreviousResponseID() != "resp_123" || cloned.CacheIntent().Key() != "repo-alpha" {
 		t.Fatalf("clone lost response state")
 	}
 }

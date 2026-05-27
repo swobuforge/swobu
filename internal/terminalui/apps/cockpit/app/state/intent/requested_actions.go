@@ -195,13 +195,3 @@ type LoadRoutingModelCatalogRequestedAction struct {
 	CredentialRef    string
 	ProviderProtocol string
 }
-
-// ProbeCreateDraftModelRequestedAction asks reducer to run one real provider
-// probe for the current create draft, using the daemon ephemeral execute path.
-type ProbeCreateDraftModelRequestedAction struct {
-	ProviderSpec     string
-	BaseURL          string
-	CredentialRef    string
-	ModelID          string
-	ProviderProtocol string
-}

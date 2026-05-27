@@ -3,7 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"github.com/swobuforge/swobu/internal/adapters/protocolsurface"
+	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
 	"io"
 	"log/slog"
 	"net/http"
@@ -53,11 +53,11 @@ func writeBufferedSuccess(w http.ResponseWriter, family canonical.IngressFamily,
 		return canonical.InternalError("buffered provider response is missing a canonical output")
 	}
 
-	codec, err := protocolsurface.ForIngressFamily(family)
+	codec, err := protocolregistry.ForIngressFamily(family)
 	if err != nil {
 		return err
 	}
-	body, err := codec.EncodeBuffered(output)
+	body, err := codec.EncodeResponse(output)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canon
 		return canonical.InternalError("streaming provider response is missing an envelope event stream")
 	}
 
-	codec, err := protocolsurface.ForIngressFamily(family)
+	codec, err := protocolregistry.ForIngressFamily(family)
 	if err != nil {
 		return err
 	}

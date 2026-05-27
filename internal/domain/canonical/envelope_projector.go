@@ -21,14 +21,6 @@ type envelopeOpenProjection struct {
 	evs    []Event
 }
 
-type requestSemanticKind string
-
-const (
-	requestSemanticKindConversation       requestSemanticKind = "conversation"
-	requestSemanticKindResponseGeneration requestSemanticKind = "response_generation"
-	requestSemanticKindPromptGeneration   requestSemanticKind = "prompt_generation"
-)
-
 // ReadClosedEnvelope consumes events until the requested envelope kind closes.
 // It returns io.EOF when no such closed envelope exists in the stream.
 func ReadClosedEnvelope(ctx context.Context, r EventReader, kind EnvelopeKind) (*ClosedEnvelope, error) {
@@ -189,16 +181,15 @@ func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*C
 // request snapshot while preserving semantic kind hints.
 func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 	if e == nil || e.Kind != EnvRequest {
-		return nil, fmt.Errorf("closed envelope is not a request")
+		return CanonicalRequest{}, fmt.Errorf("closed envelope is not a request")
 	}
 	var (
-		model        string
-		semanticKind = requestSemanticKindConversation
-		itemsByID    = map[EnvelopeID]*CanonicalItem{}
-		orderedIDs   = make([]EnvelopeID, 0)
+		model      string
+		itemsByID  = map[EnvelopeID]*CanonicalItem{}
+		orderedIDs = make([]EnvelopeID, 0)
 	)
 	for _, ev := range e.Events {
-		requestProjectionApplyEvent(ev, itemsByID, &orderedIDs, &model, &semanticKind)
+		requestProjectionApplyEvent(ev, itemsByID, &orderedIDs, &model)
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -219,20 +210,7 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		}
 		items = append(items, item.Clone())
 	}
-	switch semanticKind {
-	case requestSemanticKindResponseGeneration:
-		return NewGenerationRequest(GenerationRequestParams{Model: model, Thread: items, LastTurn: items}), nil
-	case requestSemanticKindPromptGeneration:
-		prompt := ""
-		for _, item := range items {
-			if item.Kind == ItemKindText {
-				prompt += item.Text
-			}
-		}
-		return NewPromptRequest(model, prompt), nil
-	default:
-		return NewDialogRequest(model, items), nil
-	}
+	return NewCanonicalRequest(RequestParams{Model: model, Items: items}), nil
 }
 
 func requestProjectionApplyEvent(
@@ -240,7 +218,6 @@ func requestProjectionApplyEvent(
 	itemsByID map[EnvelopeID]*CanonicalItem,
 	orderedIDs *[]EnvelopeID,
 	model *string,
-	semanticKind *requestSemanticKind,
 ) {
 	switch ev.Kind {
 	case EventMetadata:
@@ -248,9 +225,6 @@ func requestProjectionApplyEvent(
 		if payload.Values != nil {
 			if payload.Values["model"] != "" {
 				*model = payload.Values["model"]
-			}
-			if payload.Values["semantic_kind"] != "" {
-				*semanticKind = requestSemanticKind(payload.Values["semantic_kind"])
 			}
 		}
 	case EventEnvelopeStart:

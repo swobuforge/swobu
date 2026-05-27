@@ -92,7 +92,7 @@ endpoints:
 	}
 }
 
-func TestLoad_RejectsProtocolAutoAtDaemonBoundary(t *testing.T) {
+func TestLoad_RejectsProtocolAutoInPersistedConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "swobu.yaml")
 	raw := `
 endpoints:
@@ -101,7 +101,7 @@ endpoints:
     provider_configs:
       - ref: backend-a
         provider_spec: openai
-        provider_protocol: protocol_auto
+        provider_protocol: auto
         credential_ref: env:OPENAI_API_KEY
 `
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
@@ -112,8 +112,8 @@ endpoints:
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "protocol_auto") {
-		t.Fatalf("error = %v, want protocol_auto failure", err)
+	if !strings.Contains(err.Error(), "auto") {
+		t.Fatalf("error = %v, want auto validation failure", err)
 	}
 }
 

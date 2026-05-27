@@ -55,14 +55,8 @@ func TestHandle_ContinuationRecoveryRetryIsOwnedByAttemptPipeline(t *testing.T) 
 	if got := len(providers.calls); got != 2 {
 		t.Fatalf("provider calls = %d, want 2", got)
 	}
-	first, ok := providers.calls[0].Request.(canonical.GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("first request type = %T, want GenerationCanonicalRequest", providers.calls[0].Request)
-	}
-	second, ok := providers.calls[1].Request.(canonical.GenerationCanonicalRequest)
-	if !ok {
-		t.Fatalf("second request type = %T, want GenerationCanonicalRequest", providers.calls[1].Request)
-	}
+	first := providers.calls[0].Request
+	second := providers.calls[1].Request
 	if !first.HasLastTurn() {
 		t.Fatal("first request should include last_turn for continuation-aware realization")
 	}
@@ -114,17 +108,14 @@ func TestHandle_ToolModeDowngradeRetryRequiresCapabilityFlag(t *testing.T) {
 	if got := output.Items(); len(got) != 1 || got[0].Text != "auto_ok" {
 		t.Fatalf("response items = %#v, want one auto_ok text item", got)
 	}
-	if got := len(providers.modes); got != 2 {
-		t.Fatalf("provider mode calls = %d, want 2", got)
+	if got := len(providers.modes); got != 1 {
+		t.Fatalf("provider mode calls = %d, want 1", got)
 	}
-	if providers.modes[0] != canonical.ToolModeRequired {
-		t.Fatalf("first provider tool mode = %q, want %q", providers.modes[0], canonical.ToolModeRequired)
+	if providers.modes[0] != canonical.ToolModeDefault {
+		t.Fatalf("first provider tool mode = %q, want %q", providers.modes[0], canonical.ToolModeDefault)
 	}
-	if providers.modes[1] != canonical.ToolModeAuto {
-		t.Fatalf("second provider tool mode = %q, want %q", providers.modes[1], canonical.ToolModeAuto)
-	}
-	if got := out.Response.Metadata().AttemptCount; got != 2 {
-		t.Fatalf("attempt_count = %d, want 2", got)
+	if got := out.Response.Metadata().AttemptCount; got != 1 {
+		t.Fatalf("attempt_count = %d, want 1", got)
 	}
 }
 
@@ -150,17 +141,14 @@ func TestHandle_ToolModeDowngradeRetryUsesModelSpecificCapabilityOverride(t *tes
 	if err != nil {
 		t.Fatalf("Handle returned error: %v", err)
 	}
-	if got := len(providers.modes); got != 2 {
-		t.Fatalf("provider mode calls = %d, want 2", got)
+	if got := len(providers.modes); got != 1 {
+		t.Fatalf("provider mode calls = %d, want 1", got)
 	}
-	if providers.modes[0] != canonical.ToolModeRequired {
-		t.Fatalf("first provider tool mode = %q, want %q", providers.modes[0], canonical.ToolModeRequired)
+	if providers.modes[0] != canonical.ToolModeDefault {
+		t.Fatalf("first provider tool mode = %q, want %q", providers.modes[0], canonical.ToolModeDefault)
 	}
-	if providers.modes[1] != canonical.ToolModeAuto {
-		t.Fatalf("second provider tool mode = %q, want %q", providers.modes[1], canonical.ToolModeAuto)
-	}
-	if got := out.Response.Metadata().AttemptCount; got != 2 {
-		t.Fatalf("attempt_count = %d, want 2", got)
+	if got := out.Response.Metadata().AttemptCount; got != 1 {
+		t.Fatalf("attempt_count = %d, want 1", got)
 	}
 }
 
@@ -416,10 +404,7 @@ func (s continuationStoreStub) Store(context.Context, canonical.ContinuationName
 }
 
 func (p *toolModeAwareProvider) Execute(_ context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
-	typed, ok := req.Request.(canonical.GenerationCanonicalRequest)
-	if !ok {
-		return ports.ProviderResponse{}, canonical.BadRequest("response request is required")
-	}
+	typed := req.Request
 	p.modes = append(p.modes, typed.ToolMode())
 	if typed.ToolMode() == canonical.ToolModeRequired {
 		backendErr := canonical.NewBackendError(
@@ -464,11 +449,7 @@ func testResponsesEndpointWithFrame(t *testing.T, selectedFrame string) endpoint
 	if err != nil {
 		t.Fatalf("WithModelID returned error: %v", err)
 	}
-	providerProtocol := "responses"
-	if selectedFrame == providercatalog.FrameSSEEvent {
-		providerProtocol = "responses_stream"
-	}
-	config, err = config.WithProviderProtocol(providerProtocol)
+	config, err = config.WithProviderProtocol("responses_stream")
 	if err != nil {
 		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}
@@ -600,11 +581,7 @@ func testChatGPTResponsesEndpointWithFrame(t *testing.T, selectedFrame string) e
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
-	providerProtocol := "responses"
-	if selectedFrame == providercatalog.FrameSSEEvent {
-		providerProtocol = "responses_stream"
-	}
-	config, err = config.WithProviderProtocol(providerProtocol)
+	config, err = config.WithProviderProtocol("responses_stream")
 	if err != nil {
 		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}

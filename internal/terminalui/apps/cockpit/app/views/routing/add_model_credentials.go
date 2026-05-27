@@ -16,8 +16,8 @@ import (
 )
 
 func buildAddModelCredentialRow(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
-	summary := addModelCredentialSummary(model, draft)
-	row := views.RowActionWithCancel("credential", selectors.EmptyOr(summary, "not set"), "change", func() []update.Action {
+	summary := addModelCredentialSummary(model, endpointName, draft)
+	row := views.RowActionWithCancel("credential", selectors.EmptyOr(summary, views.ValueRequired), "change", func() []update.Action {
 		next := panel.credentialUI
 		next.SourcePickerOpen = !next.SourcePickerOpen
 		panel.setCredentialUI(next)
@@ -56,20 +56,22 @@ func buildAddModelCredentialRow(model state.Model, endpointName string, draft st
 	return toolkitviews.NewAnchoredDisclosure(row, options...)
 }
 
-func addModelCredentialSummary(model state.Model, draft state.ProviderConfigSnapshot) string {
-	resolvedRef := strings.TrimSpace(effectiveAddModelCredentialRef(model, draft))                              // swobu:io-string source=boundary
-	draftRef := strings.TrimSpace(draft.CredentialRef)                                                          // swobu:io-string source=boundary
-	providerSpec := strings.TrimSpace(draft.ProviderSpec)                                                       // swobu:io-string source=boundary
+func addModelCredentialSummary(model state.Model, endpointName string, draft state.ProviderConfigSnapshot) string {
+	resolvedRef := strings.TrimSpace(effectiveAddModelCredentialRef(model, draft)) // swobu:io-string source=boundary
+	draftRef := strings.TrimSpace(draft.CredentialRef)                             // swobu:io-string source=boundary
+	providerSpec := strings.TrimSpace(draft.ProviderSpec)                          // swobu:io-string source=boundary
+	authState := addModelAuthStateForDraft(model, endpointName, draft)
+	authStatus := newInteractiveAuthStatusComponent(providerSpec, resolvedRef, authState.SessionState, authState.SessionError)
 	draftVariant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(draftRef)))) // swobu:io-string source=boundary
 	if providercatalog.SupportsAuthVariant(providerSpec, draftVariant) &&
 		providercatalog.IsInteractiveAuthVariant(draftVariant) &&
 		resolvedRef != "" &&
 		!strings.EqualFold(resolvedRef, draftRef) {
-		return "signed in"
+		return authStatus.SignedInSummary()
 	}
 	source := strings.TrimSpace(credentialSource(resolvedRef)) // swobu:io-string source=boundary
 	if source == "" {
-		return "missing"
+		return views.ValueRequired
 	}
 	if strings.EqualFold(providerSpec, "bedrock") && isBedrockAWSProfileCredentialRef(resolvedRef) {
 		return "AWS profile"
@@ -77,12 +79,12 @@ func addModelCredentialSummary(model state.Model, draft state.ProviderConfigSnap
 	variant := providercatalog.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
 	if providercatalog.SupportsAuthVariant(providerSpec, variant) && providercatalog.IsInteractiveAuthVariant(variant) {
 		if resolvedRef != "" && !strings.EqualFold(resolvedRef, string(variant)) {
-			return "signed in"
+			return authStatus.SignedInSummary()
 		}
 		return authVariantDisplayLabel(variant)
 	}
 	if isResolvedInteractiveCredential(providerSpec, resolvedRef) {
-		return "signed in"
+		return authStatus.SignedInSummary()
 	}
 	if strings.EqualFold(source, "env") {
 		if strings.EqualFold(providerSpec, "bedrock") {
@@ -94,7 +96,7 @@ func addModelCredentialSummary(model state.Model, draft state.ProviderConfigSnap
 		}
 		if key != "" {
 			if _, ok := os.LookupEnv(key); !ok {
-				return "env var missing"
+				return views.ValueRequired
 			}
 		}
 		return "env var"
@@ -102,10 +104,10 @@ func addModelCredentialSummary(model state.Model, draft state.ProviderConfigSnap
 	if strings.EqualFold(source, "file") {
 		path := strings.TrimSpace(credentialFilePath(resolvedRef)) // swobu:io-string source=boundary
 		if path == "" {
-			return "file missing"
+			return views.ValueRequired
 		}
 		if _, err := os.Stat(path); err != nil {
-			return "file missing"
+			return views.ValueRequired
 		}
 		return "file"
 	}

@@ -242,14 +242,8 @@ func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConf
 		model := ctx.Model()
 		auth := providerAuthSession(model, endpointName, providerConfig)
 		loginURL := strings.TrimSpace(auth.URL) // swobu:io-string source=boundary
-		summary := "pending browser auth"
-		if s := strings.TrimSpace(auth.SessionState); s != "" { // swobu:io-string source=boundary
-			summary = "login " + s
-		}
-		if strings.TrimSpace(auth.SessionError) != "" { // swobu:io-string source=boundary
-			summary = "login error"
-		}
-		return views.RowActionWithCancel(
+		summary := providerLoginSummary(providerConfig.ProviderSpec, providerConfig.CredentialRef, auth)
+		row := views.RowActionWithCancel(
 			"login",
 			summary,
 			"open",
@@ -263,7 +257,17 @@ func providerLoginURLRow(endpointName string, providerConfig *state.ProviderConf
 			},
 			nil,
 		)
+		if loginURL == "" {
+			return row
+		}
+		ownerKey := stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String() // swobu:io-string source=boundary
+		return toolkitviews.NewAnchoredDisclosure(row, interactiveAuthLinkRows(loginURL, ownerKey)...)
 	})
+}
+
+func providerLoginSummary(providerSpec string, credentialRef string, auth stateModel.AuthSessionViewState) string {
+	status := newInteractiveAuthStatusComponent(providerSpec, credentialRef, auth.SessionState, auth.SessionError)
+	return status.LoginSummary()
 }
 
 func providerAuthSession(model state.Model, endpointName string, providerConfig *state.ProviderConfigSnapshot) stateModel.AuthSessionViewState {

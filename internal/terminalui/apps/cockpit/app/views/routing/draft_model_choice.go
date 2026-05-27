@@ -128,12 +128,12 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		ModelCatalogError: modelErr,
 	})
 
-	modelSummary := selectors.EmptyOr(modelID, "not set")
+	modelSummary := selectors.EmptyOr(modelID, views.ValueRequired)
 	if _, ok := spec.Binding.(addDraftModelBinding); ok && modelID == "" {
-		modelSummary = "not selected"
+		modelSummary = views.ValueRequired
 	}
 	if spec.PickerOpen && modelID == "" {
-		modelSummary = "choose a model"
+		modelSummary = views.ValueRequired
 	}
 	if _, ok := spec.Binding.(createDraftModelBinding); ok {
 		readiness = state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
@@ -161,24 +161,24 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
 	if readiness.Blocked {
-		if _, isCreate := spec.Binding.(createDraftModelBinding); isCreate && strings.TrimSpace(modelErr) != "" {
-			return manualCreateDraftModelEditor(ctx, draft, modelSummary, strings.TrimSpace(readiness.Message), spec)
+		if _, isCreate := spec.Binding.(createDraftModelBinding); isCreate && strings.TrimSpace(modelErr) != "" { // swobu:io-string source=boundary
+			return manualCreateDraftModelEditor(ctx, draft, modelSummary, strings.TrimSpace(readiness.Message), spec) // swobu:io-string source=boundary
 		}
 		if message := trimRoutingInput(readiness.Message); message != "" {
 			notes := views.DisclosureNoteRows(message)
-			return retained.VStack(ctx, append([]retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, "blocked")}, notes...)...)
+			return retained.VStack(ctx, append([]retained.ViewSpec[state.Model]{views.RowStatic(views.RowModel, views.ValueBlocked)}, notes...)...)
 		}
-		return views.RowStatic(views.RowModel, "blocked")
+		return views.RowStatic(views.RowModel, views.ValueBlocked)
 	}
 	if provider == "" || !spec.PickerOpen {
 		return modelRow
 	}
 	if strings.TrimSpace(modelErr) != "" { // swobu:io-string source=boundary
 		if _, isCreate := spec.Binding.(createDraftModelBinding); isCreate {
-			return manualCreateDraftModelEditor(ctx, draft, modelSummary, strings.TrimSpace(modelErr), spec)
+			return manualCreateDraftModelEditor(ctx, draft, modelSummary, strings.TrimSpace(modelErr), spec) // swobu:io-string source=boundary
 		}
 		rows := []retained.ViewSpec[state.Model]{modelRow}
-		rows = append(rows, views.DisclosureNoteRows(strings.TrimSpace(modelErr))...)
+		rows = append(rows, views.DisclosureNoteRows(strings.TrimSpace(modelErr))...) // swobu:io-string source=boundary
 		return retained.VStack(ctx, rows...)
 	}
 	if pending {
@@ -237,7 +237,7 @@ func manualCreateDraftModelEditor(
 		ctx,
 		views.RowModel,
 		modelSummary,
-		strings.TrimSpace(draft.ModelID),
+		strings.TrimSpace(draft.ModelID), // swobu:io-string source=boundary
 		"provider model id",
 		func(value string) []update.Action {
 			next := draft
@@ -246,9 +246,9 @@ func manualCreateDraftModelEditor(
 			return append(actions, state.SetInteractionMode{Mode: state.InteractionModeNAV})
 		},
 	)
-	if strings.TrimSpace(readinessMessage) == "" {
+	if strings.TrimSpace(readinessMessage) == "" { // swobu:io-string source=boundary
 		return editor
 	}
-	rows := append([]retained.ViewSpec[state.Model]{editor}, views.DisclosureNoteRows(strings.TrimSpace(readinessMessage))...)
+	rows := append([]retained.ViewSpec[state.Model]{editor}, views.DisclosureNoteRows(strings.TrimSpace(readinessMessage))...) // swobu:io-string source=boundary
 	return retained.VStack(ctx, rows...)
 }

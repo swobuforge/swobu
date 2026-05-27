@@ -55,7 +55,7 @@ func TestEvaluateModelSelectionReadiness_EnvKeyMissingBlocks(t *testing.T) {
 	}
 }
 
-func TestEvaluateModelSelectionReadiness_AuthFailurePassesRawError(t *testing.T) {
+func TestEvaluateModelSelectionReadiness_AuthFailureNormalizesOperatorMessage(t *testing.T) {
 	t.Parallel()
 
 	errText := "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK"
@@ -71,7 +71,7 @@ func TestEvaluateModelSelectionReadiness_AuthFailurePassesRawError(t *testing.T)
 	if got.Reason != ModelSelectionBlockAuthProbeFailed {
 		t.Fatalf("reason=%q", got.Reason)
 	}
-	if got.Message != errText {
+	if got.Message != "bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK" {
 		t.Fatalf("message=%q", got.Message)
 	}
 }
@@ -100,5 +100,43 @@ func TestEvaluateModelSelectionReadiness_ProviderAuthVariantMatrix_NoEmptyBlocke
 				t.Fatalf("provider=%q variant=%q blocked with empty message", spec, mode.Variant)
 			}
 		}
+	}
+}
+
+func TestEvaluateModelSelectionReadiness_ChatGPTTierError_ResolvedCredentialSuggestsSwitchAccount(t *testing.T) {
+	t.Parallel()
+
+	got := EvaluateModelSelectionGateState(ModelSelectionReadinessGateInput{
+		ProviderSpec:      "chatgpt",
+		CredentialRef:     "keychain:chatgpt/default",
+		ModelCatalogError: "BAD_ENDPOINT: chatgpt subscription tier could not be resolved from credential",
+	})
+	if !got.Blocked {
+		t.Fatal("expected blocked on tier-resolution failure")
+	}
+	if got.Reason != ModelSelectionBlockAuthProbeFailed {
+		t.Fatalf("reason=%q", got.Reason)
+	}
+	if got.Message != "signed-in account could not resolve ChatGPT subscription tier; sign in another account" {
+		t.Fatalf("message=%q", got.Message)
+	}
+}
+
+func TestEvaluateModelSelectionReadiness_ChatGPTTierError_InteractiveCredentialSuggestsSignIn(t *testing.T) {
+	t.Parallel()
+
+	got := EvaluateModelSelectionGateState(ModelSelectionReadinessGateInput{
+		ProviderSpec:      "chatgpt",
+		CredentialRef:     "chatgpt_login",
+		ModelCatalogError: "BAD_ENDPOINT: chatgpt subscription tier could not be resolved from credential",
+	})
+	if !got.Blocked {
+		t.Fatal("expected blocked on tier-resolution failure")
+	}
+	if got.Reason != ModelSelectionBlockAuthProbeFailed {
+		t.Fatalf("reason=%q", got.Reason)
+	}
+	if got.Message != "sign in to resolve ChatGPT subscription tier" {
+		t.Fatalf("message=%q", got.Message)
 	}
 }

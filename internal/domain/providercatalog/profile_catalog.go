@@ -99,7 +99,6 @@ var (
 		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 	}
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 	}
 	providerProtocolsAnthropic = []ProviderProtocolSpec{
@@ -114,10 +113,6 @@ var (
 	}
 )
 
-func cloneProviderProtocols(protocols []ProviderProtocolSpec) []ProviderProtocolSpec {
-	return slices.Clone(protocols)
-}
-
 func catalog() []Profile {
 	return []Profile{
 		{
@@ -126,7 +121,7 @@ func catalog() []Profile {
 			SetupHint:           string(ProviderSpecOllama),
 			DefaultBaseURL:      "http://127.0.0.1:11434/v1",
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   cloneProviderProtocols(providerProtocolsOpenAIFamily),
+			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeNone, Variant: "", Kind: AuthNone, Requirement: AuthModeRequirementNever},
 			},
@@ -139,7 +134,7 @@ func catalog() []Profile {
 			DefaultBaseURL:          "https://api.openai.com/v1",
 			DefaultCredentialEnvVar: "OPENAI_API_KEY",
 			VisibleInOperatorUI:     true,
-			ProviderProtocols:       cloneProviderProtocols(providerProtocolsOpenAIFamily),
+			ProviderProtocols:       slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
@@ -152,7 +147,7 @@ func catalog() []Profile {
 			SetupHint:           string(ProviderSpecChatGPT),
 			DefaultBaseURL:      "https://api.openai.com/v1",
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   cloneProviderProtocols(providerProtocolsChatGPT),
+			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeInteractiveBrowser, Variant: AuthVariantChatGPTLogin, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
 				{ID: AuthModeInteractiveDevice, Variant: AuthVariantChatGPTDeviceAuth, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
@@ -166,7 +161,7 @@ func catalog() []Profile {
 			DefaultBaseURL:          "https://api.anthropic.com/v1",
 			DefaultCredentialEnvVar: "ANTHROPIC_API_KEY",
 			VisibleInOperatorUI:     true,
-			ProviderProtocols:       cloneProviderProtocols(providerProtocolsAnthropic),
+			ProviderProtocols:       slices.Clone(providerProtocolsAnthropic),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
@@ -180,7 +175,7 @@ func catalog() []Profile {
 			DefaultBaseURL:          "https://openrouter.ai/api/v1",
 			DefaultCredentialEnvVar: "OPENROUTER_API_KEY",
 			VisibleInOperatorUI:     true,
-			ProviderProtocols:       cloneProviderProtocols(providerProtocolsOpenAIFamily),
+			ProviderProtocols:       slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
@@ -194,7 +189,7 @@ func catalog() []Profile {
 			DefaultBaseURL:          "",
 			DefaultCredentialEnvVar: "AWS_BEARER_TOKEN_BEDROCK",
 			VisibleInOperatorUI:     true,
-			ProviderProtocols:       cloneProviderProtocols(providerProtocolsBedrock),
+			ProviderProtocols:       slices.Clone(providerProtocolsBedrock),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeAWSProfile, Variant: AuthVariantAWSProfile, Kind: AuthNone, Requirement: AuthModeRequirementNever},
 				{ID: AuthModeAWSEnvSession, Variant: AuthVariantAWSEnvSession, Kind: AuthNone, Requirement: AuthModeRequirementNever},
@@ -208,7 +203,7 @@ func catalog() []Profile {
 			SetupHint:           string(ProviderSpecOpenAICompatible) + "   OpenAI-compatible URL (https://host/v1)",
 			DefaultBaseURL:      "",
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   cloneProviderProtocols(providerProtocolsOpenAIFamily),
+			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
 				{ID: AuthModeNone, Variant: "", Kind: AuthNone, Requirement: AuthModeRequirementExceptLoopbackExecute},
 				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},

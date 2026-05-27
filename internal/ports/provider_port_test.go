@@ -41,13 +41,10 @@ func TestNewExecuteRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 	if req.Contract.AllowPreCommitFallback {
 		t.Fatal("allow_pre_commit_fallback = true, want false by default")
 	}
-	if got := req.Request.SemanticKind(); got != canonical.SemanticKindConversation {
-		t.Fatalf("semantic kind = %q, want %q", got, canonical.SemanticKindConversation)
+	if got := req.Request.SemanticKind(); got != canonical.SemanticKindCanonical {
+		t.Fatalf("semantic kind = %q, want %q", got, canonical.SemanticKindCanonical)
 	}
-	typed, ok := req.Request.(canonical.DialogCanonicalRequest)
-	if !ok {
-		t.Fatalf("expected canonical.DialogCanonicalRequest, got %T", req.Request)
-	}
+	typed := req.Request
 	if got := typed.Items()[0].Text; got != "hi" {
 		t.Fatalf("message text = %q, want %q", got, "hi")
 	}

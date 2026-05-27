@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/outbound/protocols/responses"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 

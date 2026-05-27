@@ -9,9 +9,6 @@ import (
 // SynthesizeRequestFromCanonicalRequest converts a canonical request snapshot
 // into a finite canonical envelope stream (batch as closed stream).
 func SynthesizeRequestFromCanonicalRequest(exchangeID string, req CanonicalRequest) ([]Event, error) {
-	if req == nil {
-		return nil, fmt.Errorf("request is nil")
-	}
 	seq := int64(0)
 	next := func() int64 {
 		seq++
@@ -21,14 +18,7 @@ func SynthesizeRequestFromCanonicalRequest(exchangeID string, req CanonicalReque
 	meta := map[string]string{
 		"model": stringRequestModel(req),
 	}
-	switch req.SemanticKind() {
-	case SemanticKindConversation:
-		meta["semantic_kind"] = "conversation"
-	case SemanticKindResponse:
-		meta["semantic_kind"] = "response_generation"
-	case SemanticKindPrompt:
-		meta["semantic_kind"] = "prompt_generation"
-	}
+	meta["semantic_kind"] = string(req.SemanticKind())
 	events := []Event{
 		{
 			ExchangeID: exchangeID,
@@ -98,31 +88,13 @@ func SynthesizeRequestFromCanonicalRequest(exchangeID string, req CanonicalReque
 // canonicalRequestItems normalizes request variants into an item sequence for
 // envelope synthesis.
 func canonicalRequestItems(req CanonicalRequest) []CanonicalItem {
-	switch typed := req.(type) {
-	case DialogCanonicalRequest:
-		return typed.Items()
-	case GenerationCanonicalRequest:
-		return typed.Thread()
-	case PromptCanonicalRequest:
-		return []CanonicalItem{NewTextItem(ItemAuthorUser, typed.Prompt())}
-	default:
-		return nil
-	}
+	return req.Items()
 }
 
 // stringRequestModel extracts model identity without leaking request variant
 // branching into synthesizer call sites.
 func stringRequestModel(req CanonicalRequest) string {
-	switch typed := req.(type) {
-	case DialogCanonicalRequest:
-		return typed.Model()
-	case GenerationCanonicalRequest:
-		return typed.Model()
-	case PromptCanonicalRequest:
-		return typed.Model()
-	default:
-		return ""
-	}
+	return req.Model()
 }
 
 // SynthesizeResponseFromOutput converts canonical output into a finite response

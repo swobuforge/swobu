@@ -66,7 +66,7 @@ func TestEncodeEndpointDTO_PreservesProviderProtocol(t *testing.T) {
 	}
 }
 
-func TestDecodeEndpointDTO_RejectsProtocolAutoAtDaemonBoundary(t *testing.T) {
+func TestDecodeEndpointDTO_RejectsProtocolAutoAtPersistenceBoundary(t *testing.T) {
 	t.Parallel()
 
 	dto := endpointDTO{
@@ -86,6 +86,6 @@ func TestDecodeEndpointDTO_RejectsProtocolAutoAtDaemonBoundary(t *testing.T) {
 
 	_, err := decodeEndpointDTO(dto)
 	if err == nil {
-		t.Fatal("expected decode failure for protocol_auto")
+		t.Fatal("expected decode failure for auto")
 	}
 }

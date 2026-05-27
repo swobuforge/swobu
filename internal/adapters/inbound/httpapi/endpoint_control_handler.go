@@ -4,19 +4,22 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
+	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
 
 type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)
 type endpointGetFunc func(context.Context, string) (endpointintent.Endpoint, error)
 type endpointPutFunc func(context.Context, endpointintent.Endpoint) (endpointintent.Endpoint, error)
 type endpointDeleteFunc func(context.Context, string) error
+type endpointAutoProtocolProbeFunc func(context.Context, endpointintent.Endpoint, requestpath.HandleInput) (requestpath.HandleOutput, error)
+
+const autoProtocolProbeAttemptTimeout = 3 * time.Second
 
 type endpointControlErrorResponse struct {
 	Error endpointControlErrorBody `json:"error"`
@@ -55,14 +58,16 @@ type EndpointControlHandler struct {
 	get    endpointGetFunc
 	put    endpointPutFunc
 	delete endpointDeleteFunc
+	probe  endpointAutoProtocolProbeFunc
 }
 
-func NewEndpointControlHandler(list endpointListFunc, get endpointGetFunc, put endpointPutFunc, delete endpointDeleteFunc) EndpointControlHandler {
+func NewEndpointControlHandler(list endpointListFunc, get endpointGetFunc, put endpointPutFunc, delete endpointDeleteFunc, probe endpointAutoProtocolProbeFunc) EndpointControlHandler {
 	return EndpointControlHandler{
 		list:   list,
 		get:    get,
 		put:    put,
 		delete: delete,
+		probe:  probe,
 	}
 }
 
@@ -154,6 +159,15 @@ func (h EndpointControlHandler) serveResource(w http.ResponseWriter, req *http.R
 			})
 			return
 		}
+		endpoint, err = resolveAutoProviderProtocols(req.Context(), endpoint, doc, h.probe)
+		if err != nil {
+			writeEndpointControlError(w, operatorendpoints.CommandError{
+				Code:    operatorendpoints.CommandInvalidArgument,
+				Message: err.Error(),
+				Err:     err,
+			})
+			return
+		}
 		saved, err := h.put(req.Context(), endpoint)
 		if err != nil {
 			writeEndpointControlError(w, err)
@@ -203,110 +217,4 @@ func isMalformedEndpointControlPath(path string) bool {
 	}
 	name := strings.TrimPrefix(path, "/_swobu/endpoints/")
 	return strings.Contains(name, "/") || strings.TrimSpace(name) == "" // swobu:io-string source=boundary
-}
-
-func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
-	providerConfigs := endpoint.ProviderConfigs()
-	doc := endpointDocument{
-		Name:                      endpoint.Name().String(),
-		SelectedProviderConfigRef: endpoint.SelectedProviderConfigRef().String(),
-		ProviderConfigs:           make([]providerConfigDocument, 0, len(providerConfigs)),
-	}
-	for _, providerConfig := range providerConfigs {
-		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
-		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
-			Ref:              providerConfig.Ref().String(),
-			ProviderSpec:     providerConfig.ProviderSpec().String(),
-			BaseURL:          providerConfig.BaseURL(),
-			CredentialRef:    providerConfig.CredentialRef(),
-			ModelID:          providerConfig.ModelID(),
-			TargetAlias:      providerConfig.TargetAlias(),
-			ProviderProtocol: providerProtocol,
-		})
-	}
-	return doc
-}
-
-func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, error) {
-	name, err := endpointintent.ParseEndpointName(doc.Name)
-	if err != nil {
-		return endpointintent.Endpoint{}, err
-	}
-	selectedRef, err := endpointintent.ParseProviderConfigRef(doc.SelectedProviderConfigRef)
-	if err != nil {
-		return endpointintent.Endpoint{}, err
-	}
-	providerConfigs := make([]endpointintent.ProviderConfig, 0, len(doc.ProviderConfigs))
-	for _, encoded := range doc.ProviderConfigs {
-		ref, err := endpointintent.ParseProviderConfigRef(encoded.Ref)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		spec, err := endpointintent.ParseProviderSpec(encoded.ProviderSpec)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		providerConfig, err := endpointintent.NewProviderConfig(ref, spec, encoded.BaseURL, encoded.CredentialRef)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		if providerProtocol != "" {
-			providerConfig, err = providerConfig.WithProviderProtocol(providerProtocol)
-			if err != nil {
-				return endpointintent.Endpoint{}, err
-			}
-		}
-		providerConfig, err = providerConfig.WithModelID(encoded.ModelID)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		providerConfig, err = providerConfig.WithTargetAlias(encoded.TargetAlias)
-		if err != nil {
-			return endpointintent.Endpoint{}, err
-		}
-		providerConfigs = append(providerConfigs, providerConfig)
-	}
-	return endpointintent.NewEndpoint(name, providerConfigs, selectedRef)
-}
-
-func writeEndpointControlJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeEndpointControlError(w http.ResponseWriter, err error) {
-	var commandErr operatorendpoints.CommandError
-	if !errors.As(err, &commandErr) {
-		commandErr = operatorendpoints.CommandError{
-			Code:    operatorendpoints.CommandInternal,
-			Message: "endpoint control plane failed",
-			Err:     err,
-		}
-	}
-	writeEndpointControlJSON(w, statusCodeForEndpointControlError(commandErr.Code), endpointControlErrorResponse{
-		Error: endpointControlErrorBody{
-			Code:    string(commandErr.Code),
-			Message: commandErr.Error(),
-		},
-	})
-}
-
-func statusCodeForEndpointControlError(code operatorendpoints.CommandErrorCode) int {
-	switch code {
-	case operatorendpoints.CommandInvalidArgument:
-		return http.StatusBadRequest
-	case operatorendpoints.CommandNotFound:
-		return http.StatusNotFound
-	case operatorendpoints.CommandConflict:
-		return http.StatusConflict
-	case operatorendpoints.CommandUnavailable:
-		return 503
-	default:
-		return http.StatusInternalServerError
-	}
 }

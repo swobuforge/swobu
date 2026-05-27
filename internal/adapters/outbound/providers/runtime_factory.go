@@ -7,7 +7,10 @@ import (
 	anthropicprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
 	bedrockprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	chatgptprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
+	ollamaprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/ollama"
+	openaiprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaicompatprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaicompat"
+	openrouterprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 )
@@ -44,11 +47,14 @@ func (f RuntimeFactory) Build(registry []providercatalog.Profile) map[providerca
 
 func (f RuntimeFactory) runtimeFor(providerID providercatalog.ProviderID) providersruntime.ProviderRuntimeBundle {
 	switch providerID {
-	case providercatalog.ProviderSpecOllama,
-		providercatalog.ProviderSpecOpenAI,
-		providercatalog.ProviderSpecOpenRouter,
-		providercatalog.ProviderSpecOpenAICompatible:
-		return openaicompatprovider.NewRuntime(providerID, f.client, f.credentialProvider)
+	case providercatalog.ProviderSpecOllama:
+		return ollamaprovider.NewRuntime(f.client, f.credentialProvider)
+	case providercatalog.ProviderSpecOpenAI:
+		return openaiprovider.NewRuntime(f.client, f.credentialProvider)
+	case providercatalog.ProviderSpecOpenRouter:
+		return openrouterprovider.NewRuntime(f.client, f.credentialProvider)
+	case providercatalog.ProviderSpecOpenAICompatible:
+		return openaicompatprovider.NewRuntime(f.client, f.credentialProvider)
 	case providercatalog.ProviderSpecAnthropic:
 		return anthropicprovider.NewRuntime(providerID, f.client, f.credentialProvider)
 	case providercatalog.ProviderSpecBedrock:

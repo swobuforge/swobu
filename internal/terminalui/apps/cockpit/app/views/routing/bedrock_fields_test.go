@@ -157,3 +157,17 @@ func TestBedrockDefaultProfileFromEnvOrList_NoEnvNoProfiles_ReturnsEmpty(t *test
 		t.Fatalf("bedrockDefaultProfileFromEnvOrList=%q want empty", got)
 	}
 }
+
+func TestEncodeBedrockProfileCredentialRef_EmptyMeansAWSChainDefault(t *testing.T) {
+	got := encodeBedrockProfileCredentialRef("")
+	if got != "aws_profile" {
+		t.Fatalf("encodeBedrockProfileCredentialRef(empty)=%q want aws_profile", got)
+	}
+}
+
+func TestBedrockProfileSummary_EmptyShowsAuto(t *testing.T) {
+	got := bedrockProfileSummary("")
+	if got != "auto" {
+		t.Fatalf("bedrockProfileSummary(empty)=%q", got)
+	}
+}

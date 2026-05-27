@@ -144,11 +144,115 @@ func TestReduce_ProviderAuthSessionCredentialResolved_CreateDraftTransient(t *te
 		AuthScope:     stateModel.AuthScopeCreateDraft,
 		CredentialRef: "keychain:chatgpt/default",
 	})
-	if len(effects) != 0 {
-		t.Fatalf("effects len=%d want 0", len(effects))
+	if len(effects) != 1 {
+		t.Fatalf("effects len=%d want 1", len(effects))
 	}
 	if got := model.CreateDraftProviderConfig.CredentialRef; got != "keychain:chatgpt/default" {
 		t.Fatalf("create draft credential ref=%q", got)
+	}
+	load, ok := effects[0].(stateeffect.LoadRoutingModelCatalogEffect)
+	if !ok {
+		t.Fatalf("effects[0]=%T want LoadRoutingModelCatalogEffect", effects[0])
+	}
+	if load.Scope != RoutingModelCatalogScopeCreateDraft {
+		t.Fatalf("scope=%q want=%q", load.Scope, RoutingModelCatalogScopeCreateDraft)
+	}
+	if load.ProviderSpec != "chatgpt" {
+		t.Fatalf("provider_spec=%q want=chatgpt", load.ProviderSpec)
+	}
+	if load.CredentialRef != "keychain:chatgpt/default" {
+		t.Fatalf("credential_ref=%q want=keychain:chatgpt/default", load.CredentialRef)
+	}
+}
+
+func TestReduce_ProviderAuthSessionCredentialResolved_AddModelDraft_RefreshesCatalog(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		AddModelDraftProviderProtocol: "responses_stream",
+	}
+	effects := Reduce(&model, stateeffect.ProviderAuthSessionCredentialResolvedAction{
+		EndpointName: "",
+		ProviderConfig: ProviderConfigSnapshot{
+			Ref:           "cfg-add",
+			ProviderSpec:  "chatgpt",
+			BaseURL:       "https://api.openai.com/v1",
+			CredentialRef: "chatgpt_login",
+		},
+		OwnerKey:      stateModel.AddModelDraftAuthOwnerKey("acme", "cfg-add").String(),
+		AuthScope:     stateModel.AuthScopeEndpointProvider,
+		CredentialRef: "secretfile:chatgpt/team/sess_123",
+	})
+	if len(effects) != 1 {
+		t.Fatalf("effects len=%d want 1", len(effects))
+	}
+	load, ok := effects[0].(stateeffect.LoadRoutingModelCatalogEffect)
+	if !ok {
+		t.Fatalf("effects[0]=%T want LoadRoutingModelCatalogEffect", effects[0])
+	}
+	if load.Scope != RoutingModelCatalogScopeAddModelDraft {
+		t.Fatalf("scope=%q want=%q", load.Scope, RoutingModelCatalogScopeAddModelDraft)
+	}
+	if load.ProviderSpec != "chatgpt" {
+		t.Fatalf("provider_spec=%q want=chatgpt", load.ProviderSpec)
+	}
+	if load.CredentialRef != "secretfile:chatgpt/team/sess_123" {
+		t.Fatalf("credential_ref=%q want=secretfile:chatgpt/team/sess_123", load.CredentialRef)
+	}
+	if load.ProviderProtocol != "responses_stream" {
+		t.Fatalf("provider_protocol=%q want=responses_stream", load.ProviderProtocol)
+	}
+}
+
+func TestReduce_ProviderAuthSessionCredentialResolved_CreateDraft_AllowsLoadedResultToReplaceStaleError(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			ProviderSpec:     "chatgpt",
+			BaseURL:          "https://api.openai.com/v1",
+			CredentialRef:    "chatgpt_login",
+			ProviderProtocol: "responses_stream",
+		},
+		CreateDraftModelProviderSpec:  "chatgpt",
+		CreateDraftModelBaseURL:       "https://api.openai.com/v1",
+		CreateDraftModelCredentialRef: "chatgpt_login",
+		CreateDraftModelError:         "signed-in account could not resolve ChatGPT subscription tier; sign in another account",
+	}
+	effects := Reduce(&model, stateeffect.ProviderAuthSessionCredentialResolvedAction{
+		ProviderConfig: ProviderConfigSnapshot{
+			ProviderSpec: "chatgpt",
+			BaseURL:      "https://api.openai.com/v1",
+		},
+		OwnerKey:      stateModel.CreateDraftAuthOwnerKey("create-draft").String(),
+		AuthScope:     stateModel.AuthScopeCreateDraft,
+		CredentialRef: "secretfile:chatgpt/team/sess_123",
+	})
+	if len(effects) != 1 {
+		t.Fatalf("effects len=%d want 1", len(effects))
+	}
+	load, ok := effects[0].(stateeffect.LoadRoutingModelCatalogEffect)
+	if !ok {
+		t.Fatalf("effects[0]=%T want LoadRoutingModelCatalogEffect", effects[0])
+	}
+	if model.CreateDraftModelCredentialRef != "secretfile:chatgpt/team/sess_123" {
+		t.Fatalf("create draft model credential ref=%q", model.CreateDraftModelCredentialRef)
+	}
+	Reduce(&model, stateeffect.RoutingModelCatalogLoaded{
+		Scope:                    load.Scope,
+		ProviderSpec:             load.ProviderSpec,
+		BaseURL:                  load.BaseURL,
+		CredentialRef:            load.CredentialRef,
+		ProviderProtocol:         load.ProviderProtocol,
+		ModelIDs:                 []string{"gpt-4.1-mini"},
+		Error:                    "",
+		ResolvedProviderProtocol: "responses_stream",
+	})
+	if model.CreateDraftModelError != "" {
+		t.Fatalf("create draft model error=%q want empty", model.CreateDraftModelError)
+	}
+	if len(model.CreateDraftModelIDs) != 1 || model.CreateDraftModelIDs[0] != "gpt-4.1-mini" {
+		t.Fatalf("model ids=%v", model.CreateDraftModelIDs)
 	}
 }
 

@@ -42,7 +42,7 @@ func EvaluateModelSelectionGateState(input ModelSelectionReadinessGateInput) Mod
 	if provider == "" {
 		return ModelSelectionGateState{}
 	}
-	if message := strings.TrimSpace(ProviderModelCatalogAuthFailureMessage(modelErr)); message != "" { // swobu:io-string source=boundary
+	if message := strings.TrimSpace(ProviderModelCatalogAuthFailureMessage(provider, credentialRef, modelErr)); message != "" { // swobu:io-string source=boundary
 		return ModelSelectionGateState{Blocked: true, Reason: ModelSelectionBlockAuthProbeFailed, Message: message}
 	}
 	if input.CreateDraft != nil {

@@ -2,6 +2,7 @@ package chatgpt
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -56,14 +57,28 @@ func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func TestListModels_LoadsBundledTierModels(t *testing.T) {
-	t.Parallel()
-
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", "")
+	claims := `{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}`
+	idToken := "a." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".c"
+	raw, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
+		AccessToken: "token-x",
+		IDToken:     idToken,
+		IssuedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	if err := outboundcredentials.StoreSecretByRef("chatgpt", "secretfile:chatgpt/acct_plus", raw); err != nil {
+		t.Fatalf("store secretfile bundle: %v", err)
+	}
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
 	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
-		"keychain:chatgpt/acct_plus",
+		"secretfile:chatgpt/acct_plus",
 		protocolkind.ChatCompletions,
 		"credential_ref",
 		"",
@@ -77,30 +92,31 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 	}
 }
 
-func TestListModels_UsesTierFromCredentialRefPathSegment(t *testing.T) {
-	t.Parallel()
+func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", "")
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
 	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
-		"keychain:chatgpt/plus/sess_abc",
+		"secretfile:chatgpt/plus/sess_abc",
 		protocolkind.ChatCompletions,
 		"credential_ref",
 		"",
 		"",
 	))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(models) == 0 {
-		t.Fatal("expected non-empty bundled models for plus tier")
+	if err == nil {
+		t.Fatalf("expected error, got models=%v", models)
 	}
 }
 
 func TestListModels_UnknownTierReturnsError(t *testing.T) {
-	t.Parallel()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", "")
 
 	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,13 +124,26 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"model_ids":["gpt-5.5"]}`))
 	}))
 	defer srv.Close()
+	claims := `{"https://api.openai.com/auth":{"chatgpt_plan_type":"enterprise"}}`
+	idToken := "a." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".c"
+	raw, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
+		AccessToken: "token-x",
+		IDToken:     idToken,
+		IssuedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	if err := outboundcredentials.StoreSecretByRef("chatgpt", "secretfile:chatgpt/default", raw); err != nil {
+		t.Fatalf("store secretfile bundle: %v", err)
+	}
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
 	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		srv.URL+"/v1",
-		"keychain:chatgpt/default",
+		"secretfile:chatgpt/default",
 		protocolkind.ChatCompletions,
 		"credential_ref",
 		"",
@@ -125,6 +154,43 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 	}
 	if called {
 		t.Fatal("network must not be used when tier is unknown")
+	}
+}
+
+func TestListModels_ResolvesTierFromStoredSecretBundleWhenRefHasNoTierSegment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", "")
+	claims := `{"https://api.openai.com/auth":{"chatgpt_plan_type":"team"}}`
+	idToken := "a." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".c"
+	raw, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
+		AccessToken: "token-x",
+		IDToken:     idToken,
+		IssuedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	if err := outboundcredentials.StoreSecretByRef("chatgpt", "secretfile:chatgpt/sess_abc", raw); err != nil {
+		t.Fatalf("store secretfile bundle: %v", err)
+	}
+
+	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
+	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+		"draft",
+		"chatgpt",
+		"https://chatgpt.com/backend-api/codex",
+		"secretfile:chatgpt/sess_abc",
+		protocolkind.ChatCompletions,
+		"credential_ref",
+		"",
+		"",
+	))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected non-empty bundled models for team tier")
 	}
 }
 
