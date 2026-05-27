@@ -128,8 +128,9 @@ func claudeClientSpec() capabilityClientSpec {
 				"--model", "{{primary_model}}",
 			},
 			Env: map[string]string{
-				"ANTHROPIC_BASE_URL": "{{base_url}}",
-				"ANTHROPIC_MODEL":    "{{primary_model}}",
+				"ANTHROPIC_BASE_URL":            "{{base_url}}",
+				"ANTHROPIC_MODEL":               "{{primary_model}}",
+				"ANTHROPIC_CUSTOM_MODEL_OPTION": "{{primary_model}}",
 			},
 		},
 	}
@@ -205,7 +206,7 @@ func opencodeClientSpec() capabilityClientSpec {
 			pretty := strings.Join([]string{
 				"{",
 				`  "$schema": "https://opencode.ai/config.json",`,
-				`  "model": "swobu/{{primary_model}}",`,
+				`  "model": "swobu/primary",`,
 				`  "provider": {`,
 				`    "swobu": {`,
 				`      "npm": "@ai-sdk/openai-compatible",`,
@@ -220,7 +221,7 @@ func opencodeClientSpec() capabilityClientSpec {
 				`  }`,
 				"}",
 			}, "\n")
-			inline := `{"$schema":"https://opencode.ai/config.json","model":"swobu/{{primary_model}}","provider":{"swobu":{"npm":"@ai-sdk/openai-compatible","name":"Swobu","options":{"baseURL":"{{openai_base_url}}"},"models":{"primary":{"name":"Primary"}}}}}`
+			inline := `{"$schema":"https://opencode.ai/config.json","model":"swobu/primary","provider":{"swobu":{"npm":"@ai-sdk/openai-compatible","name":"Swobu","options":{"baseURL":"{{openai_base_url}}"},"models":{"primary":{"name":"Primary"}}}}}`
 			return TemplateVars{
 				"opencode_config_pretty": pretty,
 				"opencode_config_inline": inline,
@@ -241,7 +242,9 @@ func opencodeClientSpec() capabilityClientSpec {
 		Run: &capabilityRunSpec{
 			Binary: "opencode",
 			Env: map[string]string{
-				"OPENAI_API_KEY": "swobu-placeholder",
+				"OPENAI_API_KEY":          "swobu-placeholder",
+				"OPENCODE_CONFIG":         "./opencode.json",
+				"OPENCODE_CONFIG_CONTENT": "{{opencode_config_inline}}",
 			},
 			Prepare: &capabilityRunPrepareSpec{
 				Path:           "./opencode.json",

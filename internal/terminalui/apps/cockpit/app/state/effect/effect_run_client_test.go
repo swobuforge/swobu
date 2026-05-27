@@ -130,6 +130,9 @@ func TestClientRunSpecForID(t *testing.T) {
 	if got := claude.env["ANTHROPIC_MODEL"]; got != requestpath.PublicModelIDSwobu {
 		t.Fatalf("claude env ANTHROPIC_MODEL=%q", got)
 	}
+	if got := claude.env["ANTHROPIC_CUSTOM_MODEL_OPTION"]; got != requestpath.PublicModelIDSwobu {
+		t.Fatalf("claude env ANTHROPIC_CUSTOM_MODEL_OPTION=%q", got)
+	}
 	opencode, ok := clientRunSpecForID("opencode", "http://127.0.0.1:7926/c/acme/", "")
 	if !ok || opencode.binary != "opencode" {
 		t.Fatalf("opencode spec=%+v ok=%v", opencode, ok)
@@ -137,8 +140,11 @@ func TestClientRunSpecForID(t *testing.T) {
 	if got := opencode.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
 		t.Fatalf("opencode env OPENAI_API_KEY=%q", got)
 	}
-	if got := opencode.env["OPENCODE_CONFIG_CONTENT"]; got != "" {
-		t.Fatalf("opencode env OPENCODE_CONFIG_CONTENT must be empty, got=%q", got)
+	if got := opencode.env["OPENCODE_CONFIG"]; got != "./opencode.json" {
+		t.Fatalf("opencode env OPENCODE_CONFIG=%q", got)
+	}
+	if got := opencode.env["OPENCODE_CONFIG_CONTENT"]; !strings.Contains(got, `"model":"swobu/primary"`) {
+		t.Fatalf("opencode env OPENCODE_CONFIG_CONTENT=%q", got)
 	}
 	if opencode.prepare == nil {
 		t.Fatal("opencode prepare missing")
@@ -176,7 +182,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("claude command missing")
 	}
-	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_MODEL=" + requestpath.PublicModelIDSwobu + " claude --model " + requestpath.PublicModelIDSwobu; claude != want {
+	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_CUSTOM_MODEL_OPTION=" + requestpath.PublicModelIDSwobu + " ANTHROPIC_MODEL=" + requestpath.PublicModelIDSwobu + " claude --model " + requestpath.PublicModelIDSwobu; claude != want {
 		t.Fatalf("claude command=%q want=%q", claude, want)
 	}
 	assertNoTestHarnessArtifacts(t, claude)
@@ -184,8 +190,11 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode command missing")
 	}
-	if want := `OPENAI_API_KEY=swobu-placeholder opencode`; opencode != want {
-		t.Fatalf("opencode command=%q want=%q", opencode, want)
+	if !strings.Contains(opencode, `OPENAI_API_KEY=swobu-placeholder`) ||
+		!strings.Contains(opencode, `OPENCODE_CONFIG=./opencode.json`) ||
+		!strings.Contains(opencode, `OPENCODE_CONFIG_CONTENT=`) ||
+		!strings.HasSuffix(opencode, " opencode") {
+		t.Fatalf("opencode command=%q", opencode)
 	}
 	assertNoTestHarnessArtifacts(t, opencode)
 	continueCmd, ok := RunClientDisplayCommand("continue", "http://127.0.0.1:7926/c/acme/", "")

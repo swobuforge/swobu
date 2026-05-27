@@ -60,8 +60,56 @@ http_get() {
   url="$1"
   out="$2"
   need_cmd curl
+  token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  download_release_asset_via_api() {
+    rel_url="$1"
+    rel_out="$2"
+    owner="$(printf '%s' "$rel_url" | sed -n 's#https://github.com/\([^/]*\)/\([^/]*\)/releases/download/.*#\1#p')"
+    repo="$(printf '%s' "$rel_url" | sed -n 's#https://github.com/\([^/]*\)/\([^/]*\)/releases/download/.*#\2#p')"
+    tag="$(printf '%s' "$rel_url" | sed -n 's#https://github.com/[^/]*/[^/]*/releases/download/\([^/]*\)/.*#\1#p')"
+    asset_name="$(printf '%s' "$rel_url" | sed -n 's#.*/releases/download/[^/]*/\([^?]*\).*#\1#p')"
+    if [ -z "$owner" ] || [ -z "$repo" ] || [ -z "$tag" ] || [ -z "$asset_name" ]; then
+      return 1
+    fi
+    release_api="https://api.github.com/repos/$owner/$repo/releases/tags/$tag"
+    release_json="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$release_api")" || return 1
+    asset_id="$(printf '%s' "$release_json" | awk -v name="$asset_name" '
+      BEGIN { RS="{"; FS="," }
+      $0 ~ "\"name\":\"" name "\"" {
+        for (i = 1; i <= NF; i++) {
+          if ($i ~ /"id":[0-9]+/) {
+            id = $i
+            gsub(/[^0-9]/, "", id)
+            print id
+            exit
+          }
+        }
+      }
+    ')"
+    if [ -z "$asset_id" ]; then
+      return 1
+    fi
+    asset_api="https://api.github.com/repos/$owner/$repo/releases/assets/$asset_id"
+    curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" "$asset_api" -o "$rel_out"
+  }
+  curl_cmd() {
+    if [ -n "$token" ]; then
+      curl -fsSL -H "Authorization: Bearer $token" "$url" -o "$out" || {
+        case "$url" in
+          https://github.com/*/releases/download/*)
+            download_release_asset_via_api "$url" "$out"
+            ;;
+          *)
+            return 1
+            ;;
+        esac
+      }
+    else
+      curl -fsSL "$url" -o "$out"
+    fi
+  }
   if [ -t 2 ]; then
-    curl -fsSL "$url" -o "$out" &
+    curl_cmd &
     curl_pid="$!"
     spinner_idx=0
     while kill -0 "$curl_pid" 2>/dev/null; do
@@ -82,7 +130,7 @@ http_get() {
       return 1
     fi
   else
-    curl -fsSL "$url" -o "$out"
+    curl_cmd
   fi
 }
 
