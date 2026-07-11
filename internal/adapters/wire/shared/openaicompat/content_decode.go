@@ -8,11 +8,11 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// ContentPartData is one normalized OpenAI-style content part.
+// ContentPartItem is one normalized OpenAI-style content part.
 //
 // The helper keeps the raw part type and common payload fields so callers can
 // share one walker while preserving family-specific interpretation and errors.
-type ContentPartData struct {
+type ContentPartItem struct {
 	Type       string          `json:"type"`
 	Text       string          `json:"text,omitempty"`
 	InputText  string          `json:"input_text,omitempty"`
@@ -42,7 +42,7 @@ func GeneratedToolUseID(msgIdx int, partIdx int) string {
 
 // DecodeContentParts normalizes one OpenAI-style content payload into walker
 // records without interpreting part types.
-func DecodeContentParts(raw json.RawMessage, invalidMessage string) ([]ContentPartData, error) {
+func DecodeContentParts(raw json.RawMessage, invalidMessage string) ([]ContentPartItem, error) {
 	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" { // swobu:io-string source=boundary
 		return nil, nil
 	}
@@ -51,10 +51,10 @@ func DecodeContentParts(raw json.RawMessage, invalidMessage string) ([]ContentPa
 		if text == "" {
 			return nil, nil
 		}
-		return []ContentPartData{{Type: "text", Text: text}}, nil
+		return []ContentPartItem{{Type: "text", Text: text}}, nil
 	}
 
-	var parts []ContentPartData
+	var parts []ContentPartItem
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		return nil, canonical.BadRequest(invalidMessage)
 	}
@@ -63,7 +63,7 @@ func DecodeContentParts(raw json.RawMessage, invalidMessage string) ([]ContentPa
 
 // WalkContentParts visits decoded content parts in order and threads the part
 // index through the callback so callers can keep family-specific policy.
-func WalkContentParts(parts []ContentPartData, visit func(int, ContentPartData) error) error {
+func WalkContentParts(parts []ContentPartItem, visit func(int, ContentPartItem) error) error {
 	for idx, part := range parts {
 		if err := visit(idx, part); err != nil {
 			return err
@@ -79,7 +79,7 @@ func DecodeTextContentItems(raw json.RawMessage, surface string, author canonica
 	}
 
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
-	err = WalkContentParts(parts, func(_ int, part ContentPartData) error {
+	err = WalkContentParts(parts, func(_ int, part ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"

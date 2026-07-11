@@ -359,7 +359,7 @@ func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, e
 		return nil, err
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
-	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPartData) error {
+	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"
