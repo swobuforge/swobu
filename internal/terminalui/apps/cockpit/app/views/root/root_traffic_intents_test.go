@@ -47,13 +47,11 @@ func TestRoot_TrafficRows_WindowedListPreventsOverflow(t *testing.T) {
 	for i := 1; i <= 12; i++ {
 		id := fmt.Sprintf("req-%02d", i)
 		when := fmt.Sprintf("11:22:%02d", i)
-		trafficRows = append(trafficRows, state.TrafficRow{
-			RequestID:       id,
-			OperationFamily: "responses",
-			Target:          "backend-a",
-			Result:          "in_progress",
-			StatusCode:      0,
-			ObservedAt:      when,
+		trafficRows = append(trafficRows, state.TrafficRow{RequestID: id, OperationFamily: "responses",
+			Target:     "backend-a",
+			Result:     "in_progress",
+			StatusCode: 0,
+			ObservedAt: when,
 		})
 	}
 
@@ -85,13 +83,11 @@ func TestRoot_TrafficRows_DownAtWindowEdgeScrollsWithinTrafficList(t *testing.T)
 	for i := 1; i <= 8; i++ {
 		id := fmt.Sprintf("req-%02d", i)
 		when := fmt.Sprintf("12:34:%02d", i)
-		trafficRows = append(trafficRows, state.TrafficRow{
-			RequestID:       id,
-			OperationFamily: "responses",
-			Target:          "backend-a",
-			Result:          "in_progress",
-			StatusCode:      0,
-			ObservedAt:      when,
+		trafficRows = append(trafficRows, state.TrafficRow{RequestID: id, OperationFamily: "responses",
+			Target:     "backend-a",
+			Result:     "in_progress",
+			StatusCode: 0,
+			ObservedAt: when,
 		})
 	}
 

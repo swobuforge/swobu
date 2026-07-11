@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -99,9 +99,9 @@ func buildWorkspaceAddModelDetailRows(
 		Scope:      buildAddModelScopeRow(ctx, draft, panel),
 	})
 	effectiveCredentialRef := effectiveAddModelCredentialRef(model, draft)
-	authVariant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(strings.TrimSpace(draft.CredentialRef))))) // swobu:io-string source=boundary
+	authVariant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(strings.TrimSpace(draft.CredentialRef))))) // swobu:io-string source=boundary
 	authViewState := interactiveAuthPhaseNone
-	if strings.EqualFold(providerSpec, "chatgpt") && providercatalog.IsInteractiveAuthVariant(authVariant) {
+	if strings.EqualFold(providerSpec, "chatgpt") && profile.IsInteractiveAuthVariant(authVariant) {
 		authViewState = classifyInteractiveAuthPhase(model, strings.TrimSpace(snapshot.Name), draft, authVariant) // swobu:io-string source=boundary
 	}
 	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
@@ -139,7 +139,7 @@ func buildWorkspaceAddModelDetailRows(
 func buildAddModelProtocolRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		_ = ctx
-		protocols := providercatalog.SupportedProviderProtocolsForSpec(draft.ProviderSpec)
+		protocols := profile.SupportedProviderProtocolsForSpec(draft.ProviderSpec)
 		if len(protocols) == 0 {
 			return views.RowStatic("protocol", views.ValueRequired)
 		}
@@ -273,7 +273,7 @@ func buildAddModelProviderItems(model state.Model, endpointName string, draft st
 			next.ModelID = ""
 			next.TargetAlias = ""
 			if strings.EqualFold(spec, "chatgpt") {
-				next.CredentialRef = string(providercatalog.AuthVariantChatGPTLogin)
+				next.CredentialRef = string(profile.AuthVariantChatGPTLogin)
 			}
 			panel.setDraft(next)
 			panel.setProviderPickerOpen(false)

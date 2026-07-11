@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -10,10 +11,11 @@ import (
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const (
@@ -37,7 +39,7 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 }
 
 // NewRuntime builds a complete Anthropic provider runtime.
-func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
+func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	executor := NewExecutor(client, credentials)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
@@ -47,63 +49,76 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 	}
 }
 
-func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
-	streaming, err := resolveAnthropicProviderProtocol(req.Target.ProviderProtocol)
+func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
+	deliveryMode, err := resolveAnthropicProviderProtocol(req.Target.ProviderProtocol)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
-		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
+		return ports.ProviderTransportResponse{}, canonical.BadRequest("canonical request is required")
 	}
 	if strings.TrimSpace(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
-		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider base URL is required")
+		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
-	codec, err := protocolregistry.ForProtocolKind(protocolkind.Messages)
+	requestEncoder, err := protocolregistry.ForProviderRequestProtocolCarrier(protocolkind.Messages)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 
-	wireReq, err := codec.EncodeRequest(req.Request, streaming)
-	if err != nil {
-		return ports.ProviderResponse{}, err
+	resolvedDelivery := delivery.BufferedDelivery()
+	if deliveryMode == delivery.Streaming {
+		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, wireReq.Method, httpedge.JoinBaseURLAndPath(req.Target.BaseURL, wireReq.Path), wireReq.Body)
+	wireReq, err := requestEncoder.EncodeProviderRequest(req.Request, resolvedDelivery)
 	if err != nil {
-		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider request could not be built")
+		return ports.ProviderTransportResponse{}, err
 	}
-	if wireReq.HasBody {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpedge.JoinBaseURLAndPath(req.Target.BaseURL, "/messages"), bytes.NewReader(wireReq.Raw))
+	if err != nil {
+		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("anthropic provider request could not be built")
+	}
+	if len(wireReq.Raw) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
 	httpReq.Header.Set("anthropic-version", anthropicVersionHeaderValue)
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 	if err := e.applyCredential(ctx, httpReq, req.Target.ProviderID(), req.Target.CredentialRef); err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return ports.ProviderResponse{}, canonical.BadEndpoint("anthropic provider request failed before backend response")
+		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("anthropic provider request failed before backend response")
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return ports.ProviderResponse{}, canonical.InternalError("backend response content encoding is unsupported or invalid")
+		return ports.ProviderTransportResponse{}, canonical.InternalError("backend response content encoding is unsupported or invalid")
 	}
 	if resp.StatusCode >= 400 {
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
+		return ports.ProviderTransportResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	decoder, err := anthropicResponseDecoder(req.Target.ProviderID(), streaming, codec)
-	if err != nil {
-		_ = resp.Body.Close()
-		return ports.ProviderResponse{}, err
+	if deliveryMode == delivery.Streaming {
+		return ports.ProviderTransportResponse{
+			Header: resp.Header.Clone(),
+			Stream: resp.Body,
+		}, nil
 	}
-	return decoder(resp.Body)
+	raw, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return ports.ProviderTransportResponse{}, canonical.InternalError("backend success response could not be read")
+	}
+	return ports.ProviderTransportResponse{
+		Header:   resp.Header.Clone(),
+		Document: raw,
+	}, nil
 }
 
 func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
@@ -145,49 +160,21 @@ func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target
 	return err
 }
 
-func anthropicResponseDecoder(providerIDRaw string, streaming bool, codec protocolregistry.EgressCodec) (providersruntime.ResponseDecoder, error) {
-	if providerIDRaw != string(providercatalog.ProviderSpecAnthropic) {
-		return nil, canonical.BadEndpoint("provider id is unsupported for anthropic adapter runtime")
-	}
-	streamingDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		return ports.NewEnvelopeStreamingProviderResponse(codec.DecodeResponseStream(body, "provider_stream:anthropic_messages")), nil
-	}
-	bufferedDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		defer func() {
-			_ = body.Close()
-		}()
-		raw, err := io.ReadAll(body)
-		if err != nil {
-			return ports.ProviderResponse{}, canonical.InternalError("backend success response could not be read")
-		}
-		result, err := codec.DecodeResponse(raw)
-		if err != nil {
-			return ports.ProviderResponse{}, err
-		}
-		return ports.NewBufferedProviderResponse(result), nil
-	}
-	decoder, ok := providersruntime.SelectResponseDecoder(streaming, streamingDecoder, bufferedDecoder)
-	if !ok {
-		return nil, canonical.UnsupportedDelivery("anthropic provider delivery variant is not implemented")
-	}
-	return decoder, nil
-}
-
-func resolveAnthropicProviderProtocol(providerProtocol string) (bool, error) {
+func resolveAnthropicProviderProtocol(providerProtocol string) (delivery.Mode, error) {
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	if providerProtocol == "" || providerProtocol == providercatalog.ProviderProtocolAuto {
-		return false, canonical.BadEndpoint("anthropic provider protocol must be concrete")
+	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
+		return delivery.Buffered, canonical.BadEndpoint("anthropic provider protocol must be concrete")
 	}
-	if !providercatalog.SupportsProviderProtocolForSpec(string(providercatalog.ProviderSpecAnthropic), providerProtocol) {
-		return false, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
+	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecAnthropic), providerProtocol) {
+		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
 	}
 	switch providerProtocol {
 	case "messages":
-		return false, nil
+		return delivery.Buffered, nil
 	case "messages_stream":
-		return true, nil
+		return delivery.Streaming, nil
 	default:
-		return false, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
+		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
 	}
 }
 

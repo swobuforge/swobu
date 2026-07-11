@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"context"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -305,16 +306,16 @@ func TestResolveBedrockOperation(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name          string
-		variant       string
-		wantInvoke    bool
-		wantStreaming bool
-		wantErr       bool
+		name             string
+		variant          string
+		wantInvoke       bool
+		wantDeliveryMode delivery.Mode
+		wantErr          bool
 	}{
 		{name: "converse", variant: "converse"},
-		{name: "converse stream", variant: "converse_stream", wantStreaming: true},
+		{name: "converse stream", variant: "converse_stream", wantDeliveryMode: delivery.Streaming},
 		{name: "invoke model", variant: "invoke_model", wantInvoke: true},
-		{name: "invoke model stream", variant: "invoke_model_stream", wantInvoke: true, wantStreaming: true},
+		{name: "invoke model stream", variant: "invoke_model_stream", wantInvoke: true, wantDeliveryMode: delivery.Streaming},
 		{name: "empty rejected", variant: "", wantErr: true},
 		{name: "protocol auto rejected", variant: "auto", wantErr: true},
 		{name: "unsupported rejected", variant: "responses", wantErr: true},
@@ -333,8 +334,8 @@ func TestResolveBedrockOperation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolveBedrockOperation(%q) error: %v", tc.variant, err)
 			}
-			if got.invokeModel != tc.wantInvoke || got.streaming != tc.wantStreaming {
-				t.Fatalf("resolveBedrockOperation(%q)=%+v want invoke=%v streaming=%v", tc.variant, got, tc.wantInvoke, tc.wantStreaming)
+			if got.invokeModel != tc.wantInvoke || got.deliveryMode != tc.wantDeliveryMode {
+				t.Fatalf("resolveBedrockOperation(%q)=%+v want invoke=%v deliveryMode=%v", tc.variant, got, tc.wantInvoke, tc.wantDeliveryMode)
 			}
 		})
 	}

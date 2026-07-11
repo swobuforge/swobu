@@ -1,3 +1,4 @@
+// swobu:codelint ignore file-length provider executor keeps one provider edge seam
 package chatgpt
 
 import (
@@ -17,11 +18,10 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt/codexwire"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const (
@@ -51,7 +51,7 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 }
 
 // NewRuntime builds a complete ChatGPT provider runtime.
-func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
+func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	executor := NewExecutor(client, credentials)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
@@ -61,33 +61,30 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 	}
 }
 
-func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
+func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
 	if strings.TrimSpace(req.Request.Model()) == "" {
-		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
+		return ports.ProviderTransportResponse{}, canonical.BadRequest("canonical request is required")
 	}
-	streaming, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
+	deliveryMode, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
-	wireReq, err := codexwire.EncodeRequest(req.Request, streaming)
+	resolvedDelivery := delivery.BufferedDelivery()
+	if deliveryMode == delivery.Streaming {
+		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
+	}
+	wireReq, err := codexwire.EncodeProviderRequest(req.Request, resolvedDelivery)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	baseURL := resolveChatGPTExecuteBaseURL(req.Target.BaseURL)
-	var bodyBytes []byte
-	if wireReq.Body != nil {
-		raw, readErr := io.ReadAll(wireReq.Body)
-		if readErr != nil {
-			return ports.ProviderResponse{}, canonical.InternalError("provider request body could not be read")
-		}
-		bodyBytes = raw
-	}
+	bodyBytes := wireReq.Raw
 	newRequest := func(token string) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, wireReq.Method, httpedge.JoinBaseURLAndPath(baseURL, wireReq.Path), bytes.NewReader(bodyBytes))
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpedge.JoinBaseURLAndPath(baseURL, "/responses"), bytes.NewReader(bodyBytes))
 		if err != nil {
 			return nil, err
 		}
-		if wireReq.HasBody {
+		if len(bodyBytes) > 0 {
 			httpReq.Header.Set("Content-Type", "application/json")
 		}
 		httpReq.Header.Set("Accept", "application/json")
@@ -99,58 +96,62 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	}
 	token, err := e.resolveAccessToken(ctx, req.Target.ProviderID(), req.Target.CredentialRef, false)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	httpReq, err := newRequest(token)
 	if err != nil {
-		return ports.ProviderResponse{}, canonical.BadEndpoint("chatgpt provider request could not be built")
+		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("chatgpt provider request could not be built")
 	}
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return ports.ProviderResponse{}, canonical.BadEndpoint("chatgpt provider request failed before backend response")
+		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("chatgpt provider request failed before backend response")
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
 		defer func() { _ = resp.Body.Close() }()
-		return ports.ProviderResponse{}, canonical.InternalError("backend response content encoding is unsupported or invalid")
+		return ports.ProviderTransportResponse{}, canonical.InternalError("backend response content encoding is unsupported or invalid")
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		backendErr := httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 		recoveredToken, refreshErr := e.resolveAccessToken(ctx, req.Target.ProviderID(), req.Target.CredentialRef, true)
 		if refreshErr != nil || strings.TrimSpace(recoveredToken) == "" { // swobu:io-string source=boundary
-			return ports.ProviderResponse{}, backendErr
+			return ports.ProviderTransportResponse{}, backendErr
 		}
 		retryReq, buildErr := newRequest(recoveredToken)
 		if buildErr != nil {
-			return ports.ProviderResponse{}, canonical.BadEndpoint("chatgpt provider request could not be built")
+			return ports.ProviderTransportResponse{}, canonical.BadEndpoint("chatgpt provider request could not be built")
 		}
 		retryResp, retryErr := e.client.Do(retryReq)
 		if retryErr != nil {
-			return ports.ProviderResponse{}, canonical.BadEndpoint("chatgpt provider request failed before backend response")
+			return ports.ProviderTransportResponse{}, canonical.BadEndpoint("chatgpt provider request failed before backend response")
 		}
 		retryResp, retryErr = httpedge.DecodeHTTPResponseContentEncoding(retryResp)
 		if retryErr != nil {
 			defer func() { _ = retryResp.Body.Close() }()
-			return ports.ProviderResponse{}, canonical.InternalError("backend response content encoding is unsupported or invalid")
+			return ports.ProviderTransportResponse{}, canonical.InternalError("backend response content encoding is unsupported or invalid")
 		}
 		resp = retryResp
 	}
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
-		return ports.ProviderResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
+		return ports.ProviderTransportResponse{}, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	codec, err := protocolregistry.ForProtocolKind(protocolkind.Responses)
-	if err != nil {
-		_ = resp.Body.Close()
-		return ports.ProviderResponse{}, err
+	if deliveryMode == delivery.Streaming {
+		return ports.ProviderTransportResponse{
+			Header: resp.Header.Clone(),
+			Stream: resp.Body,
+		}, nil
 	}
-	decoder, err := chatGPTResponseDecoder(req.Target.ProviderID(), streaming, codec)
-	if err != nil {
-		_ = resp.Body.Close()
-		return ports.ProviderResponse{}, err
+	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return ports.ProviderTransportResponse{}, canonical.InternalError("backend success response could not be read")
 	}
-	return decoder(resp.Body)
+	return ports.ProviderTransportResponse{
+		Header:   resp.Header.Clone(),
+		Document: body,
+	}, nil
 }
 
 func (e ProviderExecutorAdapter) resolveAccessToken(ctx context.Context, providerSpec string, credentialRef string, forceRefresh bool) (string, error) {
@@ -335,44 +336,18 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 	return strings.TrimRight(base, "/")
 }
 
-func chatGPTResponseDecoder(providerIDRaw string, streaming bool, codec protocolregistry.EgressCodec) (providersruntime.ResponseDecoder, error) {
-	if providerIDRaw != string(providercatalog.ProviderSpecChatGPT) {
-		return nil, canonical.BadEndpoint("provider id is unsupported for chatgpt adapter runtime")
-	}
-	streamingDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		return ports.NewEnvelopeStreamingProviderResponse(codec.DecodeResponseStream(body, "provider_stream:chatgpt_responses")), nil
-	}
-	bufferedDecoder := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		defer func() { _ = body.Close() }()
-		raw, err := io.ReadAll(body)
-		if err != nil {
-			return ports.ProviderResponse{}, canonical.InternalError("backend success response could not be read")
-		}
-		result, err := codec.DecodeResponse(raw)
-		if err != nil {
-			return ports.ProviderResponse{}, err
-		}
-		return ports.NewBufferedProviderResponse(result), nil
-	}
-	decoder, ok := providersruntime.SelectResponseDecoder(streaming, streamingDecoder, bufferedDecoder)
-	if !ok {
-		return nil, canonical.UnsupportedDelivery("chatgpt provider delivery variant is not implemented")
-	}
-	return decoder, nil
-}
-
-func resolveChatGPTProviderProtocol(providerProtocol string) (bool, error) {
+func resolveChatGPTProviderProtocol(providerProtocol string) (delivery.Mode, error) {
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	if providerProtocol == "" || providerProtocol == providercatalog.ProviderProtocolAuto {
-		return false, canonical.BadEndpoint("chatgpt provider protocol must be concrete")
+	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
+		return delivery.Buffered, canonical.BadEndpoint("chatgpt provider protocol must be concrete")
 	}
-	if !providercatalog.SupportsProviderProtocolForSpec(string(providercatalog.ProviderSpecChatGPT), providerProtocol) {
-		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
+	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecChatGPT), providerProtocol) {
+		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
 	}
 	switch providerProtocol {
 	case "responses_stream":
-		return true, nil
+		return delivery.Streaming, nil
 	default:
-		return false, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
+		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
 	}
 }

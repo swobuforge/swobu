@@ -156,14 +156,18 @@ func CreateDraftProviderSummary(model state.Model) string {
 }
 
 func CreateDraftEndpointValue(model state.Model) string {
+	base := strings.TrimSpace(strings.TrimRight(platformconfig.DefaultDaemonURL(), "/")) // swobu:io-string source=boundary
+	if base == "" {
+		base = "http://127.0.0.1:7926"
+	}
 	name := deriveEndpointSlug(CreateDraftName(model))
 	if name == "" {
-		return "/c/<slug>/"
+		return base + "/c/<slug>/"
 	}
 	if _, err := endpointintent.ParseEndpointName(name); err != nil {
 		return "invalid"
 	}
-	return "/c/" + name + "/"
+	return base + "/c/" + name + "/"
 }
 
 func deriveEndpointSlug(raw string) string {

@@ -35,7 +35,7 @@ func buildProviderBackendURLRow(ctx *retained.Context[state.Model], spec provide
 		return applyProviderBackendURL(value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
 	})
 	if strings.TrimSpace(pc.BaseURL) == "" { // swobu:io-string source=boundary
-		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("OpenAI-compatible backend URL is required (https://host/v1)")...)
+		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("OpenAI-style backend URL is required (https://host/v1)")...)
 	} else if message := views.ScopedError(model, "routing", "provider/backend-url"); message != "" {
 		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(message)...)
 	} else {

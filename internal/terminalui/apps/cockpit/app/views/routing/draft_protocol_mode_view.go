@@ -2,7 +2,7 @@ package routing
 
 import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -14,7 +14,7 @@ func createDraftProtocolModeRow(model state.Model) retained.ViewSpec[state.Model
 	if spec == "" {
 		return views.RowStatic("protocol", views.ValueRequired)
 	}
-	protocols := providercatalog.SupportedProviderProtocolsForSpec(spec)
+	protocols := profile.SupportedProviderProtocolsForSpec(spec)
 	if len(protocols) == 0 {
 		return views.RowStatic("protocol", views.ValueRequired)
 	}

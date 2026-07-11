@@ -8,10 +8,10 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestLocalResponseContinuityStore_MaterializesLinkedThread(t *testing.T) {
+func TestLocalResponseContinuationStore_MaterializesLinkedThread(t *testing.T) {
 	baseTime := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
 	now := baseTime
-	store := NewLocalResponseContinuityStore(LocalResponseContinuityStoreConfig{
+	store := NewLocalResponseContinuationStore(LocalResponseContinuationStoreConfig{
 		Now: func() time.Time { return now },
 	})
 
@@ -50,10 +50,10 @@ func TestLocalResponseContinuityStore_MaterializesLinkedThread(t *testing.T) {
 	}
 }
 
-func TestLocalResponseContinuityStore_MatchPrefixChoosesLatestEquivalentCandidate(t *testing.T) {
+func TestLocalResponseContinuationStore_MatchPrefixChoosesLatestEquivalentCandidate(t *testing.T) {
 	baseTime := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
 	now := baseTime
-	store := NewLocalResponseContinuityStore(LocalResponseContinuityStoreConfig{
+	store := NewLocalResponseContinuationStore(LocalResponseContinuationStoreConfig{
 		Now: func() time.Time { return now },
 	})
 
@@ -88,10 +88,10 @@ func TestLocalResponseContinuityStore_MatchPrefixChoosesLatestEquivalentCandidat
 	}
 }
 
-func TestLocalResponseContinuityStore_EvictsExpiredRecentWindow(t *testing.T) {
+func TestLocalResponseContinuationStore_EvictsExpiredRecentWindow(t *testing.T) {
 	baseTime := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
 	now := baseTime
-	store := NewLocalResponseContinuityStore(LocalResponseContinuityStoreConfig{
+	store := NewLocalResponseContinuationStore(LocalResponseContinuationStoreConfig{
 		Now: func() time.Time { return now },
 	})
 
@@ -112,10 +112,10 @@ func TestLocalResponseContinuityStore_EvictsExpiredRecentWindow(t *testing.T) {
 	}
 }
 
-func TestLocalResponseContinuityStore_TouchKeepsActiveAncestorsAlive(t *testing.T) {
+func TestLocalResponseContinuationStore_TouchKeepsActiveAncestorsAlive(t *testing.T) {
 	baseTime := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
 	now := baseTime
-	store := NewLocalResponseContinuityStore(LocalResponseContinuityStoreConfig{
+	store := NewLocalResponseContinuationStore(LocalResponseContinuationStoreConfig{
 		Now: func() time.Time { return now },
 	})
 

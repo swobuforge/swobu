@@ -56,7 +56,7 @@ var actionDescriptors = map[ActionKind]actionKindInfo{
 	ActionKindRun:               {Label: "run", Summary: "command", Verb: "run"},
 	ActionKindFileConfig:        {Label: "file config", Summary: "config", Verb: "copy"},
 	ActionKindEnvironmentValues: {Label: "environment values", Summary: ".env", Verb: "copy"},
-	ActionKindOpenGuide:         {Label: "open", Summary: "openai + anthropic compatible", Verb: "view"},
+	ActionKindOpenGuide:         {Label: "open", Summary: "openai-style + anthropic-style", Verb: "view"},
 	ActionKindCopyValues:        {Label: "copy values", Summary: "base + model", Verb: "copy"},
 }
 
@@ -263,7 +263,7 @@ func otherClientSpec() capabilityClientSpec {
 			{
 				ID:      "open",
 				Kind:    ActionKindOpenGuide,
-				Content: "OpenAI + Anthropic compatible\nBase URL: {{base_url}}\nModel:    {{primary_model}}\nSwobu autodetects v1 canonical.",
+				Content: "OpenAI-style + Anthropic-style\nBase URL: {{base_url}}\nModel:    {{primary_model}}\nSwobu autodetects v1 canonical.",
 			},
 			{
 				ID:      "copy-values",

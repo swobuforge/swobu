@@ -8,15 +8,14 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
-		out: requestpath.HandleOutput{
-			Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput(
+		out: exchange.HandleOutput{
+			Response: testProviderResponseFromOutput(canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"model",
 				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
@@ -37,8 +36,8 @@ func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 
 func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
-		out: requestpath.HandleOutput{
-			Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput(
+		out: exchange.HandleOutput{
+			Response: testProviderResponseFromOutput(canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"model",
 				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
@@ -61,8 +60,8 @@ func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 
 func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 	handler := NewHandler(staticRequestHandler{
-		out: requestpath.HandleOutput{
-			Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput(
+		out: exchange.HandleOutput{
+			Response: testProviderResponseFromOutput(canonical.NewConversationOutput(
 				"chatcmpl_1",
 				"model",
 				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},

@@ -94,6 +94,17 @@ func TestReduce_CreateDraftModelAndCredentialChanges_DoNotMutateProtocolFields(t
 	}
 }
 
+func TestReduce_SetCreateDraftTargetAlias_CanonicalizesValue(t *testing.T) {
+	t.Parallel()
+
+	model := Model{}
+	Reduce(&model, SetCreateDraftTargetAlias{TargetAlias: "  FAST  "})
+
+	if got := model.CreateDraftProviderConfig.TargetAlias; got != "fast" {
+		t.Fatalf("target alias = %q, want fast", got)
+	}
+}
+
 func TestReduce_WorkspaceRequestActionsEmitSaveEffects(t *testing.T) {
 	t.Parallel()
 

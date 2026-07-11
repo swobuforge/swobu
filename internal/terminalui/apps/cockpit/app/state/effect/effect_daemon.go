@@ -17,17 +17,20 @@ import (
 const modelCatalogProbeLoadTimeout = 8 * time.Second
 
 type daemonRawTrafficRow struct {
-	RequestID      string                     `json:"request_id"`
-	ClientHandler  string                     `json:"client_handler,omitempty"`
-	ClientProtocol string                     `json:"client_protocol,omitempty"`
-	IngressFamily  string                     `json:"ingress_family,omitempty"`
-	NormalizedOp   string                     `json:"normalized_op,omitempty"`
-	Route          string                     `json:"route"`
-	Result         string                     `json:"result"`
-	StatusCode     int                        `json:"status_code"`
-	ObservedAt     string                     `json:"observed_at,omitempty"`
-	Timing         *daemonRawTimingFields     `json:"timing,omitempty"`
-	TokenUsage     *daemonRawTokenUsageFields `json:"token_usage,omitempty"`
+	RequestID           string                     `json:"request_id"`
+	ClientHandler       string                     `json:"client_handler,omitempty"`
+	ClientProtocol      string                     `json:"client_protocol,omitempty"`
+	IngressFamily       string                     `json:"ingress_family,omitempty"`
+	NormalizedOp        string                     `json:"normalized_op,omitempty"`
+	Route               string                     `json:"route"`
+	Result              string                     `json:"result"`
+	StatusCode          int                        `json:"status_code"`
+	ObservedAt          string                     `json:"observed_at,omitempty"`
+	Timing              *daemonRawTimingFields     `json:"timing,omitempty"`
+	TokenUsage          *daemonRawTokenUsageFields `json:"token_usage,omitempty"`
+	Mutations           []stateModel.Mutation      `json:"wire_transform_mutations,omitempty"`
+	ExchangeDiagnostics []string                   `json:"exchange_diagnostics,omitempty"`
+	StageReports        []stateModel.StageReport   `json:"exchange_stage_reports,omitempty"`
 }
 
 type daemonRawTimingFields struct {
@@ -182,19 +185,20 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 			cacheReadTokens = r.TokenUsage.CacheReadTokens
 			cacheWriteTokens = r.TokenUsage.CacheWriteTokens
 		}
-		rows = append(rows, stateModel.TrafficRow{
-			RequestID:        r.RequestID,
-			OperationFamily:  trafficOperationFamily(r.IngressFamily, r.Result, r.StatusCode),
-			Target:           r.Route,
-			Result:           r.Result,
-			StatusCode:       r.StatusCode,
-			ObservedAt:       r.ObservedAt,
-			TTFBMillis:       ttfbMillis,
-			DurMillis:        durMillis,
-			InputTokens:      inputTokens,
-			OutputTokens:     outputTokens,
-			CacheReadTokens:  cacheReadTokens,
-			CacheWriteTokens: cacheWriteTokens,
+		rows = append(rows, stateModel.TrafficRow{OperationFamily: trafficOperationFamily(r.IngressFamily, r.Result, r.StatusCode),
+			Target:              r.Route,
+			Result:              r.Result,
+			StatusCode:          r.StatusCode,
+			ObservedAt:          r.ObservedAt,
+			TTFBMillis:          ttfbMillis,
+			DurMillis:           durMillis,
+			InputTokens:         inputTokens,
+			OutputTokens:        outputTokens,
+			CacheReadTokens:     cacheReadTokens,
+			CacheWriteTokens:    cacheWriteTokens,
+			Mutations:           append([]stateModel.Mutation(nil), r.Mutations...),
+			ExchangeDiagnostics: append([]string(nil), r.ExchangeDiagnostics...),
+			StageReports:        append([]stateModel.StageReport(nil), r.StageReports...),
 		})
 	}
 	return []update.Action{ReplaceStatusProjection{Rows: rows}}
@@ -223,6 +227,42 @@ func validateStatusProjectionDoc(d statusProjectionDoc, requestedScope statusPro
 		}
 		if strings.TrimSpace(row.ObservedAt) == "" { // swobu:io-string source=boundary
 			return fmt.Errorf("status projection row %d missing observed_at", i)
+		}
+		if err := validateStageReports(row.StageReports); err != nil {
+			return fmt.Errorf("status projection row %d invalid exchange_stage_reports: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validateStageReports(reports []stateModel.StageReport) error {
+	if len(reports) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for i, report := range reports {
+		stage := strings.TrimSpace(strings.ToLower(report.Stage))     // swobu:io-string source=boundary
+		carrier := strings.TrimSpace(strings.ToLower(report.Carrier)) // swobu:io-string source=boundary
+		if stage == "" || carrier == "" {
+			return fmt.Errorf("entry %d missing stage or carrier", i)
+		}
+		key := stage + "\x00" + carrier
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate stage/carrier %q/%q", stage, carrier)
+		}
+		seen[key] = struct{}{}
+		if !report.Mutated {
+			continue
+		}
+		appliedCount := 0
+		for _, patchID := range report.Applied {
+			if strings.TrimSpace(patchID) == "" { // swobu:io-string source=boundary
+				continue
+			}
+			appliedCount++
+		}
+		if appliedCount == 0 {
+			return fmt.Errorf("entry %d mutated without applied transforms", i)
 		}
 	}
 	return nil

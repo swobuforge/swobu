@@ -7,8 +7,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func validateBedrockRuntimeEndpoint(baseURL string) error {
@@ -24,27 +25,27 @@ func validateBedrockRuntimeEndpoint(baseURL string) error {
 }
 
 type bedrockDispatchPlan struct {
-	invokeModel bool
-	streaming   bool
+	invokeModel  bool
+	deliveryMode delivery.Mode
 }
 
 func resolveBedrockOperation(providerProtocol string) (bedrockDispatchPlan, error) {
 	variant := strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	if variant == "" || variant == providercatalog.ProviderProtocolAuto {
+	if variant == "" || variant == profile.ProviderProtocolAuto {
 		return bedrockDispatchPlan{}, canonical.BadEndpoint("bedrock provider protocol must be concrete (converse, converse_stream, invoke_model, invoke_model_stream)")
 	}
-	if !providercatalog.SupportsProviderProtocolForSpec(string(providercatalog.ProviderSpecBedrock), variant) {
+	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecBedrock), variant) {
 		return bedrockDispatchPlan{}, canonical.BadEndpoint("selected provider protocol is unsupported for bedrock")
 	}
 	switch variant {
 	case "converse":
-		return bedrockDispatchPlan{invokeModel: false, streaming: false}, nil
+		return bedrockDispatchPlan{invokeModel: false, deliveryMode: delivery.Buffered}, nil
 	case "converse_stream":
-		return bedrockDispatchPlan{invokeModel: false, streaming: true}, nil
+		return bedrockDispatchPlan{invokeModel: false, deliveryMode: delivery.Streaming}, nil
 	case "invoke_model":
-		return bedrockDispatchPlan{invokeModel: true, streaming: false}, nil
+		return bedrockDispatchPlan{invokeModel: true, deliveryMode: delivery.Buffered}, nil
 	case "invoke_model_stream":
-		return bedrockDispatchPlan{invokeModel: true, streaming: true}, nil
+		return bedrockDispatchPlan{invokeModel: true, deliveryMode: delivery.Streaming}, nil
 	default:
 		return bedrockDispatchPlan{}, canonical.BadEndpoint("selected provider protocol is unsupported for bedrock")
 	}

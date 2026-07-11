@@ -12,7 +12,7 @@ import (
 	openaicompatprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaicompat"
 	openrouterprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // RuntimeFactory composes concrete per-provider runtime strategies from domain registry entries.
@@ -28,8 +28,8 @@ func NewRuntimeFactory(client *http.Client, credentialProvider providersruntime.
 	return RuntimeFactory{client: client, credentialProvider: credentialProvider}
 }
 
-func (f RuntimeFactory) Build(registry []providercatalog.Profile) map[providercatalog.ProviderID]providersruntime.ProviderRuntimeBundle {
-	byProviderID := make(map[providercatalog.ProviderID]providersruntime.ProviderRuntimeBundle, len(registry))
+func (f RuntimeFactory) Build(registry []profile.Profile) map[profile.ProviderID]providersruntime.ProviderRuntimeBundle {
+	byProviderID := make(map[profile.ProviderID]providersruntime.ProviderRuntimeBundle, len(registry))
 	for _, profile := range registry {
 		providerID := profile.ProviderID
 		if providerID == "" {
@@ -45,29 +45,29 @@ func (f RuntimeFactory) Build(registry []providercatalog.Profile) map[providerca
 	return byProviderID
 }
 
-func (f RuntimeFactory) runtimeFor(providerID providercatalog.ProviderID) providersruntime.ProviderRuntimeBundle {
+func (f RuntimeFactory) runtimeFor(providerID profile.ProviderID) providersruntime.ProviderRuntimeBundle {
 	switch providerID {
-	case providercatalog.ProviderSpecOllama:
+	case profile.ProviderSpecOllama:
 		return ollamaprovider.NewRuntime(f.client, f.credentialProvider)
-	case providercatalog.ProviderSpecOpenAI:
+	case profile.ProviderSpecOpenAI:
 		return openaiprovider.NewRuntime(f.client, f.credentialProvider)
-	case providercatalog.ProviderSpecOpenRouter:
+	case profile.ProviderSpecOpenRouter:
 		return openrouterprovider.NewRuntime(f.client, f.credentialProvider)
-	case providercatalog.ProviderSpecOpenAICompatible:
+	case profile.ProviderSpecOpenAICompatible:
 		return openaicompatprovider.NewRuntime(f.client, f.credentialProvider)
-	case providercatalog.ProviderSpecAnthropic:
+	case profile.ProviderSpecAnthropic:
 		return anthropicprovider.NewRuntime(providerID, f.client, f.credentialProvider)
-	case providercatalog.ProviderSpecBedrock:
+	case profile.ProviderSpecBedrock:
 		return bedrockprovider.NewRuntime(providerID, f.client, f.credentialProvider)
-	case providercatalog.ProviderSpecChatGPT:
+	case profile.ProviderSpecChatGPT:
 		return chatgptprovider.NewRuntime(providerID, f.client, f.credentialProvider)
 	default:
 		panic("providers: missing runtime constructor for provider id " + string(providerID))
 	}
 }
 
-func validateRuntimeAgainstProfile(profile providercatalog.Profile, runtime providersruntime.ProviderRuntimeBundle) {
-	providerID := profile.ProviderID
+func validateRuntimeAgainstProfile(providerProfile profile.Profile, runtime providersruntime.ProviderRuntimeBundle) {
+	providerID := providerProfile.ProviderID
 	if runtime.ProviderID != providerID {
 		panic(fmt.Sprintf("providers: runtime id mismatch for %s", providerID))
 	}
@@ -77,7 +77,7 @@ func validateRuntimeAgainstProfile(profile providercatalog.Profile, runtime prov
 	if runtime.CredentialProvider == nil {
 		panic(fmt.Sprintf("providers: missing credential provider for provider id %s", providerID))
 	}
-	if providercatalog.SupportsCapability(string(providerID), providercatalog.CapabilityModelCatalog) && runtime.ModelCatalogClient == nil {
+	if profile.SupportsCapability(string(providerID), profile.CapabilityModelCatalog) && runtime.ModelCatalogClient == nil {
 		panic(fmt.Sprintf("providers: model catalog capability declared without ModelCatalogClient for provider id %s", providerID))
 	}
 }

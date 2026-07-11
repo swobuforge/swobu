@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -23,10 +24,10 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
 	}
-	resp := ports.NewEnvelopeStreamingProviderResponse(envelope)
+	resp := ports.NewEnvelopeStreamingProviderResponseStream(envelope)
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, "req_test_1", canonical.IngressFamilyResponses, resp, true); err != nil {
+	if err := writeSuccessResponse(rr, "req_test_1", canonical.IngressFamilyResponses, resp, delivery.StreamingDelivery(delivery.FramingSSE)); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -54,10 +55,10 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 	if err != nil {
 		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
 	}
-	resp := ports.NewEnvelopeStreamingProviderResponse(envelope)
+	resp := ports.NewEnvelopeStreamingProviderResponseStream(envelope)
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, "req_test_2", canonical.IngressFamilyChatCompletions, resp, true); err != nil {
+	if err := writeSuccessResponse(rr, "req_test_2", canonical.IngressFamilyChatCompletions, resp, delivery.StreamingDelivery(delivery.FramingSSE)); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {

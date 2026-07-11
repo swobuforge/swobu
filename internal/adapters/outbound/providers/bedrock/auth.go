@@ -17,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	smithybearer "github.com/aws/smithy-go/auth/bearer"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type bedrockAuthMode string
@@ -148,16 +148,16 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 
 func parseBedrockAuthMode(credentialRef string) (mode bedrockAuthMode, value string) {
 	ref := trimBedrockInput(credentialRef)
-	if ref == "" || strings.EqualFold(ref, string(providercatalog.AuthVariantAWSProfile)) {
+	if ref == "" || strings.EqualFold(ref, string(profile.AuthVariantAWSProfile)) {
 		return bedrockAuthModeAWSProfile, ""
 	}
-	if strings.EqualFold(ref, string(providercatalog.AuthVariantAWSEnvSession)) {
+	if strings.EqualFold(ref, string(profile.AuthVariantAWSEnvSession)) {
 		return bedrockAuthModeAWSProfile, ""
 	}
 	if strings.HasPrefix(lowerBedrockInput(ref), "profile:") { // swobu:io-string source=boundary
 		return bedrockAuthModeAWSProfile, trimBedrockInput(ref[len("profile:"):])
 	}
-	if strings.EqualFold(ref, string(providercatalog.AuthVariantEnv)) {
+	if strings.EqualFold(ref, string(profile.AuthVariantEnv)) {
 		return bedrockAuthModeAPIKeyEnv, "AWS_BEARER_TOKEN_BEDROCK"
 	}
 	if strings.HasPrefix(lowerBedrockInput(ref), "env:") { // swobu:io-string source=boundary

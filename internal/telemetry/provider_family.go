@@ -3,7 +3,7 @@ package telemetry
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const providerFamilyOther = "other"
@@ -17,7 +17,7 @@ func normalizeProviderFamily(rawRoute string) string {
 	if idx := strings.Index(spec, ":"); idx >= 0 {
 		spec = strings.TrimSpace(spec[:idx]) // swobu:io-string source=boundary
 	}
-	if providercatalog.SupportsSpec(spec) {
+	if profile.SupportsSpec(spec) {
 		return spec
 	}
 	return providerFamilyOther

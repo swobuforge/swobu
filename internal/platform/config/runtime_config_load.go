@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 //go:embed runtime.cue
@@ -30,7 +30,14 @@ var (
 )
 
 type RuntimeConfig struct {
-	BindAddr string
+	BindAddr                        string
+	PatchDiagnosticThresholdsConfig PatchDiagnosticThresholdsConfig
+}
+
+type PatchDiagnosticThresholdsConfig struct {
+	MinRepeatedDecodeMutations int
+	MinNoopRatioPopulation     int
+	NoopRatioPercentThreshold  int
 }
 
 type LoadedConfig struct {
@@ -39,8 +46,15 @@ type LoadedConfig struct {
 }
 
 type runtimeFileDTO struct {
-	BindAddr  string        `json:"bind_addr" yaml:"bind_addr"`
-	Endpoints []endpointDTO `json:"endpoints" yaml:"endpoints"`
+	BindAddr                        string                       `json:"bind_addr" yaml:"bind_addr"`
+	PatchDiagnosticThresholdsConfig patchDiagnosticThresholdsDTO `json:"patch_diagnostic_thresholds" yaml:"patch_diagnostic_thresholds"`
+	Endpoints                       []endpointDTO                `json:"endpoints" yaml:"endpoints"`
+}
+
+type patchDiagnosticThresholdsDTO struct {
+	MinRepeatedDecodeMutations int `json:"min_repeated_decode_mutations" yaml:"min_repeated_decode_mutations"`
+	MinNoopRatioPopulation     int `json:"min_noop_ratio_population" yaml:"min_noop_ratio_population"`
+	NoopRatioPercentThreshold  int `json:"noop_ratio_percent_threshold" yaml:"noop_ratio_percent_threshold"`
 }
 
 type endpointDTO struct {
@@ -63,6 +77,15 @@ func (c RuntimeConfig) WithDefaults() RuntimeConfig {
 	out := c
 	if strings.TrimSpace(out.BindAddr) == "" { // swobu:io-string source=boundary
 		out.BindAddr = DefaultBindAddr()
+	}
+	if out.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations <= 0 {
+		out.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations = defaultRuntimeConfigValue().PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations
+	}
+	if out.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation <= 0 {
+		out.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation = defaultRuntimeConfigValue().PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation
+	}
+	if out.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold <= 0 {
+		out.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold = defaultRuntimeConfigValue().PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold
 	}
 	return out
 }
@@ -163,6 +186,11 @@ func Load(path string) (LoadedConfig, error) {
 	loaded := LoadedConfig{
 		Runtime: RuntimeConfig{
 			BindAddr: dto.BindAddr,
+			PatchDiagnosticThresholdsConfig: PatchDiagnosticThresholdsConfig{
+				MinRepeatedDecodeMutations: dto.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations,
+				MinNoopRatioPopulation:     dto.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation,
+				NoopRatioPercentThreshold:  dto.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold,
+			},
 		}.WithDefaults(),
 		Endpoints: make([]endpointintent.Endpoint, 0, len(dto.Endpoints)),
 	}
@@ -191,7 +219,12 @@ func Save(path string, runtime RuntimeConfig, endpoints []endpointintent.Endpoin
 	}
 
 	dto := runtimeFileDTO{
-		BindAddr:  runtime.BindAddr,
+		BindAddr: runtime.BindAddr,
+		PatchDiagnosticThresholdsConfig: patchDiagnosticThresholdsDTO{
+			MinRepeatedDecodeMutations: runtime.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations,
+			MinNoopRatioPopulation:     runtime.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation,
+			NoopRatioPercentThreshold:  runtime.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold,
+		},
 		Endpoints: make([]endpointDTO, 0, len(endpoints)),
 	}
 	for _, endpoint := range endpoints {
@@ -279,7 +312,7 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
+		providerProtocol, err := profile.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
@@ -302,7 +335,7 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 	providerConfigs := endpoint.ProviderConfigs()
 	encodedProviderConfigs := make([]providerConfigDTO, 0, len(providerConfigs))
 	for _, providerConfig := range providerConfigs {
-		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
+		providerProtocol := profile.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
 		encodedProviderConfigs = append(encodedProviderConfigs, providerConfigDTO{
 			Ref:              providerConfig.Ref().String(),
 			ProviderSpec:     providerConfig.ProviderSpec().String(),
@@ -337,6 +370,11 @@ func defaultRuntimeConfigValue() RuntimeConfig {
 		}
 		defaultRuntimeConfig = RuntimeConfig{
 			BindAddr: dto.BindAddr,
+			PatchDiagnosticThresholdsConfig: PatchDiagnosticThresholdsConfig{
+				MinRepeatedDecodeMutations: dto.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations,
+				MinNoopRatioPopulation:     dto.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation,
+				NoopRatioPercentThreshold:  dto.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold,
+			},
 		}
 	})
 	return defaultRuntimeConfig

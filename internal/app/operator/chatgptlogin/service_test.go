@@ -381,7 +381,7 @@ func TestServiceStartAuthorizeURL_UsesCodexCallbackPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://localhost:1455"+callbackPath {
+	if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != defaultOAuthRedirectBase+callbackPath {
 		t.Fatalf("redirect_uri=%q", got)
 	}
 }
@@ -419,7 +419,7 @@ func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 	if _, err := svc.Session(context.Background(), start.SessionID); err != nil {
 		t.Fatalf("Session error: %v", err)
 	}
-	if gotRedirectURI != "http://localhost:1455"+callbackPath {
+	if gotRedirectURI != defaultOAuthRedirectBase+callbackPath {
 		t.Fatalf("redirect_uri=%q", gotRedirectURI)
 	}
 }

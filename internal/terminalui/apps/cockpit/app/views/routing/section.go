@@ -4,7 +4,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -74,6 +74,17 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 	rows = append(rows, buildCreateInteractiveAuthRows(model)...)
 	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState, closeCreateTransients)
 	rows = append(rows, retained.Named[state.Model]("model", modelRow))
+	if strings.TrimSpace(provider) != "" && strings.TrimSpace(modelID) != "" { // swobu:io-string source=boundary
+		rows = append(rows, retained.Named[state.Model]("id", aliasInlineEditorRow(
+			ctx,
+			selectors.EmptyOr(model.CreateDraftProviderConfig.TargetAlias, views.ValueAuto),
+			model.CreateDraftProviderConfig.TargetAlias,
+			"fast",
+			func(value string) []update.Action {
+				return []update.Action{state.SetCreateDraftTargetAlias{TargetAlias: value}}
+			},
+		)))
+	}
 	rows = append(rows, retained.Named[state.Model]("protocol", createDraftProtocolModeRow(model)))
 	rows = append(rows, retained.Named[state.Model]("create", createDraftTestOrCreateRow(model)))
 
@@ -139,13 +150,13 @@ func buildCreateRunOnRow(
 			Search: specChoice + " " + label,
 			OnChoose: func() []update.Action {
 				setRunPickerOpen(false)
-				nextBaseURL := strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(specChoice)) // swobu:io-string source=boundary
+				nextBaseURL := strings.TrimSpace(profile.DefaultExecuteBaseURL(specChoice)) // swobu:io-string source=boundary
 				if strings.EqualFold(specChoice, "bedrock") && nextBaseURL == "" {
 					if region := strings.TrimSpace(bedrockRegionFromEnv()); region != "" { // swobu:io-string source=boundary
 						nextBaseURL = bedrockBaseURLForRegion(region)
 					}
 				}
-				nextVariant := providercatalog.ProviderProtocolAuto
+				nextVariant := profile.ProviderProtocolAuto
 				return []update.Action{
 					state.SetCreateDraftProviderSpec{ProviderSpec: specChoice},
 					state.SetCreateDraftCredentialRef{CredentialRef: ""},
@@ -217,13 +228,13 @@ func buildCreateUseKeyFromRow(
 		actions := applyProviderCredentialSelection(choice, provider, nil, "", true)
 		nextRef := createDraftCredentialRefFromActions(actions)
 		setKeyPickerState("")
-		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+		variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthVariant(variant) {
 			draft := createDraftAuthProviderConfig(provider, baseURL, nextRef)
-			if variant == providercatalog.AuthVariantChatGPTLogin {
+			if variant == profile.AuthVariantChatGPTLogin {
 				actions = append(actions, state.ResetAuthSessionUIRequestedAction{})
 			}
-			if variant == providercatalog.AuthVariantChatGPTDeviceAuth {
+			if variant == profile.AuthVariantChatGPTDeviceAuth {
 				actions = append(actions, startAuthActionsForCreateDraft(draft)...)
 			}
 		}
@@ -259,8 +270,8 @@ func buildCreateUseKeyFromRow(
 func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state.Model] {
 	provider := model.CreateDraftProviderConfig.ProviderSpec
 	source := credentialSource(model.CreateDraftProviderConfig.CredentialRef)
-	variant := providercatalog.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
-	if !providercatalog.SupportsAuthVariant(provider, variant) || !providercatalog.IsInteractiveAuthVariant(variant) {
+	variant := profile.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
+	if !profile.SupportsAuthVariant(provider, variant) || !profile.IsInteractiveAuthVariant(variant) {
 		return nil
 	}
 	draft := createDraftAuthProviderConfig(
@@ -276,9 +287,9 @@ func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state
 			return startAuthActionsForCreateDraft(next)
 		},
 		SwitchToDeviceAuth: func(next state.ProviderConfigSnapshot) []update.Action {
-			next.CredentialRef = string(providercatalog.AuthVariantChatGPTDeviceAuth)
+			next.CredentialRef = string(profile.AuthVariantChatGPTDeviceAuth)
 			actions := []update.Action{
-				state.SetCreateDraftCredentialRef{CredentialRef: string(providercatalog.AuthVariantChatGPTDeviceAuth)},
+				state.SetCreateDraftCredentialRef{CredentialRef: string(profile.AuthVariantChatGPTDeviceAuth)},
 				state.ResetAuthSessionUIRequestedAction{},
 			}
 			return append(actions, startAuthActionsForCreateDraft(next)...)

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type endpointAutoProtocolResolver struct {
@@ -29,7 +31,7 @@ func (r endpointAutoProtocolResolver) Resolve(ctx context.Context, endpoint endp
 	rebuilt := false
 	for i := range configs {
 		rawProtocol := rawByRef[strings.TrimSpace(configs[i].Ref().String())] // swobu:io-string source=boundary
-		if rawProtocol != "" && rawProtocol != providercatalog.ProviderProtocolAuto {
+		if rawProtocol != "" && rawProtocol != profile.ProviderProtocolAuto {
 			continue
 		}
 		resolved, err := r.resolveOne(ctx, endpoint.Name(), configs, i, selectedRef)
@@ -69,7 +71,7 @@ func (r endpointAutoProtocolResolver) resolveOne(
 		return "", fmt.Errorf("provider protocol auto requires model_id for provider ref %q", cfg.Ref().String())
 	}
 	var failures []string
-	for _, variant := range providercatalog.ConcreteProviderProtocolsForSpec(cfg.ProviderSpec().String()) {
+	for _, variant := range profile.ConcreteProviderProtocolsForSpec(cfg.ProviderSpec().String()) {
 		candidateCfg, err := cfg.WithProviderProtocol(variant)
 		if err != nil {
 			failures = append(failures, variant+": "+err.Error())
@@ -104,21 +106,20 @@ func (r endpointAutoProtocolResolver) probeVariant(
 	modelID string,
 	candidate endpointintent.Endpoint,
 ) error {
-	ping := canonical.NewDialogRequest(modelID, []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "ping")})
+	ping := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: modelID,
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "ping")},
+	})
 	attemptCtx, cancel := context.WithTimeout(ctx, autoProtocolProbeAttemptTimeout)
 	defer cancel()
-	out, err := r.probe(attemptCtx, candidate, requestpath.HandleInput{
+	out, err := r.probe(attemptCtx, candidate, exchange.HandleInput{
 		EndpointName: endpointName,
 		Request:      ping,
-		Contract:     requestpath.NewExecutionContract(false),
-		Provenance: requestpath.IngressProvenance{
-			ClientProtocol: "_swobu_auto_protocol_resolve",
-			ClientHandler:  "endpoint_control_put",
-		},
+		Contract:     ports.NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		return err
 	}
-	_ = out.Response.Close()
+	_ = ports.CloseProviderResponseStream(out.Response)
 	return nil
 }

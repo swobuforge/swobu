@@ -11,7 +11,7 @@ import (
 	"sort"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const endpointIntentSchemaVersion = 1
@@ -151,7 +151,7 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
+		providerProtocol, err := profile.DecodeProviderProtocolFromPersistence(spec.String(), encoded.ProviderProtocol)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
@@ -174,7 +174,7 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 	providerConfigs := endpoint.ProviderConfigs()
 	encodedProviderConfigs := make([]providerConfigDTO, 0, len(providerConfigs))
 	for _, providerConfig := range providerConfigs {
-		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
+		providerProtocol := profile.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
 		encodedProviderConfigs = append(encodedProviderConfigs, providerConfigDTO{
 			Ref:              providerConfig.Ref().String(),
 			ProviderSpec:     providerConfig.ProviderSpec().String(),

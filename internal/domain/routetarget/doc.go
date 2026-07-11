@@ -2,6 +2,6 @@
 // sets to one execution-ready routable target.
 //
 // It separates durable endpoint intent from execution routing facts while
-// preserving compatibility-owned error semantics for invalid endpoint
+// preserving route-selection error semantics for invalid endpoint
 // configuration.
 package routetarget

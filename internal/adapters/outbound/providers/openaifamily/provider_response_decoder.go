@@ -1,74 +1,73 @@
 package openaifamily
 
 import (
-	"io"
-	"net/http"
-
-	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
 	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/report"
+	"github.com/swobuforge/swobu/internal/transform"
 )
 
-func decodeBufferedByKind(profile ProviderRoutePolicy, kind protocolkind.ProtocolKind, raw []byte, headers http.Header) (canonical.CanonicalOutputValue, []ports.DegradationWarning, error) {
-	packet := core.WirePacket{
-		Protocol: kind,
-		Headers:  headers,
-		RawBody:  raw,
-	}
-	for _, patch := range profile.DecodePatches() {
-		if patch == nil {
-			continue
-		}
-		if err := patch.ApplyDecode(&packet); err != nil {
-			return canonical.CanonicalOutputValue{}, nil, canonical.InternalError("provider decode patch failed")
-		}
-	}
-	output, err := decodeInteractionFromWire(packet)
+func decodeBufferedCarrierDocument(profile ProviderRoutePolicy, doc carrier.WireDocument) (ports.ProviderResponseStream, []report.Notice, []report.Mutation, error) {
+	envelope, err := decodeInteractionEnvelopeFromCarrier(doc, "provider_buffered:"+string(doc.Family))
 	if err != nil {
-		return canonical.CanonicalOutputValue{}, nil, err
+		return ports.ProviderResponseStream{}, nil, nil, err
 	}
-	usage, warnings := profile.UsageDecoder().DecodeToCanonical(RawUsageEnvelope{
-		ProviderID: profile.ProviderID(),
-		Protocol:   packet.Protocol,
-		Body:       packet.RawBody,
-		Headers:    packet.Headers,
-	}, output.Usage())
-	return canonical.NewOutputWithUsage(
-		output.SemanticKind(),
-		output.ResultID(),
-		output.Model(),
-		output.Items(),
-		output.FinishReason(),
-		usage,
-	), warnings, nil
+	return ports.NewEnvelopeStreamingProviderResponseStream(envelope), nil, nil, nil
 }
 
-func decodeInteractionFromWire(packet core.WirePacket) (canonical.CanonicalOutputValue, error) {
-	codec, err := protocolregistry.ForProtocolKind(packet.Protocol)
+func decodeInteractionEnvelopeFromCarrier(packet carrier.WireDocument, exchangeID string) (canonical.EventReader, error) {
+	codec, err := protocolregistry.ForProviderResponseDocumentProtocolCarrierEnvelope(packet.Family)
 	if err != nil {
-		if packet.Protocol == protocolkind.Messages {
-			return canonical.CanonicalOutputValue{}, canonical.UnsupportedOperation("OpenAI-family provider does not implement the messages protocol")
+		if packet.Family == protocolkind.Messages {
+			return nil, canonical.UnsupportedOperation("OpenAI-family provider does not implement the messages protocol")
 		}
-		return canonical.CanonicalOutputValue{}, err
+		return nil, err
 	}
-	return codec.DecodeResponse(packet.RawBody)
+	return codec.DecodeProviderDocument(packet, exchangeID)
 }
 
-func decodeStreamByKind(profile ProviderRoutePolicy, kind protocolkind.ProtocolKind, body io.ReadCloser, exchangeID string, headers http.Header) (ports.ProviderResponse, []ports.DegradationWarning, error) {
-	codec, err := protocolregistry.ForProtocolKind(kind)
+func decodeStreamCarrierFrame(profile ProviderRoutePolicy, stream carrier.WireStream, exchangeID string) (ports.ProviderResponseStream, []report.Notice, []report.StageReport, error) {
+	codec, err := protocolregistry.ForProviderResponseStreamProtocolCarrier(stream.Family)
 	if err != nil {
-		if kind == protocolkind.Messages {
-			return ports.ProviderResponse{}, nil, canonical.UnsupportedOperation("OpenAI-family provider does not implement the messages protocol")
+		if stream.Family == protocolkind.Messages {
+			return ports.ProviderResponseStream{}, nil, nil, canonical.UnsupportedOperation("OpenAI-family provider does not implement the messages protocol")
 		}
-		return ports.ProviderResponse{}, nil, err
+		return ports.ProviderResponseStream{}, nil, nil, err
 	}
-	reader := codec.DecodeResponseStream(body, exchangeID)
+	reader := codec.DecodeProviderStream(stream, exchangeID)
 	normalizedReader := newUsageEventReader(reader, RawUsageEnvelope{
 		ProviderID: profile.ProviderID(),
-		Protocol:   kind,
-		Headers:    headers,
+		Protocol:   stream.Family,
+		Headers:    stream.Header,
 	}, profile.UsageDecoder())
-	return ports.NewEnvelopeStreamingProviderResponse(normalizedReader), nil, nil
+	registry := newTransformRegistry(profile.Facts(canonical.CanonicalRequest{}))
+	wrappedReader, applied, err := registry.WrapEventStream(transform.Context{
+		Stage:   exchange.StageSemanticEvents,
+		Leg:     carrier.LegProviderResponseIn,
+		Carrier: carrier.KindCanonicalEventStream,
+		Family:  stream.Family,
+	}, normalizedReader)
+	if err != nil {
+		return ports.ProviderResponseStream{}, nil, nil, canonical.InternalError("semantic event transform failed")
+	}
+	var stageReports []report.StageReport
+	if len(applied) > 0 {
+		ids := make([]string, 0, len(applied))
+		mutated := false
+		for _, entry := range applied {
+			ids = append(ids, entry.ID)
+			mutated = mutated || entry.Mutated
+		}
+		stageReports = []report.StageReport{{
+			Stage:   string(exchange.StageSemanticEvents),
+			Carrier: string(carrier.KindCanonicalEventStream),
+			Applied: ids,
+			Mutated: mutated,
+		}}
+	}
+	return ports.NewEnvelopeStreamingProviderResponseStream(wrappedReader), nil, stageReports, nil
 }

@@ -21,7 +21,7 @@ func TestSelectedClientActions_UsesProfileActionsForOther(t *testing.T) {
 	if got := actions[0].RowLabel(); got != "open" {
 		t.Fatalf("row label[0]=%q", got)
 	}
-	if got := actions[0].ActionSummary(); got != "openai + anthropic compatible" {
+	if got := actions[0].ActionSummary(); got != "openai-style + anthropic-style" {
 		t.Fatalf("summary[0]=%q", got)
 	}
 	if got := actions[0].ActionVerb(); got != "view" {
@@ -32,14 +32,11 @@ func TestSelectedClientActions_UsesProfileActionsForOther(t *testing.T) {
 	}
 }
 
-func TestSelectedClientActions_NilSelectedShowsSetup(t *testing.T) {
+func TestSelectedClientActions_NilSelectedShowsNoActions(t *testing.T) {
 	t.Parallel()
 
 	actions := selectedClientActions(nil, "http://127.0.0.1:7926/c/acme/")
-	if len(actions) != 1 {
-		t.Fatalf("action count=%d want 1", len(actions))
-	}
-	if got := actions[0].RowLabel(); got != "setup" {
-		t.Fatalf("setup row=%q", got)
+	if len(actions) != 0 {
+		t.Fatalf("action count=%d want 0", len(actions))
 	}
 }

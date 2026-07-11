@@ -9,15 +9,15 @@ import (
 	"time"
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
-	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)
 type endpointGetFunc func(context.Context, string) (endpointintent.Endpoint, error)
 type endpointPutFunc func(context.Context, endpointintent.Endpoint) (endpointintent.Endpoint, error)
 type endpointDeleteFunc func(context.Context, string) error
-type endpointAutoProtocolProbeFunc func(context.Context, endpointintent.Endpoint, requestpath.HandleInput) (requestpath.HandleOutput, error)
+type endpointAutoProtocolProbeFunc func(context.Context, endpointintent.Endpoint, exchange.HandleInput) (exchange.HandleOutput, error)
 
 const autoProtocolProbeAttemptTimeout = 3 * time.Second
 

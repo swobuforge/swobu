@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
-	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/evidence"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
@@ -29,7 +29,7 @@ type embeddedTelemetryRuntimeState struct {
 	once                  sync.Once
 	stopCh                chan struct{}
 	doneCh                chan struct{}
-	eventsCh              chan runtimeevidence.TrafficEvent
+	eventsCh              chan evidence.TrafficEvent
 	seenTerminalRequestID map[string]struct{}
 	errorTraceWindowStart time.Time
 	errorTracesInWindow   int
@@ -51,7 +51,7 @@ func (d *Daemon) startTelemetryRuntime() {
 	d.telemetry.stopCh = make(chan struct{})
 	d.telemetry.doneCh = make(chan struct{})
 	if d.telemetry.eventsCh == nil {
-		d.telemetry.eventsCh = make(chan runtimeevidence.TrafficEvent, 512)
+		d.telemetry.eventsCh = make(chan evidence.TrafficEvent, 512)
 	}
 	go d.runTelemetryRuntime()
 }
@@ -135,11 +135,11 @@ func (d *Daemon) emitInstallTelemetryBestEffort(ctx context.Context) {
 	d.telemetry.emitter.EmitInstall(ctx, state, controlplane.SwobuVersion(), runtime.GOOS, runtime.GOARCH)
 }
 
-func (d *Daemon) emitEventTelemetryBestEffort(ctx context.Context, event runtimeevidence.TrafficEvent) {
+func (d *Daemon) emitEventTelemetryBestEffort(ctx context.Context, event evidence.TrafficEvent) {
 	if d == nil || d.telemetry.emitter == nil {
 		return
 	}
-	if event.EventKind() != runtimeevidence.EventKindUpstreamTerminal {
+	if event.EventKind() != evidence.EventKindUpstreamTerminal {
 		return
 	}
 	requestID := event.RequestID().String()
@@ -186,7 +186,7 @@ func telemetryExportInterval() time.Duration {
 	return platformconfig.ResolveTelemetryExportInterval(embeddedTelemetryExportInterval)
 }
 
-func (d *Daemon) observeTelemetryEvent(event runtimeevidence.TrafficEvent) {
+func (d *Daemon) observeTelemetryEvent(event evidence.TrafficEvent) {
 	if d == nil || d.telemetry.eventsCh == nil {
 		return
 	}
@@ -197,7 +197,7 @@ func (d *Daemon) observeTelemetryEvent(event runtimeevidence.TrafficEvent) {
 	}
 }
 
-func (d *Daemon) emitErrorTraceForEventBestEffort(ctx context.Context, event runtimeevidence.TrafficEvent) {
+func (d *Daemon) emitErrorTraceForEventBestEffort(ctx context.Context, event evidence.TrafficEvent) {
 	if d == nil || d.telemetry.emitter == nil {
 		return
 	}

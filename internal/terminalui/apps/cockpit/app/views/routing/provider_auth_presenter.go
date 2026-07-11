@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -18,8 +18,8 @@ func interactiveAddModelCredentialRows(
 	draft state.ProviderConfigSnapshot,
 	source string,
 ) []retained.ViewSpec[state.Model] {
-	variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(source)))                                                        // swobu:io-string source=boundary
-	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(providerSpec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
+	variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(source)))                                                // swobu:io-string source=boundary
+	if !profile.SupportsAuthVariant(strings.TrimSpace(providerSpec), variant) || !profile.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
 		return nil
 	}
 	return interactiveAuthStatusRows(model, interactiveAuthRenderConfig{
@@ -46,12 +46,12 @@ const (
 	interactiveAuthPhaseResolved         interactiveAuthPhase = "resolved"
 )
 
-func classifyInteractiveAuthPhase(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, variant providercatalog.AuthVariant) interactiveAuthPhase {
+func classifyInteractiveAuthPhase(model state.Model, endpointName string, draft state.ProviderConfigSnapshot, variant profile.AuthVariant) interactiveAuthPhase {
 	authState := addModelAuthStateForDraft(model, endpointName, draft)
 	if strings.EqualFold(strings.TrimSpace(authState.SessionState), "expired") { // swobu:io-string source=boundary
 		return interactiveAuthPhaseExpired
 	}
-	if variant == providercatalog.AuthVariantChatGPTLogin &&
+	if variant == profile.AuthVariantChatGPTLogin &&
 		strings.EqualFold(strings.TrimSpace(authState.SessionState), "failed") && // swobu:io-string source=boundary
 		strings.TrimSpace(authState.SessionID) != "" { // swobu:io-string source=boundary
 		return interactiveAuthPhaseStartUnavailable
@@ -65,7 +65,7 @@ func classifyInteractiveAuthPhase(model state.Model, endpointName string, draft 
 	if sessionActive {
 		return interactiveAuthPhaseInProgress
 	}
-	if variant == providercatalog.AuthVariantChatGPTLogin {
+	if variant == profile.AuthVariantChatGPTLogin {
 		return interactiveAuthPhaseStartRequired
 	}
 	return interactiveAuthPhaseNone
@@ -74,7 +74,7 @@ func classifyInteractiveAuthPhase(model state.Model, endpointName string, draft 
 type interactiveAuthRenderConfig struct {
 	EndpointName       string
 	Draft              state.ProviderConfigSnapshot
-	Variant            providercatalog.AuthVariant
+	Variant            profile.AuthVariant
 	StartAuth          func(next state.ProviderConfigSnapshot) []update.Action
 	SwitchToDeviceAuth func(next state.ProviderConfigSnapshot) []update.Action
 }
@@ -90,7 +90,7 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 		stateValue := strings.TrimSpace(authState.SessionState) // swobu:io-string source=boundary
 		loginURL := strings.TrimSpace(authState.URL)            // swobu:io-string source=boundary
 		userCode := strings.TrimSpace(authState.UserCode)       // swobu:io-string source=boundary
-		if variant == providercatalog.AuthVariantChatGPTLogin {
+		if variant == profile.AuthVariantChatGPTLogin {
 			if viewState == interactiveAuthPhaseStartUnavailable {
 				rows = append(rows, views.RowStatic("", "could not open default browser"))
 			}
@@ -122,7 +122,7 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 		if loginURL != "" {
 			rows = append(rows, interactiveAuthLinkRows(loginURL, interactiveAuthOwnerKey(endpointName, strings.TrimSpace(draft.Ref)))...) // swobu:io-string source=boundary
 		}
-	} else if viewState == interactiveAuthPhaseResolved && variant == providercatalog.AuthVariantChatGPTLogin {
+	} else if viewState == interactiveAuthPhaseResolved && variant == profile.AuthVariantChatGPTLogin {
 		rows = append(rows, views.RowAction("sign in", "sign in another account", "open", func() []update.Action {
 			if cfg.StartAuth == nil {
 				return nil
@@ -138,11 +138,11 @@ func interactiveAuthStatusRows(model state.Model, cfg interactiveAuthRenderConfi
 			return cfg.StartAuth(draft)
 		}))
 	}
-	if variant == providercatalog.AuthVariantChatGPTLogin &&
+	if variant == profile.AuthVariantChatGPTLogin &&
 		viewState == interactiveAuthPhaseStartUnavailable {
 		rows = append(rows, views.RowAction("fallback", "use device code", "switch", func() []update.Action {
 			next := draft
-			next.CredentialRef = string(providercatalog.AuthVariantChatGPTDeviceAuth)
+			next.CredentialRef = string(profile.AuthVariantChatGPTDeviceAuth)
 			if cfg.SwitchToDeviceAuth != nil {
 				return cfg.SwitchToDeviceAuth(next)
 			}
@@ -207,8 +207,8 @@ func shouldShowAuthStartRetryHint(sessionError string, sessionID string) bool {
 	return true
 }
 
-func shouldRenderInteractiveAuthCode(variant providercatalog.AuthVariant, userCode string) bool {
-	return variant == providercatalog.AuthVariantChatGPTDeviceAuth && strings.TrimSpace(userCode) != "" // swobu:io-string source=boundary
+func shouldRenderInteractiveAuthCode(variant profile.AuthVariant, userCode string) bool {
+	return variant == profile.AuthVariantChatGPTDeviceAuth && strings.TrimSpace(userCode) != "" // swobu:io-string source=boundary
 }
 
 func interactiveAuthLinkRows(loginURL string, ownerKey string) []retained.ViewSpec[state.Model] {

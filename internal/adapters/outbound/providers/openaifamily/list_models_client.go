@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
-// ListModels reads the OpenAI-compatible model catalog for one selected
+// ListModels reads the OpenAI-style model catalog for one selected
 // provider target. This is an operator-support path.
 func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary

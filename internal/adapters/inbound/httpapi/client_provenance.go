@@ -5,7 +5,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -16,8 +15,15 @@ const (
 	clientHandlerUnknown          = "unknown"
 )
 
-func ingressProvenance(r *http.Request, family canonical.IngressFamily, normalizedPath canonical.NormalizedPath) requestpath.IngressProvenance {
-	return requestpath.IngressProvenance{
+type IngressProvenance struct {
+	ClientProtocol string
+	IngressFamily  canonical.IngressFamily
+	NormalizedOp   canonical.NormalizedPath
+	ClientHandler  string
+}
+
+func ingressProvenance(r *http.Request, family canonical.IngressFamily, normalizedPath canonical.NormalizedPath) IngressProvenance {
+	return IngressProvenance{
 		ClientProtocol: classifyClientProtocol(family),
 		IngressFamily:  family,
 		NormalizedOp:   normalizedPath,

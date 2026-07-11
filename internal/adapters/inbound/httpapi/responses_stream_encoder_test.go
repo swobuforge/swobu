@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
-	streamwire "github.com/swobuforge/swobu/internal/adapters/wire/shared/streamwire"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
+	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -15,10 +15,10 @@ import (
 // -> response.output_item.done -> response.completed
 func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.T) {
 	encoder := responses.NewResponseStreamWireEncoder()
-	events := []streamwire.StreamEvent{
-		{Kind: streamwire.StreamEventStarted, ResultID: "resp_1", Model: "m"},
-		{Kind: streamwire.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: streamwire.StreamEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
+	events := []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "resp_1", Model: "m"},
+		{Kind: sse.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: sse.StreamEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
 	}
 
 	frames := encodeAllFrames(t, &encoder, events)
@@ -72,12 +72,12 @@ func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.
 
 func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T) {
 	encoder := responses.NewResponseStreamWireEncoder()
-	events := []streamwire.StreamEvent{
-		{Kind: streamwire.StreamEventStarted, ResultID: "resp_2", Model: "m"},
-		{Kind: streamwire.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: streamwire.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
-		{Kind: streamwire.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: streamwire.StreamEventCompleted, FinishReason: "completed"},
+	events := []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "resp_2", Model: "m"},
+		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
+		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: sse.StreamEventCompleted, FinishReason: "completed"},
 	}
 	frames := encodeAllFrames(t, &encoder, events)
 	types := eventTypes(frames)
@@ -108,10 +108,10 @@ func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroBut
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 
-	frames := encodeAllFrames(t, &encoder, []streamwire.StreamEvent{
-		{Kind: streamwire.StreamEventStarted, ResultID: "resp_usage_1", Model: "m"},
-		{Kind: streamwire.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: streamwire.StreamEventCompleted, Usage: usage},
+	frames := encodeAllFrames(t, &encoder, []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "resp_usage_1", Model: "m"},
+		{Kind: sse.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
+		{Kind: sse.StreamEventCompleted, Usage: usage},
 	})
 
 	completed := frames[len(frames)-1]
@@ -129,11 +129,11 @@ func TestResponsesWireEventEncoder_CompletedUsageIncludesCachedTokensWhenZeroBut
 	}
 }
 
-func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder, events []streamwire.StreamEvent) []map[string]any {
+func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder, events []sse.StreamEvent) []map[string]any {
 	t.Helper()
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {
-		frames, err := encoder.Encode(streamwire.StreamEvent{
+		frames, err := encoder.Encode(sse.StreamEvent{
 			Kind:           event.Kind,
 			ResultID:       event.ResultID,
 			Model:          event.Model,

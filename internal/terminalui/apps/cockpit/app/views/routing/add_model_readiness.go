@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
@@ -17,8 +17,8 @@ func isEmptyFileCredentialRef(ref string) bool {
 
 func addModelCreateReady(draft state.ProviderConfigSnapshot) bool {
 	requiresInteractiveAuth := false
-	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(draft.ProviderSpec)) { // swobu:io-string source=boundary
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(draft.ProviderSpec)) { // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthVariant(variant) {
 			requiresInteractiveAuth = true
 			break
 		}

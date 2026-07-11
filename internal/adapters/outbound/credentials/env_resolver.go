@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const envCredentialRefPrefix = "env:"
@@ -46,7 +46,7 @@ func envCredentialName(providerSpec string, credentialRef string) (string, error
 		return "", fmt.Errorf("credential ref must not be empty")
 	}
 	if ref == "env" {
-		envKey := strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)) // swobu:io-string source=boundary
+		envKey := strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec)) // swobu:io-string source=boundary
 		if envKey == "" {
 			return "", fmt.Errorf("provider %q has no default env key", providerSpec)
 		}

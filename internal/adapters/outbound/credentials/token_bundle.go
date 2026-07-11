@@ -8,7 +8,7 @@ import (
 )
 
 // TokenBundle stores refresh-capable auth material for provider-backed secret
-// refs. Resolvers keep backward compatibility with previously stored raw-token values.
+// refs. Resolvers keep backward continuity with previously stored raw-token values.
 type TokenBundle struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`

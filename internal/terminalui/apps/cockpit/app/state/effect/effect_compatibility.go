@@ -25,12 +25,12 @@ func (eff CompatibilityRestartHintEffect) Execute(ctx context.Context) []update.
 	}}
 }
 
-// CopyCompatibilityDiagnosticsEffect copies mismatch diagnostics text.
-type CopyCompatibilityDiagnosticsEffect struct {
+// CopyExchangeDiagnosticsEffect copies mismatch diagnostics text.
+type CopyExchangeDiagnosticsEffect struct {
 	Text string
 }
 
-func (eff CopyCompatibilityDiagnosticsEffect) Execute(context.Context) []update.Action {
+func (eff CopyExchangeDiagnosticsEffect) Execute(context.Context) []update.Action {
 	return []update.Action{CompatibilityRecoveryNoted{
 		Message: copyValueNote(strings.TrimSpace(eff.Text)), // swobu:io-string source=boundary
 		Action:  "copy",

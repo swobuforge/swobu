@@ -41,7 +41,7 @@ Rules:
   - `env:AWS_BEARER_TOKEN_BEDROCK` (bearer token env reference)
 - model catalog source depends on credential strategy:
   - `aws_profile` / `aws_env_session` -> AWS SDK Bedrock `ListFoundationModels`
-  - `env:*` -> OpenAI-compatible `/models` endpoint with bearer auth
+  - `env:*` -> OpenAI-style `/models` endpoint with bearer auth
 - validation path must follow the same split; never probe `/models` for
   `aws_profile`/`aws_env_session` modes.
 - Bedrock region defaults are sourced from bundled opencore list assets under

@@ -10,11 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/adapters/outbound/continuitystore"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
-	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/evidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/telemetry"
@@ -120,15 +119,9 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.evidence = store
 	}
 	evidence = newTelemetryObservedEvidenceSink(evidence, daemon.observeTelemetryEvent)
-	continuity := in.Continuity
-	if continuity == nil {
-		// The shipped daemon must own the same continuity semantics as the in-process
-		// request path; otherwise responses previous_response_id support would exist
-		// only in tests and injected runtimes.
-		continuity = continuitystore.NewLocalResponseContinuityStore(continuitystore.LocalResponseContinuityStoreConfig{})
-	}
+	_ = in.Continuity
 
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg.BindAddr, providers, modelCatalog, evidence, continuity, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, providers, modelCatalog, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -242,11 +235,11 @@ func (d *Daemon) isRequestPathDegraded() bool {
 		Scope:         evidencestore.ProjectionScope{Kind: evidencestore.ProjectionScopeAll},
 	})
 	for _, row := range projection.RecentTraffic {
-		resultClass, err := runtimeevidence.ParseResultClass(row.Result)
+		resultClass, err := evidence.ParseResultClass(row.Result)
 		if err != nil || !resultClass.IsTerminal() {
 			continue
 		}
-		if resultClass != runtimeevidence.ResultClassSuccess && resultClass != runtimeevidence.ResultClassCancelled {
+		if resultClass != evidence.ResultClassSuccess && resultClass != evidence.ResultClassCancelled {
 			return true
 		}
 	}

@@ -1,21 +1,21 @@
 package runtime
 
 import (
-	"io"
-
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // ResponseDecoder converts one backend success body into one provider response.
-type ResponseDecoder func(body io.ReadCloser) (ports.ProviderResponse, error)
+type ResponseDecoder func(stream carrier.WireStream) (ports.ProviderResponseStream, error)
 
 // SelectResponseDecoder returns the streaming or buffered decoder for one
 // delivery mode. Caller owns error semantics when no decoder is selected.
-func SelectResponseDecoder(delivery bool, streaming ResponseDecoder, buffered ResponseDecoder) (ResponseDecoder, bool) {
-	if delivery {
+func SelectResponseDecoder(mode delivery.Mode, streaming ResponseDecoder, buffered ResponseDecoder) (ResponseDecoder, bool) {
+	if mode == delivery.Streaming {
 		if streaming == nil {
 			return nil, false
 		}
@@ -30,12 +30,12 @@ func SelectResponseDecoder(delivery bool, streaming ResponseDecoder, buffered Re
 // RequireProviderAndProtocol validates provider and protocol-kind ownership for one executor path.
 func RequireProviderAndProtocol(
 	providerIDRaw string,
-	expectedProviderID providercatalog.ProviderID,
+	expectedProviderID profile.ProviderID,
 	actualProtocolKind protocolkind.ProtocolKind,
 	expectedProtocolKind protocolkind.ProtocolKind,
 	providerName string,
 ) error {
-	providerID, ok := providercatalog.ParseProviderID(providerIDRaw)
+	providerID, ok := profile.ParseProviderID(providerIDRaw)
 	if !ok || providerID != expectedProviderID {
 		return canonical.BadEndpoint(providerName + " provider id is unsupported")
 	}

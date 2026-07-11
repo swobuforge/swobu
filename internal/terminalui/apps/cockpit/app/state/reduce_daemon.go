@@ -20,7 +20,7 @@ func allowWhileControlPlaneIncompatible(action update.Action) bool {
 		SetInteractionMode,
 		SetFocusedRowAffordance,
 		CompatibilityRestartRequested,
-		CompatibilityDiagnosticsCopyRequested,
+		ExchangeDiagnosticsCopyRequested,
 		stateeffect.CompatibilityRecoveryNoted:
 		return true
 	default:

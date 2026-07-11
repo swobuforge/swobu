@@ -3,13 +3,13 @@ package canonical
 import "testing"
 
 func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
-	req := NewDialogRequest(
-		"m",
-		[]CanonicalItem{
+	req := NewCanonicalRequest(RequestParams{
+		Model: "m",
+		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorAssistant, "hi"),
 			NewToolUseItem(ItemAuthorAssistant, "", "toolu_1", "calculator", map[string]any{"expr": "2+2"}),
 		},
-	)
+	})
 
 	cloned := req.Items()
 	cloned[0].Text = "changed"
@@ -25,7 +25,7 @@ func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
 }
 
 func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
-	req := NewGenerationRequest(GenerationRequestParams{
+	req := NewCanonicalRequest(RequestParams{
 		Model:              "m",
 		PreviousResponseID: "resp_123",
 		CacheIntent: NewCacheIntent(CacheIntentParams{
@@ -37,10 +37,10 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	})
 
 	cloned := req.Clone()
-	items := cloned.Thread()
+	items := cloned.Items()
 	items[0].Input["pattern"] = "changed"
 
-	got := req.Thread()
+	got := req.Items()
 	if got[0].Input["pattern"] != "TODO" {
 		t.Fatalf("tool input = %v, want %q", got[0].Input["pattern"], "TODO")
 	}

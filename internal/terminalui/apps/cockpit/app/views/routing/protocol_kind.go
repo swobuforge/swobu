@@ -1,18 +1,18 @@
 package routing
 
 import (
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func defaultProviderProtocolForProvider(providerSpec string) string {
-	return providercatalog.ProviderProtocolAuto
+	return profile.ProviderProtocolAuto
 }
 
 func supportedConcreteProviderProtocolsForSpec(providerSpec string) []string {
-	all := providercatalog.SupportedProviderProtocolsForSpec(providerSpec)
+	all := profile.SupportedProviderProtocolsForSpec(providerSpec)
 	out := make([]string, 0, len(all))
 	for _, protocol := range all {
-		if protocol == providercatalog.ProviderProtocolAuto {
+		if protocol == profile.ProviderProtocolAuto {
 			continue
 		}
 		out = append(out, protocol)

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type ProviderConfigRef struct {
@@ -69,12 +69,12 @@ func ParseProviderSpec(raw string) (ProviderSpec, error) {
 	if spec == "" {
 		return ProviderSpec{}, fmt.Errorf("%w: provider spec must not be empty", ErrInvalidProviderSpec)
 	}
-	if !providercatalog.SupportsSpec(spec) {
+	if !profile.SupportsSpec(spec) {
 		return ProviderSpec{}, fmt.Errorf(
 			"%w: unsupported provider spec %q (supported: %s)",
 			ErrInvalidProviderSpec,
 			spec,
-			strings.Join(providercatalog.SupportedSpecs(), ", "),
+			strings.Join(profile.SupportedSpecs(), ", "),
 		)
 	}
 	return ProviderSpec{value: spec}, nil
@@ -102,7 +102,7 @@ const primaryTargetSelector = "primary"
 // endpoint intent. It does not guess provider family or protocol semantics.
 //
 // Ingress-family admissibility and provider wire realization are owned by
-// request-path compatibility rules and provider adapters. Durable endpoint
+// request-path route rules and provider adapters. Durable endpoint
 // intent stores provider identity and credentials, not transport dialect.
 func NewProviderConfig(
 	ref ProviderConfigRef,
@@ -117,9 +117,9 @@ func NewProviderConfig(
 		return ProviderConfig{}, fmt.Errorf("%w: provider spec is required", ErrInvalidProviderConfig)
 	}
 	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=domain
-		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-compatible provider configs require a base URL", ErrInvalidProviderConfig)
+		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-style provider configs require a base URL", ErrInvalidProviderConfig)
 	}
-	providerProtocol, ok := providercatalog.ResolveConcreteProtocolForAutoAtBoundary(spec.value)
+	providerProtocol, ok := profile.ResolveConcreteProtocolForAutoAtBoundary(spec.value)
 	if !ok {
 		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no default provider protocol", ErrInvalidProviderConfig)
 	}
@@ -151,7 +151,7 @@ func (c ProviderConfig) CredentialRef() string {
 }
 
 func (c ProviderConfig) ProtocolKind() protocolkind.ProtocolKind {
-	kind, _, ok := providercatalog.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
+	kind, _, ok := profile.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
 	if ok {
 		return kind
 	}
@@ -167,7 +167,7 @@ func (c ProviderConfig) WithProviderProtocol(providerProtocol string) (ProviderC
 	if providerProtocol == "" {
 		return ProviderConfig{}, fmt.Errorf("%w: provider protocol is required", ErrInvalidProviderConfig)
 	}
-	if !providercatalog.SupportsProviderProtocolForSpec(c.providerSpec.String(), providerProtocol) {
+	if !profile.SupportsProviderProtocolForSpec(c.providerSpec.String(), providerProtocol) {
 		return ProviderConfig{}, fmt.Errorf(
 			"%w: provider protocol %q is unsupported for provider %q",
 			ErrInvalidProviderConfig,
@@ -175,11 +175,11 @@ func (c ProviderConfig) WithProviderProtocol(providerProtocol string) (ProviderC
 			c.providerSpec.String(),
 		)
 	}
-	protocolKind, _, ok := providercatalog.ProviderProtocolKindAndFrame(c.providerSpec.String(), providerProtocol)
+	protocolKind, _, ok := profile.ProviderProtocolKindAndFrame(c.providerSpec.String(), providerProtocol)
 	if !ok {
 		return ProviderConfig{}, fmt.Errorf("%w: provider protocol %q has no protocol mapping", ErrInvalidProviderConfig, providerProtocol)
 	}
-	if !providercatalog.SupportsExecutionProtocolForSpec(c.providerSpec.String(), protocolKind) {
+	if !profile.SupportsExecutionProtocolForSpec(c.providerSpec.String(), protocolKind) {
 		return ProviderConfig{}, fmt.Errorf(
 			"%w: provider protocol %q protocol %q is unsupported for provider %q",
 			ErrInvalidProviderConfig,
@@ -193,7 +193,7 @@ func (c ProviderConfig) WithProviderProtocol(providerProtocol string) (ProviderC
 }
 
 func (c ProviderConfig) SelectedFrame() string {
-	_, frame, ok := providercatalog.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
+	_, frame, ok := profile.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
 	if ok {
 		return frame
 	}

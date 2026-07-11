@@ -124,9 +124,9 @@ type HelpDiagnosticsCopyRequested struct{ Text string }
 // a daemon/TUI control-plane incompatibility.
 type CompatibilityRestartRequested struct{}
 
-// CompatibilityDiagnosticsCopyRequested asks reducer to copy incompatibility
+// ExchangeDiagnosticsCopyRequested asks reducer to copy incompatibility
 // diagnostics for operator support.
-type CompatibilityDiagnosticsCopyRequested struct{}
+type ExchangeDiagnosticsCopyRequested struct{}
 
 // SaveSelectedTargetRequested asks the reducer to save a selected target.
 type SaveSelectedTargetRequested struct {

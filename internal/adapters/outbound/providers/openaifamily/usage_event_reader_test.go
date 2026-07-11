@@ -8,11 +8,11 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/report"
 )
 
-func normalizeUsageForTest(current canonical.TokenUsage) (canonical.TokenUsage, []ports.DegradationWarning) {
+func normalizeUsageForTest(current canonical.TokenUsage) (canonical.TokenUsage, []report.Notice) {
 	input, hasInput := current.InputTokens()
 	if !hasInput {
 		return current, nil
@@ -30,7 +30,7 @@ func normalizeUsageForTest(current canonical.TokenUsage) (canonical.TokenUsage, 
 
 type testProviderUsageDecoder struct{}
 
-func (testProviderUsageDecoder) DecodeToCanonical(_ RawUsageEnvelope, current canonical.TokenUsage) (canonical.TokenUsage, []ports.DegradationWarning) {
+func (testProviderUsageDecoder) DecodeToCanonical(_ RawUsageEnvelope, current canonical.TokenUsage) (canonical.TokenUsage, []report.Notice) {
 	return normalizeUsageForTest(current)
 }
 func TestUsageEventReader_RewritesUsageEventsOnly(t *testing.T) {
@@ -43,14 +43,14 @@ func TestUsageEventReader_RewritesUsageEventsOnly(t *testing.T) {
 		t.Fatalf("usage: %v", err)
 	}
 	now := time.Now().UTC()
-	events := []canonical.Event{
+	events := canonical.EventSequence{
 		{ExchangeID: "ex", Seq: 1, Time: now, Kind: canonical.EventMetadata, EnvID: "r1", Payload: canonical.MetadataPayload{Values: map[string]string{"model": "m"}}},
 		{ExchangeID: "ex", Seq: 2, Time: now, Kind: canonical.EventUsage, EnvID: "r1", Payload: canonical.UsagePayload{Usage: usage}},
 		{ExchangeID: "ex", Seq: 3, Time: now, Kind: canonical.EventFinish, EnvID: "r1", Payload: canonical.FinishPayload{Reason: "stop"}},
 	}
 	reader := newUsageEventReader(
 		canonical.NewSliceEventReader(events),
-		RawUsageEnvelope{ProviderID: providercatalog.ProviderSpecOpenAI, Protocol: protocolkind.ChatCompletions},
+		RawUsageEnvelope{ProviderID: profile.ProviderSpecOpenAI, Protocol: protocolkind.ChatCompletions},
 		testProviderUsageDecoder{},
 	)
 	ev1, err := reader.Next(context.Background())

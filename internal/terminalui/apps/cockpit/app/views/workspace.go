@@ -22,7 +22,7 @@ func BuildWorkspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec
 	if isCreate {
 		endpoint = selectors.CreateDraftEndpointValue(model)
 	} else if name != "" {
-		endpoint = "/c/" + name + "/"
+		endpoint = selectors.ClientBaseURL(model)
 	}
 	var out retained.ViewSpec[state.Model]
 	if !isCreate {

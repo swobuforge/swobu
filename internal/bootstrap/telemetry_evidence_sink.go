@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/evidence"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -12,17 +12,17 @@ import (
 // request-path evidence append semantics.
 type telemetryObservedRequestEvidenceSink struct {
 	base     ports.RequestEvidenceSink
-	onAppend func(runtimeevidence.TrafficEvent)
+	onAppend func(evidence.TrafficEvent)
 }
 
-func newTelemetryObservedEvidenceSink(base ports.RequestEvidenceSink, onAppend func(runtimeevidence.TrafficEvent)) ports.RequestEvidenceSink {
+func newTelemetryObservedEvidenceSink(base ports.RequestEvidenceSink, onAppend func(evidence.TrafficEvent)) ports.RequestEvidenceSink {
 	return &telemetryObservedRequestEvidenceSink{
 		base:     base,
 		onAppend: onAppend,
 	}
 }
 
-func (s *telemetryObservedRequestEvidenceSink) Append(ctx context.Context, event runtimeevidence.TrafficEvent) {
+func (s *telemetryObservedRequestEvidenceSink) Append(ctx context.Context, event evidence.TrafficEvent) {
 	if s == nil || s.base == nil {
 		return
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func assertNoTestHarnessArtifacts(t *testing.T, value string) {
@@ -104,7 +104,7 @@ func TestClientRunSpecForID(t *testing.T) {
 		t.Fatalf("OPENAI_API_KEY=%q", got)
 	}
 	joinedAiderArgs := strings.Join(spec.args, " ")
-	if got := joinedAiderArgs; got != "--model openai/"+requestpath.PublicModelIDSwobu {
+	if got := joinedAiderArgs; got != "--model openai/"+exchange.PublicModelIDSwobu {
 		t.Fatalf("aider args=%q", got)
 	}
 	if strings.Contains(joinedAiderArgs, "hermetic-aider-token") {
@@ -114,7 +114,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `-c model="`+requestpath.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
+	if got := strings.Join(codex.args, " "); got != `-c model="`+exchange.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
 		t.Fatalf("codex args=%q", got)
 	}
 	if got := codex.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
@@ -127,10 +127,10 @@ func TestClientRunSpecForID(t *testing.T) {
 	if got := claude.env["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:7926/c/acme/" {
 		t.Fatalf("claude env ANTHROPIC_BASE_URL=%q", got)
 	}
-	if got := claude.env["ANTHROPIC_MODEL"]; got != requestpath.PublicModelIDSwobu {
+	if got := claude.env["ANTHROPIC_MODEL"]; got != exchange.PublicModelIDSwobu {
 		t.Fatalf("claude env ANTHROPIC_MODEL=%q", got)
 	}
-	if got := claude.env["ANTHROPIC_CUSTOM_MODEL_OPTION"]; got != requestpath.PublicModelIDSwobu {
+	if got := claude.env["ANTHROPIC_CUSTOM_MODEL_OPTION"]; got != exchange.PublicModelIDSwobu {
 		t.Fatalf("claude env ANTHROPIC_CUSTOM_MODEL_OPTION=%q", got)
 	}
 	opencode, ok := clientRunSpecForID("opencode", "http://127.0.0.1:7926/c/acme/", "")
@@ -166,7 +166,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("aider command missing")
 	}
-	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 OPENAI_API_KEY=swobu-placeholder aider --model openai/" + requestpath.PublicModelIDSwobu; cmd != want {
+	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 OPENAI_API_KEY=swobu-placeholder aider --model openai/" + exchange.PublicModelIDSwobu; cmd != want {
 		t.Fatalf("aider command=%q want=%q", cmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, cmd)
@@ -174,7 +174,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `OPENAI_API_KEY=swobu-placeholder codex -c 'model="` + requestpath.PublicModelIDSwobu + `"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
+	if want := `OPENAI_API_KEY=swobu-placeholder codex -c 'model="` + exchange.PublicModelIDSwobu + `"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -182,7 +182,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("claude command missing")
 	}
-	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_CUSTOM_MODEL_OPTION=" + requestpath.PublicModelIDSwobu + " ANTHROPIC_MODEL=" + requestpath.PublicModelIDSwobu + " claude --model " + requestpath.PublicModelIDSwobu; claude != want {
+	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_CUSTOM_MODEL_OPTION=" + exchange.PublicModelIDSwobu + " ANTHROPIC_MODEL=" + exchange.PublicModelIDSwobu + " claude --model " + exchange.PublicModelIDSwobu; claude != want {
 		t.Fatalf("claude command=%q want=%q", claude, want)
 	}
 	assertNoTestHarnessArtifacts(t, claude)

@@ -3,7 +3,7 @@ package canonical
 import "testing"
 
 func TestPreviousResponseIDFromRequest_AcceptsPreviousResponseID(t *testing.T) {
-	_, ok, err := PreviousResponseIDFromRequest(NewGenerationRequest(GenerationRequestParams{
+	_, ok, err := PreviousResponseIDFromRequest(NewCanonicalRequest(RequestParams{
 		Model:              "m",
 		PreviousResponseID: "resp_1",
 	}))
@@ -16,7 +16,7 @@ func TestPreviousResponseIDFromRequest_AcceptsPreviousResponseID(t *testing.T) {
 }
 
 func TestPreviousResponseIDFromRequest_MissingSelectorReturnsFalse(t *testing.T) {
-	_, ok, err := PreviousResponseIDFromRequest(NewGenerationRequest(GenerationRequestParams{
+	_, ok, err := PreviousResponseIDFromRequest(NewCanonicalRequest(RequestParams{
 		Model: "m",
 	}))
 	if err != nil {
@@ -28,14 +28,11 @@ func TestPreviousResponseIDFromRequest_MissingSelectorReturnsFalse(t *testing.T)
 }
 
 func TestContinuationConversation_RehydratesResponseConversation(t *testing.T) {
-	conversation, ok, err := ContinuationConversation(NewGenerationRequest(GenerationRequestParams{
+	conversation, ok, err := ContinuationConversation(NewCanonicalRequest(RequestParams{
 		Model: "m",
-		Thread: []CanonicalItem{
+		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "hi"),
 			NewTextItem(ItemAuthorAssistant, "hello"),
-			NewTextItem(ItemAuthorUser, "continue"),
-		},
-		LastTurn: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "continue"),
 		},
 	}))

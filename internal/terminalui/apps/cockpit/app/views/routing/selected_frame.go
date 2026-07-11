@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -29,7 +29,7 @@ func buildProviderProtocolChoiceRow(model state.Model, spec providerProtocolChoi
 	if spec.ProviderConfig == nil {
 		return views.RowStatic(providerProtocolRowLabel, views.ValueRequired)
 	}
-	protocols := providercatalog.SupportedProviderProtocolsForSpec(spec.ProviderConfig.ProviderSpec)
+	protocols := profile.SupportedProviderProtocolsForSpec(spec.ProviderConfig.ProviderSpec)
 	if len(protocols) == 0 {
 		return views.RowStatic(providerProtocolRowLabel, views.ValueRequired)
 	}

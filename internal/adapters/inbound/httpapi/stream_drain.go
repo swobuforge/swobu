@@ -7,7 +7,7 @@ import (
 	"errors"
 	"io"
 
-	streamwire "github.com/swobuforge/swobu/internal/adapters/wire/shared/streamwire"
+	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -25,12 +25,12 @@ type streamDrainCounters struct {
 }
 
 // drainEncodedFrames centralizes envelope source -> encoder -> sink flow.
-func drainEncodedFrames(ctx context.Context, stream canonical.EventReader, encoder streamwire.EnvelopeStreamEncoder, sink frameSink) error {
+func drainEncodedFrames(ctx context.Context, stream canonical.EventReader, encoder sse.EnvelopeStreamEncoder, sink frameSink) error {
 	_, err := drainEncodedFramesWithStats(ctx, stream, encoder, sink)
 	return err
 }
 
-func drainEncodedFramesWithStats(ctx context.Context, stream canonical.EventReader, encoder streamwire.EnvelopeStreamEncoder, sink frameSink) (streamDrainCounters, error) {
+func drainEncodedFramesWithStats(ctx context.Context, stream canonical.EventReader, encoder sse.EnvelopeStreamEncoder, sink frameSink) (streamDrainCounters, error) {
 	stats := streamDrainCounters{}
 	hash := sha256.New()
 	for {

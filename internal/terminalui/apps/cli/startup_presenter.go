@@ -32,7 +32,7 @@ type StartupEvent = appstate.Event
 type StartupState = appstate.StartupState
 
 // TODO(execution-system): StartupTranscript is an older startup presenter noun kept as a type alias
-// for compatibility with external integration tests and callers.
+// for continuity with external integration tests and callers.
 type StartupTranscript = StartupConsolePresenter
 
 // StartupConsolePresenter is a thin runtime adapter over cli app/state + app/views.

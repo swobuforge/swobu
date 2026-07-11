@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type ModelSelectionBlockReason string
@@ -74,7 +74,7 @@ func EvaluateModelSelectionGateState(input ModelSelectionReadinessGateInput) Mod
 	if strings.EqualFold(strings.TrimSpace(credentialSource(credentialRef)), "env") { // swobu:io-string source=boundary
 		key := strings.TrimSpace(envCredentialKey(credentialRef)) // swobu:io-string source=boundary
 		if key == "" {
-			key = providercatalog.DefaultEnvKeyForSpec(provider)
+			key = profile.DefaultEnvKeyForSpec(provider)
 		}
 		if strings.TrimSpace(os.Getenv(key)) == "" { // swobu:io-string source=boundary
 			return ModelSelectionGateState{

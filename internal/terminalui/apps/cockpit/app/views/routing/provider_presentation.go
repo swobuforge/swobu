@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func providerDisplayName(spec string) string {
@@ -14,48 +14,48 @@ func providerDisplayName(spec string) string {
 	return profile.ProviderDisplayName
 }
 
-func authVariantDisplayLabel(variant providercatalog.AuthVariant) string {
+func authVariantDisplayLabel(variant profile.AuthVariant) string {
 	switch variant {
-	case providercatalog.AuthVariantChatGPTLogin:
+	case profile.AuthVariantChatGPTLogin:
 		return "browser login"
-	case providercatalog.AuthVariantChatGPTDeviceAuth:
+	case profile.AuthVariantChatGPTDeviceAuth:
 		return "device code"
-	case providercatalog.AuthVariantEnv:
+	case profile.AuthVariantEnv:
 		return "env var"
-	case providercatalog.AuthVariantFile:
+	case profile.AuthVariantFile:
 		return "file"
-	case providercatalog.AuthVariantAWSProfile:
+	case profile.AuthVariantAWSProfile:
 		return "AWS chain"
-	case providercatalog.AuthVariantAWSEnvSession:
+	case profile.AuthVariantAWSEnvSession:
 		return "AWS chain"
 	default:
 		return string(variant)
 	}
 }
 
-func authVariantStartAction(spec string, variant providercatalog.AuthVariant) (label string, verb string, ok bool) {
-	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(spec), variant) || !providercatalog.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
+func authVariantStartAction(spec string, variant profile.AuthVariant) (label string, verb string, ok bool) {
+	if !profile.SupportsAuthVariant(strings.TrimSpace(spec), variant) || !profile.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
 		return "", "", false
 	}
 	switch variant {
-	case providercatalog.AuthVariantChatGPTDeviceAuth:
+	case profile.AuthVariantChatGPTDeviceAuth:
 		return "start device auth", "start", true
-	case providercatalog.AuthVariantChatGPTLogin:
+	case profile.AuthVariantChatGPTLogin:
 		return "start login", "login", true
 	default:
 		return "start login", "login", true
 	}
 }
 
-func profileForSpec(spec string) (providercatalog.Profile, bool) {
-	providerID, ok := providercatalog.ParseProviderID(spec)
+func profileForSpec(spec string) (profile.Profile, bool) {
+	providerID, ok := profile.ParseProviderID(spec)
 	if !ok {
-		return providercatalog.Profile{}, false
+		return profile.Profile{}, false
 	}
-	for _, profile := range providercatalog.All() {
+	for _, profile := range profile.All() {
 		if profile.ProviderID == providerID {
 			return profile, true
 		}
 	}
-	return providercatalog.Profile{}, false
+	return profile.Profile{}, false
 }

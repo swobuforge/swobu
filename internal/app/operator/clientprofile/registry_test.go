@@ -115,7 +115,7 @@ func TestProfileActions_ParetoMatrix(t *testing.T) {
 	if got := otherActions[1].RowLabel(); got != "copy values" {
 		t.Fatalf("other copy=%q", got)
 	}
-	if !strings.Contains(otherActions[0].ActionSummary(), "openai + anthropic") {
+	if !strings.Contains(otherActions[0].ActionSummary(), "openai-style + anthropic-style") {
 		t.Fatalf("other summary=%q", otherActions[0].ActionSummary())
 	}
 	if got := otherActions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    swobu" {

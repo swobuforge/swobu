@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestDecodeEndpointDTO_PreservesProviderProtocol(t *testing.T) {
@@ -78,7 +78,7 @@ func TestDecodeEndpointDTO_RejectsProtocolAutoAtPersistenceBoundary(t *testing.T
 				ProviderSpec:     "openai",
 				BaseURL:          "https://api.openai.com/v1",
 				CredentialRef:    "env:OPENAI_API_KEY",
-				ProviderProtocol: providercatalog.ProviderProtocolAuto,
+				ProviderProtocol: profile.ProviderProtocolAuto,
 				ModelID:          "gpt-5.4-mini",
 			},
 		},

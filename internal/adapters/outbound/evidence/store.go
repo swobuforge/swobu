@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/evidence"
 )
 
 type StoreConfig struct {
@@ -59,15 +59,18 @@ type RecentTrafficRow struct {
 	ObservedAt     string                           `json:"observed_at,omitempty"`
 	Timing         *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
 	TokenUsage     *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
-	// TODO(execution-system): Flattened token fields are preserved for compatibility with existing
+	// TODO(execution-system): Flattened token fields are preserved for continuity with existing
 	// runtimeevidence integration tests and older readers.
-	InputTokens         *int   `json:"-"`
-	OutputTokens        *int   `json:"-"`
-	CacheReadTokens     *int   `json:"-"`
-	CacheWriteTokens    *int   `json:"-"`
-	ModelRequested      string `json:"model_requested,omitempty"`
-	ModelResolved       string `json:"model_resolved,omitempty"`
-	ModelResolutionMode string `json:"model_resolution_mode,omitempty"`
+	InputTokens         *int                   `json:"-"`
+	OutputTokens        *int                   `json:"-"`
+	CacheReadTokens     *int                   `json:"-"`
+	CacheWriteTokens    *int                   `json:"-"`
+	ModelRequested      string                 `json:"model_requested,omitempty"`
+	ModelResolved       string                 `json:"model_resolved,omitempty"`
+	ModelResolutionMode string                 `json:"model_resolution_mode,omitempty"`
+	Mutations           []evidence.Mutation    `json:"wire_transform_mutations,omitempty"`
+	ExchangeDiagnostics []string               `json:"exchange_diagnostics,omitempty"`
+	StageReports        []evidence.StageReport `json:"exchange_stage_reports,omitempty"`
 }
 
 type RecentTrafficTimingSnapshot struct {
@@ -106,7 +109,7 @@ type RequestEvidenceSinkStore struct {
 }
 
 type stampedTrafficEvent struct {
-	event      runtimeevidence.TrafficEvent
+	event      evidence.TrafficEvent
 	observedAt time.Time
 }
 
@@ -125,7 +128,7 @@ func NewStore(cfg StoreConfig) *RequestEvidenceSinkStore {
 	}
 }
 
-func (s *RequestEvidenceSinkStore) Append(_ context.Context, event runtimeevidence.TrafficEvent) {
+func (s *RequestEvidenceSinkStore) Append(_ context.Context, event evidence.TrafficEvent) {
 	if s == nil {
 		return
 	}
@@ -209,7 +212,7 @@ func reconcileLatestByRequestID(events []stampedTrafficEvent) []stampedTrafficEv
 	return latest
 }
 
-func classifyCounters(counters *StatusCounters, event runtimeevidence.TrafficEvent) {
+func classifyCounters(counters *StatusCounters, event evidence.TrafficEvent) {
 	statusCode := event.StatusCode()
 	switch {
 	case statusCode >= 200 && statusCode < 300:
@@ -228,9 +231,7 @@ func classifyCounters(counters *StatusCounters, event runtimeevidence.TrafficEve
 
 func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 	evidence := event.event
-	row := RecentTrafficRow{
-		RequestID:           evidence.RequestID().String(),
-		Endpoint:            evidence.Endpoint(),
+	row := RecentTrafficRow{Endpoint: evidence.Endpoint(),
 		ClientHandler:       string(evidence.ClientHandler()),
 		ClientProtocol:      string(evidence.ClientProtocol()),
 		IngressFamily:       string(evidence.IngressFamily()),
@@ -241,6 +242,9 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 		ModelRequested:      evidence.ModelRequested(),
 		ModelResolved:       evidence.ModelResolved(),
 		ModelResolutionMode: evidence.ModelResolutionMode(),
+		Mutations:           evidence.Mutations(),
+		ExchangeDiagnostics: evidence.ExchangeDiagnostics(),
+		StageReports:        evidence.StageReports(),
 	}
 	if !event.observedAt.IsZero() {
 		row.ObservedAt = event.observedAt.Format("15:04:05")

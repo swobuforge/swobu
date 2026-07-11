@@ -14,10 +14,11 @@ import (
 	"time"
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type stubCredentialResolver struct{}
@@ -200,14 +201,14 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 	rt := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
 	req := ports.NewProviderRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(true),
+		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ports.NewRoutableTarget(
 			"draft",
-			string(providercatalog.ProviderSpecChatGPT),
+			string(profile.ProviderSpecChatGPT),
 			"https://api.openai.com/v1",
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
@@ -219,10 +220,10 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.EnvelopeStream() == nil {
-		t.Fatal("expected envelope stream response")
+	if resp.Stream == nil {
+		t.Fatal("expected transport stream response")
 	}
-	if closeErr := resp.Close(); closeErr != nil {
+	if closeErr := resp.Stream.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 	if rt.lastRequest == nil {
@@ -259,14 +260,14 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
 	req := ports.NewProviderRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(true),
+		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ports.NewRoutableTarget(
 			"draft",
-			string(providercatalog.ProviderSpecChatGPT),
+			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
@@ -292,14 +293,14 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 
 	exec := NewExecutor(srv.Client(), failingCredentialResolver{})
 	req := ports.NewProviderRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(true),
+		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ports.NewRoutableTarget(
 			"draft",
-			string(providercatalog.ProviderSpecChatGPT),
+			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
@@ -363,14 +364,14 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 
 	exec := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
 	req := ports.NewProviderRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(true),
+		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ports.NewRoutableTarget(
 			"draft",
-			string(providercatalog.ProviderSpecChatGPT),
+			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
 			ref,
 			protocolkind.Responses,
@@ -382,7 +383,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
-	_ = resp.Close()
+	_ = resp.Stream.Close()
 	if attempts != 2 {
 		t.Fatalf("attempts=%d want 2", attempts)
 	}
@@ -400,7 +401,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	}
 }
 
-func TestExecute_StreamingReturnsCanonicalStream(t *testing.T) {
+func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 	t.Parallel()
 
 	sse := "event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n" +
@@ -413,14 +414,14 @@ func TestExecute_StreamingReturnsCanonicalStream(t *testing.T) {
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
 	req := ports.NewProviderRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(true),
+		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ports.NewRoutableTarget(
 			"draft",
-			string(providercatalog.ProviderSpecChatGPT),
+			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
 			"keychain:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
@@ -432,10 +433,10 @@ func TestExecute_StreamingReturnsCanonicalStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.EnvelopeStream() == nil {
-		t.Fatal("expected envelope stream response")
+	if resp.Stream == nil {
+		t.Fatal("expected transport stream response")
 	}
-	if closeErr := resp.Close(); closeErr != nil {
+	if closeErr := resp.Stream.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 }

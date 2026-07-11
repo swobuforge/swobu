@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const (
@@ -36,7 +38,7 @@ func NewExecutor(client *http.Client) ProviderExecutorAdapter {
 	return ProviderExecutorAdapter{client: client}
 }
 
-func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
+func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	executor := NewExecutor(client)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
@@ -46,28 +48,28 @@ func NewRuntime(providerID providercatalog.ProviderID, client *http.Client, cred
 	}
 }
 
-func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderResponse, error) {
+func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
 	if trimBedrockInput(req.Request.Model()) == "" {
-		return ports.ProviderResponse{}, canonical.BadRequest("canonical request is required")
+		return ports.ProviderTransportResponse{}, canonical.BadRequest("canonical request is required")
 	}
 	if trimBedrockInput(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
-		return ports.ProviderResponse{}, canonical.BadEndpoint("bedrock provider base URL is required")
+		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("bedrock provider base URL is required")
 	}
 	if err := validateBedrockRuntimeEndpoint(req.Target.BaseURL); err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	op, err := resolveBedrockOperation(req.Target.ProviderProtocol)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	client, err := e.runtimeClient(ctx, req.Target.BaseURL, req.Target.CredentialRef)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	if op.invokeModel {
-		return e.executeInvokeModel(ctx, client, req, op.streaming)
+		return e.executeInvokeModel(ctx, client, req, op.deliveryMode)
 	}
-	return e.executeConverse(ctx, client, req, op.streaming)
+	return e.executeConverse(ctx, client, req, op.deliveryMode)
 }
 
 func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
@@ -158,44 +160,52 @@ func (e ProviderExecutorAdapter) runtimeClient(ctx context.Context, baseURL stri
 	}), nil
 }
 
-func (e ProviderExecutorAdapter) executeConverse(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, streaming bool) (ports.ProviderResponse, error) {
+func (e ProviderExecutorAdapter) executeConverse(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, deliveryMode delivery.Mode) (ports.ProviderTransportResponse, error) {
 	modelID := bedrockModelFromRequest(req.Request)
 	if trimBedrockInput(modelID) == "" {
-		return ports.ProviderResponse{}, canonical.BadRequest("bedrock model id is required")
+		return ports.ProviderTransportResponse{}, canonical.BadRequest("bedrock model id is required")
 	}
 	messages, err := bedrockMessagesFromRequest(req.Request)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
 	input := &bedrockruntime.ConverseInput{ModelId: aws.String(modelID), Messages: messages}
-	if streaming {
+	if deliveryMode == delivery.Streaming {
 		streamOut, err := client.ConverseStream(ctx, &bedrockruntime.ConverseStreamInput{ModelId: input.ModelId, Messages: input.Messages})
 		if err != nil {
-			return ports.ProviderResponse{}, classifyBedrockSDKError(err)
+			return ports.ProviderTransportResponse{}, classifyBedrockSDKError(err)
 		}
 		text, usage, stop := collectConverseStream(streamOut)
 		output := mustConversationOutput(modelID, text, stop, usage)
-		return ports.NewBufferedProviderResponse(output), nil
+		envelope, err := canonical.EventReaderFromCanonicalOutput("provider_buffered:bedrock_converse_stream", output)
+		if err != nil {
+			return ports.ProviderTransportResponse{}, canonical.InternalError("bedrock converse stream response could not be converted into canonical event stream")
+		}
+		return ports.ProviderTransportResponse{Envelope: envelope}, nil
 	}
 	out, err := client.Converse(ctx, input)
 	if err != nil {
-		return ports.ProviderResponse{}, classifyBedrockSDKError(err)
+		return ports.ProviderTransportResponse{}, classifyBedrockSDKError(err)
 	}
 	text, stop, usage := decodeConverseOutput(out)
 	output := mustConversationOutput(modelID, text, stop, usage)
-	return ports.NewBufferedProviderResponse(output), nil
+	envelope, err := canonical.EventReaderFromCanonicalOutput("provider_buffered:bedrock_converse", output)
+	if err != nil {
+		return ports.ProviderTransportResponse{}, canonical.InternalError("bedrock converse response could not be converted into canonical event stream")
+	}
+	return ports.ProviderTransportResponse{Envelope: envelope}, nil
 }
 
-func (e ProviderExecutorAdapter) executeInvokeModel(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, streaming bool) (ports.ProviderResponse, error) {
+func (e ProviderExecutorAdapter) executeInvokeModel(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, deliveryMode delivery.Mode) (ports.ProviderTransportResponse, error) {
 	modelID := trimBedrockInput(req.Request.Model())
 	if modelID == "" {
-		return ports.ProviderResponse{}, canonical.BadRequest("bedrock model id is required")
+		return ports.ProviderTransportResponse{}, canonical.BadRequest("bedrock model id is required")
 	}
-	payload, err := json.Marshal(map[string]any{"inputText": req.Request.Prompt()})
+	payload, err := json.Marshal(map[string]any{"inputText": bedrockPromptText(req.Request)})
 	if err != nil {
-		return ports.ProviderResponse{}, canonical.BadRequest("bedrock invoke_model payload could not be encoded")
+		return ports.ProviderTransportResponse{}, canonical.BadRequest("bedrock invoke_model payload could not be encoded")
 	}
-	if streaming {
+	if deliveryMode == delivery.Streaming {
 		out, err := client.InvokeModelWithResponseStream(ctx, &bedrockruntime.InvokeModelWithResponseStreamInput{
 			ModelId:     aws.String(modelID),
 			Body:        payload,
@@ -203,14 +213,18 @@ func (e ProviderExecutorAdapter) executeInvokeModel(ctx context.Context, client 
 			Accept:      aws.String("application/json"),
 		})
 		if err != nil {
-			return ports.ProviderResponse{}, classifyBedrockSDKError(err)
+			return ports.ProviderTransportResponse{}, classifyBedrockSDKError(err)
 		}
 		raw := collectInvokeModelResponseStream(out)
 		decoded, err := decodeInvokeModelBuffered(raw)
 		if err != nil {
-			return ports.ProviderResponse{}, err
+			return ports.ProviderTransportResponse{}, err
 		}
-		return ports.NewBufferedProviderResponse(decoded), nil
+		envelope, err := canonical.EventReaderFromCanonicalOutput("provider_buffered:bedrock_invoke_model_stream", decoded)
+		if err != nil {
+			return ports.ProviderTransportResponse{}, canonical.InternalError("bedrock invoke_model stream response could not be converted into canonical event stream")
+		}
+		return ports.ProviderTransportResponse{Envelope: envelope}, nil
 	}
 	out, err := client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(modelID),
@@ -219,11 +233,26 @@ func (e ProviderExecutorAdapter) executeInvokeModel(ctx context.Context, client 
 		Accept:      aws.String("application/json"),
 	})
 	if err != nil {
-		return ports.ProviderResponse{}, classifyBedrockSDKError(err)
+		return ports.ProviderTransportResponse{}, classifyBedrockSDKError(err)
 	}
 	decoded, err := decodeInvokeModelBuffered(out.Body)
 	if err != nil {
-		return ports.ProviderResponse{}, err
+		return ports.ProviderTransportResponse{}, err
 	}
-	return ports.NewBufferedProviderResponse(decoded), nil
+	envelope, err := canonical.EventReaderFromCanonicalOutput("provider_buffered:bedrock_invoke_model", decoded)
+	if err != nil {
+		return ports.ProviderTransportResponse{}, canonical.InternalError("bedrock invoke_model response could not be converted into canonical event stream")
+	}
+	return ports.ProviderTransportResponse{Envelope: envelope}, nil
+}
+
+func bedrockPromptText(request canonical.CanonicalRequest) string {
+	var out strings.Builder
+	for _, item := range request.Items() {
+		if item.Kind != canonical.ItemKindText {
+			continue
+		}
+		out.WriteString(item.Text)
+	}
+	return out.String()
 }

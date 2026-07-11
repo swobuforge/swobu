@@ -27,6 +27,7 @@ const (
 	defaultTokenURL              = "https://auth.openai.com/oauth/token"
 	defaultOpenAIClientID        = "app_EMoamEEZ73f0CkXaXp7hrann"
 	defaultCallbackListenAddr    = "127.0.0.1:1455"
+	defaultOAuthRedirectBase     = "http://localhost:1455"
 	fallbackCallbackListenAddr   = "127.0.0.1:1457"
 	callbackPath                 = "/auth/callback"
 	daemonCallbackPath           = "/_swobu/auth/chatgpt/callback"

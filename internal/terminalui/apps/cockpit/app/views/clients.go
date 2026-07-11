@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
-	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -110,7 +110,7 @@ func clientsSummaryLabel(selected clientprofile.Profile) string {
 
 func selectedClientActions(selected clientprofile.Profile, baseURL string) []clientprofile.Action {
 	if selected == nil {
-		return []clientprofile.Action{{ID: "setup", Label: "setup", Verb: "view"}}
+		return nil
 	}
 	actions := selected.Actions(baseURL)
 	configured := make([]clientprofile.Action, 0, len(actions))
@@ -120,7 +120,7 @@ func selectedClientActions(selected clientprofile.Profile, baseURL string) []cli
 		}
 	}
 	if len(configured) == 0 {
-		return []clientprofile.Action{{ID: "setup", Label: "setup", Verb: "view"}}
+		return nil
 	}
 	return configured
 }
@@ -338,5 +338,5 @@ func selectedClientRunModelID(model state.Model) string {
 	if strings.TrimSpace(snapshot.Name) == "" { // swobu:io-string source=boundary
 		return ""
 	}
-	return requestpath.PublicModelIDSwobu
+	return exchange.PublicModelIDSwobu
 }

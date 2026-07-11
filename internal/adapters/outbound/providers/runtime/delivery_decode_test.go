@@ -1,43 +1,44 @@
 package runtime
 
 import (
-	"io"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestSelectResponseDecoder(t *testing.T) {
-	streaming := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		_ = body.Close()
-		return ports.ProviderResponse{}, nil
+	streaming := func(stream carrier.WireStream) (ports.ProviderResponseStream, error) {
+		_ = stream
+		return ports.ProviderResponseStream{}, nil
 	}
-	buffered := func(body io.ReadCloser) (ports.ProviderResponse, error) {
-		_ = body.Close()
-		return ports.ProviderResponse{}, nil
+	buffered := func(stream carrier.WireStream) (ports.ProviderResponseStream, error) {
+		_ = stream
+		return ports.ProviderResponseStream{}, nil
 	}
 
-	if dec, ok := SelectResponseDecoder(true, nil, buffered); ok || dec != nil {
+	if dec, ok := SelectResponseDecoder(delivery.Streaming, nil, buffered); ok || dec != nil {
 		t.Fatalf("expected missing streaming decoder to fail selection")
 	}
-	if dec, ok := SelectResponseDecoder(false, streaming, nil); ok || dec != nil {
+	if dec, ok := SelectResponseDecoder(delivery.Buffered, streaming, nil); ok || dec != nil {
 		t.Fatalf("expected missing buffered decoder to fail selection")
 	}
-	if dec, ok := SelectResponseDecoder(true, streaming, buffered); !ok || dec == nil {
+	if dec, ok := SelectResponseDecoder(delivery.Streaming, streaming, buffered); !ok || dec == nil {
 		t.Fatalf("expected streaming decoder to be selected")
 	}
-	if dec, ok := SelectResponseDecoder(false, streaming, buffered); !ok || dec == nil {
+	if dec, ok := SelectResponseDecoder(delivery.Buffered, streaming, buffered); !ok || dec == nil {
 		t.Fatalf("expected buffered decoder to be selected")
 	}
 }
 
 func TestRequireProviderAndProtocol(t *testing.T) {
 	if err := RequireProviderAndProtocol(
-		string(providercatalog.ProviderSpecAnthropic),
-		providercatalog.ProviderSpecAnthropic,
+		string(profile.ProviderSpecAnthropic),
+		profile.ProviderSpecAnthropic,
 		protocolkind.Messages,
 		protocolkind.Messages,
 		"anthropic",
@@ -47,7 +48,7 @@ func TestRequireProviderAndProtocol(t *testing.T) {
 
 	if err := RequireProviderAndProtocol(
 		"not-a-provider",
-		providercatalog.ProviderSpecAnthropic,
+		profile.ProviderSpecAnthropic,
 		protocolkind.Messages,
 		protocolkind.Messages,
 		"anthropic",
@@ -56,8 +57,8 @@ func TestRequireProviderAndProtocol(t *testing.T) {
 	}
 
 	if err := RequireProviderAndProtocol(
-		string(providercatalog.ProviderSpecAnthropic),
-		providercatalog.ProviderSpecAnthropic,
+		string(profile.ProviderSpecAnthropic),
+		profile.ProviderSpecAnthropic,
 		protocolkind.Responses,
 		protocolkind.Messages,
 		"anthropic",

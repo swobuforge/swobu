@@ -26,7 +26,7 @@ func (s *LoginService) buildAuthorizeURL(oauthState string, codeVerifier string)
 	codeChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	redirectBase := strings.TrimSpace(s.config.OAuthRedirectBase) // swobu:io-string source=boundary
 	if redirectBase == "" {
-		redirectBase = "http://localhost:1455"
+		redirectBase = defaultOAuthRedirectBase
 	}
 	redirectURI := strings.TrimRight(redirectBase, "/") + callbackPath
 	params := url.Values{}
@@ -55,7 +55,7 @@ func (s *LoginService) exchangeAndPersist(ctx context.Context, sessionID string,
 	form.Set("code", strings.TrimSpace(code))                     // swobu:io-string source=boundary
 	redirectBase := strings.TrimSpace(s.config.OAuthRedirectBase) // swobu:io-string source=boundary
 	if redirectBase == "" {
-		redirectBase = "http://localhost:1455"
+		redirectBase = defaultOAuthRedirectBase
 	}
 	redirectURI := strings.TrimRight(redirectBase, "/") + callbackPath
 	if strings.TrimSpace(redirectOverride) != "" { // swobu:io-string source=boundary
@@ -73,7 +73,8 @@ func (s *LoginService) exchangeAndPersist(ctx context.Context, sessionID string,
 	req.Header.Set("User-Agent", strings.TrimSpace(s.config.UserAgent)) // swobu:io-string source=boundary
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("token exchange failed")
+		slog.Warn("chatgpt auth token exchange transport failed", "component", "chatgpt_login", "session_id", sessionID, "error", err.Error())
+		return "", fmt.Errorf("token exchange failed: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodyBytes))

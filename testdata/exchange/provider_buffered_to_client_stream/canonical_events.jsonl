@@ -1,0 +1,5 @@
+{"seq":1,"kind":"envelope_start","env_kind":"response","env_id":"res_1"}
+{"seq":2,"kind":"envelope_start","env_kind":"message","env_id":"msg_1","parent":"res_1"}
+{"seq":3,"kind":"text_delta","env_id":"msg_1","parent":"res_1","text":"ok"}
+{"seq":4,"kind":"envelope_end","env_kind":"message","env_id":"msg_1","parent":"res_1","status":"completed"}
+{"seq":5,"kind":"envelope_end","env_kind":"response","env_id":"res_1","status":"completed"}

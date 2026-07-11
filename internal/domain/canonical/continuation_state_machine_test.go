@@ -77,10 +77,10 @@ func TestContinuationRuntime_PrepareRequest_RehydratesCanonicalState(t *testing.
 		ok: true,
 	})
 
-	request, err := runtime.PrepareRequest(context.Background(), NewContinuationNamespace("alpha"), "", NewGenerationRequest(GenerationRequestParams{
+	request, err := runtime.PrepareRequest(context.Background(), NewContinuationNamespace("alpha"), "", NewCanonicalRequest(RequestParams{
 		Model:              "m",
 		PreviousResponseID: "resp_prev",
-		Thread: []CanonicalItem{
+		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "continue"),
 		},
 	}))
@@ -88,15 +88,15 @@ func TestContinuationRuntime_PrepareRequest_RehydratesCanonicalState(t *testing.
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
 	typed := request
-	if got := len(typed.Thread()); got != 2 {
+	if got := len(typed.Items()); got != 2 {
 		t.Fatalf("thread len = %d, want 2", got)
 	}
-	if got := len(typed.LastTurn()); got != 1 {
-		t.Fatalf("last turn len = %d, want 1", got)
+	if got := typed.Items()[1].Text; got != "continue" {
+		t.Fatalf("latest text = %q, want %q", got, "continue")
 	}
 }
 
-func TestContinuationRuntime_PrepareRequest_DerivesLastTurnForConversationRequestsOntoResponses(t *testing.T) {
+func TestContinuationRuntime_PrepareRequest_PreservesConversationItemsForResponses(t *testing.T) {
 	runtime := NewContinuationRuntime(&fakeContinuationStore{
 		matches: map[ContinuationNamespace]ContinuationPrefixMatch{
 			NewContinuationNamespace("alpha"): {
@@ -113,28 +113,25 @@ func TestContinuationRuntime_PrepareRequest_DerivesLastTurnForConversationReques
 		context.Background(),
 		NewContinuationNamespace("alpha"),
 		"responses",
-		NewDialogRequest("m", []CanonicalItem{
+		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "hi"),
 			NewTextItem(ItemAuthorAssistant, "hello"),
 			NewTextItem(ItemAuthorUser, "continue"),
-		}),
+		}}),
 	)
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
 	typed := request
-	if got := len(typed.Thread()); got != 3 {
+	if got := len(typed.Items()); got != 3 {
 		t.Fatalf("thread len = %d, want 3", got)
 	}
-	if got := len(typed.LastTurn()); got != 1 {
-		t.Fatalf("last turn len = %d, want 1", got)
-	}
-	if got := typed.LastTurn()[0].Text; got != "continue" {
-		t.Fatalf("last turn text = %q, want %q", got, "continue")
+	if got := typed.Items()[2].Text; got != "continue" {
+		t.Fatalf("latest text = %q, want %q", got, "continue")
 	}
 }
 
-func TestContinuationRuntime_PrepareRequest_DerivesLastTurnFromBestPrefixMatch(t *testing.T) {
+func TestContinuationRuntime_PrepareRequest_PreservesItemsFromBestPrefixMatch(t *testing.T) {
 	runtime := NewContinuationRuntime(&fakeContinuationStore{
 		matches: map[ContinuationNamespace]ContinuationPrefixMatch{
 			NewContinuationNamespace("alpha"): {
@@ -150,20 +147,20 @@ func TestContinuationRuntime_PrepareRequest_DerivesLastTurnFromBestPrefixMatch(t
 		context.Background(),
 		NewContinuationNamespace("alpha"),
 		"responses",
-		NewDialogRequest("m", []CanonicalItem{
+		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "shared"),
 			NewTextItem(ItemAuthorAssistant, "branch a"),
-		}),
+		}}),
 	)
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
 	typed := request
-	if got := len(typed.LastTurn()); got != 1 {
-		t.Fatalf("last turn len = %d, want 1", got)
+	if got := len(typed.Items()); got != 2 {
+		t.Fatalf("items len = %d, want 2", got)
 	}
-	if got := typed.LastTurn()[0].Text; got != "branch a" {
-		t.Fatalf("last turn text = %q, want %q", got, "branch a")
+	if got := typed.Items()[1].Text; got != "branch a" {
+		t.Fatalf("second item text = %q, want %q", got, "branch a")
 	}
 }
 
@@ -182,7 +179,7 @@ func TestContinuationRuntime_WrapEnvelopeStream_PersistsOnCompletedResponseEnvel
 	wrapped, err := runtime.WrapEnvelopeStream(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
-		NewDialogRequest("m", []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}),
+		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
 		envelope,
 	)
 	if err != nil {
@@ -215,7 +212,7 @@ func TestContinuationRuntime_WrapEnvelopeStream_DoesNotPersistOnUnexpectedEOF(t 
 	wrapped, err := runtime.WrapEnvelopeStream(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
-		NewDialogRequest("m", []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}),
+		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
 		envelope,
 	)
 	if err != nil {

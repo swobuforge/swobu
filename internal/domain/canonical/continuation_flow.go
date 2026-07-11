@@ -68,16 +68,11 @@ func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request
 	}
 	previousResponseID := request.PreviousResponseID()
 	hasParent := strings.TrimSpace(previousResponseID) != "" // swobu:io-string source=domain
-	currentThread := request.Thread()
-	currentLastTurn := request.LastTurn()
+	currentThread := request.Items()
 	if !hasParent {
-		if len(currentLastTurn) == 0 {
-			currentLastTurn = currentThread
-		}
-		return NewGenerationRequest(GenerationRequestParams{
+		return NewCanonicalRequest(RequestParams{
 			Model:       request.Model(),
-			Thread:      currentThread,
-			LastTurn:    currentLastTurn,
+			Items:       currentThread,
 			ToolMode:    request.ToolMode(),
 			CacheIntent: request.CacheIntent(),
 		}), nil
@@ -91,7 +86,6 @@ func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request
 	prefixLen := longestCommonPrefixLength(anchor, currentThread)
 
 	var thread []CanonicalItem
-	var lastTurn []CanonicalItem
 	preparedPreviousResponseID := previousResponseID
 
 	switch {
@@ -99,31 +93,26 @@ func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request
 		// Parent-only continuation is still meaningful on responses surfaces. The
 		// anchor thread becomes authoritative until the client contributes a new turn.
 		thread = cloneCanonicalItems(anchor)
-		lastTurn = nil
 	case prefixLen == len(anchor):
 		// Native parent optimization is valid only when the resolved anchor is a
 		// full prefix of the authored thread; the suffix then becomes the last turn.
 		thread = cloneCanonicalItems(currentThread)
-		lastTurn = cloneCanonicalItems(currentThread[prefixLen:])
 	case prefixLen == 0:
 		// Some clients send only the new turn when they rely on prior-thread
 		// state. In that case the canonical thread is the anchored history plus
 		// the new suffix, and the same derived last turn can later drive
 		// truthful responses realization.
 		thread = append(cloneCanonicalItems(anchor), cloneCanonicalItems(currentThread)...)
-		lastTurn = cloneCanonicalItems(currentThread)
 	default:
 		// Partial overlap means the client rewrote history relative to the anchor.
 		// We keep the authored thread as truth and drop native-parent optimization.
 		thread = cloneCanonicalItems(currentThread)
-		lastTurn = cloneCanonicalItems(currentThread)
 		preparedPreviousResponseID = ""
 	}
 
-	return NewGenerationRequest(GenerationRequestParams{
+	return NewCanonicalRequest(RequestParams{
 		Model:              request.Model(),
-		Thread:             thread,
-		LastTurn:           lastTurn,
+		Items:              thread,
 		PreviousResponseID: preparedPreviousResponseID,
 		ToolMode:           request.ToolMode(),
 		CacheIntent:        request.CacheIntent(),
@@ -131,8 +120,8 @@ func (m ContinuationRuntime) prepareResponseRequest(ctx context.Context, request
 }
 
 func (m ContinuationRuntime) prepareConversationRequest(
-	ctx context.Context,
-	namespace ContinuationNamespace,
+	_ context.Context,
+	_ ContinuationNamespace,
 	targetProtocol protocolkind.ProtocolKind,
 	request CanonicalRequest,
 ) (CanonicalRequest, error) {
@@ -141,28 +130,10 @@ func (m ContinuationRuntime) prepareConversationRequest(
 	}
 
 	thread := request.Items()
-	lastTurn := thread
 
-	if m.store != nil && !namespace.IsZero() {
-		match, ok, err := m.store.MatchPrefix(ctx, namespace, thread)
-		if err != nil {
-			return CanonicalRequest{}, InternalError("response continuity state could not be loaded")
-		}
-		if ok {
-			anchor := match.Snapshot.Thread
-			if match.PrefixLength == len(anchor) {
-				// Any best-match anchor whose full thread is a prefix is good enough
-				// for delta derivation. At that point the semantic value is the
-				// shared prefix content, not the historical chain ID.
-				lastTurn = cloneCanonicalItems(thread[match.PrefixLength:])
-			}
-		}
-	}
-
-	return NewGenerationRequest(GenerationRequestParams{
+	return NewCanonicalRequest(RequestParams{
 		Model:       request.Model(),
-		Thread:      thread,
-		LastTurn:    lastTurn,
+		Items:       thread,
 		CacheIntent: request.CacheIntent(),
 	}), nil
 }

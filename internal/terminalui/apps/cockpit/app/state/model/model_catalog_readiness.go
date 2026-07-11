@@ -3,7 +3,7 @@ package model
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 var modelCatalogAuthErrorMarkers = []string{
@@ -24,11 +24,11 @@ func ProviderCredentialVariantIsInteractive(provider, credentialRef string) bool
 	if ref == "" {
 		return false
 	}
-	variant := providercatalog.AuthVariant(strings.ToLower(credentialSource(ref)))  // swobu:io-string source=boundary
-	if !providercatalog.SupportsAuthVariant(strings.TrimSpace(provider), variant) { // swobu:io-string source=boundary
+	variant := profile.AuthVariant(strings.ToLower(credentialSource(ref)))  // swobu:io-string source=boundary
+	if !profile.SupportsAuthVariant(strings.TrimSpace(provider), variant) { // swobu:io-string source=boundary
 		return false
 	}
-	return providercatalog.IsInteractiveAuthVariant(variant)
+	return profile.IsInteractiveAuthVariant(variant)
 }
 
 func ProviderCredentialSelectionRequired(provider, baseURL, credentialRef string) bool {
@@ -36,8 +36,8 @@ func ProviderCredentialSelectionRequired(provider, baseURL, credentialRef string
 		return false
 	}
 	interactiveRequired := false
-	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthVariant(variant) {
 			interactiveRequired = true
 			break
 		}
@@ -74,8 +74,8 @@ func ProviderModelCatalogBlockedMessage(provider, baseURL, credentialRef string)
 	if !ProviderModelCatalogLoadBlocked(provider, baseURL, credentialRef) {
 		return ""
 	}
-	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthVariant(variant) {
 			return ""
 		}
 	}

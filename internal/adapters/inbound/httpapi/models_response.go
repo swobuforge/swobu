@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 type modelsListResponseDTO struct {
@@ -20,7 +19,7 @@ type modelsEntryDTO struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-func writeModelsSuccess(w http.ResponseWriter, out requestpath.ListModelsOutput) {
+func writeModelsSuccess(w http.ResponseWriter, out exchange.ListModelsOutput) {
 	data := make([]modelsEntryDTO, 0, len(out.Models))
 	for _, model := range out.Models {
 		data = append(data, modelsEntryDTO{
@@ -39,5 +38,5 @@ func writeModelsSuccess(w http.ResponseWriter, out requestpath.ListModelsOutput)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func writeModelResolutionHeaders(_ http.ResponseWriter, _ ports.ProviderResponseMetadata) {
+func writeModelResolutionHeaders(_ http.ResponseWriter) {
 }

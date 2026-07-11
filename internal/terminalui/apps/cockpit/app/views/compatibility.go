@@ -46,7 +46,7 @@ func BuildCompatibilityScreen(ctx *retained.Context[state.Model]) retained.ViewS
 	recoverRows = append(recoverRows,
 		RowStatic("", ""),
 		RowActionWithHooks("copy diagnostics", "", "copy", func() []update.Action {
-			return []update.Action{state.CompatibilityDiagnosticsCopyRequested{}}
+			return []update.Action{state.ExchangeDiagnosticsCopyRequested{}}
 		}, nil, focusAffordance("run/copy", false)),
 		compatibilityDetailLine("swobu "+strings.TrimSpace(mismatch.TUIVersion)),     // swobu:io-string source=boundary
 		compatibilityDetailLine("daemon "+strings.TrimSpace(mismatch.DaemonVersion)), // swobu:io-string source=boundary

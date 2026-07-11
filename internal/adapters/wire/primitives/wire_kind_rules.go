@@ -43,7 +43,7 @@ func (k WireKind) Validate() error {
 	}
 }
 
-func (p WirePacket) ValidateFor(op WireOperation) error {
+func ValidateWireDocumentFor(p WireDocument, op WireOperation) error {
 	if err := p.Kind.Validate(); err != nil {
 		return err
 	}

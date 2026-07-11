@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
@@ -12,19 +12,19 @@ import (
 
 // authModeDescriptorSpec is the universal schema entry for one auth mode option.
 type authModeDescriptorSpec struct {
-	Variant     providercatalog.AuthVariant
+	Variant     profile.AuthVariant
 	Label       string
 	Interactive bool
 }
 
 func authModeDescriptorsForSpec(providerSpec string) []authModeDescriptorSpec {
-	variants := providercatalog.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec)) // swobu:io-string source=boundary
+	variants := profile.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec)) // swobu:io-string source=boundary
 	out := make([]authModeDescriptorSpec, 0, len(variants))
 	for _, variant := range variants {
 		out = append(out, authModeDescriptorSpec{
 			Variant:     variant,
 			Label:       authVariantDisplayLabel(variant),
-			Interactive: providercatalog.IsInteractiveAuthVariant(variant),
+			Interactive: profile.IsInteractiveAuthVariant(variant),
 		})
 	}
 	return out
@@ -56,7 +56,7 @@ func (envAuthModeRowRenderer) RenderCreateExtras(providerSpec string, credential
 func (envAuthModeRowRenderer) RenderAddModelExtras(providerSpec string, credentialRef string) []retained.ViewSpec[state.Model] {
 	key := strings.TrimSpace(envCredentialKey(credentialRef)) // swobu:io-string source=boundary
 	if key == "" {
-		key = strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)) // swobu:io-string source=boundary
+		key = strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec)) // swobu:io-string source=boundary
 	}
 	if key == "" {
 		return nil

@@ -5,22 +5,22 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/evidence"
 )
 
 func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *testing.T) {
 	store := NewStore(StoreConfig{})
-	requestID, err := runtimeevidence.ParseRequestID("req_shape")
+	requestID, err := evidence.ParseRequestID("req_shape")
 	if err != nil {
 		t.Fatalf("ParseRequestID returned error: %v", err)
 	}
-	route, err := runtimeevidence.NewRoute("backend-a", "")
+	route, err := evidence.NewRoute("backend-a", "")
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	ttfb := 12
 	dur := 34
-	timing, err := runtimeevidence.NewTimingWithOptional(&ttfb, &dur)
+	timing, err := evidence.NewTimingWithOptional(&ttfb, &dur)
 	if err != nil {
 		t.Fatalf("NewTimingWithOptional returned error: %v", err)
 	}
@@ -28,19 +28,31 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	out := 9
 	cacheRead := 70
 	cacheWrite := 5
-	usage, err := runtimeevidence.NewTokenUsageWithOptional(&in, &out, &cacheRead, &cacheWrite)
+	usage, err := evidence.NewTokenUsageWithOptional(&in, &out, &cacheRead, &cacheWrite)
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
-	event, err := runtimeevidence.NewTerminalTrafficEvent(runtimeevidence.TrafficEventInput{
+	event, err := evidence.NewTerminalTrafficEvent(evidence.TrafficEventInput{Endpoint: "acme",
 		RequestID:     requestID,
-		Endpoint:      "acme",
 		Route:         route,
-		Result:        runtimeevidence.ResultClassSuccess,
+		Result:        evidence.ResultClassSuccess,
 		StatusCode:    200,
 		Timing:        timing,
 		TokenUsage:    usage,
-		IngressFamily: runtimeevidence.IngressFamily("responses"),
+		IngressFamily: evidence.IngressFamily("responses"),
+		Mutations: []evidence.Mutation{{
+			Leg:           "encode",
+			Transform:     "openaifamily.CacheAffinityWireTransform",
+			Changed:       true,
+			ChangedFields: []string{"prompt_cache_key"},
+		}},
+		ExchangeDiagnostics: []string{"high_transform_noop_ratio:4/5"},
+		StageReports: []evidence.StageReport{{
+			Stage:   "provider.wire.out",
+			Carrier: "wire_document",
+			Applied: []string{"openaifamily.CacheAffinityWireTransform"},
+			Mutated: true,
+		}},
 	})
 	if err != nil {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
@@ -69,6 +81,39 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	}
 	if _, ok := row["token_usage"]; !ok {
 		t.Fatalf("row missing token_usage object: %#v", row)
+	}
+	if _, ok := row["wire_transform_mutations"]; !ok {
+		t.Fatalf("row missing wire_transform_mutations: %#v", row)
+	}
+	if _, ok := row["exchange_diagnostics"]; !ok {
+		t.Fatalf("row missing exchange_diagnostics: %#v", row)
+	}
+	if _, ok := row["exchange_stage_reports"]; !ok {
+		t.Fatalf("row missing exchange_stage_reports: %#v", row)
+	}
+	stageReportsRaw, ok := row["exchange_stage_reports"].([]any)
+	if !ok || len(stageReportsRaw) != 1 {
+		t.Fatalf("row exchange_stage_reports shape = %#v, want one entry", row["exchange_stage_reports"])
+	}
+	stageReport, ok := stageReportsRaw[0].(map[string]any)
+	if !ok {
+		t.Fatalf("stage report entry shape = %#v, want map", stageReportsRaw[0])
+	}
+	if got, _ := stageReport["stage"].(string); got != "provider.wire.out" {
+		t.Fatalf("stage report stage = %#v, want provider.wire.out", stageReport["stage"])
+	}
+	if got, _ := stageReport["carrier"].(string); got != "wire_document" {
+		t.Fatalf("stage report carrier = %#v, want wire_document", stageReport["carrier"])
+	}
+	if got, _ := stageReport["mutated"].(bool); !got {
+		t.Fatalf("stage report mutated = %#v, want true", stageReport["mutated"])
+	}
+	appliedRaw, ok := stageReport["applied"].([]any)
+	if !ok || len(appliedRaw) != 1 {
+		t.Fatalf("stage report applied = %#v, want one id", stageReport["applied"])
+	}
+	if got, _ := appliedRaw[0].(string); got != "openaifamily.CacheAffinityWireTransform" {
+		t.Fatalf("stage report applied[0] = %#v, want openaifamily.CacheAffinityWireTransform", appliedRaw[0])
 	}
 	for _, forbidden := range []string{"ttfb_millis", "dur_millis", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"} {
 		if _, ok := row[forbidden]; ok {

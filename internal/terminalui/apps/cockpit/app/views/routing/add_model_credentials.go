@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
@@ -36,8 +36,8 @@ func buildAddModelCredentialRow(model state.Model, endpointName string, draft st
 			nextUI.FilePicker = views.DefaultFilterablePickerState()
 		}
 		panel.setCredentialUI(nextUI)
-		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+		variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthVariant(variant) {
 			next.CredentialRef = string(variant)
 			// Browser flow starts only when operator activates "sign in".
 			if strings.EqualFold(string(variant), "chatgpt_login") {
@@ -62,9 +62,9 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 	providerSpec := strings.TrimSpace(draft.ProviderSpec)                          // swobu:io-string source=boundary
 	authState := addModelAuthStateForDraft(model, endpointName, draft)
 	authStatus := newInteractiveAuthStatusComponent(providerSpec, resolvedRef, authState.SessionState, authState.SessionError)
-	draftVariant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(draftRef)))) // swobu:io-string source=boundary
-	if providercatalog.SupportsAuthVariant(providerSpec, draftVariant) &&
-		providercatalog.IsInteractiveAuthVariant(draftVariant) &&
+	draftVariant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(draftRef)))) // swobu:io-string source=boundary
+	if profile.SupportsAuthVariant(providerSpec, draftVariant) &&
+		profile.IsInteractiveAuthVariant(draftVariant) &&
 		resolvedRef != "" &&
 		!strings.EqualFold(resolvedRef, draftRef) {
 		return authStatus.SignedInSummary()
@@ -76,8 +76,8 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 	if strings.EqualFold(providerSpec, "bedrock") && isBedrockAWSProfileCredentialRef(resolvedRef) {
 		return "AWS profile"
 	}
-	variant := providercatalog.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
-	if providercatalog.SupportsAuthVariant(providerSpec, variant) && providercatalog.IsInteractiveAuthVariant(variant) {
+	variant := profile.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
+	if profile.SupportsAuthVariant(providerSpec, variant) && profile.IsInteractiveAuthVariant(variant) {
 		if resolvedRef != "" && !strings.EqualFold(resolvedRef, string(variant)) {
 			return authStatus.SignedInSummary()
 		}
@@ -92,7 +92,7 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 		}
 		key := strings.TrimSpace(envCredentialKey(resolvedRef)) // swobu:io-string source=boundary
 		if key == "" {
-			key = strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)) // swobu:io-string source=boundary
+			key = strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec)) // swobu:io-string source=boundary
 		}
 		if key != "" {
 			if _, ok := os.LookupEnv(key); !ok {
@@ -111,7 +111,7 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 		}
 		return "file"
 	}
-	if providercatalog.SupportsAuthVariant(providerSpec, variant) {
+	if profile.SupportsAuthVariant(providerSpec, variant) {
 		return authVariantDisplayLabel(variant)
 	}
 	return selectors.CredentialSummaryFromProviderConfig(&draft)
@@ -308,7 +308,7 @@ func applyAddModelCredentialSourceChoice(draft state.ProviderConfigSnapshot, cho
 	next := draft
 	ref := strings.TrimSpace(choice) // swobu:io-string source=boundary
 	if strings.EqualFold(ref, "env") {
-		ref = encodeCredentialEnvRef(providercatalog.DefaultEnvKeyForSpec(strings.TrimSpace(next.ProviderSpec))) // swobu:io-string source=boundary
+		ref = encodeCredentialEnvRef(profile.DefaultEnvKeyForSpec(strings.TrimSpace(next.ProviderSpec))) // swobu:io-string source=boundary
 	}
 	if strings.EqualFold(ref, "file") {
 		ref = encodeCredentialFileRef("")
@@ -344,8 +344,8 @@ func effectiveAddModelCredentialRef(model state.Model, draft state.ProviderConfi
 	ref := strings.TrimSpace(draft.CredentialRef)         // swobu:io-string source=boundary
 	providerSpec := strings.TrimSpace(draft.ProviderSpec) // swobu:io-string source=boundary
 	interactiveVariants := make(map[string]struct{}, 2)
-	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(providerSpec) {
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+	for _, variant := range profile.SupportedAuthVariantsForSpec(providerSpec) {
+		if profile.IsInteractiveAuthVariant(variant) {
 			interactiveVariants[strings.ToLower(strings.TrimSpace(string(variant)))] = struct{}{} // swobu:io-string source=boundary
 		}
 	}

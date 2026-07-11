@@ -9,8 +9,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
 	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type modelCatalogProbeResult struct {
@@ -46,7 +46,7 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	}
 	baseURL := strings.TrimSpace(query.Get("base_url")) // swobu:io-string source=boundary
 	if baseURL == "" {
-		baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
+		baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 	}
 	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
 	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
@@ -88,7 +88,7 @@ func probeModelIDs(
 	credentialRef string,
 	providerProtocol string,
 ) ([]string, string, error) {
-	routeProfile, ok := providercatalog.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
+	routeProfile, ok := profile.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
 	if !ok {
 		return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}
@@ -96,7 +96,7 @@ func probeModelIDs(
 	variants := modelCatalogProbeVariants(providerSpec, providerProtocol)
 	var lastErr error
 	for _, variant := range variants {
-		protocol, frame, ok := providercatalog.ProviderProtocolKindAndFrame(providerSpec, variant)
+		protocol, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, variant)
 		if !ok {
 			continue
 		}
@@ -123,7 +123,7 @@ func probeModelIDs(
 }
 
 func modelCatalogProbeVariants(providerSpec string, providerProtocol string) []string {
-	supported := providercatalog.ConcreteProviderProtocolsForSpec(providerSpec)
+	supported := profile.ConcreteProviderProtocolsForSpec(providerSpec)
 	variants := make([]string, 0, len(supported))
 	seen := map[string]struct{}{}
 	appendVariant := func(variant string) {

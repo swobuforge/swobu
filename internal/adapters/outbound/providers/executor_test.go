@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/ports"
@@ -38,8 +39,11 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
 
 	openAIReq := ports.NewProviderRequest(
-		canonical.NewDialogRequest("m", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}),
-		ports.NewExecutionContract(false),
+		canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: "m",
+			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		}),
+		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		ports.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	)
 	if _, err := services.Execution.Execute(context.Background(), openAIReq); err != nil {
@@ -47,8 +51,11 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}
 
 	anthropicReq := ports.NewProviderRequest(
-		canonical.NewDialogRequest("m", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}),
-		ports.NewExecutionContract(false),
+		canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: "m",
+			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		}),
+		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		ports.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)
 	if _, err := services.Execution.Execute(context.Background(), anthropicReq); err != nil {
@@ -94,8 +101,11 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 
 	services := NewProviderServicesBundle(http.DefaultClient, testCredentialResolver{})
 	_, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
-		canonical.NewPromptRequest("m", "hi"),
-		ports.NewExecutionContract(false),
+		canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model:     "m",
+			InputText: "hi",
+		}),
+		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		ports.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
@@ -150,29 +160,25 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 
 	openAIResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
 		request,
-		ports.NewExecutionContract(false),
+		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		ports.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
-	if got := openAIResp.Metadata().DegradationWarnings; len(got) != 0 {
-		t.Fatalf("openai degradation warnings = %#v, want none", got)
+	if len(openAIResp.Document) == 0 && openAIResp.Stream == nil {
+		t.Fatal("openai transport payload should include document or stream")
 	}
 
 	ollamaResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
 		request,
-		ports.NewExecutionContract(false),
+		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		ports.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {
 		t.Fatalf("ollama execution failed: %v", err)
 	}
-	warnings := ollamaResp.Metadata().DegradationWarnings
-	if len(warnings) != 1 {
-		t.Fatalf("ollama degradation warnings len=%d want 1 (%#v)", len(warnings), warnings)
-	}
-	if warnings[0].Code != "cache_retention_unsupported" {
-		t.Fatalf("ollama degradation warning code=%q", warnings[0].Code)
+	if len(ollamaResp.Document) == 0 && ollamaResp.Stream == nil {
+		t.Fatal("ollama transport payload should include document or stream")
 	}
 }

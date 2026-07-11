@@ -1,0 +1,39 @@
+name: provider_stream_to_client_buffered
+fixture_source: captured
+captured_at: 2000-01-01T00:00:00Z
+capture_ref: swobucli/test/integration/providers/testdata/scenario_capture/records/openrouter-responses-stream-ok.json
+client:
+  family: responses
+  delivery: buffered
+provider:
+  family: responses
+  delivery: streaming
+assert:
+  envelope_grammar_valid: true
+  no_loss_allowed: false
+  no_unreported_loss: true
+  expected_stage_order:
+    - client_http_in
+    - client_wire_in
+    - semantic_request
+    - provider_wire_out
+    - provider_http_out
+    - provider_http_in
+    - provider_wire_in
+    - semantic_events
+    - client_wire_out
+    - client_http_out
+  expected_stage_applied:
+    provider_wire_out: []
+    provider_wire_in: []
+    semantic_events: []
+    client_wire_out:
+      - projection.stream_to_buffered
+  expected_mutated_stages:
+    - client_wire_out
+  max_notices: 1
+  max_evidence: 1
+  expected_notice_codes:
+    - conformance.capture.fixture
+  expected_evidence_codes:
+    - conformance.capture.replayable

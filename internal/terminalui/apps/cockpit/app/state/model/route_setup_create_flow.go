@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type RouteSetupSlotState string
@@ -140,7 +140,7 @@ func CreateDraftCredentialStrategySelectable(provider string) bool {
 	if provider == "" {
 		return false
 	}
-	return len(providercatalog.SupportedAuthVariantsForSpec(provider)) > 0
+	return len(profile.SupportedAuthVariantsForSpec(provider)) > 0
 }
 
 func isExternalCredentialAuthorityVariant(provider, credentialRef string) bool {
@@ -148,9 +148,9 @@ func isExternalCredentialAuthorityVariant(provider, credentialRef string) bool {
 	if source == "" {
 		return false
 	}
-	variant := providercatalog.AuthVariant(strings.ToLower(source))                             // swobu:io-string source=boundary
-	for _, mode := range providercatalog.AllowedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
-		if mode.Variant == variant && mode.Kind == providercatalog.AuthNone {
+	variant := profile.AuthVariant(strings.ToLower(source))                             // swobu:io-string source=boundary
+	for _, mode := range profile.AllowedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
+		if mode.Variant == variant && mode.Kind == profile.AuthNone {
 			return true
 		}
 	}

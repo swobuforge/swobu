@@ -6,7 +6,7 @@ import (
 
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/runtimeevidence"
+	"github.com/swobuforge/swobu/internal/evidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
@@ -14,32 +14,30 @@ func TestStatus_ReportsDegradedWhenRecentTerminalTrafficHasFailure(t *testing.T)
 	t.Parallel()
 
 	endpoint := mustEndpoint(t, "alpha", "backend-a")
-	evidence := evidencestore.NewStore(evidencestore.StoreConfig{})
-	route, err := runtimeevidence.NewRoute("backend-a", "")
+	store := evidencestore.NewStore(evidencestore.StoreConfig{})
+	route, err := evidence.NewRoute("backend-a", "")
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	requestID, err := runtimeevidence.ParseRequestID("req_degraded")
+	requestID, err := evidence.ParseRequestID("req_degraded")
 	if err != nil {
 		t.Fatalf("ParseRequestID returned error: %v", err)
 	}
-	event, err := runtimeevidence.NewTerminalTrafficEvent(runtimeevidence.TrafficEventInput{
-		RequestID:    requestID,
-		Endpoint:     "alpha",
+	event, err := evidence.NewTerminalTrafficEvent(evidence.TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
 		Route:        route,
-		Result:       runtimeevidence.ResultClassBackendError,
+		Result:       evidence.ResultClassBackendError,
 		StatusCode:   503,
-		Timing:       runtimeevidence.NewUnknownTiming(),
+		Timing:       evidence.NewUnknownTiming(),
 		AttemptCount: 1,
 	})
 	if err != nil {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}
-	evidence.Append(context.Background(), event)
+	store.Append(context.Background(), event)
 
 	daemon := &Daemon{
 		endpoints: newEndpointCatalog("unused.yaml", config.RuntimeConfig{BindAddr: "127.0.0.1:0"}, []endpointintent.Endpoint{endpoint}),
-		evidence:  evidence,
+		evidence:  store,
 	}
 	status, err := daemon.Status()
 	if err != nil {

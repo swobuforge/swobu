@@ -238,6 +238,100 @@ func TestRefreshStatusProjectionEffect_MapsTokenAndCacheUsageFields(t *testing.T
 	}
 }
 
+func TestRefreshStatusProjectionEffect_MapsMutations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_swobu/status-projection" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.URL.Query().Get("scope"); got != "all" {
+			http.Error(w, "missing expected scope", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","wire_transform_mutations":[{"leg":"encode","transform":"openaifamily.CacheAffinityWireTransform","changed":true,"changed_fields":["prompt_cache_key"]},{"leg":"decode","transform":"openaifamily.DecodeWireTransform","changed":false,"changed_fields":[]}],"exchange_diagnostics":["high_transform_noop_ratio:4/5"],"exchange_stage_reports":[{"stage":"provider.wire.out","carrier":"wire_document","applied":["openaifamily.CacheAffinityWireTransform"],"mutated":true}]}]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+	actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
+	if len(actions) != 1 {
+		t.Fatalf("actions length = %d, want 1", len(actions))
+	}
+	replaced, ok := actions[0].(ReplaceStatusProjection)
+	if !ok {
+		t.Fatalf("action type = %T, want ReplaceStatusProjection", actions[0])
+	}
+	if len(replaced.Rows) != 1 {
+		t.Fatalf("rows length = %d, want 1", len(replaced.Rows))
+	}
+	row := replaced.Rows[0]
+	if len(row.Mutations) != 2 {
+		t.Fatalf("row.Mutations = %#v, want 2 entries", row.Mutations)
+	}
+	if row.Mutations[0].Leg != "encode" || !row.Mutations[0].Changed {
+		t.Fatalf("first wire mutation = %#v", row.Mutations[0])
+	}
+	if len(row.ExchangeDiagnostics) != 1 || row.ExchangeDiagnostics[0] != "high_transform_noop_ratio:4/5" {
+		t.Fatalf("row.ExchangeDiagnostics = %#v", row.ExchangeDiagnostics)
+	}
+	if len(row.StageReports) != 1 || row.StageReports[0].Stage != "provider.wire.out" {
+		t.Fatalf("row.StageReports = %#v", row.StageReports)
+	}
+}
+
+func TestRefreshStatusProjectionEffect_InvalidStageReports_FailsFast(t *testing.T) {
+	t.Run("duplicate stage carrier", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/_swobu/status-projection" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","exchange_stage_reports":[{"stage":"provider.wire.out","carrier":"wire_document","applied":["p.a"],"mutated":true},{"stage":"Provider.Wire.Out","carrier":"Wire_Document","applied":["p.b"],"mutated":true}]}]}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+		actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
+		if len(actions) != 1 {
+			t.Fatalf("actions length = %d, want 1", len(actions))
+		}
+		failed, ok := actions[0].(TrafficLoadFailed)
+		if !ok {
+			t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
+		}
+		if !strings.Contains(strings.ToLower(failed.Message), "duplicate stage/carrier") {
+			t.Fatalf("failure message = %q, want duplicate stage/carrier", failed.Message)
+		}
+	})
+
+	t.Run("mutated without applied", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/_swobu/status-projection" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","exchange_stage_reports":[{"stage":"provider.wire.out","carrier":"wire_document","mutated":true}]}]}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+		actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
+		if len(actions) != 1 {
+			t.Fatalf("actions length = %d, want 1", len(actions))
+		}
+		failed, ok := actions[0].(TrafficLoadFailed)
+		if !ok {
+			t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
+		}
+		if !strings.Contains(strings.ToLower(failed.Message), "mutated without applied") {
+			t.Fatalf("failure message = %q, want mutated without applied", failed.Message)
+		}
+	})
+}
+
 func TestRefreshDaemonStatusEffect_MissingControlPlaneProtocolFailsFast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/_swobu/status" {

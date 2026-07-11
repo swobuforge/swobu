@@ -93,12 +93,12 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		return []update.Effect{stateeffect.CompatibilityRestartHintEffect{
 			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand), // swobu:io-string source=boundary
 		}}, true
-	case CompatibilityDiagnosticsCopyRequested:
+	case ExchangeDiagnosticsCopyRequested:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
-		return []update.Effect{stateeffect.CopyCompatibilityDiagnosticsEffect{
-			Text: compatibilityDiagnostics(*model.ControlPlane),
+		return []update.Effect{stateeffect.CopyExchangeDiagnosticsEffect{
+			Text: compatibilityDiagnostics(*model.ControlPlane, model.TrafficRows),
 		}}, true
 	case stateeffect.CompatibilityRecoveryNoted:
 		if model.ControlPlane == nil {
@@ -193,18 +193,50 @@ func firstRunCreateReady(model *Model) bool {
 	return true
 }
 
-func compatibilityDiagnostics(mismatch ControlPlaneMismatch) string {
+func compatibilityDiagnostics(mismatch ControlPlaneMismatch, rows []TrafficRow) string {
 	daemonVersion := strings.TrimSpace(mismatch.DaemonVersion) // swobu:io-string source=boundary
 	tuiVersion := strings.TrimSpace(mismatch.TUIVersion)       // swobu:io-string source=boundary
 	protocolGot := "missing"
 	if mismatch.HasDaemonProtocol {
 		protocolGot = fmt.Sprintf("%d", mismatch.DaemonProtocol)
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"swobu " + tuiVersion,
 		"daemon " + daemonVersion,
 		fmt.Sprintf("protocol mismatch: expected %d, got %s", mismatch.ExpectedProtocol, protocolGot),
-	}, "\n")
+	}
+	stageLines := compatibilityStageContextLines(rows)
+	if len(stageLines) > 0 {
+		lines = append(lines, stageLines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func compatibilityStageContextLines(rows []TrafficRow) []string {
+	if len(rows) == 0 || len(rows[0].StageReports) == 0 {
+		return nil
+	}
+	out := []string{"exchange stages:"}
+	for _, report := range rows[0].StageReports {
+		stage := strings.TrimSpace(report.Stage) // swobu:io-string source=boundary
+		if stage == "" {
+			stage = "unknown_stage"
+		}
+		carrier := strings.TrimSpace(report.Carrier) // swobu:io-string source=boundary
+		if carrier == "" {
+			carrier = "unknown_carrier"
+		}
+		status := "noop"
+		if report.Mutated {
+			status = "mutated"
+		}
+		applied := "none"
+		if len(report.Applied) > 0 {
+			applied = strings.Join(report.Applied, ", ")
+		}
+		out = append(out, fmt.Sprintf("- %s [%s] %s (%s)", stage, carrier, status, applied))
+	}
+	return out
 }
 
 func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef, providerProtocol string) bool {

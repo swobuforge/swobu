@@ -14,18 +14,18 @@ import (
 
 const defaultContinuityRetention = 4 * time.Hour
 
-// LocalResponseContinuityStoreConfig configures the in-memory recent replay
+// LocalResponseContinuationStoreConfig configures the in-memory recent replay
 // window used for canonical continuation state.
-type LocalResponseContinuityStoreConfig struct {
+type LocalResponseContinuationStoreConfig struct {
 	Retention time.Duration
 	Now       func() time.Time
 }
 
-// LocalResponseContinuityStore keeps recent canonical continuation chains in
+// LocalResponseContinuationStore keeps recent canonical continuation chains in
 // memory only. v0 continuity is a bounded convenience window, so restart
 // forgetfulness is acceptable and much cheaper than carrying a real storage
 // engine or a custom on-disk format.
-type LocalResponseContinuityStore struct {
+type LocalResponseContinuationStore struct {
 	retention time.Duration
 	now       func() time.Time
 
@@ -50,8 +50,8 @@ type indexedContinuityState struct {
 	namespaceNodeIDs map[canonical.ContinuationNamespace][]string
 }
 
-// NewLocalResponseContinuityStore builds the in-memory recent replay window.
-func NewLocalResponseContinuityStore(cfg LocalResponseContinuityStoreConfig) *LocalResponseContinuityStore {
+// NewLocalResponseContinuationStore builds the in-memory recent replay window.
+func NewLocalResponseContinuationStore(cfg LocalResponseContinuationStoreConfig) *LocalResponseContinuationStore {
 	retention := cfg.Retention
 	if retention <= 0 {
 		retention = defaultContinuityRetention
@@ -60,13 +60,13 @@ func NewLocalResponseContinuityStore(cfg LocalResponseContinuityStoreConfig) *Lo
 	if nowFn == nil {
 		nowFn = time.Now
 	}
-	return &LocalResponseContinuityStore{
+	return &LocalResponseContinuationStore{
 		retention: retention,
 		now:       nowFn,
 	}
 }
 
-func (s *LocalResponseContinuityStore) Load(_ context.Context, previousResponseID string) (canonical.ContinuitySnapshot, bool, error) {
+func (s *LocalResponseContinuationStore) Load(_ context.Context, previousResponseID string) (canonical.ContinuitySnapshot, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -85,7 +85,7 @@ func (s *LocalResponseContinuityStore) Load(_ context.Context, previousResponseI
 	return canonical.NewContinuitySnapshot(node.ResponseID, node.Model, thread), true, nil
 }
 
-func (s *LocalResponseContinuityStore) MatchPrefix(_ context.Context, namespace canonical.ContinuationNamespace, thread []canonical.CanonicalItem) (canonical.ContinuationPrefixMatch, bool, error) {
+func (s *LocalResponseContinuationStore) MatchPrefix(_ context.Context, namespace canonical.ContinuationNamespace, thread []canonical.CanonicalItem) (canonical.ContinuationPrefixMatch, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -127,7 +127,7 @@ func (s *LocalResponseContinuityStore) MatchPrefix(_ context.Context, namespace 
 	}, true, nil
 }
 
-func (s *LocalResponseContinuityStore) Store(_ context.Context, namespace canonical.ContinuationNamespace, snapshot canonical.ContinuitySnapshot) error {
+func (s *LocalResponseContinuationStore) Store(_ context.Context, namespace canonical.ContinuationNamespace, snapshot canonical.ContinuitySnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -171,7 +171,7 @@ func (s *LocalResponseContinuityStore) Store(_ context.Context, namespace canoni
 	return nil
 }
 
-func (s *LocalResponseContinuityStore) pruneLocked() indexedContinuityState {
+func (s *LocalResponseContinuationStore) pruneLocked() indexedContinuityState {
 	cutoff := s.now().UTC().Add(-s.retention)
 	kept := make([]chainNode, 0, len(s.nodes))
 	for _, node := range s.nodes {
@@ -196,7 +196,7 @@ func (s *LocalResponseContinuityStore) pruneLocked() indexedContinuityState {
 	return s.indexLocked()
 }
 
-func (s *LocalResponseContinuityStore) indexLocked() indexedContinuityState {
+func (s *LocalResponseContinuationStore) indexLocked() indexedContinuityState {
 	index := indexedContinuityState{
 		nodesByID:        make(map[string]chainNode, len(s.nodes)),
 		responseToNodeID: map[string]string{},
@@ -216,7 +216,7 @@ func (s *LocalResponseContinuityStore) indexLocked() indexedContinuityState {
 	return index
 }
 
-func (s *LocalResponseContinuityStore) materializeThreadLocked(index indexedContinuityState, nodeID string) ([]canonical.CanonicalItem, bool) {
+func (s *LocalResponseContinuationStore) materializeThreadLocked(index indexedContinuityState, nodeID string) ([]canonical.CanonicalItem, bool) {
 	node, ok := index.nodesByID[nodeID]
 	if !ok {
 		return nil, false
@@ -231,7 +231,7 @@ func (s *LocalResponseContinuityStore) materializeThreadLocked(index indexedCont
 	return append(parentItems, cloneItems(node.Items)...), true
 }
 
-func (s *LocalResponseContinuityStore) touchChainLocked(index indexedContinuityState, nodeID string, ts time.Time) {
+func (s *LocalResponseContinuationStore) touchChainLocked(index indexedContinuityState, nodeID string, ts time.Time) {
 	touched := map[string]struct{}{}
 	for nodeID != "" {
 		if _, ok := touched[nodeID]; ok {
@@ -256,7 +256,7 @@ func (s *LocalResponseContinuityStore) touchChainLocked(index indexedContinuityS
 	}
 }
 
-func (s *LocalResponseContinuityStore) deleteNodeLocked(nodeID string) {
+func (s *LocalResponseContinuationStore) deleteNodeLocked(nodeID string) {
 	filtered := s.nodes[:0]
 	for _, node := range s.nodes {
 		if node.ID == nodeID {

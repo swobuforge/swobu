@@ -12,23 +12,25 @@ import (
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
-	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func buildDaemonServeMux(
 	daemon *Daemon,
-	bindAddr string,
+	runtime config.RuntimeConfig,
 	providers ports.ProviderExecutor,
 	modelCatalog ports.ProviderModelCatalog,
-	evidence ports.RequestEvidenceSink,
-	continuity ports.ResponseContinuityStore,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
-	orchestrator := requestpath.NewRequestHandler(daemon.endpoints, providers, evidence, continuity)
+	exchangeHandler := exchange.NewRequestHandler(
+		daemon.endpoints,
+		providers,
+	)
 	mux := http.NewServeMux()
-	mux.Handle("/c/", httpapi.NewHandler(orchestrator))
+	mux.Handle("/c/", httpapi.NewHandler(exchangeHandler))
 	mux.Handle("/_swobu/status", httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
 		status, err := daemon.Status()
 		if err != nil {
@@ -51,7 +53,7 @@ func buildDaemonServeMux(
 	mux.Handle("/_swobu/model-catalog", httpapi.NewModelCatalogProbeHandler(modelCatalog))
 	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
-		PublicBaseURL: daemonPublicBaseURLFromBindAddr(bindAddr),
+		PublicBaseURL: daemonPublicBaseURLFromBindAddr(runtime.BindAddr),
 		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) (string, error) {
 			return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
 		}),
@@ -89,7 +91,7 @@ func buildDaemonServeMux(
 			return endpointIntent.Put(ctx, endpoint)
 		},
 		func(ctx context.Context, name string) error { return endpointIntent.Delete(ctx, name) },
-		orchestrator.HandleWithEndpoint,
+		exchangeHandler.HandleWithEndpoint,
 	)
 	mux.Handle("/_swobu/endpoints", controlHandler)
 	mux.Handle("/_swobu/endpoints/", controlHandler)

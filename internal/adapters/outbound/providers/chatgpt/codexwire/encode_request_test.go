@@ -2,31 +2,28 @@ package codexwire
 
 import (
 	"encoding/json"
-	"io"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestRealize_NormalizesCodexPayload(t *testing.T) {
 	t.Parallel()
 
-	wireReq, err := EncodeRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+	wireReq, err := EncodeProviderRequest(
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{
 				canonical.NewTextItem(canonical.ItemAuthorUser, "hello"),
 			},
 		}),
-		true,
+		delivery.StreamingDelivery(delivery.FramingSSE),
 	)
 	if err != nil {
 		t.Fatalf("realize: %v", err)
 	}
-	raw, err := io.ReadAll(wireReq.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	raw := wireReq.Raw
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
@@ -62,22 +59,19 @@ func TestRealize_NormalizesCodexPayload(t *testing.T) {
 func TestRealize_AcceptsBufferedClientPreferenceViaStreamNativeEncoding(t *testing.T) {
 	t.Parallel()
 
-	wireReq, err := EncodeRequest(
-		canonical.NewGenerationRequest(canonical.GenerationRequestParams{
+	wireReq, err := EncodeProviderRequest(
+		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{
 				canonical.NewTextItem(canonical.ItemAuthorUser, "hello"),
 			},
 		}),
-		false,
+		delivery.BufferedDelivery(),
 	)
 	if err != nil {
 		t.Fatalf("realize: %v", err)
 	}
-	raw, err := io.ReadAll(wireReq.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	raw := wireReq.Raw
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)

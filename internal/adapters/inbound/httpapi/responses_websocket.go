@@ -11,10 +11,11 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
-	"github.com/swobuforge/swobu/internal/app/requestpath"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -87,36 +88,38 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if err != nil {
 		return canonical.BadRequest("websocket request body is invalid JSON")
 	}
-	request, streaming, err := decodeCanonicalRequest(canonical.IngressFamilyResponses, payload)
+	request, clientDelivery, err := decodeCanonicalRequest(canonical.IngressFamilyResponses, payload)
 	if err != nil {
 		return err
 	}
+	if clientDelivery.Mode == delivery.Streaming && clientDelivery.Framing == delivery.FramingNone {
+		clientDelivery = delivery.StreamingDelivery(delivery.FramingWebSocket)
+	}
+
 	requestID := requestIDFromRequest(r)
-	out, err := h.requests.Handle(r.Context(), requestpath.HandleInput{
+	out, err := h.requests.Handle(r.Context(), exchange.HandleInput{
 		EndpointName: endpoint,
-		RequestID:    requestID,
 		Request:      request,
-		Contract:     requestpath.NewExecutionContract(streaming),
-		Provenance:   ingressProvenance(r, canonical.IngressFamilyResponses, normalizedPath),
+		Contract:     ports.NewExecutionContract(clientDelivery),
 	})
 	if err != nil {
 		return err
 	}
 	defer func() {
-		_ = out.Response.Close()
+		_ = ports.CloseProviderResponseStream(out.Response)
 	}()
-	return writeResponsesWebsocketSuccess(conn, requestID, out.Response, streaming)
+	return writeResponsesWebsocketSuccess(conn, requestID, out.Response, clientDelivery)
 }
 
-func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp ports.ProviderResponse, streaming bool) error {
+func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp ports.ProviderResponseStream, clientDelivery delivery.Delivery) error {
 	envelope := resp.EnvelopeStream()
-	if streaming {
+	if clientDelivery.Mode == delivery.Streaming {
 		if envelope == nil {
 			return canonical.InternalError("streaming provider response is missing a canonical envelope stream")
 		}
 		return writeResponsesWebsocketEnvelope(conn, requestID, envelope)
 	}
-	if !streaming {
+	if clientDelivery.Mode != delivery.Streaming {
 		if envelope == nil {
 			return canonical.InternalError("buffered provider response is missing a canonical envelope stream")
 		}
@@ -136,7 +139,7 @@ func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp
 		}()
 		return writeResponsesWebsocketEnvelope(conn, requestID, envelope)
 	}
-	return canonical.UnsupportedDelivery("response delivery variant is not implemented")
+	return canonical.UnsupportedDelivery("response delivery mode is not implemented")
 }
 
 func writeResponsesWebsocketEnvelope(conn *websocket.Conn, requestID string, envelope canonical.EventReader) error {
@@ -196,11 +199,11 @@ func websocketErrorEvent(err error) []byte {
 		},
 	}
 
-	var compatErr canonical.Error
-	if errors.As(err, &compatErr) {
-		dto.StatusCode = statusCodeForSwobuError(compatErr.Code)
-		dto.Error.Code = string(compatErr.Code)
-		dto.Error.Message = compatErr.Message
+	var swobuErr canonical.Error
+	if errors.As(err, &swobuErr) {
+		dto.StatusCode = statusCodeForSwobuError(swobuErr.Code)
+		dto.Error.Code = string(swobuErr.Code)
+		dto.Error.Message = swobuErr.Message
 		raw, _ := json.Marshal(dto)
 		return raw
 	}

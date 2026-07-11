@@ -1,0 +1,1 @@
+{"max_tokens":16,"messages":[{"content":"Call tool noop with x=1 and stop.","role":"user"}],"model":"gpt-4.1-mini","stream":true,"tool_choice":{"function":{"name":"noop"},"type":"function"},"tools":[{"function":{"description":"No-op tool","name":"noop","parameters":{"properties":{"x":{"type":"integer"}},"required":["x"],"type":"object"}},"type":"function"}]}

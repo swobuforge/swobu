@@ -118,13 +118,9 @@ func TestEnvelopeBuilder_AliasStability(t *testing.T) {
 }
 
 func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
-	in := NewGenerationRequest(GenerationRequestParams{
+	in := NewCanonicalRequest(RequestParams{
 		Model: "gpt-r",
-		Thread: []CanonicalItem{
-			NewTextItem(ItemAuthorUser, "hello"),
-			NewToolUseItem(ItemAuthorAssistant, "tool_0", "call_1", "search", map[string]any{"q": "swobu"}),
-		},
-		LastTurn: []CanonicalItem{
+		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "hello"),
 			NewToolUseItem(ItemAuthorAssistant, "tool_0", "call_1", "search", map[string]any{"q": "swobu"}),
 		},
@@ -151,11 +147,11 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	if got := typed.Model(); got != "gpt-r" {
 		t.Fatalf("model = %q, want %q", got, "gpt-r")
 	}
-	if len(typed.Thread()) != 2 {
-		t.Fatalf("thread len = %d, want 2", len(typed.Thread()))
+	if len(typed.Items()) != 2 {
+		t.Fatalf("thread len = %d, want 2", len(typed.Items()))
 	}
-	if got, ok := typed.Thread()[1].Input["q"].(string); !ok || got != "swobu" {
-		t.Fatalf("tool input q = %#v, want %q", typed.Thread()[1].Input["q"], "swobu")
+	if got, ok := typed.Items()[1].Input["q"].(string); !ok || got != "swobu" {
+		t.Fatalf("tool input q = %#v, want %q", typed.Items()[1].Input["q"], "swobu")
 	}
 }
 

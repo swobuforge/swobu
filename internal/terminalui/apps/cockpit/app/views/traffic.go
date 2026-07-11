@@ -161,7 +161,7 @@ func renderTrafficListRow(width int, focused bool, row state.TrafficRow, open bo
 		Kind:   strings.TrimSpace(outcome + " " + trafficKind(row)), // swobu:io-string source=boundary
 		Route:  trafficBurnSummary(usage),
 		Timing: trafficTiming(row),
-		Result: trafficCacheSummary(row),
+		Result: strings.TrimSpace(trafficCacheSummary(row) + " · " + trafficTransformSummary(row) + " · " + trafficStageReportSummary(row) + " · " + trafficDiagnosticSummary(row)), // swobu:io-string source=boundary
 		Action: action,
 	})
 }
@@ -176,8 +176,14 @@ func trafficOpenDetailRows(row state.TrafficRow) []retained.ViewSpec[state.Model
 		trafficDetailLine("http", trafficHTTPStatus(row)),
 		trafficDetailLine("ttfb", previewTTFB(row)),
 		trafficDetailLine("duration", previewDuration(row)),
+		trafficDetailLine("patches", trafficTransformSummary(row)),
+		trafficDetailLine("stages", trafficStageReportSummary(row)),
+		trafficDetailLine("diagnostics", trafficDiagnosticSummary(row)),
 	}
-	return append(rows, trafficTokenDetailLines(row)...)
+	rows = append(rows, trafficTokenDetailLines(row)...)
+	rows = append(rows, trafficTransformDetailLines(row)...)
+	rows = append(rows, trafficStageReportDetailLines(row)...)
+	return append(rows, trafficDiagnosticDetailLines(row)...)
 }
 
 func trafficDetailLine(label string, value string) retained.ViewSpec[state.Model] {
@@ -271,4 +277,82 @@ func trafficCacheSummary(row state.TrafficRow) string {
 		return "c n/a"
 	}
 	return fmt.Sprintf("c %d%%", percentage(usage.cacheRead, usage.input))
+}
+
+func trafficTransformSummary(row state.TrafficRow) string {
+	if len(row.Mutations) == 0 {
+		return "p n/a"
+	}
+	changed := 0
+	for _, m := range row.Mutations {
+		if m.Changed {
+			changed++
+		}
+	}
+	return fmt.Sprintf("p %d/%d", changed, len(row.Mutations))
+}
+
+func trafficTransformDetailLines(row state.TrafficRow) []retained.ViewSpec[state.Model] {
+	if len(row.Mutations) == 0 {
+		return []retained.ViewSpec[state.Model]{trafficDetailLine("transform detail", "none")}
+	}
+	out := make([]retained.ViewSpec[state.Model], 0, len(row.Mutations))
+	for _, m := range row.Mutations {
+		status := "noop"
+		if m.Changed {
+			status = "changed"
+		}
+		fieldSummary := "none"
+		if len(m.ChangedFields) > 0 {
+			fieldSummary = strings.Join(m.ChangedFields, ", ")
+		}
+		line := fmt.Sprintf("%s %s (%s) [%s]", strings.TrimSpace(m.Leg), strings.TrimSpace(m.Transform), status, fieldSummary) // swobu:io-string source=boundary
+		out = append(out, trafficDetailLine("transform detail", line))
+	}
+	return out
+}
+
+func trafficDiagnosticSummary(row state.TrafficRow) string {
+	if len(row.ExchangeDiagnostics) == 0 {
+		return "d n/a"
+	}
+	return fmt.Sprintf("d %d", len(row.ExchangeDiagnostics))
+}
+
+func trafficStageReportSummary(row state.TrafficRow) string {
+	if len(row.StageReports) == 0 {
+		return "s n/a"
+	}
+	return fmt.Sprintf("s %d", len(row.StageReports))
+}
+
+func trafficStageReportDetailLines(row state.TrafficRow) []retained.ViewSpec[state.Model] {
+	if len(row.StageReports) == 0 {
+		return []retained.ViewSpec[state.Model]{trafficDetailLine("stage detail", "none")}
+	}
+	out := make([]retained.ViewSpec[state.Model], 0, len(row.StageReports))
+	for _, report := range row.StageReports {
+		status := "noop"
+		if report.Mutated {
+			status = "mutated"
+		}
+		applied := "none"
+		if len(report.Applied) > 0 {
+			applied = strings.Join(report.Applied, ", ")
+		}
+		line := fmt.Sprintf("%s [%s] %s (%s)", strings.TrimSpace(report.Stage), strings.TrimSpace(report.Carrier), status, applied) // swobu:io-string source=boundary
+		out = append(out, trafficDetailLine("stage detail", line))
+	}
+	return out
+}
+
+func trafficDiagnosticDetailLines(row state.TrafficRow) []retained.ViewSpec[state.Model] {
+	if len(row.ExchangeDiagnostics) == 0 {
+		return []retained.ViewSpec[state.Model]{trafficDetailLine("diag detail", "none")}
+	}
+	out := make([]retained.ViewSpec[state.Model], 0, len(row.ExchangeDiagnostics))
+	for _, d := range row.ExchangeDiagnostics {
+		out = append(out, trafficDetailLine("diag detail", strings.TrimSpace(d))) // swobu:io-string source=boundary
+	}
+	return out
 }

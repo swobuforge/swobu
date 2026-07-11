@@ -117,16 +117,37 @@ type StatusProjectionSnapshot struct {
 }
 
 type TrafficRow struct {
-	RequestID        string `json:"request_id"`
-	OperationFamily  string `json:"operation_family"`
-	Target           string `json:"target"`
-	Result           string `json:"result"`
-	StatusCode       int    `json:"status_code"`
-	ObservedAt       string `json:"observed_at,omitempty"`
-	TTFBMillis       *int   `json:"ttfb_millis,omitempty"`
-	DurMillis        *int   `json:"dur_millis,omitempty"`
-	InputTokens      *int   `json:"input_tokens,omitempty"`
-	OutputTokens     *int   `json:"output_tokens,omitempty"`
-	CacheReadTokens  *int   `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens *int   `json:"cache_write_tokens,omitempty"`
+	RequestID           string        `json:"request_id"`
+	OperationFamily     string        `json:"operation_family"`
+	Target              string        `json:"target"`
+	Result              string        `json:"result"`
+	StatusCode          int           `json:"status_code"`
+	ObservedAt          string        `json:"observed_at,omitempty"`
+	TTFBMillis          *int          `json:"ttfb_millis,omitempty"`
+	DurMillis           *int          `json:"dur_millis,omitempty"`
+	InputTokens         *int          `json:"input_tokens,omitempty"`
+	OutputTokens        *int          `json:"output_tokens,omitempty"`
+	CacheReadTokens     *int          `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens    *int          `json:"cache_write_tokens,omitempty"`
+	Mutations           []Mutation    `json:"wire_transform_mutations,omitempty"`
+	ExchangeDiagnostics []string      `json:"exchange_diagnostics,omitempty"`
+	StageReports        []StageReport `json:"exchange_stage_reports,omitempty"`
+}
+
+type Mutation struct {
+	Leg           string   `json:"leg"`
+	Transform     string   `json:"transform"`
+	Changed       bool     `json:"changed"`
+	ChangedFields []string `json:"changed_fields,omitempty"`
+}
+
+func (m Mutation) HasChanges() bool {
+	return m.Changed
+}
+
+type StageReport struct {
+	Stage   string   `json:"stage"`
+	Carrier string   `json:"carrier"`
+	Applied []string `json:"applied,omitempty"`
+	Mutated bool     `json:"mutated"`
 }

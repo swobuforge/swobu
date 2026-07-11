@@ -6,6 +6,6 @@
 // - `app/selectors`: pure derived view state
 // - `app/views`: app-owned shell, section views, and root composition
 //
-// This root package intentionally does not provide a compatibility facade.
+// This root package intentionally does not provide a proxy facade.
 // Internal callers should import the owning child package directly.
 package app

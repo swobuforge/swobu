@@ -4,7 +4,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
@@ -109,9 +109,9 @@ func credentialPostSelectionFocusKey(raw string) string {
 }
 
 func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	credentialRef = strings.TrimSpace(credentialRef)                       // swobu:io-string source=boundary
-	variant := providercatalog.AuthVariant(strings.ToLower(credentialRef)) // swobu:io-string source=boundary
-	if providercatalog.IsInteractiveAuthVariant(variant) {
+	credentialRef = strings.TrimSpace(credentialRef)               // swobu:io-string source=boundary
+	variant := profile.AuthVariant(strings.ToLower(credentialRef)) // swobu:io-string source=boundary
+	if profile.IsInteractiveAuthVariant(variant) {
 		if createMode {
 			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 		}
@@ -126,7 +126,7 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 		}}
 	}
 	if strings.EqualFold(credentialRef, "env") {
-		credentialRef = encodeCredentialEnvRef(providercatalog.DefaultEnvKeyForSpec(providerSpec))
+		credentialRef = encodeCredentialEnvRef(profile.DefaultEnvKeyForSpec(providerSpec))
 	}
 	if strings.EqualFold(credentialRef, "file") {
 		credentialRef = encodeCredentialFileRef("")
@@ -175,12 +175,12 @@ func credentialOptionItems(
 	descriptors := authModeDescriptorsForSpec(providerSpec)
 	options := make([]option, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == providercatalog.AuthVariantAWSEnvSession { // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == profile.AuthVariantAWSEnvSession { // swobu:io-string source=boundary
 			// Bedrock exposes one canonical AWS chain affordance in UI.
 			continue
 		}
 		label := descriptor.Label
-		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == providercatalog.AuthVariantEnv { // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == profile.AuthVariantEnv { // swobu:io-string source=boundary
 			label = "Bedrock API key"
 		}
 		options = append(options, option{

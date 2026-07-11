@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -53,8 +53,8 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 		if strings.EqualFold(provider, "bedrock") && isBedrockAWSProfileCredentialRef(resolvedRef) {
 			return "external: AWS chain"
 		}
-		variant := providercatalog.AuthVariant(strings.ToLower(strings.TrimSpace(cred))) // swobu:io-string source=boundary
-		if providercatalog.SupportsAuthVariant(provider, variant) {
+		variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(cred))) // swobu:io-string source=boundary
+		if profile.SupportsAuthVariant(provider, variant) {
 			return authVariantDisplayLabel(variant)
 		}
 		if strings.EqualFold(cred, "env") {
@@ -63,7 +63,7 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 			}
 			key := strings.TrimSpace(envCredentialKey(resolvedRef)) // swobu:io-string source=boundary
 			if key == "" {
-				key = strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(provider)) // swobu:io-string source=boundary
+				key = strings.TrimSpace(profile.DefaultEnvKeyForSpec(provider)) // swobu:io-string source=boundary
 			}
 			if key != "" {
 				if _, ok := os.LookupEnv(key); !ok {
@@ -97,8 +97,8 @@ func isResolvedInteractiveCredential(provider, credentialRef string) bool {
 		return false
 	}
 	hasInteractive := false
-	for _, variant := range providercatalog.SupportedAuthVariantsForSpec(provider) {
-		if providercatalog.IsInteractiveAuthVariant(variant) {
+	for _, variant := range profile.SupportedAuthVariantsForSpec(provider) {
+		if profile.IsInteractiveAuthVariant(variant) {
 			hasInteractive = true
 			break
 		}
@@ -110,10 +110,10 @@ func isResolvedInteractiveCredential(provider, credentialRef string) bool {
 	if source == "" {
 		return false
 	}
-	if providercatalog.SupportsAuthVariant(provider, providercatalog.AuthVariant(source)) {
+	if profile.SupportsAuthVariant(provider, profile.AuthVariant(source)) {
 		return false
 	}
-	return !providercatalog.SupportsAuthVariant(provider, providercatalog.AuthVariant(source))
+	return !profile.SupportsAuthVariant(provider, profile.AuthVariant(source))
 }
 
 func createDraftCredentialRefFromActions(actions []update.Action) string {
@@ -158,7 +158,7 @@ func defaultCreateDraftCredentialRef(provider string) string {
 	if spec == "" {
 		return ""
 	}
-	if !providercatalog.RequiresCredential(spec, providercatalog.DefaultExecuteBaseURL(spec)) {
+	if !profile.RequiresCredential(spec, profile.DefaultExecuteBaseURL(spec)) {
 		return ""
 	}
 	return "env"
@@ -175,7 +175,7 @@ func effectiveDraftBaseURL(draft state.ProviderConfigSnapshot) string {
 			return strings.TrimSpace(bedrockBaseURLForRegion(region)) // swobu:io-string source=boundary
 		}
 	}
-	return strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(provider)) // swobu:io-string source=boundary
+	return strings.TrimSpace(profile.DefaultExecuteBaseURL(provider)) // swobu:io-string source=boundary
 }
 
 func effectiveCreateDraftBaseURL(model state.Model, provider string) string {

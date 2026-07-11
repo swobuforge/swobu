@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
@@ -52,7 +52,7 @@ func envKeySummary(providerSpec string, explicitKey string) (summary string, edi
 	if key := strings.TrimSpace(explicitKey); key != "" { // swobu:io-string source=boundary
 		return key, key
 	}
-	if hint := strings.TrimSpace(providercatalog.DefaultEnvKeyForSpec(providerSpec)); hint != "" { // swobu:io-string source=boundary
+	if hint := strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec)); hint != "" { // swobu:io-string source=boundary
 		return hint, hint
 	}
 	return "missing", ""
@@ -63,7 +63,7 @@ func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, 
 	if createMode {
 		baseURL := strings.TrimSpace(createDraftBaseURL) // swobu:io-string source=boundary
 		if baseURL == "" {
-			baseURL = strings.TrimSpace(providercatalog.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
+			baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 		}
 		baseURL = resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, baseURL)
 		return []update.Action{

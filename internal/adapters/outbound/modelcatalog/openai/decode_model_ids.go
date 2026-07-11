@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// DecodeModelIDs decodes OpenAI-compatible model catalog payloads with
+// DecodeModelIDs decodes OpenAI-style model catalog payloads with
 // `data[].id` entries.
 func DecodeModelIDs(respBody io.Reader) ([]string, error) {
 	var payload struct {

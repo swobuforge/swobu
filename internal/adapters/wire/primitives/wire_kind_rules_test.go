@@ -24,14 +24,14 @@ func TestWireKindSupportMatrix(t *testing.T) {
 	}
 }
 
-func TestWirePacketValidateFor(t *testing.T) {
-	if err := (WirePacket{Kind: WireKindRequest}).ValidateFor(WireOpEncode); err != nil {
+func TestWireDocumentValidateFor(t *testing.T) {
+	if err := ValidateWireDocumentFor(WireDocument{Kind: WireKindRequest}, WireOpEncode); err != nil {
 		t.Fatalf("request encode should validate: %v", err)
 	}
-	if err := (WirePacket{Kind: WireKindRequest}).ValidateFor(WireOpDecode); err == nil {
+	if err := ValidateWireDocumentFor(WireDocument{Kind: WireKindRequest}, WireOpDecode); err == nil {
 		t.Fatalf("request decode must fail")
 	}
-	if err := (WirePacket{Kind: WireKindUnknown}).ValidateFor(WireOpPatch); err == nil {
+	if err := ValidateWireDocumentFor(WireDocument{Kind: WireKindUnknown}, WireOpPatch); err == nil {
 		t.Fatalf("unknown kind must fail")
 	}
 }

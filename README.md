@@ -4,7 +4,7 @@
 
 **Use the AI coding client you like with the backend you want.**
 
-Swobu is a local router for AI coding clients. Point Claude Code, Codex CLI, Continue, or another OpenAI/Anthropic-compatible client at Swobu, then route traffic to OpenAI, Anthropic, OpenRouter, AWS Bedrock, Ollama, ChatGPT, or a custom backend.
+Swobu is a local router for AI coding clients. Point Claude Code, Codex CLI, Continue, or another OpenAI-style/Anthropic-style client at Swobu, then route traffic to OpenAI, Anthropic, OpenRouter, AWS Bedrock, Ollama, ChatGPT, or a custom backend.
 
 The client is not the brain.
 Swobu is early. Expect sharp edges.
@@ -104,8 +104,8 @@ Swobu is beta. These surfaces are the current focus.
 - Claude Code
 - Codex CLI
 - Continue
-- OpenAI-compatible clients
-- Anthropic-compatible clients
+- OpenAI-style clients
+- Anthropic-style clients
 
 ### Supported backends
 
@@ -115,7 +115,7 @@ Swobu is beta. These surfaces are the current focus.
 - AWS Bedrock
 - Ollama
 - ChatGPT
-- Custom OpenAI-compatible backends
+- Custom OpenAI-style backends
 
 ### Supported request families
 
@@ -136,7 +136,7 @@ Anthropic-style:
 
 ### Known gaps
 
-- compatibility varies by client and backend
+- behavior varies by client/backend surface
 - some clients require client-specific environment variables
 - provider-reported token/cache fields are not uniform
 - release installer support is currently Linux/macOS (`amd64`/`arm64`)
@@ -240,8 +240,8 @@ Use this when you want source behavior instead of the install-script channel.
 
 Swobu is:
 
-- a local AI compatibility layer
-- a protocol shim
+- a local exchange layer
+- a protocol boundary
 - a client/backend boundary
 - a local operator cockpit
 - a way to hot-swap LLM backends behind existing AI clients
@@ -292,7 +292,7 @@ Near-term focus:
 - deeper client profiles
 - deeper backend profiles
 - better config generation
-- better compatibility diagnostics
+- better exchange diagnostics
 - clearer error translation
 - stronger streaming support
 - safer local defaults

@@ -2,7 +2,7 @@ package operatorclient
 
 import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // endpointDocument mirrors the HTTP wire format for a single endpoint.
@@ -41,7 +41,7 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 			CredentialRef:    pc.CredentialRef(),
 			ModelID:          pc.ModelID(),
 			TargetAlias:      pc.TargetAlias(),
-			ProviderProtocol: providercatalog.EncodeProviderProtocolForPersistence(pc.ProviderProtocol()),
+			ProviderProtocol: profile.EncodeProviderProtocolForPersistence(pc.ProviderProtocol()),
 		})
 	}
 	return doc
@@ -70,7 +70,7 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
-		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), pc.ProviderProtocol)
+		providerProtocol, err := profile.DecodeProviderProtocolFromPersistence(spec.String(), pc.ProviderProtocol)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}

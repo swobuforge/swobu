@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestDecodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
@@ -78,7 +78,7 @@ func TestDecodeEndpointDocument_AcceptsProtocolAutoAsUnspecified(t *testing.T) {
 				ProviderSpec:     "openai",
 				BaseURL:          "https://api.openai.com/v1",
 				CredentialRef:    "env:OPENAI_API_KEY",
-				ProviderProtocol: providercatalog.ProviderProtocolAuto,
+				ProviderProtocol: profile.ProviderProtocolAuto,
 				ModelID:          "gpt-5.4-mini",
 			},
 		},
@@ -92,7 +92,7 @@ func TestDecodeEndpointDocument_AcceptsProtocolAutoAsUnspecified(t *testing.T) {
 	if len(providers) != 1 {
 		t.Fatalf("provider configs len=%d want=1", len(providers))
 	}
-	if got := providers[0].ProviderProtocol(); got == providercatalog.ProviderProtocolAuto || got == "" {
+	if got := providers[0].ProviderProtocol(); got == profile.ProviderProtocolAuto || got == "" {
 		t.Fatalf("provider protocol=%q want concrete default protocol", got)
 	}
 }

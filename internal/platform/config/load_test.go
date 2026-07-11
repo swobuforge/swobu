@@ -33,6 +33,15 @@ endpoints:
 	if got := loaded.Runtime.BindAddr; got != DefaultBindAddr() {
 		t.Fatalf("bind addr = %q, want %q", got, DefaultBindAddr())
 	}
+	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations; got != 2 {
+		t.Fatalf("min_repeated_decode_mutations = %d, want 2", got)
+	}
+	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation; got != 3 {
+		t.Fatalf("min_noop_ratio_population = %d, want 3", got)
+	}
+	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold; got != 80 {
+		t.Fatalf("noop_ratio_percent_threshold = %d, want 80", got)
+	}
 	if len(loaded.Endpoints) != 1 {
 		t.Fatalf("endpoint count = %d, want 1", len(loaded.Endpoints))
 	}
@@ -45,6 +54,39 @@ endpoints:
 	}
 	if got := selectedProvider.TargetAlias(); got != "fast" {
 		t.Fatalf("selected provider target_alias = %q, want %q", got, "fast")
+	}
+}
+
+func TestLoad_OverridesPatchDiagnosticThresholdsConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	raw := `
+patch_diagnostic_thresholds:
+  min_repeated_decode_mutations: 4
+  min_noop_ratio_population: 6
+  noop_ratio_percent_threshold: 70
+endpoints:
+  - name: alpha
+    selected_provider_config_ref: backend-a
+    provider_configs:
+      - ref: backend-a
+        provider_spec: openai_compatible
+        base_url: https://example.test/v1
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations; got != 4 {
+		t.Fatalf("min_repeated_decode_mutations = %d, want 4", got)
+	}
+	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation; got != 6 {
+		t.Fatalf("min_noop_ratio_population = %d, want 6", got)
+	}
+	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold; got != 70 {
+		t.Fatalf("noop_ratio_percent_threshold = %d, want 70", got)
 	}
 }
 

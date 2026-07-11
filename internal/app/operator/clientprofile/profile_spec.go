@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 // TemplateVars carries string substitutions for profile spec templates.
@@ -95,6 +95,6 @@ func defaultTemplateVars(baseURL string) TemplateVars {
 	return TemplateVars{
 		"base_url":        base,
 		"openai_base_url": openAIBaseURL(base),
-		"primary_model":   requestpath.PublicModelIDSwobu,
+		"primary_model":   exchange.PublicModelIDSwobu,
 	}
 }

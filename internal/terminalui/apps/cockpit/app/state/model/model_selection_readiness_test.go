@@ -3,7 +3,7 @@ package model
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestEvaluateModelSelectionReadiness_InteractivePendingBlocks(t *testing.T) {
@@ -79,9 +79,9 @@ func TestEvaluateModelSelectionReadiness_AuthFailureNormalizesOperatorMessage(t 
 func TestEvaluateModelSelectionReadiness_ProviderAuthVariantMatrix_NoEmptyBlockedMessage(t *testing.T) {
 	t.Parallel()
 
-	specs := providercatalog.SupportedSpecs()
+	specs := profile.SupportedSpecs()
 	for _, spec := range specs {
-		modes := providercatalog.AllowedAuthModesForSpec(spec)
+		modes := profile.AllowedAuthModesForSpec(spec)
 		if len(modes) == 0 {
 			t.Fatalf("provider %q has no auth modes", spec)
 		}
@@ -92,7 +92,7 @@ func TestEvaluateModelSelectionReadiness_ProviderAuthVariantMatrix_NoEmptyBlocke
 			}
 			got := EvaluateModelSelectionGateState(ModelSelectionReadinessGateInput{
 				ProviderSpec:            spec,
-				BaseURL:                 providercatalog.DefaultExecuteBaseURL(spec),
+				BaseURL:                 profile.DefaultExecuteBaseURL(spec),
 				CredentialRef:           ref,
 				InteractiveAuthResolved: false,
 			})

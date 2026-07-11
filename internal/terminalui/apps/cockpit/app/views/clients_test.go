@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 )
 
@@ -25,8 +25,8 @@ func TestSelectedClientRunModelID_AlwaysUsesPublicSwobuModel(t *testing.T) {
 			},
 		},
 	}
-	if got := selectedClientRunModelID(model); got != requestpath.PublicModelIDSwobu {
-		t.Fatalf("run model id = %q, want %q", got, requestpath.PublicModelIDSwobu)
+	if got := selectedClientRunModelID(model); got != exchange.PublicModelIDSwobu {
+		t.Fatalf("run model id = %q, want %q", got, exchange.PublicModelIDSwobu)
 	}
 }
 

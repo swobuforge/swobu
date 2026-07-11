@@ -159,7 +159,7 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-// CheckClientAccess sends a minimal compatibility probe through one endpoint.
+// CheckClientAccess sends a minimal client-access probe through one endpoint.
 func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, modelID string) (AccessCheckResult, error) {
 	endpointName = strings.TrimSpace(endpointName) // swobu:io-string source=boundary
 	if endpointName == "" {
@@ -183,13 +183,13 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return AccessCheckResult{
 			Status:  "reachable",
-			Message: fmt.Sprintf("compatibility request succeeded with status %d", resp.StatusCode),
+			Message: fmt.Sprintf("client-access request succeeded with status %d", resp.StatusCode),
 		}, nil
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	message := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if message == "" {
-		message = fmt.Sprintf("compatibility request returned status %d", resp.StatusCode)
+		message = fmt.Sprintf("client-access request returned status %d", resp.StatusCode)
 	}
 	return AccessCheckResult{
 		Status:  fmt.Sprintf("backend %d", resp.StatusCode),

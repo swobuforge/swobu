@@ -5,11 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/app/requestpath"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirstSuccess(t *testing.T) {
@@ -27,14 +26,14 @@ func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirst
 		t.Fatalf("with model id: %v", err)
 	}
 	attempts := make([]string, 0, 2)
-	probe := func(_ context.Context, _ endpointintent.Endpoint, in requestpath.HandleInput) (requestpath.HandleOutput, error) {
+	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.HandleInput) (exchange.HandleOutput, error) {
 		_ = in
 		if len(attempts) == 0 {
 			attempts = append(attempts, "responses/http_json_body")
-			return requestpath.HandleOutput{}, errors.New("nope")
+			return exchange.HandleOutput{}, errors.New("nope")
 		}
 		attempts = append(attempts, "responses/ndjson")
-		return requestpath.HandleOutput{Response: ports.NewBufferedProviderResponse(canonical.NewConversationOutput("id", "m", []canonical.OutputItem{canonical.NewTextOutputItem("t", "ok")}, "stop"))}, nil
+		return exchange.HandleOutput{Response: testProviderResponseFromOutput(canonical.NewConversationOutput("id", "m", []canonical.OutputItem{canonical.NewTextOutputItem("t", "ok")}, "stop"))}, nil
 	}
 
 	resolver := newEndpointAutoProtocolResolver(probe)
@@ -64,9 +63,9 @@ func TestEndpointAutoProtocolResolver_ResolveOne_ReturnsErrorWhenNoVariantWorks(
 	if err != nil {
 		t.Fatalf("with model id: %v", err)
 	}
-	probe := func(_ context.Context, _ endpointintent.Endpoint, in requestpath.HandleInput) (requestpath.HandleOutput, error) {
+	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.HandleInput) (exchange.HandleOutput, error) {
 		_ = in
-		return requestpath.HandleOutput{}, errors.New("probe failed")
+		return exchange.HandleOutput{}, errors.New("probe failed")
 	}
 
 	resolver := newEndpointAutoProtocolResolver(probe)
@@ -74,7 +73,7 @@ func TestEndpointAutoProtocolResolver_ResolveOne_ReturnsErrorWhenNoVariantWorks(
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if got := err.Error(); got == "" || got == providercatalog.ProviderProtocolAuto {
+	if got := err.Error(); got == "" || got == profile.ProviderProtocolAuto {
 		t.Fatalf("unexpected error=%q", got)
 	}
 }

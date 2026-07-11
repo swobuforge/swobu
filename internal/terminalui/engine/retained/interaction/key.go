@@ -30,7 +30,7 @@ const (
 )
 
 // ParseKey translates a historical string key name into a typed Key enum. It exists
-// only for migration compatibility; new code should use typed Key values directly.
+// only for migration continuity; new code should use typed Key values directly.
 // Unknown names fall back to KeyRune with the original rune preserved.
 func ParseKey(name string, r rune) (Key, rune) {
 	keyName := name // swobu:io-string source=terminal-input

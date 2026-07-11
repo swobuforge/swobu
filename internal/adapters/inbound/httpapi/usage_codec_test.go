@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/protocols/chatcompletions"
-	messages "github.com/swobuforge/swobu/internal/adapters/wire/protocols/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/protocols/responses"
+	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
+	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -19,12 +19,12 @@ func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		"stop",
 		usage,
 	)
-	raw, err := (chatcompletions.ChatCompletionsFamilyCodec{}).EncodeResponse(output)
+	doc, err := (chatcompletions.ClientDocumentEncoder{}).EncodeClientDocument(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.prompt_tokens", 100)
@@ -42,12 +42,12 @@ func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		"completed",
 		usage,
 	)
-	raw, err := (responses.ResponsesFamilyCodec{}).EncodeResponse(output)
+	doc, err := (responses.ClientDocumentEncoder{}).EncodeClientDocument(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.input_tokens", 80)
@@ -70,12 +70,12 @@ func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPrese
 		"completed",
 		usage,
 	)
-	raw, err := (responses.ResponsesFamilyCodec{}).EncodeResponse(outputValue)
+	doc, err := (responses.ClientDocumentEncoder{}).EncodeClientDocument(outputValue)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cached_tokens", 0)
@@ -90,12 +90,12 @@ func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		"end_turn",
 		usage,
 	)
-	raw, err := (messages.MessagesFamilyCodec{}).EncodeResponse(output)
+	doc, err := (messages.ClientDocumentEncoder{}).EncodeClientDocument(output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.input_tokens", 51)

@@ -22,25 +22,18 @@ const (
 // CanonicalRequest is the single semantic request representation in core.
 // Transport/profile/protocol specifics must stay outside this type.
 type CanonicalRequest struct {
-	model    string
-	items    []CanonicalItem
-	lastTurn []CanonicalItem
+	model string
+	items []CanonicalItem
 
 	previousResponseID string
 	toolMode           ToolMode
 	cacheIntent        CacheIntent
 }
 
-// Compatibility aliases while codebase converges on one request representation.
-type DialogCanonicalRequest = CanonicalRequest
-type GenerationCanonicalRequest = CanonicalRequest
-type PromptCanonicalRequest = CanonicalRequest
-
 // RequestParams contains normalized semantic input for one request.
 type RequestParams struct {
 	Model              string
 	Items              []CanonicalItem
-	LastTurn           []CanonicalItem
 	InputText          string
 	PreviousResponseID string
 	ToolMode           ToolMode
@@ -55,7 +48,6 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 	return CanonicalRequest{
 		model:              strings.TrimSpace(params.Model), // swobu:io-string source=domain
 		items:              items,
-		lastTurn:           cloneCanonicalItems(params.LastTurn),
 		previousResponseID: strings.TrimSpace(params.PreviousResponseID), // swobu:io-string source=domain
 		toolMode:           params.ToolMode,
 		cacheIntent: NewCacheIntent(CacheIntentParams{
@@ -63,34 +55,6 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 			Retention: params.CacheIntent.Retention(),
 		}),
 	}
-}
-
-// Compatibility constructors kept as one-type shims.
-func NewDialogRequest(model string, items []CanonicalItem) CanonicalRequest {
-	return NewCanonicalRequest(RequestParams{Model: model, Items: items})
-}
-
-func NewGenerationRequest(params GenerationRequestParams) CanonicalRequest {
-	items := cloneCanonicalItems(params.Thread)
-	if len(items) == 0 {
-		items = cloneCanonicalItems(params.LastTurn)
-	}
-	if len(items) == 0 {
-		items = cloneCanonicalItems(params.Items)
-	}
-	return NewCanonicalRequest(RequestParams{
-		Model:              params.Model,
-		Items:              items,
-		LastTurn:           params.LastTurn,
-		InputText:          params.InputText,
-		PreviousResponseID: params.PreviousResponseID,
-		ToolMode:           params.ToolMode,
-		CacheIntent:        params.CacheIntent,
-	})
-}
-
-func NewPromptRequest(model string, prompt string) CanonicalRequest {
-	return NewCanonicalRequest(RequestParams{Model: model, InputText: prompt})
 }
 
 func (r CanonicalRequest) Model() string {
@@ -105,16 +69,6 @@ func (r CanonicalRequest) Items() []CanonicalItem {
 	return cloneCanonicalItems(r.items)
 }
 
-// Thread is a compatibility accessor; canonical request now has one item stream.
-func (r CanonicalRequest) Thread() []CanonicalItem {
-	return cloneCanonicalItems(r.items)
-}
-
-// LastTurn is a compatibility accessor; canonical request now has one item stream.
-func (r CanonicalRequest) LastTurn() []CanonicalItem {
-	return cloneCanonicalItems(r.lastTurn)
-}
-
 func (r CanonicalRequest) PreviousResponseID() string {
 	return r.previousResponseID
 }
@@ -127,30 +81,10 @@ func (r CanonicalRequest) CacheIntent() CacheIntent {
 	return r.cacheIntent
 }
 
-// Prompt is a compatibility accessor for prompt-style providers.
-func (r CanonicalRequest) Prompt() string {
-	out := ""
-	for _, item := range r.items {
-		if item.Kind == ItemKindText {
-			out += item.Text
-		}
-	}
-	return out
-}
-
-func (r CanonicalRequest) HasThread() bool {
-	return len(r.items) > 0
-}
-
-func (r CanonicalRequest) HasLastTurn() bool {
-	return len(r.lastTurn) > 0
-}
-
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
 		Model:              r.model,
 		Items:              r.items,
-		LastTurn:           r.lastTurn,
 		PreviousResponseID: r.previousResponseID,
 		ToolMode:           r.toolMode,
 		CacheIntent:        r.cacheIntent,
@@ -161,18 +95,6 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 // of canonical inputs after a request has been accepted.
 func CloneCanonicalRequest(req CanonicalRequest) CanonicalRequest {
 	return req.Clone()
-}
-
-// GenerationRequestParams remains as a compatibility decode surface while callers migrate.
-type GenerationRequestParams struct {
-	Model              string
-	InputText          string
-	Items              []CanonicalItem
-	Thread             []CanonicalItem
-	LastTurn           []CanonicalItem
-	PreviousResponseID string
-	ToolMode           ToolMode
-	CacheIntent        CacheIntent
 }
 
 func cloneStringAnyMap(in map[string]any) map[string]any {

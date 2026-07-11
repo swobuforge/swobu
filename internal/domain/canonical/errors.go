@@ -27,11 +27,10 @@ const (
 )
 
 type Error struct {
-	Code      ErrorCode
-	Message   string
-	Origin    ErrorOrigin
-	RequestID string
-	Details   map[string]string
+	Code    ErrorCode
+	Message string
+	Origin  ErrorOrigin
+	Details map[string]string
 }
 
 func (e Error) Error() string {
@@ -138,7 +137,7 @@ func (e BackendError) Error() string {
 
 const backendErrorCodePreviousResponseNotFound = "previous_response_not_found"
 
-// IsPreviousResponseNotFoundBackendError reports the exact OpenAI-compatible
+// IsPreviousResponseNotFoundBackendError reports the exact OpenAI-style
 // responses error contract for an unresolved previous_response_id. It relies on
 // the typed backend payload, not heuristic message matching.
 func IsPreviousResponseNotFoundBackendError(err error) bool {

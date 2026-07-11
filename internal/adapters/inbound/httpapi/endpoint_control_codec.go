@@ -9,7 +9,7 @@ import (
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/domain/providercatalog"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
@@ -20,7 +20,7 @@ func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
 		ProviderConfigs:           make([]providerConfigDocument, 0, len(providerConfigs)),
 	}
 	for _, providerConfig := range providerConfigs {
-		providerProtocol := providercatalog.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
+		providerProtocol := profile.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
 		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
 			Ref:              providerConfig.Ref().String(),
 			ProviderSpec:     providerConfig.ProviderSpec().String(),
@@ -58,10 +58,10 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 			return endpointintent.Endpoint{}, err
 		}
 		decodedProtocolInput := strings.TrimSpace(encoded.ProviderProtocol) // swobu:io-string source=boundary
-		if decodedProtocolInput == providercatalog.ProviderProtocolAuto {
+		if decodedProtocolInput == profile.ProviderProtocolAuto {
 			decodedProtocolInput = ""
 		}
-		providerProtocol, err := providercatalog.DecodeProviderProtocolFromPersistence(spec.String(), decodedProtocolInput)
+		providerProtocol, err := profile.DecodeProviderProtocolFromPersistence(spec.String(), decodedProtocolInput)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
