@@ -289,7 +289,7 @@ func decodeOutputItems(items []struct {
 			if err != nil {
 				return nil, canonical.InternalError("responses message content is invalid")
 			}
-			err = openaicompat.WalkContentParts(parts, func(idx int, part openaicompat.ContentPart) error {
+			err = openaicompat.WalkContentParts(parts, func(idx int, part openaicompat.ContentPartData) error {
 				partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 				switch partType {
 				case "text", "output_text", "input_text":

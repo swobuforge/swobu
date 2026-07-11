@@ -65,7 +65,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	pending := append([]string(nil), pendingToolUseIDs...)
-	err = openaicompat.WalkContentParts(parts, func(partIdx int, part openaicompat.ContentPart) error {
+	err = openaicompat.WalkContentParts(parts, func(partIdx int, part openaicompat.ContentPartData) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=provider-wire
 		switch partType {
 		case "text":
@@ -131,7 +131,7 @@ func decodeToolResultText(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	var builder strings.Builder
-	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPart) error {
+	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPartData) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		if partType == "" {
 			partType = "text"

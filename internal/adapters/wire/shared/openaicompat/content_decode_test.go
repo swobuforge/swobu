@@ -56,12 +56,12 @@ func TestDecodeContentParts_PreservesStructuredPartFields(t *testing.T) {
 func TestWalkContentParts_VisitsInOrder(t *testing.T) {
 	t.Parallel()
 
-	parts := []ContentPart{
+	parts := []ContentPartData{
 		{Type: "text"},
 		{Type: "tool_use"},
 	}
 	seen := make([]string, 0, len(parts))
-	if err := WalkContentParts(parts, func(idx int, part ContentPart) error {
+	if err := WalkContentParts(parts, func(idx int, part ContentPartData) error {
 		seen = append(seen, fmt.Sprintf("%d:%s", idx, part.Type))
 		return nil
 	}); err != nil {

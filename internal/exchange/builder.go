@@ -51,7 +51,7 @@ func Tags[I any, O any](tags ...Tag) LinkOption[I, O] {
 	}
 }
 
-type middlewareRegistration[T any] struct {
+type middlewareRegistrationRecord[T any] struct {
 	middleware Middleware[T, T]
 	when       []Predicate
 }
@@ -61,7 +61,7 @@ type middlewareRegistration[T any] struct {
 type Builder[T any] struct {
 	port        Port[T]
 	links       []Link[T, T]
-	middlewares []middlewareRegistration[T]
+	middlewares []middlewareRegistrationRecord[T]
 }
 
 // NewBuilder constructs one same-port exchange builder.
@@ -92,7 +92,7 @@ func (b *Builder[T]) Use(middleware Middleware[T, T], when ...Predicate) *Builde
 	if b == nil {
 		return nil
 	}
-	b.middlewares = append(b.middlewares, middlewareRegistration[T]{
+	b.middlewares = append(b.middlewares, middlewareRegistrationRecord[T]{
 		middleware: middleware,
 		when:       append([]Predicate(nil), when...),
 	})

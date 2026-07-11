@@ -291,7 +291,7 @@ func buildContinuationRecord(namespace ContinuationNamespace, request CanonicalR
 	if !ok {
 		return ContinuationRecord{}, false, InternalError("canonical output snapshot could not be cloned for continuation capture")
 	}
-	requestDelta := currentTurnDelta(request.Items())
+	requestDelta := CurrentTurnDelta(request.Items())
 	delta := NewCanonicalRequest(RequestParams{
 		Model:       request.Model(),
 		Items:       requestDelta,
@@ -332,10 +332,6 @@ func materializeContinuationThread(chain []ContinuationRecord) []CanonicalItem {
 // item. It is the materialized last-turn view used when a request needs to be
 // replayed or captured without duplicating prior context.
 func CurrentTurnDelta(items []CanonicalItem) []CanonicalItem {
-	return currentTurnDelta(items)
-}
-
-func currentTurnDelta(items []CanonicalItem) []CanonicalItem {
 	if len(items) == 0 {
 		return nil
 	}
