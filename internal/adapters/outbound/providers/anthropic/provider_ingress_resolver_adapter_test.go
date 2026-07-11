@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
@@ -56,8 +56,8 @@ func TestResolveProviderIngress_UsesContractDeliveryForStreamingRequests(t *test
 		}),
 		carrier.NewWireDocument("", "", "application/json", nil, []byte(`{}`), carrier.Meta{}),
 		exchange.NewExecutionContractForDeliveries(
-			delivery.StreamingDelivery(delivery.FramingSSE),
-			delivery.StreamingDelivery(delivery.FramingSSE),
+			protocolsurface.StreamingDelivery(protocolsurface.FramingSSE),
+			protocolsurface.StreamingDelivery(protocolsurface.FramingSSE),
 		),
 		exchange.NewRoutableTarget(
 			"backend-a",

@@ -281,8 +281,14 @@ func decodeToolPolicyMetadata(raw string) (ToolPolicy, error) {
 	if err := json.Unmarshal([]byte(trimmed), &dto); err != nil {
 		return ToolPolicy{}, BadRequest("canonical request tool policy is invalid")
 	}
-	mode := normalizeToolPolicyMode(ToolPolicyMode(dto.Mode))
+	mode, ok := ParseToolPolicyMode(dto.Mode)
+	if !ok {
+		return ToolPolicy{}, BadRequest("canonical request tool policy mode is invalid")
+	}
 	if strings.TrimSpace(dto.Specific) != "" {
+		if mode != ToolPolicySpecific {
+			return ToolPolicy{}, BadRequest("canonical request tool policy specific mode is invalid")
+		}
 		specific := NewSemanticToolID(dto.Specific)
 		return NewToolPolicy(ToolPolicySpecific, &specific), nil
 	}

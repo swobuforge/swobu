@@ -1,83 +1,48 @@
 package profile
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-// ToolChoiceCapabilityFact declares one provider/model/protocol capability fact
-// for tool-choice policy behavior.
-//
-// ModelID accepts "*" for provider+protocol defaults and concrete model IDs for
-// model-specific overrides.
-// Keep this schema minimal: only include fields consumed by active request-path
-// policy behavior. Add new fields only with a concrete downstream consumer.
-type ToolChoiceCapabilityFact struct {
-	ProviderSpec            string
-	ProtocolKind            protocolkind.ProtocolKind
-	ModelID                 string
-	ImmediateDowngradeRetry bool
-}
-
-// ToolChoiceCapabilityFacts returns default and model-specific tool-choice
-// behavior facts used by request-path semantic policy.
-func ToolChoiceCapabilityFacts() []ToolChoiceCapabilityFact {
-	out := make([]ToolChoiceCapabilityFact, 0, len(catalog())+4)
-
-	// Baseline: responses protocol supports strict->auto immediate downgrade
-	// retry across OpenAI-style adapters.
-	for _, profile := range catalog() {
-		if strings.EqualFold(string(profile.ProviderID), "anthropic") {
-			continue
-		}
-		out = append(out, ToolChoiceCapabilityFact{
-			ProviderSpec:            string(profile.ProviderID),
-			ProtocolKind:            protocolkind.Responses,
-			ModelID:                 "*",
-			ImmediateDowngradeRetry: true,
-		})
-	}
-
-	// Real-world-derived chat model facts from scenario capture captures:
-	// some OpenRouter-routed models reject strict tool_choice while still
-	// supporting auto tool_choice behavior.
-	out = append(out,
-		ToolChoiceCapabilityFact{
-			ProviderSpec:            "openrouter",
-			ProtocolKind:            protocolkind.ChatCompletions,
-			ModelID:                 "nvidia/nemotron-3-super-120b-a12b",
-			ImmediateDowngradeRetry: true,
-		},
-		ToolChoiceCapabilityFact{
-			ProviderSpec:            "openrouter",
-			ProtocolKind:            protocolkind.ChatCompletions,
-			ModelID:                 "arcee-ai/trinity-large-preview:free",
-			ImmediateDowngradeRetry: true,
-		},
-	)
-
-	return out
-}
-
 func TestToolChoiceCapabilityFacts_IncludeResponsesDefaultsForResponsesProviders(t *testing.T) {
 	facts := ToolChoiceCapabilityFacts()
+	if len(facts) == 0 {
+		t.Fatal("tool-choice capability facts must not be empty")
+	}
 
-	for _, provider := range []string{"openai", "openrouter", "openai_compatible"} {
-		found := false
-		for _, fact := range facts {
-			if fact.ProviderSpec != provider || fact.ProtocolKind != "responses" || fact.ModelID != "*" {
-				continue
-			}
-			found = true
-			if !fact.ImmediateDowngradeRetry {
-				t.Fatalf("provider %q responses wildcard fact has ImmediateDowngradeRetry=false, want true", provider)
-			}
+	expected := map[string]bool{}
+	for _, entry := range All() {
+		if !SupportsExecutionProtocolForSpec(string(entry.ProviderID), protocolkind.Responses) {
+			continue
 		}
-		if !found {
+		expected[string(entry.ProviderID)] = false
+	}
+
+	for _, fact := range facts {
+		if fact.ProtocolKind != protocolkind.Responses || fact.ModelID != "*" {
+			continue
+		}
+		if _, ok := expected[fact.ProviderSpec]; !ok {
+			t.Fatalf("unexpected responses wildcard tool-choice fact for provider %q", fact.ProviderSpec)
+		}
+		if expected[fact.ProviderSpec] {
+			t.Fatalf("duplicate responses wildcard tool-choice fact for provider %q", fact.ProviderSpec)
+		}
+		expected[fact.ProviderSpec] = true
+		if !fact.ImmediateDowngradeRetry {
+			t.Fatalf("provider %q responses wildcard fact has ImmediateDowngradeRetry=false, want true", fact.ProviderSpec)
+		}
+	}
+
+	for provider, seen := range expected {
+		if !seen {
 			t.Fatalf("missing responses wildcard tool-choice fact for provider %q", provider)
 		}
+	}
+	if SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecBedrock, protocolkind.ChatCompletions, "any") {
+		t.Fatal("bedrock should not inherit responses tool-choice retry facts")
 	}
 }
 
@@ -89,7 +54,7 @@ func TestToolChoiceCapabilityFacts_IncludeProviderModelOverrides(t *testing.T) {
 		"arcee-ai/trinity-large-preview:free": false,
 	}
 	for _, fact := range facts {
-		if fact.ProviderSpec != "openrouter" || fact.ProtocolKind != "chat_completions" {
+		if fact.ProviderSpec != "openrouter" || fact.ProtocolKind != protocolkind.ChatCompletions {
 			continue
 		}
 		if _, ok := wantModels[fact.ModelID]; !ok {
@@ -104,5 +69,20 @@ func TestToolChoiceCapabilityFacts_IncludeProviderModelOverrides(t *testing.T) {
 		if !seen {
 			t.Fatalf("missing openrouter model-specific tool-choice fact for model %q", model)
 		}
+	}
+}
+
+func TestSupportsToolChoiceImmediateDowngradeRetry_ConservativeFacts(t *testing.T) {
+	if !SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecOpenAI, protocolkind.Responses, "gpt-4.1-mini") {
+		t.Fatal("openai responses should support immediate tool-choice downgrade retry")
+	}
+	if !SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecOpenRouter, protocolkind.ChatCompletions, "nvidia/nemotron-3-super-120b-a12b") {
+		t.Fatal("openrouter model override should support immediate tool-choice downgrade retry")
+	}
+	if SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecOpenRouter, protocolkind.ChatCompletions, "unknown/model") {
+		t.Fatal("unknown openrouter model should not inherit immediate tool-choice downgrade retry")
+	}
+	if SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecBedrock, protocolkind.ChatCompletions, "any") {
+		t.Fatal("bedrock should not support immediate tool-choice downgrade retry")
 	}
 }

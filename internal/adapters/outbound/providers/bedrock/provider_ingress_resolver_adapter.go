@@ -237,11 +237,17 @@ func synthesizeBedrockProviderSemanticEventsResult(exchangeID string, kind proto
 	if err := validateBedrockSyntheticProtocol(kind); err != nil {
 		return nil, err
 	}
-	envelope, err := canonical.EventReaderFromCanonicalOutput(exchangeID, output)
-	if err != nil {
+	if output == nil {
 		return nil, canonical.InternalError("bedrock semantic event synthesis failed")
 	}
-	return carrier.CanonicalEventStream{Events: envelope}, nil
+	return carrier.CanonicalEventStream{Events: canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		exchangeID,
+		output.ResultID(),
+		output.Model(),
+		output.Items(),
+		output.FinishReason(),
+		output.Usage(),
+	))}, nil
 }
 
 func validateBedrockSyntheticProtocol(kind protocolkind.ProtocolKind) error {

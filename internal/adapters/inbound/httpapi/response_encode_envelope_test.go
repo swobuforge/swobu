@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,18 +22,14 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 		},
 		"completed",
 	)
-	envelope, err := canonical.EventReaderFromCanonicalOutput("ex_http_env", out)
-	if err != nil {
-		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
-	}
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(envelope, delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream)}
+	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream, false)}
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, "req_test_1", canonical.ClientFamilyResponses, resp); err != nil {
+	if err := writeSuccessResponse(context.Background(), rr, "req_test_1", canonical.ClientFamilyResponses, resp); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -56,18 +53,14 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 		},
 		"completed",
 	)
-	envelope, err := canonical.EventReaderFromCanonicalOutput("ex_http_env_2", out)
-	if err != nil {
-		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
-	}
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(envelope, delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream)}
+	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream, false)}
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); err != nil {
+	if err := writeSuccessResponse(context.Background(), rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -93,7 +86,7 @@ func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testin
 	}
 
 	writer := &writeHeaderCountingResponseWriter{}
-	err := writeSuccessResponse(writer, "req_test_3", canonical.ClientFamilyResponses, resp)
+	err := writeSuccessResponse(context.Background(), writer, "req_test_3", canonical.ClientFamilyResponses, resp)
 	if err == nil {
 		t.Fatal("writeSuccessResponse returned nil, want stream decoding failure")
 	}

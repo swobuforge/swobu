@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/turnstate"
 )
 
 // ContinuationNamespace is the internal compatibility-owned partition key used
@@ -96,18 +95,17 @@ const (
 // replay can be reconstructed without conflating semantic history with opaque
 // provider-native state.
 type ContinuationRecord struct {
-	ID            ContinuationID
-	Parent        *ContinuationID
-	RouteID       string
-	Client        ClientFamily
-	Provider      protocolkind.ProtocolKind
-	ModelID       string
-	RequestDelta  CanonicalRequest
-	Response      CanonicalOutputData
-	ProviderState []turnstate.TurnStateKey
-	Status        ContinuationStatus
-	CreatedAt     time.Time
-	ExpiresAt     *time.Time
+	ID           ContinuationID
+	Parent       *ContinuationID
+	RouteID      string
+	Client       ClientFamily
+	Provider     protocolkind.ProtocolKind
+	ModelID      string
+	RequestDelta CanonicalRequest
+	Response     CanonicalOutputData
+	Status       ContinuationStatus
+	CreatedAt    time.Time
+	ExpiresAt    *time.Time
 }
 
 // Clone returns a deep copy of the semantic record.
@@ -122,21 +120,18 @@ func (r ContinuationRecord) Clone() ContinuationRecord {
 		cloned := *r.ExpiresAt
 		expiresAt = &cloned
 	}
-	state := make([]turnstate.TurnStateKey, len(r.ProviderState))
-	copy(state, r.ProviderState)
 	return ContinuationRecord{
-		ID:            r.ID.Clone(),
-		Parent:        parent,
-		RouteID:       r.RouteID,
-		Client:        r.Client,
-		Provider:      r.Provider,
-		ModelID:       r.ModelID,
-		RequestDelta:  r.RequestDelta.Clone(),
-		Response:      NewOutputWithUsage(r.Response.semanticKind, r.Response.resultID, r.Response.model, r.Response.items, r.Response.finishReason, r.Response.usage),
-		ProviderState: state,
-		Status:        r.Status,
-		CreatedAt:     r.CreatedAt,
-		ExpiresAt:     expiresAt,
+		ID:           r.ID.Clone(),
+		Parent:       parent,
+		RouteID:      r.RouteID,
+		Client:       r.Client,
+		Provider:     r.Provider,
+		ModelID:      r.ModelID,
+		RequestDelta: r.RequestDelta.Clone(),
+		Response:     NewOutputWithUsage(r.Response.semanticKind, r.Response.resultID, r.Response.model, r.Response.items, r.Response.finishReason, r.Response.usage),
+		Status:       r.Status,
+		CreatedAt:    r.CreatedAt,
+		ExpiresAt:    expiresAt,
 	}
 }
 

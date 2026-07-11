@@ -17,6 +17,11 @@ func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(request c
 }
 
 func (ProviderDocumentDecoder) DecodeProviderDocument(doc carrier.WireDocument, exchangeID string) (canonical.EventReader, error) {
+	if err := core.ValidateResponseCarrierDocument(doc, protocolkind.Responses); err != nil {
+		carrierErr := canonical.InternalError("responses response wire carrier is invalid")
+		carrierErr.Details = map[string]string{"wire_document_invariant": err.Error()}
+		return nil, carrierErr
+	}
 	return decodeResponseBuffered(doc.RawBytes(), exchangeID)
 }
 

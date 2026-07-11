@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -110,7 +111,9 @@ func (r endpointAutoProtocolResolver) probeVariant(
 		Model: modelID,
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "ping")},
 	})
-	payload, err := encodeCanonicalClientRequest(canonical.ClientFamilyResponses, ping, delivery.BufferedDelivery())
+	// The auto-protocol probe is responses-only, so it uses the dedicated
+	// responses codec directly instead of a local family dispatch helper.
+	payload, err := responses.EncodeCarrier(ping, delivery.BufferedDelivery())
 	if err != nil {
 		return err
 	}
@@ -120,6 +123,9 @@ func (r endpointAutoProtocolResolver) probeVariant(
 		EndpointName: endpointName,
 		Request:      exchange.NewTransportRequest(http.MethodPost, string(canonical.NormalizedPathResponses), nil, payload.RawBytes()),
 		ClientFamily: canonical.ClientFamilyResponses,
+		// Probes have no incoming request ID, so mint a request-scoped exchange
+		// identity for the synthetic ping.
+		ExchangeID: newRequestID(),
 	})
 	if err != nil {
 		return err

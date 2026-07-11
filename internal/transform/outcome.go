@@ -19,8 +19,8 @@ type ObservationRecord struct {
 	Reason string
 }
 
-// Report is one transform execution outcome.
-type Report struct {
+// Outcome is one transform execution outcome.
+type Outcome struct {
 	Mutated      bool
 	Mutations    []MutationRecord
 	Losses       []report.Loss

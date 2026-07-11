@@ -1,10 +1,15 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"testing"
 
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
@@ -76,5 +81,58 @@ func TestEndpointAutoProtocolResolver_ResolveOne_ReturnsErrorWhenNoVariantWorks(
 	}
 	if got := err.Error(); got == "" || got == profile.ProviderProtocolAuto {
 		t.Fatalf("unexpected error=%q", got)
+	}
+}
+
+func TestEndpointAutoProtocolResolver_ResolveOne_EncodesResponsesPingRequest(t *testing.T) {
+	t.Parallel()
+
+	name, _ := endpointintent.ParseEndpointName("workspace")
+	ref, _ := endpointintent.ParseProviderConfigRef("cfg-main")
+	spec, _ := endpointintent.ParseProviderSpec("ollama")
+	cfg, err := endpointintent.NewProviderConfig(ref, spec, "http://localhost:11434", "")
+	if err != nil {
+		t.Fatalf("new provider config: %v", err)
+	}
+	cfg, err = cfg.WithModelID("llama3.1")
+	if err != nil {
+		t.Fatalf("with model id: %v", err)
+	}
+
+	var seen exchange.RequestInput
+	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.RequestInput) (exchange.RequestOutput, error) {
+		seen = in
+		return exchange.RequestOutput{}, nil
+	}
+
+	resolver := newEndpointAutoProtocolResolver(probe)
+	_, err = resolver.resolveOne(context.Background(), name, []endpointintent.ProviderConfig{cfg}, 0, ref)
+	if err != nil {
+		t.Fatalf("resolveOne error: %v", err)
+	}
+
+	if seen.ClientFamily != canonical.ClientFamilyResponses {
+		t.Fatalf("client family=%q want responses", seen.ClientFamily)
+	}
+	if got := seen.Request.Method; got != http.MethodPost {
+		t.Fatalf("request method=%q want POST", got)
+	}
+	if got := seen.Request.URL; got != string(canonical.NormalizedPathResponses) {
+		t.Fatalf("request url=%q want %q", got, canonical.NormalizedPathResponses)
+	}
+
+	gotBody, err := io.ReadAll(seen.Request.Body)
+	if err != nil {
+		t.Fatalf("read probe body: %v", err)
+	}
+	wantDoc, err := responses.EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "llama3.1",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "ping")},
+	}), delivery.BufferedDelivery())
+	if err != nil {
+		t.Fatalf("responses codec encode: %v", err)
+	}
+	if !bytes.Equal(gotBody, wantDoc.RawBytes()) {
+		t.Fatalf("probe body=%s want %s", string(gotBody), string(wantDoc.RawBytes()))
 	}
 }

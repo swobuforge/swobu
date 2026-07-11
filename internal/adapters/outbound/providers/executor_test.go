@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -44,7 +44,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
-		ports.NewExecutionContract(delivery.BufferedDelivery()),
+		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	)
 	if _, err := registry.ResolveProviderIngress(context.Background(), openAIReq); err != nil {
@@ -56,7 +56,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
-		ports.NewExecutionContract(delivery.BufferedDelivery()),
+		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)
 	if _, err := registry.ResolveProviderIngress(context.Background(), anthropicReq); err != nil {
@@ -106,7 +106,7 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 			Model:     "m",
 			InputText: "hi",
 		}),
-		ports.NewExecutionContract(delivery.BufferedDelivery()),
+		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
@@ -161,7 +161,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 
 	openAIResp, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
 		request,
-		ports.NewExecutionContract(delivery.BufferedDelivery()),
+		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {
@@ -173,7 +173,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 
 	ollamaResp, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
 		request,
-		ports.NewExecutionContract(delivery.BufferedDelivery()),
+		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {

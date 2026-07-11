@@ -21,6 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -67,15 +68,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if strings.TrimSpace(req.Request.Model()) == "" {
 		return nil, canonical.BadRequest("canonical request is required")
 	}
-	deliveryMode, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
+	resolvedDelivery, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
 	if err != nil {
 		return nil, err
 	}
-	resolvedDelivery := delivery.BufferedDelivery()
-	if deliveryMode == delivery.Streaming {
-		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
-	}
-	wireReq, err := codexwire.EncodeProviderRequestDocument(req.Request, resolvedDelivery)
+	wireReq, err := codexwire.EncodeProviderRequestDocument(req.Request, toInternalDelivery(resolvedDelivery))
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +136,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		defer func() { _ = resp.Body.Close() }()
 		return nil, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	if deliveryMode == delivery.Streaming {
+	if resolvedDelivery.IsStreaming() {
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
@@ -345,18 +342,29 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 	return strings.TrimRight(base, "/")
 }
 
-func resolveChatGPTProviderProtocol(providerProtocol string) (delivery.Mode, error) {
+func resolveChatGPTProviderProtocol(providerProtocol string) (protocolsurface.Delivery, error) {
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
 	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
-		return delivery.Buffered, canonical.BadEndpoint("chatgpt provider protocol must be concrete")
+		return protocolsurface.BufferedDelivery(), canonical.BadEndpoint("chatgpt provider protocol must be concrete")
 	}
 	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecChatGPT), providerProtocol) {
-		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
+		return protocolsurface.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
 	}
 	switch providerProtocol {
 	case "responses_stream":
-		return delivery.Streaming, nil
+		return protocolsurface.StreamingDelivery(protocolsurface.FramingSSE), nil
 	default:
-		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
+		return protocolsurface.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
+	}
+}
+
+func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
+	switch surface.Variant {
+	case protocolsurface.DeliveryVariantStreaming:
+		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
+	case protocolsurface.DeliveryVariantBuffered:
+		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
+	default:
+		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
 	}
 }

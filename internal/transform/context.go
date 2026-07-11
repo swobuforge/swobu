@@ -6,12 +6,11 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-// Context carries stage-scoped exchange facts for transform evaluation.
+// Context carries exchange facts for transform evaluation.
+// It stays focused on lookup facts, not carrier payload metadata or services.
 type Context struct {
-	ExchangeID   string
-	Stage        Stage
-	CarrierStage carrier.Stage
-	Carrier      carrier.Kind
-	Family       protocolkind.ProtocolKind
-	Delivery     delivery.Delivery
+	ExchangeID string
+	Carrier    carrier.Kind
+	Family     protocolkind.ProtocolKind
+	Delivery   delivery.Delivery
 }

@@ -20,115 +20,132 @@ import (
 )
 
 // Runner executes one exchange through a single event-first lifecycle.
+// It owns runtime codec lookup and transform application for the exchange.
 type Runner struct {
 	ResolveProviderIngress func(context.Context, ProviderRequest) (ProviderIngress, error)
+	Runtime                RuntimeResolver
+	Transforms             transform.Registry
 	EffectSink             effect.Sink
 }
 
+// ClientCodec translates client-family wire documents and client-facing responses.
 type ClientCodec interface {
 	DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error)
 	EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error)
 	EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error)
 }
 
+// ProviderRequestDocumentEncoder translates canonical requests into provider wire documents.
 type ProviderRequestDocumentEncoder interface {
 	EncodeProviderRequestDocument(request canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error)
 }
 
+// ProviderEnvelopeDecoder translates provider streams into canonical events.
 type ProviderEnvelopeDecoder interface {
 	DecodeProviderEnvelope(stream carrier.WireStream, exchangeID string) canonical.EventReader
 }
 
+// ProviderDocumentDecoder translates provider documents into canonical events.
 type ProviderDocumentDecoder interface {
 	DecodeProviderDocument(doc carrier.WireDocument, exchangeID string) (canonical.EventReader, error)
 }
 
-// ExchangeInput contains the full runner input for one request/response exchange.
-// TODO god object - architecture smell
+// ExchangeInput contains the factual inputs for one request/response exchange.
+// Runtime lookup and transform registries live on Runner, not here.
 type ExchangeInput struct {
-	ExchangeID     string
-	ClientFamily   canonical.ClientFamily
-	ClientDelivery delivery.Delivery
-	Request        canonical.CanonicalRequest
-	Target         RoutableTarget
-	Contract       ExecutionContract
-
-	ProviderProtocol               protocolkind.ProtocolKind
-	ProviderDelivery               delivery.Delivery
-	ClientCodec                    ClientCodec
-	ProviderRequestDocumentEncoder ProviderRequestDocumentEncoder
-	ProviderEnvelopeDecoder        ProviderEnvelopeDecoder
-	ProviderDocumentDecoder        ProviderDocumentDecoder
-	Transforms                     transform.Registry
+	ExchangeID       string
+	ClientFamily     canonical.ClientFamily
+	ClientDelivery   delivery.Delivery
+	Request          canonical.CanonicalRequest
+	Target           RoutableTarget
+	Contract         ExecutionContract
+	ProviderProtocol protocolkind.ProtocolKind
+	ProviderDelivery delivery.Delivery
 }
 
 // TransportResponse contains one client-facing wire result for one exchange run.
 type TransportResponse struct {
 	Transport transportpkg.TransportResponse
+	// Progressive reports whether a streaming response stayed source-incremental
+	// after exchange routing and middleware application.
+	Progressive bool
 }
 
+// Run executes one exchange using the runner-owned runtime and transforms.
 func (r Runner) Run(ctx context.Context, in ExchangeInput) (TransportResponse, error) {
-	if in.ClientCodec == nil {
-		return TransportResponse{}, errors.New("exchange runner client codec is required")
+	if r.Runtime == nil {
+		return TransportResponse{}, errors.New("exchange runner runtime resolver is required")
 	}
-	envelope, err := r.runProviderEnvelope(ctx, in)
+	clientCodec := r.Runtime.ClientCodec(in.ClientFamily)
+	if clientCodec == nil {
+		return TransportResponse{}, canonical.UnsupportedOperation("client family is not implemented")
+	}
+	envelope, progressive, err := r.runProviderEnvelope(ctx, in)
 	if err != nil {
 		return TransportResponse{}, err
 	}
-	return encodeClientOutput(ctx, in, in.ClientCodec, envelope)
+	return encodeClientOutput(ctx, in, clientCodec, envelope, progressive)
 }
 
-func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (canonical.EventReader, error) {
+func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (canonical.EventReader, bool, error) {
 	effectSink := r.EffectSink
 	if effectSink == nil {
 		effectSink = effect.NoopSink{}
 	}
 	pendingEffects := make([]effect.Effect, 0, 8)
 	resolveProviderIngress := r.ResolveProviderIngress
-	requestEncoder := in.ProviderRequestDocumentEncoder
-	streamDecoder := in.ProviderEnvelopeDecoder
-	documentDecoder := in.ProviderDocumentDecoder
+	runtime := r.Runtime
 	providerDelivery := in.ProviderDelivery
 	if resolveProviderIngress == nil {
-		return nil, errors.New("exchange runner provider ingress resolver is required")
+		return nil, false, errors.New("exchange runner provider ingress resolver is required")
 	}
+	if runtime == nil {
+		return nil, false, errors.New("exchange runner runtime resolver is required")
+	}
+	requestEncoder := runtime.ProviderRequestDocumentEncoder(in.ProviderProtocol)
 	if requestEncoder == nil {
-		return nil, errors.New("exchange runner provider request encoder is required")
+		return nil, false, errors.New("exchange runner provider request encoder is required")
 	}
+	streamDecoder := runtime.ProviderEnvelopeDecoder(in.ProviderProtocol, providerDelivery)
+	documentDecoder := runtime.ProviderDocumentDecoder(in.ProviderProtocol, providerDelivery)
 	if providerDelivery.Mode == delivery.Streaming && streamDecoder == nil {
-		return nil, errors.New("exchange runner provider stream decoder is required for streaming delivery")
+		return nil, false, errors.New("exchange runner provider stream decoder is required for streaming delivery")
 	}
 	if providerDelivery.Mode == delivery.Buffered && documentDecoder == nil {
-		return nil, errors.New("exchange runner provider document decoder is required for buffered delivery")
+		return nil, false, errors.New("exchange runner provider document decoder is required for buffered delivery")
 	}
 	if strings.TrimSpace(in.Request.Model()) == "" { // swobu:io-string source=domain
-		return nil, canonical.BadRequest("canonical request is required")
+		return nil, false, canonical.BadRequest("canonical request is required")
 	}
 	if err := in.Contract.Validate(); err != nil {
-		return nil, canonical.BadRequest("execution contract is invalid")
+		return nil, false, canonical.BadRequest("execution contract is invalid")
 	}
 
 	providerDoc, err := requestEncoder.EncodeProviderRequestDocument(canonical.CloneCanonicalRequest(in.Request), providerDelivery)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	providerCarrier := providerDoc.Clone()
 	providerCarrier.Stage = carrier.StageProviderRequestOut
-	providerDoc, stageEffects, err := applyDocumentTransformStage(
-		in.Transforms,
+	providerDocResult, err := applyDocumentTransform(
+		ctx,
+		r.Transforms,
 		in.ExchangeID,
+		in.Target.BackendRef,
+		in.Target.ProviderID(),
+		in.Request.Model(),
 		transform.StageRequestDocumentOut,
 		providerCarrier,
 		providerDelivery,
 	)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	pendingEffects = append(pendingEffects, stageEffects...)
+	providerDoc = providerDocResult.Value
+	pendingEffects = append(pendingEffects, providerDocResult.Effects...)
 
-	targetSpec := in.Target.ProviderSpec
-	if strings.TrimSpace(targetSpec) == "" { // swobu:io-string source=domain
-		return nil, canonical.BadEndpoint("provider target is required")
+	if strings.TrimSpace(in.Target.ProviderSpec) == "" { // swobu:io-string source=boundary
+		return nil, false, canonical.BadEndpoint("provider target is required")
 	}
 	providerIngress, err := resolveProviderIngress(ctx, NewProviderRequest(
 		in.ExchangeID,
@@ -139,47 +156,56 @@ func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (cano
 		in.Target,
 	))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := ValidateProviderIngress(providerIngress); err != nil {
-		return nil, canonical.InternalError("provider ingress shape is invalid")
+		return nil, false, canonical.InternalError("provider ingress shape is invalid")
 	}
 
-	envelope, err := decodeProviderEnvelope(in, providerIngress)
+	envelope, err := r.decodeProviderEnvelope(ctx, in, providerIngress, streamDecoder, documentDecoder)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	envelope, streamApplied, err := in.Transforms.WrapEventStream(transform.Context{
+	envelope, streamApplied, err := r.Transforms.WrapEventStream(transform.StageSemanticEvents, transform.Context{
 		ExchangeID: in.ExchangeID,
-		Stage:      transform.StageSemanticEvents,
 		Carrier:    carrier.KindCanonicalEventStream,
 		Family:     in.ProviderProtocol,
 		Delivery:   providerDelivery,
 	}, envelope)
 	if err != nil {
-		return nil, canonical.InternalError("semantic event transform failed")
+		return nil, false, canonical.InternalError("semantic event transform failed")
 	}
+	progressive := streamProgressive(in.ClientDelivery, providerDelivery, streamApplied)
 	for _, applied := range streamApplied {
 		for _, obs := range applied.Observations {
-			pendingEffects = append(pendingEffects, effect.ObservationEffect{Observation: observation.ObservationRecord{
-				RouteID:    "",
-				ProviderID: "",
-				ModelID:    "",
-				Code:       strings.TrimSpace(obs.Code),   // swobu:io-string source=boundary
-				Reason:     strings.TrimSpace(obs.Reason), // swobu:io-string source=boundary
-			}})
+			pendingEffects = append(pendingEffects, effect.ObservationEffect{Observation: observationRecordForExchange(
+				in.Target.BackendRef,
+				in.Target.ProviderID(),
+				in.Request.Model(),
+				obs.Code,
+				obs.Reason,
+			)})
 		}
 		for _, loss := range applied.Losses {
-			pendingEffects = append(pendingEffects, effect.LossEffect{Loss: loss})
+			pendingEffects = append(pendingEffects, effect.LossEffect{
+				Loss: loss,
+				Observation: observationRecordForExchange(
+					in.Target.BackendRef,
+					in.Target.ProviderID(),
+					in.Request.Model(),
+					string(loss.ReasonCode),
+					loss.Reason,
+				),
+			})
 		}
 	}
 	if err := effectSink.Commit(ctx, in.ExchangeID, pendingEffects); err != nil {
-		return nil, canonical.InternalError("effect sink commit failed")
+		return nil, false, canonical.InternalError("effect sink commit failed")
 	}
-	return envelope, nil
+	return envelope, progressive, nil
 }
 
-func decodeProviderEnvelope(in ExchangeInput, ingress ProviderIngress) (canonical.EventReader, error) {
+func (r Runner) decodeProviderEnvelope(ctx context.Context, in ExchangeInput, ingress ProviderIngress, streamDecoder ProviderEnvelopeDecoder, documentDecoder ProviderDocumentDecoder) (canonical.EventReader, error) {
 	switch resolved := ingress.(type) {
 	case carrier.CanonicalEventStream:
 		if resolved.Events == nil {
@@ -191,7 +217,10 @@ func decodeProviderEnvelope(in ExchangeInput, ingress ProviderIngress) (canonica
 			if in.ProviderDelivery.Mode != delivery.Streaming {
 				return nil, canonical.InternalError("provider wire stream requires streaming delivery")
 			}
-			return in.ProviderEnvelopeDecoder.DecodeProviderEnvelope(resolved, in.ExchangeID), nil
+			if streamDecoder == nil {
+				return nil, canonical.InternalError("provider wire stream decoder is required")
+			}
+			return streamDecoder.DecodeProviderEnvelope(resolved, in.ExchangeID), nil
 		}
 		return nil, canonical.InternalError("provider wire stream is required")
 	case carrier.WireDocument:
@@ -201,9 +230,13 @@ func decodeProviderEnvelope(in ExchangeInput, ingress ProviderIngress) (canonica
 		if in.ProviderDelivery.Mode != delivery.Buffered {
 			return nil, canonical.InternalError("provider wire document requires buffered delivery")
 		}
-		transformedDoc, _, err := applyDocumentTransformStage(
-			in.Transforms,
+		transformedDocResult, err := applyDocumentTransform(
+			ctx,
+			r.Transforms,
 			in.ExchangeID,
+			in.Target.BackendRef,
+			in.Target.ProviderID(),
+			in.Request.Model(),
 			transform.StageRequestDocumentIn,
 			resolved,
 			in.ProviderDelivery,
@@ -211,13 +244,17 @@ func decodeProviderEnvelope(in ExchangeInput, ingress ProviderIngress) (canonica
 		if err != nil {
 			return nil, err
 		}
-		return in.ProviderDocumentDecoder.DecodeProviderDocument(transformedDoc, in.ExchangeID)
+		transformedDoc := transformedDocResult.Value
+		if documentDecoder == nil {
+			return nil, canonical.InternalError("provider wire document decoder is required")
+		}
+		return documentDecoder.DecodeProviderDocument(transformedDoc, in.ExchangeID)
 	default:
 		return nil, canonical.InternalError("provider ingress carrier is unsupported")
 	}
 }
 
-func encodeClientOutput(ctx context.Context, in ExchangeInput, clientCodec ClientCodec, envelope canonical.EventReader) (TransportResponse, error) {
+func encodeClientOutput(ctx context.Context, in ExchangeInput, clientCodec ClientCodec, envelope canonical.EventReader, progressive bool) (TransportResponse, error) {
 	if in.ClientDelivery.Mode == delivery.Streaming {
 		stream, err := clientCodec.EncodeResponseStream(envelope, in.ClientDelivery)
 		if err != nil {
@@ -225,13 +262,13 @@ func encodeClientOutput(ctx context.Context, in ExchangeInput, clientCodec Clien
 		}
 		stream.Stage = carrier.StageClientResponseOut
 		stream.Framing = toCarrierFraming(in.ClientDelivery.Framing)
-		return NewTransportResponseFromStream(stream), nil
+		return NewTransportResponseFromStream(stream, progressive), nil
 	}
 	response, err := projectClientDocument(ctx, envelope)
 	if err != nil {
 		return TransportResponse{}, err
 	}
-	bodyDoc, err := clientCodec.EncodeResponseDocument(response)
+	bodyDoc, err := clientCodec.EncodeResponseDocument(response.Value)
 	if err != nil {
 		return TransportResponse{}, err
 	}
@@ -250,7 +287,7 @@ func NewTransportResponseFromDocument(doc carrier.WireDocument) TransportRespons
 	}}
 }
 
-func NewTransportResponseFromStream(stream carrier.WireStream) TransportResponse {
+func NewTransportResponseFromStream(stream carrier.WireStream, progressive bool) TransportResponse {
 	header := cloneHeader(stream.Header)
 	if header.Get("Content-Type") == "" {
 		switch stream.Framing {
@@ -268,7 +305,7 @@ func NewTransportResponseFromStream(stream carrier.WireStream) TransportResponse
 		Status: http.StatusOK,
 		Header: header,
 		Body:   body,
-	}}
+	}, Progressive: progressive}
 }
 
 func cloneHeader(in http.Header) http.Header {
@@ -291,43 +328,70 @@ func toCarrierFraming(in delivery.Framing) carrier.Framing {
 	return carrier.FramingNone
 }
 
-func applyDocumentTransformStage(registry transform.Registry, exchangeID string, stage transform.Stage, doc carrier.WireDocument, d delivery.Delivery) (carrier.WireDocument, []effect.Effect, error) {
-	next, applied, err := registry.ApplyDocument(transform.Context{
-		ExchangeID:   exchangeID,
-		Stage:        stage,
-		CarrierStage: doc.Stage,
-		Carrier:      carrier.KindWireDocument,
-		Family:       doc.Family,
-		Delivery:     d,
-	}, doc)
-	if err != nil {
-		return carrier.WireDocument{}, nil, canonical.InternalError("staged request transform failed")
+// streamProgressive keeps source-incremental truth separate from stream-shaped
+// batch output when middleware declares response buffering or streaming loss.
+func streamProgressive(clientDelivery delivery.Delivery, providerDelivery delivery.Delivery, applied []transform.AppliedEventStreamTransform) bool {
+	if !clientDelivery.IsStreaming() || !providerDelivery.IsStreaming() {
+		return false
 	}
-	effects := make([]effect.Effect, 0, len(applied))
-	for _, entry := range applied {
-		for _, obs := range entry.Observations {
-			effects = append(effects, effect.ObservationEffect{Observation: observation.ObservationRecord{
-				RouteID:    "",
-				ProviderID: "",
-				ModelID:    "",
-				Code:       strings.TrimSpace(obs.Code),   // swobu:io-string source=boundary
-				Reason:     strings.TrimSpace(obs.Reason), // swobu:io-string source=boundary
-			}})
+	for _, transform := range applied {
+		if transform.Capabilities.BlocksProgressiveStreaming() {
+			return false
 		}
-		if len(entry.Losses) == 0 {
-			continue
-		}
-		effects = append(effects, effect.LossEffect{Loss: entry.Losses[0]})
-		loss := entry.Losses[0]
-		field := strings.TrimSpace(loss.Field) // swobu:io-string source=boundary
-		if field == "" {
-			field = "unknown_field"
-		}
-		reason := strings.TrimSpace(loss.Reason) // swobu:io-string source=boundary
-		if reason == "" {
-			reason = "unsupported semantic projection"
-		}
-		return carrier.WireDocument{}, effects, UnsupportedProjectionError{Field: field, Reason: fmt.Sprintf("%s (%s)", reason, entry.ID)}
 	}
-	return next, effects, nil
+	return true
+}
+
+func applyDocumentTransform(ctx context.Context, registry transform.Registry, exchangeID string, routeID string, providerID string, modelID string, transformStage transform.Stage, doc carrier.WireDocument, d delivery.Delivery) (Result[carrier.WireDocument], error) {
+	link := NewLink(
+		LinkID(transformStage),
+		documentPortForStage(transformStage),
+		documentPortForStage(transformStage),
+		func(_ context.Context, in carrier.WireDocument) (Result[carrier.WireDocument], error) {
+			next, applied, err := registry.ApplyDocument(transformStage, transform.Context{
+				ExchangeID: exchangeID,
+				Carrier:    carrier.KindWireDocument,
+				Family:     in.Family,
+				Delivery:   d,
+			}, in)
+			if err != nil {
+				return Result[carrier.WireDocument]{}, canonical.InternalError("request transform failed")
+			}
+			effects := make([]effect.Effect, 0, len(applied))
+			for _, entry := range applied {
+				for _, obs := range entry.Observations {
+					effects = append(effects, effect.ObservationEffect{Observation: observationRecordForExchange(routeID, providerID, modelID, obs.Code, obs.Reason)})
+				}
+				if len(entry.Losses) == 0 {
+					continue
+				}
+				loss := entry.Losses[0]
+				effects = append(effects, effect.LossEffect{
+					Loss:        loss,
+					Observation: observationRecordForExchange(routeID, providerID, modelID, string(loss.ReasonCode), loss.Reason),
+				})
+				field := strings.TrimSpace(loss.Field) // swobu:io-string source=boundary
+				if field == "" {
+					field = "unknown_field"
+				}
+				reason := strings.TrimSpace(loss.Reason) // swobu:io-string source=boundary
+				if reason == "" {
+					reason = "unsupported semantic projection"
+				}
+				return Result[carrier.WireDocument]{Effects: effects}, UnsupportedProjectionError{Field: field, Reason: fmt.Sprintf("%s (%s)", reason, entry.ID)}
+			}
+			return NewResult(next, effects...), nil
+		},
+	)
+	return link.Run(ctx, doc)
+}
+
+func observationRecordForExchange(routeID string, providerID string, modelID string, code string, reason string) observation.ObservationRecord {
+	return observation.ObservationRecord{
+		RouteID:    strings.TrimSpace(routeID), // swobu:io-string source=boundary
+		ProviderID: strings.TrimSpace(providerID),
+		ModelID:    strings.TrimSpace(modelID),
+		Code:       strings.TrimSpace(code),   // swobu:io-string source=boundary
+		Reason:     strings.TrimSpace(reason), // swobu:io-string source=boundary
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 type EndpointReader interface {
@@ -19,7 +20,7 @@ type ProviderIngressResolver interface {
 	ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error)
 }
 
-// TODO god object
+// ProviderRequest carries one resolved exchange attempt into provider ingress.
 type ProviderRequest struct {
 	Request         canonical.CanonicalRequest
 	RequestDocument carrier.WireDocument
@@ -48,26 +49,30 @@ func NewProviderRequest(
 }
 
 type ExecutionContract struct {
-	ClientDelivery   delivery.Delivery
-	ProviderDelivery delivery.Delivery
-	ConversionKind   delivery.Conversion
+	// ClientDelivery is the adapter-edge delivery requested by the client-facing side.
+	ClientDelivery protocolsurface.Delivery
+	// ProviderDelivery is the adapter-edge delivery requested of the selected provider target.
+	ProviderDelivery protocolsurface.Delivery
+	// ConversionKind records the internal translation shape implied by the
+	// client/provider delivery pair.
+	ConversionKind delivery.Conversion
 }
 
-func NewExecutionContract(client delivery.Delivery) ExecutionContract {
+func NewExecutionContract(client protocolsurface.Delivery) ExecutionContract {
 	return NewExecutionContractForDeliveries(client, client)
 }
 
-func NewExecutionContractForDeliveries(clientDelivery delivery.Delivery, providerDelivery delivery.Delivery) ExecutionContract {
+func NewExecutionContractForDeliveries(clientDelivery protocolsurface.Delivery, providerDelivery protocolsurface.Delivery) ExecutionContract {
 	return ExecutionContract{
 		ClientDelivery:   clientDelivery,
 		ProviderDelivery: providerDelivery,
-		ConversionKind:   delivery.DeriveConversion(clientDelivery, providerDelivery),
+		ConversionKind:   delivery.DeriveConversion(toInternalDelivery(clientDelivery), toInternalDelivery(providerDelivery)),
 	}
 }
 
-func (c ExecutionContract) WithProviderDelivery(next delivery.Delivery) ExecutionContract {
+func (c ExecutionContract) WithProviderDelivery(next protocolsurface.Delivery) ExecutionContract {
 	c.ProviderDelivery = next
-	c.ConversionKind = delivery.DeriveConversion(c.ClientDelivery, c.ProviderDelivery)
+	c.ConversionKind = delivery.DeriveConversion(toInternalDelivery(c.ClientDelivery), toInternalDelivery(c.ProviderDelivery))
 	return c
 }
 
@@ -78,10 +83,32 @@ func (c ExecutionContract) Validate() error {
 	if err := c.ProviderDelivery.Validate(); err != nil {
 		return fmt.Errorf("provider delivery is invalid")
 	}
-	if want := delivery.DeriveConversion(c.ClientDelivery, c.ProviderDelivery); want != c.ConversionKind {
+	if want := delivery.DeriveConversion(toInternalDelivery(c.ClientDelivery), toInternalDelivery(c.ProviderDelivery)); want != c.ConversionKind {
 		return fmt.Errorf("delivery conversion kind is inconsistent with client/provider delivery")
 	}
 	return nil
+}
+
+func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
+	switch surface.Variant {
+	case protocolsurface.DeliveryVariantStreaming:
+		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
+	case protocolsurface.DeliveryVariantBuffered:
+		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
+	default:
+		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
+	}
+}
+
+func toProtocolsurfaceDelivery(in delivery.Delivery) protocolsurface.Delivery {
+	switch in.Mode {
+	case delivery.Streaming:
+		return protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariantStreaming, Framing: protocolsurface.Framing(in.Framing)}
+	case delivery.Buffered:
+		return protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariantBuffered, Framing: protocolsurface.Framing(in.Framing)}
+	default:
+		return protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariant(""), Framing: protocolsurface.Framing(in.Framing)}
+	}
 }
 
 type ProviderIngress any

@@ -3,12 +3,18 @@ package responses
 import "encoding/json"
 
 type responsesRequestDTO struct {
-	Model              string                       `json:"model"`
-	Input              json.RawMessage              `json:"input"`
-	ToolChoice         json.RawMessage              `json:"tool_choice"`
-	Tools              []responsesToolDefinitionDTO `json:"tools,omitempty"`
-	PreviousResponseID string                       `json:"previous_response_id"`
-	Conversation       string                       `json:"conversation"`
+	Model                string                       `json:"model"`
+	Input                json.RawMessage              `json:"input"`
+	ToolChoice           json.RawMessage              `json:"tool_choice"`
+	Tools                []responsesToolDefinitionDTO `json:"tools,omitempty"`
+	PreviousResponseID   string                       `json:"previous_response_id"`
+	Conversation         string                       `json:"conversation"`
+	Instructions         json.RawMessage              `json:"instructions,omitempty"`
+	Store                json.RawMessage              `json:"store,omitempty"`
+	MaxOutputTokens      json.RawMessage              `json:"max_output_tokens,omitempty"`
+	Stream               json.RawMessage              `json:"stream,omitempty"`
+	PromptCacheKey       json.RawMessage              `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention json.RawMessage              `json:"prompt_cache_retention,omitempty"`
 }
 
 type responsesInputItemDTO struct {

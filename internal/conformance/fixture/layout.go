@@ -6,8 +6,8 @@ var RequiredCases = []string{
 	"responses_buffered_to_buffered",
 	"responses_stream_to_stream",
 	"messages_buffered_to_buffered",
-	"provider_stream_to_client_buffered",
-	"provider_buffered_to_client_stream",
+	"upstream_stream_to_client_buffered",
+	"upstream_buffered_to_client_stream",
 }
 
 var RequiredFiles = []string{
@@ -15,9 +15,9 @@ var RequiredFiles = []string{
 	"client_request.http.json",
 	"client_request.body.json",
 	"canonical_request.json",
-	"provider_request.body.json",
-	"provider_response.body.json",
-	"provider_response.sse",
+	"upstream_request.body.json",
+	"upstream_response.body.json",
+	"upstream_response.sse",
 	"canonical_events.jsonl",
 	"client_response.body.json",
 	"client_response.sse",

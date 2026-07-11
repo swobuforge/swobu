@@ -12,6 +12,7 @@ import (
 	"time"
 
 	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
+	openaicompat "github.com/swobuforge/swobu/internal/adapters/wire/shared/openaicompat"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -89,14 +90,14 @@ func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReade
 	if err != nil {
 		return nil, err
 	}
-	output := canonical.NewConversationOutputWithUsage(
+	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		exchangeID,
 		dto.ID,
 		dto.Model,
 		items,
 		choice.FinishReason,
 		core.ExtractTokenUsage(raw, tokenUsagePathSpec),
-	)
-	return canonical.EventReaderFromCanonicalOutput(exchangeID, output)
+	)), nil
 }
 
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
@@ -353,28 +354,12 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 }
 
 func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, error) {
-	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" { // swobu:io-string source=boundary
-		return nil, nil
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		if text == "" {
-			return nil, nil
-		}
-		return []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, text)}, nil
-	}
-
-	var parts []struct {
-		Type       string `json:"type"`
-		Text       string `json:"text"`
-		InputText  string `json:"input_text"`
-		OutputText string `json:"output_text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
+	parts, err := openaicompat.DecodeContentParts(raw, "chat completions response content is invalid")
+	if err != nil {
 		return nil, err
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
-	for _, part := range parts {
+	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPart) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"
@@ -392,8 +377,12 @@ func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, e
 				decoded = append(decoded, canonical.NewTextItem(canonical.ItemAuthorAssistant, text))
 			}
 		default:
-			return nil, canonical.UnsupportedOperation("chat completions response content contains an unsupported part type")
+			return canonical.UnsupportedOperation("chat completions response content contains an unsupported part type")
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return decoded, nil
 }

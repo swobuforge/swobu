@@ -3,6 +3,7 @@ package effect
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/turnstate"
@@ -22,19 +23,20 @@ func (s StoreBackedSink) Commit(ctx context.Context, _ string, effects []Effect)
 		switch e := applied.(type) {
 		case ObservationEffect:
 			if s.Observations != nil {
-				if err := s.Observations.Put(ctx, e.Observation); err != nil {
+				obs := stampObservationRecord(e.Observation)
+				if err := s.Observations.Put(ctx, obs); err != nil {
 					return err
 				}
 			}
 		case LossEffect:
 			if s.Observations != nil {
+				obs := stampObservationRecord(e.Observation)
 				reasonCode := strings.TrimSpace(string(e.Loss.ReasonCode)) // swobu:io-string source=boundary
-				obs := observation.ObservationRecord{
-					RouteID:    "",
-					ProviderID: "",
-					ModelID:    "",
-					Code:       reasonCode,
-					Reason:     strings.TrimSpace(e.Loss.Reason), // swobu:io-string source=boundary
+				if obs.Code == "" {
+					obs.Code = reasonCode
+				}
+				if obs.Reason == "" {
+					obs.Reason = strings.TrimSpace(e.Loss.Reason) // swobu:io-string source=boundary
 				}
 				if obs.Code == "" {
 					obs.Code = "loss"
@@ -52,4 +54,11 @@ func (s StoreBackedSink) Commit(ctx context.Context, _ string, effects []Effect)
 		}
 	}
 	return nil
+}
+
+func stampObservationRecord(obs observation.ObservationRecord) observation.ObservationRecord {
+	if obs.ObservedAt == 0 {
+		obs.ObservedAt = time.Now().Unix()
+	}
+	return obs
 }

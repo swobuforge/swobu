@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -72,6 +73,12 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if parsed, ok := profile.ParseProviderID(strings.TrimSpace(req.Target.ProviderID())); !ok || parsed != e.profile.ProviderID() { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("provider policy is unsupported for OpenAI-family adapter runtime")
 	}
+	if err := req.Contract.ProviderDelivery.Validate(); err != nil {
+		return nil, canonical.UnsupportedDelivery("OpenAI-family provider delivery is unsupported")
+	}
+	if req.Contract.ProviderDelivery.IsStreaming() && req.Contract.ProviderDelivery.Framing != protocolsurface.FramingSSE {
+		return nil, canonical.UnsupportedDelivery("OpenAI-family provider does not implement the requested delivery framing")
+	}
 	wireReqCarrier := req.RequestDocument
 	if wireReqCarrier.IsEmpty() {
 		codec, codecErr := providerRequestEncoderForProtocol(req.Target.ProtocolKind)
@@ -81,7 +88,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 			}
 			return nil, codecErr
 		}
-		encoded, encodeErr := codec.EncodeProviderRequestDocument(req.Request, req.Contract.ProviderDelivery)
+		encoded, encodeErr := codec.EncodeProviderRequestDocument(req.Request, toInternalDelivery(req.Contract.ProviderDelivery))
 		if encodeErr != nil {
 			return nil, encodeErr
 		}
@@ -129,15 +136,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		backendErr := httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 		return nil, classifyBackendError(backendErr)
 	}
-	if req.Contract.ProviderDelivery.Mode == delivery.Streaming {
-		framing := carrier.FramingSSE
-		if req.Contract.ProviderDelivery.Framing != delivery.FramingSSE {
-			framing = carrier.FramingNone
-		}
+	if req.Contract.ProviderDelivery.IsStreaming() {
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
-			Framing: framing,
+			Framing: carrier.FramingSSE,
 			Header:  resp.Header.Clone(),
 			Frames:  carrier.FrameReaderFromReadCloser(resp.Body),
 		}, nil
@@ -209,6 +212,17 @@ func providerCredentialRequiredMessage(providerSpec string) string {
 		return "provider credential reference is required"
 	}
 	return string(providerID) + " provider credential reference is required"
+}
+
+func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
+	switch surface.Variant {
+	case protocolsurface.DeliveryVariantStreaming:
+		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
+	case protocolsurface.DeliveryVariantBuffered:
+		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
+	default:
+		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
+	}
 }
 
 func providerRequestEncoderForProtocol(kind protocolkind.ProtocolKind) (interface {

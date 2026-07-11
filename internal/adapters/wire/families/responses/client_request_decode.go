@@ -17,8 +17,8 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto responsesRequestDTO
-	if err := json.Unmarshal(raw, &dto); err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request body is invalid JSON")
+	if err := sse.DecodeStrictJSON(raw, &dto, "responses request"); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID)) // swobu:io-string source=boundary
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "responses")

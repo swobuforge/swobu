@@ -10,6 +10,7 @@ import (
 	"time"
 
 	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
+	openaicompat "github.com/swobuforge/swobu/internal/adapters/wire/shared/openaicompat"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -81,14 +82,14 @@ func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReade
 	if err != nil {
 		return nil, err
 	}
-	output := canonical.NewConversationOutputWithUsage(
+	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		exchangeID,
 		dto.ID,
 		dto.Model,
 		items,
 		"completed",
 		core.ExtractTokenUsage(raw, tokenUsagePathSpec),
-	)
-	return canonical.EventReaderFromCanonicalOutput(exchangeID, output)
+	)), nil
 }
 
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
@@ -284,12 +285,22 @@ func decodeOutputItems(items []struct {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
 		switch itemType {
 		case "message":
-			parts, err := decodeMessageTextParts(item.Content)
+			parts, err := openaicompat.DecodeContentParts(item.Content, "responses message content is invalid")
+			if err != nil {
+				return nil, canonical.InternalError("responses message content is invalid")
+			}
+			err = openaicompat.WalkContentParts(parts, func(idx int, part openaicompat.ContentPart) error {
+				partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
+				switch partType {
+				case "text", "output_text", "input_text":
+					output = append(output, canonical.NewTextOutputItem(fmt.Sprintf("text_%d", len(output)+idx), part.Text))
+				default:
+					return canonical.UnsupportedOperation("responses output item content part type is not implemented")
+				}
+				return nil
+			})
 			if err != nil {
 				return nil, err
-			}
-			for idx, part := range parts {
-				output = append(output, canonical.NewTextOutputItem(fmt.Sprintf("text_%d", len(output)+idx), part.Text))
 			}
 		case "function_call", "mcp_call":
 			rawArgs := strings.TrimSpace(item.Arguments) // swobu:io-string source=boundary

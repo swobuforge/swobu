@@ -11,7 +11,7 @@ func TestProviderRequestConstructor_HasSingleProductionCallsite(t *testing.T) {
 	t.Parallel()
 
 	root := packageDirFromHere(t, "..")
-	allowed := filepath.Join(root, "bootstrap", "exchange_runtime_adapter.go")
+	allowed := filepath.Join(root, "bootstrap", "provider_ingress_resolver_adapter.go")
 	var hits []string
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {

@@ -15,10 +15,10 @@ func TestProtocolFamilies_DecodeProviderStream_ValidatesWireStreamInvariant(t *t
 		name string
 		rel  string
 	}{
-		{name: "chatcompletions", rel: filepath.Join("..", "adapters", "wire", "families", "chatcompletions", "client_request_decoder.go")},
-		{name: "completions", rel: filepath.Join("..", "adapters", "wire", "families", "completions", "client_request_decoder.go")},
-		{name: "messages", rel: filepath.Join("..", "adapters", "wire", "families", "messages", "client_document_encoder.go")},
-		{name: "responses", rel: filepath.Join("..", "adapters", "wire", "families", "responses", "client_document_encoder.go")},
+		{name: "chatcompletions", rel: filepath.Join("..", "adapters", "wire", "families", "chatcompletions", "provider_codec.go")},
+		{name: "completions", rel: filepath.Join("..", "adapters", "wire", "families", "completions", "provider_codec.go")},
+		{name: "messages", rel: filepath.Join("..", "adapters", "wire", "families", "messages", "provider_codec.go")},
+		{name: "responses", rel: filepath.Join("..", "adapters", "wire", "families", "responses", "provider_codec.go")},
 	}
 
 	for _, tc := range cases {
@@ -44,7 +44,7 @@ func assertDecodeStreamEntryCallsWireStreamValidator(t *testing.T, filePath stri
 	var foundValidateCall bool
 	ast.Inspect(f, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name == nil || fn.Name.Name != "DecodeProviderStream" {
+		if !ok || fn.Name == nil || fn.Name.Name != "DecodeProviderEnvelope" {
 			return true
 		}
 		foundFunc = true
@@ -68,10 +68,10 @@ func assertDecodeStreamEntryCallsWireStreamValidator(t *testing.T, filePath stri
 	})
 
 	if !foundFunc {
-		t.Fatalf("%s missing DecodeProviderStream", filePath)
+		t.Fatalf("%s missing DecodeProviderEnvelope", filePath)
 	}
 	if !foundValidateCall {
-		t.Fatalf("%s DecodeProviderStream must call core.ValidateResponseSSECarrierStream", filePath)
+		t.Fatalf("%s DecodeProviderEnvelope must call core.ValidateResponseSSECarrierStream", filePath)
 	}
 }
 
@@ -87,7 +87,7 @@ func assertDecodeStreamEntryCarriesInvariantDetails(t *testing.T, filePath strin
 	var foundInvariantDetailKey bool
 	ast.Inspect(f, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name == nil || fn.Name.Name != "DecodeProviderStream" {
+		if !ok || fn.Name == nil || fn.Name.Name != "DecodeProviderEnvelope" {
 			return true
 		}
 		foundFunc = true
@@ -106,10 +106,10 @@ func assertDecodeStreamEntryCarriesInvariantDetails(t *testing.T, filePath strin
 	})
 
 	if !foundFunc {
-		t.Fatalf("%s missing DecodeProviderStream", filePath)
+		t.Fatalf("%s missing DecodeProviderEnvelope", filePath)
 	}
 	if !foundInvariantDetailKey {
-		t.Fatalf("%s DecodeProviderStream must include details key %q", filePath, "wire_stream_invariant")
+		t.Fatalf("%s DecodeProviderEnvelope must include details key %q", filePath, "wire_stream_invariant")
 	}
 }
 
@@ -125,7 +125,7 @@ func assertDecodeStreamEntryDetailUsesInvariantError(t *testing.T, filePath stri
 	var foundErrErrorCall bool
 	ast.Inspect(f, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name == nil || fn.Name.Name != "DecodeProviderStream" {
+		if !ok || fn.Name == nil || fn.Name.Name != "DecodeProviderEnvelope" {
 			return true
 		}
 		foundFunc = true
@@ -149,9 +149,9 @@ func assertDecodeStreamEntryDetailUsesInvariantError(t *testing.T, filePath stri
 	})
 
 	if !foundFunc {
-		t.Fatalf("%s missing DecodeProviderStream", filePath)
+		t.Fatalf("%s missing DecodeProviderEnvelope", filePath)
 	}
 	if !foundErrErrorCall {
-		t.Fatalf("%s DecodeProviderStream must include err.Error() for wire_stream_invariant detail", filePath)
+		t.Fatalf("%s DecodeProviderEnvelope must include err.Error() for wire_stream_invariant detail", filePath)
 	}
 }

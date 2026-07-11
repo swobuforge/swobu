@@ -3,9 +3,14 @@ package chatcompletions
 import "encoding/json"
 
 type chatCompletionsRequestDTO struct {
-	Model    string                             `json:"model"`
-	Messages []chatCompletionsMessageDTO        `json:"messages"`
-	Tools    []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
+	Model                string                             `json:"model"`
+	Messages             []chatCompletionsMessageDTO        `json:"messages"`
+	Tools                []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
+	ToolChoice           json.RawMessage                    `json:"tool_choice,omitempty"`
+	MaxTokens            json.RawMessage                    `json:"max_tokens,omitempty"`
+	Stream               json.RawMessage                    `json:"stream,omitempty"`
+	PromptCacheKey       json.RawMessage                    `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention json.RawMessage                    `json:"prompt_cache_retention,omitempty"`
 }
 
 type chatCompletionsMessageDTO struct {
@@ -98,11 +103,4 @@ type chatCompletionsDeltaToolCallDTO struct {
 type chatCompletionsDeltaFunctionDTO struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-}
-
-type textContentPartDTO struct {
-	Type       string `json:"type"`
-	Text       string `json:"text"`
-	InputText  string `json:"input_text"`
-	OutputText string `json:"output_text"`
 }

@@ -3,29 +3,18 @@ package messages
 import "encoding/json"
 
 type messagesRequestDTO struct {
-	Model    string               `json:"model"`
-	Messages []messagesMessageDTO `json:"messages"`
-	Tools    []messagesToolDTO    `json:"tools,omitempty"`
+	Model                string               `json:"model"`
+	Messages             []messagesMessageDTO `json:"messages"`
+	Tools                []messagesToolDTO    `json:"tools,omitempty"`
+	MaxTokens            json.RawMessage      `json:"max_tokens,omitempty"`
+	Stream               json.RawMessage      `json:"stream,omitempty"`
+	PromptCacheKey       json.RawMessage      `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention json.RawMessage      `json:"prompt_cache_retention,omitempty"`
 }
 
 type messagesMessageDTO struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
-}
-
-type messagesContentPartDTO struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Input     json.RawMessage `json:"input"`
-	ToolUseID string          `json:"tool_use_id"`
-	Content   json.RawMessage `json:"content"`
-}
-
-type messagesTextPartDTO struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
 }
 
 type messagesToolDTO struct {

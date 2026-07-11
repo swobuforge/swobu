@@ -15,6 +15,8 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
+	"github.com/swobuforge/swobu/internal/transform"
 )
 
 type blockingEnvelopeReader struct {
@@ -41,8 +43,8 @@ func (r *blockingEnvelopeReader) Next(context.Context) (canonical.Event, error) 
 func (r *blockingEnvelopeReader) Close(context.Context) error { return nil }
 
 func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
-	runner := Runner{ResolveProviderIngress: bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`))}
-	out, err := runner.Run(context.Background(), withRuntime(ExchangeInput{
+	runner := withRuntime(Runner{ResolveProviderIngress: bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`))})
+	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
@@ -50,8 +52,8 @@ func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
-	}))
+		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -71,8 +73,8 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
-	runner := Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE)))}
-	out, err := runner.Run(context.Background(), withRuntime(ExchangeInput{
+	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE)))})
+	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test_stream",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
@@ -80,13 +82,16 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-	}))
+		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if out.Transport.Body == nil {
 		t.Fatalf("ingress stream body was nil")
+	}
+	if !out.Progressive {
+		t.Fatal("streaming response should remain progressive without buffering middleware")
 	}
 	streamRaw, readErr := io.ReadAll(out.Transport.Body)
 	if readErr != nil {
@@ -94,6 +99,34 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(streamRaw), "response.completed") {
 		t.Fatalf("ingress stream missing terminal marker: %s", string(streamRaw))
+	}
+}
+
+func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenMiddlewareBuffersResponse(t *testing.T) {
+	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+	runner := withRuntime(Runner{
+		ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE))),
+		Transforms: transform.NewRegistry(nil, []transform.EventStreamTransform{
+			bufferingResponseTransform{},
+		}),
+	})
+	out, err := runner.Run(context.Background(), ExchangeInput{
+		ExchangeID:       "ex_test_stream_buffered_middleware",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Request:          testCanonicalRequest("m"),
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if out.Progressive {
+		t.Fatal("buffering middleware should disable progressive streaming truth")
 	}
 }
 
@@ -108,8 +141,8 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
 
-	runner := Runner{ResolveProviderIngress: streamingProviderIngressResolver(providerRead)}
-	out, err := runner.Run(context.Background(), withRuntime(ExchangeInput{
+	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(providerRead)})
+	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test_stream_non_blocking",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
@@ -117,8 +150,8 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-	}))
+		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -151,10 +184,10 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 }
 
 func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
-	runner := Runner{ResolveProviderIngress: func(context.Context, ProviderRequest) (ProviderIngress, error) {
+	runner := withRuntime(Runner{ResolveProviderIngress: func(context.Context, ProviderRequest) (ProviderIngress, error) {
 		return nil, nil
-	}}
-	_, err := runner.Run(context.Background(), withRuntime(ExchangeInput{
+	}})
+	_, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_invalid_transport_shape",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
@@ -162,8 +195,8 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
-	}))
+		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+	})
 	if err == nil {
 		t.Fatal("Run() expected error for invalid provider ingress")
 	}
@@ -173,8 +206,8 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 }
 
 func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
-	runner := Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n")))}
-	_, err := runner.Run(context.Background(), withRuntime(ExchangeInput{
+	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n")))})
+	_, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_invalid_delivery_shape",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
@@ -182,8 +215,8 @@ func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
-	}))
+		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+	})
 	if err == nil {
 		t.Fatal("Run() expected error for buffered delivery with transport stream")
 	}
@@ -202,8 +235,8 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		<-release
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
-	runner := Runner{ResolveProviderIngress: streamingProviderIngressResolver(providerRead)}
-	out, err := runner.Run(context.Background(), withRuntime(ExchangeInput{
+	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(providerRead)})
+	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_chat_stream_non_blocking",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
@@ -211,8 +244,8 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-	}))
+		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -260,26 +293,119 @@ func streamingProviderIngressResolver(stream io.ReadCloser) func(context.Context
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
-			Framing: toCarrierFraming(req.Contract.ProviderDelivery.Framing),
+			Framing: toCarrierFraming(delivery.Framing(req.Contract.ProviderDelivery.Framing)),
 			Frames:  carrier.FrameReaderFromReadCloser(stream),
 		}, nil
 	}
 }
 
-func withRuntime(in ExchangeInput) ExchangeInput {
-	in.ClientCodec = testClientCodec{
-		req:    clientRequestDecoderForFamily(in.ClientFamily),
-		doc:    responseDocumentEncoderForFamily(in.ClientFamily),
-		stream: responseStreamEncoderForFamily(in.ClientFamily),
+type bufferingResponseTransform struct{}
+
+func (bufferingResponseTransform) ID() string { return "test.buffering" }
+
+func (bufferingResponseTransform) Stage() transform.Stage {
+	return transform.StageSemanticEvents
+}
+
+func (bufferingResponseTransform) Capabilities() transform.MiddlewareCapabilities {
+	return transform.MiddlewareCapabilities{BuffersResponse: true}
+}
+
+func (bufferingResponseTransform) Match(transform.Context, canonical.EventReader) bool {
+	return true
+}
+
+func (bufferingResponseTransform) Wrap(_ transform.Context, reader canonical.EventReader) (canonical.EventReader, transform.Outcome, error) {
+	return reader, transform.Outcome{}, nil
+}
+
+func withRuntime(runner Runner) Runner {
+	runner.Runtime = testRuntimeResolver{}
+	return runner
+}
+
+type testRuntimeResolver struct{}
+
+func (testRuntimeResolver) ClientCodec(f canonical.ClientFamily) ClientCodec {
+	switch f {
+	case canonical.ClientFamilyChatCompletions:
+		return testClientCodec{
+			req:    chatcompletions.ClientRequestDecoder{},
+			doc:    chatcompletions.ResponseDocumentEncoder{},
+			stream: chatcompletions.ResponseStreamEncoder{},
+		}
+	case canonical.ClientFamilyResponses:
+		return testClientCodec{
+			req:    responses.ClientRequestDecoder{},
+			doc:    responses.ResponseDocumentEncoder{},
+			stream: responses.ResponseStreamEncoder{},
+		}
+	case canonical.ClientFamilyCompletions:
+		return testClientCodec{
+			req:    completions.ClientRequestDecoder{},
+			doc:    completions.ResponseDocumentEncoder{},
+			stream: completions.ResponseStreamEncoder{},
+		}
+	case canonical.ClientFamilyMessages:
+		return testClientCodec{
+			req:    messages.ClientRequestDecoder{},
+			doc:    messages.ResponseDocumentEncoder{},
+			stream: messages.ResponseStreamEncoder{},
+		}
+	default:
+		return nil
 	}
-	in.ProviderRequestDocumentEncoder = providerRequestEncoderForProtocol(in.ProviderProtocol)
-	if in.ProviderDelivery.Mode == delivery.Streaming {
-		in.ProviderEnvelopeDecoder = providerResponseEnvelopeDecoderForProtocol(in.ProviderProtocol)
+}
+
+func (testRuntimeResolver) ProviderRequestDocumentEncoder(kind protocolkind.ProtocolKind) ProviderRequestDocumentEncoder {
+	switch kind {
+	case protocolkind.ChatCompletions:
+		return chatcompletions.ProviderRequestDocumentEncoder{}
+	case protocolkind.Responses:
+		return responses.ProviderRequestDocumentEncoder{}
+	case protocolkind.Completions:
+		return completions.ProviderRequestDocumentEncoder{}
+	case protocolkind.Messages:
+		return messages.ProviderRequestDocumentEncoder{}
+	default:
+		return nil
 	}
-	if in.ProviderDelivery.Mode == delivery.Buffered {
-		in.ProviderDocumentDecoder = providerResponseDocumentDecoderForProtocol(in.ProviderProtocol)
+}
+
+func (testRuntimeResolver) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) ProviderEnvelopeDecoder {
+	if d.Mode != delivery.Streaming {
+		return nil
 	}
-	return in
+	switch kind {
+	case protocolkind.ChatCompletions:
+		return chatcompletions.ProviderEnvelopeDecoder{}
+	case protocolkind.Responses:
+		return responses.ProviderEnvelopeDecoder{}
+	case protocolkind.Completions:
+		return completions.ProviderEnvelopeDecoder{}
+	case protocolkind.Messages:
+		return messages.ProviderEnvelopeDecoder{}
+	default:
+		return nil
+	}
+}
+
+func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) ProviderDocumentDecoder {
+	if d.Mode != delivery.Buffered {
+		return nil
+	}
+	switch kind {
+	case protocolkind.ChatCompletions:
+		return chatcompletions.ProviderDocumentDecoder{}
+	case protocolkind.Responses:
+		return responses.ProviderDocumentDecoder{}
+	case protocolkind.Completions:
+		return completions.ProviderDocumentDecoder{}
+	case protocolkind.Messages:
+		return messages.ProviderDocumentDecoder{}
+	default:
+		return nil
+	}
 }
 
 type testClientCodec struct {
@@ -304,108 +430,6 @@ func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput
 
 func (c testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
 	return c.stream.EncodeResponseStream(events, d)
-}
-
-func responseDocumentEncoderForFamily(family canonical.ClientFamily) interface {
-	EncodeResponseDocument(canonical.CanonicalOutput) (carrier.WireDocument, error)
-} {
-	switch family {
-	case canonical.ClientFamilyChatCompletions:
-		return chatcompletions.ResponseDocumentEncoder{}
-	case canonical.ClientFamilyResponses:
-		return responses.ResponseDocumentEncoder{}
-	case canonical.ClientFamilyCompletions:
-		return completions.ResponseDocumentEncoder{}
-	case canonical.ClientFamilyMessages:
-		return messages.ResponseDocumentEncoder{}
-	default:
-		panic("test response document encoder missing for family " + string(family))
-	}
-}
-
-func responseStreamEncoderForFamily(family canonical.ClientFamily) interface {
-	EncodeResponseStream(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
-} {
-	switch family {
-	case canonical.ClientFamilyChatCompletions:
-		return chatcompletions.ResponseStreamEncoder{}
-	case canonical.ClientFamilyResponses:
-		return responses.ResponseStreamEncoder{}
-	case canonical.ClientFamilyCompletions:
-		return completions.ResponseStreamEncoder{}
-	case canonical.ClientFamilyMessages:
-		return messages.ResponseStreamEncoder{}
-	default:
-		panic("test response stream encoder missing for family " + string(family))
-	}
-}
-
-func providerRequestEncoderForProtocol(kind protocolkind.ProtocolKind) interface {
-	EncodeProviderRequestDocument(canonical.CanonicalRequest, delivery.Delivery) (carrier.WireDocument, error)
-} {
-	switch kind {
-	case protocolkind.ChatCompletions:
-		return chatcompletions.ProviderRequestDocumentEncoder{}
-	case protocolkind.Responses:
-		return responses.ProviderRequestDocumentEncoder{}
-	case protocolkind.Completions:
-		return completions.ProviderRequestDocumentEncoder{}
-	case protocolkind.Messages:
-		return messages.ProviderRequestDocumentEncoder{}
-	default:
-		panic("test provider request encoder missing for protocol " + string(kind))
-	}
-}
-
-func clientRequestDecoderForFamily(family canonical.ClientFamily) interface {
-	DecodeClientRequest(carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error)
-} {
-	switch family {
-	case canonical.ClientFamilyChatCompletions:
-		return chatcompletions.ClientRequestDecoder{}
-	case canonical.ClientFamilyResponses:
-		return responses.ClientRequestDecoder{}
-	case canonical.ClientFamilyCompletions:
-		return completions.ClientRequestDecoder{}
-	case canonical.ClientFamilyMessages:
-		return messages.ClientRequestDecoder{}
-	default:
-		panic("test client request decoder missing for family " + string(family))
-	}
-}
-
-func providerResponseDocumentDecoderForProtocol(kind protocolkind.ProtocolKind) interface {
-	DecodeProviderDocument(carrier.WireDocument, string) (canonical.EventReader, error)
-} {
-	switch kind {
-	case protocolkind.ChatCompletions:
-		return chatcompletions.ProviderDocumentDecoder{}
-	case protocolkind.Responses:
-		return responses.ProviderDocumentDecoder{}
-	case protocolkind.Completions:
-		return completions.ProviderDocumentDecoder{}
-	case protocolkind.Messages:
-		return messages.ProviderDocumentDecoder{}
-	default:
-		panic("test provider response document decoder missing for protocol " + string(kind))
-	}
-}
-
-func providerResponseEnvelopeDecoderForProtocol(kind protocolkind.ProtocolKind) interface {
-	DecodeProviderEnvelope(carrier.WireStream, string) canonical.EventReader
-} {
-	switch kind {
-	case protocolkind.ChatCompletions:
-		return chatcompletions.ProviderEnvelopeDecoder{}
-	case protocolkind.Responses:
-		return responses.ProviderEnvelopeDecoder{}
-	case protocolkind.Completions:
-		return completions.ProviderEnvelopeDecoder{}
-	case protocolkind.Messages:
-		return messages.ProviderEnvelopeDecoder{}
-	default:
-		panic("test provider response envelope decoder missing for protocol " + string(kind))
-	}
 }
 
 func testCanonicalRequest(model string) canonical.CanonicalRequest {

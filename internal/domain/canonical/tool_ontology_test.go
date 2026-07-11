@@ -1,6 +1,9 @@
 package canonical
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestToolPolicyClone_PreservesSpecificToolID(t *testing.T) {
 	t.Parallel()
@@ -58,4 +61,25 @@ func TestRequestToolDeclMetadata_RoundTripsCapabilityDeclarations(t *testing.T) 
 	if got.CapabilityConfig().RawObject() != `{"region":"us"}` {
 		t.Fatalf("capability config = %q, want %q", got.CapabilityConfig().RawObject(), `{"region":"us"}`)
 	}
+}
+
+func TestParseToolPolicyMode_RejectsUnknownValues(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := ParseToolPolicyMode("future_mode"); ok {
+		t.Fatal("expected unknown mode to fail closed")
+	}
+}
+
+func TestDecodeToolPolicyMetadata_RejectsUnknownMode(t *testing.T) {
+	t.Parallel()
+
+	if _, err := decodeToolPolicyMetadata(`{"mode":"future_mode"}`); !isCanonicalBadRequest(err) {
+		t.Fatalf("expected BAD_REQUEST, got %v", err)
+	}
+}
+
+func isCanonicalBadRequest(err error) bool {
+	var typed Error
+	return errors.As(err, &typed) && typed.Code == ErrorCodeBadRequest
 }

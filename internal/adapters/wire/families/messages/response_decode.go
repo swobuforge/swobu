@@ -83,14 +83,14 @@ func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReade
 			return nil, canonical.InternalError("messages response content block is unsupported")
 		}
 	}
-	output := canonical.NewConversationOutputWithUsage(
+	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		exchangeID,
 		dto.ID,
 		dto.Model,
 		items,
 		dto.StopReason,
 		core.ExtractTokenUsage(raw, tokenUsagePathSpec),
-	)
-	return canonical.EventReaderFromCanonicalOutput(exchangeID, output)
+	)), nil
 }
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.

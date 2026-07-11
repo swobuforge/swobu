@@ -23,17 +23,11 @@ type ProviderRoutePolicy interface {
 	AuthStrategy() authStrategy
 }
 
-// ProfileFactRecord controls staged request/response transform modules for one
-// provider route policy. Defaults are zero-values (all disabled).
+// ProfileFactRecord captures route facts for one provider policy. It is not a
+// toggle bundle.
 type ProfileFactRecord struct {
-	CacheAffinityKey           string
-	CacheAffinityRetention     string
-	CacheRetentionUnsupported  bool
-	ReduceDuplicateUsageEvents bool
-}
-
-func (p ProfileFactRecord) Enabled() bool {
-	return p.ReduceDuplicateUsageEvents || p.CacheAffinityKey != "" || p.CacheAffinityRetention != ""
+	CacheAffinityKey       string
+	CacheAffinityRetention string
 }
 
 type openAIProviderRoutePolicy struct{}
@@ -63,13 +57,7 @@ func (ollamaProviderRoutePolicy) ProviderID() profile.ProviderID {
 }
 
 func (ollamaProviderRoutePolicy) Facts(req canonical.CanonicalRequest) ProfileFactRecord {
-	intent := req.CacheIntent()
-	facts := routeProfileFactRecord(req)
-	if intent.Retention() != canonical.CacheRetentionUnset {
-		facts.CacheAffinityRetention = ""
-		facts.CacheRetentionUnsupported = true
-	}
-	return facts
+	return routeProfileFactRecord(req)
 }
 func (ollamaProviderRoutePolicy) UsageDecoder() ProviderUsageDecoder {
 	return passthroughProviderUsageDecoder{}
@@ -81,9 +69,7 @@ func (openAICompatibleProviderRoutePolicy) ProviderID() profile.ProviderID {
 }
 
 func (openAICompatibleProviderRoutePolicy) Facts(req canonical.CanonicalRequest) ProfileFactRecord {
-	facts := routeProfileFactRecord(req)
-	facts.ReduceDuplicateUsageEvents = true
-	return facts
+	return routeProfileFactRecord(req)
 }
 func (openAICompatibleProviderRoutePolicy) UsageDecoder() ProviderUsageDecoder {
 	return passthroughProviderUsageDecoder{}
@@ -95,9 +81,7 @@ func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 }
 
 func (openRouterProviderRoutePolicy) Facts(req canonical.CanonicalRequest) ProfileFactRecord {
-	facts := routeProfileFactRecord(req)
-	facts.ReduceDuplicateUsageEvents = true
-	return facts
+	return routeProfileFactRecord(req)
 }
 func (openRouterProviderRoutePolicy) UsageDecoder() ProviderUsageDecoder {
 	return passthroughProviderUsageDecoder{}

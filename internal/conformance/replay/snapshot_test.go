@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	"github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/conformance/fixture"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -23,13 +23,18 @@ import (
 )
 
 type fixtureEvent struct {
-	Seq     int64  `json:"seq"`
-	Kind    string `json:"kind"`
-	EnvKind string `json:"env_kind"`
-	Status  string `json:"status"`
-	Text    string `json:"text"`
-	EnvID   string `json:"env_id"`
-	Parent  string `json:"parent"`
+	Seq       int64  `json:"seq"`
+	Kind      string `json:"kind"`
+	EnvKind   string `json:"env_kind"`
+	Status    string `json:"status"`
+	Text      string `json:"text"`
+	Args      string `json:"args"`
+	Name      string `json:"name"`
+	ToolUseID string `json:"tool_use_id"`
+	ResultID  string `json:"result_id"`
+	Model     string `json:"model"`
+	EnvID     string `json:"env_id"`
+	Parent    string `json:"parent"`
 }
 
 func TestExchangeReplay(t *testing.T) {
@@ -65,82 +70,95 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 	t.Helper()
 	clientFamily, providerFamily := mustMapFamilies(t, contract)
 	clientDelivery, providerDelivery := mustMapDeliveries(t, contract)
-	clientRequest := []byte(readFile(t, filepath.Join(caseDir, "client_request.body.json")))
-	providerResponseBody := []byte(readFile(t, filepath.Join(caseDir, "provider_response.body.json")))
-	providerResponseSSE := readFile(t, filepath.Join(caseDir, "provider_response.sse"))
-	requestDecoder, err := protocolregistry.ForClientRequestDecoder(clientFamily)
-	if err != nil {
-		t.Fatalf("client request decoder: %v", err)
+	resolver := exchangeruntime.NewResolver()
+	clientCodec := resolver.ClientCodec(clientFamily)
+	if clientCodec == nil {
+		t.Fatalf("client codec missing for family %s", clientFamily)
 	}
-	request, _, err := requestDecoder.DecodeClientRequest(carrier.WireDocument{
-		Leg:    carrier.LegClientRequestIn,
-		Family: protocolkind.ProtocolKind(clientFamily),
-		Media:  "application/json",
-		Raw:    append([]byte(nil), clientRequest...),
-	})
+	clientRequest := []byte(readFile(t, filepath.Join(caseDir, "client_request.body.json")))
+	upstreamResponseBody := []byte(readFile(t, filepath.Join(caseDir, "upstream_response.body.json")))
+	upstreamResponseSSE := readFile(t, filepath.Join(caseDir, "upstream_response.sse"))
+	request, _, err := clientCodec.DecodeClientRequest(carrier.NewWireDocument(
+		carrier.StageClientRequestIn,
+		protocolkind.ProtocolKind(clientFamily),
+		"application/json",
+		nil,
+		clientRequest,
+		carrier.Meta{},
+	))
 	if err != nil {
 		t.Fatalf("decode client request: %v", err)
 	}
 	var capturedProviderRequest []byte
-	runner := exchange.Runner{ProviderExecute: func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderTransportResponse, error) {
-		capturedProviderRequest = append(capturedProviderRequest[:0], req.ProviderWire.Raw...)
+	runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+		capturedProviderRequest = append(capturedProviderRequest[:0], req.RequestDocument.RawBytes()...)
 		if providerDelivery.Mode == delivery.Streaming {
-			return exchange.ProviderTransportResponse{
-				Stream: io.NopCloser(strings.NewReader(providerResponseSSE)),
+			return carrier.WireStream{
+				Stage:   carrier.StageProviderIngressIn,
+				Family:  req.Target.ProtocolKind,
+				Framing: carrier.FramingSSE,
+				Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(upstreamResponseSSE))),
 			}, nil
 		}
-		return exchange.ProviderTransportResponse{
-			Document: providerResponseBody,
-		}, nil
-	}}
-	out, err := runner.Run(context.Background(), withRuntimeInput(exchange.ClientInput{
+		return carrier.NewWireDocument(
+			carrier.StageProviderIngressIn,
+			req.Target.ProtocolKind,
+			"application/json",
+			nil,
+			upstreamResponseBody,
+			carrier.Meta{},
+		), nil
+	}})
+	out, err := runner.Run(context.Background(), exchange.ExchangeInput{
 		ExchangeID:       "fixture_exchange",
 		ClientFamily:     clientFamily,
 		ClientDelivery:   clientDelivery,
 		Request:          request,
-		ProviderFamily:   providerFamily,
+		ProviderProtocol: providerFamily,
 		ProviderDelivery: providerDelivery,
 		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", providerFamily, "", "", ""),
-		Contract:         exchange.NewExecutionContract(clientDelivery).WithProviderDelivery(providerDelivery),
-	}))
+		Contract:         exchange.NewExecutionContract(toProtocolsurfaceDelivery(clientDelivery)).WithProviderDelivery(toProtocolsurfaceDelivery(providerDelivery)),
+	})
 	if err != nil {
 		t.Fatalf("runner replay failed: %v", err)
 	}
-	assertJSONEqual(t, capturedProviderRequest, []byte(readFile(t, filepath.Join(caseDir, "provider_request.body.json"))), "provider request")
+	assertJSONEqual(t, capturedProviderRequest, []byte(readFile(t, filepath.Join(caseDir, "upstream_request.body.json"))), "upstream request")
+	if out.Transport.Body == nil {
+		t.Fatalf("client transport body missing")
+	}
+	raw, readErr := io.ReadAll(out.Transport.Body)
+	if readErr != nil {
+		t.Fatalf("read client transport body: %v", readErr)
+	}
 	if clientDelivery.Mode == delivery.Streaming {
-		if out.Stream == nil {
-			t.Fatalf("client stream missing")
-		}
-		streamRaw, readErr := io.ReadAll(carrier.ReadCloserFromFrameReader(out.Stream.Frames))
-		if readErr != nil {
-			t.Fatalf("read client stream: %v", readErr)
-		}
-		got := strings.TrimSpace(string(streamRaw))
+		got := strings.TrimSpace(string(raw))
 		if !strings.Contains(got, "data: ") || !containsStreamTerminalMarker(got) {
 			t.Fatalf("client stream missing semantic markers: %s", got)
 		}
 	} else {
-		if out.Document == nil {
-			t.Fatalf("buffered client document missing")
+		wantBody := readFile(t, filepath.Join(caseDir, "client_response.body.json"))
+		if clientFamily == canonical.ClientFamilyResponses {
+			assertResponsesBodyContainsFixtureProjection(t, string(raw), wantBody, "client response")
+			return
 		}
-		if !strings.Contains(strings.ToLower(string(out.Document.Raw)), "ok") {
-			t.Fatalf("client response missing expected semantic text: %s", string(out.Document.Raw))
+		if !strings.Contains(strings.ToLower(string(raw)), "ok") {
+			t.Fatalf("client response missing expected semantic text: %s", string(raw))
 		}
 	}
 }
 
-func mustMapFamilies(t *testing.T, contract fixture.CaseContract) (canonical.IngressFamily, protocolkind.ProtocolKind) {
+func mustMapFamilies(t *testing.T, contract fixture.CaseContract) (canonical.ClientFamily, protocolkind.ProtocolKind) {
 	t.Helper()
-	var clientFamily canonical.IngressFamily
+	var clientFamily canonical.ClientFamily
 	switch strings.TrimSpace(contract.Client.Family) {
 	case "chatcompletions":
-		clientFamily = canonical.IngressFamilyChatCompletions
+		clientFamily = canonical.ClientFamilyChatCompletions
 	case "responses":
-		clientFamily = canonical.IngressFamilyResponses
+		clientFamily = canonical.ClientFamilyResponses
 	case "messages":
-		clientFamily = canonical.IngressFamilyMessages
+		clientFamily = canonical.ClientFamilyMessages
 	case "completions":
-		clientFamily = canonical.IngressFamilyCompletions
+		clientFamily = canonical.ClientFamilyCompletions
 	default:
 		t.Fatalf("unsupported client family %q", contract.Client.Family)
 	}
@@ -275,23 +293,150 @@ func assertEnvelopeProjectionFromCanonicalEvents(t *testing.T, eventsPath string
 
 	clientBody := readFile(t, clientBodyPath)
 	for _, item := range output.Items() {
-		if item.Kind == canonical.ItemKindText && strings.TrimSpace(item.Text) != "" {
-			if !strings.Contains(clientBody, item.Text) {
-				t.Fatalf("client body %s missing projected text %q", clientBodyPath, item.Text)
+		switch item.Kind {
+		case canonical.ItemKindText:
+			if text := strings.TrimSpace(item.Text); text != "" {
+				if !strings.Contains(clientBody, jsonStringLiteral(text)) {
+					t.Fatalf("client body %s missing projected text %q", clientBodyPath, item.Text)
+				}
+			}
+		case canonical.ItemKindToolUse:
+			if !strings.Contains(clientBody, jsonStringLiteral("function_call")) {
+				t.Fatalf("client body %s missing projected tool call type", clientBodyPath)
+			}
+			if toolUseID := strings.TrimSpace(item.ToolUseID); toolUseID != "" && !strings.Contains(clientBody, jsonStringLiteral(toolUseID)) {
+				t.Fatalf("client body %s missing projected tool call id %q", clientBodyPath, toolUseID)
+			}
+			if name := strings.TrimSpace(item.Name); name != "" && !strings.Contains(clientBody, jsonStringLiteral(name)) {
+				t.Fatalf("client body %s missing projected tool call name %q", clientBodyPath, name)
+			}
+			if args := strings.TrimSpace(item.Input.RawObject()); args != "" && !strings.Contains(clientBody, jsonStringLiteral(args)) {
+				t.Fatalf("client body %s missing projected tool call arguments %q", clientBodyPath, args)
 			}
 		}
 	}
 }
 
+type responsesBodyProjection struct {
+	Output []responsesBodyOutputItem `json:"output"`
+}
+
+type responsesBodyOutputItem struct {
+	Type      string                  `json:"type"`
+	Content   []responsesBodyTextItem `json:"content,omitempty"`
+	CallID    string                  `json:"call_id,omitempty"`
+	Name      string                  `json:"name,omitempty"`
+	Arguments string                  `json:"arguments,omitempty"`
+}
+
+type responsesBodyTextItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func assertResponsesBodyContainsFixtureProjection(t *testing.T, gotRaw string, wantRaw string, label string) {
+	t.Helper()
+	var gotBody responsesBodyProjection
+	if err := json.Unmarshal([]byte(gotRaw), &gotBody); err != nil {
+		t.Fatalf("%s got invalid json: %v", label, err)
+	}
+	var wantBody responsesBodyProjection
+	if err := json.Unmarshal([]byte(wantRaw), &wantBody); err != nil {
+		t.Fatalf("%s want invalid json: %v", label, err)
+	}
+	for _, wantItem := range wantBody.Output {
+		if !responsesBodyOutputItemPresent(gotBody.Output, wantItem) {
+			t.Fatalf("%s missing semantic item %+v", label, wantItem)
+		}
+	}
+}
+
+func responsesBodyOutputItemPresent(haystack []responsesBodyOutputItem, needle responsesBodyOutputItem) bool {
+	for _, candidate := range haystack {
+		if candidate.Type != needle.Type {
+			continue
+		}
+		switch needle.Type {
+		case "message":
+			if !responsesBodyTextItemsPresent(candidate.Content, needle.Content) {
+				continue
+			}
+			return true
+		case "function_call":
+			if strings.TrimSpace(candidate.CallID) != strings.TrimSpace(needle.CallID) {
+				continue
+			}
+			if strings.TrimSpace(candidate.Name) != strings.TrimSpace(needle.Name) {
+				continue
+			}
+			if normalizeJSONObjectString(candidate.Arguments) != normalizeJSONObjectString(needle.Arguments) {
+				continue
+			}
+			return true
+		default:
+			continue
+		}
+	}
+	return false
+}
+
+func responsesBodyTextItemsPresent(haystack []responsesBodyTextItem, needle []responsesBodyTextItem) bool {
+	if len(needle) == 0 {
+		return false
+	}
+	for _, wantPart := range needle {
+		wantText := strings.TrimSpace(wantPart.Text)
+		if wantText == "" {
+			continue
+		}
+		found := false
+		for _, candidate := range haystack {
+			if !strings.EqualFold(strings.TrimSpace(candidate.Text), wantText) {
+				continue
+			}
+			found = true
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeJSONObjectString(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	var obj any
+	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
+		return trimmed
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return trimmed
+	}
+	return string(normalized)
+}
+
+func jsonStringLiteral(raw string) string {
+	encoded, err := json.Marshal(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return string(encoded)
+}
+
 func assertDeliveryConversionInvariants(t *testing.T, contract fixture.CaseContract, caseDir string) {
 	t.Helper()
-	providerSSE := readFile(t, filepath.Join(caseDir, "provider_response.sse"))
+	upstreamSSE := readFile(t, filepath.Join(caseDir, "upstream_response.sse"))
 	clientSSE := readFile(t, filepath.Join(caseDir, "client_response.sse"))
 	clientBody := readFile(t, filepath.Join(caseDir, "client_response.body.json"))
 
 	if contract.Provider.Delivery == "streaming" {
-		if !containsStreamTerminalMarker(providerSSE) {
-			t.Fatalf("%s provider_response.sse must include terminal stream marker for streaming provider delivery", contract.Name)
+		if !containsStreamTerminalMarker(upstreamSSE) {
+			t.Fatalf("%s upstream_response.sse must include terminal stream marker for streaming provider delivery", contract.Name)
 		}
 	}
 	if contract.Client.Delivery == "streaming" {
@@ -384,13 +529,33 @@ func toCanonicalEvent(t *testing.T, fe fixtureEvent) canonical.Event {
 		if payload.Kind == canonical.EnvMessage {
 			payload.Role = canonical.ItemAuthorAssistant
 		}
+		if payload.Kind == canonical.EnvToolCall {
+			payload.Name = strings.TrimSpace(fe.Name)
+			payload.ToolUseID = strings.TrimSpace(fe.ToolUseID)
+		}
 		ev.Payload = payload
 	case "text_delta":
 		ev.Kind = canonical.EventTextDelta
 		ev.Payload = canonical.TextDeltaPayload{Text: fe.Text}
+	case "args_delta":
+		ev.Kind = canonical.EventArgsDelta
+		ev.Payload = canonical.ArgsDeltaPayload{Args: fe.Args}
 	case "envelope_end":
 		ev.Kind = canonical.EventEnvelopeEnd
 		ev.Payload = canonical.EnvelopeEndPayload{Kind: canonical.EnvelopeKind(fe.EnvKind), Status: canonical.EnvelopeStatus(fe.Status)}
+	case "metadata":
+		ev.Kind = canonical.EventMetadata
+		values := map[string]string{}
+		if strings.TrimSpace(fe.ResultID) != "" {
+			values["result_id"] = strings.TrimSpace(fe.ResultID)
+		}
+		if strings.TrimSpace(fe.Model) != "" {
+			values["model"] = strings.TrimSpace(fe.Model)
+		}
+		if len(values) == 0 {
+			values = nil
+		}
+		ev.Payload = canonical.MetadataPayload{Values: values}
 	default:
 		t.Fatalf("unsupported fixture event kind %q", fe.Kind)
 	}

@@ -15,9 +15,9 @@ import (
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -207,7 +207,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ports.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
@@ -267,7 +267,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ports.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
@@ -300,7 +300,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ports.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
@@ -371,7 +371,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ports.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
@@ -423,7 +423,7 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ports.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),

@@ -5,12 +5,9 @@ import (
 	"time"
 )
 
-// SynthesizeResponseFromOutput converts canonical output into a finite response
-// envelope stream suitable for stream or batch adapters.
-func SynthesizeResponseFromOutput(exchangeID string, output CanonicalOutput) ([]Event, error) {
-	if output == nil {
-		return nil, fmt.Errorf("output is nil")
-	}
+// SynthesizeResponseEnvelopeEvents converts canonical response fields into a
+// finite envelope event stream suitable for stream or batch adapters.
+func SynthesizeResponseEnvelopeEvents(exchangeID string, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) []Event {
 	seq := int64(0)
 	next := func() int64 {
 		seq++
@@ -35,14 +32,14 @@ func SynthesizeResponseFromOutput(exchangeID string, output CanonicalOutput) ([]
 			Kind:       EventMetadata,
 			EnvID:      responseID,
 			Payload: MetadataPayload{Values: map[string]string{
-				"result_id": output.ResultID(),
-				"model":     output.Model(),
+				"result_id": resultID,
+				"model":     model,
 			}},
 		},
 	}
 	msgIdx := 0
 	toolIdx := 0
-	for _, item := range output.Items() {
+	for _, item := range items {
 		switch item.Kind {
 		case ItemKindText:
 			id := EnvelopeID(fmt.Sprintf("%s:message:%d", responseID, msgIdx))
@@ -66,11 +63,20 @@ func SynthesizeResponseFromOutput(exchangeID string, output CanonicalOutput) ([]
 		}
 	}
 	events = append(events,
-		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventUsage, EnvID: responseID, Payload: UsagePayload{Usage: output.Usage()}},
-		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventFinish, EnvID: responseID, Payload: FinishPayload{Reason: output.FinishReason()}},
+		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventUsage, EnvID: responseID, Payload: UsagePayload{Usage: usage}},
+		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventFinish, EnvID: responseID, Payload: FinishPayload{Reason: finishReason}},
 		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: responseID, Payload: EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}},
 	)
-	return events, nil
+	return events
+}
+
+// SynthesizeResponseFromOutput converts canonical output into a finite response
+// envelope stream suitable for stream or batch adapters.
+func SynthesizeResponseFromOutput(exchangeID string, output CanonicalOutput) ([]Event, error) {
+	if output == nil {
+		return nil, fmt.Errorf("output is nil")
+	}
+	return SynthesizeResponseEnvelopeEvents(exchangeID, output.ResultID(), output.Model(), output.Items(), output.FinishReason(), output.Usage()), nil
 }
 
 // SynthesizeRequestFromCanonicalRequest converts a canonical request into a

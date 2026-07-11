@@ -101,6 +101,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), r.Header, payload),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingWebSocket,
+		ExchangeID:      requestID,
 	})
 	if err != nil {
 		return err

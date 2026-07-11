@@ -1,9 +1,9 @@
 package completions
 
 import (
-	"encoding/json"
 	"strings"
 
+	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -13,8 +13,8 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto completionsRequestDTO
-	if err := json.Unmarshal(raw, &dto); err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("completions request body is invalid JSON")
+	if err := sse.DecodeStrictJSON(raw, &dto, "completions request"); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if dto.Prompt == "" {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("completions request is missing required fields")

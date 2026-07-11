@@ -15,8 +15,8 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
-	if err := json.Unmarshal(raw, &dto); err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request body is invalid JSON")
+	if err := sse.DecodeStrictJSON(raw, &dto, "chat completions request"); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request is missing required fields")

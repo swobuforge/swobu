@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -22,17 +23,20 @@ func (t invariantDocTransform) ID() string { return t.id }
 func (t invariantDocTransform) Stage() transform.Stage {
 	return transform.StageRequestDocumentOut
 }
+func (t invariantDocTransform) Capabilities() transform.MiddlewareCapabilities {
+	return transform.MiddlewareCapabilities{}
+}
 func (t invariantDocTransform) Match(transform.Context, carrier.WireDocument) bool { return true }
-func (t invariantDocTransform) Apply(_ transform.Context, in carrier.WireDocument) (carrier.WireDocument, transform.Report, error) {
+func (t invariantDocTransform) Apply(_ transform.Context, in carrier.WireDocument) (carrier.WireDocument, transform.Outcome, error) {
 	out := in
 	out.Raw = append([]byte(nil), t.nextRaw...)
-	return out, transform.Report{
+	return out, transform.Outcome{
 		Mutated: t.mutated,
 		Losses:  append([]report.Loss(nil), t.losses...),
 	}, nil
 }
 
-func TestApplyDocumentTransformStage_FailsOnSilentMutation(t *testing.T) {
+func TestApplyDocumentTransform_FailsOnSilentMutation(t *testing.T) {
 	reg := transform.NewRegistry([]transform.DocumentTransform{
 		invariantDocTransform{
 			id:      "silent_change",
@@ -41,9 +45,13 @@ func TestApplyDocumentTransformStage_FailsOnSilentMutation(t *testing.T) {
 		},
 	}, nil)
 
-	_, _, err := applyDocumentTransformStage(
+	_, err := applyDocumentTransform(
+		context.Background(),
 		reg,
 		"ex_invariant",
+		"",
+		"",
+		"",
 		transform.StageRequestDocumentOut,
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
@@ -58,7 +66,7 @@ func TestApplyDocumentTransformStage_FailsOnSilentMutation(t *testing.T) {
 	}
 }
 
-func TestApplyDocumentTransformStage_FailsOnReportedMutationWithoutChange(t *testing.T) {
+func TestApplyDocumentTransform_FailsOnReportedMutationWithoutChange(t *testing.T) {
 	reg := transform.NewRegistry([]transform.DocumentTransform{
 		invariantDocTransform{
 			id:      "false_mutation",
@@ -67,9 +75,13 @@ func TestApplyDocumentTransformStage_FailsOnReportedMutationWithoutChange(t *tes
 		},
 	}, nil)
 
-	_, _, err := applyDocumentTransformStage(
+	_, err := applyDocumentTransform(
+		context.Background(),
 		reg,
 		"ex_invariant",
+		"",
+		"",
+		"",
 		transform.StageRequestDocumentOut,
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
@@ -84,7 +96,7 @@ func TestApplyDocumentTransformStage_FailsOnReportedMutationWithoutChange(t *tes
 	}
 }
 
-func TestApplyDocumentTransformStage_RejectsUnsupportedProjectionLoss(t *testing.T) {
+func TestApplyDocumentTransform_RejectsUnsupportedProjectionLoss(t *testing.T) {
 	reg := transform.NewRegistry([]transform.DocumentTransform{
 		invariantDocTransform{
 			id:      "lossy_change",
@@ -99,9 +111,13 @@ func TestApplyDocumentTransformStage_RejectsUnsupportedProjectionLoss(t *testing
 		},
 	}, nil)
 
-	_, _, err := applyDocumentTransformStage(
+	_, err := applyDocumentTransform(
+		context.Background(),
 		reg,
 		"ex_invariant",
+		"",
+		"",
+		"",
 		transform.StageRequestDocumentOut,
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,

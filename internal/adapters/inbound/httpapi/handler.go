@@ -11,11 +11,6 @@ import (
 	"net/http"
 	"strings"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
-	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -46,7 +41,7 @@ func NewHandler(requestIngress requestIngress) Handler {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	writer := &committingResponseWriter{ResponseWriter: w}
+	writer := &committingResponseWriter{ResponseWriter: w, gate: exchange.NewCommitGate()}
 	endpointName, operationPath, err := splitProtocolPath(r.URL.Path)
 	if err != nil {
 		writeSwobuError(writer, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
@@ -111,6 +106,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Request:         newTransportRequest(r.Method, operationPath, r.Header, requestBody),
 		ClientFamily:    family,
 		ResponseFraming: delivery.FramingSSE,
+		ExchangeID:      requestID,
 	})
 	if err != nil {
 		logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, err)
@@ -120,7 +116,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeModelResolutionHeaders(writer)
 	logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, nil)
 
-	if err := writeSuccessResponse(writer, requestID, family, out); err != nil {
+	if err := writeSuccessResponse(r.Context(), writer, requestID, family, out); err != nil {
 		if writer.committed {
 			slog.Warn("protocol response write failed after commit",
 				"component", "httpapi",
@@ -209,31 +205,6 @@ func newTransportRequest(method string, url string, header http.Header, body []b
 		Header: header.Clone(),
 		Body:   io.NopCloser(bytes.NewReader(append([]byte(nil), body...))),
 	}
-}
-
-func encodeCanonicalClientRequest(family canonical.ClientFamily, request canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	var (
-		doc carrier.WireDocument
-		err error
-	)
-	switch family {
-	case canonical.ClientFamilyChatCompletions:
-		doc, err = chatcompletions.EncodeCarrier(request, d)
-	case canonical.ClientFamilyResponses:
-		doc, err = responses.EncodeCarrier(request, d)
-	case canonical.ClientFamilyCompletions:
-		doc, err = completions.EncodeCarrier(request, d)
-	case canonical.ClientFamilyMessages:
-		doc, err = messages.EncodeCarrier(request, d)
-	default:
-		return carrier.WireDocument{}, canonical.UnsupportedOperation("client family is not implemented")
-	}
-	if err != nil {
-		return carrier.WireDocument{}, err
-	}
-	doc.Stage = carrier.StageClientRequestIn
-	doc.Family = family
-	return doc, nil
 }
 
 func logClientRequestShape(
@@ -326,15 +297,22 @@ func writeExchangeError(w http.ResponseWriter, err error) {
 type committingResponseWriter struct {
 	http.ResponseWriter
 	committed bool
+	gate      *exchange.CommitGate
 }
 
 func (w *committingResponseWriter) WriteHeader(statusCode int) {
 	w.committed = true
+	if w.gate != nil {
+		w.gate.Commit()
+	}
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
 func (w *committingResponseWriter) Write(p []byte) (int, error) {
 	w.committed = true
+	if w.gate != nil {
+		w.gate.Commit()
+	}
 	return w.ResponseWriter.Write(p)
 }
 
@@ -350,6 +328,14 @@ func (w *committingResponseWriter) Flush() {
 	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (w *committingResponseWriter) CloseNotify() <-chan bool {
+	closeNotifier, ok := w.ResponseWriter.(http.CloseNotifier)
+	if !ok {
+		return nil
+	}
+	return closeNotifier.CloseNotify()
 }
 
 func (w *committingResponseWriter) Push(target string, opts *http.PushOptions) error {

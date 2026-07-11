@@ -2,6 +2,7 @@ package completions
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -39,5 +40,24 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	}
 	if !got.CacheIntent().IsZero() {
 		t.Fatalf("cache intent=%+v want zero", got.CacheIntent())
+	}
+}
+
+func TestDecodeRequest_RejectsUnknownField(t *testing.T) {
+	codec := ClientRequestDecoder{}
+	req := []byte(`{"model":"gpt-4o-mini","prompt":"hi","unexpected":true}`)
+	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var compatErr canonical.Error
+	if !errors.As(err, &compatErr) {
+		t.Fatalf("expected canonical.Error, got %T", err)
+	}
+	if compatErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
+	}
+	if got := compatErr.Details["json_pointer"]; got != "/unexpected" {
+		t.Fatalf("json_pointer = %q, want %q", got, "/unexpected")
 	}
 }

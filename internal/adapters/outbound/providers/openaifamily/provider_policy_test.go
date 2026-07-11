@@ -51,7 +51,7 @@ func TestProviderPolicy_Facts_UseCanonicalCacheIntent(t *testing.T) {
 	}
 
 	ollamaFacts := NewOllamaPolicy().Facts(req)
-	if !ollamaFacts.CacheRetentionUnsupported || ollamaFacts.CacheAffinityRetention != "" {
+	if ollamaFacts.CacheAffinityKey != "repo-alpha" || ollamaFacts.CacheAffinityRetention != "24h" {
 		t.Fatalf("unexpected ollama facts: %#v", ollamaFacts)
 	}
 }

@@ -3,7 +3,6 @@ package carrier
 // Meta carries optional boundary metadata that is useful for tracing and
 // diagnostics but not part of semantic request/response meaning.
 type Meta struct {
-	ExchangeID string
 	Endpoint   string
 	BackendRef string
 	Opaque     map[string]string

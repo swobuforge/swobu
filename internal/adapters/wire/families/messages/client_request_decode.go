@@ -16,8 +16,8 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
-	if err := json.Unmarshal(raw, &dto); err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request body is invalid JSON")
+	if err := sse.DecodeStrictJSON(raw, &dto, "messages request"); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
@@ -52,46 +52,38 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 }
 
 func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingToolUseIDs []string) ([]canonical.CanonicalItem, []string, error) {
-	_ = msgIdx
 	if role == "" {
 		role = "user"
 	}
 	author := openaicompat.AuthorForRole(role)
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		if text != "" {
-			return []canonical.CanonicalItem{canonical.NewTextItem(author, text)}, pendingToolUseIDs, nil
-		}
-		return nil, pendingToolUseIDs, canonical.BadRequest("messages request content must not be empty")
-	}
-	var parts []messagesContentPartDTO
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, pendingToolUseIDs, canonical.BadRequest("messages request content is invalid")
+	parts, err := openaicompat.DecodeContentParts(raw, "messages request content is invalid")
+	if err != nil {
+		return nil, pendingToolUseIDs, err
 	}
 	if len(parts) == 0 {
 		return nil, pendingToolUseIDs, canonical.BadRequest("messages request content must not be empty")
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	pending := append([]string(nil), pendingToolUseIDs...)
-	for partIdx, part := range parts {
+	err = openaicompat.WalkContentParts(parts, func(partIdx int, part openaicompat.ContentPart) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=provider-wire
 		switch partType {
 		case "text":
 			if part.Text == "" {
-				return nil, pending, canonical.BadRequest("messages request text parts must not be empty")
+				return canonical.BadRequest("messages request text parts must not be empty")
 			}
 			decoded = append(decoded, canonical.NewTextItem(author, part.Text))
 		case "tool_use":
 			if strings.TrimSpace(part.Name) == "" { // swobu:io-string source=boundary
-				return nil, pending, canonical.BadRequest("messages request tool_use parts require a name")
+				return canonical.BadRequest("messages request tool_use parts require a name")
 			}
 			input, err := sse.DecodeJSONObject(part.Input, "messages request tool_use input is invalid")
 			if err != nil {
-				return nil, pending, err
+				return err
 			}
 			args, err := json.Marshal(input)
 			if err != nil {
-				return nil, pending, canonical.BadRequest("messages request tool_use input is invalid")
+				return canonical.BadRequest("messages request tool_use input is invalid")
 			}
 			toolUseID := strings.TrimSpace(part.ID)
 			if toolUseID == "" {
@@ -112,38 +104,46 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 						"pending_count", len(pending),
 						"pending_tool_use_ids", append([]string(nil), pending...),
 					)
-					return nil, pending, canonical.BadRequest("messages request tool_result parts require tool_use_id")
+					return canonical.BadRequest("messages request tool_result parts require tool_use_id")
 				}
 				toolUseID = pending[0]
 			}
 			text, err := decodeToolResultText(part.Content)
 			if err != nil {
-				return nil, pending, err
+				return err
 			}
 			decoded = append(decoded, canonical.NewToolResultItem(author, toolUseID, text)) // swobu:io-string source=boundary
 			pending = removePendingToolUseID(pending, toolUseID)
 		default:
-			return nil, pending, canonical.BadRequest("messages request content contains an unsupported part type")
+			return canonical.BadRequest("messages request content contains an unsupported part type")
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, pending, err
 	}
 	return decoded, pending, nil
 }
 
 func decodeToolResultText(raw json.RawMessage) (string, error) {
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return text, nil
-	}
-	var parts []messagesTextPartDTO
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", canonical.BadRequest("messages request tool_result content is invalid")
+	parts, err := openaicompat.DecodeContentParts(raw, "messages request tool_result content is invalid")
+	if err != nil {
+		return "", err
 	}
 	var builder strings.Builder
-	for _, part := range parts {
-		if strings.TrimSpace(part.Type) != "text" { // swobu:io-string source=boundary
-			return "", canonical.BadRequest("messages request tool_result content must contain text parts only")
+	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPart) error {
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
+		if partType == "" {
+			partType = "text"
+		}
+		if partType != "text" { // swobu:io-string source=boundary
+			return canonical.BadRequest("messages request tool_result content must contain text parts only")
 		}
 		builder.WriteString(part.Text)
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return builder.String(), nil
 }

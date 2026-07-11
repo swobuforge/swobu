@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
@@ -26,29 +27,34 @@ func TestStreamingClientOutputIsLazy(t *testing.T) {
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
 
-	runner := exchange.Runner{ProviderExecute: func(context.Context, exchange.ProviderRequest) (exchange.ProviderTransportResponse, error) {
-		return exchange.ProviderTransportResponse{Stream: providerRead}, nil
-	}}
-	out, err := runner.Run(context.Background(), withRuntimeInput(exchange.ClientInput{
+	runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, _ exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+		return carrier.WireStream{
+			Stage:   carrier.StageProviderIngressIn,
+			Family:  protocolkind.Responses,
+			Framing: carrier.FramingSSE,
+			Frames:  carrier.FrameReaderFromReadCloser(providerRead),
+		}, nil
+	}})
+	out, err := runner.Run(context.Background(), exchange.ExchangeInput{
 		ExchangeID:       "lazy_stream_client",
-		ClientFamily:     canonical.IngressFamilyResponses,
+		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
-		ProviderFamily:   protocolkind.Responses,
+		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-	}))
+		Contract:         exchange.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if out.Stream == nil {
+	if out.Transport.Body == nil {
 		t.Fatal("expected streaming client output")
 	}
 
 	readDone := make(chan string, 1)
 	readErr := make(chan error, 1)
-	streamBody := carrier.ReadCloserFromFrameReader(out.Stream.Frames)
+	streamBody := out.Transport.Body
 	defer func() { _ = streamBody.Close() }()
 	go func() {
 		buf := make([]byte, 512)
@@ -86,23 +92,23 @@ func TestBufferedProjectionIsCollectionBoundary(t *testing.T) {
 	blocking := &blockingReader{inner: envelope, release: release}
 
 	done := make(chan struct{})
-	var out exchange.ClientOutput
+	var out exchange.TransportResponse
 	var runErr error
 	go func() {
 		defer close(done)
-		runner := exchange.Runner{ProviderExecute: func(context.Context, exchange.ProviderRequest) (exchange.ProviderTransportResponse, error) {
-			return exchange.ProviderTransportResponse{Envelope: blocking}, nil
-		}}
-		out, runErr = runner.Run(context.Background(), withRuntimeInput(exchange.ClientInput{
+		runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, _ exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+			return carrier.CanonicalEventStream{Events: blocking}, nil
+		}})
+		out, runErr = runner.Run(context.Background(), exchange.ExchangeInput{
 			ExchangeID:       "buffered_collection_boundary",
-			ClientFamily:     canonical.IngressFamilyResponses,
+			ClientFamily:     canonical.ClientFamilyResponses,
 			ClientDelivery:   delivery.BufferedDelivery(),
 			Request:          testCanonicalRequest("m"),
-			ProviderFamily:   protocolkind.Responses,
+			ProviderProtocol: protocolkind.Responses,
 			ProviderDelivery: delivery.BufferedDelivery(),
 			Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-			Contract:         exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		}))
+			Contract:         exchange.NewExecutionContract(protocolsurface.BufferedDelivery()),
+		})
 	}()
 
 	select {
@@ -121,8 +127,18 @@ func TestBufferedProjectionIsCollectionBoundary(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("Run() error = %v", runErr)
 	}
-	if out.Document == nil {
-		t.Fatal("buffered output missing document")
+	if out.Transport.Body == nil {
+		t.Fatal("buffered output missing body")
+	}
+	raw, err := io.ReadAll(out.Transport.Body)
+	if err != nil {
+		t.Fatalf("read buffered output: %v", err)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		t.Fatal("buffered output body is empty")
+	}
+	if !strings.Contains(string(raw), "\"status\":\"completed\"") {
+		t.Fatalf("buffered output missing completion status: %s", string(raw))
 	}
 }
 

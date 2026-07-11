@@ -17,12 +17,14 @@ type EnvelopeIndex struct {
 	mu      sync.RWMutex
 	events  []Event
 	entries map[EnvelopeID]*envelopeIndexEntry
+	aliases AliasTable
 }
 
 // NewEnvelopeIndex creates an empty envelope index.
 func NewEnvelopeIndex() *EnvelopeIndex {
 	return &EnvelopeIndex{
 		entries: map[EnvelopeID]*envelopeIndexEntry{},
+		aliases: NewAliasTable(),
 	}
 }
 
@@ -53,7 +55,30 @@ func (i *EnvelopeIndex) Observe(ev Event) error {
 		}
 		entry.closed = true
 	}
+	if err := i.rememberObservedAliasLocked(ev, entry.kind); err != nil {
+		return err
+	}
 	return nil
+}
+
+// RememberAlias stores one native alias for one canonical envelope ID.
+func (i *EnvelopeIndex) RememberAlias(key AliasKey, canonicalID EnvelopeID) error {
+	if i == nil {
+		return nil
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.aliases.Remember(key, canonicalID)
+}
+
+// ResolveAlias resolves one native alias to its canonical envelope ID.
+func (i *EnvelopeIndex) ResolveAlias(key AliasKey) (EnvelopeID, bool) {
+	if i == nil {
+		return "", false
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.aliases.Resolve(key)
 }
 
 // Closed returns one closed envelope snapshot when the requested envelope has
@@ -100,4 +125,24 @@ func (i *EnvelopeIndex) isDescendantLocked(child EnvelopeID, ancestor EnvelopeID
 		current = entry.parent
 	}
 	return false
+}
+
+// rememberObservedAliasLocked records native alias metadata after the canonical
+// envelope kind is known so native IDs never replace the canonical envelope ID.
+func (i *EnvelopeIndex) rememberObservedAliasLocked(ev Event, kind EnvelopeKind) error {
+	if ev.EnvID == "" || kind == "" {
+		return nil
+	}
+	if ev.Meta.Protocol == "" || ev.Meta.NativeID == "" {
+		return nil
+	}
+	key := AliasKey{
+		Protocol: ev.Meta.Protocol,
+		Kind:     string(kind),
+		NativeID: ev.Meta.NativeID,
+	}
+	if ev.Meta.NativeIndex != nil {
+		key.Index = *ev.Meta.NativeIndex
+	}
+	return i.aliases.Remember(key, ev.EnvID)
 }

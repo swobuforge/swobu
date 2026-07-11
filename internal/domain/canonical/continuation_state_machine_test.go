@@ -196,10 +196,6 @@ func TestContinuationRuntime_WrapResponseEnvelope_PersistsCompletedContinuationR
 	output := NewConversationOutput("resp_env", "m", []OutputItem{
 		NewTextOutputItem("text_0", "done"),
 	}, "completed")
-	envelope, err := EventReaderFromCanonicalOutput("ex_wrap_env", output)
-	if err != nil {
-		t.Fatalf("EventReaderFromCanonicalOutput returned error: %v", err)
-	}
 
 	wrapped, err := runtime.WrapResponseEnvelope(
 		context.Background(),
@@ -209,7 +205,7 @@ func TestContinuationRuntime_WrapResponseEnvelope_PersistsCompletedContinuationR
 			Turn:  NewTurnRef("resp_prev"),
 			Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
 		}),
-		envelope,
+		NewSliceEventReader(SynthesizeResponseEnvelopeEvents("ex_wrap_env", output.ResultID(), output.Model(), output.Items(), output.FinishReason(), output.Usage())),
 	)
 	if err != nil {
 		t.Fatalf("WrapResponseEnvelope returned error: %v", err)

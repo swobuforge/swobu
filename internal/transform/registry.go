@@ -15,14 +15,16 @@ import (
 type DocumentTransform interface {
 	ID() string
 	Stage() Stage
+	Capabilities() MiddlewareCapabilities
 	Match(Context, carrier.WireDocument) bool
-	Apply(Context, carrier.WireDocument) (carrier.WireDocument, Report, error)
+	Apply(Context, carrier.WireDocument) (carrier.WireDocument, Outcome, error)
 }
 
 // AppliedDocumentTransform is one executed transform result.
 type AppliedDocumentTransform struct {
 	ID           string
 	Mutated      bool
+	Capabilities MiddlewareCapabilities
 	Losses       []report.Loss
 	Notices      []NoticeRecord
 	Observations []ObservationRecord
@@ -36,14 +38,16 @@ func (a AppliedDocumentTransform) Applied() bool {
 type EventStreamTransform interface {
 	ID() string
 	Stage() Stage
+	Capabilities() MiddlewareCapabilities
 	Match(Context, canonical.EventReader) bool
-	Wrap(Context, canonical.EventReader) (canonical.EventReader, Report, error)
+	Wrap(Context, canonical.EventReader) (canonical.EventReader, Outcome, error)
 }
 
 // AppliedEventStreamTransform is one executed stream wrapper result.
 type AppliedEventStreamTransform struct {
 	ID           string
 	Mutated      bool
+	Capabilities MiddlewareCapabilities
 	Losses       []report.Loss
 	Notices      []NoticeRecord
 	Observations []ObservationRecord
@@ -112,12 +116,13 @@ func NewRegistry(document []DocumentTransform, stream []EventStreamTransform) Re
 	return out
 }
 
-func (r Registry) ApplyDocument(ctx Context, doc carrier.WireDocument) (carrier.WireDocument, []AppliedDocumentTransform, error) {
+// ApplyDocument applies the stage-selected document transforms for one carrier kind.
+func (r Registry) ApplyDocument(stage Stage, ctx Context, doc carrier.WireDocument) (carrier.WireDocument, []AppliedDocumentTransform, error) {
 	carrierKind := ctx.Carrier
 	if carrierKind == "" {
 		carrierKind = carrier.KindWireDocument
 	}
-	transforms := r.documentByStageCarrier[registryKey{Stage: ctx.Stage, Carrier: carrierKind}]
+	transforms := r.documentByStageCarrier[registryKey{Stage: stage, Carrier: carrierKind}]
 	if len(transforms) == 0 {
 		return doc, nil, nil
 	}
@@ -142,6 +147,7 @@ func (r Registry) ApplyDocument(ctx Context, doc carrier.WireDocument) (carrier.
 		applied = append(applied, AppliedDocumentTransform{
 			ID:           transform.ID(),
 			Mutated:      outcome.Mutated,
+			Capabilities: transform.Capabilities(),
 			Losses:       append([]report.Loss(nil), outcome.Losses...),
 			Notices:      append([]NoticeRecord(nil), outcome.Notices...),
 			Observations: append([]ObservationRecord(nil), outcome.Observations...),
@@ -150,12 +156,13 @@ func (r Registry) ApplyDocument(ctx Context, doc carrier.WireDocument) (carrier.
 	return out, applied, nil
 }
 
-func (r Registry) WrapEventStream(ctx Context, reader canonical.EventReader) (canonical.EventReader, []AppliedEventStreamTransform, error) {
+// WrapEventStream applies the stage-selected stream transforms for one carrier kind.
+func (r Registry) WrapEventStream(stage Stage, ctx Context, reader canonical.EventReader) (canonical.EventReader, []AppliedEventStreamTransform, error) {
 	carrierKind := ctx.Carrier
 	if carrierKind == "" {
 		carrierKind = carrier.KindCanonicalEventStream
 	}
-	transforms := r.streamByStageCarrier[registryKey{Stage: ctx.Stage, Carrier: carrierKind}]
+	transforms := r.streamByStageCarrier[registryKey{Stage: stage, Carrier: carrierKind}]
 	if len(transforms) == 0 {
 		return reader, nil, nil
 	}
@@ -176,6 +183,7 @@ func (r Registry) WrapEventStream(ctx Context, reader canonical.EventReader) (ca
 		applied = append(applied, AppliedEventStreamTransform{
 			ID:           transform.ID(),
 			Mutated:      outcome.Mutated,
+			Capabilities: transform.Capabilities(),
 			Losses:       append([]report.Loss(nil), outcome.Losses...),
 			Notices:      append([]NoticeRecord(nil), outcome.Notices...),
 			Observations: append([]ObservationRecord(nil), outcome.Observations...),

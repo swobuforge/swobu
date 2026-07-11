@@ -1,8 +1,13 @@
 package completions
 
+import "encoding/json"
+
 type completionsRequestDTO struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
+	Model                string          `json:"model"`
+	Prompt               string          `json:"prompt"`
+	Stream               json.RawMessage `json:"stream,omitempty"`
+	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
 }
 
 type completionsResponseDTO struct {

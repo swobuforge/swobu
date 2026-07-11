@@ -20,18 +20,19 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) 
 
 	var stringMode string
 	if err := json.Unmarshal(raw, &stringMode); err == nil {
-		normalizedMode := strings.ToLower(strings.TrimSpace(stringMode)) // swobu:io-string source=provider-wire
-		switch normalizedMode {
-		case "", "none":
+		mode, ok := canonical.ParseToolPolicyMode(stringMode)
+		if !ok {
+			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
+		}
+		switch mode {
+		case canonical.ToolPolicyNone:
 			return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
-		case "auto":
+		case canonical.ToolPolicyAuto:
 			return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
-		case "required":
+		case canonical.ToolPolicyRequired:
 			return canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil
-		case "specific":
+		case canonical.ToolPolicySpecific:
 			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice specific requires a tool name")
-		default:
-			return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
 		}
 	}
 
@@ -65,7 +66,7 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) 
 		}
 		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific), nil
 	default:
-		return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
+		return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
 	}
 }
 

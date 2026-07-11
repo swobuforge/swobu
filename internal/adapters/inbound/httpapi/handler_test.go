@@ -592,7 +592,17 @@ func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
 	}
 }
 
+func TestFallbackAfterStreamCommit(t *testing.T) {
+	assertNoExchangeErrorAfterStreamingCommit(t)
+}
+
 func TestHandler_DoesNotWriteExchangeErrorAfterStreamingCommit(t *testing.T) {
+	assertNoExchangeErrorAfterStreamingCommit(t)
+}
+
+func assertNoExchangeErrorAfterStreamingCommit(t *testing.T) {
+	t.Helper()
+
 	handler := NewHandler(staticRequestIngress{
 		out: exchange.RequestOutput{
 			Response: exchange.TransportResponse{
@@ -688,11 +698,14 @@ func (h staticRequestIngress) HandleRequest(_ context.Context, in exchange.Reque
 }
 
 func testProviderIngressFromOutput(output canonical.CanonicalOutput) canonical.EventReader {
-	envelope, err := canonical.EventReaderFromCanonicalOutput("test_buffered:httpapi", output)
-	if err != nil {
-		panic(err)
-	}
-	return envelope
+	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		"test_buffered:httpapi",
+		output.ResultID(),
+		output.Model(),
+		output.Items(),
+		output.FinishReason(),
+		output.Usage(),
+	))
 }
 
 func testStreamingEmptyResponse() canonical.EventReader {
@@ -773,7 +786,7 @@ func synthesizeRequestOutputFromEnvelope(in exchange.RequestInput, envelope cano
 		if err != nil {
 			return exchange.RequestOutput{}, err
 		}
-		return exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream)}, nil
+		return exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream, false)}, nil
 	}
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), envelope, canonical.EnvResponse)
 	if err != nil {
@@ -878,6 +891,7 @@ func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]excha
 			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, raw),
 			ClientFamily:    in.ClientFamily,
 			ResponseFraming: in.ResponseFraming,
+			ExchangeID:      in.ExchangeID,
 		})
 	}
 	return out, nil

@@ -237,19 +237,28 @@ const (
 	ToolPolicySpecific ToolPolicyMode = "specific"
 )
 
-func normalizeToolPolicyMode(mode ToolPolicyMode) ToolPolicyMode {
-	switch strings.ToLower(strings.TrimSpace(string(mode))) {
-	case "", "none":
-		return ToolPolicyNone
+// ParseToolPolicyMode parses one raw tool-policy mode without silently
+// defaulting unknown values.
+func ParseToolPolicyMode(raw string) (ToolPolicyMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "none":
+		return ToolPolicyNone, true
 	case "auto":
-		return ToolPolicyAuto
+		return ToolPolicyAuto, true
 	case "required":
-		return ToolPolicyRequired
+		return ToolPolicyRequired, true
 	case "specific":
-		return ToolPolicySpecific
+		return ToolPolicySpecific, true
 	default:
-		return ToolPolicyNone
+		return "", false
 	}
+}
+
+func normalizeToolPolicyMode(mode ToolPolicyMode) ToolPolicyMode {
+	if parsed, ok := ParseToolPolicyMode(string(mode)); ok {
+		return parsed
+	}
+	return ToolPolicyNone
 }
 
 // ToolPolicy describes what the caller wants the model to do with tools.

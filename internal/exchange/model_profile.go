@@ -1,6 +1,10 @@
 package exchange
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/swobuforge/swobu/internal/delivery"
+)
 
 // RouteSpec describes client and provider exchange surfaces.
 type RouteSpec struct {
@@ -30,8 +34,8 @@ const (
 )
 
 type DeliveryPolicy struct {
-	Preferred Delivery
-	Supported []Delivery
+	Preferred delivery.Delivery
+	Supported []delivery.Delivery
 }
 
 type EndpointPolicy struct {

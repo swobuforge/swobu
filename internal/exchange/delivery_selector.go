@@ -8,15 +8,13 @@ import (
 	"github.com/swobuforge/swobu/internal/observation"
 )
 
-type Delivery = delivery.Delivery
-
 type DeliverySelector interface {
-	SelectProviderDelivery(ctx context.Context, route RouteSpec, client Delivery, observations observation.Snapshot) Delivery
+	SelectProviderDelivery(ctx context.Context, route RouteSpec, client delivery.Delivery, observations observation.Snapshot) delivery.Delivery
 }
 
 type FixedDeliverySelector struct{}
 
-func (FixedDeliverySelector) SelectProviderDelivery(_ context.Context, route RouteSpec, client Delivery, observations observation.Snapshot) Delivery {
+func (FixedDeliverySelector) SelectProviderDelivery(_ context.Context, route RouteSpec, client delivery.Delivery, observations observation.Snapshot) delivery.Delivery {
 	target := route.Provider
 	for _, obs := range observations {
 		code := strings.TrimSpace(obs.Code) // swobu:io-string source=boundary

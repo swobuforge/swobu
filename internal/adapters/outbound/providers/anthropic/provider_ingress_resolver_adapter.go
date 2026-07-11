@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -63,13 +64,13 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	}
 
 	resolvedDelivery := req.Contract.ProviderDelivery
-	if resolvedDelivery.Mode != delivery.Buffered && resolvedDelivery.Mode != delivery.Streaming {
+	if err := resolvedDelivery.Validate(); err != nil {
 		return nil, canonical.UnsupportedDelivery("anthropic provider delivery is unsupported")
 	}
-	if resolvedDelivery.Mode == delivery.Streaming && resolvedDelivery.Framing == delivery.FramingNone {
-		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
+	if resolvedDelivery.IsStreaming() && resolvedDelivery.Framing != protocolsurface.FramingSSE {
+		return nil, canonical.UnsupportedDelivery("anthropic provider does not implement the requested delivery framing")
 	}
-	wireReq, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(req.Request, resolvedDelivery)
+	wireReq, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(req.Request, toInternalDelivery(resolvedDelivery))
 	if err != nil {
 		return nil, err
 	}
@@ -105,15 +106,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		}()
 		return nil, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	if resolvedDelivery.Mode == delivery.Streaming {
-		framing := carrier.FramingSSE
-		if resolvedDelivery.Framing != delivery.FramingSSE {
-			framing = carrier.FramingNone
-		}
+	if resolvedDelivery.IsStreaming() {
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  protocolkind.Messages,
-			Framing: framing,
+			Framing: carrier.FramingSSE,
 			Header:  resp.Header.Clone(),
 			Frames:  carrier.FrameReaderFromReadCloser(resp.Body),
 		}, nil
@@ -170,6 +167,17 @@ func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target e
 func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	_, err := e.ListModels(ctx, target)
 	return err
+}
+
+func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
+	switch surface.Variant {
+	case protocolsurface.DeliveryVariantStreaming:
+		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
+	case protocolsurface.DeliveryVariantBuffered:
+		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
+	default:
+		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
+	}
 }
 
 func validateAnthropicProviderProtocol(providerProtocol string) error {

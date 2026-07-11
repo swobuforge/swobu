@@ -63,7 +63,7 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 	}
 }
 
-func TestDecodeResponsesToolPolicy_UnknownValuesDowngradeToDefault(t *testing.T) {
+func TestDecodeResponsesToolPolicy_UnknownValuesFailClosed(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{
@@ -74,11 +74,11 @@ func TestDecodeResponsesToolPolicy_UnknownValuesDowngradeToDefault(t *testing.T)
 		`{}`,
 	} {
 		got, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil)
-		if err != nil {
-			t.Fatalf("raw=%s decodeResponsesToolPolicy returned error: %v", raw, err)
+		if !isBadRequestError(err) {
+			t.Fatalf("raw=%s err=%v, want BAD_REQUEST", raw, err)
 		}
-		if got.Mode != canonical.ToolPolicyNone {
-			t.Fatalf("raw=%s tool policy mode = %q, want %q", raw, got.Mode, canonical.ToolPolicyNone)
+		if got.Mode != "" {
+			t.Fatalf("raw=%s tool policy mode = %q, want empty", raw, got.Mode)
 		}
 	}
 }

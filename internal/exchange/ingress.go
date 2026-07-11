@@ -3,6 +3,7 @@ package exchange
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -28,18 +29,18 @@ type RequestIngress struct {
 	endpoints    EndpointReader
 	providerExec ProviderIngressResolver
 	runner       Runner
-	runtime      RuntimeResolver
-	resolver     ExchangeRouteResolver
+	planner      RoutePlanner
 }
 
 type RuntimePoliciesSpec struct {
-	DeliverySelector DeliverySelector
-	ObservationStore observation.Store
+	DeliverySelector  DeliverySelector
+	ObservationStore  observation.Store
 	ContinuationStore canonical.ContinuationStore
-	TurnStateStore   turnstate.TurnStateStore
-	EffectSink       effect.Sink
+	TurnStateStore    turnstate.TurnStateStore
+	EffectSink        effect.Sink
 }
 
+// RuntimeResolver provides client and provider codec lookup for request ingress and the exchange runner.
 type RuntimeResolver interface {
 	ClientCodec(canonical.ClientFamily) ClientCodec
 	ProviderRequestDocumentEncoder(protocolkind.ProtocolKind) ProviderRequestDocumentEncoder
@@ -67,9 +68,8 @@ func NewIngress(endpoints EndpointReader, providerExec ProviderIngressResolver, 
 	return RequestIngress{
 		endpoints:    endpoints,
 		providerExec: providerExec,
-		runner:       Runner{ResolveProviderIngress: providerExec.ResolveProviderIngress, EffectSink: sink},
-		runtime:      runtime,
-		resolver: ExchangeRouteResolver{
+		runner:       Runner{ResolveProviderIngress: providerExec.ResolveProviderIngress, Runtime: runtime, Transforms: transform.Registry{}, EffectSink: sink},
+		planner: RoutePlanner{
 			DeliverySelector: selector,
 			Observations:     policies.ObservationStore,
 			Continuation:     continuation,
@@ -82,6 +82,9 @@ type RequestInput struct {
 	Request         transportpkg.TransportRequest
 	ClientFamily    canonical.ClientFamily
 	ResponseFraming delivery.Framing
+	// ExchangeID is the request-scoped identifier used for event and effect
+	// tracing. Callers must supply one unique value per exchange run.
+	ExchangeID string
 }
 
 type RequestOutput struct {
@@ -119,7 +122,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if h.providerExec == nil {
 		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("provider ingress resolver is not configured")
 	}
-	if h.runtime == nil {
+	if h.runner.Runtime == nil {
 		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange runtime resolver is not configured")
 	}
 
@@ -134,27 +137,34 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if clientFamily == "" {
 		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("client family is not configured")
 	}
-	clientCodec := h.runtime.ClientCodec(clientFamily)
+	clientCodec := h.runner.Runtime.ClientCodec(clientFamily)
 	if clientCodec == nil {
 		return TransportResponse{}, RoutableTarget{}, canonical.UnsupportedOperation("client family is not implemented")
 	}
-	// TODO unclear what is exchange id? is it request id, endpoint id, or something else?
-	exchangeID := "exchange_" + strings.TrimSpace(in.EndpointName.String()) // swobu:io-string source=boundary
+	exchangeID := strings.TrimSpace(in.ExchangeID) // swobu:io-string source=boundary
+	if exchangeID == "" {
+		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange id is required")
+	}
 
 	requestDoc, err := newClientRequestDocument(clientFamily, in.Request)
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	requestDoc, _, err = applyDocumentTransformStage(
+	requestDocResult, err := applyDocumentTransform(
+		ctx,
 		transform.Registry{},
 		exchangeID,
-		StageClientWireIn,
+		"",
+		"",
+		"",
+		transform.StageClientWireIn,
 		requestDoc,
 		delivery.BufferedDelivery(),
 	)
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
+	requestDoc = requestDocResult.Value
 	request, decodedDelivery, err := clientCodec.DecodeClientRequest(requestDoc)
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
@@ -163,7 +173,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		return TransportResponse{}, RoutableTarget{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	resolvedRoute, err := h.resolver.Resolve(ctx, RouteResolutionInput{
+	routePlan, err := h.planner.Plan(ctx, RoutePlanInput{
 		Endpoint:       endpoint,
 		ClientDelivery: clientDelivery,
 		Request:        request,
@@ -171,25 +181,33 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	contract := NewExecutionContract(clientDelivery).WithProviderDelivery(resolvedRoute.ProviderDelivery)
-	response, err := h.runner.Run(ctx, ExchangeInput{
-		ExchangeID:                     exchangeID,
-		ClientFamily:                   clientFamily,
-		ClientDelivery:                 contract.ClientDelivery,
-		Request:                        resolvedRoute.Request,
-		Target:                         resolvedRoute.Target,
-		Contract:                       contract,
-		ProviderProtocol:               resolvedRoute.ProtocolKind,
-		ProviderDelivery:               contract.ProviderDelivery,
-		ClientCodec:                    clientCodec,
-		ProviderRequestDocumentEncoder: h.runtime.ProviderRequestDocumentEncoder(resolvedRoute.ProtocolKind),
-		ProviderEnvelopeDecoder:        h.runtime.ProviderEnvelopeDecoder(resolvedRoute.ProtocolKind, contract.ProviderDelivery),
-		ProviderDocumentDecoder:        h.runtime.ProviderDocumentDecoder(resolvedRoute.ProtocolKind, contract.ProviderDelivery),
+	attempts := routePlan.Attempts
+	if len(attempts) == 0 {
+		attempts = []RouteAttempt{{
+			Request:          routePlan.Request,
+			Target:           routePlan.Target,
+			ProviderDelivery: routePlan.ProviderDelivery,
+			ProtocolKind:     routePlan.ProtocolKind,
+		}}
+	}
+	fallback := FallbackVendor{}
+	response, attempt, err := fallback.Execute(ctx, attempts, func(ctx context.Context, attempt RouteAttempt) (TransportResponse, error) {
+		contract := NewExecutionContract(toProtocolsurfaceDelivery(clientDelivery)).WithProviderDelivery(toProtocolsurfaceDelivery(attempt.ProviderDelivery))
+		return h.runner.Run(ctx, ExchangeInput{
+			ExchangeID:       exchangeID,
+			ClientFamily:     clientFamily,
+			ClientDelivery:   toInternalDelivery(contract.ClientDelivery),
+			Request:          attempt.Request,
+			Target:           attempt.Target,
+			Contract:         contract,
+			ProviderProtocol: attempt.ProtocolKind,
+			ProviderDelivery: toInternalDelivery(contract.ProviderDelivery),
+		})
 	})
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	return response, resolvedRoute.Target, nil
+	return response, attempt.Target, nil
 }
 
 func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.WireDocument, error) {
@@ -221,6 +239,18 @@ func readTransportRequestBody(body io.ReadCloser) ([]byte, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+func canFallbackOnExchangeError(err error) bool {
+	var backendErr canonical.BackendError
+	if errors.As(err, &backendErr) {
+		return true
+	}
+	var swobuErr canonical.Error
+	if errors.As(err, &swobuErr) && swobuErr.Code == canonical.ErrorCodeBadEndpoint {
+		return true
+	}
+	return false
 }
 
 func NewTransportRequest(method string, url string, header http.Header, body []byte) transportpkg.TransportRequest {
