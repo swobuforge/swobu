@@ -9,6 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -100,7 +101,7 @@ func probeModelIDs(
 		if !ok {
 			continue
 		}
-		target := ports.NewRoutableTarget(
+		target := exchange.NewRoutableTarget(
 			"draft",
 			providerSpec,
 			baseURL,

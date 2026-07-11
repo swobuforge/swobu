@@ -914,7 +914,7 @@ func TestRoot_RoutingModelsDrawerGrammarAligned(t *testing.T) {
 		t.Fatalf("expected concise model rows in models drawer; render=%q", out)
 	}
 	if strings.Contains(out, "provider:") || strings.Contains(out, "selected") {
-		t.Fatalf("unexpected legacy summary clutter in model rows; render=%q", out)
+		t.Fatalf("unexpected stale summary clutter in model rows; render=%q", out)
 	}
 
 	focusRowContaining(t, rt, viewport, "add model")
@@ -1319,7 +1319,7 @@ func TestRoot_WorkspaceSavedStatusDoesNotRenderCopyEndpointHintRows(t *testing.T
 	}
 }
 
-func TestRoot_ControlPlaneIncompatibleRendersHardStopCompatibilityScreen(t *testing.T) {
+func TestRoot_ControlPlaneIncompatibleRendersHardStopMismatchScreen(t *testing.T) {
 	t.Parallel()
 
 	rt := newTestRuntime(state.Model{
@@ -1338,11 +1338,11 @@ func TestRoot_ControlPlaneIncompatibleRendersHardStopCompatibilityScreen(t *test
 	out := rt.Render(viewport).String()
 	assertContainsInOrder(t, out,
 		"incompatible   [ daemon mismatch ]",
-		"compatibility",
+		"mismatch",
 		"recover",
 		"↑↓ move",
 	)
 	if strings.Contains(out, "workspace") || strings.Contains(out, "traffic") {
-		t.Fatalf("hard-stop compatibility screen should hide normal sections: %q", out)
+		t.Fatalf("hard-stop mismatch screen should hide normal sections: %q", out)
 	}
 }

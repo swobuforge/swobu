@@ -94,7 +94,7 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonica
 	return &messagesEventReader{
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:      core.NewSSEReader(stream.Body),
+		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
 		blocks:      map[int]streamContentBlock{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
@@ -171,7 +171,7 @@ func (s *messagesEventReader) Next(context.Context) (canonical.Event, error) {
 			if err == io.EOF && s.started && !s.completed {
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
 				for idx, block := range s.blocks {
-					s.enqueueEnvelopeEnd(s.blockEnvID(idx, block), s.blockKind(block), canonical.EnvelopeStatusError)
+					s.enqueueEnvelopeEnd(s.blockEnvID(idx), s.blockKind(block), canonical.EnvelopeStatusError)
 				}
 				s.blocks = map[int]streamContentBlock{}
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
@@ -253,7 +253,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	case "text":
 		block.ItemKind = canonical.ItemKindText
 		block.ItemID = "text_" + strconv.Itoa(payload.Index)
-		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMetadataFields{NativeID: block.ItemID})
+		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMetadataFields{NativeID: block.ItemID})
 	case "tool_use":
 		block.ItemKind = canonical.ItemKindToolUse
 		block.ToolUseID = strings.TrimSpace(payload.ContentBlock.ID) // swobu:io-string source=boundary
@@ -262,7 +262,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		}
 		block.Name = strings.TrimSpace(payload.ContentBlock.Name) // swobu:io-string source=boundary
 		block.ItemID = block.ToolUseID
-		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index, block), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMetadataFields{NativeID: block.ItemID})
+		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMetadataFields{NativeID: block.ItemID})
 	default:
 		return canonical.InternalError("messages stream content block type is unsupported")
 	}
@@ -275,7 +275,7 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_delta frame is invalid")
 	}
-	block, ok := s.blocks[payload.Index]
+	_, ok := s.blocks[payload.Index]
 	if !ok {
 		return nil
 	}
@@ -284,13 +284,13 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 	case "text_delta":
 		s.enqueue(canonical.Event{
 			Kind:    canonical.EventTextDelta,
-			EnvID:   s.blockEnvID(payload.Index, block),
+			EnvID:   s.blockEnvID(payload.Index),
 			Payload: canonical.TextDeltaPayload{Text: payload.Delta.Text},
 		})
 	case "input_json_delta":
 		s.enqueue(canonical.Event{
 			Kind:    canonical.EventArgsDelta,
-			EnvID:   s.blockEnvID(payload.Index, block),
+			EnvID:   s.blockEnvID(payload.Index),
 			Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON},
 		})
 	default:
@@ -308,7 +308,7 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 	if !ok {
 		return nil
 	}
-	s.enqueueEnvelopeEnd(s.blockEnvID(payload.Index, block), s.blockKind(block), canonical.EnvelopeStatusCompleted)
+	s.enqueueEnvelopeEnd(s.blockEnvID(payload.Index), s.blockKind(block), canonical.EnvelopeStatusCompleted)
 	delete(s.blocks, payload.Index)
 	return nil
 }
@@ -367,7 +367,7 @@ func (s *messagesEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind c
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
 }
 
-func (s *messagesEventReader) blockEnvID(index int, _ streamContentBlock) canonical.EnvelopeID {
+func (s *messagesEventReader) blockEnvID(index int) canonical.EnvelopeID {
 	return canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseID, index))
 }
 

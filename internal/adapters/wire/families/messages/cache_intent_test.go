@@ -26,7 +26,7 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if _, ok := body["prompt_cache_key"]; ok {
-		t.Fatalf("prompt_cache_key must be provider patch concern")
+		t.Fatalf("prompt_cache_key must be provider transform concern")
 	}
 }
 

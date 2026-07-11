@@ -86,11 +86,11 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		}}, true
 	case HelpDiagnosticsCopyRequested:
 		return []update.Effect{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true // swobu:io-string source=boundary
-	case CompatibilityRestartRequested:
+	case MismatchRestartRequested:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
-		return []update.Effect{stateeffect.CompatibilityRestartHintEffect{
+		return []update.Effect{stateeffect.MismatchRestartHintEffect{
 			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand), // swobu:io-string source=boundary
 		}}, true
 	case ExchangeDiagnosticsCopyRequested:
@@ -98,9 +98,9 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 			return nil, true
 		}
 		return []update.Effect{stateeffect.CopyExchangeDiagnosticsEffect{
-			Text: compatibilityDiagnostics(*model.ControlPlane, model.TrafficRows),
+			Text: mismatchDiagnostics(*model.ControlPlane, model.TrafficRows),
 		}}, true
-	case stateeffect.CompatibilityRecoveryNoted:
+	case stateeffect.MismatchRecoveryNoted:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
@@ -193,7 +193,7 @@ func firstRunCreateReady(model *Model) bool {
 	return true
 }
 
-func compatibilityDiagnostics(mismatch ControlPlaneMismatch, rows []TrafficRow) string {
+func mismatchDiagnostics(mismatch ControlPlaneMismatch, rows []TrafficRow) string {
 	daemonVersion := strings.TrimSpace(mismatch.DaemonVersion) // swobu:io-string source=boundary
 	tuiVersion := strings.TrimSpace(mismatch.TUIVersion)       // swobu:io-string source=boundary
 	protocolGot := "missing"
@@ -205,14 +205,14 @@ func compatibilityDiagnostics(mismatch ControlPlaneMismatch, rows []TrafficRow) 
 		"daemon " + daemonVersion,
 		fmt.Sprintf("protocol mismatch: expected %d, got %s", mismatch.ExpectedProtocol, protocolGot),
 	}
-	stageLines := compatibilityStageContextLines(rows)
+	stageLines := mismatchStageContextLines(rows)
 	if len(stageLines) > 0 {
 		lines = append(lines, stageLines...)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func compatibilityStageContextLines(rows []TrafficRow) []string {
+func mismatchStageContextLines(rows []TrafficRow) []string {
 	if len(rows) == 0 || len(rows[0].StageReports) == 0 {
 		return nil
 	}

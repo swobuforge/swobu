@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestStreamingClientOutputIsLazy(t *testing.T) {
@@ -26,19 +26,19 @@ func TestStreamingClientOutputIsLazy(t *testing.T) {
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
 
-	out, err := (exchange.Runner{}).Run(context.Background(), exchange.ClientInput{
+	runner := exchange.Runner{ProviderExecute: func(context.Context, exchange.ProviderRequest) (exchange.ProviderTransportResponse, error) {
+		return exchange.ProviderTransportResponse{Stream: providerRead}, nil
+	}}
+	out, err := runner.Run(context.Background(), withRuntimeInput(exchange.ClientInput{
 		ExchangeID:       "lazy_stream_client",
 		ClientFamily:     canonical.IngressFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
-		ClientRequestRaw: []byte(`{"model":"m","input":"hi","stream":true}`),
+		Request:          testCanonicalRequest("m"),
 		ProviderFamily:   protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           ports.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		ProviderExecute: func(context.Context, ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
-			return ports.ProviderTransportResponse{Stream: providerRead}, nil
-		},
-	})
+		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Contract:         exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+	}))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -48,9 +48,11 @@ func TestStreamingClientOutputIsLazy(t *testing.T) {
 
 	readDone := make(chan string, 1)
 	readErr := make(chan error, 1)
+	streamBody := carrier.ReadCloserFromFrameReader(out.Stream.Frames)
+	defer func() { _ = streamBody.Close() }()
 	go func() {
 		buf := make([]byte, 512)
-		n, err := out.Stream.Body.Read(buf)
+		n, err := streamBody.Read(buf)
 		if err != nil && err != io.EOF {
 			readErr <- err
 			return
@@ -88,19 +90,19 @@ func TestBufferedProjectionIsCollectionBoundary(t *testing.T) {
 	var runErr error
 	go func() {
 		defer close(done)
-		out, runErr = (exchange.Runner{}).Run(context.Background(), exchange.ClientInput{
+		runner := exchange.Runner{ProviderExecute: func(context.Context, exchange.ProviderRequest) (exchange.ProviderTransportResponse, error) {
+			return exchange.ProviderTransportResponse{Envelope: blocking}, nil
+		}}
+		out, runErr = runner.Run(context.Background(), withRuntimeInput(exchange.ClientInput{
 			ExchangeID:       "buffered_collection_boundary",
 			ClientFamily:     canonical.IngressFamilyResponses,
 			ClientDelivery:   delivery.BufferedDelivery(),
-			ClientRequestRaw: []byte(`{"model":"m","input":"hi"}`),
+			Request:          testCanonicalRequest("m"),
 			ProviderFamily:   protocolkind.Responses,
 			ProviderDelivery: delivery.BufferedDelivery(),
-			Target:           ports.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-			Contract:         ports.NewExecutionContract(delivery.BufferedDelivery()),
-			ProviderExecute: func(context.Context, ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
-				return ports.ProviderTransportResponse{Envelope: blocking}, nil
-			},
-		})
+			Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+			Contract:         exchange.NewExecutionContract(delivery.BufferedDelivery()),
+		}))
 	}()
 
 	select {
@@ -139,3 +141,12 @@ func (r *blockingReader) Next(ctx context.Context) (canonical.Event, error) {
 }
 
 func (r *blockingReader) Close(ctx context.Context) error { return r.inner.Close(ctx) }
+
+func testCanonicalRequest(model string) canonical.CanonicalRequest {
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: model,
+		Items: []canonical.CanonicalItem{
+			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+		},
+	})
+}

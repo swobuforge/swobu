@@ -15,10 +15,8 @@ import (
 
 func TestAllDocumentTransformsAreIdempotent(t *testing.T) {
 	reg := NewProviderTransformRegistry(ProviderTransformFactRecord{
-		NormalizeToolDeclarations:       true,
-		StrictJSONSupportedRequestField: map[string]struct{}{"model": {}, "input": {}, "tools": {}, "stream": {}},
-		CacheAffinityKey:                "k1",
-		CacheAffinityRetention:          "ephemeral",
+		CacheAffinityKey:       "k1",
+		CacheAffinityRetention: "ephemeral",
 	})
 	ctx := transform.Context{ExchangeID: "ex_doc", Stage: transform.StageProviderWireOut, Leg: carrier.LegProviderRequestOut, Carrier: carrier.KindWireDocument, Family: protocolkind.Responses, Delivery: delivery.BufferedDelivery()}
 	in := carrier.WireDocument{Leg: carrier.LegProviderRequestOut, Family: protocolkind.Responses, Raw: []byte(`{"model":"m","stream":true,"input":"hello","unknown":"drop","tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}`)}

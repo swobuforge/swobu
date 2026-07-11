@@ -1,17 +1,16 @@
 package exchange
 
 import (
-	"github.com/swobuforge/swobu/internal/delivery"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestResolveProviderProtocolRouting(t *testing.T) {
 	t.Parallel()
 
-	target := ports.NewRoutableTarget("ref", "openai", "https://api.openai.com/v1", "", protocolkind.Responses, "bearer", "", "responses_stream")
+	target := NewRoutableTarget("ref", "openai", "https://api.openai.com/v1", "", protocolkind.Responses, "bearer", "", "responses_stream")
 	routing, err := ResolveProviderProtocolRouting(target, "protocol must be concrete")
 	if err != nil {
 		t.Fatalf("ResolveProviderProtocolRouting() error = %v", err)

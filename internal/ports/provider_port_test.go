@@ -7,11 +7,12 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestNewProviderRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}})
-	target := NewRoutableTarget("backend-a", "openai_"+"com"+"patible", "http://localhost:8080/v1", "cred-1", "chat_completions", "", "", "")
+	target := exchange.NewRoutableTarget("backend-a", "openai_"+"com"+"patible", "http://localhost:8080/v1", "cred-1", "chat_completions", "", "", "")
 	req := NewProviderRequest(request, NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)), target)
 	if req.Contract.ClientDelivery.Mode != delivery.Streaming || req.Contract.ProviderDelivery.Mode != delivery.Streaming {
 		t.Fatalf("delivery clone mismatch")

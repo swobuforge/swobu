@@ -5,7 +5,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/report"
 	"github.com/swobuforge/swobu/internal/transform"
@@ -46,7 +45,7 @@ func decodeStreamCarrierFrame(profile ProviderRoutePolicy, stream carrier.WireSt
 	}, profile.UsageDecoder())
 	registry := newTransformRegistry(profile.Facts(canonical.CanonicalRequest{}))
 	wrappedReader, applied, err := registry.WrapEventStream(transform.Context{
-		Stage:   exchange.StageSemanticEvents,
+		Stage:   transform.StageSemanticEvents,
 		Leg:     carrier.LegProviderResponseIn,
 		Carrier: carrier.KindCanonicalEventStream,
 		Family:  stream.Family,
@@ -63,7 +62,7 @@ func decodeStreamCarrierFrame(profile ProviderRoutePolicy, stream carrier.WireSt
 			mutated = mutated || entry.Mutated
 		}
 		stageReports = []report.StageReport{{
-			Stage:   string(exchange.StageSemanticEvents),
+			Stage:   string(transform.StageSemanticEvents),
 			Carrier: string(carrier.KindCanonicalEventStream),
 			Applied: ids,
 			Mutated: mutated,

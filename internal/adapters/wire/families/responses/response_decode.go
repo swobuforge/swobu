@@ -94,8 +94,7 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonica
 	return &responsesEventReader{
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:      core.NewSSEReader(stream.Body),
-		startedTool: map[string]bool{},
+		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
 		toolEnvIDs:  map[string]canonical.EnvelopeID{},
 		textOpen:    false,
 		latestUsage: canonical.NewUnknownTokenUsage(),
@@ -107,7 +106,6 @@ type responsesEventReader struct {
 	responseID  canonical.EnvelopeID
 	reader      *core.SSEReaderCloser
 	pending     canonical.EventSequence
-	startedTool map[string]bool
 	toolEnvIDs  map[string]canonical.EnvelopeID
 	textOpen    bool
 	textEnvID   canonical.EnvelopeID
@@ -228,7 +226,6 @@ func (s *responsesEventReader) closeOpenTools(status canonical.EnvelopeStatus) {
 	for itemID, envID := range s.toolEnvIDs {
 		s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, status)
 		delete(s.toolEnvIDs, itemID)
-		delete(s.startedTool, itemID)
 	}
 }
 

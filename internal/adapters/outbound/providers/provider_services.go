@@ -6,6 +6,7 @@ import (
 
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -57,7 +58,7 @@ func (s ProviderExecutorService) Execute(ctx context.Context, req ports.Provider
 	return adapter.Execute(ctx, req)
 }
 
-func (s ProviderModelCatalogService) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
+func (s ProviderModelCatalogService) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	providerID, ok := profile.ParseProviderID(target.ProviderID())
 	if !ok {
 		return nil, canonical.BadEndpoint("provider id is unsupported")
@@ -69,7 +70,7 @@ func (s ProviderModelCatalogService) ListModels(ctx context.Context, target port
 	return adapter.ListModels(ctx, target)
 }
 
-func (s ProviderModelCatalogService) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+func (s ProviderModelCatalogService) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	providerID, ok := profile.ParseProviderID(target.ProviderID())
 	if !ok {
 		return canonical.BadEndpoint("provider id is unsupported")

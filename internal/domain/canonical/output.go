@@ -35,9 +35,9 @@ type CanonicalOutput interface {
 	CloneOutput() CanonicalOutput
 }
 
-// CanonicalOutputValue is the fully materialized canonical success value in the canonical core.
+// CanonicalOutputData is the fully materialized canonical success value in the canonical core.
 // Streaming is modeled as ordered assembly of this object rather than as a separate semantic path.
-type CanonicalOutputValue struct {
+type CanonicalOutputData struct {
 	semanticKind SemanticKind
 	resultID     string
 	model        string
@@ -46,12 +46,12 @@ type CanonicalOutputValue struct {
 	usage        TokenUsage
 }
 
-func NewOutput(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputValue {
+func NewOutput(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputData {
 	return NewOutputWithUsage(semanticKind, resultID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputValue {
-	return CanonicalOutputValue{
+func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
+	return CanonicalOutputData{
 		semanticKind: semanticKind,
 		resultID:     resultID,
 		model:        model,
@@ -61,51 +61,51 @@ func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string
 	}
 }
 
-func NewConversationOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputValue {
+func NewConversationOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputData {
 	return NewConversationOutputWithUsage(resultID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewConversationOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputValue {
+func NewConversationOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
 	return NewOutputWithUsage(SemanticKindConversation, resultID, model, items, finishReason, usage)
 }
 
-func NewPromptOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputValue {
+func NewPromptOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputData {
 	return NewPromptOutputWithUsage(resultID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewPromptOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputValue {
+func NewPromptOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
 	return NewOutputWithUsage(SemanticKindPrompt, resultID, model, items, finishReason, usage)
 }
 
-func (o CanonicalOutputValue) SemanticKind() SemanticKind {
+func (o CanonicalOutputData) SemanticKind() SemanticKind {
 	return o.semanticKind
 }
 
-func (o CanonicalOutputValue) ResultID() string {
+func (o CanonicalOutputData) ResultID() string {
 	return o.resultID
 }
 
-func (o CanonicalOutputValue) Model() string {
+func (o CanonicalOutputData) Model() string {
 	return o.model
 }
 
-func (o CanonicalOutputValue) FinishReason() string {
+func (o CanonicalOutputData) FinishReason() string {
 	return o.finishReason
 }
 
-func (o CanonicalOutputValue) Items() []CanonicalItem {
+func (o CanonicalOutputData) Items() []CanonicalItem {
 	return cloneCanonicalItems(o.items)
 }
 
-func (o CanonicalOutputValue) Usage() TokenUsage {
+func (o CanonicalOutputData) Usage() TokenUsage {
 	return o.usage
 }
 
-func (o CanonicalOutputValue) CloneOutput() CanonicalOutput {
+func (o CanonicalOutputData) CloneOutput() CanonicalOutput {
 	return NewOutputWithUsage(o.semanticKind, o.resultID, o.model, o.items, o.finishReason, o.usage)
 }
 
-func (o CanonicalOutputValue) Text() string {
+func (o CanonicalOutputData) Text() string {
 	out := ""
 	for _, item := range o.items {
 		if item.Kind != ItemKindText {

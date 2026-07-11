@@ -11,9 +11,9 @@ const (
 func (c Conversion) String() string {
 	switch c {
 	case CollectStreamToDocument:
-		return "collect_stream_to_batch"
+		return "collect_stream_to_document"
 	case SynthesizeDocumentToStream:
-		return "synthesize_batch_to_stream"
+		return "synthesize_document_to_stream"
 	default:
 		return "passthrough"
 	}

@@ -15,7 +15,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
@@ -78,10 +77,7 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 		"event=ingress_request_shape",
 		"event=request_outcome",
 		"request_id=req_success",
-		"client_handler=codex",
-		"client_protocol=openai_compat",
 		"request_id=req_fail",
-		"client_handler=claude_code",
 		"result=backend_error",
 		"error_origin=backend",
 		"backend_ref=openai",
@@ -622,7 +618,7 @@ func (h *capturingRequestHandler) Handle(_ context.Context, in exchange.HandleIn
 				"stop",
 			),
 		),
-		Target: ports.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "", ""),
+		Target: exchange.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "", ""),
 	}, nil
 }
 
@@ -635,16 +631,16 @@ func (h staticRequestHandler) Handle(_ context.Context, _ exchange.HandleInput) 
 	return h.out, h.err
 }
 
-func testProviderResponseFromOutput(output canonical.CanonicalOutput) ports.ProviderResponseStream {
+func testProviderResponseFromOutput(output canonical.CanonicalOutput) exchange.ProviderResponseStream {
 	envelope, err := canonical.EventReaderFromCanonicalOutput("test_buffered:httpapi", output)
 	if err != nil {
 		panic(err)
 	}
-	return ports.NewEnvelopeStreamingProviderResponseStream(envelope)
+	return exchange.NewEnvelopeStreamingProviderResponseStream(envelope)
 }
 
-func testStreamingEmptyResponse() ports.ProviderResponseStream {
-	return ports.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(nil))
+func testStreamingEmptyResponse() exchange.ProviderResponseStream {
+	return exchange.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(nil))
 }
 
 func testDebugLogger() (restore func(), out *bytes.Buffer) {
@@ -657,7 +653,7 @@ func testDebugLogger() (restore func(), out *bytes.Buffer) {
 	}, &buf
 }
 
-func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) ports.ProviderResponseStream {
+func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) exchange.ProviderResponseStream {
 	events := canonical.EventSequence{
 		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
 		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
@@ -667,10 +663,10 @@ func testStreamingTextResponse(resultID string, model string, itemID string, tex
 		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
 		{ExchangeID: "test_exchange", Seq: 7, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	}
-	return ports.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(events))
+	return exchange.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(events))
 }
 
-func testStreamingToolResponse(resultID string, model string, itemID string, toolUseID string, name string, argDeltas []string, finish string) ports.ProviderResponseStream {
+func testStreamingToolResponse(resultID string, model string, itemID string, toolUseID string, name string, argDeltas []string, finish string) exchange.ProviderResponseStream {
 	events := canonical.EventSequence{
 		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
 		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
@@ -686,7 +682,7 @@ func testStreamingToolResponse(resultID string, model string, itemID string, too
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 1, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 2, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	)
-	return ports.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(events))
+	return exchange.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(events))
 }
 
 type modelsCapableHandler struct {

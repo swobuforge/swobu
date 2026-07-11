@@ -539,11 +539,11 @@ func TestReduce_ControlPlaneIncompatibleHardStopsAndRecoversOnCompatibleStatus(t
 	}
 	Reduce(&model, ReplaceDaemonStatus{State: "healthy", EndpointCount: 1})
 	if model.ControlPlane != nil {
-		t.Fatal("control plane mismatch should clear after compatible status")
+		t.Fatal("control plane mismatch should clear after healthy status")
 	}
 }
 
-func TestReduce_DaemonRefreshTickInCompatibilityModeOnlyRefreshesStatus(t *testing.T) {
+func TestReduce_DaemonRefreshTickInMismatchModeOnlyRefreshesStatus(t *testing.T) {
 	t.Parallel()
 
 	model := Model{

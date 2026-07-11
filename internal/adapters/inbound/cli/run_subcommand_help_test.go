@@ -31,6 +31,6 @@ func TestRunner_TelemetryStatusHelp_DoesNotExposeStatePathKnobs(t *testing.T) {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
 	}
 	if strings.Contains(stderr.String(), "state-path") {
-		t.Fatalf("telemetry status help exposes deprecated state path override; stderr=%q", stderr.String())
+		t.Fatalf("telemetry status help exposes retired state path override; stderr=%q", stderr.String())
 	}
 }

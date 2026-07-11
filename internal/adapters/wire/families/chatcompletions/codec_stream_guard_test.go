@@ -18,9 +18,9 @@ func TestDecodeProviderStream_InvalidWireCarrierFailsImmediately(t *testing.T) {
 		wire        carrier.WireStream
 		reasonMatch string
 	}{
-		{name: "wrong protocol", wire: carrier.WireStream{Family: protocolkind.Completions, Body: io.NopCloser(strings.NewReader("")), Framing: carrier.FramingSSE}, reasonMatch: "protocol must be"},
-		{name: "wrong framing", wire: carrier.WireStream{Family: protocolkind.ChatCompletions, Body: io.NopCloser(strings.NewReader("")), Framing: carrier.FramingNDJSON}, reasonMatch: "framing must be"},
-		{name: "missing frames", wire: carrier.WireStream{Family: protocolkind.ChatCompletions, Framing: carrier.FramingSSE}, reasonMatch: "body must be configured"},
+		{name: "wrong protocol", wire: carrier.WireStream{Family: protocolkind.Completions, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingSSE}, reasonMatch: "protocol must be"},
+		{name: "wrong framing", wire: carrier.WireStream{Family: protocolkind.ChatCompletions, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingNDJSON}, reasonMatch: "framing must be"},
+		{name: "missing frames", wire: carrier.WireStream{Family: protocolkind.ChatCompletions, Framing: carrier.FramingSSE}, reasonMatch: "frames must be configured"},
 	}
 
 	codec := ProviderStreamDecoder{}

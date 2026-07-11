@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestBedrockSigningRegion_FromEnv(t *testing.T) {
@@ -201,7 +201,7 @@ func TestListModels_AWSProfileMode_UsesControlPlaneHTTP(t *testing.T) {
 	}
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "bedrock", "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1", "", protocolkind.ChatCompletions, "", "", "",
 	))
 	if err != nil {
@@ -241,7 +241,7 @@ func TestListModels_EnvMode_UsesControlPlaneHTTP(t *testing.T) {
 	}
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "", "", "",
 	))
 	if err != nil {
@@ -260,7 +260,7 @@ func TestListModels_EnvMode_MissingTokenFails(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-east-1")
 
 	exec := NewExecutor(nil)
-	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "", "", "",
 	))
 	if err == nil {

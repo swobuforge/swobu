@@ -15,7 +15,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 const (
@@ -32,11 +31,11 @@ type modelsHandler interface {
 }
 
 type Handler struct {
-	requests requestHandler
+	requestHandler requestHandler
 }
 
-func NewHandler(requests requestHandler) Handler {
-	return Handler{requests: requests}
+func NewHandler(requestHandler requestHandler) Handler {
+	return Handler{requestHandler: requestHandler}
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,41 +98,30 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		clientDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
 	}
 
-	provenance := ingressProvenance(r, family, normalizedPath)
 	requestID := requestIDFromRequest(r)
-	logIngressRequestShape(requestID, endpoint.String(), provenance, request, clientDelivery)
+	logIngressRequestShape(requestID, endpoint.String(), family, normalizedPath, request, clientDelivery)
 
-	if h.requests == nil {
+	if h.requestHandler == nil {
 		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
 		return
 	}
 
-	out, err := h.requests.Handle(r.Context(), exchange.HandleInput{
+	out, err := h.requestHandler.Handle(r.Context(), exchange.HandleInput{
 		EndpointName: endpoint,
+		ClientFamily: family,
 		Request:      request,
-		Contract:     ports.NewExecutionContract(clientDelivery),
+		Contract:     exchange.NewExecutionContract(clientDelivery),
 	})
 	if err != nil {
-		logRequestOutcome(requestID, endpoint.String(), provenance, "", "", "", "", "", "", err)
+		logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, err)
 		writeExchangeError(w, err)
 		return
 	}
 	defer func() {
-		_ = ports.CloseProviderResponseStream(out.Response)
+		_ = exchange.CloseProviderResponseStream(out.Response)
 	}()
 	writeModelResolutionHeaders(w)
-	logRequestOutcome(
-		requestID,
-		endpoint.String(),
-		provenance,
-		"",
-		"",
-		"",
-		"",
-		"",
-		"",
-		nil,
-	)
+	logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, nil)
 
 	if err := writeSuccessResponse(w, requestID, family, out.Response, clientDelivery); err != nil {
 		writeExchangeError(w, err)
@@ -145,11 +133,11 @@ func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, end
 		writeSwobuError(w, canonical.UnsupportedOperation("models endpoint only supports GET"))
 		return
 	}
-	if h.requests == nil {
+	if h.requestHandler == nil {
 		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
 		return
 	}
-	m, ok := h.requests.(modelsHandler)
+	m, ok := h.requestHandler.(modelsHandler)
 	if !ok {
 		writeSwobuError(w, canonical.InternalError("models query is not configured"))
 		return
@@ -206,7 +194,7 @@ func decodeRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 }
 
 func decodeCanonicalRequest(family canonical.IngressFamily, raw []byte) (canonical.CanonicalRequest, delivery.Delivery, error) {
-	codec, err := protocolregistry.ForClientFamily(family)
+	codec, err := protocolregistry.ForClientRequestDecoder(family)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -221,58 +209,29 @@ func decodeCanonicalRequest(family canonical.IngressFamily, raw []byte) (canonic
 func logIngressRequestShape(
 	requestID string,
 	endpoint string,
-	provenance IngressProvenance,
+	family canonical.IngressFamily,
+	normalizedPath canonical.NormalizedPath,
 	request canonical.CanonicalRequest,
 	clientDelivery delivery.Delivery,
 ) {
-	threadCount, lastRole, hasPreviousResponseID := requestShapeSummary(request)
 	slog.Debug("protocol ingress request",
 		"component", "httpapi",
 		"event", "ingress_request_shape",
 		"request_id", requestID,
 		"endpoint", endpoint,
-		"ingress_family", string(provenance.IngressFamily),
-		"normalized_op", string(provenance.NormalizedOp),
-		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // swobu:io-string source=boundary
-		"client_handler", strings.TrimSpace(provenance.ClientHandler), // swobu:io-string source=boundary
+		"ingress_family", string(family),
+		"normalized_op", string(normalizedPath),
 		"streaming", clientDelivery.Mode == delivery.Streaming,
 		"delivery_mode", clientDelivery.Mode.String(),
 		"delivery_framing", string(clientDelivery.Framing),
-		"item_count", threadCount,
-		"last_input_role", lastRole,
-		"has_previous_response_id", hasPreviousResponseID,
 	)
-}
-
-func requestShapeSummary(request canonical.CanonicalRequest) (int, string, bool) {
-	items := request.Items()
-	return len(items), lastRoleFromItems(items), strings.TrimSpace(request.PreviousResponseID()) != "" // swobu:io-string source=boundary
-}
-
-func lastRoleFromItems(items []canonical.CanonicalItem) string {
-	if len(items) == 0 {
-		return ""
-	}
-	switch items[len(items)-1].Author {
-	case canonical.ItemAuthorAssistant:
-		return "assistant"
-	case canonical.ItemAuthorTool:
-		return "tool"
-	default:
-		return "user"
-	}
 }
 
 func logRequestOutcome(
 	requestID string,
 	endpoint string,
-	provenance IngressProvenance,
-	modelRequested string,
-	modelResolved string,
-	modelResolutionMode string,
-	clientDeliveryMode string,
-	providerDeliveryMode string,
-	conversionKind string,
+	family canonical.IngressFamily,
+	normalizedPath canonical.NormalizedPath,
 	err error,
 ) {
 	result := "success"
@@ -297,20 +256,12 @@ func logRequestOutcome(
 		"event", "request_outcome",
 		"request_id", requestID,
 		"endpoint", endpoint,
-		"ingress_family", string(provenance.IngressFamily),
-		"normalized_op", string(provenance.NormalizedOp),
-		"client_protocol", strings.TrimSpace(provenance.ClientProtocol), // swobu:io-string source=boundary
-		"client_handler", strings.TrimSpace(provenance.ClientHandler), // swobu:io-string source=boundary
+		"ingress_family", string(family),
+		"normalized_op", string(normalizedPath),
 		"result", result,
 		"status_code", statusCode,
 		"error_origin", errorOrigin,
 		"backend_ref", backendRef,
-		"model_requested", strings.TrimSpace(modelRequested), // swobu:io-string source=boundary
-		"model_resolved", strings.TrimSpace(modelResolved), // swobu:io-string source=boundary
-		"model_resolution_mode", strings.TrimSpace(modelResolutionMode), // swobu:io-string source=boundary
-		"client_delivery_mode", strings.TrimSpace(clientDeliveryMode), // swobu:io-string source=boundary
-		"provider_delivery_mode", strings.TrimSpace(providerDeliveryMode), // swobu:io-string source=boundary
-		"conversion_kind", strings.TrimSpace(conversionKind), // swobu:io-string source=boundary
 	)
 }
 

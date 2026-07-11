@@ -11,15 +11,15 @@ import (
 
 var restartDaemon = startDaemonRestart
 
-// CompatibilityRestartHintEffect reports the recommended recovery command.
-type CompatibilityRestartHintEffect struct {
+// MismatchRestartHintEffect reports the recommended recovery command.
+type MismatchRestartHintEffect struct {
 	Command string
 }
 
-func (eff CompatibilityRestartHintEffect) Execute(ctx context.Context) []update.Action {
+func (eff MismatchRestartHintEffect) Execute(ctx context.Context) []update.Action {
 	_ = strings.TrimSpace(eff.Command) // swobu:io-string source=boundary
-	message := restartDaemonCompatibilityMessage(ctx)
-	return []update.Action{CompatibilityRecoveryNoted{
+	message := restartDaemonMismatchMessage(ctx)
+	return []update.Action{MismatchRecoveryNoted{
 		Message: message,
 		Action:  "run",
 	}}
@@ -31,7 +31,7 @@ type CopyExchangeDiagnosticsEffect struct {
 }
 
 func (eff CopyExchangeDiagnosticsEffect) Execute(context.Context) []update.Action {
-	return []update.Action{CompatibilityRecoveryNoted{
+	return []update.Action{MismatchRecoveryNoted{
 		Message: copyValueNote(strings.TrimSpace(eff.Text)), // swobu:io-string source=boundary
 		Action:  "copy",
 	}}
@@ -47,13 +47,13 @@ type ControlPlaneIncompatibleDetected struct {
 	Reason            string
 }
 
-// CompatibilityRecoveryNoted reports operator-facing recovery/copy outcome.
-type CompatibilityRecoveryNoted struct {
+// MismatchRecoveryNoted reports operator-facing recovery/copy outcome.
+type MismatchRecoveryNoted struct {
 	Message string
 	Action  string
 }
 
-func restartDaemonCompatibilityMessage(ctx context.Context) string {
+func restartDaemonMismatchMessage(ctx context.Context) string {
 	err := restartDaemon(ctx, daemonlifecycle.RestartInput{})
 	if err != nil {
 		return "failed to restart daemon: " + strings.TrimSpace(err.Error()) // swobu:io-string source=boundary

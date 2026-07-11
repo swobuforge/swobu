@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -121,7 +122,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	}, nil
 }
 
-func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
+func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
@@ -155,7 +156,7 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	return models, nil
 }
 
-func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	_, err := e.ListModels(ctx, target)
 	return err
 }

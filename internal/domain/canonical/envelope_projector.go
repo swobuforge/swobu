@@ -74,7 +74,7 @@ func ReadClosedEnvelope(ctx context.Context, r EventReader, kind EnvelopeKind) (
 
 // ProjectResponse materializes a closed response envelope into canonical output.
 // Events remain source of truth; this is a derived view.
-func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputValue, error) {
+func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputData, error) {
 	if e == nil || e.Kind != EnvResponse {
 		return nil, fmt.Errorf("closed envelope is not a response")
 	}

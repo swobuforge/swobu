@@ -37,7 +37,7 @@ type Status struct {
 // Daemon is the live process boundary produced by bootstrap. It owns listener
 // lifetime, runtime health, and graceful shutdown for the local daemon.
 type Daemon struct {
-	endpoints  *endpointCatalog
+	endpoints  *endpointReaderCatalog
 	server     *http.Server
 	listener   net.Listener
 	logger     *slog.Logger

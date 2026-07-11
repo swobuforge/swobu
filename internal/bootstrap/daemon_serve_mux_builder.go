@@ -27,7 +27,8 @@ func buildDaemonServeMux(
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeHandler := exchange.NewRequestHandler(
 		daemon.endpoints,
-		providers,
+		newExchangeProviderExecutorAdapter(providers),
+		newExchangeRuntimeResolver(),
 	)
 	mux := http.NewServeMux()
 	mux.Handle("/c/", httpapi.NewHandler(exchangeHandler))

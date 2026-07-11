@@ -34,7 +34,7 @@ func CarrierWireStreamFromWireStream(stream WireStream, leg carrier.Leg, meta ca
 		Family:  stream.Protocol,
 		Framing: carrier.Framing(stream.Framing),
 		Header:  stream.Headers,
-		Body:    stream.Body,
+		Frames:  carrier.FrameReaderFromReadCloser(stream.Body),
 		Meta:    meta,
 	}
 }

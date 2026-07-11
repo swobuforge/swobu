@@ -1,10 +1,6 @@
 package protocolregistry
 
 import (
-	"context"
-	"errors"
-	"io"
-
 	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
 	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
 	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
@@ -45,47 +41,7 @@ type ProviderDocumentDecoder interface {
 	DecodeProviderDocument(doc carrier.WireDocument, exchangeID string) (canonical.EventReader, error)
 }
 
-type ClientFamily interface {
-	ClientRequestDecoder
-	ClientDocumentEncoder
-	ClientStreamEncoder
-}
-
-type clientFamilyCodec struct {
-	requestDecoder          ClientRequestDecoder
-	documentResponseEncoder ClientDocumentEncoder
-	streamResponseEncoder   ClientStreamEncoder
-}
-
-func (f clientFamilyCodec) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
-	return f.requestDecoder.DecodeClientRequest(doc)
-}
-
-func (f clientFamilyCodec) EncodeClientDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
-	return f.documentResponseEncoder.EncodeClientDocument(output)
-}
-
-func (f clientFamilyCodec) EncodeClientStream(events canonical.EventReader) (carrier.WireStream, error) {
-	return f.streamResponseEncoder.EncodeClientStream(events)
-}
-
-func ForClientFamily(family canonical.IngressFamily) (ClientFamily, error) {
-	requestDecoder, err := forClientRequestFamily(family)
-	if err != nil {
-		return nil, err
-	}
-	documentResponseEncoder, err := forClientResponseDocumentFamily(family)
-	if err != nil {
-		return nil, err
-	}
-	streamResponseEncoder, err := forClientResponseStreamFamily(family)
-	if err != nil {
-		return nil, err
-	}
-	return clientFamilyCodec{requestDecoder: requestDecoder, documentResponseEncoder: documentResponseEncoder, streamResponseEncoder: streamResponseEncoder}, nil
-}
-
-func forClientRequestFamily(family canonical.IngressFamily) (ClientRequestDecoder, error) {
+func ForClientRequestDecoder(family canonical.IngressFamily) (ClientRequestDecoder, error) {
 	switch family {
 	case canonical.IngressFamilyChatCompletions:
 		return chatcompletions.ClientRequestDecoder{}, nil
@@ -100,7 +56,7 @@ func forClientRequestFamily(family canonical.IngressFamily) (ClientRequestDecode
 	}
 }
 
-func forClientResponseDocumentFamily(family canonical.IngressFamily) (ClientDocumentEncoder, error) {
+func ForClientDocumentEncoder(family canonical.IngressFamily) (ClientDocumentEncoder, error) {
 	switch family {
 	case canonical.IngressFamilyChatCompletions:
 		return chatcompletions.ClientDocumentEncoder{}, nil
@@ -115,7 +71,7 @@ func forClientResponseDocumentFamily(family canonical.IngressFamily) (ClientDocu
 	}
 }
 
-func forClientResponseStreamFamily(family canonical.IngressFamily) (ClientStreamEncoder, error) {
+func ForClientStreamEncoder(family canonical.IngressFamily) (ClientStreamEncoder, error) {
 	switch family {
 	case canonical.IngressFamilyChatCompletions:
 		return chatcompletions.ClientStreamEncoder{}, nil
@@ -187,37 +143,4 @@ func ForProviderResponseStreamProtocolCarrier(kind protocolkind.ProtocolKind) (P
 		return nil, err
 	}
 	return providerStreamDecoderAdapter{codec: codec}, nil
-}
-
-func EncodeClientStream(events canonical.EventReader, family protocolkind.ProtocolKind, encode func(canonical.Event) ([][]byte, error)) (carrier.WireStream, error) {
-	if encode == nil {
-		return carrier.WireStream{}, errors.New("client stream encoder is required")
-	}
-	pr, pw := io.Pipe()
-	go func() {
-		defer func() { _ = events.Close(context.Background()) }()
-		defer func() { _ = pw.Close() }()
-		for {
-			ev, err := events.Next(context.Background())
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					return
-				}
-				_ = pw.CloseWithError(err)
-				return
-			}
-			frames, err := encode(ev)
-			if err != nil {
-				_ = pw.CloseWithError(err)
-				return
-			}
-			for _, frame := range frames {
-				if _, err := pw.Write(frame); err != nil {
-					_ = pw.CloseWithError(err)
-					return
-				}
-			}
-		}
-	}()
-	return carrier.WireStream{Family: family, Framing: carrier.FramingSSE, Body: pr}, nil
 }

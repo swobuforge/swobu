@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/routetarget"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -22,28 +21,38 @@ const (
 
 // RequestHandler runs one exchange lifecycle at the application boundary.
 type RequestHandler struct {
-	endpoints ports.EndpointReader
-	providers ports.ProviderExecutor
+	endpoints EndpointReader
+	providers ProviderExecutor
 	runner    Runner
+	runtime   RuntimeResolver
 }
 
-func NewRequestHandler(endpoints ports.EndpointReader, providers ports.ProviderExecutor) RequestHandler {
+type RuntimeResolver interface {
+	ClientCodec(canonical.IngressFamily) ClientCodec
+	ProviderRequestEncoder(protocolkind.ProtocolKind) ProviderRequestEncoder
+	ProviderStreamDecoder(protocolkind.ProtocolKind, delivery.Delivery) ProviderStreamDecoder
+	ProviderDocumentDecoder(protocolkind.ProtocolKind, delivery.Delivery) ProviderDocumentDecoder
+}
+
+func NewRequestHandler(endpoints EndpointReader, providers ProviderExecutor, runtime RuntimeResolver) RequestHandler {
 	return RequestHandler{
 		endpoints: endpoints,
 		providers: providers,
-		runner:    Runner{},
+		runner:    Runner{ProviderExecute: providers.Execute},
+		runtime:   runtime,
 	}
 }
 
 type HandleInput struct {
 	EndpointName endpointintent.EndpointName
+	ClientFamily canonical.IngressFamily
 	Request      canonical.CanonicalRequest
-	Contract     ports.ExecutionContract
+	Contract     ExecutionContract
 }
 
 type HandleOutput struct {
-	Response ports.ProviderResponseStream
-	Target   ports.RoutableTarget
+	Response ProviderResponseStream
+	Target   RoutableTarget
 }
 
 func (h RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutput, error) {
@@ -52,6 +61,9 @@ func (h RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 	}
 	if strings.TrimSpace(in.Request.Model()) == "" { // swobu:io-string source=domain
 		return HandleOutput{}, canonical.BadRequest("canonical request is required")
+	}
+	if in.ClientFamily == "" {
+		return HandleOutput{}, canonical.BadRequest("client family is required")
 	}
 	if h.endpoints == nil {
 		return HandleOutput{}, canonical.InternalError("endpoint reader is not configured")
@@ -66,6 +78,9 @@ func (h RequestHandler) Handle(ctx context.Context, in HandleInput) (HandleOutpu
 func (h RequestHandler) HandleWithEndpoint(ctx context.Context, endpoint endpointintent.Endpoint, in HandleInput) (HandleOutput, error) {
 	if h.providers == nil {
 		return HandleOutput{}, canonical.InternalError("provider executor is not configured")
+	}
+	if h.runtime == nil {
+		return HandleOutput{}, canonical.InternalError("exchange runtime resolver is not configured")
 	}
 	if strings.TrimSpace(in.Request.Model()) == "" { // swobu:io-string source=domain
 		return HandleOutput{}, canonical.BadRequest("canonical request is required")
@@ -95,17 +110,19 @@ func (h RequestHandler) HandleWithEndpoint(ctx context.Context, endpoint endpoin
 		return HandleOutput{}, err
 	}
 	route.ProtocolKind = protocolKind
-	runnerOut, err := h.runner.Run(ctx, ClientInput{
-		ExchangeID:           "exchange_request_handler",
-		ClientFamily:         canonical.IngressFamilyResponses,
-		ClientDelivery:       contract.ClientDelivery,
-		Request:              resolvedRequest,
-		Target:               route,
-		Contract:             contract,
-		ProviderFamily:       route.ProtocolKind,
-		ProviderDelivery:     contract.ProviderDelivery,
-		SkipClientProjection: true,
-		ProviderExecute:      h.providers.Execute,
+	runnerOut, err := h.runner.RunEnvelope(ctx, ClientInput{
+		ExchangeID:       "exchange_" + strings.TrimSpace(in.EndpointName.String()), // swobu:io-string source=boundary
+		ClientFamily:     in.ClientFamily,
+		ClientDelivery:   contract.ClientDelivery,
+		Request:          resolvedRequest,
+		Target:           route,
+		Contract:         contract,
+		ProviderFamily:   route.ProtocolKind,
+		ProviderDelivery: contract.ProviderDelivery,
+		ClientCodec:      h.runtime.ClientCodec(in.ClientFamily),
+		ProviderEncoder:  h.runtime.ProviderRequestEncoder(route.ProtocolKind),
+		StreamDecoder:    h.runtime.ProviderStreamDecoder(route.ProtocolKind, contract.ProviderDelivery),
+		DocumentDecoder:  h.runtime.ProviderDocumentDecoder(route.ProtocolKind, contract.ProviderDelivery),
 	})
 	if err != nil {
 		return HandleOutput{}, err
@@ -113,7 +130,7 @@ func (h RequestHandler) HandleWithEndpoint(ctx context.Context, endpoint endpoin
 	if runnerOut.Envelope == nil {
 		return HandleOutput{}, canonical.InternalError("exchange runner did not return provider envelope stream")
 	}
-	resp := ports.NewEnvelopeStreamingProviderResponseStream(runnerOut.Envelope)
+	resp := NewEnvelopeStreamingProviderResponseStream(runnerOut.Envelope)
 	return HandleOutput{
 		Response: resp,
 		Target:   route,
@@ -159,12 +176,12 @@ func (h RequestHandler) ListModels(ctx context.Context, in ListModelsInput) (Lis
 	}, nil
 }
 
-func resolveRoute(endpoint endpointintent.Endpoint) (ports.RoutableTarget, error) {
+func resolveRoute(endpoint endpointintent.Endpoint) (RoutableTarget, error) {
 	resolved, err := routetarget.ResolveRoutableTarget(endpoint)
 	if err != nil {
-		return ports.RoutableTarget{}, err
+		return RoutableTarget{}, err
 	}
-	return ports.NewRoutableTarget(
+	return NewRoutableTarget(
 		resolved.ProviderConfig.Ref().String(),
 		resolved.ProviderConfig.ProviderSpec().String(),
 		resolved.ProviderConfig.BaseURL(),
@@ -201,7 +218,7 @@ func validateRequestedPublicModel(raw string) string {
 	return modelResolutionIgnored
 }
 
-func providerCallDeliveryPolicy(clientDelivery delivery.Delivery, target ports.RoutableTarget) (delivery.Delivery, error) {
+func providerCallDeliveryPolicy(clientDelivery delivery.Delivery, target RoutableTarget) (delivery.Delivery, error) {
 	providerDelivery := clientDelivery
 	if target.SelectedFrame != "" {
 		if _, ok := profile.StreamingForFrame(target.SelectedFrame); !ok {

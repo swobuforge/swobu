@@ -31,7 +31,7 @@ func TestWireDocumentValidateFor(t *testing.T) {
 	if err := ValidateWireDocumentFor(WireDocument{Kind: WireKindRequest}, WireOpDecode); err == nil {
 		t.Fatalf("request decode must fail")
 	}
-	if err := ValidateWireDocumentFor(WireDocument{Kind: WireKindUnknown}, WireOpPatch); err == nil {
+	if err := ValidateWireDocumentFor(WireDocument{Kind: WireKindUnknown}, WireOpTransform); err == nil {
 		t.Fatalf("unknown kind must fail")
 	}
 }

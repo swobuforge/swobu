@@ -219,7 +219,7 @@ func NewTerminalTrafficEvent(input TrafficEventInput) (TrafficEvent, error) {
 }
 
 // evidence schema's validation and normalization rules.
-// swobu:codelint ignore complexity domain normalization path keeps one validation seam
+// swobu:codelint ignore complexity because=domain normalization and validation are intentionally co-located in one invariant seam
 func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, error) {
 	if input.RequestID.IsZero() {
 		return TrafficEvent{}, fmt.Errorf("request id is required")

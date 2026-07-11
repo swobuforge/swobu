@@ -6,7 +6,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -22,7 +21,7 @@ func (r ProviderProtocolRouting) Streaming() bool {
 
 // ResolveProviderProtocolRouting resolves one concrete provider protocol routing
 // decision from the selected target.
-func ResolveProviderProtocolRouting(target ports.RoutableTarget, missingProtocolMessage string) (ProviderProtocolRouting, error) {
+func ResolveProviderProtocolRouting(target RoutableTarget, missingProtocolMessage string) (ProviderProtocolRouting, error) {
 	providerProtocol := strings.TrimSpace(target.ProviderProtocol) // swobu:io-string source=boundary
 	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
 		return ProviderProtocolRouting{}, canonical.BadEndpoint(missingProtocolMessage)

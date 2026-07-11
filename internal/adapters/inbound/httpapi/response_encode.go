@@ -7,12 +7,13 @@ import (
 	"net/http"
 
 	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func writeSuccessResponse(w http.ResponseWriter, requestID string, family canonical.IngressFamily, resp ports.ProviderResponseStream, clientDelivery delivery.Delivery) error {
+func writeSuccessResponse(w http.ResponseWriter, requestID string, family canonical.IngressFamily, resp exchange.ProviderResponseStream, clientDelivery delivery.Delivery) error {
 	if clientDelivery.Mode != delivery.Streaming {
 		envelope := resp.EnvelopeStream()
 		if envelope == nil {
@@ -53,7 +54,7 @@ func writeBufferedSuccess(w http.ResponseWriter, family canonical.IngressFamily,
 		return canonical.InternalError("buffered provider response is missing a canonical output")
 	}
 
-	codec, err := protocolregistry.ForClientFamily(family)
+	codec, err := protocolregistry.ForClientDocumentEncoder(family)
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canon
 		return canonical.InternalError("streaming provider response is missing an envelope event stream")
 	}
 
-	codec, err := protocolregistry.ForClientFamily(family)
+	codec, err := protocolregistry.ForClientStreamEncoder(family)
 	if err != nil {
 		return err
 	}
@@ -90,8 +91,9 @@ func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canon
 	if err != nil {
 		return canonical.InternalError("stream decoding failed")
 	}
-	defer func() { _ = stream.Body.Close() }()
-	if _, err := io.Copy(w, stream.Body); err != nil && !errors.Is(err, io.EOF) {
+	streamBody := carrier.ReadCloserFromFrameReader(stream.Frames)
+	defer func() { _ = streamBody.Close() }()
+	if _, err := io.Copy(w, streamBody); err != nil && !errors.Is(err, io.EOF) {
 		return canonical.InternalError("stream decoding failed")
 	}
 	return nil

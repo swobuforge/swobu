@@ -1,7 +1,6 @@
 package carrier
 
 import (
-	"io"
 	"net/http"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -23,6 +22,6 @@ type WireStream struct {
 	Family  protocolkind.ProtocolKind
 	Framing Framing
 	Header  http.Header
-	Body    io.ReadCloser
+	Frames  FrameReader
 	Meta    Meta
 }

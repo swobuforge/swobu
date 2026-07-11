@@ -164,14 +164,14 @@ func tokenUsageFromBedrock(in *bedrocktypes.TokenUsage) canonical.TokenUsage {
 	return usage
 }
 
-func mustConversationOutput(modelID string, text string, stop string, usage canonical.TokenUsage) canonical.CanonicalOutputValue {
+func mustConversationOutput(modelID string, text string, stop string, usage canonical.TokenUsage) canonical.CanonicalOutputData {
 	return canonical.NewConversationOutputWithUsage("", modelID, []canonical.OutputItem{canonical.NewTextOutputItem("text_0", text)}, stop, usage)
 }
 
-func decodeInvokeModelBuffered(raw []byte) (canonical.CanonicalOutputValue, error) {
+func decodeInvokeModelBuffered(raw []byte) (canonical.CanonicalOutputData, error) {
 	var parsed map[string]any
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return canonical.CanonicalOutputValue{}, canonical.InternalError("bedrock invoke_model response is invalid JSON")
+		return canonical.CanonicalOutputData{}, canonical.InternalError("bedrock invoke_model response is invalid JSON")
 	}
 	text := bedrockExtractInvokeText(parsed)
 	return canonical.NewPromptOutput("", "", []canonical.OutputItem{canonical.NewTextOutputItem("text_0", text)}, ""), nil

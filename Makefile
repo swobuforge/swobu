@@ -44,4 +44,4 @@ lint:
 	@$(MAKE) lint-platform
 
 lint-platform:
-	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/platformlint
+	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/invariantlint

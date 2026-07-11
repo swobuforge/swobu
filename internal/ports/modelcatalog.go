@@ -4,13 +4,15 @@ import (
 	"context"
 	"slices"
 	"strings"
+
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 // ProviderModelCatalog reads operator-support model catalogs for one selected
 // provider target. It is separate from protocol-path semantic execution.
 type ProviderModelCatalog interface {
-	ValidateCredentials(ctx context.Context, target RoutableTarget) error
-	ListModels(ctx context.Context, target RoutableTarget) ([]string, error)
+	ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error
+	ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error)
 }
 
 // CloneModelIDs protects operator read models from accidental mutation by

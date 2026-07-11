@@ -39,3 +39,29 @@ func TestWrap_EndWithoutStartFails(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestWrap_EOFWithOpenEnvelopeFails(t *testing.T) {
+	in := canonical.NewSliceEventReader(canonical.EventSequence{
+		{Kind: canonical.EventEnvelopeStart, EnvID: "r1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
+	})
+	wrapped := Wrap(in)
+	if _, err := wrapped.Next(context.Background()); err != nil {
+		t.Fatalf("first next: %v", err)
+	}
+	if _, err := wrapped.Next(context.Background()); err == nil {
+		t.Fatal("expected eof validation error for open envelope")
+	}
+}
+
+func TestWrap_CloseWithOpenEnvelopeFails(t *testing.T) {
+	in := canonical.NewSliceEventReader(canonical.EventSequence{
+		{Kind: canonical.EventEnvelopeStart, EnvID: "r1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
+	})
+	wrapped := Wrap(in)
+	if _, err := wrapped.Next(context.Background()); err != nil {
+		t.Fatalf("first next: %v", err)
+	}
+	if err := wrapped.Close(context.Background()); err == nil {
+		t.Fatal("expected close error for open envelope")
+	}
+}

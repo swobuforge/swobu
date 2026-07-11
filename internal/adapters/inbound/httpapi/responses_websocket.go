@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 const websocketRequestTypeResponseCreate = "response.create"
@@ -37,7 +36,7 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
 	conn.MaxPayloadBytes = maxWebsocketRequestBodyBytes
-	if h.requests == nil {
+	if h.requestHandler == nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.InternalError("request orchestrator is not configured"))))
 		return
 	}
@@ -97,21 +96,21 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	}
 
 	requestID := requestIDFromRequest(r)
-	out, err := h.requests.Handle(r.Context(), exchange.HandleInput{
+	out, err := h.requestHandler.Handle(r.Context(), exchange.HandleInput{
 		EndpointName: endpoint,
 		Request:      request,
-		Contract:     ports.NewExecutionContract(clientDelivery),
+		Contract:     exchange.NewExecutionContract(clientDelivery),
 	})
 	if err != nil {
 		return err
 	}
 	defer func() {
-		_ = ports.CloseProviderResponseStream(out.Response)
+		_ = exchange.CloseProviderResponseStream(out.Response)
 	}()
 	return writeResponsesWebsocketSuccess(conn, requestID, out.Response, clientDelivery)
 }
 
-func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp ports.ProviderResponseStream, clientDelivery delivery.Delivery) error {
+func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp exchange.ProviderResponseStream, clientDelivery delivery.Delivery) error {
 	envelope := resp.EnvelopeStream()
 	if clientDelivery.Mode == delivery.Streaming {
 		if envelope == nil {

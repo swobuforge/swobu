@@ -19,9 +19,9 @@ func allowWhileControlPlaneIncompatible(action update.Action) bool {
 		HelpDiagnosticsCopyRequested,
 		SetInteractionMode,
 		SetFocusedRowAffordance,
-		CompatibilityRestartRequested,
+		MismatchRestartRequested,
 		ExchangeDiagnosticsCopyRequested,
-		stateeffect.CompatibilityRecoveryNoted:
+		stateeffect.MismatchRecoveryNoted:
 		return true
 	default:
 		return false

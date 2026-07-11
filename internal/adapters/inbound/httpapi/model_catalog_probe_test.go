@@ -9,17 +9,17 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 type stubModelCatalog struct {
 	models       []string
 	err          error
 	validateUsed bool
-	listFn       func(target ports.RoutableTarget) ([]string, error)
+	listFn       func(target exchange.RoutableTarget) ([]string, error)
 }
 
-func (s *stubModelCatalog) ListModels(_ context.Context, target ports.RoutableTarget) ([]string, error) {
+func (s *stubModelCatalog) ListModels(_ context.Context, target exchange.RoutableTarget) ([]string, error) {
 	if s.listFn != nil {
 		return s.listFn(target)
 	}
@@ -29,7 +29,7 @@ func (s *stubModelCatalog) ListModels(_ context.Context, target ports.RoutableTa
 	return append([]string(nil), s.models...), nil
 }
 
-func (s *stubModelCatalog) ValidateCredentials(context.Context, ports.RoutableTarget) error {
+func (s *stubModelCatalog) ValidateCredentials(context.Context, exchange.RoutableTarget) error {
 	s.validateUsed = true
 	return nil
 }
@@ -96,7 +96,7 @@ func TestModelCatalogProbeHandler_ReturnsRawError(t *testing.T) {
 func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirstSuccess(t *testing.T) {
 	attempts := make([]string, 0, 4)
 	stub := &stubModelCatalog{
-		listFn: func(target ports.RoutableTarget) ([]string, error) {
+		listFn: func(target exchange.RoutableTarget) ([]string, error) {
 			key := target.ProtocolKind.String() + "/" + target.SelectedFrame
 			attempts = append(attempts, key)
 			if key == "responses/sse_event" {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
@@ -24,7 +24,7 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
 	}
-	resp := ports.NewEnvelopeStreamingProviderResponseStream(envelope)
+	resp := exchange.NewEnvelopeStreamingProviderResponseStream(envelope)
 
 	rr := httptest.NewRecorder()
 	if err := writeSuccessResponse(rr, "req_test_1", canonical.IngressFamilyResponses, resp, delivery.StreamingDelivery(delivery.FramingSSE)); err != nil {
@@ -55,7 +55,7 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 	if err != nil {
 		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
 	}
-	resp := ports.NewEnvelopeStreamingProviderResponseStream(envelope)
+	resp := exchange.NewEnvelopeStreamingProviderResponseStream(envelope)
 
 	rr := httptest.NewRecorder()
 	if err := writeSuccessResponse(rr, "req_test_2", canonical.IngressFamilyChatCompletions, resp, delivery.StreamingDelivery(delivery.FramingSSE)); err != nil {

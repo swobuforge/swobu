@@ -37,7 +37,7 @@ func TestProviderCacheTransform_ProtocolEncodeStaysNeutral(t *testing.T) {
 func TestProviderCacheTransform_ProfileFactRecordApplyProviderFields(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo-alpha", Retention: canonical.CacheRetention24H})})
 	in := carrier.WireDocument{Raw: []byte(`{"model":"m"}`)}
-	out, _, _, _, err := transform.ApplyProviderWireOutStage(in, newTransformRegistry(NewOpenAIPolicy().Facts(req)))
+	out, _, _, _, _, _, err := transform.ApplyProviderWireOutStage(in, newTransformRegistry(NewOpenAIPolicy().Facts(req)))
 	if err != nil {
 		t.Fatalf("ApplyDocumentStage: %v", err)
 	}

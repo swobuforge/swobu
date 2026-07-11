@@ -66,8 +66,8 @@ func ValidateResponseSSECarrierStream(stream carrier.WireStream, expectedProtoco
 	if stream.Framing != carrier.FramingSSE {
 		return fmt.Errorf("wire stream framing must be %q", carrier.FramingSSE)
 	}
-	if stream.Body == nil {
-		return fmt.Errorf("wire stream body must be configured")
+	if stream.Frames == nil {
+		return fmt.Errorf("wire stream frames must be configured")
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -20,8 +21,8 @@ type Executor interface {
 
 // ModelCatalogClient lists backend model IDs for one provider target.
 type ModelCatalogClient interface {
-	ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error
-	ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error)
+	ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error
+	ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error)
 }
 
 // ProviderRuntimeBundle groups one provider's runtime roles.

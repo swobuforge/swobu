@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
@@ -44,7 +45,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
-		ports.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
+		exchange.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	)
 	if _, err := services.Execution.Execute(context.Background(), openAIReq); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
@@ -56,7 +57,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
-		ports.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
+		exchange.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)
 	if _, err := services.Execution.Execute(context.Background(), anthropicReq); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
@@ -78,7 +79,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 
 	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
 
-	openAIModels, err := services.ModelCatalog.ListModels(context.Background(), ports.NewRoutableTarget(
+	openAIModels, err := services.ModelCatalog.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -88,7 +89,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai model catalog len=%d want 2", len(openAIModels))
 	}
 
-	_, err = services.ModelCatalog.ListModels(context.Background(), ports.NewRoutableTarget(
+	_, err = services.ModelCatalog.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-b", "chatgpt", upstream.URL+"/v1", "keychain:chatgpt/default", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
@@ -106,7 +107,7 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 			InputText: "hi",
 		}),
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
-		ports.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
+		exchange.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
 		t.Fatalf("unknown provider must fail fast, got err=%v", err)
@@ -127,7 +128,7 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 	defer upstream.Close()
 
 	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
-	err := services.ModelCatalog.ValidateCredentials(context.Background(), ports.NewRoutableTarget(
+	err := services.ModelCatalog.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -161,7 +162,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	openAIResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
 		request,
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
-		ports.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
+		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {
 		t.Fatalf("openai execution failed: %v", err)
@@ -173,7 +174,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	ollamaResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
 		request,
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
-		ports.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
+		exchange.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {
 		t.Fatalf("ollama execution failed: %v", err)

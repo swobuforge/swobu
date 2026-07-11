@@ -19,17 +19,25 @@ func TestClientFamiliesImplementDirectionalClientPorts(t *testing.T) {
 		family := family
 		t.Run(string(family), func(t *testing.T) {
 			t.Parallel()
-			codec, err := ForClientFamily(family)
+			requestDecoder, err := ForClientRequestDecoder(family)
 			if err != nil {
-				t.Fatalf("ForClientFamily(%s): %v", family, err)
+				t.Fatalf("ForClientRequestDecoder(%s): %v", family, err)
 			}
-			if _, ok := codec.(ClientRequestDecoder); !ok {
+			if _, ok := requestDecoder.(ClientRequestDecoder); !ok {
 				t.Fatalf("family %s missing ClientRequestDecoder", family)
 			}
-			if _, ok := codec.(ClientDocumentEncoder); !ok {
+			documentEncoder, err := ForClientDocumentEncoder(family)
+			if err != nil {
+				t.Fatalf("ForClientDocumentEncoder(%s): %v", family, err)
+			}
+			if _, ok := documentEncoder.(ClientDocumentEncoder); !ok {
 				t.Fatalf("family %s missing ClientDocumentEncoder", family)
 			}
-			if _, ok := codec.(ClientStreamEncoder); !ok {
+			streamEncoder, err := ForClientStreamEncoder(family)
+			if err != nil {
+				t.Fatalf("ForClientStreamEncoder(%s): %v", family, err)
+			}
+			if _, ok := streamEncoder.(ClientStreamEncoder); !ok {
 				t.Fatalf("family %s missing ClientStreamEncoder", family)
 			}
 		})

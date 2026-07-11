@@ -20,7 +20,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 
-	chain := []string{"compat", "responses"}
+	chain := []string{"bridge", "responses"}
 	mutations := []Mutation{{
 		Leg:           "encode",
 		Transform:     "openaifamily.CacheAffinityWireTransform",
@@ -55,8 +55,8 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}
 	chain[0] = "mutated"
-	if got := event.AdaptationChain()[0]; got != "compat" {
-		t.Fatalf("adaptation chain[0] = %q, want %q", got, "compat")
+	if got := event.AdaptationChain()[0]; got != "bridge" {
+		t.Fatalf("adaptation chain[0] = %q, want %q", got, "bridge")
 	}
 	if got := event.ModelRequested(); got != "client-model" {
 		t.Fatalf("model requested = %q, want %q", got, "client-model")

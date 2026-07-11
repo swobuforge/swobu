@@ -17,7 +17,7 @@ func BuildBody(ctx *retained.Context[state.Model], preset ScreenLayoutPreset) (r
 		return helpBodyLayouts(ctx, preset)
 	}
 	if model.ControlPlane != nil {
-		return incompatibilityBodyLayouts(ctx, preset)
+		return mismatchBodyLayouts(ctx, preset)
 	}
 	if model.CurrentEndpoint == "" {
 		return createBodyLayouts(ctx, model, preset)
@@ -32,9 +32,9 @@ func helpBodyLayouts(ctx *retained.Context[state.Model], preset ScreenLayoutPres
 	return body, body
 }
 
-func incompatibilityBodyLayouts(ctx *retained.Context[state.Model], preset ScreenLayoutPreset) (retained.ViewSpec[state.Model], retained.ViewSpec[state.Model]) {
+func mismatchBodyLayouts(ctx *retained.Context[state.Model], preset ScreenLayoutPreset) (retained.ViewSpec[state.Model], retained.ViewSpec[state.Model]) {
 	body := composeSectionStack(ctx, preset.SectionGap, false,
-		retained.Build[state.Model](appviews.BuildCompatibilityScreen),
+		retained.Build[state.Model](appviews.BuildMismatchScreen),
 	)
 	return body, body
 }

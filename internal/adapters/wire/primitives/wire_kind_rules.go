@@ -16,19 +16,19 @@ const (
 type WireOperation string
 
 const (
-	WireOpEncode WireOperation = "encode"
-	WireOpDecode WireOperation = "decode"
-	WireOpPatch  WireOperation = "patch"
+	WireOpEncode    WireOperation = "encode"
+	WireOpDecode    WireOperation = "decode"
+	WireOpTransform WireOperation = "transform"
 )
 
 func (k WireKind) Supports(op WireOperation) bool {
 	switch k {
 	case WireKindRequest:
-		return op == WireOpEncode || op == WireOpPatch
+		return op == WireOpEncode || op == WireOpTransform
 	case WireKindResponse, WireKindUsage, WireKindError:
-		return op == WireOpDecode || op == WireOpPatch
+		return op == WireOpDecode || op == WireOpTransform
 	case WireKindResponseStream:
-		return op == WireOpDecode || op == WireOpPatch
+		return op == WireOpDecode || op == WireOpTransform
 	default:
 		return false
 	}

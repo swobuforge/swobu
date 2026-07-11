@@ -14,6 +14,4 @@ type Context struct {
 	Carrier    carrier.Kind
 	Family     protocolkind.ProtocolKind
 	Delivery   delivery.Delivery
-	Profile    map[string]string
-	Evidence   map[string]string
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -75,7 +76,7 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 		t.Fatalf("store secretfile bundle: %v", err)
 	}
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -99,7 +100,7 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 	t.Setenv("USERPROFILE", "")
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -140,7 +141,7 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 	}
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		srv.URL+"/v1",
@@ -177,7 +178,7 @@ func TestListModels_ResolvesTierFromStoredSecretBundleWhenRefHasNoTierSegment(t 
 	}
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -206,7 +207,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
 		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		ports.NewRoutableTarget(
+		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			"https://api.openai.com/v1",
@@ -265,7 +266,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
 		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		ports.NewRoutableTarget(
+		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -298,7 +299,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
 		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		ports.NewRoutableTarget(
+		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -369,7 +370,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
 		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		ports.NewRoutableTarget(
+		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -419,7 +420,7 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
 		ports.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		ports.NewRoutableTarget(
+		exchange.NewRoutableTarget(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",

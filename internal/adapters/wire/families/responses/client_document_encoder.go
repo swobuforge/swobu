@@ -140,7 +140,7 @@ func (e ClientStreamEncoder) EncodeClientStream(events canonical.EventReader) (c
 			}
 		}
 	}()
-	return carrier.WireStream{Family: protocolkind.Responses, Framing: carrier.FramingSSE, Body: pr}, nil
+	return carrier.WireStream{Family: protocolkind.Responses, Framing: carrier.FramingSSE, Frames: carrier.FrameReaderFromReadCloser(pr)}, nil
 }
 
 func (ProviderRequestEncoder) EncodeProviderRequest(request canonical.CanonicalRequest, delivery delivery.Delivery) (carrier.WireDocument, error) {

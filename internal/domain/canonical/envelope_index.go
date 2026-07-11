@@ -73,7 +73,7 @@ func (i *EnvelopeIndex) Closed(id EnvelopeID) (*ClosedEnvelope, bool) {
 
 // ProjectResponse materializes a closed canonical response envelope into a
 // canonical output snapshot.
-func (i *EnvelopeIndex) ProjectResponse(id EnvelopeID) (*CanonicalOutputValue, error) {
+func (i *EnvelopeIndex) ProjectResponse(id EnvelopeID) (*CanonicalOutputData, error) {
 	closed, ok := i.closed[id]
 	if !ok {
 		return nil, fmt.Errorf("response envelope %q is not closed", id)

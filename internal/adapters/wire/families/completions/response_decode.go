@@ -74,7 +74,7 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonica
 	return &completionsEventReader{
 		exchangeID: exchangeID,
 		responseID: canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:     core.NewSSEReader(stream.Body),
+		reader:     core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
 	}
 }
 

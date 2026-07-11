@@ -14,6 +14,7 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -72,7 +73,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 	return e.executeConverse(ctx, client, req, op.deliveryMode)
 }
 
-func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
+func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	mode, value := parseBedrockAuthMode(target.CredentialRef)
 	if mode != bedrockAuthModeAWSProfile && mode != bedrockAuthModeAPIKeyEnv {
 		return nil, canonical.BadEndpoint("bedrock auth mode is unsupported")
@@ -135,7 +136,7 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.Ro
 	return models, nil
 }
 
-func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	_, err := e.ListModels(ctx, target)
 	return err
 }

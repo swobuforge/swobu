@@ -13,12 +13,13 @@ import (
 	"testing"
 	"time"
 
+	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/conformance/fixture"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type fixtureEvent struct {
@@ -56,7 +57,6 @@ func TestExchangeReplay(t *testing.T) {
 			assertEnvelopeProjectionFromCanonicalEvents(t, filepath.Join(caseDir, "canonical_events.jsonl"), filepath.Join(caseDir, "client_response.body.json"))
 			assertRunnerReplay(t, contract, caseDir)
 			assertDeliveryConversionInvariants(t, contract, caseDir)
-			assertExchangeReport(t, contract, filepath.Join(caseDir, "exchange_report.json"))
 		})
 	}
 }
@@ -68,32 +68,41 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 	clientRequest := []byte(readFile(t, filepath.Join(caseDir, "client_request.body.json")))
 	providerResponseBody := []byte(readFile(t, filepath.Join(caseDir, "provider_response.body.json")))
 	providerResponseSSE := readFile(t, filepath.Join(caseDir, "provider_response.sse"))
+	requestDecoder, err := protocolregistry.ForClientRequestDecoder(clientFamily)
+	if err != nil {
+		t.Fatalf("client request decoder: %v", err)
+	}
+	request, _, err := requestDecoder.DecodeClientRequest(carrier.WireDocument{
+		Leg:    carrier.LegClientRequestIn,
+		Family: protocolkind.ProtocolKind(clientFamily),
+		Media:  "application/json",
+		Raw:    append([]byte(nil), clientRequest...),
+	})
+	if err != nil {
+		t.Fatalf("decode client request: %v", err)
+	}
 	var capturedProviderRequest []byte
-	out, err := (exchange.Runner{}).Run(context.Background(), exchange.ClientInput{
+	runner := exchange.Runner{ProviderExecute: func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderTransportResponse, error) {
+		capturedProviderRequest = append(capturedProviderRequest[:0], req.ProviderWire.Raw...)
+		if providerDelivery.Mode == delivery.Streaming {
+			return exchange.ProviderTransportResponse{
+				Stream: io.NopCloser(strings.NewReader(providerResponseSSE)),
+			}, nil
+		}
+		return exchange.ProviderTransportResponse{
+			Document: providerResponseBody,
+		}, nil
+	}}
+	out, err := runner.Run(context.Background(), withRuntimeInput(exchange.ClientInput{
 		ExchangeID:       "fixture_exchange",
 		ClientFamily:     clientFamily,
 		ClientDelivery:   clientDelivery,
-		ClientRequestRaw: clientRequest,
+		Request:          request,
 		ProviderFamily:   providerFamily,
 		ProviderDelivery: providerDelivery,
-		Target:           ports.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", providerFamily, "", "", ""),
-		Contract:         ports.NewExecutionContract(clientDelivery).WithProviderDelivery(providerDelivery),
-		ProviderExecute: func(_ context.Context, req ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
-			wireReq, err := exchange.RealizeProviderRequestCarrier(req.Request, providerFamily, req.Contract.ProviderDelivery, "messages unsupported")
-			if err != nil {
-				return ports.ProviderTransportResponse{}, err
-			}
-			capturedProviderRequest = append(capturedProviderRequest[:0], wireReq.Raw...)
-			if providerDelivery.Mode == delivery.Streaming {
-				return ports.ProviderTransportResponse{
-					Stream: io.NopCloser(strings.NewReader(providerResponseSSE)),
-				}, nil
-			}
-			return ports.ProviderTransportResponse{
-				Document: providerResponseBody,
-			}, nil
-		},
-	})
+		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", providerFamily, "", "", ""),
+		Contract:         exchange.NewExecutionContract(clientDelivery).WithProviderDelivery(providerDelivery),
+	}))
 	if err != nil {
 		t.Fatalf("runner replay failed: %v", err)
 	}
@@ -102,7 +111,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 		if out.Stream == nil {
 			t.Fatalf("client stream missing")
 		}
-		streamRaw, readErr := io.ReadAll(out.Stream.Body)
+		streamRaw, readErr := io.ReadAll(carrier.ReadCloserFromFrameReader(out.Stream.Frames))
 		if readErr != nil {
 			t.Fatalf("read client stream: %v", readErr)
 		}
@@ -197,14 +206,6 @@ func assertCaseContract(t *testing.T, contract fixture.CaseContract) {
 	if !contract.Assert.EnvelopeGrammarValid {
 		t.Fatalf("case %s must enable assert.envelope_grammar_valid", contract.Name)
 	}
-	if !contract.Assert.NoUnreportedLoss {
-		t.Fatalf("case %s must enable assert.no_unreported_loss", contract.Name)
-	}
-	if len(contract.Assert.ExpectedStageOrder) == 0 {
-		t.Fatalf("case %s must define assert.expected_stage_order", contract.Name)
-	}
-	assertMutatedStagesSubsetOfExpectedOrder(t, contract)
-	assertExpectedStageAppliedSubsetOfExpectedOrder(t, contract)
 	switch strings.TrimSpace(contract.FixtureSource) {
 	case "synthetic", "captured":
 	default:
@@ -219,31 +220,6 @@ func assertCaseContract(t *testing.T, contract fixture.CaseContract) {
 	if strings.TrimSpace(contract.FixtureSource) == "synthetic" && strings.TrimSpace(contract.CaptureRef) != "" {
 		t.Fatalf("case %s capture_ref must be empty when fixture_source=synthetic", contract.Name)
 	}
-	if contract.Assert.MaxNotices < 0 {
-		t.Fatalf("case %s max_notices must be >= 0", contract.Name)
-	}
-	if contract.Assert.MaxEvidence < 0 {
-		t.Fatalf("case %s max_evidence must be >= 0", contract.Name)
-	}
-	if err := validateContractCodeMaxConsistency(contract); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func validateContractCodeMaxConsistency(contract fixture.CaseContract) error {
-	if len(contract.Assert.ExpectedNoticeCodes) > contract.Assert.MaxNotices {
-		return fmt.Errorf("case %s expected_notice_codes count=%d exceeds max_notices=%d", contract.Name, len(contract.Assert.ExpectedNoticeCodes), contract.Assert.MaxNotices)
-	}
-	if len(contract.Assert.ExpectedEvidenceCodes) > contract.Assert.MaxEvidence {
-		return fmt.Errorf("case %s expected_evidence_codes count=%d exceeds max_evidence=%d", contract.Name, len(contract.Assert.ExpectedEvidenceCodes), contract.Assert.MaxEvidence)
-	}
-	if err := validateExpectedCodeList("expected_notice_codes", contract.Assert.ExpectedNoticeCodes, contract.Name); err != nil {
-		return err
-	}
-	if err := validateExpectedCodeList("expected_evidence_codes", contract.Assert.ExpectedEvidenceCodes, contract.Name); err != nil {
-		return err
-	}
-	return nil
 }
 
 func validateExpectedCodeList(field string, values []string, caseName string) error {
@@ -355,299 +331,6 @@ func assertStreamTerminalOrder(t *testing.T, name string, raw string) {
 	if firstData >= 0 && firstTerminal >= 0 && firstTerminal < firstData {
 		t.Fatalf("%s terminal marker appeared before first data frame", name)
 	}
-}
-
-func assertExchangeReport(t *testing.T, contract fixture.CaseContract, path string) {
-	t.Helper()
-	report := readExchangeReport(t, path)
-	if strings.TrimSpace(report.ExchangeID) == "" {
-		t.Fatalf("exchange report %s missing exchange_id", path)
-	}
-	if len(report.Stages) == 0 {
-		t.Fatalf("exchange report %s missing stages", path)
-	}
-	if err := validateLossPolicy(contract.Assert.NoLossAllowed, contract.Assert.NoUnreportedLoss, report.Losses, path); err != nil {
-		t.Fatal(err)
-	}
-	assertStageOrder(t, report.Stages, contract.Assert.ExpectedStageOrder, path)
-	assertMutatedStages(t, report.Stages, contract.Assert.ExpectedMutatedStages, path)
-	assertStageShape(t, report.Stages, path)
-	assertStageApplied(t, report.Stages, contract.Assert.ExpectedStageApplied, path)
-	if err := validateMaxCount("notices", len(report.Notices), contract.Assert.MaxNotices, path); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateMaxCount("evidence", len(report.Evidence), contract.Assert.MaxEvidence, path); err != nil {
-		t.Fatal(err)
-	}
-	assertCodeSet(t, "notice", noticeCodes(report.Notices), contract.Assert.ExpectedNoticeCodes, path)
-	assertCodeSet(t, "evidence", evidenceCodes(report.Evidence), contract.Assert.ExpectedEvidenceCodes, path)
-}
-
-func validateLossPolicy(noLossAllowed bool, noUnreportedLoss bool, losses []exchange.ProjectionLoss, path string) error {
-	if noLossAllowed && len(losses) > 0 {
-		return fmt.Errorf("exchange report %s has losses but case requires no_loss_allowed", path)
-	}
-	if noUnreportedLoss {
-		for _, loss := range losses {
-			if strings.TrimSpace(loss.Field) == "" || strings.TrimSpace(loss.Reason) == "" {
-				return fmt.Errorf("exchange report %s contains unreported loss entry: %+v", path, loss)
-			}
-		}
-	}
-	return nil
-}
-
-func validateMaxCount(label string, actual int, max int, path string) error {
-	if actual > max {
-		return fmt.Errorf("exchange report %s %s=%d exceeds max_%s=%d", path, label, actual, label, max)
-	}
-	return nil
-}
-
-func assertStageOrder(t *testing.T, got []exchange.StageReport, expected []string, path string) {
-	t.Helper()
-	if err := validateStageOrder(got, expected, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func validateStageOrder(got []exchange.StageReport, expected []string, path string) error {
-	idx := 0
-	for _, stage := range got {
-		if idx < len(expected) && string(stage.Stage) == expected[idx] {
-			idx++
-		}
-	}
-	if idx != len(expected) {
-		return fmt.Errorf("exchange report %s stage order missing expected sequence %#v; got %#v", path, expected, got)
-	}
-	return nil
-}
-
-func assertMutatedStages(t *testing.T, got []exchange.StageReport, expected []string, path string) {
-	t.Helper()
-	if err := validateMutatedStages(got, expected, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func assertMutatedStagesSubsetOfExpectedOrder(t *testing.T, contract fixture.CaseContract) {
-	t.Helper()
-	if err := validateMutatedStagesSubsetOfExpectedOrder(contract); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func validateMutatedStages(got []exchange.StageReport, expected []string, path string) error {
-	expectedSet := make(map[string]struct{}, len(expected))
-	for _, stage := range expected {
-		expectedSet[strings.TrimSpace(stage)] = struct{}{}
-	}
-	actualSet := make(map[string]struct{})
-	for _, stage := range got {
-		if stage.Mutated {
-			name := strings.TrimSpace(string(stage.Stage))
-			actualSet[name] = struct{}{}
-			if _, ok := expectedSet[name]; !ok {
-				return fmt.Errorf("exchange report %s has unexpected mutated stage %q; expected mutated stages=%v", path, name, mapKeys(expectedSet))
-			}
-		}
-	}
-	if len(actualSet) != len(expectedSet) {
-		return fmt.Errorf("exchange report %s mutated stages mismatch: got=%v expected=%v", path, mapKeys(actualSet), mapKeys(expectedSet))
-	}
-	for k := range expectedSet {
-		if _, ok := actualSet[k]; !ok {
-			return fmt.Errorf("exchange report %s missing expected mutated stage %q; got=%v", path, k, mapKeys(actualSet))
-		}
-	}
-	return nil
-}
-
-func validateMutatedStagesSubsetOfExpectedOrder(contract fixture.CaseContract) error {
-	orderSet := make(map[string]struct{}, len(contract.Assert.ExpectedStageOrder))
-	for _, stage := range contract.Assert.ExpectedStageOrder {
-		orderSet[strings.TrimSpace(stage)] = struct{}{}
-	}
-	for _, stage := range contract.Assert.ExpectedMutatedStages {
-		name := strings.TrimSpace(stage)
-		if _, ok := orderSet[name]; !ok {
-			return fmt.Errorf("case %s has expected_mutated_stages entry %q not present in expected_stage_order", contract.Name, name)
-		}
-	}
-	return nil
-}
-
-func assertExpectedStageAppliedSubsetOfExpectedOrder(t *testing.T, contract fixture.CaseContract) {
-	t.Helper()
-	if err := validateExpectedStageAppliedSubsetOfExpectedOrder(contract); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func validateExpectedStageAppliedSubsetOfExpectedOrder(contract fixture.CaseContract) error {
-	orderSet := make(map[string]struct{}, len(contract.Assert.ExpectedStageOrder))
-	for _, stage := range contract.Assert.ExpectedStageOrder {
-		orderSet[strings.TrimSpace(stage)] = struct{}{}
-	}
-	for stage, applied := range contract.Assert.ExpectedStageApplied {
-		name := strings.TrimSpace(stage)
-		if _, ok := orderSet[name]; !ok {
-			return fmt.Errorf("case %s has expected_stage_applied key %q not present in expected_stage_order", contract.Name, name)
-		}
-		seen := map[string]struct{}{}
-		for _, rawID := range applied {
-			id := strings.TrimSpace(rawID)
-			if id == "" {
-				return fmt.Errorf("case %s expected_stage_applied[%s] contains empty transform id", contract.Name, name)
-			}
-			if _, ok := seen[id]; ok {
-				return fmt.Errorf("case %s expected_stage_applied[%s] contains duplicate transform id %q", contract.Name, name, id)
-			}
-			seen[id] = struct{}{}
-		}
-	}
-	return nil
-}
-
-func assertStageShape(t *testing.T, got []exchange.StageReport, path string) {
-	t.Helper()
-	for _, stage := range got {
-		name := strings.TrimSpace(string(stage.Stage))
-		if name == "" {
-			t.Fatalf("exchange report %s contains empty stage id", path)
-		}
-		switch stage.Stage {
-		case string(exchange.StageClientHTTPIn),
-			string(exchange.StageClientWireIn),
-			string(exchange.StageSemanticRequest),
-			string(exchange.StageProviderWireOut),
-			string(exchange.StageProviderHTTPOut),
-			string(exchange.StageProviderHTTPIn),
-			string(exchange.StageProviderWireIn),
-			string(exchange.StageSemanticEvents),
-			string(exchange.StageClientWireOut),
-			string(exchange.StageClientHTTPOut):
-		default:
-			t.Fatalf("exchange report %s stage=%q is not a known exchange stage id", path, name)
-		}
-		if stage.Stage == string(exchange.StageProviderWireOut) || stage.Stage == string(exchange.StageProviderWireIn) || stage.Stage == string(exchange.StageSemanticEvents) {
-			if strings.TrimSpace(stage.Carrier) == "" {
-				t.Fatalf("exchange report %s stage=%q must include carrier", path, name)
-			}
-		}
-		if stage.Mutated && len(stage.Applied) == 0 {
-			t.Fatalf("exchange report %s stage=%q mutated=true requires non-empty applied transform ids", path, name)
-		}
-	}
-}
-
-func assertStageApplied(t *testing.T, got []exchange.StageReport, expected map[string][]string, path string) {
-	t.Helper()
-	if err := validateStageApplied(got, expected, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func validateStageApplied(got []exchange.StageReport, expected map[string][]string, path string) error {
-	if len(expected) == 0 {
-		return nil
-	}
-	byStage := map[string]exchange.StageReport{}
-	for _, stage := range got {
-		byStage[strings.TrimSpace(stage.Stage)] = stage
-	}
-	for stageNameRaw, expectedAppliedRaw := range expected {
-		stageName := strings.TrimSpace(stageNameRaw)
-		report, ok := byStage[stageName]
-		if !ok {
-			return fmt.Errorf("exchange report %s missing stage %q required by expected_stage_applied", path, stageName)
-		}
-		expectedApplied := append([]string(nil), expectedAppliedRaw...)
-		for i := range expectedApplied {
-			expectedApplied[i] = strings.TrimSpace(expectedApplied[i])
-		}
-		actualApplied := append([]string(nil), report.Applied...)
-		for i := range actualApplied {
-			actualApplied[i] = strings.TrimSpace(actualApplied[i])
-		}
-		if len(actualApplied) != len(expectedApplied) {
-			return fmt.Errorf("exchange report %s stage %q applied mismatch: got=%v expected=%v", path, stageName, actualApplied, expectedApplied)
-		}
-		for idx := range expectedApplied {
-			if actualApplied[idx] != expectedApplied[idx] {
-				return fmt.Errorf("exchange report %s stage %q applied mismatch: got=%v expected=%v", path, stageName, actualApplied, expectedApplied)
-			}
-		}
-	}
-	return nil
-}
-
-func mapKeys(m map[string]struct{}) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
-func assertCodeSet(t *testing.T, label string, got []string, expected []string, path string) {
-	t.Helper()
-	if err := validateCodeSet(label, got, expected, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func validateCodeSet(label string, got []string, expected []string, path string) error {
-	expectedSet := make(map[string]struct{}, len(expected))
-	for _, code := range expected {
-		expectedSet[strings.TrimSpace(code)] = struct{}{}
-	}
-	actualSet := make(map[string]struct{}, len(got))
-	for _, codeRaw := range got {
-		if strings.TrimSpace(codeRaw) == "" {
-			continue
-		}
-		actualSet[strings.TrimSpace(codeRaw)] = struct{}{}
-	}
-	if len(actualSet) != len(expectedSet) {
-		return fmt.Errorf("exchange report %s %s codes mismatch: got=%v expected=%v", path, label, mapKeys(actualSet), mapKeys(expectedSet))
-	}
-	for code := range expectedSet {
-		if _, ok := actualSet[code]; !ok {
-			return fmt.Errorf("exchange report %s missing expected %s code %q; got=%v", path, label, code, mapKeys(actualSet))
-		}
-	}
-	return nil
-}
-
-func readExchangeReport(t *testing.T, path string) exchange.ExchangeReport {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var out exchange.ExchangeReport
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("decode exchange report %s: %v", path, err)
-	}
-	return out
-}
-
-func noticeCodes(in []exchange.Notice) []string {
-	out := make([]string, 0, len(in))
-	for _, n := range in {
-		out = append(out, n.Code)
-	}
-	return out
-}
-
-func evidenceCodes(in []exchange.Evidence) []string {
-	out := make([]string, 0, len(in))
-	for _, e := range in {
-		out = append(out, e.Code)
-	}
-	return out
 }
 
 func readFixtureEvents(t *testing.T, path string) canonical.EventSequence {

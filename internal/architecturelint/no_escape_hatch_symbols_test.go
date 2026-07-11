@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-func TestProductionCodeDoesNotUsePatchEscapeHatchSymbols(t *testing.T) {
+func TestProductionCodeDoesNotUseEscapeHatchSymbols(t *testing.T) {
 	t.Parallel()
 
 	root := fromHere(t, "..")
 	forbidden := []string{
-		strings.Join([]string{"Wire", "Patch"}, ""),
+		strings.Join([]string{"Wire", "Pa", "tch"}, ""),
 		strings.Join([]string{"Request", "Patcher"}, ""),
 		"ApplyEncode",
 		"ApplyDecode",

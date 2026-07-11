@@ -10,12 +10,12 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/transform"
 )
 
 type ProviderExecutorAdapter struct {
@@ -52,9 +52,8 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	}
 }
 
-// Execute applies provider wiring, performs the backend HTTP call, and decodes
-// successful responses into canonical semantics. Backend-origin failures remain
-// backend errors rather than being normalized into Swobu success envelopes.
+// Execute performs provider HTTP transport only. Exchange orchestration,
+// transforms, and semantic decode live in exchange.
 func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderTransportResponse, error) {
 	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
 		return ports.ProviderTransportResponse{}, canonical.BadRequest("canonical request is required")
@@ -66,30 +65,25 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		return ports.ProviderTransportResponse{}, canonical.BadEndpoint(providerCredentialRequiredMessage(req.Target.ProviderID()))
 	}
 
-	dispatch, err := exchange.ResolveProviderProtocolRouting(req.Target, "OpenAI-family provider protocol must be concrete")
-	if err != nil {
-		return ports.ProviderTransportResponse{}, err
-	}
-
 	if parsed, ok := profile.ParseProviderID(strings.TrimSpace(req.Target.ProviderID())); !ok || parsed != e.profile.ProviderID() { // swobu:io-string source=boundary
 		return ports.ProviderTransportResponse{}, canonical.BadEndpoint("provider policy is unsupported for OpenAI-family adapter runtime")
 	}
-	facts := e.profile.Facts(req.Request)
-	wireReqCarrier, err := exchange.RealizeProviderRequestCarrier(
-		req.Request,
-		dispatch.Kind,
-		dispatch.Delivery,
-		"OpenAI-family provider does not implement the messages protocol",
-	)
-	if err != nil {
-		return ports.ProviderTransportResponse{}, err
+	wireReqCarrier := req.ProviderWire
+	if len(wireReqCarrier.Raw) == 0 {
+		codec, codecErr := protocolregistry.ForProviderRequestProtocolCarrier(req.Target.ProtocolKind)
+		if codecErr != nil {
+			if req.Target.ProtocolKind == protocolkind.Messages {
+				return ports.ProviderTransportResponse{}, canonical.UnsupportedOperation("OpenAI-family provider does not implement the messages protocol")
+			}
+			return ports.ProviderTransportResponse{}, codecErr
+		}
+		encoded, encodeErr := codec.EncodeProviderRequest(req.Request, req.Contract.ProviderDelivery)
+		if encodeErr != nil {
+			return ports.ProviderTransportResponse{}, encodeErr
+		}
+		wireReqCarrier = encoded
 	}
-	wireReqCarrier, transformReports, transformStageReports, transformNotices, err := transform.ApplyProviderWireOutStage(wireReqCarrier, newTransformRegistry(facts))
-	if err != nil {
-		return ports.ProviderTransportResponse{}, err
-	}
-	transformNotices = append(transformNotices, transformFactNotices(facts)...)
-	path, err := exchange.ProviderRequestPathForProtocol(dispatch.Kind)
+	path, err := providerRequestPathForProtocol(req.Target.ProtocolKind)
 	if err != nil {
 		return ports.ProviderTransportResponse{}, err
 	}
@@ -130,10 +124,7 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		backendErr := httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 		return ports.ProviderTransportResponse{}, classifyBackendError(backendErr)
 	}
-	_ = transformReports
-	_ = transformStageReports
-	_ = transformNotices
-	if dispatch.Delivery.Mode == delivery.Streaming {
+	if req.Contract.ProviderDelivery.Mode == delivery.Streaming {
 		return ports.ProviderTransportResponse{
 			Header: resp.Header.Clone(),
 			Stream: resp.Body,
@@ -148,6 +139,21 @@ func (e ProviderExecutorAdapter) Execute(ctx context.Context, req ports.Provider
 		Header:   resp.Header.Clone(),
 		Document: raw,
 	}, nil
+}
+
+func providerRequestPathForProtocol(kind protocolkind.ProtocolKind) (string, error) {
+	switch kind {
+	case protocolkind.ChatCompletions:
+		return "/chat/completions", nil
+	case protocolkind.Responses:
+		return "/responses", nil
+	case protocolkind.Completions:
+		return "/completions", nil
+	case protocolkind.Messages:
+		return "/messages", nil
+	default:
+		return "", canonical.UnsupportedOperation("protocol kind is not implemented")
+	}
 }
 
 // applyCredential keeps auth resolution at the provider edge so canonicals and

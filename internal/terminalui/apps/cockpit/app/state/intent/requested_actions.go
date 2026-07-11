@@ -120,11 +120,11 @@ type OpenSupportLinkRequested struct {
 // HelpDiagnosticsCopyRequested asks reducer to copy diagnostics text.
 type HelpDiagnosticsCopyRequested struct{ Text string }
 
-// CompatibilityRestartRequested asks reducer to trigger recovery guidance for
-// a daemon/TUI control-plane incompatibility.
-type CompatibilityRestartRequested struct{}
+// MismatchRestartRequested asks reducer to trigger recovery guidance for
+// a daemon/TUI control-plane mismatch.
+type MismatchRestartRequested struct{}
 
-// ExchangeDiagnosticsCopyRequested asks reducer to copy incompatibility
+// ExchangeDiagnosticsCopyRequested asks reducer to copy mismatch
 // diagnostics for operator support.
 type ExchangeDiagnosticsCopyRequested struct{}
 

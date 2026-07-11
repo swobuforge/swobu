@@ -1,4 +1,4 @@
-// swobu:codelint ignore file-length protocol response decode fanout is transport-shaped
+// swobu:codelint ignore file-length because=single codec seam must keep protocol fanout visible in one owner file
 // event-state machine together so migration behavior stays recoverable.
 package chatcompletions
 
@@ -104,7 +104,7 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonica
 	return &chatCompletionsEventReader{
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:      core.NewSSEReader(stream.Body),
+		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
 		toolCalls:   map[int]streamToolState{},
 		toolEnvIDs:  map[int]canonical.EnvelopeID{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
@@ -132,7 +132,6 @@ type streamToolState struct {
 	OutputItemID string
 	ToolUseID    string
 	Name         string
-	Started      bool
 	PendingArgs  []string
 }
 
@@ -225,11 +224,9 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(choice streamChoiceBody) 
 		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, canonical.EnvelopeStatusCompleted)
 		s.textOpen = false
 	}
-	for idx, state := range s.toolCalls {
-		if state.Started {
-			if envID := s.toolEnvIDs[idx]; envID != "" {
-				s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
-			}
+	for idx := range s.toolCalls {
+		if envID := s.toolEnvIDs[idx]; envID != "" {
+			s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
 		}
 		delete(s.toolCalls, idx)
 		delete(s.toolEnvIDs, idx)
@@ -267,12 +264,11 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 	if call.Function.Arguments != "" {
 		state.PendingArgs = append(state.PendingArgs, call.Function.Arguments)
 	}
-	if !state.Started && strings.TrimSpace(state.Name) == "" { // swobu:io-string source=boundary
+	if s.toolEnvIDs[call.Index] == "" && strings.TrimSpace(state.Name) == "" { // swobu:io-string source=boundary
 		s.toolCalls[call.Index] = state
 		return nil
 	}
-	if !state.Started {
-		state.Started = true
+	if s.toolEnvIDs[call.Index] == "" {
 		envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, state.OutputItemID))
 		s.toolEnvIDs[call.Index] = envID
 		s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: state.Name, ToolUseID: state.ToolUseID}, canonical.EventMetadataFields{NativeID: state.OutputItemID})
@@ -314,11 +310,9 @@ func (s *chatCompletionsEventReader) closeOpenChildren(status canonical.Envelope
 		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
 		s.textOpen = false
 	}
-	for idx, state := range s.toolCalls {
-		if state.Started {
-			if envID := s.toolEnvIDs[idx]; envID != "" {
-				s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, status)
-			}
+	for idx := range s.toolCalls {
+		if envID := s.toolEnvIDs[idx]; envID != "" {
+			s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, status)
 		}
 		delete(s.toolCalls, idx)
 		delete(s.toolEnvIDs, idx)

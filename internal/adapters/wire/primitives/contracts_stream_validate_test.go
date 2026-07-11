@@ -53,7 +53,7 @@ func TestValidateResponseSSEWireStream_RejectsInvalidShape(t *testing.T) {
 			},
 		},
 		{
-			name: "missing frames",
+			name: "missing body",
 			wire: WireStream{
 				Kind:     WireKindResponseStream,
 				Protocol: protocolkind.Responses,

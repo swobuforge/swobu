@@ -26,16 +26,14 @@ type ProviderRoutePolicy interface {
 // ProfileFactRecord controls staged request/response transform modules for one
 // provider route policy. Defaults are zero-values (all disabled).
 type ProfileFactRecord struct {
-	CacheAffinityKey                string
-	CacheAffinityRetention          string
-	CacheRetentionUnsupported       bool
-	NormalizeToolDeclarations       bool
-	StrictJSONSupportedRequestField map[string]struct{}
-	ReduceDuplicateUsageEvents      bool
+	CacheAffinityKey           string
+	CacheAffinityRetention     string
+	CacheRetentionUnsupported  bool
+	ReduceDuplicateUsageEvents bool
 }
 
 func (p ProfileFactRecord) Enabled() bool {
-	return p.NormalizeToolDeclarations || p.ReduceDuplicateUsageEvents || p.CacheAffinityKey != "" || p.CacheAffinityRetention != "" || len(p.StrictJSONSupportedRequestField) > 0
+	return p.ReduceDuplicateUsageEvents || p.CacheAffinityKey != "" || p.CacheAffinityRetention != ""
 }
 
 type openAIProviderRoutePolicy struct{}
@@ -84,7 +82,6 @@ func (openAICompatibleProviderRoutePolicy) ProviderID() profile.ProviderID {
 
 func (openAICompatibleProviderRoutePolicy) Facts(req canonical.CanonicalRequest) ProfileFactRecord {
 	facts := routeProfileFactRecord(req)
-	facts.NormalizeToolDeclarations = true
 	facts.ReduceDuplicateUsageEvents = true
 	return facts
 }
@@ -99,7 +96,6 @@ func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 
 func (openRouterProviderRoutePolicy) Facts(req canonical.CanonicalRequest) ProfileFactRecord {
 	facts := routeProfileFactRecord(req)
-	facts.NormalizeToolDeclarations = true
 	facts.ReduceDuplicateUsageEvents = true
 	return facts
 }

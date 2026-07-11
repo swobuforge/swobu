@@ -8,11 +8,9 @@ import (
 
 func newTransformRegistry(facts ProfileFactRecord) transform.Registry {
 	return composition.NewProviderTransformRegistry(composition.ProviderTransformFactRecord{
-		CacheAffinityKey:                facts.CacheAffinityKey,
-		CacheAffinityRetention:          facts.CacheAffinityRetention,
-		NormalizeToolDeclarations:       facts.NormalizeToolDeclarations,
-		StrictJSONSupportedRequestField: facts.StrictJSONSupportedRequestField,
-		ReduceDuplicateUsageEvents:      facts.ReduceDuplicateUsageEvents,
+		CacheAffinityKey:           facts.CacheAffinityKey,
+		CacheAffinityRetention:     facts.CacheAffinityRetention,
+		ReduceDuplicateUsageEvents: facts.ReduceDuplicateUsageEvents,
 	})
 }
 

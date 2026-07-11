@@ -1,4 +1,4 @@
-// swobu:codelint ignore file-length provider executor keeps one provider edge seam
+// swobu:codelint ignore file-length because=provider edge behavior is intentionally localized in one executor owner seam
 package chatgpt
 
 import (
@@ -20,6 +20,7 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -257,7 +258,7 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 	return out, nil
 }
 
-func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target ports.RoutableTarget) ([]string, error) {
+func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	tier, ok := e.resolveChatGPTSubscriptionTier(ctx, target.ProviderID(), target.CredentialRef)
 	if !ok {
 		return nil, canonical.BadEndpoint("chatgpt subscription tier could not be resolved from credential")
@@ -286,7 +287,7 @@ func (e ProviderExecutorAdapter) resolveChatGPTSubscriptionTier(_ context.Contex
 	return parseChatGPTSubscriptionTierFromIDToken(bundle.IDToken)
 }
 
-func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target ports.RoutableTarget) error {
+func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	_, err := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, false)
 	return err
 }

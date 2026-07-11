@@ -13,7 +13,7 @@ type Result struct {
 
 // PreserveToolOutputParts keeps tool output content parts in structured form.
 // Unsupported parts are removed with explicit projection loss.
-// swobu:codelint ignore string-switch io boundary decode fanout over external part types
+// swobu:codelint ignore string-switch because=boundary decode must branch over external part type literals from provider wire
 func PreserveToolOutputParts(doc carrier.WireDocument, supportsFileParts bool) (carrier.WireDocument, Result, error) {
 	if len(doc.Raw) == 0 {
 		return doc, Result{}, nil

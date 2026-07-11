@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func logBedrockBackendDiagnostic(operation string, target ports.RoutableTarget, requestPath string, payload []byte, backendErr canonical.BackendError) {
+func logBedrockBackendDiagnostic(operation string, target exchange.RoutableTarget, requestPath string, payload []byte, backendErr canonical.BackendError) {
 	msg := strings.TrimSpace(backendErr.Message) // swobu:io-string source=boundary
 	if msg == "" {
 		return

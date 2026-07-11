@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -114,12 +113,13 @@ func (r endpointAutoProtocolResolver) probeVariant(
 	defer cancel()
 	out, err := r.probe(attemptCtx, candidate, exchange.HandleInput{
 		EndpointName: endpointName,
+		ClientFamily: canonical.IngressFamilyResponses,
 		Request:      ping,
-		Contract:     ports.NewExecutionContract(delivery.BufferedDelivery()),
+		Contract:     exchange.NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		return err
 	}
-	_ = ports.CloseProviderResponseStream(out.Response)
+	_ = exchange.CloseProviderResponseStream(out.Response)
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -24,6 +25,9 @@ type EventReader struct {
 func (r *EventReader) Next(ctx context.Context) (canonical.Event, error) {
 	ev, err := r.inner.Next(ctx)
 	if err != nil {
+		if err == io.EOF && len(r.stateByID) > 0 {
+			return canonical.Event{}, fmt.Errorf("envelope stream ended with open envelopes: %s", openEnvelopeIDs(r.stateByID))
+		}
 		return canonical.Event{}, err
 	}
 	switch ev.Kind {
@@ -54,9 +58,23 @@ func (r *EventReader) Next(ctx context.Context) (canonical.Event, error) {
 }
 
 func (r *EventReader) Close(ctx context.Context) error {
+	if len(r.stateByID) > 0 {
+		return fmt.Errorf("cannot close with open envelopes: %s", openEnvelopeIDs(r.stateByID))
+	}
 	err := r.inner.Close(ctx)
 	if err != nil && err != io.EOF {
 		return err
 	}
 	return nil
+}
+
+func openEnvelopeIDs(state map[canonical.EnvelopeID]canonical.EnvelopeKind) string {
+	if len(state) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(state))
+	for id := range state {
+		ids = append(ids, strings.TrimSpace(string(id))) // swobu:io-string source=boundary
+	}
+	return strings.Join(ids, ",")
 }

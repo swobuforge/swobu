@@ -32,7 +32,7 @@ func TestApplyDocumentStage_ErrorSeverityBlocksProviderRequest(t *testing.T) {
 	reg := NewRegistry([]DocumentTransform{
 		severityDocTransform{id: "z", severity: report.SeverityError},
 	}, nil)
-	_, _, _, _, err := ApplyProviderWireOutStage(carrier.WireDocument{
+	_, _, _, _, _, _, err := ApplyProviderWireOutStage(carrier.WireDocument{
 		Leg:    carrier.LegProviderRequestOut,
 		Family: canonical.IngressFamilyResponses,
 		Raw:    []byte(`{"model":"m"}`),
@@ -46,7 +46,7 @@ func TestApplyDocumentStage_WarningSeverityProducesNotice(t *testing.T) {
 	reg := NewRegistry([]DocumentTransform{
 		severityDocTransform{id: "z", severity: report.SeverityWarning},
 	}, nil)
-	_, _, _, notices, err := ApplyProviderWireOutStage(carrier.WireDocument{
+	_, _, _, losses, notices, _, err := ApplyProviderWireOutStage(carrier.WireDocument{
 		Leg:    carrier.LegProviderRequestOut,
 		Family: canonical.IngressFamilyResponses,
 		Raw:    []byte(`{"model":"m"}`),
@@ -54,7 +54,10 @@ func TestApplyDocumentStage_WarningSeverityProducesNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyProviderWireOutStage() error = %v", err)
 	}
-	if len(notices) != 1 || notices[0].Code != "projection_loss" {
-		t.Fatalf("notices=%#v", notices)
+	if len(notices) != 0 {
+		t.Fatalf("notices=%#v, want none", notices)
+	}
+	if len(losses) != 1 {
+		t.Fatalf("losses=%#v, want one", losses)
 	}
 }

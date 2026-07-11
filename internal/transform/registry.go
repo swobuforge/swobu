@@ -1,6 +1,9 @@
 package transform
 
 import (
+	"bytes"
+	"errors"
+	"reflect"
 	"slices"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -18,9 +21,11 @@ type DocumentTransform interface {
 
 // AppliedDocumentTransform is one executed transform result.
 type AppliedDocumentTransform struct {
-	ID      string
-	Mutated bool
-	Losses  []report.Loss
+	ID           string
+	Mutated      bool
+	Losses       []report.Loss
+	Notices      []NoticeRecord
+	Observations []ObservationRecord
 }
 
 func (a AppliedDocumentTransform) Applied() bool {
@@ -37,8 +42,11 @@ type EventStreamTransform interface {
 
 // AppliedEventStreamTransform is one executed stream wrapper result.
 type AppliedEventStreamTransform struct {
-	ID      string
-	Mutated bool
+	ID           string
+	Mutated      bool
+	Losses       []report.Loss
+	Notices      []NoticeRecord
+	Observations []ObservationRecord
 }
 
 func (a AppliedEventStreamTransform) Applied() bool {
@@ -123,11 +131,20 @@ func (r Registry) ApplyDocument(ctx Context, doc carrier.WireDocument) (carrier.
 		if err != nil {
 			return carrier.WireDocument{}, nil, err
 		}
+		changed := wireDocumentChanged(out, next)
+		if changed && !outcome.Mutated && len(outcome.Losses) == 0 {
+			return carrier.WireDocument{}, nil, errors.New("document transform changed carrier without mutation or loss report")
+		}
+		if outcome.Mutated && !changed {
+			return carrier.WireDocument{}, nil, errors.New("document transform reported mutation without carrier change")
+		}
 		out = next
 		applied = append(applied, AppliedDocumentTransform{
-			ID:      transform.ID(),
-			Mutated: outcome.Mutated,
-			Losses:  append([]report.Loss(nil), outcome.Losses...),
+			ID:           transform.ID(),
+			Mutated:      outcome.Mutated,
+			Losses:       append([]report.Loss(nil), outcome.Losses...),
+			Notices:      append([]NoticeRecord(nil), outcome.Notices...),
+			Observations: append([]ObservationRecord(nil), outcome.Observations...),
 		})
 	}
 	return out, applied, nil
@@ -148,15 +165,34 @@ func (r Registry) WrapEventStream(ctx Context, reader canonical.EventReader) (ca
 		if !transform.Match(ctx, out) {
 			continue
 		}
-		next, report, err := transform.Wrap(ctx, out)
+		next, outcome, err := transform.Wrap(ctx, out)
 		if err != nil {
 			return nil, nil, err
 		}
+		if outcome.Mutated && len(outcome.Mutations) == 0 && len(outcome.Losses) == 0 {
+			return nil, nil, errors.New("event transform reported mutation without mutation or loss detail")
+		}
 		out = next
 		applied = append(applied, AppliedEventStreamTransform{
-			ID:      transform.ID(),
-			Mutated: report.Mutated,
+			ID:           transform.ID(),
+			Mutated:      outcome.Mutated,
+			Losses:       append([]report.Loss(nil), outcome.Losses...),
+			Notices:      append([]NoticeRecord(nil), outcome.Notices...),
+			Observations: append([]ObservationRecord(nil), outcome.Observations...),
 		})
 	}
 	return out, applied, nil
+}
+
+func wireDocumentChanged(before, after carrier.WireDocument) bool {
+	if before.Leg != after.Leg || before.Family != after.Family || before.Media != after.Media {
+		return true
+	}
+	if !reflect.DeepEqual(before.Header, after.Header) {
+		return true
+	}
+	if !reflect.DeepEqual(before.Meta, after.Meta) {
+		return true
+	}
+	return !bytes.Equal(before.Raw, after.Raw)
 }

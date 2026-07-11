@@ -90,8 +90,7 @@ func (s *responsesEventReader) handleOutputTextDelta(frame streamFrame) {
 
 func (s *responsesEventReader) handleFunctionCallArgumentsDelta(frame streamFrame) {
 	itemID := fallbackItemID(frame.ItemID, frame.CallID)
-	if !s.startedTool[itemID] {
-		s.startedTool[itemID] = true
+	if s.toolEnvIDs[itemID] == "" {
 		toolEnvID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, itemID))
 		s.toolEnvIDs[itemID] = toolEnvID
 		s.enqueueEnvelopeStart(toolEnvID, s.responseID, canonical.EnvelopeStartPayload{
@@ -108,10 +107,9 @@ func (s *responsesEventReader) handleOutputItemAdded(frame streamFrame) bool {
 		return false
 	}
 	itemID := fallbackItemID(frame.Item.ID, frame.Item.CallID)
-	if s.startedTool[itemID] {
+	if s.toolEnvIDs[itemID] != "" {
 		return false
 	}
-	s.startedTool[itemID] = true
 	toolEnvID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, itemID))
 	s.toolEnvIDs[itemID] = toolEnvID
 	s.enqueueEnvelopeStart(toolEnvID, s.responseID, canonical.EnvelopeStartPayload{
@@ -128,7 +126,6 @@ func (s *responsesEventReader) handleFunctionCallArgumentsDone(frame streamFrame
 	if toolEnvID != "" {
 		s.enqueueEnvelopeEnd(toolEnvID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
 	}
-	delete(s.startedTool, itemID)
 	delete(s.toolEnvIDs, itemID)
 }
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 type stubCredentialResolver struct{}
@@ -28,7 +28,7 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
-	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"openrouter",
 		srv.URL+"/v1",
@@ -54,7 +54,7 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAIPolicy())
-	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"openai",
 		srv.URL+"/v1",
@@ -87,7 +87,7 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
-	_, err := exec.ListModels(context.Background(), ports.NewRoutableTarget(
+	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"openrouter",
 		srv.URL+"/v1",

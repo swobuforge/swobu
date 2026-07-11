@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -73,7 +74,7 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	if err != nil {
 		t.Fatalf("EncodeClientStream error: %v", err)
 	}
-	raw, err := io.ReadAll(stream.Body)
+	raw, err := io.ReadAll(carrier.ReadCloserFromFrameReader(stream.Frames))
 	if err != nil {
 		t.Fatalf("read stream error: %v", err)
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
-type endpointCatalog struct {
+type endpointReaderCatalog struct {
 	mu         sync.RWMutex
 	configPath string
 	runtime    config.RuntimeConfig
@@ -19,12 +19,12 @@ type endpointCatalog struct {
 	all        []endpointintent.Endpoint
 }
 
-func newEndpointCatalog(configPath string, runtime config.RuntimeConfig, endpoints []endpointintent.Endpoint) *endpointCatalog {
+func newEndpointCatalog(configPath string, runtime config.RuntimeConfig, endpoints []endpointintent.Endpoint) *endpointReaderCatalog {
 	byName := make(map[string]endpointintent.Endpoint, len(endpoints))
 	for _, endpoint := range endpoints {
 		byName[endpoint.Name().String()] = endpoint
 	}
-	return &endpointCatalog{
+	return &endpointReaderCatalog{
 		configPath: configPath,
 		runtime:    runtime,
 		byName:     byName,
@@ -32,7 +32,7 @@ func newEndpointCatalog(configPath string, runtime config.RuntimeConfig, endpoin
 	}
 }
 
-func (c *endpointCatalog) GetEndpoint(_ context.Context, name endpointintent.EndpointName) (endpointintent.Endpoint, error) {
+func (c *endpointReaderCatalog) GetEndpoint(_ context.Context, name endpointintent.EndpointName) (endpointintent.Endpoint, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	endpoint, ok := c.byName[name.String()]
@@ -42,13 +42,13 @@ func (c *endpointCatalog) GetEndpoint(_ context.Context, name endpointintent.End
 	return endpoint, nil
 }
 
-func (c *endpointCatalog) ListEndpoints(context.Context) ([]endpointintent.Endpoint, error) {
+func (c *endpointReaderCatalog) ListEndpoints(context.Context) ([]endpointintent.Endpoint, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return slices.Clone(c.all), nil
 }
 
-func (c *endpointCatalog) SaveEndpoints(_ context.Context, endpoints []endpointintent.Endpoint) error {
+func (c *endpointReaderCatalog) SaveEndpoints(_ context.Context, endpoints []endpointintent.Endpoint) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -68,7 +68,7 @@ func (c *endpointCatalog) SaveEndpoints(_ context.Context, endpoints []endpointi
 	return nil
 }
 
-func (c *endpointCatalog) Count() int {
+func (c *endpointReaderCatalog) Count() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.all)
