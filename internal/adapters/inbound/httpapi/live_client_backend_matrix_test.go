@@ -21,7 +21,7 @@ type liveMatrixResponse struct {
 
 func TestLiveClientBackendHelloMatrix(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_SMOKE")) != "1" {
-		t.Skip("set SWOBU_LIVE_SMOKE=1 to run live client/backend smoke matrix")
+		t.Skip("set SWOBU_LIVE_SMOKE=1 to run live client/backend smoke matrix") // swobu:lint ignore no-test-skip because=live smoke requires opt-in environment
 	}
 
 	daemonURL := strings.TrimSpace(os.Getenv("SWOBU_LIVE_DAEMON_URL"))
