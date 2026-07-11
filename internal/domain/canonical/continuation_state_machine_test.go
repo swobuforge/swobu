@@ -7,29 +7,6 @@ import (
 	"testing"
 )
 
-func TestIsPreviousResponseNotFoundBackendError(t *testing.T) {
-	t.Run("exact typed responses error", func(t *testing.T) {
-		err := NewBackendError("backend-a", 400, `{"error":{"message":"Previous response with id 'resp_missing' not found.","type":"invalid_request_error","param":"previous_response_id","code":"previous_response_not_found"}}`, "")
-		if !IsPreviousResponseNotFoundBackendError(err) {
-			t.Fatal("expected exact previous_response_not_found payload to match")
-		}
-	})
-
-	t.Run("different param does not match", func(t *testing.T) {
-		err := NewBackendError("backend-a", 400, `{"error":{"message":"bad","type":"invalid_request_error","param":"conversation","code":"previous_response_not_found"}}`, "")
-		if IsPreviousResponseNotFoundBackendError(err) {
-			t.Fatal("expected non-previous_response_id payload not to match")
-		}
-	})
-
-	t.Run("plain text does not match", func(t *testing.T) {
-		err := NewBackendError("backend-a", 400, "Previous response not found", "")
-		if IsPreviousResponseNotFoundBackendError(err) {
-			t.Fatal("expected heuristic text payload not to match")
-		}
-	})
-}
-
 type fakeContinuationStore struct {
 	snapshot ContinuitySnapshot
 	matches  map[ContinuationNamespace]ContinuationPrefixMatch
@@ -164,7 +141,7 @@ func TestContinuationRuntime_PrepareRequest_PreservesItemsFromBestPrefixMatch(t 
 	}
 }
 
-func TestContinuationRuntime_WrapEnvelopeStream_PersistsOnCompletedResponseEnvelope(t *testing.T) {
+func TestContinuationRuntime_WrapResponseEnvelope_PersistsOnCompletedResponseEnvelope(t *testing.T) {
 	store := &fakeContinuationStore{}
 	runtime := NewContinuationRuntime(store)
 
@@ -176,14 +153,14 @@ func TestContinuationRuntime_WrapEnvelopeStream_PersistsOnCompletedResponseEnvel
 		t.Fatalf("EventReaderFromCanonicalOutput returned error: %v", err)
 	}
 
-	wrapped, err := runtime.WrapEnvelopeStream(
+	wrapped, err := runtime.WrapResponseEnvelope(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
 		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
 		envelope,
 	)
 	if err != nil {
-		t.Fatalf("WrapEnvelopeStream returned error: %v", err)
+		t.Fatalf("WrapResponseEnvelope returned error: %v", err)
 	}
 	for {
 		_, err := wrapped.Next(context.Background())
@@ -199,7 +176,7 @@ func TestContinuationRuntime_WrapEnvelopeStream_PersistsOnCompletedResponseEnvel
 	}
 }
 
-func TestContinuationRuntime_WrapEnvelopeStream_DoesNotPersistOnUnexpectedEOF(t *testing.T) {
+func TestContinuationRuntime_WrapResponseEnvelope_DoesNotPersistOnUnexpectedEOF(t *testing.T) {
 	store := &fakeContinuationStore{}
 	runtime := NewContinuationRuntime(store)
 
@@ -209,14 +186,14 @@ func TestContinuationRuntime_WrapEnvelopeStream_DoesNotPersistOnUnexpectedEOF(t 
 		{ExchangeID: "ex_bad", Seq: 3, Kind: EventTextDelta, EnvID: "m1", Payload: TextDeltaPayload{Text: "partial"}},
 	})
 
-	wrapped, err := runtime.WrapEnvelopeStream(
+	wrapped, err := runtime.WrapResponseEnvelope(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
 		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
 		envelope,
 	)
 	if err != nil {
-		t.Fatalf("WrapEnvelopeStream returned error: %v", err)
+		t.Fatalf("WrapResponseEnvelope returned error: %v", err)
 	}
 	for {
 		_, err := wrapped.Next(context.Background())

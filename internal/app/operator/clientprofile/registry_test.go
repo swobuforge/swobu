@@ -228,7 +228,7 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 	}{
 		{
 			profileID: "codex",
-			contains:  []string{"codex -c", `model_provider="swobu"`},
+			contains:  []string{"codex --dangerously-bypass-approvals-and-sandbox", `model_provider="swobu"`},
 		},
 		{
 			profileID: "claude",
@@ -236,7 +236,7 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 		},
 		{
 			profileID: "aider",
-			contains:  []string{"aider --model", "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1"},
+			contains:  []string{"aider --no-show-model-warnings --no-browser", "--model", "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1"},
 		},
 		{
 			profileID: "continue",
@@ -244,7 +244,7 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 		},
 		{
 			profileID: "opencode",
-			contains:  []string{"opencode"},
+			contains:  []string{"opencode", `"apiKey":"{env:OPENAI_API_KEY}"`},
 		},
 	}
 

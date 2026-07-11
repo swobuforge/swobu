@@ -3,7 +3,6 @@ package completions
 type completionsRequestDTO struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
 }
 
 type completionsResponseDTO struct {

@@ -65,18 +65,6 @@ func FlowRow(kind string, gap int, children ...ViewSpec) ViewSpec {
 	return ViewSpec{Kind: kind, Flow: &FlowSpec{Axis: FlowAxisRow, Gap: gap}, Children: children}
 }
 
-func ShowWhen(kind string, visible bool, children ...ViewSpec) ViewSpec {
-	return ViewSpec{Kind: kind, Show: &ShowSpec{Visible: visible}, Children: children}
-}
-
-func GridLayout(kind string, columns int, gap int, children ...ViewSpec) ViewSpec {
-	return ViewSpec{Kind: kind, Grid: &GridSpec{Columns: columns, Gap: gap}, Children: children}
-}
-
-func ScrollY(kind string, offset int, child ViewSpec) ViewSpec {
-	return ViewSpec{Kind: kind, Scroll: &ScrollSpec{Axis: ScrollAxisY, Offset: offset}, Children: []ViewSpec{child}}
-}
-
 // Normalize ensures each node has a deterministic key for reconciliation.
 func Normalize(root ViewSpec) ViewSpec {
 	return normalize(root, "root")

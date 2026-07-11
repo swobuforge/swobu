@@ -10,11 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-const (
-	SupportAskQuestionURL = "https://github.com/swobuforge/swobu/discussions/new/choose"
-	SupportFileIssueURL   = "https://github.com/swobuforge/swobu/issues/new/choose"
-)
-
 var startProcess = func(command *exec.Cmd) error {
 	return command.Start()
 }

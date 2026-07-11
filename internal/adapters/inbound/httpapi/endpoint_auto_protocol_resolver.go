@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -109,17 +110,20 @@ func (r endpointAutoProtocolResolver) probeVariant(
 		Model: modelID,
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "ping")},
 	})
+	payload, err := encodeCanonicalClientRequest(canonical.ClientFamilyResponses, ping, delivery.BufferedDelivery())
+	if err != nil {
+		return err
+	}
 	attemptCtx, cancel := context.WithTimeout(ctx, autoProtocolProbeAttemptTimeout)
 	defer cancel()
-	out, err := r.probe(attemptCtx, candidate, exchange.HandleInput{
+	out, err := r.probe(attemptCtx, candidate, exchange.RequestInput{
 		EndpointName: endpointName,
-		ClientFamily: canonical.IngressFamilyResponses,
-		Request:      ping,
-		Contract:     exchange.NewExecutionContract(delivery.BufferedDelivery()),
+		Request:      exchange.NewTransportRequest(http.MethodPost, string(canonical.NormalizedPathResponses), nil, payload.RawBytes()),
+		ClientFamily: canonical.ClientFamilyResponses,
 	})
 	if err != nil {
 		return err
 	}
-	_ = exchange.CloseProviderResponseStream(out.Response)
+	_ = out
 	return nil
 }

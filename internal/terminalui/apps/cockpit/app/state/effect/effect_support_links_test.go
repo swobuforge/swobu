@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+const (
+	SupportAskQuestionURL = "https://github.com/swobuforge/swobu/discussions/new/choose"
+	SupportFileIssueURL   = "https://github.com/swobuforge/swobu/issues/new/choose"
+)
+
 func TestOpenSupportLinkEffect_ReportsFallbackOnSuccess(t *testing.T) {
 	orig := startProcess
 	startProcess = func(_ *exec.Cmd) error { return nil }

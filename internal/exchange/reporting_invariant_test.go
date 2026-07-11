@@ -20,7 +20,7 @@ type invariantDocTransform struct {
 
 func (t invariantDocTransform) ID() string { return t.id }
 func (t invariantDocTransform) Stage() transform.Stage {
-	return transform.StageProviderWireOut
+	return transform.StageRequestDocumentOut
 }
 func (t invariantDocTransform) Match(transform.Context, carrier.WireDocument) bool { return true }
 func (t invariantDocTransform) Apply(_ transform.Context, in carrier.WireDocument) (carrier.WireDocument, transform.Report, error) {
@@ -41,13 +41,13 @@ func TestApplyDocumentTransformStage_FailsOnSilentMutation(t *testing.T) {
 		},
 	}, nil)
 
-	_, err := applyDocumentTransformStage(
+	_, _, err := applyDocumentTransformStage(
 		reg,
 		"ex_invariant",
-		transform.StageProviderWireOut,
+		transform.StageRequestDocumentOut,
 		carrier.WireDocument{
-			Leg:    carrier.LegProviderRequestOut,
-			Family: canonical.IngressFamilyResponses,
+			Stage:  carrier.StageProviderRequestOut,
+			Family: canonical.ClientFamilyResponses,
 			Media:  "application/json",
 			Raw:    []byte(`{"model":"m","input":"hi"}`),
 		},
@@ -67,13 +67,13 @@ func TestApplyDocumentTransformStage_FailsOnReportedMutationWithoutChange(t *tes
 		},
 	}, nil)
 
-	_, err := applyDocumentTransformStage(
+	_, _, err := applyDocumentTransformStage(
 		reg,
 		"ex_invariant",
-		transform.StageProviderWireOut,
+		transform.StageRequestDocumentOut,
 		carrier.WireDocument{
-			Leg:    carrier.LegProviderRequestOut,
-			Family: canonical.IngressFamilyResponses,
+			Stage:  carrier.StageProviderRequestOut,
+			Family: canonical.ClientFamilyResponses,
 			Media:  "application/json",
 			Raw:    []byte(`{"model":"m","input":"hi"}`),
 		},
@@ -99,13 +99,13 @@ func TestApplyDocumentTransformStage_RejectsUnsupportedProjectionLoss(t *testing
 		},
 	}, nil)
 
-	_, err := applyDocumentTransformStage(
+	_, _, err := applyDocumentTransformStage(
 		reg,
 		"ex_invariant",
-		transform.StageProviderWireOut,
+		transform.StageRequestDocumentOut,
 		carrier.WireDocument{
-			Leg:    carrier.LegProviderRequestOut,
-			Family: canonical.IngressFamilyResponses,
+			Stage:  carrier.StageProviderRequestOut,
+			Family: canonical.ClientFamilyResponses,
 			Media:  "application/json",
 			Raw:    []byte(`{"model":"m","input":"hi"}`),
 		},

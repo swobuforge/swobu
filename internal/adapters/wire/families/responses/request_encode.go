@@ -16,30 +16,6 @@ type EncodeOptions struct {
 	Store                *bool
 }
 
-func encodeRequestCarrier(request canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	if err := canonical.ValidateResponseContinuationSelectors(request); err != nil {
-		return carrier.WireDocument{}, err
-	}
-	return EncodeCarrier(request, d)
-}
-
-func encodeRequestCarrierWithOptions(request canonical.CanonicalRequest, d delivery.Delivery, options EncodeOptions) (carrier.WireDocument, error) {
-	if err := canonical.ValidateResponseContinuationSelectors(request); err != nil {
-		return carrier.WireDocument{}, err
-	}
-	return encodeCarrierWithOptions(request, d, options)
-}
-
-type requestBody struct {
-	Model              string `json:"model"`
-	Input              any    `json:"input,omitempty"`
-	Instructions       string `json:"instructions,omitempty"`
-	ToolChoice         any    `json:"tool_choice,omitempty"`
-	PreviousResponseID string `json:"previous_response_id,omitempty"`
-	Store              *bool  `json:"store,omitempty"`
-	Stream             bool   `json:"stream,omitempty"`
-}
-
 type inputMessageItem struct {
 	Type    string         `json:"type"`
 	Role    string         `json:"role"`
@@ -81,24 +57,40 @@ func encodeCarrierWithOptions(req canonical.CanonicalRequest, d delivery.Deliver
 	}
 	logResponsesEncodeShape(req, input, d)
 
-	raw, err := json.Marshal(requestBody{
-		Model:              req.Model(),
-		Input:              input,
-		Instructions:       strings.TrimSpace(options.Instructions), // swobu:io-string source=boundary
-		ToolChoice:         encodeToolChoice(req.ToolMode()),
-		PreviousResponseID: req.PreviousResponseID(),
-		Store:              options.Store,
-		Stream:             d.Mode == delivery.Streaming,
-	})
+	payload := map[string]any{
+		"model": req.Model(),
+	}
+	if input != nil {
+		payload["input"] = input
+	}
+	if trimmed := strings.TrimSpace(options.Instructions); trimmed != "" { // swobu:io-string source=boundary
+		payload["instructions"] = trimmed
+	}
+	if choice := encodeToolChoice(req.ToolMode()); choice != nil {
+		payload["tool_choice"] = choice
+	}
+	if prev := req.PreviousResponseID(); prev != "" {
+		payload["previous_response_id"] = prev
+	}
+	if options.Store != nil {
+		payload["store"] = *options.Store
+	}
+	if d.Mode == delivery.Streaming {
+		payload["stream"] = true
+	}
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		return carrier.WireDocument{}, canonical.BadRequest("response request could not be encoded for the responses protocol")
 	}
 
-	return carrier.WireDocument{
-		Leg:   carrier.LegProviderRequestOut,
-		Media: "application/json",
-		Raw:   raw,
-	}, nil
+	return carrier.NewWireDocument(
+		carrier.StageProviderRequestOut,
+		"",
+		"application/json",
+		nil,
+		raw,
+		carrier.Meta{},
+	), nil
 }
 
 func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, d delivery.Delivery) {
@@ -229,15 +221,11 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 				Content: content,
 			})
 		case canonical.ItemKindToolUse:
-			args, err := json.Marshal(current.Input)
-			if err != nil {
-				return nil, canonical.BadRequest("tool_use input could not be encoded for the responses protocol")
-			}
 			encoded = append(encoded, functionCallItem{
 				Type:      "function_call",
 				CallID:    current.ToolUseID,
 				Name:      current.Name,
-				Arguments: string(args),
+				Arguments: current.Input.RawObject(),
 			})
 			i++
 		case canonical.ItemKindToolResult:

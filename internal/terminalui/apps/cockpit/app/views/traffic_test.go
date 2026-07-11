@@ -103,8 +103,8 @@ func TestTrafficTransformSummary(t *testing.T) {
 			name: "changed and noop mix",
 			row: state.TrafficRow{
 				Mutations: []stateModel.Mutation{
-					{Leg: "encode", Transform: "A", Changed: true},
-					{Leg: "decode", Transform: "B", Changed: false},
+					{Stage: "encode", Transform: "A", Changed: true},
+					{Stage: "decode", Transform: "B", Changed: false},
 				},
 			},
 			want: "p 1/2",
@@ -125,13 +125,13 @@ func TestTrafficTransformDetailLines(t *testing.T) {
 	row := state.TrafficRow{
 		Mutations: []stateModel.Mutation{
 			{
-				Leg:           "encode",
+				Stage:         "encode",
 				Transform:     "openaifamily.CacheAffinityWireTransform",
 				Changed:       true,
 				ChangedFields: []string{"prompt_cache_key"},
 			},
 			{
-				Leg:       "decode",
+				Stage:     "decode",
 				Transform: "openaifamily.DecodeWireTransform",
 				Changed:   false,
 			},

@@ -3,9 +3,17 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func ResolveConfigPath(flagValue string) string {
+	if trimmed := strings.TrimSpace(flagValue); trimmed != "" { // swobu:io-string source=boundary
+		return trimmed
+	}
+	return DefaultConfigPath()
+}
 
 func TestResolveDaemonURL_Preference(t *testing.T) {
 	t.Setenv(EnvDaemonURL, "http://env.test:7777")

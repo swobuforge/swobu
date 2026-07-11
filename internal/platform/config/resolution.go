@@ -15,14 +15,6 @@ func ResolveDaemonURL(flagValue string) string {
 	return DefaultDaemonURL()
 }
 
-// ResolveConfigPath applies standard CLI precedence: flag > env > default.
-func ResolveConfigPath(flagValue string) string {
-	if trimmed := strings.TrimSpace(flagValue); trimmed != "" { // swobu:io-string source=boundary
-		return trimmed
-	}
-	return DefaultConfigPath()
-}
-
 // ResolveTelemetryEndpoint applies env override over the built-in endpoint.
 func ResolveTelemetryEndpoint(defaultValue string) string {
 	if explicit := strings.TrimSpace(os.Getenv(EnvTelemetryEndpoint)); explicit != "" { // swobu:io-string source=boundary

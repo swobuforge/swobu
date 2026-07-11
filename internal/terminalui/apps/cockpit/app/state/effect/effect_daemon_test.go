@@ -269,7 +269,7 @@ func TestRefreshStatusProjectionEffect_MapsMutations(t *testing.T) {
 	if len(row.Mutations) != 2 {
 		t.Fatalf("row.Mutations = %#v, want 2 entries", row.Mutations)
 	}
-	if row.Mutations[0].Leg != "encode" || !row.Mutations[0].Changed {
+	if row.Mutations[0].Stage != "encode" || !row.Mutations[0].Changed {
 		t.Fatalf("first wire mutation = %#v", row.Mutations[0])
 	}
 	if len(row.ExchangeDiagnostics) != 1 || row.ExchangeDiagnostics[0] != "high_transform_noop_ratio:4/5" {

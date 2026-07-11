@@ -185,7 +185,7 @@ func (r Registry) WrapEventStream(ctx Context, reader canonical.EventReader) (ca
 }
 
 func wireDocumentChanged(before, after carrier.WireDocument) bool {
-	if before.Leg != after.Leg || before.Family != after.Family || before.Media != after.Media {
+	if before.Stage != after.Stage || before.Family != after.Family || before.Media != after.Media {
 		return true
 	}
 	if !reflect.DeepEqual(before.Header, after.Header) {
@@ -194,5 +194,5 @@ func wireDocumentChanged(before, after carrier.WireDocument) bool {
 	if !reflect.DeepEqual(before.Meta, after.Meta) {
 		return true
 	}
-	return !bytes.Equal(before.Raw, after.Raw)
+	return !bytes.Equal(before.RawBytes(), after.RawBytes())
 }

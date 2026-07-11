@@ -260,14 +260,27 @@ func decodeOutputItems(items []struct {
 				output = append(output, canonical.NewTextOutputItem(fmt.Sprintf("text_%d", len(output)+idx), part.Text))
 			}
 		case "function_call":
-			input := map[string]any{}
-			if strings.TrimSpace(item.Arguments) != "" { // swobu:io-string source=boundary
-				if err := json.Unmarshal([]byte(item.Arguments), &input); err != nil {
+			rawArgs := strings.TrimSpace(item.Arguments) // swobu:io-string source=boundary
+			if rawArgs != "" {
+				decoded := map[string]any{}
+				if err := json.Unmarshal([]byte(rawArgs), &decoded); err != nil {
 					return nil, canonical.InternalError("responses function_call arguments are invalid")
 				}
+				normalized, err := json.Marshal(decoded)
+				if err != nil {
+					return nil, canonical.InternalError("responses function_call arguments are invalid")
+				}
+				rawArgs = string(normalized)
 			}
 			itemID := fallbackItemID("", item.CallID)
-			output = append(output, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(item.CallID), strings.TrimSpace(item.Name), input)) // swobu:io-string source=boundary
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
+			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
+			output = append(output, canonical.NewToolUseOutputItem(
+				itemID,
+				callID,
+				name,
+				canonical.NewToolArgumentsObject(rawArgs),
+			))
 		case "reasoning":
 			continue
 		default:

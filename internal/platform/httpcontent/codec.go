@@ -12,12 +12,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// DecodeBytes removes supported HTTP content codings from a fully buffered body.
-// It exists for request bodies where canonical interpretation needs decoded bytes first.
-func DecodeBytes(contentEncoding string, raw []byte) ([]byte, error) {
-	return DecodeBytesLimited(contentEncoding, raw, 0)
-}
-
 // DecodeBytesLimited removes supported HTTP content codings from a fully
 // buffered body and optionally caps decoded size. A maxDecodedBytes value <= 0
 // means no decoded-size cap.

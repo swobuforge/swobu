@@ -1,23 +1,23 @@
 package report
 
-import "fmt"
+import "github.com/swobuforge/swobu/internal/delta"
 
 type Stage string
 
 const (
-	StageClientHTTPIn    Stage = "client_http_in"
-	StageClientWireIn    Stage = "client_wire_in"
-	StageSemanticRequest Stage = "semantic_request"
+	StageClientHTTPIn    Stage = "client_request.transport_in"
+	StageClientWireIn    Stage = "client_request.wire_in"
+	StageSemanticRequest Stage = "semantic.request"
 
-	StageProviderWireOut Stage = "provider_wire_out"
-	StageProviderHTTPOut Stage = "provider_http_out"
+	StageRequestDocumentOut Stage = "provider_request.wire_out"
+	StageProviderHTTPOut    Stage = "provider_request.transport_out"
 
-	StageProviderHTTPIn Stage = "provider_http_in"
-	StageProviderWireIn Stage = "provider_wire_in"
-	StageSemanticEvents Stage = "semantic_events"
+	StageProviderHTTPIn    Stage = "provider_response.transport_in"
+	StageRequestDocumentIn Stage = "provider_response.wire_in"
+	StageSemanticEvents    Stage = "semantic.response_events"
 
-	StageClientWireOut Stage = "client_wire_out"
-	StageClientHTTPOut Stage = "client_http_out"
+	StageClientWireOut Stage = "client_response.wire_out"
+	StageClientHTTPOut Stage = "client_response.transport_out"
 )
 
 type StageReport struct {
@@ -36,6 +36,14 @@ const (
 	LossProviderPrivateStateMissing LossKind = "provider_private_state_missing"
 )
 
+type LossClass string
+
+const (
+	LossClassRepresentational LossClass = "representational"
+	LossClassSemantic         LossClass = "semantic"
+	LossClassFatal            LossClass = "fatal"
+)
+
 type Severity string
 
 const (
@@ -44,28 +52,42 @@ const (
 	SeverityError   Severity = "error"
 )
 
+type PathKind = delta.MutationPathKind
+type Path = delta.MutationPathRecord
+
+const (
+	PathKindJSONPointer = delta.PathKindJSONPointer
+	PathKindFramePath   = delta.PathKindFramePath
+	PathKindEventPath   = delta.PathKindEventPath
+	PathKindSemantic    = delta.PathKindSemantic
+	PathKindState       = delta.PathKindState
+)
+
+type ReasonCode string
+
+const (
+	ReasonTargetRejectsUnknownField ReasonCode = "target_rejects_unknown_field"
+	ReasonTargetLacksToolForm       ReasonCode = "target_lacks_tool_form"
+	ReasonTargetLacksContentPart    ReasonCode = "target_lacks_content_part"
+	ReasonDuplicateUsageReport      ReasonCode = "duplicate_usage_report"
+	ReasonMissingTerminalEvent      ReasonCode = "missing_terminal_event"
+	ReasonOpaqueStateRequired       ReasonCode = "opaque_state_required"
+	ReasonInvalidEventLifecycle     ReasonCode = "invalid_event_lifecycle"
+	ReasonTransportDeliveryFailed   ReasonCode = "transport_delivery_failed"
+)
+
 type Loss struct {
-	Field    string   `json:"field"`
-	Kind     LossKind `json:"kind"`
-	Reason   string   `json:"reason"`
-	Severity Severity `json:"severity"`
+	Field      string     `json:"field"`
+	Kind       LossKind   `json:"kind"`
+	Class      LossClass  `json:"class,omitempty"`
+	Path       Path       `json:"path,omitempty"`
+	ReasonCode ReasonCode `json:"reason_code,omitempty"`
+	Reason     string     `json:"reason"`
+	Severity   Severity   `json:"severity"`
 }
 
 func (l Loss) Empty() bool {
-	return l.Field == "" && l.Kind == "" && l.Reason == "" && l.Severity == ""
-}
-
-func ValidateLoss(loss Loss) error {
-	if loss.Kind == "" {
-		return fmt.Errorf("projection loss kind is required")
-	}
-	if loss.Severity != SeverityNotice && loss.Severity != SeverityWarning && loss.Severity != SeverityError {
-		return fmt.Errorf("projection loss severity is invalid")
-	}
-	if loss.Kind == LossUnrepresentableTool && loss.Severity == SeverityNotice {
-		return fmt.Errorf("unrepresentable tool loss cannot be notice")
-	}
-	return nil
+	return l.Field == "" && l.Kind == "" && l.Class == "" && l.Path == (Path{}) && l.ReasonCode == "" && l.Reason == "" && l.Severity == ""
 }
 
 type Notice struct {
@@ -84,16 +106,7 @@ type Evidence struct {
 	Reason string `json:"reason"`
 }
 
-type Mutation struct {
-	Leg           string   `json:"leg"`
-	Transform     string   `json:"transform"`
-	Changed       bool     `json:"changed"`
-	ChangedFields []string `json:"changed_fields,omitempty"`
-}
-
-func (m Mutation) HasChanges() bool {
-	return m.Changed
-}
+type Mutation = delta.MutationRecord
 
 type ExchangeReport struct {
 	ExchangeID string        `json:"exchange_id"`

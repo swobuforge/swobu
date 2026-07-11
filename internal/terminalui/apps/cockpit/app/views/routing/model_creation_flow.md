@@ -33,6 +33,14 @@ Rules:
 - blocker hints belong to the blocked row only (for example model blockers render
   under `model`, never under `protocol`)
 
+## Disclosure Law
+
+- routing disclosures start collapsed and open only from explicit `Enter` on the
+  disclosure title row
+- focus movement, arrow keys, and populated draft state must not change open
+  state
+- when a disclosure opens, cursor may move into the first actionable child row
+
 ## Bedrock Credential And Catalog Law
 
 - Bedrock supports three credential strategies in this flow:

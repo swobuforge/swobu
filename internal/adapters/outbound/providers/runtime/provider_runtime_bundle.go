@@ -13,10 +13,11 @@ type CredentialProvider interface {
 	ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error)
 }
 
-// Executor dispatches one canonical request to a backend provider and returns
-// raw provider transport success carriers.
-type Executor interface {
-	Execute(ctx context.Context, req ports.ProviderRequest) (ports.ProviderTransportResponse, error)
+// IngressResolver dispatches one canonical request to a backend provider and
+// returns the first truthful ingress carrier for the downstream exchange
+// pipeline.
+type IngressResolver interface {
+	ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error)
 }
 
 // ModelCatalogClient lists backend model IDs for one provider target.
@@ -28,7 +29,7 @@ type ModelCatalogClient interface {
 // ProviderRuntimeBundle groups one provider's runtime roles.
 type ProviderRuntimeBundle struct {
 	ProviderID         profile.ProviderID
-	Executor           Executor
+	IngressResolver    IngressResolver
 	CredentialProvider CredentialProvider
 	ModelCatalogClient ModelCatalogClient
 }

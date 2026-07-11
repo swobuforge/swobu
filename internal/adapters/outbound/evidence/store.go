@@ -51,7 +51,7 @@ type RecentTrafficRow struct {
 	Endpoint       string                           `json:"endpoint"`
 	ClientHandler  string                           `json:"client_handler,omitempty"`
 	ClientProtocol string                           `json:"client_protocol,omitempty"`
-	IngressFamily  string                           `json:"ingress_family,omitempty"`
+	ClientFamily   string                           `json:"client_family,omitempty"`
 	NormalizedOp   string                           `json:"normalized_op,omitempty"`
 	Route          string                           `json:"route"`
 	Result         string                           `json:"result"`
@@ -234,7 +234,7 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 	row := RecentTrafficRow{Endpoint: evidence.Endpoint(),
 		ClientHandler:       string(evidence.ClientHandler()),
 		ClientProtocol:      string(evidence.ClientProtocol()),
-		IngressFamily:       string(evidence.IngressFamily()),
+		ClientFamily:        string(evidence.ClientFamily()),
 		NormalizedOp:        string(evidence.NormalizedOp()),
 		Route:               evidence.Route().String(),
 		Result:              evidence.Result().String(),

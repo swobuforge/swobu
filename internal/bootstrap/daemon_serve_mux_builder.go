@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
@@ -21,17 +22,20 @@ import (
 func buildDaemonServeMux(
 	daemon *Daemon,
 	runtime config.RuntimeConfig,
-	providers ports.ProviderExecutor,
+	providers ports.ProviderIngressResolver,
 	modelCatalog ports.ProviderModelCatalog,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
-	exchangeHandler := exchange.NewRequestHandler(
+	exchangeIngress := exchange.NewIngress(
 		daemon.endpoints,
-		newExchangeProviderExecutorAdapter(providers),
-		newExchangeRuntimeResolver(),
+		newExchangeProviderIngressResolverAdapter(providers),
+		exchangeruntime.NewResolver(),
+		exchange.RuntimePoliciesSpec{
+			DeliverySelector: exchange.FixedDeliverySelector{},
+		},
 	)
 	mux := http.NewServeMux()
-	mux.Handle("/c/", httpapi.NewHandler(exchangeHandler))
+	mux.Handle("/c/", httpapi.NewHandler(exchangeIngress))
 	mux.Handle("/_swobu/status", httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
 		status, err := daemon.Status()
 		if err != nil {
@@ -92,7 +96,7 @@ func buildDaemonServeMux(
 			return endpointIntent.Put(ctx, endpoint)
 		},
 		func(ctx context.Context, name string) error { return endpointIntent.Delete(ctx, name) },
-		exchangeHandler.HandleWithEndpoint,
+		exchangeIngress.HandleRequestWithEndpoint,
 	)
 	mux.Handle("/_swobu/endpoints", controlHandler)
 	mux.Handle("/_swobu/endpoints/", controlHandler)

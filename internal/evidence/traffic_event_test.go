@@ -1,6 +1,8 @@
 package evidence
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	requestID, err := ParseRequestID("req-1")
@@ -22,7 +24,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 
 	chain := []string{"bridge", "responses"}
 	mutations := []Mutation{{
-		Leg:           "encode",
+		Stage:         "encode",
 		Transform:     "openaifamily.CacheAffinityWireTransform",
 		Changed:       true,
 		ChangedFields: []string{"prompt_cache_key"},
@@ -37,7 +39,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
 		ClientProtocol:      "openai_compat",
 		ClientHandler:       "codex",
-		IngressFamily:       "chat_completions",
+		ClientFamily:        "chat_completions",
 		NormalizedOp:        "/chat/completions",
 		Route:               route,
 		AdaptationChain:     chain,
@@ -73,7 +75,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	if got := event.ClientHandler(); got != "codex" {
 		t.Fatalf("client handler = %q, want %q", got, "codex")
 	}
-	if got := event.IngressFamily(); got != "chat_completions" {
+	if got := event.ClientFamily(); got != "chat_completions" {
 		t.Fatalf("ingress family = %q, want %q", got, "chat_completions")
 	}
 	if got := event.NormalizedOp(); got != "/chat/completions" {
@@ -127,8 +129,10 @@ func TestTrafficEvent_RejectsTerminalInProgressResult(t *testing.T) {
 }
 
 func TestTiming_RejectsDurationBeforeTTFB(t *testing.T) {
-	if _, err := NewTiming(50, 10); err == nil {
-		t.Fatal("NewTiming should reject duration before ttfb")
+	ttfb := 50
+	dur := 10
+	if _, err := NewTimingWithOptional(&ttfb, &dur); err == nil {
+		t.Fatal("NewTimingWithOptional should reject duration before ttfb")
 	}
 }
 
@@ -235,7 +239,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
 		Mutations: []Mutation{{
-			Leg:           "encode",
+			Stage:         "encode",
 			Transform:     "p.encode",
 			Changed:       true,
 			ChangedFields: []string{"f1"},

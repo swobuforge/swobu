@@ -1,5 +1,7 @@
 package delivery
 
+import "fmt"
+
 type Mode uint8
 
 const (
@@ -38,4 +40,23 @@ func BufferedDelivery() Delivery {
 
 func StreamingDelivery(framing Framing) Delivery {
 	return Delivery{Mode: Streaming, Framing: framing}
+}
+
+func (d Delivery) Validate() error {
+	switch d.Mode {
+	case Buffered:
+		if d.Framing != FramingNone {
+			return fmt.Errorf("buffered delivery requires no framing")
+		}
+		return nil
+	case Streaming:
+		switch d.Framing {
+		case FramingSSE, FramingWebSocket, FramingNDJSON:
+			return nil
+		default:
+			return fmt.Errorf("streaming delivery requires explicit framing")
+		}
+	default:
+		return fmt.Errorf("delivery mode is invalid")
+	}
 }

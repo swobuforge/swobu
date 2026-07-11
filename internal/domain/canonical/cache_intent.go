@@ -53,14 +53,3 @@ func (i CacheIntent) Retention() CacheRetention { return i.retention }
 func (i CacheIntent) IsZero() bool {
 	return i.key == "" && i.retention == CacheRetentionUnset
 }
-
-// CacheIntentFromAffinityKeyAndRetention maps protocol-level affinity fields
-// into canonical cache intent.
-func CacheIntentFromAffinityKeyAndRetention(key string, retention CacheRetention) CacheIntent {
-	normalizedKey := strings.TrimSpace(key) // swobu:io-string source=domain
-	normalizedRetention := normalizeCacheRetention(retention)
-	return NewCacheIntent(CacheIntentParams{
-		Key:       normalizedKey,
-		Retention: normalizedRetention,
-	})
-}

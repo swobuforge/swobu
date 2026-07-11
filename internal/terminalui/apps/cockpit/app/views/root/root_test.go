@@ -10,7 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/loop"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
 func TestRoot_RendersShellAndCanonicalSectionOrder(t *testing.T) {
@@ -177,6 +179,34 @@ func TestRoot_WorkspaceSwitchResetsWorkspaceLocalClientsState(t *testing.T) {
 	}
 }
 
+func TestRoot_ClientsSectionOpenFocusesClientRowByKey(t *testing.T) {
+	t.Parallel()
+
+	rt := newTestRuntime(state.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		Endpoints:       []string{"acme"},
+		CurrentEndpoint: "acme",
+		EndpointSnapshots: []state.EndpointSnapshot{
+			{Name: "acme"},
+		},
+	})
+	viewport := geom.Rect{W: 100, H: 28}
+	rt.Rebuild(Root(), viewport)
+
+	focusRowContaining(t, rt, viewport, "clients")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
+	if rt.Focused == nil {
+		t.Fatal("expected focused client row after opening clients section")
+	}
+	_, key, _ := retained.NamedNodeMetadata(layout.UnwrapIdentity(rt.Focused.RenderNode))
+	if key != "client" {
+		t.Fatalf("focused key = %q, want client", key)
+	}
+}
+
 func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 	t.Parallel()
 
@@ -194,12 +224,22 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 	})
 	viewport := geom.Rect{W: 80, H: 24}
 	rt.Rebuild(Root(), viewport)
+
+	out := rt.Render(viewport).String()
+	if strings.Contains(out, "provider           ") {
+		t.Fatalf("routing should start collapsed instead of opening from populated draft state; render=%q", out)
+	}
+
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+
 	focusRowContaining(t, rt, viewport, "provider")
 
 	rt.DispatchEvent(updateKey(interaction.KeyEsc))
 	rt.Rebuild(Root(), viewport)
 
-	out := rt.Render(viewport).String()
+	out = rt.Render(viewport).String()
 	assertRootScenario(t, out, "routing_collapsed_by_esc")
 }
 
@@ -357,6 +397,7 @@ func TestRoot_FirstRunBedrockCreateFlow_RequiresScopeBeforeModel(t *testing.T) {
 	})
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
 
 	// Canonical slot grammar must remain stable for Bedrock in first-run.
@@ -385,6 +426,7 @@ func TestRoot_FirstRunBedrockCreateFlow_DoesNotSilentlyDefaultScope(t *testing.T
 	})
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := strings.ToLower(rt.Render(viewport).String())
 
 	// Missing scope must render as missing; default region inference is invalid in this state.
@@ -414,6 +456,7 @@ func TestRoot_FirstRunBedrockCreateFlow_DerivesRegionFromEnvWhenURLMissing(t *te
 	})
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
 	assertRootScenario(t, out, "bedrock_region_derived_from_env")
 }
@@ -440,6 +483,7 @@ func TestRoot_FirstRunBedrockCreateFlow_NoAWSProfilesFound_ShowsExplicitProfileS
 	})
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
 	assertRootScenario(t, out, "bedrock_no_aws_profiles_found")
 }
@@ -496,6 +540,7 @@ func TestRoot_FirstRunOllamaHidesCredentialRowWhenExternalAndNonSelectable(t *te
 	})
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
 	if strings.Contains(strings.ToLower(out), "credential") {
 		t.Fatalf("ollama first-run should hide credential row when external/non-selectable; render=%q", out)
@@ -516,6 +561,7 @@ func TestRoot_FirstRunBedrockShowsCredentialRowForStrategySelection(t *testing.T
 	})
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := strings.ToLower(rt.Render(viewport).String())
 	if !strings.Contains(out, "credential") {
 		t.Fatalf("bedrock first-run should show credential row for strategy selection; render=%q", out)
@@ -1047,6 +1093,7 @@ func TestRoot_FirstRunChatGPTBrowserLogin_LongURLVisualRoundTrip_NoEllipsisNoLos
 	})
 	viewport := geom.Rect{W: 100, H: 30}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
 	if strings.Contains(out, "…") {
 		t.Fatalf("expected no ellipsis in wrapped auth link rows; render=%q", out)
@@ -1080,6 +1127,7 @@ func TestRoot_FirstRunChatGPTBrowserLogin_LongURLNarrowViewport_NoLoss(t *testin
 	})
 	viewport := geom.Rect{W: 80, H: 24}
 	rt.Rebuild(Root(), viewport)
+	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
 	normalizedRender := normalizeVisualText(out)
 	if !strings.Contains(normalizedRender, "code_challenge_method=S256") {
@@ -1279,7 +1327,7 @@ func TestRoot_FirstRunOpeningModelClosesCredentialChooserDisclosure(t *testing.T
 	})
 	viewport := geom.Rect{W: 110, H: 34}
 	rt.Rebuild(Root(), viewport)
-
+	openRoutingSection(t, rt, viewport)
 	focusRowContaining(t, rt, viewport, "credential")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)

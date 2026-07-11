@@ -29,11 +29,3 @@ func SupportsExecutionProtocolForSpec(spec string, protocolKind protocolkind.Pro
 	}
 	return false
 }
-
-func DefaultExecutionProtocolForSpec(spec string) (protocolkind.ProtocolKind, bool) {
-	supported := SupportedExecutionProtocolsForSpec(spec)
-	if len(supported) == 0 {
-		return "", false
-	}
-	return supported[0], true
-}

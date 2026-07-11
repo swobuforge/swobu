@@ -37,7 +37,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
+	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
 
 	openAIReq := ports.NewProviderRequest(
 		canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -47,7 +47,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	)
-	if _, err := services.Execution.Execute(context.Background(), openAIReq); err != nil {
+	if _, err := registry.ResolveProviderIngress(context.Background(), openAIReq); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)
-	if _, err := services.Execution.Execute(context.Background(), anthropicReq); err != nil {
+	if _, err := registry.ResolveProviderIngress(context.Background(), anthropicReq); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 }
@@ -77,9 +77,9 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
+	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
 
-	openAIModels, err := services.ModelCatalog.ListModels(context.Background(), exchange.NewRoutableTarget(
+	openAIModels, err := registry.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -89,7 +89,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai model catalog len=%d want 2", len(openAIModels))
 	}
 
-	_, err = services.ModelCatalog.ListModels(context.Background(), exchange.NewRoutableTarget(
+	_, err = registry.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-b", "chatgpt", upstream.URL+"/v1", "keychain:chatgpt/default", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
@@ -100,8 +100,8 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	t.Parallel()
 
-	services := NewProviderServicesBundle(http.DefaultClient, testCredentialResolver{})
-	_, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
+	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{})
+	_, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     "m",
 			InputText: "hi",
@@ -127,8 +127,8 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
-	err := services.ModelCatalog.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
+	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
+	err := registry.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -149,7 +149,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	}))
 	defer upstream.Close()
 
-	services := NewProviderServicesBundle(upstream.Client(), testCredentialResolver{})
+	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
@@ -159,7 +159,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 		}),
 	})
 
-	openAIResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
+	openAIResp, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
 		request,
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
@@ -167,11 +167,11 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	if err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
-	if len(openAIResp.Document) == 0 && openAIResp.Stream == nil {
-		t.Fatal("openai transport payload should include document or stream")
+	if err := exchange.ValidateProviderIngress(openAIResp); err != nil {
+		t.Fatalf("openai ingress invalid: %v", err)
 	}
 
-	ollamaResp, err := services.Execution.Execute(context.Background(), ports.NewProviderRequest(
+	ollamaResp, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
 		request,
 		ports.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
@@ -179,7 +179,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	if err != nil {
 		t.Fatalf("ollama execution failed: %v", err)
 	}
-	if len(ollamaResp.Document) == 0 && ollamaResp.Stream == nil {
-		t.Fatal("ollama transport payload should include document or stream")
+	if err := exchange.ValidateProviderIngress(ollamaResp); err != nil {
+		t.Fatalf("ollama ingress invalid: %v", err)
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 // ListModels reads the OpenAI-style model catalog for one selected
 // provider target. This is an operator-support path.
-func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("OpenAI-family provider base URL is required")
 	}
@@ -51,7 +51,7 @@ func (e ProviderExecutorAdapter) ListModels(ctx context.Context, target exchange
 	return models, nil
 }
 
-func (e ProviderExecutorAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
+func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	_, err := e.ListModels(ctx, target)
 	return err
 }

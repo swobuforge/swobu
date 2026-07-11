@@ -1,20 +1,8 @@
 package canonical
 
-import (
-	"reflect"
-	"strings"
-)
+import "strings"
 
 type ContinuationNamespace string
-
-// NewContinuationNamespace builds the internal replay bucket used to search for
-// prior chains. It is intentionally not a public session identifier; callers
-// may derive it from routing scope while actual chain identity comes from
-// native previous_response_id values or canonical prefix matching inside that
-// bucket.
-func NewContinuationNamespace(raw string) ContinuationNamespace {
-	return ContinuationNamespace(strings.TrimSpace(raw)) // swobu:io-string source=domain
-}
 
 func (s ContinuationNamespace) IsZero() bool {
 	return strings.TrimSpace(string(s)) == "" // swobu:io-string source=domain
@@ -47,73 +35,4 @@ func NewContinuitySnapshot(responseID string, model string, thread []CanonicalIt
 
 func (s ContinuitySnapshot) Clone() ContinuitySnapshot {
 	return NewContinuitySnapshot(s.ResponseID, s.Model, s.Thread)
-}
-
-// ValidateResponseContinuationSelectors enforces the narrowed v0 responses
-// contract: previous_response_id is the only supported native selector.
-func ValidateResponseContinuationSelectors(request CanonicalRequest) error {
-	_ = request
-	return nil
-}
-
-func PreviousResponseIDFromRequest(request CanonicalRequest) (string, bool, error) {
-	if err := ValidateResponseContinuationSelectors(request); err != nil {
-		return "", false, err
-	}
-	value := strings.TrimSpace(request.PreviousResponseID()) // swobu:io-string source=domain
-	if value == "" {
-		return "", false, nil
-	}
-	return value, true, nil
-}
-
-// ContinuationConversation builds the canonical history for one request. It
-// stays protocol-agnostic and therefore only understands canonical request
-// semantics.
-func ContinuationConversation(request CanonicalRequest) ([]CanonicalItem, bool, error) {
-	items := request.Items()
-	return items, len(items) > 0, nil
-}
-
-// BuildContinuitySnapshot appends replayable successful output items to one
-// replayable canonical thread when that thread exists for the request.
-func BuildContinuitySnapshot(
-	thread []CanonicalItem,
-	output CanonicalOutput,
-) (ContinuitySnapshot, bool, error) {
-	if output == nil || output.ResultID() == "" || len(thread) == 0 {
-		return ContinuitySnapshot{}, false, nil
-	}
-	items := output.Items()
-	if len(items) == 0 {
-		return ContinuitySnapshot{}, false, nil
-	}
-	for _, item := range items {
-		switch item.Kind {
-		case ItemKindText, ItemKindToolUse:
-		default:
-			return ContinuitySnapshot{}, false, UnsupportedOperation("canonical output item is not replayable in continuity state")
-		}
-	}
-	return NewContinuitySnapshot(
-		output.ResultID(),
-		output.Model(),
-		append(cloneCanonicalItems(thread), cloneCanonicalItems(items)...),
-	), true, nil
-}
-
-// longestCommonPrefixLength is the semantic diff primitive for continuation
-// derivation. Prefix matching is content-based on canonical items; storage
-// lineage matters only insofar as it yields a usable prefix anchor.
-func longestCommonPrefixLength(left []CanonicalItem, right []CanonicalItem) int {
-	limit := len(left)
-	if len(right) < limit {
-		limit = len(right)
-	}
-	for i := 0; i < limit; i++ {
-		if !reflect.DeepEqual(left[i], right[i]) {
-			return i
-		}
-	}
-	return limit
 }

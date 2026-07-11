@@ -96,6 +96,7 @@ func codexClientSpec() capabilityClientSpec {
 		Run: &capabilityRunSpec{
 			Binary: "codex",
 			Args: []string{
+				"--dangerously-bypass-approvals-and-sandbox",
 				"-c", "model=\"{{primary_model}}\"",
 				"-c", "model_provider=\"swobu\"",
 				"-c", "model_providers.swobu.name=\"Swobu\"",
@@ -159,6 +160,8 @@ func aiderClientSpec() capabilityClientSpec {
 		Run: &capabilityRunSpec{
 			Binary: "aider",
 			Args: []string{
+				"--no-show-model-warnings",
+				"--no-browser",
 				"--model", "openai/{{primary_model}}",
 			},
 			Env: map[string]string{
@@ -203,6 +206,9 @@ func opencodeClientSpec() capabilityClientSpec {
 	return capabilityClientSpec{
 		Identity: Identity{ID: "opencode", Label: "OpenCode"},
 		Vars: func(baseURL string) TemplateVars {
+			// OpenCode only sends requests once the custom provider has an explicit
+			// apiKey. Keep the lane deterministic by baking the env-backed key into
+			// the checked-in config instead of relying on implicit provider auth.
 			pretty := strings.Join([]string{
 				"{",
 				`  "$schema": "https://opencode.ai/config.json",`,
@@ -212,7 +218,8 @@ func opencodeClientSpec() capabilityClientSpec {
 				`      "npm": "@ai-sdk/openai-compatible",`,
 				`      "name": "Swobu",`,
 				`      "options": {`,
-				`        "baseURL": "{{openai_base_url}}"`,
+				`        "baseURL": "{{openai_base_url}}",`,
+				`        "apiKey": "{env:OPENAI_API_KEY}"`,
 				`      },`,
 				`      "models": {`,
 				`        "primary": { "name": "Primary" }`,
@@ -221,7 +228,7 @@ func opencodeClientSpec() capabilityClientSpec {
 				`  }`,
 				"}",
 			}, "\n")
-			inline := `{"$schema":"https://opencode.ai/config.json","model":"swobu/primary","provider":{"swobu":{"npm":"@ai-sdk/openai-compatible","name":"Swobu","options":{"baseURL":"{{openai_base_url}}"},"models":{"primary":{"name":"Primary"}}}}}`
+			inline := `{"$schema":"https://opencode.ai/config.json","model":"swobu/primary","provider":{"swobu":{"npm":"@ai-sdk/openai-compatible","name":"Swobu","options":{"baseURL":"{{openai_base_url}}","apiKey":"{env:OPENAI_API_KEY}"},"models":{"primary":{"name":"Primary"}}}}}`
 			return TemplateVars{
 				"opencode_config_pretty": pretty,
 				"opencode_config_inline": inline,
@@ -243,7 +250,7 @@ func opencodeClientSpec() capabilityClientSpec {
 			Binary: "opencode",
 			Env: map[string]string{
 				"OPENAI_API_KEY":          "swobu-placeholder",
-				"OPENCODE_CONFIG":         "./opencode.json",
+				"OPENCODE_CONFIG":         "{{cwd}}/opencode.json",
 				"OPENCODE_CONFIG_CONTENT": "{{opencode_config_inline}}",
 			},
 			Prepare: &capabilityRunPrepareSpec{

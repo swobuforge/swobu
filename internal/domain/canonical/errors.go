@@ -1,10 +1,8 @@
 package canonical
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 type ErrorOrigin string
@@ -65,10 +63,6 @@ func BadRequest(message string) Error {
 	return NewSwobuError(ErrorCodeBadRequest, message)
 }
 
-func UnknownTarget(message string) Error {
-	return NewSwobuError(ErrorCodeUnknownTarget, message)
-}
-
 func UnsupportedOperation(message string) Error {
 	return NewSwobuError(ErrorCodeUnsupportedOperation, message)
 }
@@ -116,7 +110,7 @@ func (e ClassifiedBackendError) Unwrap() error {
 	return e.Cause
 }
 
-// NewBackendError preserves backend-origin truth instead of laundering upstream
+// NewBackendError preserves backend-origin truth instead of laundering provider
 // failures into Swobu-shaped validation or policy errors.
 func NewBackendError(backendRef string, statusCode int, message string, retryAfterHeaderValue string) BackendError {
 	return BackendError{
@@ -133,29 +127,6 @@ func (e BackendError) Error() string {
 		return fmt.Sprintf("backend error from %s (%d)", e.BackendRef, e.StatusCode)
 	}
 	return fmt.Sprintf("backend error from %s (%d): %s", e.BackendRef, e.StatusCode, e.Message)
-}
-
-const backendErrorCodePreviousResponseNotFound = "previous_response_not_found"
-
-// IsPreviousResponseNotFoundBackendError reports the exact OpenAI-style
-// responses error contract for an unresolved previous_response_id. It relies on
-// the typed backend payload, not heuristic message matching.
-func IsPreviousResponseNotFoundBackendError(err error) bool {
-	var backendErr BackendError
-	if !errors.As(err, &backendErr) {
-		return false
-	}
-	var envelope struct {
-		Error struct {
-			Param string `json:"param"`
-			Code  string `json:"code"`
-		} `json:"error"`
-	}
-	if json.Unmarshal([]byte(backendErr.Message), &envelope) != nil {
-		return false
-	}
-	return strings.TrimSpace(envelope.Error.Param) == "previous_response_id" && // swobu:io-string source=domain
-		strings.TrimSpace(envelope.Error.Code) == backendErrorCodePreviousResponseNotFound // swobu:io-string source=domain
 }
 
 func IsBackendErrorClass(err error, class BackendErrorClass) bool {

@@ -1,6 +1,8 @@
 package clientprofile
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,6 +13,11 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 	t.Parallel()
 
 	baseURL := "http://127.0.0.1:7926/c/acme/"
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	opencodeConfigPath := filepath.Join(cwd, "opencode.json")
 	tests := []struct {
 		clientID    string
 		binary      string
@@ -21,7 +28,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "aider",
 			binary:   "aider",
-			contains: []string{"--model", "openai/" + exchange.PublicModelIDSwobu},
+			contains: []string{"--no-show-model-warnings", "--no-browser", "--model", "openai/" + exchange.PublicModelIDSwobu},
 			envChecks: map[string]string{
 				"AIDER_OPENAI_API_BASE": "http://127.0.0.1:7926/c/acme/v1",
 				"OPENAI_API_KEY":        "swobu-placeholder",
@@ -31,6 +38,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			clientID: "codex",
 			binary:   "codex",
 			contains: []string{
+				`--dangerously-bypass-approvals-and-sandbox`,
 				`model="` + exchange.PublicModelIDSwobu + `"`,
 				`model_provider="swobu"`,
 				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
@@ -59,7 +67,9 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			binary:   "opencode",
 			contains: []string{},
 			envChecks: map[string]string{
-				"OPENAI_API_KEY": "swobu-placeholder",
+				"OPENAI_API_KEY":          "swobu-placeholder",
+				"OPENCODE_CONFIG":         opencodeConfigPath,
+				"OPENCODE_CONFIG_CONTENT": `"apiKey":"{env:OPENAI_API_KEY}"`,
 			},
 			preparePath: "./opencode.json",
 		},

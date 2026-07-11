@@ -1,5 +1,5 @@
-// swobu:codelint ignore file-length because=single codec seam must keep protocol fanout visible in one owner file
-// event-state machine together so migration behavior stays recoverable.
+// swobu:lint ignore file-length because=single codec seam must keep protocol fanout visible in one owner file.
+// Keep the event-state machine together so migration behavior stays recoverable.
 package chatcompletions
 
 import (
@@ -335,17 +335,19 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 		if call.Type != "" && call.Type != "function" {
 			return nil, canonical.InternalError("chat completions response tool call type is unsupported")
 		}
-		input := map[string]any{}
-		if strings.TrimSpace(call.Function.Arguments) != "" { // swobu:io-string source=boundary
-			if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil {
-				return nil, canonical.InternalError("chat completions response tool call arguments are invalid")
-			}
-		}
 		itemID := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if itemID == "" {
 			itemID = "tool_0"
 		}
-		out = append(out, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(call.ID), strings.TrimSpace(call.Function.Name), input)) // swobu:io-string source=boundary
+		toolUseID := strings.TrimSpace(call.ID)                    // swobu:io-string source=boundary
+		functionName := strings.TrimSpace(call.Function.Name)      // swobu:io-string source=boundary
+		functionArgs := strings.TrimSpace(call.Function.Arguments) // swobu:io-string source=boundary
+		out = append(out, canonical.NewToolUseOutputItem(
+			itemID,
+			toolUseID,
+			functionName,
+			canonical.NewToolArgumentsObject(functionArgs),
+		))
 	}
 	return out, nil
 }

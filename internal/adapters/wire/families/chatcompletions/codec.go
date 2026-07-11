@@ -171,13 +171,13 @@ func chatToolCalls(items []canonical.OutputItem) []chatCompletionsResponseToolCa
 		if item.Kind != canonical.ItemKindToolUse {
 			continue
 		}
-		args, _ := json.Marshal(item.Input)
+		args := item.Input.RawObject()
 		out = append(out, chatCompletionsResponseToolCallDTO{
 			ID:   item.ToolUseID,
 			Type: "function",
 			Function: chatCompletionsResponseFunctionDTO{
 				Name:      item.Name,
-				Arguments: string(args),
+				Arguments: args,
 			},
 		})
 	}

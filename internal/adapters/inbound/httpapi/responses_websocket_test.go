@@ -9,19 +9,16 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testProviderResponseFromOutput(canonical.NewConversationOutput(
-				"chatcmpl_1",
-				"model",
-				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
-				"stop",
-			)),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testProviderIngressFromOutput(canonical.NewConversationOutput(
+			"chatcmpl_1",
+			"model",
+			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			"stop",
+		)),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -35,15 +32,13 @@ func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 }
 
 func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testProviderResponseFromOutput(canonical.NewConversationOutput(
-				"chatcmpl_1",
-				"model",
-				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
-				"stop",
-			)),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testProviderIngressFromOutput(canonical.NewConversationOutput(
+			"chatcmpl_1",
+			"model",
+			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			"stop",
+		)),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -59,15 +54,13 @@ func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 }
 
 func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testProviderResponseFromOutput(canonical.NewConversationOutput(
-				"chatcmpl_1",
-				"model",
-				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
-				"stop",
-			)),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testProviderIngressFromOutput(canonical.NewConversationOutput(
+			"chatcmpl_1",
+			"model",
+			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			"stop",
+		)),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()

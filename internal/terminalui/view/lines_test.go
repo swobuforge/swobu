@@ -2,6 +2,18 @@ package view
 
 import "testing"
 
+func ShowWhen(kind string, visible bool, children ...ViewSpec) ViewSpec {
+	return ViewSpec{Kind: kind, Show: &ShowSpec{Visible: visible}, Children: children}
+}
+
+func GridLayout(kind string, columns int, gap int, children ...ViewSpec) ViewSpec {
+	return ViewSpec{Kind: kind, Grid: &GridSpec{Columns: columns, Gap: gap}, Children: children}
+}
+
+func ScrollY(kind string, offset int, child ViewSpec) ViewSpec {
+	return ViewSpec{Kind: kind, Scroll: &ScrollSpec{Axis: ScrollAxisY, Offset: offset}, Children: []ViewSpec{child}}
+}
+
 func TestDurableLines_RendersPanelNode(t *testing.T) {
 	t.Parallel()
 

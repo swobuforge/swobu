@@ -17,10 +17,6 @@ type TokenUsage struct {
 	hasCacheWriteTokens bool
 }
 
-func NewUnknownTokenUsage() TokenUsage {
-	return TokenUsage{}
-}
-
 func NewTokenUsageWithOptional(inputTokens *int, outputTokens *int, cacheReadTokens *int, cacheWriteTokens *int) (TokenUsage, error) {
 	usage := TokenUsage{}
 	if inputTokens != nil {

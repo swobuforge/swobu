@@ -28,7 +28,7 @@ type liveTrafficRow struct {
 	Endpoint       string `json:"endpoint"`
 	ClientHandler  string `json:"client_handler"`
 	ClientProtocol string `json:"client_protocol"`
-	IngressFamily  string `json:"ingress_family"`
+	ClientFamily   string `json:"ingress_family"`
 	Result         string `json:"result"`
 	Route          string `json:"route"`
 }
@@ -112,7 +112,7 @@ func TestLiveClientBackendHelloMatrix(t *testing.T) {
 				if got := strings.TrimSpace(row.Route); got == "" {
 					t.Fatalf("missing route in status projection row for request_id=%s", reqID)
 				}
-				if got := strings.TrimSpace(row.Result); got == "" {
+				if got := strings.TrimSpace(row.Body); got == "" {
 					t.Fatalf("missing result in status projection row for request_id=%s", reqID)
 				}
 			})

@@ -537,7 +537,7 @@ func TestReduce_ControlPlaneIncompatibleHardStopsAndRecoversOnCompatibleStatus(t
 	if got := model.CurrentEndpoint; got != "acme" {
 		t.Fatalf("current endpoint changed during incompatible mode: %q", got)
 	}
-	Reduce(&model, ReplaceDaemonStatus{State: "healthy", EndpointCount: 1})
+	Reduce(&model, stateeffect.ReplaceDaemonStatus{State: "healthy", EndpointCount: 1})
 	if model.ControlPlane != nil {
 		t.Fatal("control plane mismatch should clear after healthy status")
 	}

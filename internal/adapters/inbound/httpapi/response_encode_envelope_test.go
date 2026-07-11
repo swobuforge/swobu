@@ -24,10 +24,14 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
 	}
-	resp := exchange.NewEnvelopeStreamingProviderResponseStream(envelope)
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(envelope, delivery.StreamingDelivery(delivery.FramingSSE))
+	if err != nil {
+		t.Fatalf("EncodeResponseStream error: %v", err)
+	}
+	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream)}
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, "req_test_1", canonical.IngressFamilyResponses, resp, delivery.StreamingDelivery(delivery.FramingSSE)); err != nil {
+	if err := writeSuccessResponse(rr, "req_test_1", canonical.ClientFamilyResponses, resp); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -55,10 +59,14 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 	if err != nil {
 		t.Fatalf("EventReaderFromCanonicalOutput error: %v", err)
 	}
-	resp := exchange.NewEnvelopeStreamingProviderResponseStream(envelope)
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(envelope, delivery.StreamingDelivery(delivery.FramingSSE))
+	if err != nil {
+		t.Fatalf("EncodeResponseStream error: %v", err)
+	}
+	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream)}
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(rr, "req_test_2", canonical.IngressFamilyChatCompletions, resp, delivery.StreamingDelivery(delivery.FramingSSE)); err != nil {
+	if err := writeSuccessResponse(rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); err != nil {
 		t.Fatalf("writeSuccessResponse error: %v", err)
 	}
 	if rr.Code != http.StatusOK {

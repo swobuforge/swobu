@@ -5,7 +5,65 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/report"
 )
+
+type ApplyResult struct {
+	Mutated bool
+	Losses  []report.Loss
+}
+
+func Apply(doc carrier.WireDocument, key string, retention string) (carrier.WireDocument, ApplyResult, error) {
+	if doc.IsEmpty() {
+		return doc, ApplyResult{}, nil
+	}
+	out, mutated, err := mutateWireDocumentJSON(doc, func(payload map[string]any) (bool, error) {
+		changed := false
+		if key != "" {
+			if got, _ := payload["prompt_cache_key"].(string); got != key {
+				payload["prompt_cache_key"] = key
+				changed = true
+			}
+		}
+		if retention != "" {
+			if got, _ := payload["prompt_cache_retention"].(string); got != retention {
+				payload["prompt_cache_retention"] = retention
+				changed = true
+			}
+		}
+		return changed, nil
+	})
+	if err != nil {
+		return carrier.WireDocument{}, ApplyResult{}, canonical.InternalError("provider request body is invalid JSON for cache affinity transform")
+	}
+	return out, ApplyResult{Mutated: mutated}, nil
+}
+
+func mutateWireDocumentJSON(doc carrier.WireDocument, mutate func(payload map[string]any) (bool, error)) (carrier.WireDocument, bool, error) {
+	var payload map[string]any
+	if len(doc.Raw) != 0 {
+		payload = map[string]any{}
+		if err := json.Unmarshal(doc.Raw, &payload); err != nil {
+			return carrier.WireDocument{}, false, err
+		}
+	} else {
+		payload = map[string]any{}
+	}
+	changed, err := mutate(payload)
+	if err != nil {
+		return carrier.WireDocument{}, false, err
+	}
+	if !changed {
+		return doc, false, nil
+	}
+	nextRaw, err := json.Marshal(payload)
+	if err != nil {
+		return carrier.WireDocument{}, false, err
+	}
+	doc.Raw = nextRaw
+	return doc, true, nil
+}
 
 func TestApply_MutatesPromptCacheFields(t *testing.T) {
 	in := carrier.WireDocument{Raw: []byte(`{"model":"m"}`)}

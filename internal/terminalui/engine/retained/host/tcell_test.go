@@ -87,6 +87,19 @@ func TestMapKeyEvent_MapsBackspace(t *testing.T) {
 	}
 }
 
+func TestMapKeyEvent_MapsReturnRuneToEnter(t *testing.T) {
+	for _, evIn := range []*tcell.EventKey{
+		tcell.NewEventKey(tcell.KeyEnter, 0, 0),
+		tcell.NewEventKey(tcell.KeyCtrlJ, 0, 0),
+		tcell.NewEventKey(tcell.KeyCtrlM, 0, 0),
+	} {
+		ev := mapKeyEvent(evIn)
+		if ev.Kind != interaction.EventKey || ev.Key != interaction.KeyEnter {
+			t.Fatalf("mapKeyEvent(%q) = (%v, %q), want (EventKey, KeyEnter)", evIn.Name(), ev.Kind, ev.Key)
+		}
+	}
+}
+
 func TestRunner_FlushesFirstFrameBeforeBlockingBootEffect(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	screen.SetSize(40, 6)
@@ -116,6 +129,63 @@ func TestRunner_FlushesFirstFrameBeforeBlockingBootEffect(t *testing.T) {
 		t.Fatal("runner did not exit after ctrl+c")
 	}
 	_ = block
+}
+
+func TestRunner_EnterOnClientsSectionFocusesClientRow(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	screen.SetSize(100, 28)
+
+	runner := New(screen, rootviews.Root(), appstate.Model{
+		HeaderStatus:    "ready",
+		DaemonState:     "up",
+		Endpoints:       []string{"acme"},
+		CurrentEndpoint: "acme",
+		EndpointSnapshots: []appstate.EndpointSnapshot{{
+			Name:                      "acme",
+			SelectedProviderConfigRef: "backend-a",
+			ProviderConfigs: []appstate.ProviderConfigSnapshot{{
+				Ref:          "backend-a",
+				ProviderSpec: "openai_compatible",
+				ModelID:      "gpt-4.1-mini",
+			}},
+		}},
+	}, appstate.Reduce)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runner.Run(context.Background())
+	}()
+
+	waitFor(t, screen, done, func() bool {
+		return strings.Contains(screenString(screen), "workspace")
+	})
+
+	for i := 0; i < 12; i++ {
+		if strings.Contains(screenString(screen), "> clients ▸") {
+			break
+		}
+		screen.InjectKey(tcell.KeyDown, 0, 0)
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(screenString(screen), "> clients ▸") {
+		t.Fatalf("failed to focus clients header before open; screen=%q", screenString(screen))
+	}
+
+	screen.InjectKey(tcell.KeyEnter, 0, 0)
+	waitFor(t, screen, done, func() bool {
+		s := screenString(screen)
+		return strings.Contains(s, "clients ▾") && strings.Contains(s, ">    client")
+	})
+
+	screen.InjectKey(tcell.KeyCtrlC, 0, 0)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runner returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not exit after ctrl+c")
+	}
 }
 
 type bootEffectTrigger struct{}

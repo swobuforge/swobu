@@ -30,7 +30,6 @@ const (
 	defaultOAuthRedirectBase     = "http://localhost:1455"
 	fallbackCallbackListenAddr   = "127.0.0.1:1457"
 	callbackPath                 = "/auth/callback"
-	daemonCallbackPath           = "/_swobu/auth/chatgpt/callback"
 	maxHTTPBodyBytes             = 128 * 1024
 	authSessionTTL               = 15 * time.Minute
 	defaultHTTPTimeout           = 15 * time.Second

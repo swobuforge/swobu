@@ -33,15 +33,15 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 	event, err := evidence.NewTerminalTrafficEvent(evidence.TrafficEventInput{Endpoint: "acme",
-		RequestID:     requestID,
-		Route:         route,
-		Result:        evidence.ResultClassSuccess,
-		StatusCode:    200,
-		Timing:        timing,
-		TokenUsage:    usage,
-		IngressFamily: evidence.IngressFamily("responses"),
+		RequestID:    requestID,
+		Route:        route,
+		Result:       evidence.ResultClassSuccess,
+		StatusCode:   200,
+		Timing:       timing,
+		TokenUsage:   usage,
+		ClientFamily: evidence.ClientFamily("responses"),
 		Mutations: []evidence.Mutation{{
-			Leg:           "encode",
+			Stage:         "encode",
 			Transform:     "openaifamily.CacheAffinityWireTransform",
 			Changed:       true,
 			ChangedFields: []string{"prompt_cache_key"},

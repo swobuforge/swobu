@@ -140,19 +140,3 @@ func ensurePreparedRunFile(prepare clientprofile.RunPrepareFileSpec) error {
 	}
 	return os.WriteFile(path, []byte(prepare.Content), mode)
 }
-
-// RunClientDisplayCommand returns the shell-style command line that corresponds
-// to the run-once invocation for the selected client and model context.
-func RunClientDisplayCommand(clientID, baseURL, modelID string) (string, bool) {
-	spec, ok := clientRunSpecForID(clientID, baseURL, modelID)
-	if !ok {
-		return "", false
-	}
-	command := clientprofile.RunCommandSpec{
-		ClientID: spec.clientID,
-		Binary:   spec.binary,
-		Args:     append([]string(nil), spec.args...),
-		Env:      cloneStringMap(spec.env),
-	}
-	return clientprofile.RenderRunCommand(command), true
-}

@@ -101,7 +101,7 @@ const primaryTargetSelector = "primary"
 // NewProviderConfig validates the explicit provider-config declaration used by
 // endpoint intent. It does not guess provider family or protocol semantics.
 //
-// Ingress-family admissibility and provider wire realization are owned by
+// client-family admissibility and provider wire realization are owned by
 // request-path route rules and provider adapters. Durable endpoint
 // intent stores provider identity and credentials, not transport dialect.
 func NewProviderConfig(

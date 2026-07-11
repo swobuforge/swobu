@@ -1,6 +1,7 @@
 package clientprofile
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -92,9 +93,14 @@ func renderTemplate(raw string, vars TemplateVars) string {
 
 func defaultTemplateVars(baseURL string) TemplateVars {
 	base := strings.TrimSpace(baseURL) // swobu:io-string source=boundary
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
 	return TemplateVars{
 		"base_url":        base,
 		"openai_base_url": openAIBaseURL(base),
+		"cwd":             strings.TrimSpace(cwd),
 		"primary_model":   exchange.PublicModelIDSwobu,
 	}
 }

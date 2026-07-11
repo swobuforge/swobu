@@ -48,7 +48,7 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 	case stateeffect.RoutingModelCatalogLoaded:
 		return handleRoutingModelCatalogLoaded(model, value)
 	case FocusNextAfterRebuildRequested:
-		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{Delay: 2 * time.Millisecond}}
+		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{}}
 	case EndpointCopyRequested:
 		return []update.Effect{stateeffect.CopyEndpointValueEffect(value)}
 	case AuthSessionURLCopyRequested:

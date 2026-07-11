@@ -139,7 +139,7 @@ func (d *Daemon) emitEventTelemetryBestEffort(ctx context.Context, event evidenc
 	if d == nil || d.telemetry.emitter == nil {
 		return
 	}
-	if event.EventKind() != evidence.EventKindUpstreamTerminal {
+	if event.EventKind() != evidence.EventKindProviderTerminal {
 		return
 	}
 	requestID := event.RequestID().String()

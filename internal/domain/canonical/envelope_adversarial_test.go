@@ -2,6 +2,7 @@ package canonical
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -51,7 +52,7 @@ func TestEnvelopeSynthesizeProject_RoundTrip(t *testing.T) {
 	inUsage, _ := NewTokenUsageWithOptional(intPtr(12), intPtr(7), nil, nil)
 	out := NewConversationOutputWithUsage("resp_1", "gpt-x", []CanonicalItem{
 		NewTextOutputItem("m1", "Hello"),
-		NewToolUseOutputItem("t1", "tc_1", "search", map[string]any{"query": "swobu"}),
+		NewToolUseOutputItem("t1", "tc_1", "search", NewToolArgumentsObject(`{"query":"swobu"}`)),
 	}, "stop", inUsage)
 
 	events, err := SynthesizeResponseFromOutput("ex_round", out)
@@ -85,8 +86,8 @@ func TestEnvelopeSynthesizeProject_RoundTrip(t *testing.T) {
 	if projected.Items()[1].Kind != ItemKindToolUse {
 		t.Fatalf("second item kind = %q, want %q", projected.Items()[1].Kind, ItemKindToolUse)
 	}
-	if got, ok := projected.Items()[1].Input["query"].(string); !ok || got != "swobu" {
-		t.Fatalf("tool args query = %#v, want %q", projected.Items()[1].Input["query"], "swobu")
+	if !strings.Contains(projected.Items()[1].Input.RawObject(), `"query":"swobu"`) {
+		t.Fatalf("tool args query missing in %q", projected.Items()[1].Input.RawObject())
 	}
 }
 
@@ -105,24 +106,12 @@ func TestReadClosedEnvelope_Response(t *testing.T) {
 	}
 }
 
-func TestEnvelopeBuilder_AliasStability(t *testing.T) {
-	b := NewEnvelopeBuilder("ex_alias")
-	resp, err := b.Start(EnvResponse, "", EnvelopeStartPayload{})
-	mustNoErr(t, err)
-	key := AliasKey{Protocol: "openai.chat", Kind: "tool_call", NativeID: "abc", Index: 0}
-	id1 := b.EnsureToolCall(resp.EnvID, key)
-	id2 := b.EnsureToolCall(resp.EnvID, key)
-	if id1 != id2 {
-		t.Fatalf("alias ids differ: %q vs %q", id1, id2)
-	}
-}
-
 func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	in := NewCanonicalRequest(RequestParams{
 		Model: "gpt-r",
 		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "hello"),
-			NewToolUseItem(ItemAuthorAssistant, "tool_0", "call_1", "search", map[string]any{"q": "swobu"}),
+			NewToolUseItem(ItemAuthorAssistant, "tool_0", "call_1", "search", NewToolArgumentsObject(`{"q":"swobu"}`)),
 		},
 	})
 	events, err := SynthesizeRequestFromCanonicalRequest("ex_req_rt", in)
@@ -150,8 +139,8 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	if len(typed.Items()) != 2 {
 		t.Fatalf("thread len = %d, want 2", len(typed.Items()))
 	}
-	if got, ok := typed.Items()[1].Input["q"].(string); !ok || got != "swobu" {
-		t.Fatalf("tool input q = %#v, want %q", typed.Items()[1].Input["q"], "swobu")
+	if !strings.Contains(typed.Items()[1].Input.RawObject(), `"q":"swobu"`) {
+		t.Fatalf("tool input q missing in %q", typed.Items()[1].Input.RawObject())
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -66,11 +67,11 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		if profile.UsageDecoder() == nil {
 			t.Fatalf("provider=%s usage adapter is nil", profile.ProviderID())
 		}
-		resp, warnings, transformReports, err := decodeBufferedCarrierDocument(profile, carrier.WireDocument{Leg: carrier.LegProviderResponseIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw})
+		resp, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(carrier.WireDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
 		if err != nil {
 			t.Fatalf("provider=%s decode: %v", profile.ProviderID(), err)
 		}
-		closed, err := canonical.ReadClosedEnvelope(context.Background(), resp.EnvelopeStream(), canonical.EnvResponse)
+		closed, err := canonical.ReadClosedEnvelope(context.Background(), resp, canonical.EnvResponse)
 		if err != nil {
 			t.Fatalf("provider=%s envelope read: %v", profile.ProviderID(), err)
 		}
@@ -80,9 +81,6 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		}
 		if out.Model() != "m" {
 			t.Fatalf("provider=%s model=%q", profile.ProviderID(), out.Model())
-		}
-		if len(warnings) != 0 || len(transformReports) != 0 {
-			t.Fatalf("provider=%s warnings/reports mismatch warnings=%#v reports=%#v", profile.ProviderID(), warnings, transformReports)
 		}
 	}
 }

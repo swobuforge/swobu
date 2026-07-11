@@ -1,7 +1,8 @@
 package httpapi
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,15 +12,22 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
+	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 const websocketRequestTypeResponseCreate = "response.create"
 const maxWebsocketRequestBodyBytes = 1 << 20
+
+type streamDrainCounters struct {
+	EventCount  int
+	FrameCount  int
+	FrameBytes  int
+	FrameSHA256 string
+}
 
 func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
 	server := websocket.Server{
@@ -36,8 +44,8 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
 	conn.MaxPayloadBytes = maxWebsocketRequestBodyBytes
-	if h.requestHandler == nil {
-		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.InternalError("request orchestrator is not configured"))))
+	if h.requestIngress == nil {
+		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.InternalError("exchange ingress is not configured"))))
 		return
 	}
 
@@ -87,65 +95,31 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if err != nil {
 		return canonical.BadRequest("websocket request body is invalid JSON")
 	}
-	request, clientDelivery, err := decodeCanonicalRequest(canonical.IngressFamilyResponses, payload)
-	if err != nil {
-		return err
-	}
-	if clientDelivery.Mode == delivery.Streaming && clientDelivery.Framing == delivery.FramingNone {
-		clientDelivery = delivery.StreamingDelivery(delivery.FramingWebSocket)
-	}
-
 	requestID := requestIDFromRequest(r)
-	out, err := h.requestHandler.Handle(r.Context(), exchange.HandleInput{
-		EndpointName: endpoint,
-		Request:      request,
-		Contract:     exchange.NewExecutionContract(clientDelivery),
+	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
+		EndpointName:    endpoint,
+		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), r.Header, payload),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingWebSocket,
 	})
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = exchange.CloseProviderResponseStream(out.Response)
-	}()
-	return writeResponsesWebsocketSuccess(conn, requestID, out.Response, clientDelivery)
+	return writeResponsesWebsocketSuccess(conn, requestID, out.Response)
 }
 
-func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, resp exchange.ProviderResponseStream, clientDelivery delivery.Delivery) error {
-	envelope := resp.EnvelopeStream()
-	if clientDelivery.Mode == delivery.Streaming {
-		if envelope == nil {
-			return canonical.InternalError("streaming provider response is missing a canonical envelope stream")
-		}
-		return writeResponsesWebsocketEnvelope(conn, requestID, envelope)
+func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, response exchange.TransportResponse) error {
+	if response.Transport.Header.Get("Content-Type") != "application/json" {
+		return canonical.UnsupportedDelivery("websocket responses require websocket-framed streaming output")
 	}
-	if clientDelivery.Mode != delivery.Streaming {
-		if envelope == nil {
-			return canonical.InternalError("buffered provider response is missing a canonical envelope stream")
-		}
-		output, err := projectBufferedOutputFromEnvelope(envelope)
-		if err != nil {
-			return err
-		}
-		if output == nil {
-			return canonical.InternalError("buffered provider response is missing a canonical output")
-		}
-		envelope, err = canonical.EventReaderFromCanonicalOutput("ws_buffered_response", output)
-		if err != nil {
-			return canonical.InternalError("buffered provider response could not be synthesized into envelope events")
-		}
-		defer func() {
-			_ = envelope.Close(context.Background())
-		}()
-		return writeResponsesWebsocketEnvelope(conn, requestID, envelope)
+	if response.Transport.Body == nil {
+		return canonical.InternalError("streaming client response is missing transport body")
 	}
-	return canonical.UnsupportedDelivery("response delivery mode is not implemented")
+	return writeResponsesWebsocketStream(conn, requestID, response.Transport)
 }
 
-func writeResponsesWebsocketEnvelope(conn *websocket.Conn, requestID string, envelope canonical.EventReader) error {
-	if envelope == nil {
-		return canonical.InternalError("streaming provider response is missing an output event stream")
-	}
-	stats, err := drainEncodedFramesWithStats(context.Background(), envelope, responses.NewJSONEnvelopeStreamEncoder(), websocketFrameSink{conn: conn})
+func writeResponsesWebsocketStream(conn *websocket.Conn, requestID string, response transportpkg.TransportResponse) error {
+	stats, err := drainWebsocketBodyWithStats(response.Body, websocketFrameSink{conn: conn})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -164,6 +138,33 @@ func writeResponsesWebsocketEnvelope(conn *websocket.Conn, requestID string, env
 	return nil
 }
 
+func drainWebsocketBodyWithStats(body io.ReadCloser, sink websocketFrameSink) (streamDrainCounters, error) {
+	defer func() { _ = body.Close() }()
+	stats := streamDrainCounters{}
+	hash := sha256.New()
+	buf := make([]byte, 4096)
+	for {
+		n, err := body.Read(buf)
+		if n > 0 {
+			chunk := append([]byte(nil), buf[:n]...)
+			if writeErr := sink.WriteFrame(chunk); writeErr != nil {
+				return stats, writeErr
+			}
+			_, _ = hash.Write(chunk)
+			stats.EventCount++
+			stats.FrameCount++
+			stats.FrameBytes += len(chunk)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				stats.FrameSHA256 = hex.EncodeToString(hash.Sum(nil))
+				return stats, nil
+			}
+			return stats, err
+		}
+	}
+}
+
 type websocketFrameSink struct {
 	conn *websocket.Conn
 }
@@ -174,8 +175,6 @@ func (s websocketFrameSink) WriteFrame(frame []byte) error {
 	}
 	return nil
 }
-
-func (s websocketFrameSink) Flush() error { return nil }
 
 type responsesWebsocketErrorDTO struct {
 	Type       string                      `json:"type"`

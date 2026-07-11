@@ -306,7 +306,7 @@ func trafficTransformDetailLines(row state.TrafficRow) []retained.ViewSpec[state
 		if len(m.ChangedFields) > 0 {
 			fieldSummary = strings.Join(m.ChangedFields, ", ")
 		}
-		line := fmt.Sprintf("%s %s (%s) [%s]", strings.TrimSpace(m.Leg), strings.TrimSpace(m.Transform), status, fieldSummary) // swobu:io-string source=boundary
+		line := fmt.Sprintf("%s %s (%s) [%s]", strings.TrimSpace(m.Stage), strings.TrimSpace(m.Transform), status, fieldSummary) // swobu:io-string source=boundary
 		out = append(out, trafficDetailLine("transform detail", line))
 	}
 	return out

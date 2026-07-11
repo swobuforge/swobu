@@ -45,7 +45,7 @@ func TestEndpointCredentialRefStoreUpsertCredentialRef(t *testing.T) {
 	repo := &endpointRepoStub{endpoints: []endpointintent.Endpoint{ep}}
 	store := NewEndpointCredentialStore(operatorendpoints.NewOperatorEndpointStore(repo))
 
-	persisted, err := store.UpsertCredentialRef(context.Background(), "openai", EncodeEndpointCredentialLocator("main", "cfg-a"), "keychain:openai/default")
+	persisted, err := store.UpsertCredentialRef(context.Background(), "openai", "main#cfg-a", "keychain:openai/default")
 	if err != nil {
 		t.Fatalf("UpsertCredentialRef error: %v", err)
 	}

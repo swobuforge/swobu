@@ -14,14 +14,14 @@ func NewTextOutputItem(itemID string, text string) CanonicalItem {
 	return item
 }
 
-func NewToolUseOutputItem(itemID string, toolUseID string, name string, input map[string]any) CanonicalItem {
+func NewToolUseOutputItem(itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
 	return NewToolUseItem(ItemAuthorAssistant, itemID, toolUseID, name, input)
 }
 
 type CanonicalOutput interface {
 	// SemanticKind reports which semantic family this successful canonical output represents.
 	SemanticKind() SemanticKind
-	// ResultID returns the continuity-critical provider result identity when available.
+	// ResultID returns the continuity-critical provider body identity when available.
 	ResultID() string
 	// Model returns the backend model identity reported for this output when available.
 	Model() string
@@ -44,10 +44,6 @@ type CanonicalOutputData struct {
 	items        []CanonicalItem
 	finishReason string
 	usage        TokenUsage
-}
-
-func NewOutput(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputData {
-	return NewOutputWithUsage(semanticKind, resultID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
 func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
@@ -114,12 +110,4 @@ func (o CanonicalOutputData) Text() string {
 		out += item.Text
 	}
 	return out
-}
-
-// CloneCanonicalOutput protects cross-boundary output handoff from accidental mutation.
-func CloneCanonicalOutput(output CanonicalOutput) CanonicalOutput {
-	if output == nil {
-		return nil
-	}
-	return output.CloneOutput()
 }

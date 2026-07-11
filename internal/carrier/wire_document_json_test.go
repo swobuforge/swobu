@@ -1,21 +1,38 @@
 package carrier
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-func TestWireDocumentDecodeJSON(t *testing.T) {
-	doc := WireDocument{Raw: []byte(`{"model":"m","x":1}`)}
-	payload, err := DecodeWireDocumentJSON(doc)
+func mutateWireDocumentJSON(doc WireDocument, mutate func(payload map[string]any) (bool, error)) (WireDocument, bool, error) {
+	var payload map[string]any
+	if len(doc.Raw) != 0 {
+		payload = map[string]any{}
+		if err := json.Unmarshal(doc.Raw, &payload); err != nil {
+			return WireDocument{}, false, err
+		}
+	} else {
+		payload = map[string]any{}
+	}
+	changed, err := mutate(payload)
 	if err != nil {
-		t.Fatalf("DecodeJSON() error = %v", err)
+		return WireDocument{}, false, err
 	}
-	if payload["model"] != "m" {
-		t.Fatalf("model = %v, want m", payload["model"])
+	if !changed {
+		return doc, false, nil
 	}
+	nextRaw, err := json.Marshal(payload)
+	if err != nil {
+		return WireDocument{}, false, err
+	}
+	doc.Raw = nextRaw
+	return doc, true, nil
 }
 
 func TestWireDocumentMutateJSON(t *testing.T) {
 	doc := WireDocument{Raw: []byte(`{"model":"m"}`)}
-	next, changed, err := MutateWireDocumentJSON(doc, func(payload map[string]any) (bool, error) {
+	next, changed, err := mutateWireDocumentJSON(doc, func(payload map[string]any) (bool, error) {
 		payload["model"] = "m2"
 		return true, nil
 	})

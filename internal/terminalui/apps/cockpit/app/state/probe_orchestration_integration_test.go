@@ -61,6 +61,28 @@ func TestReduce_ProbeOrchestration_CreateDraftCatalogAndProbeFlow(t *testing.T) 
 
 }
 
+func TestReduce_ProbeOrchestration_CreateDraftCatalogBlockedUntilCredentialConcrete(t *testing.T) {
+	t.Parallel()
+
+	model := Model{}
+	effects := Reduce(&model, LoadRoutingModelCatalogRequestedAction{
+		Scope:            RoutingModelCatalogScopeCreateDraft,
+		ProviderSpec:     "openai",
+		BaseURL:          "https://api.openai.com/v1",
+		CredentialRef:    "",
+		ProviderProtocol: "auto",
+	})
+	if len(effects) != 0 {
+		t.Fatalf("effects len=%d want 0 for blocked catalog load", len(effects))
+	}
+	if model.CreateDraftModelProbePending {
+		t.Fatal("create draft probe pending=true want false for blocked catalog load")
+	}
+	if model.CreateDraftModelProviderSpec != "" || model.CreateDraftModelBaseURL != "" || model.CreateDraftModelCredentialRef != "" {
+		t.Fatalf("blocked load should not prime probe identity: %+v", model)
+	}
+}
+
 func TestReduce_ProbeOrchestration_AddModelCatalogStaleResultIgnoredThenAccepted(t *testing.T) {
 	t.Parallel()
 

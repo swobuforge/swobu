@@ -58,12 +58,8 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 	for {
 		bounds := screenBounds(r.Screen)
 		if r.Loop.NeedsRebuild() {
-			lifecycle := r.Loop.RebuildPending(r.Root, bounds)
-			if quit := r.flush(bounds); quit {
+			if quit := r.settleAndFlush(ctx, bounds); quit {
 				return nil
-			}
-			for _, eff := range lifecycle {
-				r.runEffect(ctx, eff)
 			}
 		}
 
@@ -84,13 +80,9 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 			}
 			if resized || r.Loop.NeedsRebuild() {
 				bounds = screenBounds(r.Screen)
-				lifecycle := r.Loop.RebuildPending(r.Root, bounds)
-				if quit := r.flush(bounds); quit {
+				if quit := r.settleAndFlush(ctx, bounds); quit {
 					slog.Debug("tcell runner exiting on flush quit flag")
 					return nil
-				}
-				for _, eff := range lifecycle {
-					r.runEffect(ctx, eff)
 				}
 			}
 		case actions := <-r.Loop.FollowUp():
@@ -99,15 +91,32 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 			}
 			if r.Loop.NeedsRebuild() {
 				bounds = screenBounds(r.Screen)
-				lifecycle := r.Loop.RebuildPending(r.Root, bounds)
-				if quit := r.flush(bounds); quit {
+				if quit := r.settleAndFlush(ctx, bounds); quit {
 					slog.Debug("tcell runner exiting on flush quit flag")
 					return nil
 				}
-				for _, eff := range lifecycle {
-					r.runEffect(ctx, eff)
-				}
 			}
+		}
+	}
+}
+
+func (r *Runner[M]) settleAndFlush(ctx context.Context, bounds geom.Rect) bool {
+	for {
+		if r.Loop.NeedsRebuild() {
+			lifecycle := r.Loop.RebuildPending(r.Root, bounds)
+			for _, eff := range lifecycle {
+				r.runEffect(ctx, eff)
+			}
+			continue
+		}
+		select {
+		case actions := <-r.Loop.FollowUp():
+			for _, a := range actions {
+				r.Loop.Dispatch([]update.Action{a})
+			}
+			continue
+		default:
+			return r.flush(bounds)
 		}
 	}
 }
@@ -150,6 +159,26 @@ func (r *Runner[M]) flush(bounds geom.Rect) bool {
 	return r.quit
 }
 
+func flushBuffer(screen tcell.Screen, previous, next *paint.BufferPainter) {
+	if screen == nil || next == nil {
+		return
+	}
+	bounds := next.Bounds()
+	for y := 0; y < bounds.H; y++ {
+		for x := 0; x < bounds.W; x++ {
+			cell := next.Cell(x, y)
+			if previous != nil && previous.Cell(x, y) == cell {
+				continue
+			}
+			r := cell.Rune
+			if r == 0 {
+				r = ' '
+			}
+			screen.SetContent(x, y, r, nil, tcell.StyleDefault)
+		}
+	}
+}
+
 func screenBounds(screen tcell.Screen) geom.Rect {
 	width, height := screen.Size()
 	return geom.Rect{W: width, H: height}
@@ -184,6 +213,8 @@ func mapTcellKey(tk tcell.Key, r rune) (interaction.Key, rune) {
 		return interaction.KeyEsc, 0
 	case tcell.KeyEnter:
 		return interaction.KeyEnter, 0
+	case tcell.KeyCtrlJ:
+		return interaction.KeyEnter, 0
 	case tcell.KeyTAB:
 		return interaction.KeyTab, 0
 	case tcell.KeyBacktab:
@@ -194,7 +225,10 @@ func mapTcellKey(tk tcell.Key, r rune) (interaction.Key, rune) {
 		if r == ' ' {
 			return interaction.KeySpace, 0
 		}
-		if r == 0 || r == '\n' || r == '\r' {
+		if r == '\n' || r == '\r' {
+			return interaction.KeyEnter, 0
+		}
+		if r == 0 {
 			return interaction.KeyNone, 0
 		}
 		return interaction.KeyRune, r
@@ -208,35 +242,8 @@ func mapTcellKey(tk tcell.Key, r rune) (interaction.Key, rune) {
 
 func mapMouseEvent(ev *tcell.EventMouse) interaction.Event {
 	x, y := ev.Position()
-	button := ev.Buttons()
-	if button&tcell.WheelUp != 0 {
-		return interaction.Event{Kind: interaction.EventWheelUp, Pos: geom.Point{X: x, Y: y}}
+	return interaction.Event{
+		Kind: interaction.EventMouseDown,
+		Pos:  geom.Point{X: x, Y: y},
 	}
-	if button&tcell.WheelDown != 0 {
-		return interaction.Event{Kind: interaction.EventWheelDown, Pos: geom.Point{X: x, Y: y}}
-	}
-	if button&tcell.Button1 != 0 {
-		return interaction.Event{Kind: interaction.EventMouseDown, Pos: geom.Point{X: x, Y: y}}
-	}
-	return interaction.Event{Kind: interaction.EventMouseMove, Pos: geom.Point{X: x, Y: y}}
-}
-
-func flushBuffer(screen tcell.Screen, previous, current *paint.BufferPainter) {
-	bounds := current.Bounds()
-	for y := 0; y < bounds.H; y++ {
-		for x := 0; x < bounds.W; x++ {
-			cell := current.Cell(x, y)
-			if previous != nil && previous.Cell(x, y) == cell {
-				continue
-			}
-			screen.SetContent(x, y, normalizeRune(cell.Rune), nil, tcell.StyleDefault)
-		}
-	}
-}
-
-func normalizeRune(r rune) rune {
-	if r == 0 {
-		return ' '
-	}
-	return r
 }

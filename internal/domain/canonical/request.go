@@ -96,29 +96,3 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 func CloneCanonicalRequest(req CanonicalRequest) CanonicalRequest {
 	return req.Clone()
 }
-
-func cloneStringAnyMap(in map[string]any) map[string]any {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneAny(value)
-	}
-	return out
-}
-
-func cloneAny(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneStringAnyMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i := range typed {
-			out[i] = cloneAny(typed[i])
-		}
-		return out
-	default:
-		return typed
-	}
-}

@@ -7,20 +7,20 @@ func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
 		Model: "m",
 		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorAssistant, "hi"),
-			NewToolUseItem(ItemAuthorAssistant, "", "toolu_1", "calculator", map[string]any{"expr": "2+2"}),
+			NewToolUseItem(ItemAuthorAssistant, "", "toolu_1", "calculator", NewToolArgumentsObject(`{"expr":"2+2"}`)),
 		},
 	})
 
 	cloned := req.Items()
 	cloned[0].Text = "changed"
-	cloned[1].Input["expr"] = "changed"
+	cloned[1].Input = NewToolArgumentsObject(`{"expr":"changed"}`)
 
 	got := req.Items()
 	if got[0].Text != "hi" {
 		t.Fatalf("text = %q, want %q", got[0].Text, "hi")
 	}
-	if got[1].Input["expr"] != "2+2" {
-		t.Fatalf("tool input = %v, want %q", got[1].Input["expr"], "2+2")
+	if got[1].Input.RawObject() != `{"expr":"2+2"}` {
+		t.Fatalf("tool input = %q, want %q", got[1].Input.RawObject(), `{"expr":"2+2"}`)
 	}
 }
 
@@ -32,17 +32,17 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 			Key: "repo-alpha",
 		}),
 		Items: []CanonicalItem{
-			NewToolUseItem(ItemAuthorAssistant, "", "call_1", "grep", map[string]any{"pattern": "TODO"}),
+			NewToolUseItem(ItemAuthorAssistant, "", "call_1", "grep", NewToolArgumentsObject(`{"pattern":"TODO"}`)),
 		},
 	})
 
 	cloned := req.Clone()
 	items := cloned.Items()
-	items[0].Input["pattern"] = "changed"
+	items[0].Input = NewToolArgumentsObject(`{"pattern":"changed"}`)
 
 	got := req.Items()
-	if got[0].Input["pattern"] != "TODO" {
-		t.Fatalf("tool input = %v, want %q", got[0].Input["pattern"], "TODO")
+	if got[0].Input.RawObject() != `{"pattern":"TODO"}` {
+		t.Fatalf("tool input = %q, want %q", got[0].Input.RawObject(), `{"pattern":"TODO"}`)
 	}
 	if cloned.PreviousResponseID() != "resp_123" || cloned.CacheIntent().Key() != "repo-alpha" {
 		t.Fatalf("clone lost response state")

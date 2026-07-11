@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/bootstrap"
 )
@@ -45,7 +44,7 @@ endpoints:
 	start, err := client.StartAuthSession(
 		context.Background(),
 		"chatgpt",
-		authplane.EncodeEndpointCredentialLocator("testname", "chatgpt-main"),
+		"testname#chatgpt-main",
 		"browser",
 	)
 	if err != nil {

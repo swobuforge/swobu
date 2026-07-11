@@ -58,10 +58,10 @@ var daemonIdleTimeout = 60 * time.Second
 // bootstrap must wire into the live request path.
 type StartInput struct {
 	ConfigPath   string
-	Providers    ports.ProviderExecutor
+	Providers    ports.ProviderIngressResolver
 	ModelCatalog ports.ProviderModelCatalog
 	Evidence     ports.RequestEvidenceSink
-	Continuity   ports.ResponseContinuityStore
+	Continuity   ports.ContinuityStore
 	Logger       *slog.Logger
 }
 
@@ -104,12 +104,12 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		services := providersadapter.NewProviderServicesBundle(
+		registry := providersadapter.NewProviderRegistry(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
 		)
-		providers = services.Execution
-		modelCatalog = services.ModelCatalog
+		providers = registry
+		modelCatalog = registry
 	}
 	evidence := in.Evidence
 	if evidence == nil {
@@ -244,10 +244,6 @@ func (d *Daemon) isRequestPathDegraded() bool {
 		}
 	}
 	return false
-}
-
-func (d *Daemon) StatusProjection() (evidencestore.StatusProjection, error) {
-	return d.StatusProjectionForScope(evidencestore.ProjectionScope{Kind: evidencestore.ProjectionScopeAll})
 }
 
 func (d *Daemon) StatusProjectionForScope(scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {

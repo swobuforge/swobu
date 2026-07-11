@@ -7,18 +7,21 @@ SWOBU_VERSION ?= dev
 SWOBU_LDFLAGS := -s -w -X $(MODULE_PATH)/internal/app/operator/controlplane.swobuVersion=$(SWOBU_VERSION)
 GO_TEST_FLAGS ?= -failfast -timeout=5m
 
-.PHONY: help verify test build artifacts clean fmt-check lint lint-platform
+.PHONY: help check check-fmt check-test test build artifacts clean fmt-check lint
 
-help: ## Show OSS entrypoints
-	@awk 'BEGIN {FS = ":.*## "; print "swobucli/oss entrypoints:"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help: ## Show public entrypoints
+	@awk 'BEGIN {FS = ":.*## "; print "swobucli/opencore entrypoints:"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-verify: ## Run OSS local quality gate
+check: ## Run all child checks
 	@$(MAKE) fmt-check
 	@$(MAKE) lint
 	@$(MAKE) test
 
-test: ## Run deterministic required tests
-	CGO_ENABLED=0 $(GO) test $(GO_TEST_FLAGS) ./...
+check-fmt: ## Run child formatting check
+	@$(MAKE) fmt-check
+
+check-test: ## Run child tests
+	@$(MAKE) test
 
 build: ## Build local swobu binary artifact
 	@mkdir -p $(BUILD_OUT_DIR)
@@ -27,8 +30,8 @@ build: ## Build local swobu binary artifact
 artifacts: ## Build release archives + checksums into dist/release/v<SWOBU_VERSION>
 	./scripts/release.sh "$(SWOBU_VERSION)"
 
-clean: ## Remove local generated build outputs
-	rm -rf .out dist
+test:
+	CGO_ENABLED=0 $(GO) test $(GO_TEST_FLAGS) ./...
 
 fmt-check:
 	@set -eu; \
@@ -41,7 +44,7 @@ fmt-check:
 lint:
 	CGO_ENABLED=0 $(GO) build ./...
 	CGO_ENABLED=0 $(GO) vet ./...
-	@$(MAKE) lint-platform
+	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/check-opencore-lint
 
-lint-platform:
-	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/invariantlint
+clean:
+	rm -rf .out dist

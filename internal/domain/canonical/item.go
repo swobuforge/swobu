@@ -30,7 +30,7 @@ type CanonicalItem struct {
 	Text      string
 	ToolUseID string
 	Name      string
-	Input     map[string]any
+	Input     ToolArguments
 }
 
 func NewTextItem(author ItemAuthor, text string) CanonicalItem {
@@ -41,14 +41,14 @@ func NewTextItem(author ItemAuthor, text string) CanonicalItem {
 	}
 }
 
-func NewToolUseItem(author ItemAuthor, itemID string, toolUseID string, name string, input map[string]any) CanonicalItem {
+func NewToolUseItem(author ItemAuthor, itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
 	return CanonicalItem{
 		Author:    author,
 		Kind:      ItemKindToolUse,
 		ItemID:    itemID,
 		ToolUseID: toolUseID,
 		Name:      name,
-		Input:     cloneStringAnyMap(input),
+		Input:     input,
 	}
 }
 
@@ -69,7 +69,7 @@ func (i CanonicalItem) Clone() CanonicalItem {
 		Text:      i.Text,
 		ToolUseID: i.ToolUseID,
 		Name:      i.Name,
-		Input:     cloneStringAnyMap(i.Input),
+		Input:     i.Input,
 	}
 }
 

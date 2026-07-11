@@ -5,7 +5,19 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
+
+func bedrockDefaultProfileFromEnvOrList(profiles []string) string {
+	if fromEnv := trimRoutingInput(platformconfig.ReadEnvTrim("AWS_PROFILE")); fromEnv != "" {
+		return fromEnv
+	}
+	if len(profiles) == 0 {
+		return ""
+	}
+	return trimRoutingInput(profiles[0])
+}
 
 func TestBedrockResolvedRegion_ExplicitRegionTakesPrecedence(t *testing.T) {
 	t.Setenv("AWS_REGION", "eu-west-1")

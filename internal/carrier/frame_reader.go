@@ -5,8 +5,19 @@ import (
 	"io"
 )
 
+type FrameKind string
+
+const (
+	FramePayload FrameKind = "payload"
+	FrameComment FrameKind = "comment"
+	FrameControl FrameKind = "control"
+	FrameError   FrameKind = "error"
+)
+
 type Frame struct {
-	Kind string
+	Seq  uint64
+	Kind FrameKind
+	Name string
 	Data []byte
 	Meta Meta
 }
@@ -54,13 +65,20 @@ func ReadCloserFromFrameReader(frames FrameReader) io.ReadCloser {
 
 type chunkReadCloserFrameReader struct {
 	body io.ReadCloser
+	seq  uint64
 }
 
 func (r *chunkReadCloserFrameReader) Next(context.Context) (Frame, error) {
 	buf := make([]byte, 4096)
 	n, err := r.body.Read(buf)
 	if n > 0 {
-		return Frame{Kind: "bytes", Data: append([]byte(nil), buf[:n]...)}, nil
+		frame := Frame{
+			Seq:  r.seq,
+			Kind: FramePayload,
+			Data: append([]byte(nil), buf[:n]...),
+		}
+		r.seq++
+		return frame, nil
 	}
 	if err != nil {
 		return Frame{}, err

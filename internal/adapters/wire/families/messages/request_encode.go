@@ -11,21 +11,6 @@ import (
 
 const defaultMessagesMaxTokens = 256
 
-func encodeRequestCarrier(request canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	thread := request.Items()
-	if len(thread) == 0 {
-		return carrier.WireDocument{}, canonical.BadRequest("request does not contain replayable conversation input")
-	}
-	return EncodeCarrier(request, d)
-}
-
-type requestBody struct {
-	Model     string        `json:"model"`
-	Messages  []messageBody `json:"messages"`
-	MaxTokens int           `json:"max_tokens"`
-	Stream    bool          `json:"stream,omitempty"`
-}
-
 type messageBody struct {
 	Role    string      `json:"role"`
 	Content []contentID `json:"content"`
@@ -51,20 +36,26 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	if err != nil {
 		return carrier.WireDocument{}, err
 	}
-	raw, err := json.Marshal(requestBody{
-		Model:     req.Model(),
-		Messages:  wireMessages,
-		MaxTokens: defaultMessagesMaxTokens,
-		Stream:    d.Mode == delivery.Streaming,
-	})
+	payload := map[string]any{
+		"model":      req.Model(),
+		"messages":   wireMessages,
+		"max_tokens": defaultMessagesMaxTokens,
+	}
+	if d.Mode == delivery.Streaming {
+		payload["stream"] = true
+	}
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		return carrier.WireDocument{}, canonical.BadRequest("conversation request could not be encoded for the messages protocol")
 	}
-	return carrier.WireDocument{
-		Leg:   carrier.LegProviderRequestOut,
-		Media: "application/json",
-		Raw:   raw,
-	}, nil
+	return carrier.NewWireDocument(
+		carrier.StageProviderRequestOut,
+		"",
+		"application/json",
+		nil,
+		raw,
+		carrier.Meta{},
+	), nil
 }
 
 func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
@@ -84,11 +75,15 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 					Text: current.Text,
 				})
 			case canonical.ItemKindToolUse:
+				input, err := decodeToolArgumentsObject(current.Input)
+				if err != nil {
+					return nil, err
+				}
 				content = append(content, contentID{
 					Type:  "tool_use",
 					ID:    strings.TrimSpace(current.ToolUseID), // swobu:io-string source=boundary
 					Name:  strings.TrimSpace(current.Name),      // swobu:io-string source=boundary
-					Input: cloneInput(current.Input),
+					Input: input,
 				})
 				if strings.TrimSpace(content[len(content)-1].Name) == "" { // swobu:io-string source=boundary
 					return nil, canonical.BadRequest("messages protocol tool_use items require a name")
@@ -127,13 +122,15 @@ func roleForMessagesItem(item canonical.CanonicalItem) string {
 	}
 }
 
-func cloneInput(input map[string]any) map[string]any {
-	if input == nil {
-		return map[string]any{}
+func decodeToolArgumentsObject(input canonical.ToolArguments) (map[string]any, error) {
+	raw := input.RawObject()
+	trimmedRaw := strings.TrimSpace(raw) // swobu:io-string source=boundary
+	if trimmedRaw == "" {
+		return map[string]any{}, nil
 	}
-	out := make(map[string]any, len(input))
-	for key, value := range input {
-		out[key] = value
+	out := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, canonical.BadRequest("messages protocol tool_use input must be a JSON object")
 	}
-	return out
+	return out, nil
 }

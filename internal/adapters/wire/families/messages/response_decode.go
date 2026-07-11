@@ -74,7 +74,11 @@ func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReade
 			if itemID == "" {
 				itemID = "tool_" + strconv.Itoa(i)
 			}
-			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), cloneInput(block.Input))) // swobu:io-string source=boundary
+			args, marshalErr := json.Marshal(block.Input)
+			if marshalErr != nil {
+				return nil, canonical.InternalError("messages response tool_use input is invalid JSON object")
+			}
+			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
 		default:
 			return nil, canonical.InternalError("messages response content block is unsupported")
 		}

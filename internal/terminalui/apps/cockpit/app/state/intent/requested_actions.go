@@ -58,8 +58,8 @@ type SetFocusedRowAffordance struct {
 	AllowSpace bool
 }
 
-// FocusNextAfterRebuildRequested asks reducer to schedule a deferred
-// focus-next action after rebuild, so newly opened section children exist.
+// FocusNextAfterRebuildRequested asks reducer to emit one focus-next hop
+// after rebuild, so newly opened section children exist.
 type FocusNextAfterRebuildRequested struct{}
 
 // --- Workflow trigger actions ---

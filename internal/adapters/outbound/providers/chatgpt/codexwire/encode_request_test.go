@@ -11,7 +11,7 @@ import (
 func TestRealize_NormalizesCodexPayload(t *testing.T) {
 	t.Parallel()
 
-	wireReq, err := EncodeProviderRequest(
+	wireReq, err := EncodeProviderRequestDocument(
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{
@@ -59,7 +59,7 @@ func TestRealize_NormalizesCodexPayload(t *testing.T) {
 func TestRealize_AcceptsBufferedClientPreferenceViaStreamNativeEncoding(t *testing.T) {
 	t.Parallel()
 
-	wireReq, err := EncodeProviderRequest(
+	wireReq, err := EncodeProviderRequestDocument(
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{

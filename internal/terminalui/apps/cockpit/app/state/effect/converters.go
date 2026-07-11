@@ -67,8 +67,8 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 	return snapshot
 }
 
-func trafficOperationFamily(ingressFamily string, result string, statusCode int) string {
-	family := strings.TrimSpace(strings.ToLower(ingressFamily)) // swobu:io-string source=boundary
+func trafficOperationFamily(clientFamily string, result string, statusCode int) string {
+	family := strings.TrimSpace(strings.ToLower(clientFamily)) // swobu:io-string source=boundary
 	if family == "responses" {
 		return "responses"
 	}

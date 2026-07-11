@@ -2,26 +2,20 @@ package canonical
 
 import "testing"
 
-func TestPreviousResponseIDFromRequest_AcceptsPreviousResponseID(t *testing.T) {
-	_, ok, err := PreviousResponseIDFromRequest(NewCanonicalRequest(RequestParams{
+func TestContinuationSelectorFromRequest_AcceptsPreviousResponseID(t *testing.T) {
+	_, ok := ContinuationSelectorFromRequest(NewCanonicalRequest(RequestParams{
 		Model:              "m",
 		PreviousResponseID: "resp_1",
 	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if !ok {
 		t.Fatal("ok = false, want true")
 	}
 }
 
-func TestPreviousResponseIDFromRequest_MissingSelectorReturnsFalse(t *testing.T) {
-	_, ok, err := PreviousResponseIDFromRequest(NewCanonicalRequest(RequestParams{
+func TestContinuationSelectorFromRequest_MissingSelectorReturnsFalse(t *testing.T) {
+	_, ok := ContinuationSelectorFromRequest(NewCanonicalRequest(RequestParams{
 		Model: "m",
 	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if ok {
 		t.Fatal("ok = true, want false")
 	}
@@ -57,7 +51,7 @@ func TestBuildContinuitySnapshot_AppendsAssistantOutput(t *testing.T) {
 			"resp_1", "m",
 			[]OutputItem{
 				NewTextOutputItem("text_0", "hello"),
-				NewToolUseOutputItem("tool_0", "call_1", "grep", map[string]any{"pattern": "TODO"}),
+				NewToolUseOutputItem("tool_0", "call_1", "grep", NewToolArgumentsObject(`{"pattern":"TODO"}`)),
 			},
 			"completed",
 		),

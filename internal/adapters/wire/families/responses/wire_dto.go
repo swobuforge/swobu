@@ -8,7 +8,6 @@ type responsesRequestDTO struct {
 	ToolChoice         json.RawMessage `json:"tool_choice"`
 	PreviousResponseID string          `json:"previous_response_id"`
 	Conversation       string          `json:"conversation"`
-	Stream             bool            `json:"stream"`
 }
 
 type responsesInputItemDTO struct {

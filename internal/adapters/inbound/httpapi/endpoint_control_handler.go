@@ -17,7 +17,7 @@ type endpointListFunc func(context.Context) ([]endpointintent.Endpoint, error)
 type endpointGetFunc func(context.Context, string) (endpointintent.Endpoint, error)
 type endpointPutFunc func(context.Context, endpointintent.Endpoint) (endpointintent.Endpoint, error)
 type endpointDeleteFunc func(context.Context, string) error
-type endpointAutoProtocolProbeFunc func(context.Context, endpointintent.Endpoint, exchange.HandleInput) (exchange.HandleOutput, error)
+type endpointAutoProtocolProbeFunc func(context.Context, endpointintent.Endpoint, exchange.RequestInput) (exchange.RequestOutput, error)
 
 const autoProtocolProbeAttemptTimeout = 3 * time.Second
 

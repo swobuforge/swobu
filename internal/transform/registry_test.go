@@ -15,7 +15,7 @@ func TestRegistryApplyDocument_DeterministicOrderByID(t *testing.T) {
 		testDocTransform{id: "b"},
 		testDocTransform{id: "a"},
 	}, nil)
-	_, applied, err := reg.ApplyDocument(Context{Stage: StageProviderWireOut}, carrier.WireDocument{})
+	_, applied, err := reg.ApplyDocument(Context{Stage: StageRequestDocumentOut}, carrier.WireDocument{})
 	if err != nil {
 		t.Fatalf("ApplyDocument() error = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestRegistryApplyDocument_DoesNotApplyOnCarrierMismatch(t *testing.T) {
 		testDocTransform{id: "a"},
 	}, nil)
 	_, applied, err := reg.ApplyDocument(Context{
-		Stage:   StageProviderWireOut,
+		Stage:   StageRequestDocumentOut,
 		Carrier: carrier.KindCanonicalEventStream,
 	}, carrier.WireDocument{})
 	if err != nil {
@@ -70,9 +70,9 @@ func TestRegistryApplyDocument_FailsOnSilentMutation(t *testing.T) {
 	reg := NewRegistry([]DocumentTransform{
 		silentMutationDocTransform{id: "mut"},
 	}, nil)
-	_, _, err := reg.ApplyDocument(Context{Stage: StageProviderWireOut}, carrier.WireDocument{
-		Leg:    carrier.LegProviderRequestOut,
-		Family: canonical.IngressFamilyResponses,
+	_, _, err := reg.ApplyDocument(Context{Stage: StageRequestDocumentOut}, carrier.WireDocument{
+		Stage:  carrier.StageProviderRequestOut,
+		Family: canonical.ClientFamilyResponses,
 		Raw:    []byte(`{"model":"m","input":"hi"}`),
 	})
 	if err == nil {
@@ -84,9 +84,9 @@ func TestRegistryApplyDocument_FailsOnSilentHeaderMutation(t *testing.T) {
 	reg := NewRegistry([]DocumentTransform{
 		silentHeaderMutationDocTransform{id: "mut_header"},
 	}, nil)
-	_, _, err := reg.ApplyDocument(Context{Stage: StageProviderWireOut}, carrier.WireDocument{
-		Leg:    carrier.LegProviderRequestOut,
-		Family: canonical.IngressFamilyResponses,
+	_, _, err := reg.ApplyDocument(Context{Stage: StageRequestDocumentOut}, carrier.WireDocument{
+		Stage:  carrier.StageProviderRequestOut,
+		Family: canonical.ClientFamilyResponses,
 		Header: http.Header{"X-A": {"1"}},
 		Raw:    []byte(`{"model":"m","input":"hi"}`),
 	})
@@ -99,9 +99,9 @@ func TestRegistryApplyDocument_FailsOnSilentMetaMutation(t *testing.T) {
 	reg := NewRegistry([]DocumentTransform{
 		silentMetaMutationDocTransform{id: "mut_meta"},
 	}, nil)
-	_, _, err := reg.ApplyDocument(Context{Stage: StageProviderWireOut}, carrier.WireDocument{
-		Leg:    carrier.LegProviderRequestOut,
-		Family: canonical.IngressFamilyResponses,
+	_, _, err := reg.ApplyDocument(Context{Stage: StageRequestDocumentOut}, carrier.WireDocument{
+		Stage:  carrier.StageProviderRequestOut,
+		Family: canonical.ClientFamilyResponses,
 		Meta:   carrier.Meta{ExchangeID: "ex1"},
 		Raw:    []byte(`{"model":"m","input":"hi"}`),
 	})
@@ -125,7 +125,7 @@ type testDocTransform struct {
 }
 
 func (t testDocTransform) ID() string                               { return t.id }
-func (t testDocTransform) Stage() Stage                             { return StageProviderWireOut }
+func (t testDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
 func (t testDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t testDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Report, error) {
 	return in, Report{}, nil
@@ -151,7 +151,7 @@ type silentHeaderMutationDocTransform struct {
 }
 
 func (t silentHeaderMutationDocTransform) ID() string                               { return t.id }
-func (t silentHeaderMutationDocTransform) Stage() Stage                             { return StageProviderWireOut }
+func (t silentHeaderMutationDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
 func (t silentHeaderMutationDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t silentHeaderMutationDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Report, error) {
 	out := in
@@ -165,7 +165,7 @@ type silentMetaMutationDocTransform struct {
 }
 
 func (t silentMetaMutationDocTransform) ID() string                               { return t.id }
-func (t silentMetaMutationDocTransform) Stage() Stage                             { return StageProviderWireOut }
+func (t silentMetaMutationDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
 func (t silentMetaMutationDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t silentMetaMutationDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Report, error) {
 	out := in
@@ -174,7 +174,7 @@ func (t silentMetaMutationDocTransform) Apply(_ Context, in carrier.WireDocument
 }
 
 func (t silentMutationDocTransform) ID() string                               { return t.id }
-func (t silentMutationDocTransform) Stage() Stage                             { return StageProviderWireOut }
+func (t silentMutationDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
 func (t silentMutationDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t silentMutationDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Report, error) {
 	out := in

@@ -22,6 +22,8 @@ type captureWriter struct {
 	err      error
 }
 
+const daemonCallbackPath = "/_swobu/auth/chatgpt/callback"
+
 func (w *captureWriter) Store(providerSpec string, keyName string, secret string) (string, error) {
 	w.provider = providerSpec
 	w.key = keyName

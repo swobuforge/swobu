@@ -41,17 +41,40 @@ func BuildClientsSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 
 	clientRow := buildClientRow(profiles, summary, local)
 	actions := selectedClientActions(selected, baseURL)
-	rows := []retained.ViewSpec[state.Model]{
-		retained.Named[state.Model]("client", clientRow),
-	}
+	rows := []retained.ViewSpec[state.Model]{retained.Named[state.Model]("client", clientRow)}
 	rows = append(rows, buildActionRows(model, actions, baseURL, selected, local)...)
-
-	return NewCollapsibleSection(
+	return retained.Named[state.Model](
 		SectionClients,
-		false,
-		"open",
-		SummaryRow(summary),
-		rows...,
+		retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
+			open, setOpen := retained.UseState(ctx, func() bool { return false })
+			closeSection := func() []update.Action {
+				if !open {
+					return nil
+				}
+				setOpen(false)
+				return []update.Action{
+					state.SetInteractionMode{Mode: state.InteractionModeNAV},
+					state.SetFocusedRowAffordance{Verb: "open"},
+				}
+			}
+			titleRow := retained.Named[state.Model](
+				"title",
+				sectionToggleTitleRow(SectionClients, open, func() []update.Action {
+					if open {
+						return closeSection()
+					}
+					setOpen(true)
+					return []update.Action{interaction.FocusKeyAction{Key: "client"}}
+				}),
+			)
+			children := []retained.ViewSpec[state.Model]{titleRow}
+			if open {
+				children = append(children, rows...)
+			} else {
+				children = append(children, SummaryRow(summary))
+			}
+			return EscClosableDisclosure(retained.VStack(ctx, children...), open, closeSection)
+		}),
 	)
 }
 
@@ -126,15 +149,17 @@ func selectedClientActions(selected clientprofile.Profile, baseURL string) []cli
 }
 
 func buildClientRow(profiles []clientprofile.Profile, summary string, local clientsSectionState) retained.ViewSpec[state.Model] {
+	selected := selectedClientProfile(profiles, local.selectedClientID)
+	selectedCursor := clientPickerCursorForSelection(profiles, selected)
 	clientRow := RowChoiceWithHooks("client", summary, func() []update.Action {
-		return toggleClientPicker(local)
+		return toggleClientPicker(selectedCursor, local)
 	}, func() []update.Action {
 		return closeClientPicker(local)
 	}, focusAffordance("choose", false))
 	if !local.clientPickerOpen {
 		return clientRow
 	}
-	options := buildClientPickerRows(profiles, local)
+	options := buildClientPickerRows(profiles, local, selected)
 	optionStack := retained.VStack[state.Model](nil, options...)
 	optionViewport := retained.WithConstrain[state.Model](retained.ConstrainSpec{
 		GrowW: true,
@@ -145,15 +170,18 @@ func buildClientRow(profiles []clientprofile.Profile, summary string, local clie
 	return toolkitviews.KeyScope(disclosure, clientPickerKeyHandler(profiles, local))
 }
 
-func toggleClientPicker(local clientsSectionState) []update.Action {
+func toggleClientPicker(selectedCursor int, local clientsSectionState) []update.Action {
 	nextOpen := !local.clientPickerOpen
 	local.setClientPickerOpen(nextOpen)
 	if !nextOpen {
 		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
 	}
-	local.setClientPickerCursor(0)
+	if selectedCursor < 0 {
+		selectedCursor = 0
+	}
+	local.setClientPickerCursor(selectedCursor)
 	return []update.Action{
-		interaction.FocusKeyAction{Key: clientPickerFocusKey(0)},
+		interaction.FocusKeyAction{Key: clientPickerFocusKey(selectedCursor)},
 		state.SetInteractionMode{Mode: state.InteractionModePickOne},
 	}
 }
@@ -166,19 +194,20 @@ func closeClientPicker(local clientsSectionState) []update.Action {
 	return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
 }
 
-func buildClientPickerRows(profiles []clientprofile.Profile, local clientsSectionState) []retained.ViewSpec[state.Model] {
+func buildClientPickerRows(profiles []clientprofile.Profile, local clientsSectionState, selected clientprofile.Profile) []retained.ViewSpec[state.Model] {
 	pickerRows := make([]retained.ViewSpec[state.Model], 0, len(profiles))
 	for i, profile := range profiles {
-		pickerRows = append(pickerRows, buildClientPickerRow(profile, i, local))
+		pickerRows = append(pickerRows, buildClientPickerRow(profile, i, local, selected))
 	}
 	return pickerRows
 }
 
-func buildClientPickerRow(profile clientprofile.Profile, index int, local clientsSectionState) retained.ViewSpec[state.Model] {
+func buildClientPickerRow(profile clientprofile.Profile, index int, local clientsSectionState, selected clientprofile.Profile) retained.ViewSpec[state.Model] {
 	choice := profile
+	isSelected := selected != nil && choice.Identity().ID == selected.Identity().ID
 	return retained.Named[state.Model](clientPickerFocusKey(index), toolkitviews.ListItemRowWithHooks[state.Model](
 		toolkitviews.InsetLabel(choice.Identity().Label, 4),
-		false,
+		isSelected,
 		false,
 		true,
 		func() []update.Action {
@@ -201,6 +230,18 @@ func buildClientPickerRow(profile clientprofile.Profile, index int, local client
 		},
 		focusAffordance("select", false),
 	))
+}
+
+func clientPickerCursorForSelection(profiles []clientprofile.Profile, selected clientprofile.Profile) int {
+	if selected == nil {
+		return 0
+	}
+	for i, profile := range profiles {
+		if profile.Identity().ID == selected.Identity().ID {
+			return i
+		}
+	}
+	return 0
 }
 
 func clientPickerKeyHandler(profiles []clientprofile.Profile, local clientsSectionState) func(*retained.Context[state.Model], interaction.Event) (bool, []update.Action) {

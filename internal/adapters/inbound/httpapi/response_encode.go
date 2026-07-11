@@ -1,117 +1,59 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
 
-	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
-	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
-func writeSuccessResponse(w http.ResponseWriter, requestID string, family canonical.IngressFamily, resp exchange.ProviderResponseStream, clientDelivery delivery.Delivery) error {
-	if clientDelivery.Mode != delivery.Streaming {
-		envelope := resp.EnvelopeStream()
-		if envelope == nil {
-			return canonical.InternalError("buffered provider response is missing a canonical envelope stream")
+func writeSuccessResponse(w http.ResponseWriter, requestID string, family canonical.ClientFamily, out exchange.RequestOutput) error {
+	response := out.Response.Transport
+	_ = family
+	if !isStreamingTransportResponse(response) {
+		if response.Body == nil {
+			return canonical.InternalError("buffered client response is missing transport body")
 		}
-		output, err := projectBufferedOutputFromEnvelope(envelope)
-		if err != nil {
-			return err
-		}
-		return writeBufferedSuccess(w, family, output)
+		return writeBufferedResponse(w, response)
 	}
-	envelope := resp.EnvelopeStream()
-	if envelope == nil {
-		return canonical.InternalError("streaming provider response is missing a canonical envelope stream")
+	if response.Body == nil {
+		return canonical.InternalError("streaming client response is missing transport body")
 	}
-	return writeStreamingSuccess(w, requestID, family, envelope)
+	return writeStreamingSuccess(w, requestID, family, response)
 }
 
-func projectBufferedOutputFromEnvelope(envelope canonical.EventReader) (canonical.CanonicalOutput, error) {
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), envelope, canonical.EnvResponse)
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil, canonical.InternalError("buffered provider response envelope ended before response closure")
-		}
-		return nil, canonical.InternalError("buffered provider response envelope could not be read")
-	}
-	output, err := closed.ProjectResponse()
-	if err != nil {
-		return nil, canonical.InternalError("buffered provider response envelope could not be projected")
-	}
-	return output, nil
+func isStreamingTransportResponse(response transportpkg.TransportResponse) bool {
+	return response.Header.Get("Content-Type") == "text/event-stream"
 }
 
-// writeBufferedSuccess delegates profile-specific success encoding to the
-// client-family codec selected at the HTTP edge.
-func writeBufferedSuccess(w http.ResponseWriter, family canonical.IngressFamily, output canonical.CanonicalOutput) error {
-	if output == nil {
-		return canonical.InternalError("buffered provider response is missing a canonical output")
-	}
-
-	codec, err := protocolregistry.ForClientDocumentEncoder(family)
-	if err != nil {
-		return err
-	}
-	bodyDoc, err := codec.EncodeClientDocument(output)
-	if err != nil {
-		return err
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(bodyDoc.Raw)
+func writeBufferedResponse(w http.ResponseWriter, response transportpkg.TransportResponse) error {
+	copyResponseHeaders(w, response.Header)
+	w.WriteHeader(response.Status)
+	defer func() { _ = response.Body.Close() }()
+	_, err := io.Copy(w, response.Body)
 	return err
 }
 
-// writeStreamingSuccess delegates stream-frame encoding to the selected
-// client-family codec so provider SSE shapes never leak through this boundary.
-// family-specific codecs and terminal transport conditions at one choke point.
-func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canonical.IngressFamily, envelope canonical.EventReader) error {
+func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canonical.ClientFamily, response transportpkg.TransportResponse) error {
 	_ = requestID
-	if envelope == nil {
-		return canonical.InternalError("streaming provider response is missing an envelope event stream")
-	}
+	_ = family
 
-	codec, err := protocolregistry.ForClientStreamEncoder(family)
-	if err != nil {
-		return err
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.WriteHeader(http.StatusOK)
-
-	stream, err := codec.EncodeClientStream(envelope)
-	if err != nil {
-		return canonical.InternalError("stream decoding failed")
-	}
-	streamBody := carrier.ReadCloserFromFrameReader(stream.Frames)
-	defer func() { _ = streamBody.Close() }()
-	if _, err := io.Copy(w, streamBody); err != nil && !errors.Is(err, io.EOF) {
+	copyResponseHeaders(w, response.Header)
+	w.WriteHeader(response.Status)
+	defer func() { _ = response.Body.Close() }()
+	if _, err := io.Copy(w, response.Body); err != nil && !errors.Is(err, io.EOF) {
 		return canonical.InternalError("stream decoding failed")
 	}
 	return nil
 }
 
-type httpFrameSink struct {
-	w http.ResponseWriter
-}
-
-func (s httpFrameSink) WriteFrame(frame []byte) error {
-	_, err := s.w.Write(frame)
-	return err
-}
-
-func (s httpFrameSink) Flush() error {
-	flusher, _ := s.w.(http.Flusher)
-	if flusher != nil {
-		flusher.Flush()
+func copyResponseHeaders(w http.ResponseWriter, header http.Header) {
+	for key, values := range header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
 	}
-	return nil
 }

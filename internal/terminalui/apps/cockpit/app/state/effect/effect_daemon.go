@@ -20,7 +20,7 @@ type daemonRawTrafficRow struct {
 	RequestID           string                     `json:"request_id"`
 	ClientHandler       string                     `json:"client_handler,omitempty"`
 	ClientProtocol      string                     `json:"client_protocol,omitempty"`
-	IngressFamily       string                     `json:"ingress_family,omitempty"`
+	ClientFamily        string                     `json:"client_family,omitempty"`
 	NormalizedOp        string                     `json:"normalized_op,omitempty"`
 	Route               string                     `json:"route"`
 	Result              string                     `json:"result"`
@@ -185,7 +185,7 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 			cacheReadTokens = r.TokenUsage.CacheReadTokens
 			cacheWriteTokens = r.TokenUsage.CacheWriteTokens
 		}
-		rows = append(rows, stateModel.TrafficRow{OperationFamily: trafficOperationFamily(r.IngressFamily, r.Result, r.StatusCode),
+		rows = append(rows, stateModel.TrafficRow{OperationFamily: trafficOperationFamily(r.ClientFamily, r.Result, r.StatusCode),
 			Target:              r.Route,
 			Result:              r.Result,
 			StatusCode:          r.StatusCode,

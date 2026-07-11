@@ -2,29 +2,23 @@ package effect
 
 import (
 	"context"
-	"time"
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-// FocusNextAfterRebuildEffect defers one focus-next hop so newly opened
-// section children are present in the rebuilt tree before focus traversal.
-type FocusNextAfterRebuildEffect struct {
-	Delay time.Duration
-}
+// FocusNextAfterRebuildEffect emits one focus-next hop after the current
+// rebuild has committed the newly opened subtree.
+//
+// The loop executes this follow-up inline in the same update cycle so the
+// post-open focus handoff is deterministic.
+type FocusNextAfterRebuildEffect struct{}
 
 func (eff FocusNextAfterRebuildEffect) Execute(ctx context.Context) []update.Action {
-	delay := eff.Delay
-	if delay <= 0 {
-		delay = 2 * time.Millisecond
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return nil
-	case <-timer.C:
+	default:
 		return []update.Action{interaction.FocusMoveAction{Move: interaction.FocusMoveNext}}
 	}
 }

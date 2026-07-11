@@ -1,70 +1,64 @@
 package ports
 
 import (
+	"context"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func TestProviderTransportResponseValidate_ExactlyOneCarrierRequired(t *testing.T) {
+func TestProviderIngressValidate_ExactlyOneCarrierRequired(t *testing.T) {
 	tests := []struct {
 		name    string
-		input   ProviderTransportResponse
+		input   ProviderIngress
 		wantErr bool
 	}{
 		{
 			name:    "none invalid",
-			input:   ProviderTransportResponse{},
+			input:   nil,
 			wantErr: true,
 		},
 		{
 			name: "document only valid",
-			input: ProviderTransportResponse{
-				Document: []byte(`{"ok":true}`),
-			},
+			input: carrier.NewWireDocument(
+				carrier.StageProviderIngressIn,
+				protocolkind.Responses,
+				"application/json",
+				nil,
+				[]byte(`{"ok":true}`),
+				carrier.Meta{},
+			),
 		},
 		{
 			name: "stream only valid",
-			input: ProviderTransportResponse{
-				Stream: io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n")),
+			input: carrier.WireStream{
+				Stage:   carrier.StageProviderIngressIn,
+				Family:  protocolkind.Responses,
+				Framing: carrier.FramingSSE,
+				Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n"))),
 			},
 		},
 		{
-			name: "envelope only valid",
-			input: ProviderTransportResponse{
-				Envelope: canonical.NewSliceEventReader(canonical.EventSequence{}),
-			},
-		},
-		{
-			name: "document and stream invalid",
-			input: ProviderTransportResponse{
-				Document: []byte(`{"ok":true}`),
-				Stream:   io.NopCloser(strings.NewReader("x")),
-			},
-			wantErr: true,
-		},
-		{
-			name: "document and envelope invalid",
-			input: ProviderTransportResponse{
-				Document: []byte(`{"ok":true}`),
-				Envelope: canonical.NewSliceEventReader(canonical.EventSequence{}),
-			},
-			wantErr: true,
-		},
-		{
-			name: "stream and envelope invalid",
-			input: ProviderTransportResponse{
-				Stream:   io.NopCloser(strings.NewReader("x")),
-				Envelope: canonical.NewSliceEventReader(canonical.EventSequence{}),
-			},
-			wantErr: true,
+			name: "events only valid",
+			input: carrier.CanonicalEventStream{Events: canonical.NewSliceEventReader([]canonical.Event{{
+				ExchangeID: "ex",
+				Seq:        1,
+				Kind:       canonical.EventEnvelopeStart,
+				EnvID:      "resp_1",
+				Payload: canonical.EnvelopeStartPayload{
+					Kind: canonical.EnvResponse,
+				},
+			}})},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.input.Validate()
+			err := exchange.ValidateProviderIngress(tc.input)
 			if tc.wantErr && err == nil {
 				t.Fatal("Validate() expected error")
 			}
@@ -72,5 +66,25 @@ func TestProviderTransportResponseValidate_ExactlyOneCarrierRequired(t *testing.
 				t.Fatalf("Validate() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestProviderCanonicalEventStreamIngress_ExposesReader(t *testing.T) {
+	result := carrier.CanonicalEventStream{Events: canonical.NewSliceEventReader([]canonical.Event{{
+		ExchangeID: "ex",
+		Seq:        1,
+		Kind:       canonical.EventEnvelopeStart,
+		EnvID:      "resp_1",
+		Payload: canonical.EnvelopeStartPayload{
+			Kind: canonical.EnvResponse,
+		},
+	}})}
+	reader := result.Events
+	ev, err := reader.Next(context.Background())
+	if err != nil {
+		t.Fatalf("next event: %v", err)
+	}
+	if ev.ExchangeID != "ex" {
+		t.Fatalf("exchange_id=%q", ev.ExchangeID)
 	}
 }

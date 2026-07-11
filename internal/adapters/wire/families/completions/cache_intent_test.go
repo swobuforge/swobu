@@ -16,7 +16,7 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 		Items:       []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention24H}),
 	})
-	wire, err := encodeRequestCarrier(req, delivery.BufferedDelivery())
+	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
 		t.Fatalf("EncodeRequest: %v", err)
 	}

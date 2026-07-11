@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
@@ -11,6 +12,9 @@ func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModel
 	scope := strings.TrimSpace(value.Scope) // swobu:io-string source=boundary
 	id := newRoutingProbeIdentity(scope, value.ProviderSpec, value.BaseURL, value.CredentialRef)
 	providerProtocol := strings.TrimSpace(value.ProviderProtocol) // swobu:io-string source=boundary
+	if stateModel.ProviderModelCatalogLoadBlocked(id.ProviderSpec, id.BaseURL, id.CredentialRef) {
+		return nil
+	}
 	if scope == RoutingModelCatalogScopeCreateDraft {
 		if id.ProviderSpec == "" {
 			clearCreateDraftModelCatalogProbe(model)

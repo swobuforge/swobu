@@ -135,7 +135,7 @@ type TrafficRow struct {
 }
 
 type Mutation struct {
-	Leg           string   `json:"leg"`
+	Stage         string   `json:"leg"`
 	Transform     string   `json:"transform"`
 	Changed       bool     `json:"changed"`
 	ChangedFields []string `json:"changed_fields,omitempty"`

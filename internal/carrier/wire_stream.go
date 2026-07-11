@@ -18,7 +18,7 @@ const (
 
 // WireStream is one framed stream carrier on a wire leg.
 type WireStream struct {
-	Leg     Leg
+	Stage   Stage
 	Family  protocolkind.ProtocolKind
 	Framing Framing
 	Header  http.Header

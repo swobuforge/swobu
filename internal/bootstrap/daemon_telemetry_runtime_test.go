@@ -123,7 +123,7 @@ func mustTerminalTrafficEvent(t *testing.T, requestID string, result evidence.Re
 	event, err := evidence.NewTerminalTrafficEvent(evidence.TrafficEventInput{RequestID: id, Endpoint: "default",
 		ClientProtocol: evidence.ClientProtocol("responses"),
 		ClientHandler:  evidence.ClientHandler("http"),
-		IngressFamily:  evidence.IngressFamily("openai"),
+		ClientFamily:   evidence.ClientFamily("openai"),
 		NormalizedOp:   evidence.NormalizedOp("responses.create"),
 		Route:          route,
 		Result:         result,

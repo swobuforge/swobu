@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,13 +9,17 @@ import (
 	"net/http"
 	"strings"
 
-	protocolregistry "github.com/swobuforge/swobu/internal/adapters/wire/protocolregistry"
+	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
+	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
+	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
+	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 const (
@@ -22,8 +27,8 @@ const (
 	maxDecodedRequestBodyBytes    int64 = 8 << 20
 )
 
-type requestHandler interface {
-	Handle(context.Context, exchange.HandleInput) (exchange.HandleOutput, error)
+type requestIngress interface {
+	HandleRequest(context.Context, exchange.RequestInput) (exchange.RequestOutput, error)
 }
 
 type modelsHandler interface {
@@ -31,11 +36,11 @@ type modelsHandler interface {
 }
 
 type Handler struct {
-	requestHandler requestHandler
+	requestIngress requestIngress
 }
 
-func NewHandler(requestHandler requestHandler) Handler {
-	return Handler{requestHandler: requestHandler}
+func NewHandler(requestIngress requestIngress) Handler {
+	return Handler{requestIngress: requestIngress}
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -65,19 +70,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.serveResponsesWebsocket(w, r, endpointName, normalizedPath)
 			return
 		}
-		writeExchangeError(w, canonical.UnsupportedEndpoint("websocket ingress is supported only on protocol /responses routes"))
+		writeExchangeError(w, canonical.UnsupportedEndpoint("websocket client transport is supported only on protocol /responses routes"))
 		return
 	}
 	if normalizedPath == canonical.NormalizedPathModels {
 		h.serveModelsEndpoint(w, r, endpoint)
 		return
 	}
-	if err := canonical.ValidateIngressTransport(r.Method, normalizedPath, false); err != nil {
+	if err := canonical.ValidateClientTransport(r.Method, normalizedPath, false); err != nil {
 		writeExchangeError(w, err)
 		return
 	}
 
-	family, err := canonical.InferFamily(r.Method, normalizedPath, strings.TrimSpace(r.Header.Get("anthropic-version")) != "") // swobu:io-string source=boundary
+	hasMessagesProtocolMarker := strings.TrimSpace(r.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
+	family, err := canonical.InferClientFamily(r.Method, normalizedPath, hasMessagesProtocolMarker)
 	if err != nil {
 		writeExchangeError(w, err)
 		return
@@ -89,41 +95,29 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request, clientDelivery, err := decodeCanonicalRequest(family, requestBody)
-	if err != nil {
-		writeExchangeError(w, err)
-		return
-	}
-	if clientDelivery.Mode == delivery.Streaming && clientDelivery.Framing == delivery.FramingNone {
-		clientDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
-	}
-
 	requestID := requestIDFromRequest(r)
-	logIngressRequestShape(requestID, endpoint.String(), family, normalizedPath, request, clientDelivery)
+	logClientRequestShape(requestID, endpoint.String(), family, normalizedPath)
 
-	if h.requestHandler == nil {
-		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
+	if h.requestIngress == nil {
+		writeSwobuError(w, canonical.InternalError("exchange ingress is not configured"))
 		return
 	}
 
-	out, err := h.requestHandler.Handle(r.Context(), exchange.HandleInput{
-		EndpointName: endpoint,
-		ClientFamily: family,
-		Request:      request,
-		Contract:     exchange.NewExecutionContract(clientDelivery),
+	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
+		EndpointName:    endpoint,
+		Request:         newTransportRequest(r.Method, operationPath, r.Header, requestBody),
+		ClientFamily:    family,
+		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
 		logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, err)
 		writeExchangeError(w, err)
 		return
 	}
-	defer func() {
-		_ = exchange.CloseProviderResponseStream(out.Response)
-	}()
 	writeModelResolutionHeaders(w)
 	logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, nil)
 
-	if err := writeSuccessResponse(w, requestID, family, out.Response, clientDelivery); err != nil {
+	if err := writeSuccessResponse(w, requestID, family, out); err != nil {
 		writeExchangeError(w, err)
 	}
 }
@@ -133,11 +127,11 @@ func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, end
 		writeSwobuError(w, canonical.UnsupportedOperation("models endpoint only supports GET"))
 		return
 	}
-	if h.requestHandler == nil {
-		writeSwobuError(w, canonical.InternalError("request orchestrator is not configured"))
+	if h.requestIngress == nil {
+		writeSwobuError(w, canonical.InternalError("exchange ingress is not configured"))
 		return
 	}
-	m, ok := h.requestHandler.(modelsHandler)
+	m, ok := h.requestIngress.(modelsHandler)
 	if !ok {
 		writeSwobuError(w, canonical.InternalError("models query is not configured"))
 		return
@@ -193,44 +187,60 @@ func decodeRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	return decoded, nil
 }
 
-func decodeCanonicalRequest(family canonical.IngressFamily, raw []byte) (canonical.CanonicalRequest, delivery.Delivery, error) {
-	codec, err := protocolregistry.ForClientRequestDecoder(family)
-	if err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+func newTransportRequest(method string, url string, header http.Header, body []byte) transportpkg.TransportRequest {
+	return transportpkg.TransportRequest{
+		Method: method,
+		URL:    url,
+		Header: header.Clone(),
+		Body:   io.NopCloser(bytes.NewReader(append([]byte(nil), body...))),
 	}
-	return codec.DecodeClientRequest(carrier.WireDocument{
-		Leg:    carrier.LegClientRequestIn,
-		Family: family,
-		Media:  "application/json",
-		Raw:    append([]byte(nil), raw...),
-	})
 }
 
-func logIngressRequestShape(
+func encodeCanonicalClientRequest(family canonical.ClientFamily, request canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
+	var (
+		doc carrier.WireDocument
+		err error
+	)
+	switch family {
+	case canonical.ClientFamilyChatCompletions:
+		doc, err = chatcompletions.EncodeCarrier(request, d)
+	case canonical.ClientFamilyResponses:
+		doc, err = responses.EncodeCarrier(request, d)
+	case canonical.ClientFamilyCompletions:
+		doc, err = completions.EncodeCarrier(request, d)
+	case canonical.ClientFamilyMessages:
+		doc, err = messages.EncodeCarrier(request, d)
+	default:
+		return carrier.WireDocument{}, canonical.UnsupportedOperation("client family is not implemented")
+	}
+	if err != nil {
+		return carrier.WireDocument{}, err
+	}
+	doc.Stage = carrier.StageClientRequestIn
+	doc.Family = family
+	return doc, nil
+}
+
+func logClientRequestShape(
 	requestID string,
 	endpoint string,
-	family canonical.IngressFamily,
+	family canonical.ClientFamily,
 	normalizedPath canonical.NormalizedPath,
-	request canonical.CanonicalRequest,
-	clientDelivery delivery.Delivery,
 ) {
-	slog.Debug("protocol ingress request",
+	slog.Debug("protocol client request",
 		"component", "httpapi",
 		"event", "ingress_request_shape",
 		"request_id", requestID,
 		"endpoint", endpoint,
 		"ingress_family", string(family),
 		"normalized_op", string(normalizedPath),
-		"streaming", clientDelivery.Mode == delivery.Streaming,
-		"delivery_mode", clientDelivery.Mode.String(),
-		"delivery_framing", string(clientDelivery.Framing),
 	)
 }
 
 func logRequestOutcome(
 	requestID string,
 	endpoint string,
-	family canonical.IngressFamily,
+	family canonical.ClientFamily,
 	normalizedPath canonical.NormalizedPath,
 	err error,
 ) {

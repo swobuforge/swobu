@@ -5,7 +5,6 @@ import "encoding/json"
 type chatCompletionsRequestDTO struct {
 	Model    string                      `json:"model"`
 	Messages []chatCompletionsMessageDTO `json:"messages"`
-	Stream   bool                        `json:"stream"`
 }
 
 type chatCompletionsMessageDTO struct {

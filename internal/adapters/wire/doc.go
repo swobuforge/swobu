@@ -7,6 +7,6 @@
 // - codec.go: protocol-level facade implementing runtime codec contracts.
 // - wire_dto.go: protocol wire DTO schemas.
 //
-// Provider quirks are not implemented in protocol packages.
+// Provider-specific behavior is not implemented in protocol packages.
 // Protocol packages own only shared protocol syntax/shape.
 package wire

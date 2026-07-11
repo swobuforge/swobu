@@ -3,6 +3,7 @@ package testharness
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 )
@@ -22,7 +23,9 @@ func FocusRowContaining(t *testing.T, render func() string, stepDown func(), pat
 				return
 			}
 		}
+		before := out
 		stepDown()
+		waitForRenderChange(render, before)
 	}
 	t.Fatalf("could not focus row containing %q; render=%q", pattern, render())
 }
@@ -42,7 +45,9 @@ func FocusChooserOptionContaining(t *testing.T, render func() string, stepDown f
 			}
 			return
 		}
+		before := out
 		stepDown()
+		waitForRenderChange(render, before)
 	}
 	t.Fatalf("could not focus chooser option containing %q; render=%q", pattern, render())
 }
@@ -59,4 +64,17 @@ func FocusedLineContains(out string, token string) bool {
 		}
 	}
 	return false
+}
+
+func waitForRenderChange(render func() string, before string) {
+	if render == nil {
+		return
+	}
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if render() != before {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

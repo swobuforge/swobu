@@ -9,20 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func encodeRequestCarrier(request canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	thread := request.Items()
-	if len(thread) == 0 {
-		return carrier.WireDocument{}, canonical.BadRequest("request does not contain replayable conversation input")
-	}
-	return EncodeCarrier(request, d)
-}
-
-type requestBody struct {
-	Model    string        `json:"model"`
-	Messages []messageBody `json:"messages"`
-	Stream   bool          `json:"stream,omitempty"`
-}
-
 type messageBody struct {
 	Role       string         `json:"role"`
 	Content    any            `json:"content,omitempty"`
@@ -54,20 +40,26 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 		return carrier.WireDocument{}, err
 	}
 
-	raw, err := json.Marshal(requestBody{
-		Model:    req.Model(),
-		Messages: wireMessages,
-		Stream:   d.Mode == delivery.Streaming,
-	})
+	payload := map[string]any{
+		"model":    req.Model(),
+		"messages": wireMessages,
+	}
+	if d.Mode == delivery.Streaming {
+		payload["stream"] = true
+	}
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		return carrier.WireDocument{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
 	}
 
-	return carrier.WireDocument{
-		Leg:   carrier.LegProviderRequestOut,
-		Media: "application/json",
-		Raw:   raw,
-	}, nil
+	return carrier.NewWireDocument(
+		carrier.StageProviderRequestOut,
+		"",
+		"application/json",
+		nil,
+		raw,
+		carrier.Meta{},
+	), nil
 }
 
 func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
@@ -99,16 +91,13 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 			case canonical.ItemKindText:
 				text += current.Text
 			case canonical.ItemKindToolUse:
-				args, err := json.Marshal(current.Input)
-				if err != nil {
-					return nil, canonical.BadRequest("tool_use input could not be encoded for the chat completions protocol")
-				}
+				args := current.Input.RawObject()
 				toolCalls = append(toolCalls, toolCallBody{
 					ID:   current.ToolUseID,
 					Type: "function",
 					Function: toolFunctionBody{
 						Name:      current.Name,
-						Arguments: string(args),
+						Arguments: args,
 					},
 				})
 			default:

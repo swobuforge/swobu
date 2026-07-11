@@ -29,7 +29,6 @@ func BuildSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Mo
 
 func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	nameSet := model.CreateDraftName != ""
 	provider := model.CreateDraftProviderConfig.ProviderSpec
 	providerProtocol := model.CreateDraftProviderConfig.ProviderProtocol
 	modelID := model.CreateDraftProviderConfig.ModelID
@@ -37,7 +36,6 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 	baseURL := effectiveCreateDraftBaseURL(model, provider)
 	credSummary := firstRunCredentialSummary(provider, baseURL, cred)
 
-	defaultOpen := provider != "" || nameSet
 	runPickerOpen, setRunPickerOpen := retained.UseState(ctx, func() bool { return false })
 	pickerState, setPickerState := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
 	keyPickerState, setKeyPickerState := retained.UseState(ctx, func() string { return "" })
@@ -93,7 +91,8 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 		"routing-create",
 		views.NewCollapsibleSection(
 			views.SectionRouting,
-			defaultOpen,
+			// Keep routing disclosure explicit: only Enter opens it.
+			false,
 			"choose",
 			views.SummaryRow(summary),
 			rows...,

@@ -26,14 +26,15 @@ func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirst
 		t.Fatalf("with model id: %v", err)
 	}
 	attempts := make([]string, 0, 2)
-	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.HandleInput) (exchange.HandleOutput, error) {
+	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.RequestInput) (exchange.RequestOutput, error) {
 		_ = in
 		if len(attempts) == 0 {
 			attempts = append(attempts, "responses/http_json_body")
-			return exchange.HandleOutput{}, errors.New("nope")
+			return exchange.RequestOutput{}, errors.New("nope")
 		}
 		attempts = append(attempts, "responses/ndjson")
-		return exchange.HandleOutput{Response: testProviderResponseFromOutput(canonical.NewConversationOutput("id", "m", []canonical.OutputItem{canonical.NewTextOutputItem("t", "ok")}, "stop"))}, nil
+		doc, _ := testResponseDocumentEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseDocument(canonical.NewConversationOutput("id", "m", []canonical.OutputItem{canonical.NewTextOutputItem("t", "ok")}, "stop"))
+		return exchange.RequestOutput{Response: exchange.NewTransportResponseFromDocument(doc)}, nil
 	}
 
 	resolver := newEndpointAutoProtocolResolver(probe)
@@ -63,9 +64,9 @@ func TestEndpointAutoProtocolResolver_ResolveOne_ReturnsErrorWhenNoVariantWorks(
 	if err != nil {
 		t.Fatalf("with model id: %v", err)
 	}
-	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.HandleInput) (exchange.HandleOutput, error) {
+	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.RequestInput) (exchange.RequestOutput, error) {
 		_ = in
-		return exchange.HandleOutput{}, errors.New("probe failed")
+		return exchange.RequestOutput{}, errors.New("probe failed")
 	}
 
 	resolver := newEndpointAutoProtocolResolver(probe)

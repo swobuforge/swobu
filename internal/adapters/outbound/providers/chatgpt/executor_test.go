@@ -14,6 +14,7 @@ import (
 	"time"
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -217,14 +218,15 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 			"", "responses_stream",
 		),
 	)
-	resp, err := exec.Execute(context.Background(), req)
+	resp, err := exec.ResolveProviderIngress(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Stream == nil {
+	streamBody, ok := resp.(carrier.WireStream)
+	if !ok || streamBody.Frames == nil {
 		t.Fatal("expected transport stream response")
 	}
-	if closeErr := resp.Stream.Close(); closeErr != nil {
+	if closeErr := streamBody.Frames.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 	if rt.lastRequest == nil {
@@ -276,7 +278,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 			"", "responses_stream",
 		),
 	)
-	if _, err := exec.Execute(context.Background(), req); err != nil {
+	if _, err := exec.ResolveProviderIngress(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if seenPath != "/backend-api/codex/responses" {
@@ -309,7 +311,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 			"", "responses_stream",
 		),
 	)
-	_, err := exec.Execute(context.Background(), req)
+	_, err := exec.ResolveProviderIngress(context.Background(), req)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -380,11 +382,13 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 			"", "responses_stream",
 		),
 	)
-	resp, err := exec.Execute(context.Background(), req)
+	resp, err := exec.ResolveProviderIngress(context.Background(), req)
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
-	_ = resp.Stream.Close()
+	if streamBody, ok := resp.(carrier.WireStream); ok && streamBody.Frames != nil {
+		_ = streamBody.Frames.Close()
+	}
 	if attempts != 2 {
 		t.Fatalf("attempts=%d want 2", attempts)
 	}
@@ -430,14 +434,15 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 			"", "responses_stream",
 		),
 	)
-	resp, err := exec.Execute(context.Background(), req)
+	resp, err := exec.ResolveProviderIngress(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Stream == nil {
+	streamBody, ok := resp.(carrier.WireStream)
+	if !ok || streamBody.Frames == nil {
 		t.Fatal("expected transport stream response")
 	}
-	if closeErr := resp.Stream.Close(); closeErr != nil {
+	if closeErr := streamBody.Frames.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 }

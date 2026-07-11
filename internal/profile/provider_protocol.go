@@ -72,19 +72,6 @@ func ProviderProtocolKindAndFrame(spec string, providerProtocol string) (protoco
 	return "", "", false
 }
 
-func ConcreteProviderProtocolForSpecKindFrame(spec string, kind protocolkind.ProtocolKind, frame string) (string, bool) {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return "", false
-	}
-	for _, protocol := range profile.ProviderProtocols {
-		if protocol.Kind == kind && protocol.Frame == frame {
-			return protocol.Name, true
-		}
-	}
-	return "", false
-}
-
 func EncodeProviderProtocolForPersistence(providerProtocol string) string {
 	normalized := strings.TrimSpace(providerProtocol) // swobu:io-string source=domain
 	if normalized == "" || normalized == ProviderProtocolAuto {

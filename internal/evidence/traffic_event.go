@@ -10,8 +10,8 @@ import (
 type EventKind string
 
 const (
-	EventKindUpstreamInflight EventKind = "upstream_inflight"
-	EventKindUpstreamTerminal EventKind = "upstream_terminal"
+	EventKindProviderInflight EventKind = "provider_inflight"
+	EventKindProviderTerminal EventKind = "provider_terminal"
 )
 
 type ClientProtocol string
@@ -22,9 +22,9 @@ type ClientHandler string
 
 const ClientHandlerUnknown ClientHandler = "unknown"
 
-type IngressFamily string
+type ClientFamily string
 
-const IngressFamilyUnknown IngressFamily = "unknown"
+const ClientFamilyUnknown ClientFamily = "unknown"
 
 type NormalizedOp string
 
@@ -69,10 +69,6 @@ func NewUnknownTiming() Timing {
 	return Timing{}
 }
 
-func NewTiming(ttfbMS int, durMS int) (Timing, error) {
-	return NewTimingWithOptional(&ttfbMS, &durMS)
-}
-
 func NewTimingWithOptional(ttfbMS *int, durMS *int) (Timing, error) {
 	timing := Timing{}
 	if ttfbMS != nil {
@@ -109,7 +105,7 @@ type TrafficEvent struct {
 	endpoint                  string
 	clientProtocol            ClientProtocol
 	clientHandler             ClientHandler
-	ingressFamily             IngressFamily
+	clientFamily              ClientFamily
 	normalizedOp              NormalizedOp
 	route                     Route
 	bridgeID                  string
@@ -135,7 +131,7 @@ type TrafficEventInput struct {
 	Endpoint                  string
 	ClientProtocol            ClientProtocol
 	ClientHandler             ClientHandler
-	IngressFamily             IngressFamily
+	ClientFamily              ClientFamily
 	NormalizedOp              NormalizedOp
 	Route                     Route
 	BridgeID                  string
@@ -157,7 +153,7 @@ type TrafficEventInput struct {
 }
 
 type Mutation struct {
-	Leg           string
+	Stage         string
 	Transform     string
 	Changed       bool
 	ChangedFields []string
@@ -205,30 +201,70 @@ func cloneStageReports(src []StageReport) []StageReport {
 	return out
 }
 
-// NewInflightTrafficEvent creates the first immutable evidence fact for a
-// request lifecycle. Unknown protocol-facing fields remain explicit `unknown`
-// values until later seams can enrich them without changing event shape.
-func NewInflightTrafficEvent(input TrafficEventInput) (TrafficEvent, error) {
-	input.Result = ResultClassInProgress
-	input.StatusCode = 0
-	return newTrafficEvent(EventKindUpstreamInflight, input)
-}
-
 func NewTerminalTrafficEvent(input TrafficEventInput) (TrafficEvent, error) {
-	return newTrafficEvent(EventKindUpstreamTerminal, input)
+	return newTrafficEvent(EventKindProviderTerminal, input)
 }
 
-// evidence schema's validation and normalization rules.
-// swobu:codelint ignore complexity because=domain normalization and validation are intentionally co-located in one invariant seam
 func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, error) {
+	normalizedInput, err := normalizeTrafficEventInput(kind, input)
+	if err != nil {
+		return TrafficEvent{}, err
+	}
+	return TrafficEvent{
+		requestID:                 normalizedInput.RequestID,
+		eventKind:                 kind,
+		endpoint:                  normalizedInput.Endpoint,
+		clientProtocol:            normalizedInput.ClientProtocol,
+		clientHandler:             normalizedInput.ClientHandler,
+		clientFamily:              normalizedInput.ClientFamily,
+		normalizedOp:              normalizedInput.NormalizedOp,
+		route:                     normalizedInput.Route,
+		bridgeID:                  normalizedInput.BridgeID,
+		decisionReason:            normalizedInput.DecisionReason,
+		adaptationChain:           slices.Clone(normalizedInput.AdaptationChain),
+		result:                    normalizedInput.Result,
+		statusCode:                normalizedInput.StatusCode,
+		timing:                    normalizedInput.Timing,
+		attemptCount:              normalizedInput.AttemptCount,
+		continuityRecovered:       normalizedInput.ContinuityRecovered,
+		continuityRecoveryTrigger: normalizedInput.ContinuityRecoveryTrigger,
+		modelResolutionMode:       normalizedInput.ModelResolutionMode,
+		modelRequested:            normalizedInput.ModelRequested,
+		modelResolved:             normalizedInput.ModelResolved,
+		tokenUsage:                normalizedInput.TokenUsage,
+		wireMutations:             cloneMutations(normalizedInput.Mutations),
+		exchangeDiagnostics:       slices.Clone(normalizedInput.ExchangeDiagnostics),
+		exchangeStageReports:      cloneStageReports(normalizedInput.StageReports),
+	}, nil
+}
+
+func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (TrafficEventInput, error) {
 	if input.RequestID.IsZero() {
-		return TrafficEvent{}, fmt.Errorf("request id is required")
+		return TrafficEventInput{}, fmt.Errorf("request id is required")
 	}
 	if strings.TrimSpace(input.Endpoint) == "" { // swobu:io-string source=domain
-		return TrafficEvent{}, fmt.Errorf("endpoint is required")
+		return TrafficEventInput{}, fmt.Errorf("endpoint is required")
 	}
 	if input.Route.ProviderConfigRef() == "" {
-		return TrafficEvent{}, fmt.Errorf("route is required")
+		return TrafficEventInput{}, fmt.Errorf("route is required")
+	}
+	if input.StatusCode < 0 {
+		return TrafficEventInput{}, fmt.Errorf("status code must not be negative")
+	}
+	switch kind {
+	case EventKindProviderInflight:
+		if input.Result != ResultClassInProgress {
+			return TrafficEventInput{}, fmt.Errorf("in-flight events must use in_progress result class")
+		}
+		if input.StatusCode != 0 {
+			return TrafficEventInput{}, fmt.Errorf("in-flight events must use status code 0")
+		}
+	case EventKindProviderTerminal:
+		if !input.Result.IsTerminal() {
+			return TrafficEventInput{}, fmt.Errorf("terminal events must use a terminal result class")
+		}
+	default:
+		return TrafficEventInput{}, fmt.Errorf("unknown event kind %q", kind)
 	}
 	if input.ClientProtocol == "" {
 		input.ClientProtocol = ClientProtocolUnknown
@@ -236,8 +272,8 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 	if input.ClientHandler == "" {
 		input.ClientHandler = ClientHandlerUnknown
 	}
-	if input.IngressFamily == "" {
-		input.IngressFamily = IngressFamilyUnknown
+	if input.ClientFamily == "" {
+		input.ClientFamily = ClientFamilyUnknown
 	}
 	if input.NormalizedOp == "" {
 		input.NormalizedOp = NormalizedOpUnknown
@@ -248,115 +284,87 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 	if strings.TrimSpace(input.DecisionReason) == "" { // swobu:io-string source=domain
 		input.DecisionReason = "selected_provider_config"
 	}
-	if input.StatusCode < 0 {
-		return TrafficEvent{}, fmt.Errorf("status code must not be negative")
-	}
 	if input.AttemptCount <= 0 {
 		input.AttemptCount = 1
 	}
 	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode) // swobu:io-string source=domain
 	input.ModelRequested = strings.TrimSpace(input.ModelRequested)           // swobu:io-string source=domain
 	input.ModelResolved = strings.TrimSpace(input.ModelResolved)             // swobu:io-string source=domain
-	normalizedMutations := make([]Mutation, 0, len(input.Mutations))
-	for _, m := range input.Mutations {
-		m.Leg = strings.TrimSpace(m.Leg)             // swobu:io-string source=domain
+	input.Mutations = normalizeTrafficEventMutations(input.Mutations)
+	input.ExchangeDiagnostics = normalizeTrafficEventStrings(input.ExchangeDiagnostics)
+	stageReports, err := normalizeTrafficEventStageReports(input.StageReports)
+	if err != nil {
+		return TrafficEventInput{}, err
+	}
+	input.StageReports = stageReports
+	return input, nil
+}
+
+func normalizeTrafficEventMutations(src []Mutation) []Mutation {
+	normalized := make([]Mutation, 0, len(src))
+	for _, m := range src {
+		m.Stage = strings.TrimSpace(m.Stage)         // swobu:io-string source=domain
 		m.Transform = strings.TrimSpace(m.Transform) // swobu:io-string source=domain
-		if m.Leg == "" || m.Transform == "" {
+		if m.Stage == "" || m.Transform == "" {
 			continue
 		}
-		nextFields := make([]string, 0, len(m.ChangedFields))
-		for _, field := range m.ChangedFields {
-			field = strings.TrimSpace(field) // swobu:io-string source=domain
-			if field == "" {
-				continue
-			}
-			nextFields = append(nextFields, field)
-		}
-		m.ChangedFields = nextFields
-		normalizedMutations = append(normalizedMutations, m)
+		m.ChangedFields = normalizeTrafficEventStrings(m.ChangedFields)
+		normalized = append(normalized, m)
 	}
-	diagnostics := make([]string, 0, len(input.ExchangeDiagnostics))
-	for _, d := range input.ExchangeDiagnostics {
-		d = strings.TrimSpace(d) // swobu:io-string source=domain
-		if d == "" {
-			continue
-		}
-		diagnostics = append(diagnostics, d)
-	}
-	stageReports := make([]StageReport, 0, len(input.StageReports))
+	return normalized
+}
+
+func normalizeTrafficEventStageReports(src []StageReport) ([]StageReport, error) {
+	stageReports := make([]StageReport, 0, len(src))
 	seenStageCarrier := map[string]struct{}{}
-	for _, report := range input.StageReports {
+	for _, report := range src {
 		report.Stage = strings.ToLower(strings.TrimSpace(report.Stage))     // swobu:io-string source=domain
 		report.Carrier = strings.ToLower(strings.TrimSpace(report.Carrier)) // swobu:io-string source=domain
 		if report.Stage == "" || report.Carrier == "" {
-			return TrafficEvent{}, fmt.Errorf("exchange stage report stage/carrier must not be empty")
+			return nil, fmt.Errorf("exchange stage report stage/carrier must not be empty")
 		}
-		applied := make([]string, 0, len(report.Applied))
-		seenApplied := map[string]struct{}{}
-		for _, id := range report.Applied {
-			id = strings.TrimSpace(id) // swobu:io-string source=domain
-			if id == "" {
-				continue
-			}
-			if _, exists := seenApplied[id]; exists {
-				continue
-			}
-			seenApplied[id] = struct{}{}
-			applied = append(applied, id)
-		}
-		sort.Strings(applied)
-		report.Applied = applied
+		report.Applied = normalizeTrafficEventUniqueStrings(report.Applied)
 		if report.Mutated && len(report.Applied) == 0 {
-			return TrafficEvent{}, fmt.Errorf("exchange stage report %q/%q mutated without applied transforms", report.Stage, report.Carrier)
+			return nil, fmt.Errorf("exchange stage report %q/%q mutated without applied transforms", report.Stage, report.Carrier)
 		}
 		key := report.Stage + "\x00" + report.Carrier
 		if _, exists := seenStageCarrier[key]; exists {
-			return TrafficEvent{}, fmt.Errorf("duplicate exchange stage report for %q/%q", report.Stage, report.Carrier)
+			return nil, fmt.Errorf("duplicate exchange stage report for %q/%q", report.Stage, report.Carrier)
 		}
 		seenStageCarrier[key] = struct{}{}
 		stageReports = append(stageReports, report)
 	}
-	switch kind {
-	case EventKindUpstreamInflight:
-		if input.Result != ResultClassInProgress {
-			return TrafficEvent{}, fmt.Errorf("in-flight events must use in_progress result class")
+	return stageReports, nil
+}
+
+func normalizeTrafficEventStrings(src []string) []string {
+	normalized := make([]string, 0, len(src))
+	for _, value := range src {
+		value = strings.TrimSpace(value) // swobu:io-string source=domain
+		if value == "" {
+			continue
 		}
-		if input.StatusCode != 0 {
-			return TrafficEvent{}, fmt.Errorf("in-flight events must use status code 0")
-		}
-	case EventKindUpstreamTerminal:
-		if !input.Result.IsTerminal() {
-			return TrafficEvent{}, fmt.Errorf("terminal events must use a terminal result class")
-		}
-	default:
-		return TrafficEvent{}, fmt.Errorf("unknown event kind %q", kind)
+		normalized = append(normalized, value)
 	}
-	return TrafficEvent{
-		requestID:                 input.RequestID,
-		eventKind:                 kind,
-		endpoint:                  input.Endpoint,
-		clientProtocol:            input.ClientProtocol,
-		clientHandler:             input.ClientHandler,
-		ingressFamily:             input.IngressFamily,
-		normalizedOp:              input.NormalizedOp,
-		route:                     input.Route,
-		bridgeID:                  input.BridgeID,
-		decisionReason:            input.DecisionReason,
-		adaptationChain:           slices.Clone(input.AdaptationChain),
-		result:                    input.Result,
-		statusCode:                input.StatusCode,
-		timing:                    input.Timing,
-		attemptCount:              input.AttemptCount,
-		continuityRecovered:       input.ContinuityRecovered,
-		continuityRecoveryTrigger: input.ContinuityRecoveryTrigger,
-		modelResolutionMode:       input.ModelResolutionMode,
-		modelRequested:            input.ModelRequested,
-		modelResolved:             input.ModelResolved,
-		tokenUsage:                input.TokenUsage,
-		wireMutations:             cloneMutations(normalizedMutations),
-		exchangeDiagnostics:       slices.Clone(diagnostics),
-		exchangeStageReports:      cloneStageReports(stageReports),
-	}, nil
+	return normalized
+}
+
+func normalizeTrafficEventUniqueStrings(src []string) []string {
+	normalized := normalizeTrafficEventStrings(src)
+	if len(normalized) == 0 {
+		return normalized
+	}
+	seen := map[string]struct{}{}
+	unique := make([]string, 0, len(normalized))
+	for _, value := range normalized {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	sort.Strings(unique)
+	return unique
 }
 
 func (e TrafficEvent) RequestID() RequestID              { return e.requestID }
@@ -364,7 +372,7 @@ func (e TrafficEvent) EventKind() EventKind              { return e.eventKind }
 func (e TrafficEvent) Endpoint() string                  { return e.endpoint }
 func (e TrafficEvent) ClientProtocol() ClientProtocol    { return e.clientProtocol }
 func (e TrafficEvent) ClientHandler() ClientHandler      { return e.clientHandler }
-func (e TrafficEvent) IngressFamily() IngressFamily      { return e.ingressFamily }
+func (e TrafficEvent) ClientFamily() ClientFamily        { return e.clientFamily }
 func (e TrafficEvent) NormalizedOp() NormalizedOp        { return e.normalizedOp }
 func (e TrafficEvent) Route() Route                      { return e.route }
 func (e TrafficEvent) BridgeID() string                  { return e.bridgeID }

@@ -145,16 +145,6 @@ func parseAWSINIProfiles(raw string, fromConfig bool) []string {
 	return out
 }
 
-func bedrockDefaultProfileFromEnvOrList(profiles []string) string {
-	if fromEnv := trimRoutingInput(platformconfig.ReadEnvTrim("AWS_PROFILE")); fromEnv != "" {
-		return fromEnv
-	}
-	if len(profiles) == 0 {
-		return ""
-	}
-	return trimRoutingInput(profiles[0])
-}
-
 func isBedrockAWSProfileCredentialRef(ref string) bool {
 	trimmed := trimRoutingInput(ref)
 	if trimmed == "" {

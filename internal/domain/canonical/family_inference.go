@@ -2,33 +2,32 @@ package canonical
 
 import "github.com/swobuforge/swobu/internal/domain/protocolkind"
 
-type IngressFamily = protocolkind.ProtocolKind
+type ClientFamily = protocolkind.ProtocolKind
 
 const (
-	IngressFamilyChatCompletions IngressFamily = protocolkind.ChatCompletions
-	IngressFamilyResponses       IngressFamily = protocolkind.Responses
-	IngressFamilyCompletions     IngressFamily = protocolkind.Completions
-	IngressFamilyMessages        IngressFamily = protocolkind.Messages
+	ClientFamilyChatCompletions ClientFamily = protocolkind.ChatCompletions
+	ClientFamilyResponses       ClientFamily = protocolkind.Responses
+	ClientFamilyCompletions     ClientFamily = protocolkind.Completions
+	ClientFamilyMessages        ClientFamily = protocolkind.Messages
 )
 
-func InferFamily(method string, normalizedPath NormalizedPath, hasAnthropicVersion bool) (IngressFamily, error) {
+func InferClientFamily(method string, normalizedPath NormalizedPath, hasMessagesProtocolMarker bool) (ClientFamily, error) {
 	switch {
 	case method == "POST" && normalizedPath == NormalizedPathChatCompletions:
-		return IngressFamilyChatCompletions, nil
+		return ClientFamilyChatCompletions, nil
 	case method == "POST" && normalizedPath == NormalizedPathResponses:
-		return IngressFamilyResponses, nil
+		return ClientFamilyResponses, nil
 	case method == "POST" && normalizedPath == NormalizedPathCompletions:
-		return IngressFamilyCompletions, nil
-	case method == "POST" && normalizedPath == NormalizedPathMessages && hasAnthropicVersion:
-		return IngressFamilyMessages, nil
+		return ClientFamilyCompletions, nil
+	case method == "POST" && normalizedPath == NormalizedPathMessages && hasMessagesProtocolMarker:
+		return ClientFamilyMessages, nil
 	default:
-		return "", UnsupportedEndpoint("unsupported or ambiguous ingress family")
+		return "", UnsupportedEndpoint("unsupported or ambiguous client family")
 	}
 }
 
-// ValidateIngressTransport enforces protocol-route transport law before family
-// decoding.
-func ValidateIngressTransport(method string, normalizedPath NormalizedPath, websocketUpgrade bool) error {
+// ValidateClientTransport enforces protocol-route transport law before family decoding.
+func ValidateClientTransport(method string, normalizedPath NormalizedPath, websocketUpgrade bool) error {
 	if normalizedPath == NormalizedPathModels {
 		return nil
 	}
@@ -36,10 +35,10 @@ func ValidateIngressTransport(method string, normalizedPath NormalizedPath, webs
 		if method == "GET" && normalizedPath == NormalizedPathResponses {
 			return nil
 		}
-		return UnsupportedEndpoint("websocket ingress is not supported on protocol routes; use HTTP POST and SSE streaming semantics")
+		return UnsupportedEndpoint("websocket client transport is not supported on protocol routes; use request-post with framed streaming delivery")
 	}
 	if method != "POST" {
-		return UnsupportedEndpoint("protocol family operations require HTTP POST")
+		return UnsupportedEndpoint("protocol family operations require request-post method")
 	}
 	return nil
 }

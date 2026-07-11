@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeProviderStream_InvalidWireCarrierFailsImmediately(t *testing.T) {
+func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T) {
 	tests := []struct {
 		name        string
 		wire        carrier.WireStream
@@ -23,10 +23,10 @@ func TestDecodeProviderStream_InvalidWireCarrierFailsImmediately(t *testing.T) {
 		{name: "missing frames", wire: carrier.WireStream{Family: protocolkind.Completions, Framing: carrier.FramingSSE}, reasonMatch: "frames must be configured"},
 	}
 
-	codec := ProviderStreamDecoder{}
+	codec := ProviderEnvelopeDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := codec.DecodeProviderStream(tt.wire, "ex_guard")
+			reader := codec.DecodeProviderEnvelope(tt.wire, "ex_guard")
 			_, err := reader.Next(context.Background())
 			if err == nil {
 				t.Fatal("expected decode stream guard error, got nil")

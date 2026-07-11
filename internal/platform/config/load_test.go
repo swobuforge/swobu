@@ -159,6 +159,40 @@ endpoints:
 	}
 }
 
+func TestLoad_PreservesProviderProtocol(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	raw := `
+endpoints:
+  - name: jobs
+    selected_provider_config_ref: cfg-main
+    provider_configs:
+      - ref: cfg-main
+        provider_spec: openai
+        base_url: https://api.openai.com/v1
+        credential_ref: env:OPENAI_API_KEY
+        provider_protocol: responses_stream
+        model_id: gpt-5.4-mini
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(loaded.Endpoints) != 1 {
+		t.Fatalf("endpoint count=%d want 1", len(loaded.Endpoints))
+	}
+	providers := loaded.Endpoints[0].ProviderConfigs()
+	if len(providers) != 1 {
+		t.Fatalf("provider config count=%d want 1", len(providers))
+	}
+	if got := providers[0].ProviderProtocol(); got != "responses_stream" {
+		t.Fatalf("provider protocol=%q want=%q", got, "responses_stream")
+	}
+}
+
 func TestSave_PersistsProviderModelID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "swobu.yaml")
 	name, err := endpointintent.ParseEndpointName("alpha")
@@ -334,5 +368,55 @@ func TestSaveLoad_RoundTripMultiProviderCredentialRefsAndAliases_JSON(t *testing
 	}
 	if got := cfgs[1].TargetAlias(); got != "personal-safe" {
 		t.Fatalf("roundtrip target_alias[1]=%q", got)
+	}
+}
+
+func TestSave_PersistsProviderProtocol(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	name, err := endpointintent.ParseEndpointName("jobs")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	ref, err := endpointintent.ParseProviderConfigRef("cfg-main")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://api.openai.com/v1", "env:OPENAI_API_KEY")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	cfg, err = cfg.WithProviderProtocol("responses_stream")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	if err := Save(path, RuntimeConfig{BindAddr: DefaultBindAddr()}, []endpointintent.Endpoint{endpoint}); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.Contains(string(raw), "provider_protocol: responses_stream") {
+		t.Fatalf("saved config missing provider_protocol, got:\n%s", string(raw))
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	got := loaded.Endpoints[0].ProviderConfigs()[0].ProviderProtocol()
+	if got != "responses_stream" {
+		t.Fatalf("roundtrip provider protocol=%q want=%q", got, "responses_stream")
 	}
 }

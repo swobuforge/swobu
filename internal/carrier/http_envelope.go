@@ -7,7 +7,7 @@ import (
 
 // HTTPEnvelope is one HTTP transport boundary carrier.
 type HTTPEnvelope struct {
-	Leg    Leg
+	Stage  Stage
 	Method string
 	Path   string
 	Status int

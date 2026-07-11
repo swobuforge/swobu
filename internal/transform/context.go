@@ -8,10 +8,10 @@ import (
 
 // Context carries stage-scoped exchange facts for transform evaluation.
 type Context struct {
-	ExchangeID string
-	Stage      Stage
-	Leg        carrier.Leg
-	Carrier    carrier.Kind
-	Family     protocolkind.ProtocolKind
-	Delivery   delivery.Delivery
+	ExchangeID   string
+	Stage        Stage
+	CarrierStage carrier.Stage
+	Carrier      carrier.Kind
+	Family       protocolkind.ProtocolKind
+	Delivery     delivery.Delivery
 }

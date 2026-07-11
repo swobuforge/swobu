@@ -35,9 +35,9 @@ func sanitizeAuthSessionErrorMessage(message string) string {
 		if match := authCodePattern.FindStringSubmatch(trimmed); len(match) == 2 {
 			code = strings.TrimSpace(match[1]) // swobu:io-string source=boundary
 		}
-		summary := "auth start failed: upstream returned an HTML challenge page"
+		summary := "auth start failed: provider returned an HTML challenge page"
 		if status != "" {
-			summary = fmt.Sprintf("auth start failed: upstream returned status %s with an HTML challenge page", status)
+			summary = fmt.Sprintf("auth start failed: provider returned status %s with an HTML challenge page", status)
 		}
 		if code != "" {
 			summary = summary + " (code=" + code + ")"

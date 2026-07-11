@@ -13,12 +13,6 @@ import (
 const endpointRefDelimiter = "#"
 const subjectRefPrefix = "subject:"
 
-// EncodeEndpointCredentialLocator returns the canonical endpoint locator used by
-// authplane persistence: <endpoint-name>#<provider-config-ref>.
-func EncodeEndpointCredentialLocator(endpointName string, providerRef string) string {
-	return strings.TrimSpace(endpointName) + endpointRefDelimiter + strings.TrimSpace(providerRef) // swobu:io-string source=boundary
-}
-
 // EndpointCredentialStore persists resolved credential refs into endpoint
 // intent provider configs.
 type EndpointCredentialStore struct {

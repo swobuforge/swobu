@@ -174,6 +174,13 @@ func focusRowContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport ge
 	)
 }
 
+func openRoutingSection(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
+	t.Helper()
+	focusRowContaining(t, rt, viewport, "routing")
+	rt.DispatchEvent(updateKey(interaction.KeyEnter))
+	rt.Rebuild(Root(), viewport)
+}
+
 func focusChooserOptionContaining(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect, pattern string) {
 	t.Helper()
 	testharness.FocusChooserOptionContaining(

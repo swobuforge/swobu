@@ -3,14 +3,14 @@ package canonical
 import "testing"
 
 func TestCacheIntentFromAffinityKeyAndRetention_DefaultsWhenUnset(t *testing.T) {
-	intent := CacheIntentFromAffinityKeyAndRetention("", CacheRetentionUnset)
+	intent := NewCacheIntent(CacheIntentParams{})
 	if !intent.IsZero() {
 		t.Fatalf("intent is not zero")
 	}
 }
 
 func TestCacheIntentFromAffinityKeyAndRetention_PreservesConfiguredFields(t *testing.T) {
-	intent := CacheIntentFromAffinityKeyAndRetention("repo", CacheRetention24H)
+	intent := NewCacheIntent(CacheIntentParams{Key: "repo", Retention: CacheRetention24H})
 	if intent.Key() != "repo" {
 		t.Fatalf("key=%q want repo", intent.Key())
 	}

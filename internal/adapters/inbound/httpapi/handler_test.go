@@ -5,6 +5,8 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,12 +15,18 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
+	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
+	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
+	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("X-Request-Id", "req-123")
@@ -30,7 +38,8 @@ func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if capturing.got.Request.Model() == "" {
+	request := testDecodeCapturedRequest(t, capturing.got)
+	if request.Model() == "" {
 		t.Fatal("request was not forwarded")
 	}
 }
@@ -39,17 +48,15 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 	setDefaultLogger, logs := testDebugLogger()
 	defer setDefaultLogger()
 
-	success := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testProviderResponseFromOutput(
-				canonical.NewConversationOutput(
-					"chatcmpl_1",
-					"m",
-					[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
-					"stop",
-				),
+	success := NewHandler(staticRequestIngress{
+		envelope: testProviderIngressFromOutput(
+			canonical.NewConversationOutput(
+				"chatcmpl_1",
+				"m",
+				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+				"stop",
 			),
-		},
+		),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("User-Agent", "Codex/1.0")
@@ -60,8 +67,8 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 		t.Fatalf("success status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	fail := NewHandler(staticRequestHandler{
-		err: canonical.NewBackendError("openai", http.StatusBadGateway, `{"error":"upstream failed"}`, ""),
+	fail := NewHandler(staticRequestIngress{
+		err: canonical.NewBackendError("openai", http.StatusBadGateway, `{"error":"provider failed"}`, ""),
 	})
 	reqFail := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
 	reqFail.Header.Set("User-Agent", "Claude-Code/2.0")
@@ -155,7 +162,7 @@ func TestHandler_RejectsNonGETModelsRequests(t *testing.T) {
 }
 
 func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
-	resp := testProviderResponseFromOutput(
+	resp := testProviderIngressFromOutput(
 		canonical.NewConversationOutput(
 			"chatcmpl_1",
 			"resolved-model",
@@ -163,10 +170,8 @@ func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
 			"stop",
 		),
 	)
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: resp,
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: resp,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}]}`))
 	rec := httptest.NewRecorder()
@@ -184,7 +189,7 @@ func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
 }
 
 func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	var encoded bytes.Buffer
 	gz := gzip.NewWriter(&encoded)
@@ -200,7 +205,7 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed := capturing.got.Request
+	typed := testDecodeCapturedRequest(t, capturing.got)
 	items := typed.Items()
 	if len(items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(items))
@@ -217,7 +222,7 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 }
 
 func TestHandler_RejectsOversizedRequestBody(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	oversized := bytes.Repeat([]byte("a"), int(maxCompressedRequestBodyBytes)+1)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewReader(oversized))
@@ -234,7 +239,7 @@ func TestHandler_RejectsOversizedRequestBody(t *testing.T) {
 }
 
 func TestHandler_RejectsDecodedBodyOverLimit(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 
 	var encoded bytes.Buffer
@@ -257,7 +262,7 @@ func TestHandler_RejectsDecodedBodyOverLimit(t *testing.T) {
 }
 
 func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","prompt_cache_key":"repo-alpha","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},{"type":"function_call","call_id":"call_1","name":"grep","arguments":{"pattern":"TODO"}},{"type":"function_call_output","call_id":"call_1","output":"2 hits"}]}`))
 	rec := httptest.NewRecorder()
@@ -267,7 +272,7 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed := capturing.got.Request
+	typed := testDecodeCapturedRequest(t, capturing.got)
 	if got := typed.PreviousResponseID(); got != "resp_123" {
 		t.Fatalf("previous_response_id = %q, want %q", got, "resp_123")
 	}
@@ -287,7 +292,7 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 }
 
 func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolMode(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tool_choice":"required","input":"continue"}`))
 	rec := httptest.NewRecorder()
@@ -297,14 +302,14 @@ func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolMode(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	typed := capturing.got.Request
+	typed := testDecodeCapturedRequest(t, capturing.got)
 	if got := typed.ToolMode(); got != canonical.ToolModeRequired {
 		t.Fatalf("tool mode = %q, want %q", got, canonical.ToolModeRequired)
 	}
 }
 
 func TestHandler_RejectsResponsesRequestsWithBothContinuationSelectors(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","conversation":"conv_123","input":"continue"}`))
 	rec := httptest.NewRecorder()
@@ -320,7 +325,7 @@ func TestHandler_RejectsResponsesRequestsWithBothContinuationSelectors(t *testin
 }
 
 func TestHandler_RejectsResponsesConversationSelector(t *testing.T) {
-	capturing := &capturingRequestHandler{}
+	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","conversation":"conv_123","input":"continue"}`))
 	rec := httptest.NewRecorder()
@@ -336,7 +341,7 @@ func TestHandler_RejectsResponsesConversationSelector(t *testing.T) {
 }
 
 func TestHandler_RejectsUnsupportedRequestContentEncoding(t *testing.T) {
-	handler := NewHandler(&capturingRequestHandler{})
+	handler := NewHandler(&capturingRequestIngress{})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Encoding", "brotli")
 	rec := httptest.NewRecorder()
@@ -351,8 +356,8 @@ func TestHandler_RejectsUnsupportedRequestContentEncoding(t *testing.T) {
 	}
 }
 
-func TestHandler_RejectsWebSocketIngressWithGuidance(t *testing.T) {
-	handler := NewHandler(&capturingRequestHandler{})
+func TestHandler_RejectsWebSocketClientWithGuidance(t *testing.T) {
+	handler := NewHandler(&capturingRequestIngress{})
 	req := httptest.NewRequest(http.MethodGet, "/c/alpha/chat/completions", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
@@ -372,11 +377,9 @@ func TestHandler_RejectsWebSocketIngressWithGuidance(t *testing.T) {
 	}
 }
 
-func TestHandler_AcceptsResponsesWebSocketIngress(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
-		},
+func TestHandler_AcceptsResponsesWebSocketClient(t *testing.T) {
+	handler := NewHandler(staticRequestIngress{
+		envelope: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -441,10 +444,8 @@ func TestHandler_AcceptsResponsesWebSocketIngress(t *testing.T) {
 }
 
 func TestHandler_ResponsesWebSocketRejectsUnsupportedMessageType(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testStreamingEmptyResponse(),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testStreamingEmptyResponse(),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -479,7 +480,7 @@ func TestHandler_ResponsesWebSocketRejectsUnsupportedMessageType(t *testing.T) {
 }
 
 func TestHandler_RejectsNonPOSTCompatibilityFamilyOperations(t *testing.T) {
-	handler := NewHandler(&capturingRequestHandler{})
+	handler := NewHandler(&capturingRequestIngress{})
 	req := httptest.NewRequest(http.MethodGet, "/c/alpha/responses", nil)
 	rec := httptest.NewRecorder()
 
@@ -492,13 +493,13 @@ func TestHandler_RejectsNonPOSTCompatibilityFamilyOperations(t *testing.T) {
 	if !strings.Contains(body, `"code":"UNSUPPORTED_ENDPOINT"`) {
 		t.Fatalf("body = %q, want UNSUPPORTED_ENDPOINT", body)
 	}
-	if !strings.Contains(body, "protocol family operations require HTTP POST") {
+	if !strings.Contains(body, "protocol family operations require request-post method") {
 		t.Fatalf("body = %q, want POST guidance", body)
 	}
 }
 
 func TestHandler_RejectsUnsupportedAnthropicMessagePartType(t *testing.T) {
-	handler := NewHandler(&capturingRequestHandler{})
+	handler := NewHandler(&capturingRequestIngress{})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc"}}]}]}`))
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
@@ -514,10 +515,8 @@ func TestHandler_RejectsUnsupportedAnthropicMessagePartType(t *testing.T) {
 }
 
 func TestHandler_EncodesToolCallStreamingForResponses(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testStreamingToolResponse("resp_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TO`, `DO"}`}, "completed"),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testStreamingToolResponse("resp_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TO`, `DO"}`}, "completed"),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
 	rec := httptest.NewRecorder()
@@ -540,10 +539,8 @@ func TestHandler_EncodesToolCallStreamingForResponses(t *testing.T) {
 }
 
 func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
 	rec := httptest.NewRecorder()
@@ -575,10 +572,8 @@ func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
 }
 
 func TestHandler_EncodesToolCallStreamingForMessages(t *testing.T) {
-	handler := NewHandler(staticRequestHandler{
-		out: exchange.HandleOutput{
-			Response: testStreamingToolResponse("msg_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TODO"}`}, "tool_use"),
-		},
+	handler := NewHandler(staticRequestIngress{
+		envelope: testStreamingToolResponse("msg_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TODO"}`}, "tool_use"),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -601,46 +596,59 @@ func TestHandler_EncodesToolCallStreamingForMessages(t *testing.T) {
 	}
 }
 
-type capturingRequestHandler struct {
-	got exchange.HandleInput
+type capturingRequestIngress struct {
+	got exchange.RequestInput
 }
 
-func (h *capturingRequestHandler) Handle(_ context.Context, in exchange.HandleInput) (exchange.HandleOutput, error) {
-	h.got = in
-	return exchange.HandleOutput{
-		Response: testProviderResponseFromOutput(
-			canonical.NewConversationOutput(
-				"chatcmpl_1",
-				"m",
-				[]canonical.OutputItem{
-					canonical.NewTextOutputItem("text_0", "ok"),
-				},
-				"stop",
-			),
+func (h *capturingRequestIngress) HandleRequest(_ context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
+	clones, err := replicateRequestInputForTest(in, 3)
+	if err != nil {
+		return exchange.RequestOutput{}, err
+	}
+	h.got = clones[0]
+	if _, _, err := decodeCapturedRequest(clones[1]); err != nil {
+		return exchange.RequestOutput{}, err
+	}
+	out, err := synthesizeRequestOutputFromEnvelope(clones[2], testProviderIngressFromOutput(
+		canonical.NewConversationOutput(
+			"chatcmpl_1",
+			"m",
+			[]canonical.OutputItem{
+				canonical.NewTextOutputItem("text_0", "ok"),
+			},
+			"stop",
 		),
-		Target: exchange.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "", ""),
-	}, nil
+	))
+	if err != nil {
+		return exchange.RequestOutput{}, err
+	}
+	out.Target = exchange.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "", "")
+	return out, nil
 }
 
-type staticRequestHandler struct {
-	out exchange.HandleOutput
-	err error
+type staticRequestIngress struct {
+	out      exchange.RequestOutput
+	err      error
+	envelope canonical.EventReader
 }
 
-func (h staticRequestHandler) Handle(_ context.Context, _ exchange.HandleInput) (exchange.HandleOutput, error) {
+func (h staticRequestIngress) HandleRequest(_ context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
+	if h.envelope != nil {
+		return synthesizeRequestOutputFromEnvelope(in, h.envelope)
+	}
 	return h.out, h.err
 }
 
-func testProviderResponseFromOutput(output canonical.CanonicalOutput) exchange.ProviderResponseStream {
+func testProviderIngressFromOutput(output canonical.CanonicalOutput) canonical.EventReader {
 	envelope, err := canonical.EventReaderFromCanonicalOutput("test_buffered:httpapi", output)
 	if err != nil {
 		panic(err)
 	}
-	return exchange.NewEnvelopeStreamingProviderResponseStream(envelope)
+	return envelope
 }
 
-func testStreamingEmptyResponse() exchange.ProviderResponseStream {
-	return exchange.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(nil))
+func testStreamingEmptyResponse() canonical.EventReader {
+	return canonical.NewSliceEventReader(nil)
 }
 
 func testDebugLogger() (restore func(), out *bytes.Buffer) {
@@ -653,7 +661,7 @@ func testDebugLogger() (restore func(), out *bytes.Buffer) {
 	}, &buf
 }
 
-func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) exchange.ProviderResponseStream {
+func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) canonical.EventReader {
 	events := canonical.EventSequence{
 		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
 		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
@@ -663,10 +671,10 @@ func testStreamingTextResponse(resultID string, model string, itemID string, tex
 		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
 		{ExchangeID: "test_exchange", Seq: 7, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	}
-	return exchange.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(events))
+	return canonical.NewSliceEventReader(events)
 }
 
-func testStreamingToolResponse(resultID string, model string, itemID string, toolUseID string, name string, argDeltas []string, finish string) exchange.ProviderResponseStream {
+func testStreamingToolResponse(resultID string, model string, itemID string, toolUseID string, name string, argDeltas []string, finish string) canonical.EventReader {
 	events := canonical.EventSequence{
 		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
 		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
@@ -682,7 +690,7 @@ func testStreamingToolResponse(resultID string, model string, itemID string, too
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 1, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 2, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	)
-	return exchange.NewEnvelopeStreamingProviderResponseStream(canonical.NewSliceEventReader(events))
+	return canonical.NewSliceEventReader(events)
 }
 
 type modelsCapableHandler struct {
@@ -691,19 +699,189 @@ type modelsCapableHandler struct {
 	gotModelsIn exchange.ListModelsInput
 }
 
-func (h *modelsCapableHandler) Handle(_ context.Context, _ exchange.HandleInput) (exchange.HandleOutput, error) {
-	return exchange.HandleOutput{
-		Response: testProviderResponseFromOutput(
-			canonical.NewConversationOutput(
-				"chatcmpl_1",
-				"m",
-				[]canonical.OutputItem{
-					canonical.NewTextOutputItem("text_0", "ok"),
-				},
-				"stop",
-			),
+func (h *modelsCapableHandler) HandleRequest(_ context.Context, _ exchange.RequestInput) (exchange.RequestOutput, error) {
+	return exchange.RequestOutput{Response: exchange.NewTransportResponseFromDocument(testDocumentFromOutput(
+		canonical.ClientFamilyChatCompletions,
+		canonical.NewConversationOutput(
+			"chatcmpl_1",
+			"m",
+			[]canonical.OutputItem{
+				canonical.NewTextOutputItem("text_0", "ok"),
+			},
+			"stop",
 		),
-	}, nil
+	))}, nil
+}
+
+func synthesizeRequestOutputFromEnvelope(in exchange.RequestInput, envelope canonical.EventReader) (exchange.RequestOutput, error) {
+	request, clientDelivery := mustDecodeCapturedRequest(in)
+	doc, err := buildRequestDocumentForTest(in)
+	if err != nil {
+		return exchange.RequestOutput{}, err
+	}
+	clientFamily := canonical.ClientFamily(doc.Family)
+	if clientDelivery.Mode == delivery.Streaming {
+		stream, err := testResponseStreamEncoderForFamily(clientFamily).EncodeResponseStream(envelope, clientDelivery)
+		if err != nil {
+			return exchange.RequestOutput{}, err
+		}
+		return exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream)}, nil
+	}
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), envelope, canonical.EnvResponse)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return exchange.RequestOutput{}, canonical.InternalError("buffered provider response envelope ended before response closure")
+		}
+		return exchange.RequestOutput{}, err
+	}
+	output, err := closed.ProjectResponse()
+	if err != nil {
+		return exchange.RequestOutput{}, err
+	}
+	_ = request
+	responseDoc := testDocumentFromOutput(clientFamily, output)
+	return exchange.RequestOutput{Response: exchange.NewTransportResponseFromDocument(responseDoc)}, nil
+}
+
+func testDecodeCapturedRequest(t *testing.T, in exchange.RequestInput) canonical.CanonicalRequest {
+	t.Helper()
+	request, _, err := decodeCapturedRequest(in)
+	if err != nil {
+		t.Fatalf("decode captured request: %v", err)
+	}
+	return request
+}
+
+func mustDecodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest, delivery.Delivery) {
+	request, clientDelivery, err := decodeCapturedRequest(in)
+	if err != nil {
+		panic(err)
+	}
+	return request, clientDelivery
+}
+
+func decodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest, delivery.Delivery, error) {
+	doc, err := buildRequestDocumentForTest(in)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	switch canonical.ClientFamily(doc.Family) {
+	case canonical.ClientFamilyChatCompletions:
+		request, clientDelivery, err := chatcompletions.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+	case canonical.ClientFamilyResponses:
+		request, clientDelivery, err := responses.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+	case canonical.ClientFamilyCompletions:
+		request, clientDelivery, err := completions.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+	case canonical.ClientFamilyMessages:
+		request, clientDelivery, err := messages.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+	default:
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), errors.New("unsupported captured request family")
+	}
+}
+
+func buildRequestDocumentForTest(in exchange.RequestInput) (carrier.WireDocument, error) {
+	raw, err := io.ReadAll(in.Request.Body)
+	if err != nil {
+		return carrier.WireDocument{}, err
+	}
+	_ = in.Request.Body.Close()
+	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
+	if err != nil {
+		return carrier.WireDocument{}, err
+	}
+	family := in.ClientFamily
+	if family == "" {
+		hasMessagesProtocolMarker := strings.TrimSpace(in.Request.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
+		family, err = canonical.InferClientFamily(in.Request.Method, normalizedPath, hasMessagesProtocolMarker)
+		if err != nil {
+			return carrier.WireDocument{}, err
+		}
+	}
+	return carrier.NewWireDocument(carrier.StageClientRequestIn, family, "application/json", in.Request.Header, raw, carrier.Meta{}), nil
+}
+
+func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]exchange.RequestInput, error) {
+	raw, err := io.ReadAll(in.Request.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = in.Request.Body.Close()
+	header := in.Request.Header.Clone()
+	out := make([]exchange.RequestInput, 0, copies)
+	for range copies {
+		out = append(out, exchange.RequestInput{
+			EndpointName:    in.EndpointName,
+			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, raw),
+			ClientFamily:    in.ClientFamily,
+			ResponseFraming: in.ResponseFraming,
+		})
+	}
+	return out, nil
+}
+
+func normalizeStreamingDeliveryForTest(clientDelivery delivery.Delivery, framing delivery.Framing) delivery.Delivery {
+	if clientDelivery.Mode != delivery.Streaming || clientDelivery.Framing != delivery.FramingNone || framing == delivery.FramingNone {
+		return clientDelivery
+	}
+	return delivery.StreamingDelivery(framing)
+}
+
+func testDocumentFromOutput(family canonical.ClientFamily, output canonical.CanonicalOutput) carrier.WireDocument {
+	doc, err := testResponseDocumentEncoderForFamily(family).EncodeResponseDocument(output)
+	if err != nil {
+		panic(err)
+	}
+	return doc
+}
+
+func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) interface {
+	EncodeResponseDocument(canonical.CanonicalOutput) (carrier.WireDocument, error)
+} {
+	switch family {
+	case canonical.ClientFamilyChatCompletions:
+		return chatcompletions.ResponseDocumentEncoder{}
+	case canonical.ClientFamilyResponses:
+		return responses.ResponseDocumentEncoder{}
+	case canonical.ClientFamilyCompletions:
+		return completions.ResponseDocumentEncoder{}
+	case canonical.ClientFamilyMessages:
+		return messages.ResponseDocumentEncoder{}
+	default:
+		panic("test response document encoder missing for family " + string(family))
+	}
+}
+
+func testResponseStreamEncoderForFamily(family canonical.ClientFamily) interface {
+	EncodeResponseStream(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
+} {
+	switch family {
+	case canonical.ClientFamilyChatCompletions:
+		return chatcompletions.ResponseStreamEncoder{}
+	case canonical.ClientFamilyResponses:
+		return responses.ResponseStreamEncoder{}
+	case canonical.ClientFamilyCompletions:
+		return completions.ResponseStreamEncoder{}
+	case canonical.ClientFamilyMessages:
+		return messages.ResponseStreamEncoder{}
+	default:
+		panic("test response stream encoder missing for family " + string(family))
+	}
 }
 
 func (h *modelsCapableHandler) ListModels(_ context.Context, in exchange.ListModelsInput) (exchange.ListModelsOutput, error) {

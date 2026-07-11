@@ -4,11 +4,27 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/exchange"
 )
+
+func RunClientDisplayCommand(clientID, baseURL, modelID string) (string, bool) {
+	spec, ok := clientRunSpecForID(clientID, baseURL, modelID)
+	if !ok {
+		return "", false
+	}
+	command := clientprofile.RunCommandSpec{
+		ClientID: spec.clientID,
+		Binary:   spec.binary,
+		Args:     append([]string(nil), spec.args...),
+		Env:      cloneStringMap(spec.env),
+	}
+	return clientprofile.RenderRunCommand(command), true
+}
 
 func assertNoTestHarnessArtifacts(t *testing.T, value string) {
 	t.Helper()
@@ -104,7 +120,7 @@ func TestClientRunSpecForID(t *testing.T) {
 		t.Fatalf("OPENAI_API_KEY=%q", got)
 	}
 	joinedAiderArgs := strings.Join(spec.args, " ")
-	if got := joinedAiderArgs; got != "--model openai/"+exchange.PublicModelIDSwobu {
+	if got := joinedAiderArgs; got != "--no-show-model-warnings --no-browser --model openai/"+exchange.PublicModelIDSwobu {
 		t.Fatalf("aider args=%q", got)
 	}
 	if strings.Contains(joinedAiderArgs, "hermetic-aider-token") {
@@ -114,7 +130,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `-c model="`+exchange.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
+	if got := strings.Join(codex.args, " "); got != `--dangerously-bypass-approvals-and-sandbox -c model="`+exchange.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
 		t.Fatalf("codex args=%q", got)
 	}
 	if got := codex.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
@@ -140,10 +156,15 @@ func TestClientRunSpecForID(t *testing.T) {
 	if got := opencode.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
 		t.Fatalf("opencode env OPENAI_API_KEY=%q", got)
 	}
-	if got := opencode.env["OPENCODE_CONFIG"]; got != "./opencode.json" {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	opencodeConfigPath := filepath.Join(cwd, "opencode.json")
+	if got := opencode.env["OPENCODE_CONFIG"]; got != opencodeConfigPath {
 		t.Fatalf("opencode env OPENCODE_CONFIG=%q", got)
 	}
-	if got := opencode.env["OPENCODE_CONFIG_CONTENT"]; !strings.Contains(got, `"model":"swobu/primary"`) {
+	if got := opencode.env["OPENCODE_CONFIG_CONTENT"]; !strings.Contains(got, `"model":"swobu/primary"`) || !strings.Contains(got, `"apiKey":"{env:OPENAI_API_KEY}"`) {
 		t.Fatalf("opencode env OPENCODE_CONFIG_CONTENT=%q", got)
 	}
 	if opencode.prepare == nil {
@@ -166,7 +187,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("aider command missing")
 	}
-	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 OPENAI_API_KEY=swobu-placeholder aider --model openai/" + exchange.PublicModelIDSwobu; cmd != want {
+	if want := "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1 OPENAI_API_KEY=swobu-placeholder aider --no-show-model-warnings --no-browser --model openai/" + exchange.PublicModelIDSwobu; cmd != want {
 		t.Fatalf("aider command=%q want=%q", cmd, want)
 	}
 	assertNoTestHarnessArtifacts(t, cmd)
@@ -174,7 +195,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `OPENAI_API_KEY=swobu-placeholder codex -c 'model="` + exchange.PublicModelIDSwobu + `"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
+	if want := `OPENAI_API_KEY=swobu-placeholder codex --dangerously-bypass-approvals-and-sandbox -c 'model="` + exchange.PublicModelIDSwobu + `"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -190,8 +211,13 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode command missing")
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	opencodeConfigPath := filepath.Join(cwd, "opencode.json")
 	if !strings.Contains(opencode, `OPENAI_API_KEY=swobu-placeholder`) ||
-		!strings.Contains(opencode, `OPENCODE_CONFIG=./opencode.json`) ||
+		!strings.Contains(opencode, `OPENCODE_CONFIG=`+opencodeConfigPath) ||
 		!strings.Contains(opencode, `OPENCODE_CONFIG_CONTENT=`) ||
 		!strings.HasSuffix(opencode, " opencode") {
 		t.Fatalf("opencode command=%q", opencode)

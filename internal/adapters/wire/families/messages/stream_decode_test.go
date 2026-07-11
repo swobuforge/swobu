@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testing.T) {
 	t.Parallel()
 
-	codec := ClientStreamEncoder{}
+	codec := ResponseStreamEncoder{}
 	events := canonical.EventSequence{
 		{
 			ExchangeID: "ex_1",
@@ -70,9 +71,9 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 		},
 	}
 
-	stream, err := codec.EncodeClientStream(canonical.NewSliceEventReader(events))
+	stream, err := codec.EncodeResponseStream(canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
-		t.Fatalf("EncodeClientStream error: %v", err)
+		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
 	raw, err := io.ReadAll(carrier.ReadCloserFromFrameReader(stream.Frames))
 	if err != nil {

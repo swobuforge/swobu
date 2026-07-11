@@ -13,20 +13,20 @@ assert:
   no_loss_allowed: false
   no_unreported_loss: true
   expected_stage_order:
-    - client_http_in
-    - client_wire_in
-    - semantic_request
-    - provider_wire_out
-    - provider_http_out
-    - provider_http_in
-    - provider_wire_in
-    - semantic_events
-    - client_wire_out
-    - client_http_out
+    - client_request.transport_in
+    - client_request.wire_in
+    - semantic.request
+    - upstream_request.wire_out
+    - upstream_request.transport_out
+    - upstream_response.transport_in
+    - upstream_response.wire_in
+    - semantic.response_events
+    - client_response.wire_out
+    - client_response.transport_out
   expected_stage_applied:
-    provider_wire_out: []
-    provider_wire_in: []
-    semantic_events: []
+    upstream_request.wire_out: []
+    upstream_response.wire_in: []
+    semantic.response_events: []
   expected_mutated_stages: []
   max_notices: 1
   max_evidence: 1

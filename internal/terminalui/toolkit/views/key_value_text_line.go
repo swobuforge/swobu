@@ -15,12 +15,3 @@ func FormatKeyValueTextLine(key string, value string, keyWidth int) string {
 	}
 	return strings.TrimRight(line, " ")
 }
-
-// RenderKeyValueTextLine formats and clips a key/value line to width.
-func RenderKeyValueTextLine(width int, key string, value string, keyWidth int) string {
-	if width <= 0 {
-		return ""
-	}
-	line := FormatKeyValueTextLine(key, value, keyWidth)
-	return PadRight(TrimToWidth(line, width), width)
-}

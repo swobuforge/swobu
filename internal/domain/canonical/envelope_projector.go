@@ -2,7 +2,6 @@ package canonical
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 )
@@ -79,6 +78,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputData, error) {
 		return nil, fmt.Errorf("closed envelope is not a response")
 	}
 	itemsByID := map[EnvelopeID]*CanonicalItem{}
+	toolArgsByID := map[EnvelopeID]string{}
 	orderedIDs := make([]EnvelopeID, 0)
 	usage := NewUnknownTokenUsage()
 	finish := ""
@@ -86,7 +86,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputData, error) {
 	model := ""
 
 	for _, ev := range e.Events {
-		responseProjectionApplyEvent(ev, itemsByID, &orderedIDs, &usage, &finish, &resultID, &model)
+		responseProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &usage, &finish, &resultID, &model)
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -94,14 +94,9 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputData, error) {
 		if item == nil {
 			continue
 		}
-		if item.Kind == ItemKindToolUse && item.Input != nil {
-			raw, _ := item.Input["$arguments_delta"].(string)
-			if raw != "" {
-				decoded := map[string]any{}
-				// Keep raw arguments if decode fails; do not invent semantics.
-				if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
-					item.Input = decoded
-				}
+		if item.Kind == ItemKindToolUse {
+			if raw := toolArgsByID[id]; raw != "" {
+				item.Input = NewToolArgumentsObject(raw)
 			}
 		}
 		items = append(items, item.Clone())
@@ -113,6 +108,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputData, error) {
 func responseProjectionApplyEvent(
 	ev Event,
 	itemsByID map[EnvelopeID]*CanonicalItem,
+	toolArgsByID map[EnvelopeID]string,
 	orderedIDs *[]EnvelopeID,
 	usage *TokenUsage,
 	finish *string,
@@ -129,9 +125,8 @@ func responseProjectionApplyEvent(
 		}
 	case EventArgsDelta:
 		payload, _ := ev.Payload.(ArgsDeltaPayload)
-		if item, ok := itemsByID[ev.EnvID]; ok {
-			raw, _ := item.Input["$arguments_delta"].(string)
-			item.Input["$arguments_delta"] = raw + payload.Args
+		if _, ok := itemsByID[ev.EnvID]; ok {
+			toolArgsByID[ev.EnvID] = toolArgsByID[ev.EnvID] + payload.Args
 		}
 	case EventUsage:
 		payload, ok := ev.Payload.(UsagePayload)
@@ -170,7 +165,7 @@ func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*C
 		if toolUseID == "" {
 			toolUseID = string(ev.EnvID)
 		}
-		item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, map[string]any{})
+		item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, EmptyToolArguments())
 		item.Author = ItemAuthorAssistant
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
@@ -184,12 +179,13 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		return CanonicalRequest{}, fmt.Errorf("closed envelope is not a request")
 	}
 	var (
-		model      string
-		itemsByID  = map[EnvelopeID]*CanonicalItem{}
-		orderedIDs = make([]EnvelopeID, 0)
+		model        string
+		itemsByID    = map[EnvelopeID]*CanonicalItem{}
+		toolArgsByID = map[EnvelopeID]string{}
+		orderedIDs   = make([]EnvelopeID, 0)
 	)
 	for _, ev := range e.Events {
-		requestProjectionApplyEvent(ev, itemsByID, &orderedIDs, &model)
+		requestProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &model)
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -197,16 +193,9 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		if item == nil {
 			continue
 		}
-		if item.Input != nil {
-			if raw, _ := item.Input["$arguments_delta"].(string); raw != "" {
-				decoded := map[string]any{}
-				if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
-					item.Input = decoded
-					item.Kind = ItemKindToolUse
-				}
-				// Remove folding scratch key from projected snapshot.
-				delete(item.Input, "$arguments_delta")
-			}
+		if raw := toolArgsByID[id]; raw != "" {
+			item.Input = NewToolArgumentsObject(raw)
+			item.Kind = ItemKindToolUse
 		}
 		items = append(items, item.Clone())
 	}
@@ -216,6 +205,7 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 func requestProjectionApplyEvent(
 	ev Event,
 	itemsByID map[EnvelopeID]*CanonicalItem,
+	toolArgsByID map[EnvelopeID]string,
 	orderedIDs *[]EnvelopeID,
 	model *string,
 ) {
@@ -236,12 +226,8 @@ func requestProjectionApplyEvent(
 		}
 	case EventArgsDelta:
 		payload, _ := ev.Payload.(ArgsDeltaPayload)
-		if item, ok := itemsByID[ev.EnvID]; ok {
-			if item.Input == nil {
-				item.Input = map[string]any{}
-			}
-			raw, _ := item.Input["$arguments_delta"].(string)
-			item.Input["$arguments_delta"] = raw + payload.Args
+		if _, ok := itemsByID[ev.EnvID]; ok {
+			toolArgsByID[ev.EnvID] = toolArgsByID[ev.EnvID] + payload.Args
 		}
 	default:
 		// ignored by request projection
