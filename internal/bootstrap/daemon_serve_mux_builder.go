@@ -32,7 +32,7 @@ func buildDaemonServeMux(
 		newExchangeProviderIngressResolverAdapter(providers),
 		exchangeruntime.NewResolver(),
 		exchange.RuntimePoliciesSpec{
-			DeliverySelector: exchange.FixedDeliverySelector{},
+			DeliverySelector:  exchange.FixedDeliverySelector{},
 			ContinuationStore: continuation,
 		},
 	)

@@ -45,4 +45,3 @@ func TestPortLinkAndResultCarryTypedValueAndEffects(t *testing.T) {
 		t.Fatalf("effect kind = %q, want %q", got, effect.KindObservation)
 	}
 }
-

@@ -167,9 +167,11 @@ type silentHeaderMutationDocTransform struct {
 	id string
 }
 
-func (t silentHeaderMutationDocTransform) ID() string                               { return t.id }
-func (t silentHeaderMutationDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
-func (t silentHeaderMutationDocTransform) Capabilities() MiddlewareCapabilities     { return MiddlewareCapabilities{} }
+func (t silentHeaderMutationDocTransform) ID() string   { return t.id }
+func (t silentHeaderMutationDocTransform) Stage() Stage { return StageRequestDocumentOut }
+func (t silentHeaderMutationDocTransform) Capabilities() MiddlewareCapabilities {
+	return MiddlewareCapabilities{}
+}
 func (t silentHeaderMutationDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t silentHeaderMutationDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Outcome, error) {
 	out := in
@@ -182,9 +184,11 @@ type silentMetaMutationDocTransform struct {
 	id string
 }
 
-func (t silentMetaMutationDocTransform) ID() string                               { return t.id }
-func (t silentMetaMutationDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
-func (t silentMetaMutationDocTransform) Capabilities() MiddlewareCapabilities     { return MiddlewareCapabilities{} }
+func (t silentMetaMutationDocTransform) ID() string   { return t.id }
+func (t silentMetaMutationDocTransform) Stage() Stage { return StageRequestDocumentOut }
+func (t silentMetaMutationDocTransform) Capabilities() MiddlewareCapabilities {
+	return MiddlewareCapabilities{}
+}
 func (t silentMetaMutationDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t silentMetaMutationDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Outcome, error) {
 	out := in
@@ -192,9 +196,11 @@ func (t silentMetaMutationDocTransform) Apply(_ Context, in carrier.WireDocument
 	return out, Outcome{}, nil
 }
 
-func (t silentMutationDocTransform) ID() string                               { return t.id }
-func (t silentMutationDocTransform) Stage() Stage                             { return StageRequestDocumentOut }
-func (t silentMutationDocTransform) Capabilities() MiddlewareCapabilities     { return MiddlewareCapabilities{} }
+func (t silentMutationDocTransform) ID() string   { return t.id }
+func (t silentMutationDocTransform) Stage() Stage { return StageRequestDocumentOut }
+func (t silentMutationDocTransform) Capabilities() MiddlewareCapabilities {
+	return MiddlewareCapabilities{}
+}
 func (t silentMutationDocTransform) Match(Context, carrier.WireDocument) bool { return true }
 func (t silentMutationDocTransform) Apply(_ Context, in carrier.WireDocument) (carrier.WireDocument, Outcome, error) {
 	out := in
@@ -206,9 +212,11 @@ type undetailedMutatingStreamTransform struct {
 	id string
 }
 
-func (t undetailedMutatingStreamTransform) ID() string                                { return t.id }
-func (t undetailedMutatingStreamTransform) Stage() Stage                              { return StageSemanticEvents }
-func (t undetailedMutatingStreamTransform) Capabilities() MiddlewareCapabilities      { return MiddlewareCapabilities{} }
+func (t undetailedMutatingStreamTransform) ID() string   { return t.id }
+func (t undetailedMutatingStreamTransform) Stage() Stage { return StageSemanticEvents }
+func (t undetailedMutatingStreamTransform) Capabilities() MiddlewareCapabilities {
+	return MiddlewareCapabilities{}
+}
 func (t undetailedMutatingStreamTransform) Match(Context, canonical.EventReader) bool { return true }
 func (t undetailedMutatingStreamTransform) Wrap(_ Context, r canonical.EventReader) (canonical.EventReader, Outcome, error) {
 	return r, Outcome{Mutated: true}, nil
