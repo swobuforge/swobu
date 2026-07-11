@@ -5,6 +5,7 @@ import "encoding/json"
 type messagesRequestDTO struct {
 	Model    string               `json:"model"`
 	Messages []messagesMessageDTO `json:"messages"`
+	Tools    []messagesToolDTO    `json:"tools,omitempty"`
 }
 
 type messagesMessageDTO struct {
@@ -25,6 +26,12 @@ type messagesContentPartDTO struct {
 type messagesTextPartDTO struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+type messagesToolDTO struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema"`
 }
 
 type messagesResponseDTO struct {
@@ -55,11 +62,31 @@ type messagesResponsePartDTO struct {
 type messagesStartEventDTO struct {
 	Type    string                  `json:"type"`
 	Message messagesStartMessageDTO `json:"message"`
+	Usage   messagesUsageDTO        `json:"usage"`
 }
 
 type messagesStartMessageDTO struct {
-	ID   string `json:"id"`
-	Role string `json:"role"`
+	ID           string                    `json:"id"`
+	Type         string                    `json:"type"`
+	Role         string                    `json:"role"`
+	Content      []messagesResponsePartDTO `json:"content"`
+	StopReason   *string                   `json:"stop_reason"`
+	StopSequence *string                   `json:"stop_sequence"`
+}
+
+type messagesDeltaEventDTO struct {
+	Type  string                `json:"type"`
+	Delta messagesDeltaBodyDTO  `json:"delta"`
+	Usage messagesDeltaUsageDTO `json:"usage"`
+}
+
+type messagesDeltaBodyDTO struct {
+	StopReason   string  `json:"stop_reason"`
+	StopSequence *string `json:"stop_sequence"`
+}
+
+type messagesDeltaUsageDTO struct {
+	OutputTokens int `json:"output_tokens"`
 }
 
 type messagesContentBlockStartDTO struct {

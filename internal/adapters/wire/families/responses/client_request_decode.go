@@ -38,16 +38,21 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	if inputText == "" && len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseID) == "" { // swobu:io-string source=boundary
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request is missing required fields")
 	}
-	toolMode, err := DecodeResponsesToolMode(dto.ToolChoice)
+	tools, err := decodeResponsesTools(dto.Tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	toolPolicy, err := DecodeResponsesToolPolicy(dto.ToolChoice, tools)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:              strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		InputText:          inputText,
-		Items:              conversation,
-		ToolMode:           toolMode,
-		PreviousResponseID: strings.TrimSpace(dto.PreviousResponseID), // swobu:io-string source=boundary
+		Model:      strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		InputText:  inputText,
+		Items:      conversation,
+		Tools:      tools,
+		ToolPolicy: toolPolicy,
+		Turn:       canonical.NewTurnRef(dto.PreviousResponseID), // swobu:io-string source=boundary
 	})
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {

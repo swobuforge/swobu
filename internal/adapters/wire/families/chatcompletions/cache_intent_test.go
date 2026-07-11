@@ -12,8 +12,11 @@ import (
 
 func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:       "gpt-4o-mini",
-		Items:       []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model: "gpt-4o-mini",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("tool_0", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`)),
+		},
 		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention24H}),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -31,16 +34,23 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	if _, ok := body["prompt_cache_retention"]; ok {
 		t.Fatalf("prompt_cache_retention must be provider transform concern")
 	}
+	if _, ok := body["tools"]; ok {
+		t.Fatalf("tools must stay out of the provider request body")
+	}
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := ClientRequestDecoder{}
-	req := []byte(`{"model":"gpt-4o-mini","prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
+	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"get_weather","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
 	if !got.CacheIntent().IsZero() {
 		t.Fatalf("cache intent=%+v want zero", got.CacheIntent())
+	}
+	tools := got.Tools()
+	if len(tools) != 1 || tools[0].ToolName() != "get_weather" {
+		t.Fatalf("tools = %#v", tools)
 	}
 }

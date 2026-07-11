@@ -2,9 +2,11 @@ package responses
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
+	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -17,14 +19,11 @@ type EncodeOptions struct {
 }
 
 type inputMessageItem struct {
-	Type    string         `json:"type"`
-	Role    string         `json:"role"`
-	Content []inputTextRef `json:"content"`
-}
-
-type inputTextRef struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type    string `json:"type"`
+	ID      string `json:"id,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type functionCallItem struct {
@@ -66,10 +65,12 @@ func encodeCarrierWithOptions(req canonical.CanonicalRequest, d delivery.Deliver
 	if trimmed := strings.TrimSpace(options.Instructions); trimmed != "" { // swobu:io-string source=boundary
 		payload["instructions"] = trimmed
 	}
-	if choice := encodeToolChoice(req.ToolMode()); choice != nil {
+	if choice, err := encodeToolChoice(req.ToolPolicy(), req.Tools()); err != nil {
+		return carrier.WireDocument{}, err
+	} else if choice != nil {
 		payload["tool_choice"] = choice
 	}
-	if prev := req.PreviousResponseID(); prev != "" {
+	if prev, ok := req.Turn().PreviousID(); ok {
 		payload["previous_response_id"] = prev
 	}
 	if options.Store != nil {
@@ -95,7 +96,10 @@ func encodeCarrierWithOptions(req canonical.CanonicalRequest, d delivery.Deliver
 
 func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, d delivery.Delivery) {
 	thread := req.Items()
-	lastTurn := thread
+	encodedItems := thread
+	if !req.Turn().IsZero() {
+		encodedItems = canonical.CurrentTurnDelta(thread)
+	}
 	inputType := "nil"
 	if input != nil {
 		switch input.(type) {
@@ -111,11 +115,11 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, d delive
 		"component", "protocol.responses",
 		"event", "outbound_request_shape",
 		"streaming", d.Mode == delivery.Streaming,
-		"has_previous_response_id", strings.TrimSpace(req.PreviousResponseID()) != "", // swobu:io-string source=boundary
+		"has_previous_response_id", !req.Turn().IsZero(), // swobu:io-string source=boundary
 		"thread_item_count", len(thread),
-		"last_turn_item_count", len(lastTurn),
+		"encoded_item_count", len(encodedItems),
 		"thread_tail_role", responsesTailRole(thread),
-		"last_turn_tail_role", responsesTailRole(lastTurn),
+		"encoded_tail_role", responsesTailRole(encodedItems),
 		"input_type", inputType,
 	)
 }
@@ -134,30 +138,128 @@ func responsesTailRole(items []canonical.CanonicalItem) string {
 	return "user"
 }
 
-func encodeToolChoice(mode canonical.ToolMode) any {
-	switch mode {
-	case canonical.ToolModeAuto:
-		return "auto"
-	case canonical.ToolModeRequired:
-		return "required"
+func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl) (any, error) {
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	switch policy.Mode {
+	case canonical.ToolPolicyNone:
+		return nil, nil
+	case canonical.ToolPolicyAuto:
+		return "auto", nil
+	case canonical.ToolPolicyRequired:
+		return "required", nil
+	case canonical.ToolPolicySpecific:
+		specific, ok := policy.SpecificID()
+		if !ok {
+			return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
+		}
+		name, err := resolveToolChoiceSpecificName(tools, specific)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"type": "function",
+			"name": name,
+		}, nil
 	default:
-		return nil
+		return nil, canonical.BadRequest("response request tool_choice is invalid")
 	}
 }
 
-func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any, error) {
-	// Native continuation-only calls should rely on previous_response_id without
-	// replaying anchor thread input. Replaying can end with assistant output and
-	// violate backend prefill constraints.
-	if strings.TrimSpace(req.PreviousResponseID()) != "" && !hasContinuationDelta(req.Items()) { // swobu:io-string source=boundary
+func resolveToolChoiceSpecificName(tools []canonical.ToolDecl, id canonical.SemanticToolID) (string, error) {
+	if id.IsZero() {
+		return "", canonical.BadRequest("response request tool_choice specific requires a tool id")
+	}
+	var (
+		name    string
+		matched bool
+	)
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		decl, ok := tool.(canonical.FunctionToolDecl)
+		if !ok {
+			if ptr, ok := tool.(*canonical.FunctionToolDecl); ok {
+				decl = *ptr
+			} else {
+				continue
+			}
+		}
+		if decl.ToolID() != id {
+			continue
+		}
+		toolName := strings.TrimSpace(decl.ToolName()) // swobu:io-string source=boundary
+		if toolName == "" {
+			return "", canonical.BadRequest("response request tool_choice specific tool requires a name")
+		}
+		if matched && name != toolName {
+			return "", canonical.BadRequest("response request tool_choice specific tool is ambiguous")
+		}
+		name = toolName
+		matched = true
+	}
+	if !matched {
+		return "", canonical.BadRequest("response request tool_choice references an undeclared tool")
+	}
+	return name, nil
+}
+
+func decodeResponsesTools(tools []responsesToolDefinitionDTO) ([]canonical.ToolDecl, error) {
+	if len(tools) == 0 {
 		return nil, nil
 	}
+	out := make([]canonical.ToolDecl, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "" && tool.Type != "function" {
+			return nil, canonical.BadRequest("responses request contains an unsupported tool type")
+		}
+		schema, err := responsesToolParametersFromWire(tool.Parameters)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
+		if name == "" {
+			return nil, canonical.BadRequest("responses request tool declarations require a name")
+		}
+		out = append(out, canonical.NewFunctionToolDecl(name, name, tool.Description, schema))
+	}
+	return out, nil
+}
+
+func responsesToolParametersFromWire(raw json.RawMessage) (canonical.ToolSchema, error) {
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
+	if trimmed == "" || trimmed == "null" {
+		return canonical.ToolSchema{}, canonical.BadRequest("responses request tool declarations require parameters")
+	}
+	obj, err := sse.DecodeJSONObject(json.RawMessage(trimmed), "responses request tool declaration parameters are invalid")
+	if err != nil {
+		return canonical.ToolSchema{}, err
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return canonical.ToolSchema{}, canonical.InternalError("responses request tool declarations could not be decoded")
+	}
+	return canonical.NewToolSchemaObject(string(normalized)), nil
+}
+
+func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any, error) {
+	items := req.Items()
+	if !req.Turn().IsZero() {
+		items = canonical.CurrentTurnDelta(items)
+		// Native continuation-only calls should rely on previous_response_id without
+		// replaying anchor thread input. Replaying can end with assistant output and
+		// violate backend prefill constraints.
+		if !hasContinuationDelta(items) { // swobu:io-string source=boundary
+			return nil, nil
+		}
+	}
 	if !forceStructuredInput {
-		if input, ok, err := encodeSimpleInput(req); ok || err != nil {
+		if input, ok, err := encodeSimpleInput(items); ok || err != nil {
 			return input, err
 		}
 	}
-	items := req.Items()
 	switch len(items) {
 	case 0:
 		return nil, nil
@@ -166,18 +268,17 @@ func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any
 	}
 }
 
-func encodeSimpleInput(req canonical.CanonicalRequest) (any, bool, error) {
-	messages := req.Items()
-	if len(messages) == 0 {
+func encodeSimpleInput(items []canonical.CanonicalItem) (any, bool, error) {
+	if len(items) == 0 {
 		return nil, false, nil
 	}
-	if len(messages) != 1 {
+	if len(items) != 1 {
 		return nil, false, nil
 	}
-	if messages[0].Author != "" && messages[0].Author != canonical.ItemAuthorUser {
+	if items[0].Author != "" && items[0].Author != canonical.ItemAuthorUser {
 		return nil, false, nil
 	}
-	text, ok := textOnlyItem(messages[0])
+	text, ok := textOnlyItem(items[0])
 	if !ok {
 		return nil, false, nil
 	}
@@ -203,23 +304,26 @@ func hasContinuationDelta(items []canonical.CanonicalItem) bool {
 func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	for i := 0; i < len(items); {
+		start := i
 		current := items[i]
 		switch current.Kind {
 		case canonical.ItemKindText:
 			role := roleForResponsesItem(current)
-			content := make([]inputTextRef, 0, 1)
+			var content strings.Builder
 			for i < len(items) && items[i].Kind == canonical.ItemKindText && roleForResponsesItem(items[i]) == role {
-				content = append(content, inputTextRef{
-					Type: contentPartTypeForRole(role),
-					Text: items[i].Text,
-				})
+				content.WriteString(items[i].Text)
 				i++
 			}
-			encoded = append(encoded, inputMessageItem{
+			item := inputMessageItem{
 				Type:    "message",
 				Role:    role,
-				Content: content,
-			})
+				Content: content.String(),
+			}
+			if role == "assistant" {
+				item.ID = sse.FallbackID(current.ItemID, fmt.Sprintf("msg_swobu_%d", start))
+				item.Status = "completed"
+			}
+			encoded = append(encoded, item)
 		case canonical.ItemKindToolUse:
 			encoded = append(encoded, functionCallItem{
 				Type:      "function_call",
@@ -243,13 +347,6 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 		}
 	}
 	return encoded, nil
-}
-
-func contentPartTypeForRole(role string) string {
-	if role == "assistant" {
-		return "output_text"
-	}
-	return "input_text"
 }
 
 func roleForResponsesItem(item canonical.CanonicalItem) string {

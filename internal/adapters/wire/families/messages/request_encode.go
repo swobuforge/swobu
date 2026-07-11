@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -40,6 +41,11 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 		"model":      req.Model(),
 		"messages":   wireMessages,
 		"max_tokens": defaultMessagesMaxTokens,
+	}
+	if wireTools, err := encodeMessagesTools(req.Tools()); err != nil {
+		return carrier.WireDocument{}, err
+	} else if len(wireTools) > 0 {
+		payload["tools"] = wireTools
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
@@ -111,6 +117,88 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 		})
 	}
 	return out, nil
+}
+
+func encodeMessagesTools(tools []canonical.ToolDecl) ([]messagesToolDTO, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	out := make([]messagesToolDTO, 0, len(tools))
+	for _, tool := range tools {
+		decl, ok := tool.(canonical.FunctionToolDecl)
+		if !ok {
+			if ptr, ok := tool.(*canonical.FunctionToolDecl); ok {
+				decl = *ptr
+			} else {
+				return nil, canonical.UnsupportedOperation("messages protocol only supports function tool declarations")
+			}
+		}
+		schema, err := messagesToolSchema(decl.ToolInputSchema())
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(decl.ToolName()) // swobu:io-string source=boundary
+		if name == "" {
+			return nil, canonical.BadRequest("messages protocol tool declarations require a name")
+		}
+		out = append(out, messagesToolDTO{
+			Name:        name,
+			Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=boundary
+			InputSchema: schema,
+		})
+	}
+	return out, nil
+}
+
+func decodeMessagesTools(tools []messagesToolDTO) ([]canonical.ToolDecl, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	out := make([]canonical.ToolDecl, 0, len(tools))
+	for _, tool := range tools {
+		schema, err := messagesToolSchemaFromWire(tool.InputSchema)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
+		if name == "" {
+			return nil, canonical.BadRequest("messages request tool declarations require a name")
+		}
+		out = append(out, canonical.NewFunctionToolDecl(name, name, tool.Description, schema))
+	}
+	return out, nil
+}
+
+func messagesToolSchema(schema canonical.ToolSchema) (json.RawMessage, error) {
+	raw := strings.TrimSpace(schema.RawObject()) // swobu:io-string source=domain
+	if raw == "" {
+		return nil, canonical.BadRequest("messages protocol tool declarations require input_schema")
+	}
+	obj, err := sse.DecodeJSONObject(json.RawMessage(raw), "messages protocol tool declaration input_schema is invalid")
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return nil, canonical.InternalError("messages protocol tool declarations could not be encoded")
+	}
+	return json.RawMessage(normalized), nil
+}
+
+func messagesToolSchemaFromWire(raw json.RawMessage) (canonical.ToolSchema, error) {
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
+	if trimmed == "" || trimmed == "null" {
+		return canonical.ToolSchema{}, canonical.BadRequest("messages request tool declarations require input_schema")
+	}
+	obj, err := sse.DecodeJSONObject(json.RawMessage(trimmed), "messages request tool declaration input_schema is invalid")
+	if err != nil {
+		return canonical.ToolSchema{}, err
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return canonical.ToolSchema{}, canonical.InternalError("messages request tool declarations could not be decoded")
+	}
+	return canonical.NewToolSchemaObject(string(normalized)), nil
 }
 
 func roleForMessagesItem(item canonical.CanonicalItem) string {

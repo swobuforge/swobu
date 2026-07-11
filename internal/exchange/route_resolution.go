@@ -29,6 +29,7 @@ type RouteResolutionOutput struct {
 type ExchangeRouteResolver struct {
 	DeliverySelector DeliverySelector
 	Observations     observation.Store
+	Continuation     canonical.ContinuationRuntime
 }
 
 func (r ExchangeRouteResolver) Resolve(ctx context.Context, in RouteResolutionInput) (RouteResolutionOutput, error) {
@@ -55,6 +56,15 @@ func (r ExchangeRouteResolver) Resolve(ctx context.Context, in RouteResolutionIn
 		return RouteResolutionOutput{}, err
 	}
 	target.ProtocolKind = protocolKind
+	resolvedRequest, err = r.Continuation.PrepareRequest(
+		ctx,
+		canonical.NewContinuationNamespace(in.Endpoint.Name().String()),
+		protocolKind,
+		resolvedRequest,
+	)
+	if err != nil {
+		return RouteResolutionOutput{}, err
+	}
 	return RouteResolutionOutput{
 		Target:           target,
 		ProviderDelivery: providerDelivery,
@@ -155,11 +165,12 @@ func materializeRequestForExecution(request canonical.CanonicalRequest, modelID 
 		return request
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:              modelID,
-		Items:              request.Items(),
-		PreviousResponseID: request.PreviousResponseID(),
-		ToolMode:           request.ToolMode(),
-		CacheIntent:        request.CacheIntent(),
+		Model:       modelID,
+		Items:       request.Items(),
+		Tools:       request.Tools(),
+		Turn:        request.Turn(),
+		ToolPolicy:  request.ToolPolicy(),
+		CacheIntent: request.CacheIntent(),
 	})
 }
 

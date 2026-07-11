@@ -7,14 +7,13 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-const codexDefaultInstructions = "You are a helpful assistant."
-
 func EncodeProviderRequestDocument(request canonical.CanonicalRequest, _ delivery.Delivery) (carrier.WireDocument, error) {
 	// Codex execute path is stream-native; batch clients are handled via
-	// stream->batch projection outside this protocol encoder.
+	// stream->batch projection outside this protocol encoder. No extra prompt
+	// overlay is injected here; the adapter only preserves the required wire
+	// shape for the execute route.
 	store := false
 	return responses.ProviderRequestDocumentEncoder{}.EncodeProviderRequestWithOptions(request, delivery.StreamingDelivery(delivery.FramingSSE), responses.EncodeOptions{
-		Instructions:         codexDefaultInstructions,
 		ForceStructuredInput: true,
 		Store:                &store,
 	})

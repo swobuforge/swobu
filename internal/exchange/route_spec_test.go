@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestDeliveryPolicyValidate(t *testing.T) {
@@ -98,5 +99,28 @@ func TestRouteSpecValidate(t *testing.T) {
 	invalidLimits.Provider.Model.Limits.OutputTokens = -1
 	if err := invalidLimits.Validate(); err == nil {
 		t.Fatalf("expected invalid limits error")
+	}
+}
+
+func TestMaterializeRequestForExecution_PreservesToolDeclarations(t *testing.T) {
+	t.Parallel()
+
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "client-model",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("tool_0", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`)),
+		},
+	})
+
+	materialized := materializeRequestForExecution(request, "provider-model")
+	if got := materialized.Model(); got != "provider-model" {
+		t.Fatalf("model = %q, want %q", got, "provider-model")
+	}
+	if len(materialized.Tools()) != 1 {
+		t.Fatalf("tools len = %d, want 1", len(materialized.Tools()))
+	}
+	if got := materialized.Tools()[0].(canonical.FunctionToolDecl).ToolName(); got != "Read" {
+		t.Fatalf("tool name = %q, want Read", got)
 	}
 }

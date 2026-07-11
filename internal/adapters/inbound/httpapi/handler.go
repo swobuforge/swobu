@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 
@@ -44,54 +46,55 @@ func NewHandler(requestIngress requestIngress) Handler {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	writer := &committingResponseWriter{ResponseWriter: w}
 	endpointName, operationPath, err := splitProtocolPath(r.URL.Path)
 	if err != nil {
-		writeSwobuError(w, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
+		writeSwobuError(writer, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
 		return
 	}
 	if operationPath == "" {
-		writeSwobuError(w, canonical.UnsupportedEndpoint("protocol operation path is required"))
+		writeSwobuError(writer, canonical.UnsupportedEndpoint("protocol operation path is required"))
 		return
 	}
 
 	endpoint, err := endpointintent.ParseEndpointName(endpointName)
 	if err != nil {
-		writeSwobuError(w, canonical.BadEndpoint("endpoint name is invalid"))
+		writeSwobuError(writer, canonical.BadEndpoint("endpoint name is invalid"))
 		return
 	}
 
 	normalizedPath, err := canonical.NormalizePath(operationPath)
 	if err != nil {
-		writeExchangeError(w, err)
+		writeExchangeError(writer, err)
 		return
 	}
 	if websocketUpgrade(r) {
 		if normalizedPath == canonical.NormalizedPathResponses {
-			h.serveResponsesWebsocket(w, r, endpointName, normalizedPath)
+			h.serveResponsesWebsocket(writer, r, endpointName, normalizedPath)
 			return
 		}
-		writeExchangeError(w, canonical.UnsupportedEndpoint("websocket client transport is supported only on protocol /responses routes"))
+		writeExchangeError(writer, canonical.UnsupportedEndpoint("websocket client transport is supported only on protocol /responses routes"))
 		return
 	}
 	if normalizedPath == canonical.NormalizedPathModels {
-		h.serveModelsEndpoint(w, r, endpoint)
+		h.serveModelsEndpoint(writer, r, endpoint)
 		return
 	}
 	if err := canonical.ValidateClientTransport(r.Method, normalizedPath, false); err != nil {
-		writeExchangeError(w, err)
+		writeExchangeError(writer, err)
 		return
 	}
 
 	hasMessagesProtocolMarker := strings.TrimSpace(r.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
 	family, err := canonical.InferClientFamily(r.Method, normalizedPath, hasMessagesProtocolMarker)
 	if err != nil {
-		writeExchangeError(w, err)
+		writeExchangeError(writer, err)
 		return
 	}
 
 	requestBody, err := decodeRequestBody(w, r)
 	if err != nil {
-		writeExchangeError(w, err)
+		writeExchangeError(writer, err)
 		return
 	}
 
@@ -99,7 +102,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logClientRequestShape(requestID, endpoint.String(), family, normalizedPath)
 
 	if h.requestIngress == nil {
-		writeSwobuError(w, canonical.InternalError("exchange ingress is not configured"))
+		writeSwobuError(writer, canonical.InternalError("exchange ingress is not configured"))
 		return
 	}
 
@@ -111,14 +114,26 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, err)
-		writeExchangeError(w, err)
+		writeExchangeError(writer, err)
 		return
 	}
-	writeModelResolutionHeaders(w)
+	writeModelResolutionHeaders(writer)
 	logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, nil)
 
-	if err := writeSuccessResponse(w, requestID, family, out); err != nil {
-		writeExchangeError(w, err)
+	if err := writeSuccessResponse(writer, requestID, family, out); err != nil {
+		if writer.committed {
+			slog.Warn("protocol response write failed after commit",
+				"component", "httpapi",
+				"event", "response_write_after_commit_failed",
+				"request_id", requestID,
+				"endpoint", endpoint.String(),
+				"ingress_family", string(family),
+				"normalized_op", string(normalizedPath),
+				"error", err,
+			)
+			return
+		}
+		writeExchangeError(writer, err)
 	}
 }
 
@@ -306,4 +321,40 @@ func writeExchangeError(w http.ResponseWriter, err error) {
 	}
 
 	writeSwobuError(w, canonical.InternalError("internal server error"))
+}
+
+type committingResponseWriter struct {
+	http.ResponseWriter
+	committed bool
+}
+
+func (w *committingResponseWriter) WriteHeader(statusCode int) {
+	w.committed = true
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *committingResponseWriter) Write(p []byte) (int, error) {
+	w.committed = true
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *committingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+	return hijacker.Hijack()
+}
+
+func (w *committingResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *committingResponseWriter) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := w.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }

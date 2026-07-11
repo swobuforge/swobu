@@ -113,6 +113,10 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 			NewTextItem(ItemAuthorUser, "hello"),
 			NewToolUseItem(ItemAuthorAssistant, "tool_0", "call_1", "search", NewToolArgumentsObject(`{"q":"swobu"}`)),
 		},
+		Tools: []ToolDecl{
+			NewFunctionToolDecl("tool_1", "search", "search the workspace", NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
+		},
+		ToolPolicy: NewToolPolicy(ToolPolicyRequired, nil),
 	})
 	events, err := SynthesizeRequestFromCanonicalRequest("ex_req_rt", in)
 	if err != nil {
@@ -141,6 +145,15 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(typed.Items()[1].Input.RawObject(), `"q":"swobu"`) {
 		t.Fatalf("tool input q missing in %q", typed.Items()[1].Input.RawObject())
+	}
+	if len(typed.Tools()) != 1 {
+		t.Fatalf("tools len = %d, want 1", len(typed.Tools()))
+	}
+	if got := typed.ToolPolicy(); got.Mode != ToolPolicyRequired {
+		t.Fatalf("tool policy mode = %q, want %q", got.Mode, ToolPolicyRequired)
+	}
+	if got := typed.Tools()[0].(FunctionToolDecl); got.ToolName() != "search" || !strings.Contains(got.ToolInputSchema().RawObject(), `"q"`) {
+		t.Fatalf("tool declaration roundtrip = %#v", got)
 	}
 }
 

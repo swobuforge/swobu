@@ -39,7 +39,9 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			binary:   "codex",
 			contains: []string{
 				`--dangerously-bypass-approvals-and-sandbox`,
-				`model="` + exchange.PublicModelIDSwobu + `"`,
+				`--disable`,
+				`apps`,
+				`model="gpt-5.5"`,
 				`model_provider="swobu"`,
 				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
 			},
@@ -50,8 +52,9 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{
 			clientID: "claude",
 			binary:   "claude",
-			contains: []string{"--model", exchange.PublicModelIDSwobu},
+			contains: []string{"--bare", "--add-dir", ".", "--tools", "Read", "--allowedTools", "Read", "--model", exchange.PublicModelIDSwobu},
 			envChecks: map[string]string{
+				"ANTHROPIC_API_KEY":  "swobu-placeholder",
 				"ANTHROPIC_BASE_URL": "http://127.0.0.1:7926/c/acme/",
 				"ANTHROPIC_MODEL":    exchange.PublicModelIDSwobu,
 			},

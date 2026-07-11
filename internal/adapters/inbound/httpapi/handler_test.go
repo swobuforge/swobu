@@ -23,6 +23,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
@@ -273,7 +274,7 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	typed := testDecodeCapturedRequest(t, capturing.got)
-	if got := typed.PreviousResponseID(); got != "resp_123" {
+	if got, ok := typed.Turn().PreviousID(); !ok || got.String() != "resp_123" {
 		t.Fatalf("previous_response_id = %q, want %q", got, "resp_123")
 	}
 	if !typed.CacheIntent().IsZero() {
@@ -291,7 +292,7 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	}
 }
 
-func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolMode(t *testing.T) {
+func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolPolicy(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tool_choice":"required","input":"continue"}`))
@@ -303,8 +304,28 @@ func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolMode(t *testin
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	typed := testDecodeCapturedRequest(t, capturing.got)
-	if got := typed.ToolMode(); got != canonical.ToolModeRequired {
-		t.Fatalf("tool mode = %q, want %q", got, canonical.ToolModeRequired)
+	if got := typed.ToolPolicy(); got.Mode != canonical.ToolPolicyRequired {
+		t.Fatalf("tool policy mode = %q, want %q", got.Mode, canonical.ToolPolicyRequired)
+	}
+}
+
+func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *testing.T) {
+	capturing := &capturingRequestIngress{}
+	handler := NewHandler(capturing)
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tools":[{"type":"function","name":"grep","description":"search text","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}],"tool_choice":{"type":"function","name":"grep"},"input":"continue"}`))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	typed := testDecodeCapturedRequest(t, capturing.got)
+	if got := typed.ToolPolicy(); got.Mode != canonical.ToolPolicySpecific {
+		t.Fatalf("tool policy mode = %q, want %q", got.Mode, canonical.ToolPolicySpecific)
+	}
+	if specific, ok := typed.ToolPolicy().SpecificID(); !ok || specific.String() != "grep" {
+		t.Fatalf("tool policy specific = %q, want %q", specific, "grep")
 	}
 }
 
@@ -568,6 +589,33 @@ func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
 	}
 	if strings.Index(body, `"type":"response.output_item.added"`) > strings.Index(body, `"type":"response.output_text.delta"`) {
 		t.Fatalf("body = %q, want output_item.added before output_text.delta", body)
+	}
+}
+
+func TestHandler_DoesNotWriteExchangeErrorAfterStreamingCommit(t *testing.T) {
+	handler := NewHandler(staticRequestIngress{
+		out: exchange.RequestOutput{
+			Response: exchange.TransportResponse{
+				Transport: transportpkg.TransportResponse{
+					Status: http.StatusOK,
+					Header: http.Header{
+						"Content-Type": []string{"text/event-stream"},
+					},
+					Body: &firstChunkThenErrorBody{},
+				},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	rec := &writeHeaderCountingResponseWriter{}
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.writeHeaderCount != 1 {
+		t.Fatalf("writeHeader count = %d, want 1", rec.writeHeaderCount)
+	}
+	if rec.writeCount == 0 {
+		t.Fatal("body was not written")
 	}
 }
 
@@ -888,3 +936,48 @@ func (h *modelsCapableHandler) ListModels(_ context.Context, in exchange.ListMod
 	h.gotModelsIn = in
 	return h.modelsOut, h.modelsErr
 }
+
+type writeHeaderCountingResponseWriter struct {
+	header           http.Header
+	statusCode       int
+	writeHeaderCount int
+	writeCount       int
+}
+
+func (w *writeHeaderCountingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *writeHeaderCountingResponseWriter) WriteHeader(statusCode int) {
+	w.writeHeaderCount++
+	w.statusCode = statusCode
+}
+
+func (w *writeHeaderCountingResponseWriter) Write(p []byte) (int, error) {
+	w.writeCount++
+	return len(p), nil
+}
+
+type firstChunkThenErrorBody struct {
+	readCount int
+}
+
+func (b *firstChunkThenErrorBody) Read(p []byte) (int, error) {
+	if b.readCount == 0 {
+		b.readCount++
+		p[0] = 'x'
+		return 1, nil
+	}
+	return 0, errors.New("stream body failed")
+}
+
+func (b *firstChunkThenErrorBody) Close() error { return nil }
+
+type immediateReadErrorBody struct{}
+
+func (immediateReadErrorBody) Read([]byte) (int, error) { return 0, errors.New("stream body failed") }
+
+func (immediateReadErrorBody) Close() error { return nil }

@@ -14,7 +14,7 @@ func (NoopSink) Commit(context.Context, string, []Effect) error { return nil }
 
 type StoreBackedSink struct {
 	Observations observation.Store
-	TurnState    turnstate.Store
+	TurnState    turnstate.TurnStateStore
 }
 
 func (s StoreBackedSink) Commit(ctx context.Context, _ string, effects []Effect) error {

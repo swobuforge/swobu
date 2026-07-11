@@ -61,7 +61,7 @@ type StartInput struct {
 	Providers    ports.ProviderIngressResolver
 	ModelCatalog ports.ProviderModelCatalog
 	Evidence     ports.RequestEvidenceSink
-	Continuity   ports.ContinuityStore
+	Continuation ports.ContinuationStore
 	Logger       *slog.Logger
 }
 
@@ -119,9 +119,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.evidence = store
 	}
 	evidence = newTelemetryObservedEvidenceSink(evidence, daemon.observeTelemetryEvent)
-	_ = in.Continuity
-
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, providers, modelCatalog, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, providers, modelCatalog, in.Continuation, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}

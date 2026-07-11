@@ -2,6 +2,7 @@ package messages
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
@@ -21,17 +22,23 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
 	}
+	tools, err := decodeMessagesTools(dto.Tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "messages")
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	items := make([]canonical.CanonicalItem, 0, len(dto.Messages))
+	pendingToolUseIDs := make([]string, 0, len(dto.Messages))
 	for idx, msg := range dto.Messages {
-		decoded, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role)) // swobu:io-string source=boundary
+		decoded, nextPending, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role), pendingToolUseIDs) // swobu:io-string source=boundary
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
 		items = append(items, decoded...)
+		pendingToolUseIDs = nextPending
 	}
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
@@ -40,10 +47,11 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
 		Items: items,
+		Tools: tools,
 	}), resolvedDelivery, nil
 }
 
-func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string) ([]canonical.CanonicalItem, error) {
+func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingToolUseIDs []string) ([]canonical.CanonicalItem, []string, error) {
 	_ = msgIdx
 	if role == "" {
 		role = "user"
@@ -52,53 +60,73 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string) ([]canoni
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		if text != "" {
-			return []canonical.CanonicalItem{canonical.NewTextItem(author, text)}, nil
+			return []canonical.CanonicalItem{canonical.NewTextItem(author, text)}, pendingToolUseIDs, nil
 		}
-		return nil, canonical.BadRequest("messages request content must not be empty")
+		return nil, pendingToolUseIDs, canonical.BadRequest("messages request content must not be empty")
 	}
 	var parts []messagesContentPartDTO
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, canonical.BadRequest("messages request content is invalid")
+		return nil, pendingToolUseIDs, canonical.BadRequest("messages request content is invalid")
 	}
 	if len(parts) == 0 {
-		return nil, canonical.BadRequest("messages request content must not be empty")
+		return nil, pendingToolUseIDs, canonical.BadRequest("messages request content must not be empty")
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
-	for _, part := range parts {
+	pending := append([]string(nil), pendingToolUseIDs...)
+	for partIdx, part := range parts {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=provider-wire
 		switch partType {
 		case "text":
 			if part.Text == "" {
-				return nil, canonical.BadRequest("messages request text parts must not be empty")
+				return nil, pending, canonical.BadRequest("messages request text parts must not be empty")
 			}
 			decoded = append(decoded, canonical.NewTextItem(author, part.Text))
 		case "tool_use":
 			if strings.TrimSpace(part.Name) == "" { // swobu:io-string source=boundary
-				return nil, canonical.BadRequest("messages request tool_use parts require a name")
+				return nil, pending, canonical.BadRequest("messages request tool_use parts require a name")
 			}
 			input, err := sse.DecodeJSONObject(part.Input, "messages request tool_use input is invalid")
 			if err != nil {
-				return nil, err
+				return nil, pending, err
 			}
 			args, err := json.Marshal(input)
 			if err != nil {
-				return nil, canonical.BadRequest("messages request tool_use input is invalid")
+				return nil, pending, canonical.BadRequest("messages request tool_use input is invalid")
 			}
-			decoded = append(decoded, canonical.NewToolUseItem(author, "", strings.TrimSpace(part.ID), strings.TrimSpace(part.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+			toolUseID := strings.TrimSpace(part.ID)
+			if toolUseID == "" {
+				toolUseID = openaicompat.GeneratedToolUseID(msgIdx, partIdx)
+			}
+			pending = append(pending, toolUseID)
+			decoded = append(decoded, canonical.NewToolUseItem(author, "", toolUseID, strings.TrimSpace(part.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
 		case "tool_result":
-			if strings.TrimSpace(part.ToolUseID) == "" { // swobu:io-string source=boundary
-				return nil, canonical.BadRequest("messages request tool_result parts require tool_use_id")
+			toolUseID := strings.TrimSpace(part.ToolUseID)
+			if toolUseID == "" {
+				if len(pending) != 1 {
+					slog.Debug("messages tool_result missing tool_use_id",
+						"component", "protocol.messages",
+						"event", "tool_result_missing_tool_use_id",
+						"message_index", msgIdx,
+						"part_index", partIdx,
+						"role", role,
+						"pending_count", len(pending),
+						"pending_tool_use_ids", append([]string(nil), pending...),
+					)
+					return nil, pending, canonical.BadRequest("messages request tool_result parts require tool_use_id")
+				}
+				toolUseID = pending[0]
 			}
 			text, err := decodeToolResultText(part.Content)
 			if err != nil {
-				return nil, err
+				return nil, pending, err
 			}
-			decoded = append(decoded, canonical.NewToolResultItem(author, strings.TrimSpace(part.ToolUseID), text)) // swobu:io-string source=boundary
+			decoded = append(decoded, canonical.NewToolResultItem(author, toolUseID, text)) // swobu:io-string source=boundary
+			pending = removePendingToolUseID(pending, toolUseID)
 		default:
-			return nil, canonical.BadRequest("messages request content contains an unsupported part type")
+			return nil, pending, canonical.BadRequest("messages request content contains an unsupported part type")
 		}
 	}
-	return decoded, nil
+	return decoded, pending, nil
 }
 
 func decodeToolResultText(raw json.RawMessage) (string, error) {
@@ -118,4 +146,16 @@ func decodeToolResultText(raw json.RawMessage) (string, error) {
 		builder.WriteString(part.Text)
 	}
 	return builder.String(), nil
+}
+
+func removePendingToolUseID(pending []string, toolUseID string) []string {
+	if len(pending) == 0 {
+		return pending
+	}
+	for i := len(pending) - 1; i >= 0; i-- {
+		if pending[i] == toolUseID {
+			return append(pending[:i], pending[i+1:]...)
+		}
+	}
+	return pending
 }

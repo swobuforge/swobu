@@ -3,8 +3,9 @@ package chatcompletions
 import "encoding/json"
 
 type chatCompletionsRequestDTO struct {
-	Model    string                      `json:"model"`
-	Messages []chatCompletionsMessageDTO `json:"messages"`
+	Model    string                             `json:"model"`
+	Messages []chatCompletionsMessageDTO        `json:"messages"`
+	Tools    []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
 }
 
 type chatCompletionsMessageDTO struct {
@@ -23,6 +24,18 @@ type chatCompletionsToolCallDTO struct {
 type chatCompletionsToolFunctionDTO struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+}
+
+type chatCompletionsToolDefinitionDTO struct {
+	Type     string                                   `json:"type"`
+	Function chatCompletionsToolDefinitionFunctionDTO `json:"function"`
+}
+
+type chatCompletionsToolDefinitionFunctionDTO struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type chatCompletionsResponseDTO struct {

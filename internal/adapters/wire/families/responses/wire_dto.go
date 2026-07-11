@@ -3,11 +3,12 @@ package responses
 import "encoding/json"
 
 type responsesRequestDTO struct {
-	Model              string          `json:"model"`
-	Input              json.RawMessage `json:"input"`
-	ToolChoice         json.RawMessage `json:"tool_choice"`
-	PreviousResponseID string          `json:"previous_response_id"`
-	Conversation       string          `json:"conversation"`
+	Model              string                       `json:"model"`
+	Input              json.RawMessage              `json:"input"`
+	ToolChoice         json.RawMessage              `json:"tool_choice"`
+	Tools              []responsesToolDefinitionDTO `json:"tools,omitempty"`
+	PreviousResponseID string                       `json:"previous_response_id"`
+	Conversation       string                       `json:"conversation"`
 }
 
 type responsesInputItemDTO struct {
@@ -120,6 +121,14 @@ type responsesOutputItemFunctionCallDTO struct {
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+type responsesToolDefinitionDTO struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type responsesTextDeltaEventDTO struct {

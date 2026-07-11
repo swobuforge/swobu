@@ -24,6 +24,7 @@ func buildDaemonServeMux(
 	runtime config.RuntimeConfig,
 	providers ports.ProviderIngressResolver,
 	modelCatalog ports.ProviderModelCatalog,
+	continuation ports.ContinuationStore,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeIngress := exchange.NewIngress(
@@ -32,6 +33,7 @@ func buildDaemonServeMux(
 		exchangeruntime.NewResolver(),
 		exchange.RuntimePoliciesSpec{
 			DeliverySelector: exchange.FixedDeliverySelector{},
+			ContinuationStore: continuation,
 		},
 	)
 	mux := http.NewServeMux()

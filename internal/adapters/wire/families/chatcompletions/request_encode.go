@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -126,4 +127,42 @@ func roleForChatItem(item canonical.CanonicalItem) string {
 	default:
 		return "user"
 	}
+}
+
+func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO) ([]canonical.ToolDecl, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	out := make([]canonical.ToolDecl, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "" && tool.Type != "function" {
+			return nil, canonical.BadRequest("chat completions request contains an unsupported tool type")
+		}
+		schema, err := chatCompletionsToolParametersFromWire(tool.Function.Parameters)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(tool.Function.Name) // swobu:io-string source=boundary
+		if name == "" {
+			return nil, canonical.BadRequest("chat completions request tool declarations require a name")
+		}
+		out = append(out, canonical.NewFunctionToolDecl(name, name, tool.Function.Description, schema))
+	}
+	return out, nil
+}
+
+func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolSchema, error) {
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
+	if trimmed == "" || trimmed == "null" {
+		return canonical.ToolSchema{}, canonical.BadRequest("chat completions request tool declarations require parameters")
+	}
+	obj, err := sse.DecodeJSONObject(json.RawMessage(trimmed), "chat completions request tool declaration parameters are invalid")
+	if err != nil {
+		return canonical.ToolSchema{}, err
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return canonical.ToolSchema{}, canonical.InternalError("chat completions request tool declarations could not be decoded")
+	}
+	return canonical.NewToolSchemaObject(string(normalized)), nil
 }

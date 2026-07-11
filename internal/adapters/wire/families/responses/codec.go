@@ -9,14 +9,13 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// DecodeResponsesToolMode is intentionally permissive for unknown enum/object
-// values. Known values map to canonical tool modes, and unknown values degrade
-// to default mode for forward canonical. Invalid JSON type shapes still fail
-// request validation.
-func DecodeResponsesToolMode(raw json.RawMessage) (canonical.ToolMode, error) {
+// DecodeResponsesToolPolicy maps responses tool_choice into canonical tool
+// policy. String auto/required values remain direct. Specific tool selection is
+// resolved against the declared tools so the semantic tool ID stays canonical.
+func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) (canonical.ToolPolicy, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
-		return canonical.ToolModeDefault, nil
+		return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
 	}
 
 	var stringMode string
@@ -24,31 +23,86 @@ func DecodeResponsesToolMode(raw json.RawMessage) (canonical.ToolMode, error) {
 		normalizedMode := strings.ToLower(strings.TrimSpace(stringMode)) // swobu:io-string source=provider-wire
 		switch normalizedMode {
 		case "", "none":
-			return canonical.ToolModeDefault, nil
+			return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
 		case "auto":
-			return canonical.ToolModeAuto, nil
+			return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
 		case "required":
-			return canonical.ToolModeRequired, nil
+			return canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil
+		case "specific":
+			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice specific requires a tool name")
 		default:
-			return canonical.ToolModeDefault, nil
+			return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
 		}
 	}
 
 	var objectMode struct {
-		Type string `json:"type"`
+		Type     string `json:"type"`
+		Name     string `json:"name"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
 	}
 	if err := json.Unmarshal(raw, &objectMode); err != nil {
-		return canonical.ToolModeDefault, canonical.BadRequest("responses request tool_choice is invalid")
+		return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
 	}
 	normalizedType := strings.ToLower(strings.TrimSpace(objectMode.Type)) // swobu:io-string source=provider-wire
 	switch normalizedType {
-	case "function", "required":
-		return canonical.ToolModeRequired, nil
 	case "auto":
-		return canonical.ToolModeAuto, nil
+		return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
+	case "required":
+		return canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil
+	case "function":
+		name := strings.TrimSpace(objectMode.Name) // swobu:io-string source=provider-wire
+		if name == "" {
+			name = strings.TrimSpace(objectMode.Function.Name)
+		}
+		if name == "" {
+			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice function requires a name")
+		}
+		specific, err := resolveResponsesSpecificToolID(tools, name)
+		if err != nil {
+			return canonical.ToolPolicy{}, err
+		}
+		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific), nil
 	default:
-		return canonical.ToolModeDefault, nil
+		return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
 	}
+}
+
+func resolveResponsesSpecificToolID(tools []canonical.ToolDecl, name string) (canonical.SemanticToolID, error) {
+	trimmed := strings.TrimSpace(name) // swobu:io-string source=boundary
+	if trimmed == "" {
+		return "", canonical.BadRequest("responses request tool_choice requires a tool name")
+	}
+	var (
+		found   canonical.SemanticToolID
+		matched bool
+	)
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		decl, ok := tool.(canonical.FunctionToolDecl)
+		if !ok {
+			if ptr, ok := tool.(*canonical.FunctionToolDecl); ok {
+				decl = *ptr
+			} else {
+				continue
+			}
+		}
+		if !strings.EqualFold(strings.TrimSpace(decl.ToolName()), trimmed) {
+			continue
+		}
+		if matched && found != decl.ToolID() {
+			return "", canonical.BadRequest("responses request tool_choice name is ambiguous")
+		}
+		found = decl.ToolID()
+		matched = true
+	}
+	if !matched {
+		return "", canonical.BadRequest("responses request tool_choice references an undeclared tool")
+	}
+	return found.Clone(), nil
 }
 
 type sseEnvelopeStreamEncoder struct {

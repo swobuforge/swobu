@@ -19,12 +19,14 @@ type responseEnvelope struct {
 	Model      string `json:"model"`
 	OutputText string `json:"output_text"`
 	Output     []struct {
-		Type      string          `json:"type"`
-		Role      string          `json:"role"`
-		Content   json.RawMessage `json:"content"`
-		CallID    string          `json:"call_id"`
-		Name      string          `json:"name"`
-		Arguments string          `json:"arguments"`
+		Type        string          `json:"type"`
+		ID          string          `json:"id"`
+		Role        string          `json:"role"`
+		Content     json.RawMessage `json:"content"`
+		CallID      string          `json:"call_id"`
+		Name        string          `json:"name"`
+		Arguments   string          `json:"arguments"`
+		ServerLabel string          `json:"server_label"`
 	} `json:"output"`
 }
 
@@ -127,11 +129,7 @@ func (s *responsesEventReader) Next(context.Context) (canonical.Event, error) {
 		event, err := s.reader.Next()
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
-				s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
-				s.closeOpenText(canonical.EnvelopeStatusError)
-				s.closeOpenTools(canonical.EnvelopeStatusError)
-				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
-				s.completed = true
+				s.handleUnexpectedEOF()
 				if len(s.pending) > 0 {
 					out := s.pending[0]
 					s.pending = s.pending[1:]
@@ -141,6 +139,14 @@ func (s *responsesEventReader) Next(context.Context) (canonical.Event, error) {
 			return canonical.Event{}, err
 		}
 		if strings.TrimSpace(event.Data) == "[DONE]" { // swobu:io-string source=boundary
+			if s.started && !s.completed {
+				s.handleStreamDone()
+				if len(s.pending) > 0 {
+					out := s.pending[0]
+					s.pending = s.pending[1:]
+					return out, nil
+				}
+			}
 			continue
 		}
 		rawFrame := []byte(event.Data)
@@ -214,6 +220,30 @@ func (s *responsesEventReader) enqueueError(code string, message string) {
 	s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: code, Message: message}})
 }
 
+func (s *responsesEventReader) handleUnexpectedEOF() {
+	s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
+	s.closeOpenText(canonical.EnvelopeStatusError)
+	s.closeOpenTools(canonical.EnvelopeStatusError)
+	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+	s.completed = true
+}
+
+func (s *responsesEventReader) handleStreamDone() {
+	s.handleTerminalCompletion("completed")
+}
+
+func (s *responsesEventReader) handleTerminalCompletion(status string) {
+	if strings.TrimSpace(status) == "" {
+		status = "completed"
+	}
+	s.completed = true
+	s.closeOpenText(canonical.EnvelopeStatusCompleted)
+	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
+	s.enqueueUsage(s.latestUsage)
+	s.enqueueFinish(status)
+	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+}
+
 func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
 	if s.textOpen {
 		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
@@ -240,12 +270,14 @@ func fallbackItemID(itemID string, callID string) string {
 }
 
 func decodeOutputItems(items []struct {
-	Type      string          `json:"type"`
-	Role      string          `json:"role"`
-	Content   json.RawMessage `json:"content"`
-	CallID    string          `json:"call_id"`
-	Name      string          `json:"name"`
-	Arguments string          `json:"arguments"`
+	Type        string          `json:"type"`
+	ID          string          `json:"id"`
+	Role        string          `json:"role"`
+	Content     json.RawMessage `json:"content"`
+	CallID      string          `json:"call_id"`
+	Name        string          `json:"name"`
+	Arguments   string          `json:"arguments"`
+	ServerLabel string          `json:"server_label"`
 }, outputText string) ([]canonical.OutputItem, error) {
 	output := make([]canonical.OutputItem, 0, len(items))
 	for _, item := range items {
@@ -259,22 +291,28 @@ func decodeOutputItems(items []struct {
 			for idx, part := range parts {
 				output = append(output, canonical.NewTextOutputItem(fmt.Sprintf("text_%d", len(output)+idx), part.Text))
 			}
-		case "function_call":
+		case "function_call", "mcp_call":
 			rawArgs := strings.TrimSpace(item.Arguments) // swobu:io-string source=boundary
 			if rawArgs != "" {
 				decoded := map[string]any{}
 				if err := json.Unmarshal([]byte(rawArgs), &decoded); err != nil {
-					return nil, canonical.InternalError("responses function_call arguments are invalid")
+					return nil, canonical.InternalError("responses tool call arguments are invalid")
 				}
 				normalized, err := json.Marshal(decoded)
 				if err != nil {
-					return nil, canonical.InternalError("responses function_call arguments are invalid")
+					return nil, canonical.InternalError("responses tool call arguments are invalid")
 				}
 				rawArgs = string(normalized)
 			}
-			itemID := fallbackItemID("", item.CallID)
+			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
+			if itemID == "" {
+				itemID = fallbackItemID("", item.CallID)
+			}
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
+			if callID == "" {
+				callID = itemID
+			}
 			output = append(output, canonical.NewToolUseOutputItem(
 				itemID,
 				callID,

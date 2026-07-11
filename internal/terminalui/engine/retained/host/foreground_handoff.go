@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // ErrForegroundHandoffUnavailable reports that no active host runner can
@@ -146,10 +149,23 @@ var runForegroundCommand = runForegroundCommandOnHost
 
 func runForegroundCommandOnHost(ctx context.Context, executable string, args []string, env map[string]string) (int, error) {
 	cmd := exec.CommandContext(ctx, executable, args...)
+	var stderr bytes.Buffer
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	var stderr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+		defer tty.Close()
+		cmd.Stdin = tty
+		cmd.Stdout = tty
+		cmd.Stderr = io.MultiWriter(tty, &stderr)
+		if err := flushTerminalInput(tty); err != nil {
+			return 0, fmt.Errorf("flush terminal input: %w", err)
+		}
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Foreground: true,
+			Ctty:       int(tty.Fd()),
+		}
+	}
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), envPairs(env)...)
 	}
@@ -168,6 +184,13 @@ func runForegroundCommandOnHost(ctx context.Context, executable string, args []s
 		return 0, err
 	}
 	return 0, nil
+}
+
+func flushTerminalInput(tty *os.File) error {
+	if tty == nil {
+		return nil
+	}
+	return unix.IoctlSetInt(int(tty.Fd()), unix.TCFLSH, unix.TCIFLUSH)
 }
 
 func envPairs(values map[string]string) []string {

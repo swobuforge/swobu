@@ -3,60 +3,104 @@ package canonical
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 type fakeContinuationStore struct {
-	snapshot ContinuitySnapshot
-	matches  map[ContinuationNamespace]ContinuationPrefixMatch
-	ok       bool
-	loadErr  error
-	storeErr error
-	stored   []ContinuitySnapshot
+	records  map[ContinuationID]ContinuationRecord
+	putErr   error
+	getErr   error
+	chainErr error
+	stored   []ContinuationRecord
 }
 
-func (s *fakeContinuationStore) Load(context.Context, string) (ContinuitySnapshot, bool, error) {
-	return s.snapshot.Clone(), s.ok, s.loadErr
-}
-
-func (s *fakeContinuationStore) MatchPrefix(_ context.Context, namespace ContinuationNamespace, _ []CanonicalItem) (ContinuationPrefixMatch, bool, error) {
-	if s.loadErr != nil {
-		return ContinuationPrefixMatch{}, false, s.loadErr
+func (s *fakeContinuationStore) Put(_ context.Context, rec ContinuationRecord) error {
+	if s.putErr != nil {
+		return s.putErr
 	}
-	match, ok := s.matches[namespace]
-	return ContinuationPrefixMatch{
-		Snapshot:     match.Snapshot.Clone(),
-		PrefixLength: match.PrefixLength,
-	}, ok, nil
-}
-
-func (s *fakeContinuationStore) Store(_ context.Context, namespace ContinuationNamespace, snapshot ContinuitySnapshot) error {
-	if s.storeErr != nil {
-		return s.storeErr
+	if s.records == nil {
+		s.records = map[ContinuationID]ContinuationRecord{}
 	}
-	if s.matches == nil {
-		s.matches = map[ContinuationNamespace]ContinuationPrefixMatch{}
-	}
-	s.matches[namespace] = ContinuationPrefixMatch{
-		Snapshot:     snapshot.Clone(),
-		PrefixLength: len(snapshot.Thread),
-	}
-	s.stored = append(s.stored, snapshot.Clone())
+	s.records[rec.ID] = rec.Clone()
+	s.stored = append(s.stored, rec.Clone())
 	return nil
 }
 
-func TestContinuationRuntime_PrepareRequest_RehydratesCanonicalState(t *testing.T) {
-	runtime := NewContinuationRuntime(&fakeContinuationStore{
-		snapshot: NewContinuitySnapshot("resp_prev", "m", []CanonicalItem{
-			NewTextItem(ItemAuthorUser, "hi"),
-		}),
-		ok: true,
-	})
+func (s *fakeContinuationStore) Get(_ context.Context, id ContinuationID) (ContinuationRecord, bool, error) {
+	if s.getErr != nil {
+		return ContinuationRecord{}, false, s.getErr
+	}
+	rec, ok := s.records[id]
+	if !ok {
+		return ContinuationRecord{}, false, nil
+	}
+	return rec.Clone(), true, nil
+}
 
-	request, err := runtime.PrepareRequest(context.Background(), NewContinuationNamespace("alpha"), "", NewCanonicalRequest(RequestParams{
-		Model:              "m",
-		PreviousResponseID: "resp_prev",
+func (s *fakeContinuationStore) Chain(_ context.Context, id ContinuationID) ([]ContinuationRecord, error) {
+	if s.chainErr != nil {
+		return nil, s.chainErr
+	}
+	if s.records == nil {
+		return nil, nil
+	}
+	var reversed []ContinuationRecord
+	seen := map[ContinuationID]struct{}{}
+	current := id
+	for {
+		if _, ok := seen[current]; ok {
+			return nil, fmt.Errorf("continuation chain cycle detected for %q", current)
+		}
+		seen[current] = struct{}{}
+		rec, ok := s.records[current]
+		if !ok {
+			break
+		}
+		reversed = append(reversed, rec.Clone())
+		if rec.Parent == nil || rec.Parent.IsZero() {
+			break
+		}
+		current = rec.Parent.Clone()
+	}
+	if len(reversed) == 0 {
+		return nil, nil
+	}
+	chain := make([]ContinuationRecord, len(reversed))
+	for i := range reversed {
+		chain[len(reversed)-1-i] = reversed[i]
+	}
+	return chain, nil
+}
+
+func TestContinuationRuntime_PrepareRequest_MaterializesCanonicalHistoryForNonResponsesTargets(t *testing.T) {
+	store := &fakeContinuationStore{
+		records: map[ContinuationID]ContinuationRecord{
+			NewContinuationID("resp_prev"): {
+				ID: NewContinuationID("resp_prev"),
+				RequestDelta: NewCanonicalRequest(RequestParams{
+					Model: "m",
+					Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
+				}),
+				Response: NewConversationOutput(
+					"resp_prev",
+					"m",
+					[]OutputItem{NewTextOutputItem("text_0", "hello")},
+					"completed",
+				),
+				Status: ContinuationStatusCompleted,
+			},
+		},
+	}
+	runtime := NewContinuationRuntime(store)
+
+	request, err := runtime.PrepareRequest(context.Background(), NewContinuationNamespace("alpha"), protocolkind.ChatCompletions, NewCanonicalRequest(RequestParams{
+		Model: "m",
+		Turn:  NewTurnRef("resp_prev"),
 		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorUser, "continue"),
 		},
@@ -64,84 +108,88 @@ func TestContinuationRuntime_PrepareRequest_RehydratesCanonicalState(t *testing.
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
-	typed := request
-	if got := len(typed.Items()); got != 2 {
-		t.Fatalf("thread len = %d, want 2", got)
+	if got := request.Turn().IsZero(); !got {
+		t.Fatal("Turn().IsZero() = false, want true after materialization")
 	}
-	if got := typed.Items()[1].Text; got != "continue" {
+	items := request.Items()
+	if len(items) != 3 {
+		t.Fatalf("materialized item len = %d, want 3", len(items))
+	}
+	if got := items[0].Text; got != "hi" {
+		t.Fatalf("materialized prefix[0] = %q, want %q", got, "hi")
+	}
+	if got := items[2].Text; got != "continue" {
 		t.Fatalf("latest text = %q, want %q", got, "continue")
 	}
 }
 
-func TestContinuationRuntime_PrepareRequest_PreservesConversationItemsForResponses(t *testing.T) {
-	runtime := NewContinuationRuntime(&fakeContinuationStore{
-		matches: map[ContinuationNamespace]ContinuationPrefixMatch{
-			NewContinuationNamespace("alpha"): {
-				Snapshot: NewContinuitySnapshot("resp_prev", "m", []CanonicalItem{
-					NewTextItem(ItemAuthorUser, "hi"),
-					NewTextItem(ItemAuthorAssistant, "hello"),
+func TestContinuationRuntime_PrepareRequest_PreservesNativeContinuationWhenSafe(t *testing.T) {
+	store := &fakeContinuationStore{
+		records: map[ContinuationID]ContinuationRecord{
+			NewContinuationID("resp_prev"): {
+				ID: NewContinuationID("resp_prev"),
+				RequestDelta: NewCanonicalRequest(RequestParams{
+					Model: "m",
+					Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
 				}),
-				PrefixLength: 2,
+				Response: NewConversationOutput(
+					"resp_prev",
+					"m",
+					[]OutputItem{NewTextOutputItem("text_0", "hello")},
+					"completed",
+				),
+				Status: ContinuationStatusCompleted,
 			},
 		},
-	})
+	}
+	runtime := NewContinuationRuntime(store)
 
 	request, err := runtime.PrepareRequest(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
-		"responses",
-		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{
-			NewTextItem(ItemAuthorUser, "hi"),
-			NewTextItem(ItemAuthorAssistant, "hello"),
-			NewTextItem(ItemAuthorUser, "continue"),
-		}}),
+		protocolkind.Responses,
+		NewCanonicalRequest(RequestParams{
+			Model: "m",
+			Turn:  NewTurnRef("resp_prev"),
+			Items: []CanonicalItem{
+				NewTextItem(ItemAuthorUser, "hi"),
+				NewTextItem(ItemAuthorAssistant, "hello"),
+				NewTextItem(ItemAuthorUser, "continue"),
+			},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
-	typed := request
-	if got := len(typed.Items()); got != 3 {
+	if got := request.Turn().IsZero(); got {
+		t.Fatal("Turn().IsZero() = true, want false for native continuation")
+	}
+	if got := len(request.Items()); got != 3 {
 		t.Fatalf("thread len = %d, want 3", got)
 	}
-	if got := typed.Items()[2].Text; got != "continue" {
+	if got := request.Items()[2].Text; got != "continue" {
 		t.Fatalf("latest text = %q, want %q", got, "continue")
 	}
 }
 
-func TestContinuationRuntime_PrepareRequest_PreservesItemsFromBestPrefixMatch(t *testing.T) {
-	runtime := NewContinuationRuntime(&fakeContinuationStore{
-		matches: map[ContinuationNamespace]ContinuationPrefixMatch{
-			NewContinuationNamespace("alpha"): {
-				Snapshot: NewContinuitySnapshot("resp_prev", "m", []CanonicalItem{
-					NewTextItem(ItemAuthorUser, "shared"),
-				}),
-				PrefixLength: 1,
-			},
-		},
-	})
-
-	request, err := runtime.PrepareRequest(
+func TestContinuationRuntime_PrepareRequest_FailsClosedOnUnknownContinuationID(t *testing.T) {
+	runtime := NewContinuationRuntime(&fakeContinuationStore{})
+	_, err := runtime.PrepareRequest(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
-		"responses",
-		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{
-			NewTextItem(ItemAuthorUser, "shared"),
-			NewTextItem(ItemAuthorAssistant, "branch a"),
-		}}),
+		protocolkind.Responses,
+		NewCanonicalRequest(RequestParams{
+			Model: "m",
+			Turn:  NewTurnRef("resp_missing"),
+			Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "continue")},
+		}),
 	)
-	if err != nil {
-		t.Fatalf("PrepareRequest returned error: %v", err)
-	}
-	typed := request
-	if got := len(typed.Items()); got != 2 {
-		t.Fatalf("items len = %d, want 2", got)
-	}
-	if got := typed.Items()[1].Text; got != "branch a" {
-		t.Fatalf("second item text = %q, want %q", got, "branch a")
+	if err == nil || !strings.Contains(err.Error(), "could not be rehydrated") {
+		t.Fatalf("PrepareRequest returned err=%v, want explicit rehydrate failure", err)
 	}
 }
 
-func TestContinuationRuntime_WrapResponseEnvelope_PersistsOnCompletedResponseEnvelope(t *testing.T) {
+func TestContinuationRuntime_WrapResponseEnvelope_PersistsCompletedContinuationRecord(t *testing.T) {
 	store := &fakeContinuationStore{}
 	runtime := NewContinuationRuntime(store)
 
@@ -156,7 +204,11 @@ func TestContinuationRuntime_WrapResponseEnvelope_PersistsOnCompletedResponseEnv
 	wrapped, err := runtime.WrapResponseEnvelope(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
-		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
+		NewCanonicalRequest(RequestParams{
+			Model: "m",
+			Turn:  NewTurnRef("resp_prev"),
+			Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
+		}),
 		envelope,
 	)
 	if err != nil {
@@ -172,7 +224,13 @@ func TestContinuationRuntime_WrapResponseEnvelope_PersistsOnCompletedResponseEnv
 		}
 	}
 	if len(store.stored) != 1 {
-		t.Fatalf("stored snapshots = %d, want 1", len(store.stored))
+		t.Fatalf("stored records = %d, want 1", len(store.stored))
+	}
+	if got := store.stored[0].ID.String(); got != "resp_env" {
+		t.Fatalf("stored record id = %q, want %q", got, "resp_env")
+	}
+	if got := store.stored[0].RequestDelta.Items(); len(got) != 1 || got[0].Text != "hi" {
+		t.Fatalf("stored request delta = %+v, want current turn only", got)
 	}
 }
 
@@ -189,7 +247,11 @@ func TestContinuationRuntime_WrapResponseEnvelope_DoesNotPersistOnUnexpectedEOF(
 	wrapped, err := runtime.WrapResponseEnvelope(
 		context.Background(),
 		NewContinuationNamespace("alpha"),
-		NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
+		NewCanonicalRequest(RequestParams{
+			Model: "m",
+			Turn:  NewTurnRef("resp_prev"),
+			Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
+		}),
 		envelope,
 	)
 	if err != nil {
@@ -205,6 +267,6 @@ func TestContinuationRuntime_WrapResponseEnvelope_DoesNotPersistOnUnexpectedEOF(
 		}
 	}
 	if len(store.stored) != 0 {
-		t.Fatalf("stored snapshots = %d, want 0", len(store.stored))
+		t.Fatalf("stored records = %d, want 0", len(store.stored))
 	}
 }

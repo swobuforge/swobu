@@ -35,7 +35,8 @@ type RequestIngress struct {
 type RuntimePoliciesSpec struct {
 	DeliverySelector DeliverySelector
 	ObservationStore observation.Store
-	TurnStateStore   turnstate.Store
+	ContinuationStore canonical.ContinuationStore
+	TurnStateStore   turnstate.TurnStateStore
 	EffectSink       effect.Sink
 }
 
@@ -51,6 +52,7 @@ func NewIngress(endpoints EndpointReader, providerExec ProviderIngressResolver, 
 	if selector == nil {
 		selector = FixedDeliverySelector{}
 	}
+	continuation := canonical.NewContinuationRuntime(policies.ContinuationStore)
 	sink := policies.EffectSink
 	if sink == nil {
 		if policies.ObservationStore != nil || policies.TurnStateStore != nil {
@@ -70,6 +72,7 @@ func NewIngress(endpoints EndpointReader, providerExec ProviderIngressResolver, 
 		resolver: ExchangeRouteResolver{
 			DeliverySelector: selector,
 			Observations:     policies.ObservationStore,
+			Continuation:     continuation,
 		},
 	}
 }

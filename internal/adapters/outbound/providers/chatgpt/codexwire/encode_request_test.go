@@ -28,9 +28,8 @@ func TestRealize_NormalizesCodexPayload(t *testing.T) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	instructions, _ := payload["instructions"].(string)
-	if instructions == "" {
-		t.Fatal("expected instructions")
+	if _, ok := payload["instructions"]; ok {
+		t.Fatalf("expected no instructions overlay, got %#v", payload["instructions"])
 	}
 	if store, ok := payload["store"].(bool); !ok || store {
 		t.Fatalf("expected store=false, got %#v", payload["store"])
@@ -43,16 +42,18 @@ func TestRealize_NormalizesCodexPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected object input[0], got %#v", input[0])
 	}
-	content, ok := first["content"].([]any)
-	if !ok || len(content) == 0 {
-		t.Fatalf("expected non-empty content, got %#v", first["content"])
+	if got := first["type"]; got != "message" {
+		t.Fatalf("expected content type message, got %#v", got)
 	}
-	part, ok := content[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected object content[0], got %#v", content[0])
+	if got := first["role"]; got != "user" {
+		t.Fatalf("expected role user, got %#v", got)
 	}
-	if got := part["type"]; got != "input_text" {
-		t.Fatalf("expected content type input_text, got %#v", got)
+	content, ok := first["content"].(string)
+	if !ok || content == "" {
+		t.Fatalf("expected non-empty string content, got %#v", first["content"])
+	}
+	if content != "hello" {
+		t.Fatalf("expected content hello, got %#v", content)
 	}
 }
 

@@ -12,8 +12,11 @@ import (
 
 func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:       "claude",
-		Items:       []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model: "claude",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("tool_0", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`)),
+		},
 		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention1H}),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -27,6 +30,10 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	}
 	if _, ok := body["prompt_cache_key"]; ok {
 		t.Fatalf("prompt_cache_key must be provider transform concern")
+	}
+	tools, ok := body["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one tool declaration", body["tools"])
 	}
 }
 

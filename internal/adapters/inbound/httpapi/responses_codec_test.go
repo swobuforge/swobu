@@ -9,39 +9,61 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestDecodeResponsesToolMode_KnownValues(t *testing.T) {
+func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 	t.Parallel()
 
+	specificID := canonical.NewSemanticToolID("tool_0")
 	tests := []struct {
-		name string
-		raw  string
-		want canonical.ToolMode
+		name         string
+		raw          string
+		tools        []canonical.ToolDecl
+		wantMode     canonical.ToolPolicyMode
+		wantSpecific string
 	}{
-		{name: "empty", raw: "", want: canonical.ToolModeDefault},
-		{name: "null", raw: "null", want: canonical.ToolModeDefault},
-		{name: "string none", raw: `"none"`, want: canonical.ToolModeDefault},
-		{name: "string auto", raw: `"auto"`, want: canonical.ToolModeAuto},
-		{name: "string required", raw: `"required"`, want: canonical.ToolModeRequired},
-		{name: "object auto", raw: `{"type":"auto"}`, want: canonical.ToolModeAuto},
-		{name: "object required", raw: `{"type":"required"}`, want: canonical.ToolModeRequired},
-		{name: "object function", raw: `{"type":"function","name":"grep"}`, want: canonical.ToolModeRequired},
+		{name: "empty", raw: "", wantMode: canonical.ToolPolicyNone},
+		{name: "null", raw: "null", wantMode: canonical.ToolPolicyNone},
+		{name: "string none", raw: `"none"`, wantMode: canonical.ToolPolicyNone},
+		{name: "string auto", raw: `"auto"`, wantMode: canonical.ToolPolicyAuto},
+		{name: "string required", raw: `"required"`, wantMode: canonical.ToolPolicyRequired},
+		{name: "object auto", raw: `{"type":"auto"}`, wantMode: canonical.ToolPolicyAuto},
+		{name: "object required", raw: `{"type":"required"}`, wantMode: canonical.ToolPolicyRequired},
+		{
+			name:         "object function",
+			raw:          `{"type":"function","name":"grep"}`,
+			tools:        []canonical.ToolDecl{canonical.NewFunctionToolDecl(string(specificID), "grep", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))},
+			wantMode:     canonical.ToolPolicySpecific,
+			wantSpecific: specificID.String(),
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := responses.DecodeResponsesToolMode(rawJSON(tc.raw))
+			got, err := responses.DecodeResponsesToolPolicy(rawJSON(tc.raw), tc.tools)
 			if err != nil {
-				t.Fatalf("decodeResponsesToolMode returned error: %v", err)
+				t.Fatalf("decodeResponsesToolPolicy returned error: %v", err)
 			}
-			if got != tc.want {
-				t.Fatalf("tool mode = %q, want %q", got, tc.want)
+			if got.Mode != tc.wantMode {
+				t.Fatalf("tool policy mode = %q, want %q", got.Mode, tc.wantMode)
+			}
+			if tc.wantSpecific == "" {
+				if specific, ok := got.SpecificID(); ok {
+					t.Fatalf("tool policy specific = %q, want none", specific)
+				}
+				return
+			}
+			specific, ok := got.SpecificID()
+			if !ok {
+				t.Fatalf("tool policy specific is missing, want %q", tc.wantSpecific)
+			}
+			if specific.String() != tc.wantSpecific {
+				t.Fatalf("tool policy specific = %q, want %q", specific, tc.wantSpecific)
 			}
 		})
 	}
 }
 
-func TestDecodeResponsesToolMode_UnknownValuesDowngradeToDefault(t *testing.T) {
+func TestDecodeResponsesToolPolicy_UnknownValuesDowngradeToDefault(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{
@@ -51,17 +73,17 @@ func TestDecodeResponsesToolMode_UnknownValuesDowngradeToDefault(t *testing.T) {
 		`{"type":""}`,
 		`{}`,
 	} {
-		got, err := responses.DecodeResponsesToolMode(rawJSON(raw))
+		got, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil)
 		if err != nil {
-			t.Fatalf("raw=%s decodeResponsesToolMode returned error: %v", raw, err)
+			t.Fatalf("raw=%s decodeResponsesToolPolicy returned error: %v", raw, err)
 		}
-		if got != canonical.ToolModeDefault {
-			t.Fatalf("raw=%s tool mode = %q, want %q", raw, got, canonical.ToolModeDefault)
+		if got.Mode != canonical.ToolPolicyNone {
+			t.Fatalf("raw=%s tool policy mode = %q, want %q", raw, got.Mode, canonical.ToolPolicyNone)
 		}
 	}
 }
 
-func TestDecodeResponsesToolMode_InvalidShapesFailBadRequest(t *testing.T) {
+func TestDecodeResponsesToolPolicy_InvalidShapesFailBadRequest(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{
@@ -70,9 +92,10 @@ func TestDecodeResponsesToolMode_InvalidShapesFailBadRequest(t *testing.T) {
 		`true`,
 		`{"type":{}}`,
 		`{"type":[]}`,
+		`{"type":"function"}`,
 		`{`,
 	} {
-		_, err := responses.DecodeResponsesToolMode(rawJSON(raw))
+		_, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil)
 		if !isBadRequestError(err) {
 			t.Fatalf("raw=%s err=%v, want BAD_REQUEST", raw, err)
 		}

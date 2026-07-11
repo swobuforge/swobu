@@ -130,7 +130,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `--dangerously-bypass-approvals-and-sandbox -c model="`+exchange.PublicModelIDSwobu+`" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
+	if got := strings.Join(codex.args, " "); got != `--dangerously-bypass-approvals-and-sandbox --disable apps -c model="gpt-5.5" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
 		t.Fatalf("codex args=%q", got)
 	}
 	if got := codex.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
@@ -142,6 +142,9 @@ func TestClientRunSpecForID(t *testing.T) {
 	}
 	if got := claude.env["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:7926/c/acme/" {
 		t.Fatalf("claude env ANTHROPIC_BASE_URL=%q", got)
+	}
+	if got := claude.env["ANTHROPIC_API_KEY"]; got != "swobu-placeholder" {
+		t.Fatalf("claude env ANTHROPIC_API_KEY=%q", got)
 	}
 	if got := claude.env["ANTHROPIC_MODEL"]; got != exchange.PublicModelIDSwobu {
 		t.Fatalf("claude env ANTHROPIC_MODEL=%q", got)
@@ -195,7 +198,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `OPENAI_API_KEY=swobu-placeholder codex --dangerously-bypass-approvals-and-sandbox -c 'model="` + exchange.PublicModelIDSwobu + `"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
+	if want := `OPENAI_API_KEY=swobu-placeholder codex --dangerously-bypass-approvals-and-sandbox --disable apps -c 'model="gpt-5.5"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -203,7 +206,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("claude command missing")
 	}
-	if want := "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_CUSTOM_MODEL_OPTION=" + exchange.PublicModelIDSwobu + " ANTHROPIC_MODEL=" + exchange.PublicModelIDSwobu + " claude --model " + exchange.PublicModelIDSwobu; claude != want {
+	if want := "ANTHROPIC_API_KEY=swobu-placeholder ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/ ANTHROPIC_CUSTOM_MODEL_OPTION=" + exchange.PublicModelIDSwobu + " ANTHROPIC_MODEL=" + exchange.PublicModelIDSwobu + " claude --bare --add-dir . --tools Read --allowedTools Read --model " + exchange.PublicModelIDSwobu; claude != want {
 		t.Fatalf("claude command=%q want=%q", claude, want)
 	}
 	assertNoTestHarnessArtifacts(t, claude)

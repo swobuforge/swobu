@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
@@ -75,5 +76,31 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 	body := rr.Body.String()
 	if !strings.Contains(body, "truth") {
 		t.Fatalf("body missing streamed text: %s", body)
+	}
+}
+
+func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testing.T) {
+	resp := exchange.RequestOutput{
+		Response: exchange.TransportResponse{
+			Transport: transportpkg.TransportResponse{
+				Status: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/event-stream"},
+				},
+				Body: immediateReadErrorBody{},
+			},
+		},
+	}
+
+	writer := &writeHeaderCountingResponseWriter{}
+	err := writeSuccessResponse(writer, "req_test_3", canonical.ClientFamilyResponses, resp)
+	if err == nil {
+		t.Fatal("writeSuccessResponse returned nil, want stream decoding failure")
+	}
+	if !strings.Contains(err.Error(), "stream decoding failed") {
+		t.Fatalf("error = %v, want stream decoding failed", err)
+	}
+	if writer.writeHeaderCount != 0 {
+		t.Fatalf("writeHeader count = %d, want 0", writer.writeHeaderCount)
 	}
 }

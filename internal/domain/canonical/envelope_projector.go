@@ -180,12 +180,16 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 	}
 	var (
 		model        string
+		toolsRaw     string
+		toolPolicy   ToolPolicy
 		itemsByID    = map[EnvelopeID]*CanonicalItem{}
 		toolArgsByID = map[EnvelopeID]string{}
 		orderedIDs   = make([]EnvelopeID, 0)
 	)
 	for _, ev := range e.Events {
-		requestProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &model)
+		if err := requestProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &model, &toolsRaw, &toolPolicy); err != nil {
+			return CanonicalRequest{}, err
+		}
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -199,7 +203,11 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		}
 		items = append(items, item.Clone())
 	}
-	return NewCanonicalRequest(RequestParams{Model: model, Items: items}), nil
+	tools, err := decodeRequestToolDeclsMetadata(toolsRaw)
+	if err != nil {
+		return CanonicalRequest{}, err
+	}
+	return NewCanonicalRequest(RequestParams{Model: model, Items: items, Tools: tools, ToolPolicy: toolPolicy}), nil
 }
 
 func requestProjectionApplyEvent(
@@ -208,13 +216,25 @@ func requestProjectionApplyEvent(
 	toolArgsByID map[EnvelopeID]string,
 	orderedIDs *[]EnvelopeID,
 	model *string,
-) {
+	toolsRaw *string,
+	toolPolicy *ToolPolicy,
+) error {
 	switch ev.Kind {
 	case EventMetadata:
 		payload, _ := ev.Payload.(MetadataPayload)
 		if payload.Values != nil {
 			if payload.Values["model"] != "" {
 				*model = payload.Values["model"]
+			}
+			if payload.Values["tools"] != "" {
+				*toolsRaw = payload.Values["tools"]
+			}
+			if payload.Values["tool_policy"] != "" {
+				policy, err := decodeToolPolicyMetadata(payload.Values["tool_policy"])
+				if err != nil {
+					return err
+				}
+				*toolPolicy = policy
 			}
 		}
 	case EventEnvelopeStart:
@@ -232,12 +252,19 @@ func requestProjectionApplyEvent(
 	default:
 		// ignored by request projection
 	}
+	return nil
 }
 
 func requestProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) {
 	payload, _ := ev.Payload.(EnvelopeStartPayload)
 	if payload.Kind == EnvMessage {
 		item := NewTextItem(payload.Role, "")
+		itemsByID[ev.EnvID] = &item
+		*orderedIDs = append(*orderedIDs, ev.EnvID)
+		return
+	}
+	if payload.Kind == EnvToolCall {
+		item := NewToolUseItem(payload.Role, string(ev.EnvID), payload.ToolUseID, payload.Name, EmptyToolArguments())
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
 		return

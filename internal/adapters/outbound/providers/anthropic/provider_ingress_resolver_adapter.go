@@ -52,8 +52,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 }
 
 func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
-	deliveryMode, err := resolveAnthropicProviderProtocol(req.Target.ProviderProtocol)
-	if err != nil {
+	if err := validateAnthropicProviderProtocol(req.Target.ProviderProtocol); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
@@ -63,8 +62,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		return nil, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
 
-	resolvedDelivery := delivery.BufferedDelivery()
-	if deliveryMode == delivery.Streaming {
+	resolvedDelivery := req.Contract.ProviderDelivery
+	if resolvedDelivery.Mode != delivery.Buffered && resolvedDelivery.Mode != delivery.Streaming {
+		return nil, canonical.UnsupportedDelivery("anthropic provider delivery is unsupported")
+	}
+	if resolvedDelivery.Mode == delivery.Streaming && resolvedDelivery.Framing == delivery.FramingNone {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
 	}
 	wireReq, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(req.Request, resolvedDelivery)
@@ -103,7 +105,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		}()
 		return nil, httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
 	}
-	if deliveryMode == delivery.Streaming {
+	if resolvedDelivery.Mode == delivery.Streaming {
 		framing := carrier.FramingSSE
 		if resolvedDelivery.Framing != delivery.FramingSSE {
 			framing = carrier.FramingNone
@@ -170,22 +172,15 @@ func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context,
 	return err
 }
 
-func resolveAnthropicProviderProtocol(providerProtocol string) (delivery.Mode, error) {
+func validateAnthropicProviderProtocol(providerProtocol string) error {
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
 	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
-		return delivery.Buffered, canonical.BadEndpoint("anthropic provider protocol must be concrete")
+		return canonical.BadEndpoint("anthropic provider protocol must be concrete")
 	}
 	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecAnthropic), providerProtocol) {
-		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
+		return canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
 	}
-	switch providerProtocol {
-	case "messages":
-		return delivery.Buffered, nil
-	case "messages_stream":
-		return delivery.Streaming, nil
-	default:
-		return delivery.Buffered, canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
-	}
+	return nil
 }
 
 func (e ProviderIngressResolverAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {

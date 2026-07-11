@@ -23,10 +23,12 @@ type streamFrame struct {
 		Status string `json:"status"`
 	} `json:"response"`
 	Item struct {
-		ID     string `json:"id"`
-		Type   string `json:"type"`
-		CallID string `json:"call_id"`
-		Name   string `json:"name"`
+		ID          string `json:"id"`
+		Type        string `json:"type"`
+		CallID      string `json:"call_id"`
+		Name        string `json:"name"`
+		Arguments   string `json:"arguments"`
+		ServerLabel string `json:"server_label"`
 	} `json:"item"`
 }
 
@@ -42,12 +44,18 @@ func (s *responsesEventReader) handleFrame(frame streamFrame) (bool, canonical.E
 	case "response.function_call_arguments.delta":
 		s.handleFunctionCallArgumentsDelta(frame)
 		return true, s.shiftPendingEvent(), nil
+	case "response.mcp_call_arguments.delta":
+		s.handleFunctionCallArgumentsDelta(frame)
+		return true, s.shiftPendingEvent(), nil
 	case "response.output_item.added":
 		if !s.handleOutputItemAdded(frame) {
 			return false, canonical.Event{}, nil
 		}
 		return true, s.shiftPendingEvent(), nil
 	case "response.function_call_arguments.done":
+		s.handleFunctionCallArgumentsDone(frame)
+		return true, s.shiftPendingEvent(), nil
+	case "response.mcp_call_arguments.done":
 		s.handleFunctionCallArgumentsDone(frame)
 		return true, s.shiftPendingEvent(), nil
 	case "response.completed":
@@ -103,7 +111,8 @@ func (s *responsesEventReader) handleFunctionCallArgumentsDelta(frame streamFram
 }
 
 func (s *responsesEventReader) handleOutputItemAdded(frame streamFrame) bool {
-	if strings.TrimSpace(frame.Item.Type) != "function_call" { // swobu:io-string source=boundary
+	itemType := strings.TrimSpace(frame.Item.Type)             // swobu:io-string source=boundary
+	if itemType != "function_call" && itemType != "mcp_call" { // swobu:io-string source=boundary
 		return false
 	}
 	itemID := fallbackItemID(frame.Item.ID, frame.Item.CallID)

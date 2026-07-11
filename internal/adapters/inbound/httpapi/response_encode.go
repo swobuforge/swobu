@@ -41,13 +41,34 @@ func writeStreamingSuccess(w http.ResponseWriter, requestID string, family canon
 	_ = requestID
 	_ = family
 
+	prefix, err := readFirstStreamChunk(response.Body)
+	if err != nil {
+		return canonical.InternalError("stream decoding failed")
+	}
 	copyResponseHeaders(w, response.Header)
 	w.WriteHeader(response.Status)
 	defer func() { _ = response.Body.Close() }()
+	if len(prefix) > 0 {
+		if _, err := w.Write(prefix); err != nil {
+			return canonical.InternalError("stream decoding failed")
+		}
+	}
 	if _, err := io.Copy(w, response.Body); err != nil && !errors.Is(err, io.EOF) {
 		return canonical.InternalError("stream decoding failed")
 	}
 	return nil
+}
+
+func readFirstStreamChunk(body io.ReadCloser) ([]byte, error) {
+	if body == nil {
+		return nil, canonical.InternalError("streaming client response is missing transport body")
+	}
+	buf := make([]byte, 1)
+	n, err := io.ReadAtLeast(body, buf, 1)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), buf[:n]...), nil
 }
 
 func copyResponseHeaders(w http.ResponseWriter, header http.Header) {

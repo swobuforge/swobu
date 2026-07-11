@@ -2,8 +2,8 @@ package turnstate
 
 import "context"
 
-// Store persists opaque continuation payloads.
-type Store interface {
-	Put(ctx context.Context, key Key, value []byte) error
-	Get(ctx context.Context, key Key) ([]byte, bool, error)
+// TurnStateStore persists opaque provider-native replay bytes.
+type TurnStateStore interface {
+	Put(ctx context.Context, key TurnStateKey, value []byte) error
+	Get(ctx context.Context, key TurnStateKey) ([]byte, bool, error)
 }

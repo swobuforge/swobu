@@ -74,6 +74,11 @@ func capabilityCatalog() []capabilityClientSpec {
 func codexClientSpec() capabilityClientSpec {
 	return capabilityClientSpec{
 		Identity: Identity{ID: "codex", Label: "Codex"},
+		Vars: func(baseURL string) TemplateVars {
+			vars := defaultTemplateVars(baseURL)
+			vars["primary_model"] = "gpt-5.5"
+			return vars
+		},
 		Actions: []capabilityActionSpec{
 			{
 				ID:      "file-config",
@@ -97,6 +102,7 @@ func codexClientSpec() capabilityClientSpec {
 			Binary: "codex",
 			Args: []string{
 				"--dangerously-bypass-approvals-and-sandbox",
+				"--disable", "apps",
 				"-c", "model=\"{{primary_model}}\"",
 				"-c", "model_provider=\"swobu\"",
 				"-c", "model_providers.swobu.name=\"Swobu\"",
@@ -126,9 +132,16 @@ func claudeClientSpec() capabilityClientSpec {
 		Run: &capabilityRunSpec{
 			Binary: "claude",
 			Args: []string{
+				"--bare",
+				"--add-dir", ".",
+				"--tools", "Read",
+				"--allowedTools", "Read",
 				"--model", "{{primary_model}}",
 			},
 			Env: map[string]string{
+				// Claude Code still expects a non-empty Anthropic API key even when
+				// the base URL points at the Swobu workspace endpoint.
+				"ANTHROPIC_API_KEY":             "swobu-placeholder",
 				"ANTHROPIC_BASE_URL":            "{{base_url}}",
 				"ANTHROPIC_MODEL":               "{{primary_model}}",
 				"ANTHROPIC_CUSTOM_MODEL_OPTION": "{{primary_model}}",

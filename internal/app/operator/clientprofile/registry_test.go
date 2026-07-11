@@ -228,11 +228,11 @@ func TestCatalog_RunActionContentDerivedFromRunSpec(t *testing.T) {
 	}{
 		{
 			profileID: "codex",
-			contains:  []string{"codex --dangerously-bypass-approvals-and-sandbox", `model_provider="swobu"`},
+			contains:  []string{"codex --dangerously-bypass-approvals-and-sandbox --disable apps", `model="gpt-5.5"`, `model_provider="swobu"`},
 		},
 		{
 			profileID: "claude",
-			contains:  []string{"claude --model", "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/"},
+			contains:  []string{"claude --bare --add-dir . --tools Read --allowedTools Read --model", "ANTHROPIC_API_KEY=swobu-placeholder", "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/"},
 		},
 		{
 			profileID: "aider",

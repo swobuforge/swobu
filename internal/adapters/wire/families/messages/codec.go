@@ -43,9 +43,14 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		raw, _ := json.Marshal(messagesStartEventDTO{
 			Type: "message_start",
 			Message: messagesStartMessageDTO{
-				ID:   sse.FallbackID(event.ResultID, "msg_swobu"),
-				Role: "assistant",
+				ID:           sse.FallbackID(event.ResultID, "msg_swobu"),
+				Type:         "message",
+				Role:         "assistant",
+				Content:      []messagesResponsePartDTO{},
+				StopReason:   nil,
+				StopSequence: nil,
 			},
+			Usage: messagesUsageDTO{},
 		})
 		return [][]byte{
 			sse.SSEEventFrame("message_start", raw),
@@ -147,37 +152,33 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		return [][]byte{sse.SSEEventFrame("content_block_stop", raw)}, nil
 	case sse.StreamEventCompleted:
 		if !s.started {
-			raw, _ := json.Marshal(messagesStartEventDTO{
-				Type: "message_start",
-				Message: messagesStartMessageDTO{
-					ID:   "msg_swobu",
-					Role: "assistant",
-				},
-			})
-			return [][]byte{
-				sse.SSEEventFrame("message_start", raw),
-			}, nil
+			frames, _ := s.Encode(sse.StreamEvent{Kind: sse.StreamEventStarted, ResultID: event.ResultID, Model: event.Model})
+			more, err := s.Encode(event)
+			return append(frames, more...), err
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
 		for _, index := range s.blockIndexByID {
 			raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
 			frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
 		}
+		stopReason := "end_turn"
 		if s.sawToolUse {
-			raw, _ := json.Marshal(struct {
-				Type  string `json:"type"`
-				Delta struct {
-					StopReason string `json:"stop_reason"`
-				} `json:"delta"`
-			}{
-				Type: "message_delta",
-				Delta: struct {
-					StopReason string `json:"stop_reason"`
-				}{StopReason: "tool_use"},
-			})
-			frames = append(frames, sse.SSEEventFrame("message_delta", raw))
+			stopReason = "tool_use"
 		}
-		raw, _ := json.Marshal(struct {
+		outputTokens := 0
+		if usageTokens, ok := event.Usage.OutputTokens(); ok {
+			outputTokens = usageTokens
+		}
+		raw, _ := json.Marshal(messagesDeltaEventDTO{
+			Type: "message_delta",
+			Delta: messagesDeltaBodyDTO{
+				StopReason:   stopReason,
+				StopSequence: nil,
+			},
+			Usage: messagesDeltaUsageDTO{OutputTokens: outputTokens},
+		})
+		frames = append(frames, sse.SSEEventFrame("message_delta", raw))
+		raw, _ = json.Marshal(struct {
 			Type string `json:"type"`
 		}{Type: "message_stop"})
 		frames = append(frames, sse.SSEEventFrame("message_stop", raw))

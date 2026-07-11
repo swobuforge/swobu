@@ -15,9 +15,9 @@ type realizedResponsesBody struct {
 
 func TestEncode_OmitsInputForContinuationOnlyRequests(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:              "claude-opus-4-6",
-		Items:              []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output")},
-		PreviousResponseID: "resp_123",
+		Model: "claude-opus-4-6",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output")},
+		Turn:  canonical.NewTurnRef("resp_123"),
 	})
 
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -44,7 +44,7 @@ func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 			canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output"),
 			canonical.NewTextItem(canonical.ItemAuthorUser, "new user turn"),
 		},
-		PreviousResponseID: "resp_123",
+		Turn: canonical.NewTurnRef("resp_123"),
 	})
 
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -56,16 +56,18 @@ func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	if _, ok := body["input"]; !ok {
-		t.Fatalf("input missing with non-empty last turn; raw=%s", string(raw))
+	if got, ok := body["input"].(string); !ok || got != "new user turn" {
+		t.Fatalf("input=%#v want current user turn string; raw=%s", body["input"], string(raw))
 	}
 }
 
-func TestEncode_UsesOutputTextPartsForAssistantContent(t *testing.T) {
+func TestEncode_PreservesFullThreadWithoutPreviousResponseID(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "claude-opus-4-6",
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output"),
+			canonical.NewTextItem(canonical.ItemAuthorUser, "open the file"),
+			canonical.NewToolUseItem(canonical.ItemAuthorAssistant, "msg_1", "call_1", "Read", canonical.NewToolArgumentsObject(`{"path":"workspace/file.txt"}`)),
+			canonical.NewToolResultItem(canonical.ItemAuthorTool, "call_1", "file contents"),
 			canonical.NewTextItem(canonical.ItemAuthorUser, "new user turn"),
 		},
 	})
@@ -75,26 +77,25 @@ func TestEncode_UsesOutputTextPartsForAssistantContent(t *testing.T) {
 		t.Fatalf("Encode returned err=%v", err)
 	}
 	raw := wire.Raw
-	var body struct {
-		Input []struct {
-			Type    string `json:"type"`
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"input"`
-	}
+	var body realizedResponsesBody
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	if len(body.Input) != 2 {
-		t.Fatalf("input len=%d want 2; raw=%s", len(body.Input), string(raw))
+	input, ok := body.Input.([]any)
+	if !ok {
+		t.Fatalf("input=%T want array; raw=%s", body.Input, string(raw))
 	}
-	if body.Input[0].Role != "assistant" || len(body.Input[0].Content) != 1 || body.Input[0].Content[0].Type != "output_text" {
-		t.Fatalf("assistant content part type mismatch: %#v; raw=%s", body.Input[0], string(raw))
+	if len(input) != 4 {
+		t.Fatalf("input len = %d, want 4; raw=%s", len(input), string(raw))
 	}
-	if body.Input[1].Role != "user" || len(body.Input[1].Content) != 1 || body.Input[1].Content[0].Type != "input_text" {
-		t.Fatalf("user content part type mismatch: %#v; raw=%s", body.Input[1], string(raw))
+	types := []string{"message", "function_call", "function_call_output", "message"}
+	for i, item := range input {
+		typed, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("input[%d] = %T, want object; raw=%s", i, item, string(raw))
+		}
+		if got := typed["type"]; got != types[i] {
+			t.Fatalf("input[%d].type = %v, want %q; raw=%s", i, got, types[i], string(raw))
+		}
 	}
 }

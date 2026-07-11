@@ -15,6 +15,8 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	t.Parallel()
 
 	codec := ResponseStreamEncoder{}
+	outputTokens := 2
+	usage := mustTokenUsage(t, nil, &outputTokens, nil, nil)
 	events := canonical.EventSequence{
 		{
 			ExchangeID: "ex_1",
@@ -53,7 +55,7 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 			Seq:        5,
 			Kind:       canonical.EventUsage,
 			EnvID:      "res_1",
-			Payload:    canonical.UsagePayload{Usage: canonical.NewUnknownTokenUsage()},
+			Payload:    canonical.UsagePayload{Usage: usage},
 		},
 		{
 			ExchangeID: "ex_1",
@@ -93,8 +95,29 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	if got := countType(types, "content_block_delta"); got != 1 {
 		t.Fatalf("content_block_delta count = %d, want 1; types=%v", got, types)
 	}
+	if got := countType(types, "message_start"); got != 1 {
+		t.Fatalf("message_start count = %d, want 1; types=%v", got, types)
+	}
+	if got := countType(types, "message_delta"); got != 1 {
+		t.Fatalf("message_delta count = %d, want 1; types=%v", got, types)
+	}
 	if got := countType(types, "message_stop"); got != 1 {
 		t.Fatalf("message_stop count = %d, want 1; types=%v", got, types)
+	}
+
+	startPayload := firstPayloadByEventType(t, frames, "message_start")
+	msg, ok := startPayload["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message_start payload shape invalid: %#v", startPayload)
+	}
+	if got, _ := msg["type"].(string); got != "message" {
+		t.Fatalf("message_start message.type = %q, want %q", got, "message")
+	}
+	if got, _ := msg["role"].(string); got != "assistant" {
+		t.Fatalf("message_start message.role = %q, want %q", got, "assistant")
+	}
+	if content, ok := msg["content"].([]any); !ok || len(content) != 0 {
+		t.Fatalf("message_start message.content = %#v, want empty array", msg["content"])
 	}
 
 	deltaPayload := firstPayloadByEventType(t, frames, "content_block_delta")
@@ -105,6 +128,29 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	if got, _ := delta["text"].(string); got != "Hello world!" {
 		t.Fatalf("delta text = %q, want %q", got, "Hello world!")
 	}
+
+	messageDeltaPayload := firstPayloadByEventType(t, frames, "message_delta")
+	messageDelta, ok := messageDeltaPayload["delta"].(map[string]any)
+	if !ok {
+		t.Fatalf("message_delta payload shape invalid: %#v", messageDeltaPayload)
+	}
+	if got, _ := messageDelta["stop_reason"].(string); got != "end_turn" {
+		t.Fatalf("message_delta stop_reason = %q, want %q", got, "end_turn")
+	}
+	if usagePayload, ok := messageDeltaPayload["usage"].(map[string]any); !ok {
+		t.Fatalf("message_delta usage shape invalid: %#v", messageDeltaPayload["usage"])
+	} else if got := usagePayload["output_tokens"]; got != float64(2) {
+		t.Fatalf("message_delta usage.output_tokens = %v, want 2", got)
+	}
+}
+
+func mustTokenUsage(t *testing.T, input, output, cacheRead, cacheWrite *int) canonical.TokenUsage {
+	t.Helper()
+	usage, err := canonical.NewTokenUsageWithOptional(input, output, cacheRead, cacheWrite)
+	if err != nil {
+		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
+	}
+	return usage
 }
 
 func frameTypes(t *testing.T, frames [][]byte) []string {

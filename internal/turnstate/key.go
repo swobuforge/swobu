@@ -1,14 +1,14 @@
 package turnstate
 
-// Kind classifies one opaque continuation payload role.
-type Kind string
+// TurnStateKind classifies one opaque provider-native replay payload role.
+type TurnStateKind string
 
-// Key scopes one opaque continuation payload.
-type Key struct {
+// TurnStateKey scopes one opaque provider-native replay payload.
+type TurnStateKey struct {
 	RouteID      string
 	ProviderID   string
 	ModelID      string
 	Conversation string
 	Subject      string
-	Kind         Kind
+	Kind         TurnStateKind
 }

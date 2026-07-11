@@ -11,45 +11,44 @@ const (
 	SemanticKindPrompt       SemanticKind = "prompt_generation"
 )
 
-type ToolMode string
-
-const (
-	ToolModeDefault  ToolMode = ""
-	ToolModeAuto     ToolMode = "auto"
-	ToolModeRequired ToolMode = "required"
-)
-
 // CanonicalRequest is the single semantic request representation in core.
 // Transport/profile/protocol specifics must stay outside this type.
+// Tool declarations and policy belong here because they are request grammar,
+// not wire shape.
 type CanonicalRequest struct {
 	model string
 	items []CanonicalItem
+	tools []ToolDecl
 
-	previousResponseID string
-	toolMode           ToolMode
-	cacheIntent        CacheIntent
+	turn        TurnRef
+	toolPolicy  ToolPolicy
+	cacheIntent CacheIntent
 }
 
-// RequestParams contains normalized semantic input for one request.
+// RequestParams contains normalized semantic input for one request, including
+// semantic tool declarations, tool policy, and the canonical turn reference.
 type RequestParams struct {
-	Model              string
-	Items              []CanonicalItem
-	InputText          string
-	PreviousResponseID string
-	ToolMode           ToolMode
-	CacheIntent        CacheIntent
+	Model       string
+	Items       []CanonicalItem
+	Tools       []ToolDecl
+	InputText   string
+	Turn        TurnRef
+	ToolPolicy  ToolPolicy
+	CacheIntent CacheIntent
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 	items := cloneCanonicalItems(params.Items)
+	tools := cloneToolDecls(params.Tools)
 	if params.InputText != "" {
 		items = append(items, NewTextItem(ItemAuthorUser, params.InputText))
 	}
 	return CanonicalRequest{
-		model:              strings.TrimSpace(params.Model), // swobu:io-string source=domain
-		items:              items,
-		previousResponseID: strings.TrimSpace(params.PreviousResponseID), // swobu:io-string source=domain
-		toolMode:           params.ToolMode,
+		model:      strings.TrimSpace(params.Model), // swobu:io-string source=domain
+		items:      items,
+		tools:      tools,
+		turn:       params.Turn.Clone(),
+		toolPolicy: params.ToolPolicy.Clone(),
 		cacheIntent: NewCacheIntent(CacheIntentParams{
 			Key:       params.CacheIntent.Key(),
 			Retention: params.CacheIntent.Retention(),
@@ -69,12 +68,16 @@ func (r CanonicalRequest) Items() []CanonicalItem {
 	return cloneCanonicalItems(r.items)
 }
 
-func (r CanonicalRequest) PreviousResponseID() string {
-	return r.previousResponseID
+func (r CanonicalRequest) Tools() []ToolDecl {
+	return cloneToolDecls(r.tools)
 }
 
-func (r CanonicalRequest) ToolMode() ToolMode {
-	return r.toolMode
+func (r CanonicalRequest) Turn() TurnRef {
+	return r.turn.Clone()
+}
+
+func (r CanonicalRequest) ToolPolicy() ToolPolicy {
+	return r.toolPolicy.Clone()
 }
 
 func (r CanonicalRequest) CacheIntent() CacheIntent {
@@ -83,11 +86,12 @@ func (r CanonicalRequest) CacheIntent() CacheIntent {
 
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
-		Model:              r.model,
-		Items:              r.items,
-		PreviousResponseID: r.previousResponseID,
-		ToolMode:           r.toolMode,
-		CacheIntent:        r.cacheIntent,
+		Model:       r.model,
+		Items:       r.items,
+		Tools:       r.tools,
+		Turn:        r.turn,
+		ToolPolicy:  r.toolPolicy,
+		CacheIntent: r.cacheIntent,
 	})
 }
 

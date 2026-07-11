@@ -21,6 +21,10 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request is missing required fields")
 	}
+	tools, err := decodeChatCompletionsTools(dto.Tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "chat completions")
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -40,6 +44,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
 		Items: items,
+		Tools: tools,
 	}), resolvedDelivery, nil
 }
 

@@ -2,70 +2,74 @@ package canonical
 
 import "testing"
 
-func TestContinuationSelectorFromRequest_AcceptsPreviousResponseID(t *testing.T) {
-	_, ok := ContinuationSelectorFromRequest(NewCanonicalRequest(RequestParams{
-		Model:              "m",
-		PreviousResponseID: "resp_1",
-	}))
+func TestTurnRef_NormalizesAndClonesPreviousID(t *testing.T) {
+	ref := NewTurnRef("  resp_123  ")
+	if ref.IsZero() {
+		t.Fatal("IsZero() = true, want false")
+	}
+	prev, ok := ref.PreviousID()
 	if !ok {
-		t.Fatal("ok = false, want true")
+		t.Fatal("PreviousID() = false, want true")
+	}
+	if got := prev.String(); got != "resp_123" {
+		t.Fatalf("PreviousID() = %q, want %q", got, "resp_123")
+	}
+	cloned := ref.Clone()
+	if cloned.Previous == nil || cloned.Previous == ref.Previous {
+		t.Fatal("Clone() must deep-copy the turn reference")
 	}
 }
 
-func TestContinuationSelectorFromRequest_MissingSelectorReturnsFalse(t *testing.T) {
-	_, ok := ContinuationSelectorFromRequest(NewCanonicalRequest(RequestParams{
-		Model: "m",
-	}))
-	if ok {
-		t.Fatal("ok = true, want false")
+func TestCurrentTurnDelta_ReturnsSuffixStartingAtLatestUserItem(t *testing.T) {
+	delta := CurrentTurnDelta([]CanonicalItem{
+		NewTextItem(ItemAuthorUser, "hi"),
+		NewTextItem(ItemAuthorAssistant, "hello"),
+		NewTextItem(ItemAuthorUser, "continue"),
+	})
+	if len(delta) != 1 {
+		t.Fatalf("delta len = %d, want 1", len(delta))
+	}
+	if got := delta[0].Text; got != "continue" {
+		t.Fatalf("delta[0].Text = %q, want %q", got, "continue")
 	}
 }
 
-func TestContinuationConversation_RehydratesResponseConversation(t *testing.T) {
-	conversation, ok, err := ContinuationConversation(NewCanonicalRequest(RequestParams{
-		Model: "m",
-		Items: []CanonicalItem{
-			NewTextItem(ItemAuthorUser, "hi"),
-			NewTextItem(ItemAuthorAssistant, "hello"),
-			NewTextItem(ItemAuthorUser, "continue"),
-		},
-	}))
-	if err != nil {
-		t.Fatalf("ContinuationConversation returned error: %v", err)
+func TestCurrentTurnDelta_FallsBackToCloneWhenNoUserItemExists(t *testing.T) {
+	original := []CanonicalItem{NewTextItem(ItemAuthorAssistant, "hello")}
+	delta := CurrentTurnDelta(original)
+	if len(delta) != 1 || delta[0].Text != "hello" {
+		t.Fatalf("delta = %+v, want clone of original", delta)
 	}
-	if !ok {
-		t.Fatal("ok = false, want true")
-	}
-	if len(conversation) != 3 {
-		t.Fatalf("conversation len = %d, want 3", len(conversation))
-	}
-	if got := conversation[2].Text; got != "continue" {
-		t.Fatalf("latest text = %q, want %q", got, "continue")
+	delta[0].Text = "mutated"
+	if original[0].Text != "hello" {
+		t.Fatal("CurrentTurnDelta must return a clone")
 	}
 }
 
-func TestBuildContinuitySnapshot_AppendsAssistantOutput(t *testing.T) {
-	snapshot, ok, err := BuildContinuitySnapshot(
-		[]CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
-		NewConversationOutput(
-			"resp_1", "m",
-			[]OutputItem{
-				NewTextOutputItem("text_0", "hello"),
-				NewToolUseOutputItem("tool_0", "call_1", "grep", NewToolArgumentsObject(`{"pattern":"TODO"}`)),
-			},
+func TestContinuationRecord_CloneCopiesPointerFieldsAndPayloads(t *testing.T) {
+	parent := NewContinuationID("resp_parent")
+	record := ContinuationRecord{
+		ID:           NewContinuationID("resp_child"),
+		Parent:       &parent,
+		RouteID:      "alpha",
+		ModelID:      "m",
+		RequestDelta: NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
+		Response: NewConversationOutput(
+			"resp_child",
+			"m",
+			[]OutputItem{NewTextOutputItem("text_0", "done")},
 			"completed",
 		),
-	)
-	if err != nil {
-		t.Fatalf("BuildContinuitySnapshot returned error: %v", err)
 	}
-	if !ok {
-		t.Fatal("ok = false, want true")
+
+	cloned := record.Clone()
+	if cloned.Parent == nil || cloned.Parent == record.Parent || cloned.Parent.String() != "resp_parent" {
+		t.Fatal("Clone() must deep-copy the parent pointer")
 	}
-	if got := snapshot.ResponseID; got != "resp_1" {
-		t.Fatalf("response id = %q, want %q", got, "resp_1")
+	if cloned.RequestDelta.Items()[0].Text != "hi" {
+		t.Fatal("Clone() lost request delta")
 	}
-	if len(snapshot.Thread) != 3 {
-		t.Fatalf("thread len = %d, want 3", len(snapshot.Thread))
+	if cloned.Response.ResultID() != "resp_child" {
+		t.Fatal("Clone() lost response snapshot")
 	}
 }
