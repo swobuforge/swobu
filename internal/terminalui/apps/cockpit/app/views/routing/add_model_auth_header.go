@@ -151,9 +151,9 @@ func applyAddModelAuthHeaderSelection(model state.Model, providerSpec string, au
 			Scope:            state.RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:     providerSpec,
 			AuthHeader:       authHeader,
-			ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
-			BaseURL:          strings.TrimSpace(next.BaseURL),          // swobu:io-string source=boundary
-			CredentialRef:    strings.TrimSpace(effectiveAddModelCredentialRef(model, next)),
+			ProviderProtocol: strings.TrimSpace(next.ProviderProtocol),                       // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(next.BaseURL),                                // swobu:io-string source=boundary
+			CredentialRef:    strings.TrimSpace(effectiveAddModelCredentialRef(model, next)), // swobu:io-string source=domain
 		},
 	}
 }

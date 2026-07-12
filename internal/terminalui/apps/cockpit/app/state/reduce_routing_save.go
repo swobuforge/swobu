@@ -135,33 +135,33 @@ func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec stri
 		if trimmed == "" {
 			return false
 		}
-		lowered := strings.ToLower(trimmed)
+		lowered := strings.ToLower(trimmed) // swobu:io-string source=domain
 		return lowered == "keychain" || strings.HasPrefix(lowered, "keychain:")
 	}
-	if strings.TrimSpace(model.CurrentEndpoint) == "" {
+	if strings.TrimSpace(model.CurrentEndpoint) == "" { // swobu:io-string source=domain
 		draft := model.CreateDraftProviderConfig
-		if !strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), providerSpec) || !isKeychainRef(draft.CredentialRef) {
+		if !strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), providerSpec) || !isKeychainRef(draft.CredentialRef) { // swobu:io-string source=domain
 			return nil
 		}
 		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
 			Scope:            RoutingModelCatalogScopeCreateDraft,
-			ProviderSpec:     strings.TrimSpace(draft.ProviderSpec),  // swobu:io-string source=boundary
-			BaseURL:          strings.TrimSpace(draft.BaseURL),       // swobu:io-string source=boundary
-			AuthHeader:       strings.TrimSpace(draft.AuthHeader),    // swobu:io-string source=boundary
-			CredentialRef:    strings.TrimSpace(draft.CredentialRef), // swobu:io-string source=boundary
-			ProviderProtocol: strings.TrimSpace(draft.ProviderProtocol),
+			ProviderSpec:     strings.TrimSpace(draft.ProviderSpec),     // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(draft.BaseURL),          // swobu:io-string source=boundary
+			AuthHeader:       strings.TrimSpace(draft.AuthHeader),       // swobu:io-string source=boundary
+			CredentialRef:    strings.TrimSpace(draft.CredentialRef),    // swobu:io-string source=boundary
+			ProviderProtocol: strings.TrimSpace(draft.ProviderProtocol), // swobu:io-string source=domain
 		}}
 	}
-	if !strings.EqualFold(strings.TrimSpace(model.AddModelDraftProviderSpec), providerSpec) || !isKeychainRef(model.AddModelDraftCredentialRef) {
+	if !strings.EqualFold(strings.TrimSpace(model.AddModelDraftProviderSpec), providerSpec) || !isKeychainRef(model.AddModelDraftCredentialRef) { // swobu:io-string source=domain
 		return nil
 	}
 	return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
 		Scope:            RoutingModelCatalogScopeAddModelDraft,
-		ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),  // swobu:io-string source=boundary
-		BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),       // swobu:io-string source=boundary
-		AuthHeader:       strings.TrimSpace(model.AddModelDraftAuthHeader),    // swobu:io-string source=boundary
-		CredentialRef:    strings.TrimSpace(model.AddModelDraftCredentialRef), // swobu:io-string source=boundary
-		ProviderProtocol: strings.TrimSpace(model.AddModelDraftProviderProtocol),
+		ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),     // swobu:io-string source=boundary
+		BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),          // swobu:io-string source=boundary
+		AuthHeader:       strings.TrimSpace(model.AddModelDraftAuthHeader),       // swobu:io-string source=boundary
+		CredentialRef:    strings.TrimSpace(model.AddModelDraftCredentialRef),    // swobu:io-string source=boundary
+		ProviderProtocol: strings.TrimSpace(model.AddModelDraftProviderProtocol), // swobu:io-string source=domain
 	}}
 }
 
@@ -193,9 +193,9 @@ func reduceProviderAuthSessionFailed(model *Model, value stateeffect.ProviderAut
 	userCode := ""
 	sessionID := ""
 	if hadPrevious {
-		url = strings.TrimSpace(previous.URL)           // swobu:io-string source=boundary
-		userCode = strings.TrimSpace(previous.UserCode) // swobu:io-string source=boundary
-		sessionID = strings.TrimSpace(previous.SessionID)
+		url = strings.TrimSpace(previous.URL)             // swobu:io-string source=boundary
+		userCode = strings.TrimSpace(previous.UserCode)   // swobu:io-string source=boundary
+		sessionID = strings.TrimSpace(previous.SessionID) // swobu:io-string source=domain
 	}
 	setAuthSession(model, ownerKey, stateModel.AuthSessionViewState{
 		SessionID:    sessionID,
@@ -229,22 +229,22 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 		model.HeaderStatus = "login complete"
 		model.InteractionMode = InteractionModeManageList
 		clearSaveErrors(model)
-		model.CreateDraftProviderConfig.ProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec)  // swobu:io-string source=boundary
-		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)            // swobu:io-string source=boundary
-		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef)               // swobu:io-string source=boundary
-		model.CreateDraftModelProviderSpec = strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec) // swobu:io-string source=boundary
-		model.CreateDraftModelBaseURL = strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)           // swobu:io-string source=boundary
-		model.CreateDraftModelCredentialRef = strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef)
+		model.CreateDraftProviderConfig.ProviderSpec = strings.TrimSpace(value.ProviderConfig.ProviderSpec)    // swobu:io-string source=boundary
+		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.ProviderConfig.BaseURL)              // swobu:io-string source=boundary
+		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef)                 // swobu:io-string source=boundary
+		model.CreateDraftModelProviderSpec = strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec)   // swobu:io-string source=boundary
+		model.CreateDraftModelBaseURL = strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL)             // swobu:io-string source=boundary
+		model.CreateDraftModelCredentialRef = strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef) // swobu:io-string source=domain
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = true
 		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
 		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
 			Scope:            RoutingModelCatalogScopeCreateDraft,
-			ProviderSpec:     strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec),  // swobu:io-string source=boundary
-			BaseURL:          strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL),       // swobu:io-string source=boundary
-			AuthHeader:       strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader),    // swobu:io-string source=boundary
-			CredentialRef:    strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef), // swobu:io-string source=boundary
-			ProviderProtocol: strings.TrimSpace(model.CreateDraftProviderConfig.ProviderProtocol),
+			ProviderSpec:     strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec),     // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL),          // swobu:io-string source=boundary
+			AuthHeader:       strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader),       // swobu:io-string source=boundary
+			CredentialRef:    strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef),    // swobu:io-string source=boundary
+			ProviderProtocol: strings.TrimSpace(model.CreateDraftProviderConfig.ProviderProtocol), // swobu:io-string source=domain
 		}}
 	}
 	if stateModel.AuthOwnerKey(strings.TrimSpace(value.OwnerKey)).IsAddModelDraft() { // swobu:io-string source=boundary

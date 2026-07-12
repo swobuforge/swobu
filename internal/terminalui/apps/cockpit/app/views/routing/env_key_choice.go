@@ -71,7 +71,7 @@ func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, 
 	if createMode {
 		baseURL := createDraftBaseURL
 		if baseURL == "" {
-			baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec))
+			baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=domain
 		}
 		baseURL = resolveBedrockMantleBaseURL(providerSpec, envKey, baseURL)
 		authHeader := ""

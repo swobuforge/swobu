@@ -69,7 +69,7 @@ func TestStore_Reset_RemoveFailureIncludesDetails(t *testing.T) {
 	if !strings.Contains(msg, "remove telemetry state") {
 		t.Fatalf("error = %q, want remove context", msg)
 	}
-	if !strings.Contains(strings.ToLower(msg), "directory") {
+	if !strings.Contains(strings.ToLower(msg), "directory") { // swobu:io-string source=domain
 		t.Fatalf("error = %q, want filesystem cause detail", msg)
 	}
 }

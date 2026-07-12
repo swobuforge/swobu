@@ -99,7 +99,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 				t.Fatalf("binary=%q want=%q", command.Binary, tc.binary)
 			}
 			joined := strings.Join(command.Args, " ")
-			if tc.clientID == "opencode" && strings.TrimSpace(joined) != "" {
+			if tc.clientID == "opencode" && strings.TrimSpace(joined) != "" { // swobu:io-string source=domain
 				t.Fatalf("opencode args=%q want empty for interactive launch", joined)
 			}
 			for _, fragment := range tc.contains {
@@ -154,7 +154,7 @@ func TestResolveRunCommand_RejectsBatchProbeArgs(t *testing.T) {
 		if !ok {
 			t.Fatalf("ResolveRunCommand(%q) returned not ok", clientID)
 		}
-		joined := strings.ToLower(strings.Join(command.Args, " "))
+		joined := strings.ToLower(strings.Join(command.Args, " ")) // swobu:io-string source=domain
 		for _, banned := range []string{
 			"reply with exactly:",
 			"--message",

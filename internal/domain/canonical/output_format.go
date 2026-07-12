@@ -36,15 +36,15 @@ type OutputFormatParams struct {
 
 // NewOutputFormat normalizes one canonical output-format request.
 func NewOutputFormat(params OutputFormatParams) (OutputFormat, error) {
-	kind := OutputFormatKind(strings.TrimSpace(string(params.Kind)))
+	kind := OutputFormatKind(strings.TrimSpace(string(params.Kind))) // swobu:io-string source=domain
 	switch kind {
 	case OutputFormatUnspecified:
-		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict {
+		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict { // swobu:io-string source=domain
 			return OutputFormat{}, BadRequest("output format is invalid")
 		}
 		return OutputFormat{}, nil
 	case OutputFormatText:
-		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict {
+		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict { // swobu:io-string source=domain
 			return OutputFormat{}, BadRequest("output format text does not accept schema, description, or strict mode")
 		}
 		return OutputFormat{Kind: OutputFormatText}, nil
@@ -53,7 +53,7 @@ func NewOutputFormat(params OutputFormatParams) (OutputFormat, error) {
 		if err := validateOutputFormatName(name); err != nil {
 			return OutputFormat{}, err
 		}
-		description := strings.TrimSpace(params.Description)
+		description := strings.TrimSpace(params.Description)      // swobu:io-string source=domain
 		schemaRaw := strings.TrimSpace(params.Schema.RawObject()) // swobu:io-string source=domain
 		if err := validateOutputFormatSchema(schemaRaw); err != nil {
 			return OutputFormat{}, err
@@ -81,9 +81,9 @@ func (f OutputFormat) Clone() OutputFormat {
 }
 
 func (f OutputFormat) IsZero() bool {
-	return strings.TrimSpace(string(f.Kind)) == "" &&
-		strings.TrimSpace(f.Name) == "" &&
-		strings.TrimSpace(f.Description) == "" &&
+	return strings.TrimSpace(string(f.Kind)) == "" && // swobu:io-string source=domain
+		strings.TrimSpace(f.Name) == "" && // swobu:io-string source=domain
+		strings.TrimSpace(f.Description) == "" && // swobu:io-string source=domain
 		f.Schema.IsEmpty() &&
 		!f.Strict
 }
@@ -192,7 +192,7 @@ func validateOutputFormatSchemaObject(obj map[string]any) error {
 func validateOutputFormatSchemaType(value any) error {
 	switch typed := value.(type) {
 	case string:
-		if strings.TrimSpace(typed) == "" {
+		if strings.TrimSpace(typed) == "" { // swobu:io-string source=domain
 			return BadRequest("output format schema type must not be empty")
 		}
 		return nil

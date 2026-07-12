@@ -373,7 +373,7 @@ func TestRoot_FirstRunBedrockCreateFlow_RequiresScopeBeforeModel(t *testing.T) {
 	// Canonical slot grammar must remain stable for Bedrock in first-run.
 	assertContainsInOrder(t, out, "provider", "credential", "region", "model", "protocol", "create")
 	// Model must remain blocked until scope is explicit.
-	if !strings.Contains(out, "model") || !strings.Contains(strings.ToLower(out), "blocked") {
+	if !strings.Contains(out, "model") || !strings.Contains(strings.ToLower(out), "blocked") { // swobu:io-string source=domain
 		t.Fatalf("bedrock first-run model should be blocked before scope is resolved; render=%q", out)
 	}
 }
@@ -397,8 +397,7 @@ func TestRoot_FirstRunBedrockCreateFlow_DoesNotSilentlyDefaultScope(t *testing.T
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
 	openRoutingSection(t, rt, viewport)
-	out := strings.ToLower(rt.Render(viewport).String())
-
+	out := strings.ToLower(rt.Render(viewport).String()) // swobu:io-string source=domain
 	// Missing scope must render as missing; default region inference is invalid in this state.
 	if strings.Contains(out, "eu-west-2") || strings.Contains(out, "us-east-1") {
 		t.Fatalf("bedrock first-run region default leaked into missing-region state; render=%q", out)
@@ -512,7 +511,7 @@ func TestRoot_FirstRunOllamaHidesCredentialRowWhenExternalAndNonSelectable(t *te
 	rt.Rebuild(Root(), viewport)
 	openRoutingSection(t, rt, viewport)
 	out := rt.Render(viewport).String()
-	if strings.Contains(strings.ToLower(out), "credential") {
+	if strings.Contains(strings.ToLower(out), "credential") { // swobu:io-string source=domain
 		t.Fatalf("ollama first-run should hide credential row when external/non-selectable; render=%q", out)
 	}
 }
@@ -532,7 +531,7 @@ func TestRoot_FirstRunBedrockShowsCredentialRowForStrategySelection(t *testing.T
 	viewport := geom.Rect{W: 100, H: 26}
 	rt.Rebuild(Root(), viewport)
 	openRoutingSection(t, rt, viewport)
-	out := strings.ToLower(rt.Render(viewport).String())
+	out := strings.ToLower(rt.Render(viewport).String()) // swobu:io-string source=domain
 	if !strings.Contains(out, "credential") {
 		t.Fatalf("bedrock first-run should show credential row for strategy selection; render=%q", out)
 	}
@@ -1033,7 +1032,7 @@ func TestRoot_FirstRunChatGPTBrowserLogin_ShowsAuthFlowRows(t *testing.T) {
 
 	out := rt.Render(viewport).String()
 	if !(strings.Contains(out, "sign in") && strings.Contains(out, "open default browser")) &&
-		!strings.Contains(strings.ToLower(out), "chatgpt · browser login") {
+		!strings.Contains(strings.ToLower(out), "chatgpt · browser login") { // swobu:io-string source=domain
 		t.Fatalf("first-run browser login rows missing: %q", out)
 	}
 	if strings.Contains(out, "use device code") {

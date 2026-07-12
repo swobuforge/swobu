@@ -60,7 +60,7 @@ endpoints:
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	state := strings.TrimSpace(u.Query().Get("state"))
+	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	if state == "" {
 		t.Fatal("missing oauth state")
 	}

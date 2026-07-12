@@ -52,7 +52,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		return [][]byte{sse.SSEData(raw)}, nil
 	case sse.StreamEventItemStarted:
 		if event.ItemKind == canonical.ItemKindToolUse {
-			if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom {
+			if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom { // swobu:io-string source=domain
 				return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
 			}
 			index := len(s.toolByID)
@@ -96,7 +96,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		})
 		return [][]byte{sse.SSEData(raw)}, nil
 	case sse.StreamEventToolUseArgumentsDelta:
-		if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom {
+		if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom { // swobu:io-string source=domain
 			return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
 		}
 		index, ok := s.toolByID[event.ItemID]
@@ -198,7 +198,7 @@ func chatToolCallFromOutputItem(item canonical.OutputItem) (chatCompletionsRespo
 		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require a name")
 	}
 	args := item.Input.RawObject()
-	switch strings.ToLower(strings.TrimSpace(item.ToolType)) {
+	switch strings.ToLower(strings.TrimSpace(item.ToolType)) { // swobu:io-string source=domain
 	case "", canonical.ToolTypeFunction:
 		return chatCompletionsResponseToolCallDTO{
 			ID:   toolUseID,

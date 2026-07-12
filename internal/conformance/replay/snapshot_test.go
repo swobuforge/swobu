@@ -54,7 +54,7 @@ func TestExchangeReplay(t *testing.T) {
 			}
 
 			contract := mustLoadCaseContract(t, filepath.Join(caseDir, "case.yaml"))
-			if strings.TrimSpace(contract.Name) != caseDirName {
+			if strings.TrimSpace(contract.Name) != caseDirName { // swobu:io-string source=domain
 				t.Fatalf("case contract name=%q want %q", contract.Name, caseDirName)
 			}
 			assertCaseContract(t, contract)
@@ -131,7 +131,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 		t.Fatalf("read client transport body: %v", readErr)
 	}
 	if clientDelivery.Mode == delivery.Streaming {
-		got := strings.TrimSpace(string(raw))
+		got := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 		if !strings.Contains(got, "data: ") || !containsStreamTerminalMarker(got) {
 			t.Fatalf("client stream missing semantic markers: %s", got)
 		}
@@ -141,7 +141,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 			assertResponsesBodyContainsFixtureProjection(t, string(raw), wantBody, "client response")
 			return
 		}
-		if !strings.Contains(strings.ToLower(string(raw)), "ok") {
+		if !strings.Contains(strings.ToLower(string(raw)), "ok") { // swobu:io-string source=domain
 			t.Fatalf("client response missing expected semantic text: %s", string(raw))
 		}
 	}
@@ -150,7 +150,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 func mustMapFamilies(t *testing.T, contract fixture.CaseContract) (canonical.ClientFamily, protocolkind.ProtocolKind) {
 	t.Helper()
 	var clientFamily canonical.ClientFamily
-	switch strings.TrimSpace(contract.Client.Family) {
+	switch strings.TrimSpace(contract.Client.Family) { // swobu:io-string source=domain
 	case "chatcompletions":
 		clientFamily = canonical.ClientFamilyChatCompletions
 	case "responses":
@@ -163,7 +163,7 @@ func mustMapFamilies(t *testing.T, contract fixture.CaseContract) (canonical.Cli
 		t.Fatalf("unsupported client family %q", contract.Client.Family)
 	}
 	var providerFamily protocolkind.ProtocolKind
-	switch strings.TrimSpace(contract.Provider.Family) {
+	switch strings.TrimSpace(contract.Provider.Family) { // swobu:io-string source=domain
 	case "chatcompletions":
 		providerFamily = protocolkind.ChatCompletions
 	case "responses":
@@ -181,7 +181,7 @@ func mustMapFamilies(t *testing.T, contract fixture.CaseContract) (canonical.Cli
 func mustMapDeliveries(t *testing.T, contract fixture.CaseContract) (delivery.Delivery, delivery.Delivery) {
 	t.Helper()
 	toDelivery := func(raw string) delivery.Delivery {
-		if strings.TrimSpace(raw) == "streaming" {
+		if strings.TrimSpace(raw) == "streaming" { // swobu:io-string source=domain
 			return delivery.StreamingDelivery(delivery.FramingSSE)
 		}
 		return delivery.BufferedDelivery()
@@ -224,18 +224,18 @@ func assertCaseContract(t *testing.T, contract fixture.CaseContract) {
 	if !contract.Assert.EnvelopeGrammarValid {
 		t.Fatalf("case %s must enable assert.envelope_grammar_valid", contract.Name)
 	}
-	switch strings.TrimSpace(contract.FixtureSource) {
+	switch strings.TrimSpace(contract.FixtureSource) { // swobu:io-string source=domain
 	case "synthetic", "captured":
 	default:
 		t.Fatalf("case %s fixture_source must be synthetic or captured", contract.Name)
 	}
-	if strings.TrimSpace(contract.CapturedAt) == "" {
+	if strings.TrimSpace(contract.CapturedAt) == "" { // swobu:io-string source=domain
 		t.Fatalf("case %s must define captured_at", contract.Name)
 	}
-	if strings.TrimSpace(contract.FixtureSource) == "captured" && strings.TrimSpace(contract.CaptureRef) == "" {
+	if strings.TrimSpace(contract.FixtureSource) == "captured" && strings.TrimSpace(contract.CaptureRef) == "" { // swobu:io-string source=domain
 		t.Fatalf("case %s capture_ref is required when fixture_source=captured", contract.Name)
 	}
-	if strings.TrimSpace(contract.FixtureSource) == "synthetic" && strings.TrimSpace(contract.CaptureRef) != "" {
+	if strings.TrimSpace(contract.FixtureSource) == "synthetic" && strings.TrimSpace(contract.CaptureRef) != "" { // swobu:io-string source=domain
 		t.Fatalf("case %s capture_ref must be empty when fixture_source=synthetic", contract.Name)
 	}
 }
@@ -243,7 +243,7 @@ func assertCaseContract(t *testing.T, contract fixture.CaseContract) {
 func validateExpectedCodeList(field string, values []string, caseName string) error {
 	seen := make(map[string]struct{}, len(values))
 	for _, raw := range values {
-		code := strings.TrimSpace(raw)
+		code := strings.TrimSpace(raw) // swobu:io-string source=domain
 		if code == "" {
 			return fmt.Errorf("case %s %s must not contain empty code entry", caseName, field)
 		}
@@ -257,7 +257,7 @@ func validateExpectedCodeList(field string, values []string, caseName string) er
 
 func assertAllowedFamily(t *testing.T, field string, value string) {
 	t.Helper()
-	switch strings.TrimSpace(value) {
+	switch strings.TrimSpace(value) { // swobu:io-string source=domain
 	case "chatcompletions", "responses", "messages", "completions":
 		return
 	default:
@@ -267,7 +267,7 @@ func assertAllowedFamily(t *testing.T, field string, value string) {
 
 func assertAllowedDelivery(t *testing.T, field string, value string) {
 	t.Helper()
-	switch strings.TrimSpace(value) {
+	switch strings.TrimSpace(value) { // swobu:io-string source=domain
 	case "buffered", "streaming":
 		return
 	default:
@@ -295,7 +295,7 @@ func assertEnvelopeProjectionFromCanonicalEvents(t *testing.T, eventsPath string
 	for _, item := range output.Items() {
 		switch item.Kind {
 		case canonical.ItemKindText:
-			if text := strings.TrimSpace(item.Text); text != "" {
+			if text := strings.TrimSpace(item.Text); text != "" { // swobu:io-string source=domain
 				if !strings.Contains(clientBody, jsonStringLiteral(text)) {
 					t.Fatalf("client body %s missing projected text %q", clientBodyPath, item.Text)
 				}
@@ -304,13 +304,13 @@ func assertEnvelopeProjectionFromCanonicalEvents(t *testing.T, eventsPath string
 			if !strings.Contains(clientBody, jsonStringLiteral("function_call")) {
 				t.Fatalf("client body %s missing projected tool call type", clientBodyPath)
 			}
-			if toolUseID := strings.TrimSpace(item.ToolUseID); toolUseID != "" && !strings.Contains(clientBody, jsonStringLiteral(toolUseID)) {
+			if toolUseID := strings.TrimSpace(item.ToolUseID); toolUseID != "" && !strings.Contains(clientBody, jsonStringLiteral(toolUseID)) { // swobu:io-string source=domain
 				t.Fatalf("client body %s missing projected tool call id %q", clientBodyPath, toolUseID)
 			}
-			if name := strings.TrimSpace(item.Name); name != "" && !strings.Contains(clientBody, jsonStringLiteral(name)) {
+			if name := strings.TrimSpace(item.Name); name != "" && !strings.Contains(clientBody, jsonStringLiteral(name)) { // swobu:io-string source=domain
 				t.Fatalf("client body %s missing projected tool call name %q", clientBodyPath, name)
 			}
-			if args := strings.TrimSpace(item.Input.RawObject()); args != "" && !strings.Contains(clientBody, jsonStringLiteral(args)) {
+			if args := strings.TrimSpace(item.Input.RawObject()); args != "" && !strings.Contains(clientBody, jsonStringLiteral(args)) { // swobu:io-string source=domain
 				t.Fatalf("client body %s missing projected tool call arguments %q", clientBodyPath, args)
 			}
 		}
@@ -363,10 +363,10 @@ func responsesBodyOutputItemPresent(haystack []responsesBodyOutputItem, needle r
 			}
 			return true
 		case "function_call":
-			if strings.TrimSpace(candidate.CallID) != strings.TrimSpace(needle.CallID) {
+			if strings.TrimSpace(candidate.CallID) != strings.TrimSpace(needle.CallID) { // swobu:io-string source=domain
 				continue
 			}
-			if strings.TrimSpace(candidate.Name) != strings.TrimSpace(needle.Name) {
+			if strings.TrimSpace(candidate.Name) != strings.TrimSpace(needle.Name) { // swobu:io-string source=domain
 				continue
 			}
 			if normalizeJSONObjectString(candidate.Arguments) != normalizeJSONObjectString(needle.Arguments) {
@@ -385,13 +385,13 @@ func responsesBodyTextItemsPresent(haystack []responsesBodyTextItem, needle []re
 		return false
 	}
 	for _, wantPart := range needle {
-		wantText := strings.TrimSpace(wantPart.Text)
+		wantText := strings.TrimSpace(wantPart.Text) // swobu:io-string source=domain
 		if wantText == "" {
 			continue
 		}
 		found := false
 		for _, candidate := range haystack {
-			if !strings.EqualFold(strings.TrimSpace(candidate.Text), wantText) {
+			if !strings.EqualFold(strings.TrimSpace(candidate.Text), wantText) { // swobu:io-string source=domain
 				continue
 			}
 			found = true
@@ -405,7 +405,7 @@ func responsesBodyTextItemsPresent(haystack []responsesBodyTextItem, needle []re
 }
 
 func normalizeJSONObjectString(raw string) string {
-	trimmed := strings.TrimSpace(raw)
+	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
 	if trimmed == "" {
 		return ""
 	}
@@ -421,9 +421,9 @@ func normalizeJSONObjectString(raw string) string {
 }
 
 func jsonStringLiteral(raw string) string {
-	encoded, err := json.Marshal(strings.TrimSpace(raw))
+	encoded, err := json.Marshal(strings.TrimSpace(raw)) // swobu:io-string source=domain
 	if err != nil {
-		return strings.TrimSpace(raw)
+		return strings.TrimSpace(raw) // swobu:io-string source=domain
 	}
 	return string(encoded)
 }
@@ -489,7 +489,7 @@ func readFixtureEvents(t *testing.T, path string) canonical.EventSequence {
 	out := make(canonical.EventSequence, 0, 8)
 	s := bufio.NewScanner(f)
 	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
+		line := strings.TrimSpace(s.Text()) // swobu:io-string source=domain
 		if line == "" {
 			continue
 		}
@@ -516,11 +516,11 @@ func toCanonicalEvent(t *testing.T, fe fixtureEvent) canonical.Event {
 		Time:       time.Unix(0, fe.Seq),
 		EnvID:      "res_1",
 	}
-	if strings.TrimSpace(fe.EnvID) != "" {
-		ev.EnvID = canonical.EnvelopeID(strings.TrimSpace(fe.EnvID))
+	if strings.TrimSpace(fe.EnvID) != "" { // swobu:io-string source=domain
+		ev.EnvID = canonical.EnvelopeID(strings.TrimSpace(fe.EnvID)) // swobu:io-string source=domain
 	}
-	if strings.TrimSpace(fe.Parent) != "" {
-		ev.ParentID = canonical.EnvelopeID(strings.TrimSpace(fe.Parent))
+	if strings.TrimSpace(fe.Parent) != "" { // swobu:io-string source=domain
+		ev.ParentID = canonical.EnvelopeID(strings.TrimSpace(fe.Parent)) // swobu:io-string source=domain
 	}
 	switch fe.Kind {
 	case "envelope_start":
@@ -530,8 +530,8 @@ func toCanonicalEvent(t *testing.T, fe fixtureEvent) canonical.Event {
 			payload.Role = canonical.ItemAuthorAssistant
 		}
 		if payload.Kind == canonical.EnvToolCall {
-			payload.Name = strings.TrimSpace(fe.Name)
-			payload.ToolUseID = strings.TrimSpace(fe.ToolUseID)
+			payload.Name = strings.TrimSpace(fe.Name)           // swobu:io-string source=domain
+			payload.ToolUseID = strings.TrimSpace(fe.ToolUseID) // swobu:io-string source=domain
 		}
 		ev.Payload = payload
 	case "text_delta":
@@ -546,11 +546,11 @@ func toCanonicalEvent(t *testing.T, fe fixtureEvent) canonical.Event {
 	case "metadata":
 		ev.Kind = canonical.EventMetadata
 		values := map[string]string{}
-		if strings.TrimSpace(fe.ResultID) != "" {
-			values["result_id"] = strings.TrimSpace(fe.ResultID)
+		if strings.TrimSpace(fe.ResultID) != "" { // swobu:io-string source=domain
+			values["result_id"] = strings.TrimSpace(fe.ResultID) // swobu:io-string source=domain
 		}
-		if strings.TrimSpace(fe.Model) != "" {
-			values["model"] = strings.TrimSpace(fe.Model)
+		if strings.TrimSpace(fe.Model) != "" { // swobu:io-string source=domain
+			values["model"] = strings.TrimSpace(fe.Model) // swobu:io-string source=domain
 		}
 		if len(values) == 0 {
 			values = nil

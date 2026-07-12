@@ -111,8 +111,8 @@ func EvaluateModelSelectionGateState(input ModelSelectionReadinessGateInput) Mod
 }
 
 func bedrockProfileFromCredentialRef(ref string) string {
-	ref = strings.TrimSpace(ref) // swobu:io-string source=boundary
-	if !strings.HasPrefix(strings.ToLower(ref), "profile:") {
+	ref = strings.TrimSpace(ref)                              // swobu:io-string source=boundary
+	if !strings.HasPrefix(strings.ToLower(ref), "profile:") { // swobu:io-string source=domain
 		return ""
 	}
 	return strings.TrimSpace(ref[len("profile:"):]) // swobu:io-string source=boundary

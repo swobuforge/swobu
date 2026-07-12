@@ -37,7 +37,7 @@ func assertNoRequestpathImport(t *testing.T, path string) {
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	for _, imp := range node.Imports {
-		lit := strings.TrimSpace(strings.Trim(imp.Path.Value, `"`))
+		lit := strings.TrimSpace(strings.Trim(imp.Path.Value, `"`)) // swobu:io-string source=domain
 		if strings.HasSuffix(lit, "/internal/app/requestpath") {
 			t.Fatalf("%s imports forbidden package %q", path, lit)
 		}

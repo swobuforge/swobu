@@ -31,8 +31,8 @@ func (w *captureWriter) Store(providerSpec string, keyName string, secret string
 	if w.err != nil {
 		return "", w.err
 	}
-	if strings.TrimSpace(w.ref) != "" {
-		return strings.TrimSpace(w.ref), nil
+	if strings.TrimSpace(w.ref) != "" { // swobu:io-string source=domain
+		return strings.TrimSpace(w.ref), nil // swobu:io-string source=domain
 	}
 	return "secret:" + keyName, nil
 }
@@ -74,7 +74,7 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	state := strings.TrimSpace(u.Query().Get("state"))
+	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	if state == "" {
 		t.Fatal("missing oauth state")
 	}
@@ -170,7 +170,7 @@ func TestServiceCallbackStateWithAppendedURLStillResolvesSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	state := strings.TrimSpace(u.Query().Get("state"))
+	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	if state == "" {
 		t.Fatal("missing oauth state")
 	}
@@ -221,7 +221,7 @@ func TestServiceTokenExchangeFailureMarksFailed(t *testing.T) {
 	if out.State != SessionFailed {
 		t.Fatalf("state=%s", out.State)
 	}
-	if !strings.Contains(strings.ToLower(out.ErrorMessage), "token exchange") {
+	if !strings.Contains(strings.ToLower(out.ErrorMessage), "token exchange") { // swobu:io-string source=domain
 		t.Fatalf("error=%q", out.ErrorMessage)
 	}
 }
@@ -257,7 +257,7 @@ func TestServiceCredentialStoreFailureMarksFailed(t *testing.T) {
 	if out.State != SessionFailed {
 		t.Fatalf("state=%s", out.State)
 	}
-	if !strings.Contains(strings.ToLower(out.ErrorMessage), "credential store failed: os keyring unavailable") {
+	if !strings.Contains(strings.ToLower(out.ErrorMessage), "credential store failed: os keyring unavailable") { // swobu:io-string source=domain
 		t.Fatalf("error=%q", out.ErrorMessage)
 	}
 }
@@ -302,7 +302,7 @@ func TestServiceStartAuthorizeURLIncludesOriginator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	if got := strings.TrimSpace(u.Query().Get("originator")); got != "swobu_test" {
+	if got := strings.TrimSpace(u.Query().Get("originator")); got != "swobu_test" { // swobu:io-string source=domain
 		t.Fatalf("originator=%q", got)
 	}
 }
@@ -318,7 +318,7 @@ func TestServiceStartAuthorizeURL_DefaultScopeMatchesCodexContract(t *testing.T)
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	if got := strings.TrimSpace(u.Query().Get("scope")); got != "openid profile email offline_access api.connectors.read api.connectors.invoke" {
+	if got := strings.TrimSpace(u.Query().Get("scope")); got != "openid profile email offline_access api.connectors.read api.connectors.invoke" { // swobu:io-string source=domain
 		t.Fatalf("scope=%q", got)
 	}
 }
@@ -334,7 +334,7 @@ func TestServiceStartAuthorizeURL_DefaultOriginatorMatchesCodex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	if got := strings.TrimSpace(u.Query().Get("originator")); got != "codex_cli_rs" {
+	if got := strings.TrimSpace(u.Query().Get("originator")); got != "codex_cli_rs" { // swobu:io-string source=domain
 		t.Fatalf("originator=%q", got)
 	}
 }
@@ -363,11 +363,11 @@ func TestServiceStartAuthorizeURL_MatchesCodexQueryShape(t *testing.T) {
 		"codex_cli_simplified_flow",
 		"originator",
 	} {
-		if strings.TrimSpace(q.Get(required)) == "" {
+		if strings.TrimSpace(q.Get(required)) == "" { // swobu:io-string source=domain
 			t.Fatalf("missing required authorize query key=%q in %q", required, start.AuthorizeURL)
 		}
 	}
-	if got := strings.TrimSpace(q.Get("prompt")); got != "" {
+	if got := strings.TrimSpace(q.Get("prompt")); got != "" { // swobu:io-string source=domain
 		t.Fatalf("unexpected prompt query value=%q", got)
 	}
 }
@@ -383,7 +383,7 @@ func TestServiceStartAuthorizeURL_UsesCodexCallbackPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse authorize url: %v", err)
 	}
-	if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != defaultOAuthRedirectBase+callbackPath {
+	if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != defaultOAuthRedirectBase+callbackPath { // swobu:io-string source=domain
 		t.Fatalf("redirect_uri=%q", got)
 	}
 }
@@ -394,7 +394,7 @@ func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
 		values, _ := url.ParseQuery(string(body))
-		gotRedirectURI = strings.TrimSpace(values.Get("redirect_uri"))
+		gotRedirectURI = strings.TrimSpace(values.Get("redirect_uri")) // swobu:io-string source=domain
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"at_test"}`))
 	}))
@@ -411,7 +411,7 @@ func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 		t.Fatalf("Start error: %v", err)
 	}
 	u, _ := url.Parse(start.AuthorizeURL)
-	state := strings.TrimSpace(u.Query().Get("state"))
+	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
 	svc.HandleCallback(rec, req)
@@ -450,7 +450,7 @@ func TestServiceSessionSuccess_PlanTierIncludedInCredentialRefWhenPresent(t *tes
 		t.Fatalf("Start error: %v", err)
 	}
 	u, _ := url.Parse(start.AuthorizeURL)
-	state := strings.TrimSpace(u.Query().Get("state"))
+	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
 	svc.HandleCallback(rec, req)
@@ -477,7 +477,7 @@ func TestServiceDeviceAuthStartSetsUserAgentHeader(t *testing.T) {
 	t.Parallel()
 	var seenUA string
 	deviceSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		seenUA = strings.TrimSpace(req.Header.Get("User-Agent"))
+		seenUA = strings.TrimSpace(req.Header.Get("User-Agent")) // swobu:io-string source=domain
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"device_auth_id":"dev_123","user_code":"ABCD-1234","interval":"5"}`))
 	}))
@@ -500,7 +500,7 @@ func TestServiceDeviceAuthStartSetsUserAgentHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	if strings.TrimSpace(start.UserCode) == "" {
+	if strings.TrimSpace(start.UserCode) == "" { // swobu:io-string source=domain
 		t.Fatalf("missing user code in start output: %+v", start)
 	}
 	if seenUA != "swobu-test/1" {
@@ -526,7 +526,7 @@ func TestServiceDefaults_DoNotEmbedTimeSignedAuthArtifacts(t *testing.T) {
 		"expires=",
 		"sig=",
 	}
-	lower := strings.ToLower(joined)
+	lower := strings.ToLower(joined) // swobu:io-string source=domain
 	for _, fragment := range forbiddenFragments {
 		if strings.Contains(lower, fragment) {
 			t.Fatalf("defaults contain forbidden signed fragment %q", fragment)
@@ -549,7 +549,7 @@ func TestServiceStartBrowser_WhenPrimaryCallbackPortBusy_FallsBackToSecondaryPor
 		if parseErr != nil {
 			t.Fatalf("parse authorize url: %v", parseErr)
 		}
-		if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://localhost:1457"+callbackPath {
+		if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://localhost:1457"+callbackPath { // swobu:io-string source=domain
 			t.Fatalf("redirect_uri=%q", got)
 		}
 		return
@@ -574,7 +574,7 @@ func TestServiceStartBrowser_WhenCallbackPortsBusy_ReturnsDeviceHint(t *testing.
 	if err == nil {
 		t.Fatal("expected callback listener unavailable error")
 	}
-	msg := strings.ToLower(err.Error())
+	msg := strings.ToLower(err.Error()) // swobu:io-string source=domain
 	if !strings.Contains(msg, "use device auth mode") {
 		t.Fatalf("error missing device hint: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T
 		t.Fatalf("start browser auth: %v", err)
 	}
 	u, _ := url.Parse(start.AuthorizeURL)
-	state := strings.TrimSpace(u.Query().Get("state"))
+	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=ok", nil)
 	svc.HandleCallback(rec, req)

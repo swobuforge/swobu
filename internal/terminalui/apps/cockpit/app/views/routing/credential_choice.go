@@ -61,7 +61,7 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 		setOpen(false)
 		actions := applyProviderCredentialSelection(choice.Mode, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
 		actions = append(actions, state.SetInteractionMode{Mode: state.InteractionModeManageList})
-		if focusKey := strings.TrimSpace(choice.FocusKey); focusKey != "" {
+		if focusKey := strings.TrimSpace(choice.FocusKey); focusKey != "" { // swobu:io-string source=domain
 			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
 		}
 		return actions
@@ -116,7 +116,7 @@ func applyProviderCredentialSelection(credentialRef profile.AuthMode, providerSp
 	ref := strings.TrimSpace(string(credentialRef)) // swobu:io-string source=boundary
 	providerSpec = strings.TrimSpace(providerSpec)  // swobu:io-string source=boundary
 	endpointName = strings.TrimSpace(endpointName)  // swobu:io-string source=boundary
-	mode := profile.AuthMode(strings.ToLower(ref))
+	mode := profile.AuthMode(strings.ToLower(ref))  // swobu:io-string source=domain
 	if profile.IsInteractiveAuthMode(mode) {
 		if createMode {
 			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}

@@ -66,14 +66,14 @@ func TestKeyValueActionRow_LabelOnlyRowKeepsPrimaryContent(t *testing.T) {
 
 	policy := DefaultLineLayoutPolicy()
 	line := newRowParts("delete workspace", "", "delete ↵", false).render(28, policy)
-	if strings.TrimSpace(strings.Trim(line, " ")) == "" {
+	if strings.TrimSpace(strings.Trim(line, " ")) == "" { // swobu:io-string source=domain
 		t.Fatalf("render=%q should not collapse to blank", line)
 	}
 	if !strings.Contains(line, "delete") {
 		t.Fatalf("render=%q missing primary label prefix", line)
 	}
 	if action := strings.Index(line, "delete ↵"); action >= 0 {
-		left := strings.TrimSpace(line[:action])
+		left := strings.TrimSpace(line[:action]) // swobu:io-string source=domain
 		if left == "" {
 			t.Fatalf("render=%q collapsed to action-only row", line)
 		}

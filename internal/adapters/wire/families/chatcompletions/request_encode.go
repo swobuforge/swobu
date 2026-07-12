@@ -130,7 +130,7 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 				text += current.Text
 			case canonical.ItemKindToolUse:
 				args := current.Input.RawObject()
-				switch strings.ToLower(strings.TrimSpace(current.ToolType)) {
+				switch strings.ToLower(strings.TrimSpace(current.ToolType)) { // swobu:io-string source=domain
 				case "", canonical.ToolTypeFunction:
 					toolCalls = append(toolCalls, toolCallBody{
 						ID:   current.ToolUseID,

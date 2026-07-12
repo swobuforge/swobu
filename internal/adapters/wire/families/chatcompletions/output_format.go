@@ -29,7 +29,7 @@ func decodeChatCompletionsOutputFormat(raw json.RawMessage) (canonical.OutputFor
 	if err := json.Unmarshal([]byte(trimmed), &dto); err != nil {
 		return canonical.OutputFormat{}, canonical.BadRequest("chat completions request response_format is invalid")
 	}
-	switch strings.TrimSpace(dto.Type) {
+	switch strings.TrimSpace(dto.Type) { // swobu:io-string source=domain
 	case "":
 		return canonical.OutputFormat{}, canonical.BadRequest("chat completions request response_format is invalid")
 	case "json_schema":
@@ -70,8 +70,8 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 	dto := chatCompletionsResponseFormatDTO{
 		Type: string(canonical.OutputFormatJSONSchema),
 		JSONSchema: &chatCompletionsJSONSchemaFormatDTO{
-			Name:        strings.TrimSpace(format.Name),
-			Description: strings.TrimSpace(format.Description),
+			Name:        strings.TrimSpace(format.Name),        // swobu:io-string source=domain
+			Description: strings.TrimSpace(format.Description), // swobu:io-string source=domain
 			Schema:      json.RawMessage(format.Schema.RawObject()),
 		},
 	}

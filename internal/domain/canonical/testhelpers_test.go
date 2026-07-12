@@ -277,9 +277,9 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 				}
 				dto = append(dto, requestToolDeclMetadataDTO{
 					Kind:        "function",
-					ID:          strings.TrimSpace(decl.ToolID().String()),
-					Name:        strings.TrimSpace(decl.ToolName()),
-					Description: strings.TrimSpace(decl.ToolDescription()),
+					ID:          strings.TrimSpace(decl.ToolID().String()), // swobu:io-string source=domain
+					Name:        strings.TrimSpace(decl.ToolName()),        // swobu:io-string source=domain
+					Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=domain
 					InputSchema: schema,
 					Strict:      cloneBoolPointer(decl.Strict),
 					Execution:   execution,
@@ -294,9 +294,9 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 				}
 				dto = append(dto, requestToolDeclMetadataDTO{
 					Kind:        "function",
-					ID:          strings.TrimSpace(decl.ToolID().String()),
-					Name:        strings.TrimSpace(decl.ToolName()),
-					Description: strings.TrimSpace(decl.ToolDescription()),
+					ID:          strings.TrimSpace(decl.ToolID().String()), // swobu:io-string source=domain
+					Name:        strings.TrimSpace(decl.ToolName()),        // swobu:io-string source=domain
+					Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=domain
 					InputSchema: schema,
 					Strict:      cloneBoolPointer(decl.Strict),
 					Execution:   execution,
@@ -311,9 +311,9 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 				}
 				dto = append(dto, requestToolDeclMetadataDTO{
 					Kind:        "custom",
-					ID:          strings.TrimSpace(decl.ToolID().String()),
-					Name:        strings.TrimSpace(decl.ToolName()),
-					Description: strings.TrimSpace(decl.ToolDescription()),
+					ID:          strings.TrimSpace(decl.ToolID().String()), // swobu:io-string source=domain
+					Name:        strings.TrimSpace(decl.ToolName()),        // swobu:io-string source=domain
+					Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=domain
 					Format:      format,
 					Execution:   execution,
 				})
@@ -327,9 +327,9 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 				}
 				dto = append(dto, requestToolDeclMetadataDTO{
 					Kind:        "custom",
-					ID:          strings.TrimSpace(decl.ToolID().String()),
-					Name:        strings.TrimSpace(decl.ToolName()),
-					Description: strings.TrimSpace(decl.ToolDescription()),
+					ID:          strings.TrimSpace(decl.ToolID().String()), // swobu:io-string source=domain
+					Name:        strings.TrimSpace(decl.ToolName()),        // swobu:io-string source=domain
+					Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=domain
 					Format:      format,
 					Execution:   execution,
 				})
@@ -343,8 +343,8 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 				}
 				dto = append(dto, requestToolDeclMetadataDTO{
 					Kind:             "capability",
-					ID:               strings.TrimSpace(decl.ToolID().String()),
-					Capability:       strings.TrimSpace(string(decl.ToolCapability())),
+					ID:               strings.TrimSpace(decl.ToolID().String()),        // swobu:io-string source=domain
+					Capability:       strings.TrimSpace(string(decl.ToolCapability())), // swobu:io-string source=domain
 					CapabilityConfig: config,
 					Execution:        execution,
 				})
@@ -358,8 +358,8 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 				}
 				dto = append(dto, requestToolDeclMetadataDTO{
 					Kind:             "capability",
-					ID:               strings.TrimSpace(decl.ToolID().String()),
-					Capability:       strings.TrimSpace(string(decl.ToolCapability())),
+					ID:               strings.TrimSpace(decl.ToolID().String()),        // swobu:io-string source=domain
+					Capability:       strings.TrimSpace(string(decl.ToolCapability())), // swobu:io-string source=domain
 					CapabilityConfig: config,
 					Execution:        execution,
 				})

@@ -236,7 +236,7 @@ func TestBuildAddModelProviderItems_SelectChatGPTDefaultsBrowserLoginAndStartsAu
 func findProviderItemBySearch(t *testing.T, items []views.FilterablePickerItem, term string) views.FilterablePickerItem {
 	t.Helper()
 	for _, item := range items {
-		if strings.Contains(strings.ToLower(item.Search), strings.ToLower(term)) {
+		if strings.Contains(strings.ToLower(item.Search), strings.ToLower(term)) { // swobu:io-string source=domain
 			return item
 		}
 	}

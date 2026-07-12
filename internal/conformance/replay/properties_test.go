@@ -133,7 +133,7 @@ func TestBufferedProjectionIsCollectionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read buffered output: %v", err)
 	}
-	if strings.TrimSpace(string(raw)) == "" {
+	if strings.TrimSpace(string(raw)) == "" { // swobu:io-string source=domain
 		t.Fatal("buffered output body is empty")
 	}
 	if !strings.Contains(string(raw), "\"status\":\"completed\"") {

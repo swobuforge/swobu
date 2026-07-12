@@ -73,8 +73,8 @@ func decodeRequestToolDeclsMetadata(raw string) ([]ToolDecl, error) {
 	for _, tool := range dto {
 		executionRaw := strings.TrimSpace(tool.Execution) // swobu:io-string source=domain
 		execution := normalizeToolExecutionOwner(ToolExecutionOwner(executionRaw))
-		kindRaw := strings.TrimSpace(tool.Kind) // swobu:io-string source=domain
-		kind := strings.ToLower(kindRaw)
+		kindRaw := strings.TrimSpace(tool.Kind)          // swobu:io-string source=domain
+		kind := strings.ToLower(kindRaw)                 // swobu:io-string source=domain
 		capability := strings.TrimSpace(tool.Capability) // swobu:io-string source=domain
 		if len(tool.Tools) > 0 {
 			return nil, BadRequest("canonical request tool namespace declarations are unsupported")

@@ -26,7 +26,7 @@ func TestStore_EnsureNoticeShownWithDisclosure_PrintsOnceAndPersists(t *testing.
 	if !state.NoticeShown {
 		t.Fatal("notice_shown = false, want true")
 	}
-	if got := strings.TrimSpace(out.String()); got != strings.TrimSpace(FirstRunNoticeText()) {
+	if got := strings.TrimSpace(out.String()); got != strings.TrimSpace(FirstRunNoticeText()) { // swobu:io-string source=domain
 		t.Fatalf("disclosure output mismatch:\n%s", got)
 	}
 

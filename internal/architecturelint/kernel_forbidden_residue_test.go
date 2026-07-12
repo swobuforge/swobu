@@ -36,7 +36,7 @@ func TestKernelOwnershipNames_RejectForbiddenResidue(t *testing.T) {
 				return err
 			}
 			if d.IsDir() {
-				name := strings.ToLower(d.Name())
+				name := strings.ToLower(d.Name()) // swobu:io-string source=domain
 				if forbidden.MatchString(name) {
 					t.Fatalf("forbidden directory name residue %q in %s", d.Name(), path)
 				}
@@ -45,7 +45,7 @@ func TestKernelOwnershipNames_RejectForbiddenResidue(t *testing.T) {
 			if !strings.HasSuffix(path, ".go") {
 				return nil
 			}
-			base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".go"))
+			base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".go")) // swobu:io-string source=domain
 			if forbidden.MatchString(base) {
 				t.Fatalf("forbidden file name residue %q in %s", base, path)
 			}
@@ -55,7 +55,7 @@ func TestKernelOwnershipNames_RejectForbiddenResidue(t *testing.T) {
 			if parseErr != nil {
 				return parseErr
 			}
-			pkg := strings.ToLower(file.Name.Name)
+			pkg := strings.ToLower(file.Name.Name) // swobu:io-string source=domain
 			if forbidden.MatchString(pkg) {
 				t.Fatalf("forbidden package name residue %q in %s", pkg, path)
 			}
@@ -95,7 +95,7 @@ func TestKernelComments_RejectEscapeHatchPhrase(t *testing.T) {
 			for _, group := range file.Comments {
 				for _, comment := range group.List {
 					phrase := strings.Join([]string{"escape", " ", "hatch"}, "")
-					if strings.Contains(strings.ToLower(comment.Text), phrase) {
+					if strings.Contains(strings.ToLower(comment.Text), phrase) { // swobu:io-string source=domain
 						t.Fatalf("forbidden bypass phrase found in %s", path)
 					}
 				}

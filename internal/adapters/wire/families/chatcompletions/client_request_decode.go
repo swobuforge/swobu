@@ -96,7 +96,7 @@ func decodeChatCompletionsItems(
 		if id == "" {
 			id = openaicompat.GeneratedToolUseID(msgIdx, idx)
 		}
-		switch strings.ToLower(strings.TrimSpace(call.Type)) {
+		switch strings.ToLower(strings.TrimSpace(call.Type)) { // swobu:io-string source=domain
 		case "", "function":
 			if call.Function == nil {
 				return nil, canonical.BadRequest("chat completions tool calls require a function body")

@@ -28,7 +28,7 @@ func RunClientDisplayCommand(clientID, baseURL, modelID string) (string, bool) {
 
 func assertNoTestHarnessArtifacts(t *testing.T, value string) {
 	t.Helper()
-	lower := strings.ToLower(strings.TrimSpace(value))
+	lower := strings.ToLower(strings.TrimSpace(value)) // swobu:io-string source=domain
 	for _, token := range []string{
 		"hermetic-",
 		"swobu-local",

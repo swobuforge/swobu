@@ -84,7 +84,7 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	parts := strings.Split(string(raw), "\n\n")
 	frames := make([][]byte, 0, len(parts))
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
+		p = strings.TrimSpace(p) // swobu:io-string source=domain
 		if p == "" {
 			continue
 		}
@@ -185,12 +185,12 @@ func decodeSSEFrame(t *testing.T, frame []byte) (string, map[string]any) {
 	text := string(frame)
 	var eventName, data string
 	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(line) // swobu:io-string source=domain
 		switch {
 		case strings.HasPrefix(line, "event:"):
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:")) // swobu:io-string source=domain
 		case strings.HasPrefix(line, "data:"):
-			data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			data = strings.TrimSpace(strings.TrimPrefix(line, "data:")) // swobu:io-string source=domain
 		}
 	}
 	payload := map[string]any{}

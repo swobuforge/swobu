@@ -96,7 +96,7 @@ func parseAWSINIProfiles(raw string, fromConfig bool) []string {
 				continue
 			}
 			if strings.HasPrefix(strings.ToLower(section), "profile ") { // swobu:io-string source=boundary
-				out = append(out, strings.TrimSpace(section[len("profile "):]))
+				out = append(out, strings.TrimSpace(section[len("profile "):])) // swobu:io-string source=domain
 			}
 			continue
 		}

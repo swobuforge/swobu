@@ -32,7 +32,7 @@ func TestRunnerRun_StreamToBatchResponseProjectsProviderEventsInternally(t *test
 	if out.Transport.Body == nil {
 		t.Fatal("buffered response must set transport body")
 	}
-	if got := strings.ToLower(out.Transport.Header.Get("Content-Type")); got != "application/json" {
+	if got := strings.ToLower(out.Transport.Header.Get("Content-Type")); got != "application/json" { // swobu:io-string source=domain
 		t.Fatalf("content-type = %q, want application/json", got)
 	}
 	raw, err := io.ReadAll(out.Transport.Body)
@@ -66,7 +66,7 @@ func TestRunnerRun_BatchToStreamResponseWithoutSourceIncrementality(t *testing.T
 	if out.Transport.Body == nil {
 		t.Fatal("streaming response must set transport body")
 	}
-	if got := strings.ToLower(out.Transport.Header.Get("Content-Type")); got != "text/event-stream" {
+	if got := strings.ToLower(out.Transport.Header.Get("Content-Type")); got != "text/event-stream" { // swobu:io-string source=domain
 		t.Fatalf("content-type = %q, want text/event-stream", got)
 	}
 	raw, err := io.ReadAll(out.Transport.Body)

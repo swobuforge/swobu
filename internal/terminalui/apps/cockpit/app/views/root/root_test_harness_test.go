@@ -254,7 +254,7 @@ func currentCredentialPickerPath(out string) string {
 		if idx < 0 {
 			continue
 		}
-		return strings.TrimSpace(line[idx+len("path"):])
+		return strings.TrimSpace(line[idx+len("path"):]) // swobu:io-string source=domain
 	}
 	return ""
 }

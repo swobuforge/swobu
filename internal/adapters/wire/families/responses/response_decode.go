@@ -267,7 +267,7 @@ func (s *responsesEventReader) closeOpenTools(status canonical.EnvelopeStatus) {
 
 func (s *responsesEventReader) ensureToolState(itemID string, toolType string, callID string, name string) responsesToolState {
 	if state, ok := s.toolStates[itemID]; ok {
-		if state.toolType == "" && strings.TrimSpace(toolType) != "" {
+		if state.toolType == "" && strings.TrimSpace(toolType) != "" { // swobu:io-string source=domain
 			state.toolType = strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
 			s.toolStates[itemID] = state
 		}

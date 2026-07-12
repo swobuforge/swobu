@@ -75,7 +75,7 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 	}
 	previewOptions := make([]modelPickerOption, 0, len(model.AddModelDraftModelIDs))
 	for _, modelID := range model.AddModelDraftModelIDs {
-		id := strings.TrimSpace(modelID)
+		id := strings.TrimSpace(modelID) // swobu:io-string source=domain
 		if id == "" {
 			continue
 		}

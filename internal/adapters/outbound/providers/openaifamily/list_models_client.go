@@ -111,7 +111,7 @@ func azureProjectEndpointForModelCatalog(baseURL string, projectEndpoint string)
 	if baseURL == "" {
 		return ""
 	}
-	if !strings.Contains(strings.ToLower(baseURL), ".openai.azure.com/openai/v1") && !strings.Contains(strings.ToLower(baseURL), ".services.ai.azure.com/openai/v1") {
+	if !strings.Contains(strings.ToLower(baseURL), ".openai.azure.com/openai/v1") && !strings.Contains(strings.ToLower(baseURL), ".services.ai.azure.com/openai/v1") { // swobu:io-string source=domain
 		return ""
 	}
 	projectEndpoint = strings.TrimSpace(projectEndpoint) // swobu:io-string source=boundary

@@ -60,7 +60,7 @@ func TestSecretFileStore_CorruptFileFailsFast(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected decode failure")
 	}
-	if !strings.Contains(strings.ToLower(err.Error()), "decode failed") {
+	if !strings.Contains(strings.ToLower(err.Error()), "decode failed") { // swobu:io-string source=domain
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

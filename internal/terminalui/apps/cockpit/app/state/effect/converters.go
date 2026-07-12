@@ -22,7 +22,7 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if strings.EqualFold(strings.TrimSpace(pc.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
 		if derived := stateModel.BedrockBaseURLForRegion(pc.Region); strings.TrimSpace(derived) != "" { // swobu:io-string source=boundary
 			baseURL = derived
-		} else if strings.TrimSpace(baseURL) == "" {
+		} else if strings.TrimSpace(baseURL) == "" { // swobu:io-string source=domain
 			region := strings.TrimSpace(os.Getenv("AWS_REGION")) // swobu:io-string source=boundary
 			if region == "" {
 				region = strings.TrimSpace(os.Getenv("AWS_DEFAULT_REGION")) // swobu:io-string source=boundary

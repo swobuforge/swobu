@@ -16,7 +16,7 @@ func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO) ([]can
 	}
 	out := make([]canonical.ToolDecl, 0, len(tools))
 	for _, tool := range tools {
-		kind := strings.ToLower(strings.TrimSpace(tool.Type))
+		kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
 		switch kind {
 		case "function":
 			if tool.Function == nil {
@@ -182,8 +182,8 @@ func chatCompletionsToolFormatFromCanonical(format canonical.ToolFormat) (json.R
 }
 
 func chatCompletionsToolFormatFromWire(raw json.RawMessage) (canonical.ToolFormat, error) {
-	rawText := string(raw) // swobu:io-string source=domain
-	if strings.TrimSpace(rawText) == "" || strings.TrimSpace(rawText) == "null" {
+	rawText := string(raw)                                                        // swobu:io-string source=domain
+	if strings.TrimSpace(rawText) == "" || strings.TrimSpace(rawText) == "null" { // swobu:io-string source=domain
 		return canonical.EmptyToolFormat(), nil
 	}
 	if _, err := sse.DecodeJSONObject(raw, "chat completions request custom tool format is invalid"); err != nil {
@@ -193,11 +193,11 @@ func chatCompletionsToolFormatFromWire(raw json.RawMessage) (canonical.ToolForma
 }
 
 func chatCompletionsUnsupportedToolKind(tool canonical.ToolDecl) string {
-	kind := strings.TrimSpace(canonical.ToolDeclKind(tool))
+	kind := strings.TrimSpace(canonical.ToolDeclKind(tool)) // swobu:io-string source=domain
 	if kind != "" {
 		return kind
 	}
-	typeName := strings.TrimPrefix(strings.TrimSpace(fmt.Sprintf("%T", tool)), "*")
+	typeName := strings.TrimPrefix(strings.TrimSpace(fmt.Sprintf("%T", tool)), "*") // swobu:io-string source=domain
 	if typeName != "" {
 		return typeName
 	}

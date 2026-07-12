@@ -30,7 +30,7 @@ func (p ToolCallBatchPolicy) Clone() ToolCallBatchPolicy {
 }
 
 func (p ToolCallBatchPolicy) IsZero() bool {
-	return strings.TrimSpace(string(p.Mode)) == ""
+	return strings.TrimSpace(string(p.Mode)) == "" // swobu:io-string source=domain
 }
 
 func (p ToolCallBatchPolicy) Validate() error {
@@ -55,7 +55,7 @@ func decodeToolCallBatchMetadata(raw string) (ToolCallBatchPolicy, error) {
 	if err := json.Unmarshal([]byte(trimmed), &dto); err != nil {
 		return ToolCallBatchPolicy{}, BadRequest("canonical request tool call batch policy is invalid")
 	}
-	mode := ToolCallBatchMode(strings.TrimSpace(dto.Mode))
+	mode := ToolCallBatchMode(strings.TrimSpace(dto.Mode)) // swobu:io-string source=domain
 	switch mode {
 	case ToolCallBatchUnspecified:
 		return ToolCallBatchPolicy{}, BadRequest("canonical request tool call batch policy mode is required")

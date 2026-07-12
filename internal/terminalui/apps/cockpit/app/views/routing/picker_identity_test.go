@@ -16,7 +16,7 @@ func TestCredentialOptionItems_UsesStableKeys(t *testing.T) {
 	}
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
-		if strings.TrimSpace(item.Key) == "" {
+		if strings.TrimSpace(item.Key) == "" { // swobu:io-string source=domain
 			t.Fatalf("item key empty for label %q", item.Label)
 		}
 		if _, ok := seen[item.Key]; ok {
@@ -35,7 +35,7 @@ func TestBedrockProfilePickerItems_UsesStableKeys(t *testing.T) {
 		t.Fatalf("first item key=%q want auto", items[0].Key)
 	}
 	for _, item := range items {
-		if strings.TrimSpace(item.Key) == "" {
+		if strings.TrimSpace(item.Key) == "" { // swobu:io-string source=domain
 			t.Fatalf("item key empty for label %q", item.Label)
 		}
 	}
@@ -69,7 +69,7 @@ func TestCreateRunOnChoiceItems_UsesStableKey(t *testing.T) {
 	if len(items) == 0 {
 		t.Fatal("expected at least one run-on item")
 	}
-	if strings.TrimSpace(items[0].Key) == "" {
+	if strings.TrimSpace(items[0].Key) == "" { // swobu:io-string source=domain
 		t.Fatal("run-on item key must be stable")
 	}
 }
@@ -92,7 +92,7 @@ func TestCredentialFilePickerItems_UsesPathKeysAndFirstFocus(t *testing.T) {
 		t.Fatalf("items len=%d want >=2", len(items))
 	}
 	for _, item := range items {
-		if strings.TrimSpace(item.Key) == "" {
+		if strings.TrimSpace(item.Key) == "" { // swobu:io-string source=domain
 			t.Fatalf("item key empty for label %q", item.Label)
 		}
 	}

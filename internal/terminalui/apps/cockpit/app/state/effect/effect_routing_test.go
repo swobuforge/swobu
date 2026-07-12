@@ -40,7 +40,7 @@ func TestPollProviderAuthSessionEffect_FailedStatusSurfacesCredentialStoreError(
 	if !ok {
 		t.Fatalf("action[1]=%T want ProviderAuthSessionFailedAction", actions[1])
 	}
-	if got := strings.TrimSpace(failed.Message); got != "credential store failed" {
+	if got := strings.TrimSpace(failed.Message); got != "credential store failed" { // swobu:io-string source=domain
 		t.Fatalf("failed message=%q", got)
 	}
 }

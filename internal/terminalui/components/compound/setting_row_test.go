@@ -52,7 +52,7 @@ func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 
 	buf := paint.NewBuffer(geom.Rect{W: 48, H: 1})
 	lowered.Paint(buf, &layout.LayoutNode{BorderRect: geom.Rect{W: 48, H: 1}}, &layout.PaintContext{})
-	out := strings.TrimSpace(buf.String())
+	out := strings.TrimSpace(buf.String()) // swobu:io-string source=domain
 	if !strings.Contains(out, "ask question") {
 		t.Fatalf("render = %q, want label text", out)
 	}

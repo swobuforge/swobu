@@ -63,7 +63,7 @@ func TestDaemonLifecycle_StartFailureIncludesErrorDetailsInErrorAndLogs(t *testi
 	if !strings.Contains(errText, "missing-swobu.yaml") {
 		t.Fatalf("error = %q, want missing config path detail", errText)
 	}
-	if !strings.Contains(strings.ToLower(errText), "no such file") {
+	if !strings.Contains(strings.ToLower(errText), "no such file") { // swobu:io-string source=domain
 		t.Fatalf("error = %q, want filesystem cause detail", errText)
 	}
 
@@ -72,7 +72,7 @@ func TestDaemonLifecycle_StartFailureIncludesErrorDetailsInErrorAndLogs(t *testi
 	if !strings.Contains(logText, "config_path="+missingConfigPath) {
 		t.Fatalf("logs missing config_path detail; logs=%s", logText)
 	}
-	if !strings.Contains(strings.ToLower(logText), "no such file") {
+	if !strings.Contains(strings.ToLower(logText), "no such file") { // swobu:io-string source=domain
 		t.Fatalf("logs missing underlying error detail; logs=%s", logText)
 	}
 }

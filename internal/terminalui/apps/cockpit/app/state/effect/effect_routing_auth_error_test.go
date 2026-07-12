@@ -12,7 +12,7 @@ func TestNormalizeAuthSessionSurfaceError_HTMLChallengePageCollapsed(t *testing.
 	err := errors.New("operator client: chatgpt login start failed: device auth start returned status 403: <!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title></head></html> (code=INVALID_ARGUMENT)")
 	got := normalizeAuthSessionSurfaceError(err)
 
-	if strings.Contains(strings.ToLower(got), "<!doctype html") || strings.Contains(strings.ToLower(got), "<html") {
+	if strings.Contains(strings.ToLower(got), "<!doctype html") || strings.Contains(strings.ToLower(got), "<html") { // swobu:io-string source=domain
 		t.Fatalf("normalized error leaked html: %q", got)
 	}
 	if !strings.Contains(got, "status 403") {

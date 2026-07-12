@@ -20,7 +20,7 @@ func TestStdoutEmitter_ErrorTracePayload_DoesNotContainForbiddenTelemetryTokens(
 		DurationMS:    &durationMS,
 	})
 
-	payload := strings.ToLower(sink.String())
+	payload := strings.ToLower(sink.String()) // swobu:io-string source=domain
 	for _, forbidden := range loadForbiddenTokensFixture(t) {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("payload leaked forbidden token %q: %s", forbidden, sink.String())

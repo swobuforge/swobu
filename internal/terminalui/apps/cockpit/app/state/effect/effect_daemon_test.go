@@ -202,7 +202,7 @@ func TestRefreshStatusProjectionEffect_MissingObservedAt_FailsFast(t *testing.T)
 	if !ok {
 		t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
 	}
-	if !strings.Contains(strings.ToLower(failed.Message), "missing observed_at") {
+	if !strings.Contains(strings.ToLower(failed.Message), "missing observed_at") { // swobu:io-string source=domain
 		t.Fatalf("failure message = %q, want missing observed_at", failed.Message)
 	}
 }
@@ -231,7 +231,7 @@ func TestRefreshStatusProjectionEffect_EndpointScopeMismatch_FailsFast(t *testin
 	if !ok {
 		t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
 	}
-	if !strings.Contains(strings.ToLower(failed.Message), "scope endpoint mismatch") {
+	if !strings.Contains(strings.ToLower(failed.Message), "scope endpoint mismatch") { // swobu:io-string source=domain
 		t.Fatalf("failure message = %q, want scope endpoint mismatch", failed.Message)
 	}
 }
@@ -341,7 +341,7 @@ func TestRefreshStatusProjectionEffect_InvalidStageReports_FailsFast(t *testing.
 		if !ok {
 			t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
 		}
-		if !strings.Contains(strings.ToLower(failed.Message), "duplicate stage/carrier") {
+		if !strings.Contains(strings.ToLower(failed.Message), "duplicate stage/carrier") { // swobu:io-string source=domain
 			t.Fatalf("failure message = %q, want duplicate stage/carrier", failed.Message)
 		}
 	})
@@ -366,7 +366,7 @@ func TestRefreshStatusProjectionEffect_InvalidStageReports_FailsFast(t *testing.
 		if !ok {
 			t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
 		}
-		if !strings.Contains(strings.ToLower(failed.Message), "mutated without applied") {
+		if !strings.Contains(strings.ToLower(failed.Message), "mutated without applied") { // swobu:io-string source=domain
 			t.Fatalf("failure message = %q, want mutated without applied", failed.Message)
 		}
 	})
@@ -448,7 +448,7 @@ func TestRefreshDaemonStatusEffect_MissingSwobuVersionFailsFast(t *testing.T) {
 	if !ok {
 		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", actions[0])
 	}
-	if !strings.Contains(strings.ToLower(incompatible.Reason), "missing required swobu_version") {
+	if !strings.Contains(strings.ToLower(incompatible.Reason), "missing required swobu_version") { // swobu:io-string source=domain
 		t.Fatalf("reason = %q, want missing swobu_version", incompatible.Reason)
 	}
 }

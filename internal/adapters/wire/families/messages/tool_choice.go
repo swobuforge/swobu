@@ -19,7 +19,7 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl) (
 
 	var stringMode string
 	if err := json.Unmarshal([]byte(trimmed), &stringMode); err == nil {
-		switch strings.ToLower(strings.TrimSpace(stringMode)) {
+		switch strings.ToLower(strings.TrimSpace(stringMode)) { // swobu:io-string source=domain
 		case "auto":
 			return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
 		case "none":
@@ -38,7 +38,7 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl) (
 	if err := json.Unmarshal([]byte(trimmed), &objectMode); err != nil {
 		return canonical.ToolPolicy{}, canonical.BadRequest("messages request tool_choice is invalid")
 	}
-	switch strings.ToLower(strings.TrimSpace(objectMode.Type)) {
+	switch strings.ToLower(strings.TrimSpace(objectMode.Type)) { // swobu:io-string source=domain
 	case "auto":
 		return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
 	case "none":

@@ -31,7 +31,7 @@ func TestBuildWorkspaceSection_RendersCoreBridgeEndpointRow(t *testing.T) {
 	tree := (&layout.TreeBuilder{}).Build(node, geom.Rect{W: 100, H: 10})
 	buf := paint.NewBuffer(geom.Rect{W: 100, H: 10})
 	paintLayoutTree(tree, buf, &layout.PaintContext{}, geom.Point{})
-	out := strings.TrimSpace(buf.String())
+	out := strings.TrimSpace(buf.String()) // swobu:io-string source=domain
 	if !strings.Contains(out, "copy ↵") {
 		t.Fatalf("render = %q, want core-backed copy action", out)
 	}

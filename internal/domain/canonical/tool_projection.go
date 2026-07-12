@@ -34,7 +34,7 @@ func ProjectedToolName(tool ToolDecl) (string, error) {
 // a deterministic wire-safe flat name.
 // swobu:lint ignore string-switch because=projection accepts boundary tool-kind text.
 func projectedToolNameForID(id SemanticToolID, kind string) (string, error) {
-	normalizedKind := strings.ToLower(strings.TrimSpace(kind))
+	normalizedKind := strings.ToLower(strings.TrimSpace(kind)) // swobu:io-string source=domain
 	switch normalizedKind {
 	case toolProjectionKindFunction, toolProjectionKindCustom:
 	default:
@@ -42,7 +42,7 @@ func projectedToolNameForID(id SemanticToolID, kind string) (string, error) {
 	}
 
 	normalizedID := NewSemanticToolIDFor(ToolOriginRequest, ToolKind(normalizedKind), id.Path)
-	if strings.TrimSpace(normalizedID.Path) == "" {
+	if strings.TrimSpace(normalizedID.Path) == "" { // swobu:io-string source=domain
 		return "", BadRequest("canonical tool projection requires a tool path")
 	}
 	namespace, leaf := splitProjectedToolPath(normalizedID.Path)
@@ -60,11 +60,11 @@ func projectedToolNameForID(id SemanticToolID, kind string) (string, error) {
 // structured tool identity.
 // swobu:lint ignore string-switch because=projection parses boundary tool-kind text.
 func ParseProjectedToolName(raw string, kind ToolKind) (SemanticToolID, string, error) {
-	trimmed := strings.TrimSpace(raw)
+	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
 	if trimmed == "" {
 		return SemanticToolID{}, "", BadRequest("canonical request tool references require a name")
 	}
-	normalizedKind := strings.ToLower(strings.TrimSpace(string(kind)))
+	normalizedKind := strings.ToLower(strings.TrimSpace(string(kind))) // swobu:io-string source=domain
 	switch normalizedKind {
 	case toolProjectionKindFunction, toolProjectionKindCustom:
 	default:
@@ -118,7 +118,7 @@ func ParseProjectedToolName(raw string, kind ToolKind) (SemanticToolID, string, 
 func toolProjectionDigest(material string) string {
 	mac := hmac.New(sha256.New, []byte(toolProjectionKey))
 	_, _ = mac.Write([]byte(material))
-	digest := strings.ToLower(toolProjectionEncoding.EncodeToString(mac.Sum(nil)))
+	digest := strings.ToLower(toolProjectionEncoding.EncodeToString(mac.Sum(nil))) // swobu:io-string source=domain
 	if len(digest) > toolProjectionDigestLength {
 		digest = digest[:toolProjectionDigestLength]
 	}
@@ -126,21 +126,21 @@ func toolProjectionDigest(material string) string {
 }
 
 func splitProjectedToolPath(path string) (string, string) {
-	trimmed := strings.TrimSpace(path)
+	trimmed := strings.TrimSpace(path) // swobu:io-string source=domain
 	if trimmed == "" {
 		return "", ""
 	}
 	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
-		namespace := strings.TrimSpace(trimmed[:index])
-		leaf := strings.TrimSpace(trimmed[index+1:])
+		namespace := strings.TrimSpace(trimmed[:index]) // swobu:io-string source=domain
+		leaf := strings.TrimSpace(trimmed[index+1:])    // swobu:io-string source=domain
 		return namespace, leaf
 	}
 	return "", trimmed
 }
 
 func buildProjectedToolPath(namespace, leaf string) string {
-	trimmedNamespace := strings.TrimSpace(namespace)
-	trimmedLeaf := strings.TrimSpace(leaf)
+	trimmedNamespace := strings.TrimSpace(namespace) // swobu:io-string source=domain
+	trimmedLeaf := strings.TrimSpace(leaf)           // swobu:io-string source=domain
 	if trimmedNamespace == "" {
 		return trimmedLeaf
 	}

@@ -18,13 +18,13 @@ func wrapResponsesToolReferenceError(fieldPath, kindDescriptor, name string, err
 	if !errors.As(err, &compatErr) || compatErr.Code != canonical.ErrorCodeBadRequest {
 		return err
 	}
-	kindDescriptor = strings.TrimSpace(kindDescriptor)
-	name = strings.TrimSpace(name)
-	fieldPath = strings.TrimSpace(fieldPath)
+	kindDescriptor = strings.TrimSpace(kindDescriptor) // swobu:io-string source=domain
+	name = strings.TrimSpace(name)                     // swobu:io-string source=domain
+	fieldPath = strings.TrimSpace(fieldPath)           // swobu:io-string source=domain
 	if fieldPath == "" || kindDescriptor == "" || name == "" {
 		return err
 	}
-	cause := strings.TrimSpace(compatErr.Message)
+	cause := strings.TrimSpace(compatErr.Message) // swobu:io-string source=domain
 	compatErr.Details = map[string]string{
 		"request_field": fieldPath,
 		"tool_kind":     kindDescriptor,

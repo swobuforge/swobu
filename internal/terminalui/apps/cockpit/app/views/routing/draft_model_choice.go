@@ -148,7 +148,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	}
 	previewOptions := make([]modelPickerOption, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		id := strings.TrimSpace(modelID)
+		id := strings.TrimSpace(modelID) // swobu:io-string source=domain
 		if id == "" {
 			continue
 		}

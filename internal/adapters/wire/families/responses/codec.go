@@ -50,7 +50,7 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) 
 		return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
 	}
 	normalizedTypeRaw := strings.TrimSpace(objectMode.Type) // swobu:io-string source=provider-wire
-	normalizedType := strings.ToLower(normalizedTypeRaw)
+	normalizedType := strings.ToLower(normalizedTypeRaw)    // swobu:io-string source=domain
 	switch normalizedType {
 	case "auto":
 		return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil

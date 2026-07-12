@@ -25,7 +25,7 @@ func TestBuildHelpSection_RendersCoreBridgeRows(t *testing.T) {
 	tree := (&layout.TreeBuilder{}).Build(node, geom.Rect{W: 80, H: 8})
 	buf := paint.NewBuffer(geom.Rect{W: 80, H: 8})
 	paintLayoutTree(tree, buf, &layout.PaintContext{}, geom.Point{})
-	out := strings.TrimSpace(buf.String())
+	out := strings.TrimSpace(buf.String()) // swobu:io-string source=domain
 	if !strings.Contains(out, "ask question") {
 		t.Fatalf("render = %q, want ask question row", out)
 	}

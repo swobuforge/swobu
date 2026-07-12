@@ -352,7 +352,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
-		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		auth := strings.TrimSpace(r.Header.Get("Authorization")) // swobu:io-string source=domain
 		if attempts == 1 {
 			if auth != "Bearer token_old" {
 				t.Fatalf("first auth=%q", auth)
@@ -405,7 +405,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
 		t.Fatalf("decode persisted secret: %v", err)
 	}
-	if strings.TrimSpace(persisted["access_token"].(string)) != "token_fresh" {
+	if strings.TrimSpace(persisted["access_token"].(string)) != "token_fresh" { // swobu:io-string source=domain
 		t.Fatalf("persisted access token=%v", persisted["access_token"])
 	}
 }

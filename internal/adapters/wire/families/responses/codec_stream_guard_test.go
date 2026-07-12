@@ -41,7 +41,7 @@ func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T)
 			if compatErr.Message != "responses stream wire carrier is invalid" {
 				t.Fatalf("error message = %q", compatErr.Message)
 			}
-			if strings.TrimSpace(compatErr.Details["wire_stream_invariant"]) == "" {
+			if strings.TrimSpace(compatErr.Details["wire_stream_invariant"]) == "" { // swobu:io-string source=domain
 				t.Fatalf("missing wire_stream_invariant detail: %#v", compatErr.Details)
 			}
 			if !strings.Contains(compatErr.Details["wire_stream_invariant"], tt.reasonMatch) {

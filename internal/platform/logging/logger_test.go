@@ -20,7 +20,7 @@ func TestCommonLineHandler_Format(t *testing.T) {
 		"config_path", "/tmp/swobu.yaml",
 	)
 
-	line := strings.TrimSpace(out.String())
+	line := strings.TrimSpace(out.String()) // swobu:io-string source=domain
 	if line == "" {
 		t.Fatal("expected one log line")
 	}
@@ -37,7 +37,7 @@ func TestConfigureDefaultLogger_RedirectsStdlibLog(t *testing.T) {
 	ConfigureDefaultLogger(&out)
 	log.Printf("2026/05/06 09:56:42 failed to upload metrics: dial tcp timeout")
 
-	text := strings.TrimSpace(out.String())
+	text := strings.TrimSpace(out.String()) // swobu:io-string source=domain
 	if text == "" {
 		t.Fatal("expected redirected stdlib log line")
 	}
@@ -58,7 +58,7 @@ func TestConfigureDefaultLogger_EnablesDebugWithEnv(t *testing.T) {
 	ConfigureDefaultLogger(&out)
 	slog.Debug("debug probe", "component", "daemon")
 
-	text := strings.TrimSpace(out.String())
+	text := strings.TrimSpace(out.String()) // swobu:io-string source=domain
 	if !strings.Contains(text, "DEBUG") || !strings.Contains(text, "debug probe") {
 		t.Fatalf("expected debug log line, got=%q", text)
 	}

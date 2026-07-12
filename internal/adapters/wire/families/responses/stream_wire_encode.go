@@ -177,7 +177,7 @@ func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEve
 	}
 	state.arguments.WriteString(event.ArgumentsDelta)
 	deltaType := "response.function_call_arguments.delta"
-	if strings.ToLower(strings.TrimSpace(state.toolType)) == canonical.ToolTypeCustom {
+	if strings.ToLower(strings.TrimSpace(state.toolType)) == canonical.ToolTypeCustom { // swobu:io-string source=domain
 		deltaType = "response.custom_tool_call_input.delta"
 	}
 	delta, err := json.Marshal(responsesToolArgumentsDeltaEventDTO{

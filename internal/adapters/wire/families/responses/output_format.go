@@ -13,7 +13,7 @@ func decodeResponsesOutputFormat(text *responsesTextDTO) (canonical.OutputFormat
 	}
 	formatType := strings.TrimSpace(text.Format.Type) // swobu:io-string source=boundary
 	if formatType == "" {
-		if strings.TrimSpace(text.Format.Name) == "" && strings.TrimSpace(text.Format.Description) == "" && len(text.Format.Schema) == 0 && text.Format.Strict == nil {
+		if strings.TrimSpace(text.Format.Name) == "" && strings.TrimSpace(text.Format.Description) == "" && len(text.Format.Schema) == 0 && text.Format.Strict == nil { // swobu:io-string source=domain
 			return canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatText})
 		}
 		return canonical.OutputFormat{}, canonical.BadRequest("responses request text.format is invalid")
@@ -53,8 +53,8 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 	case canonical.OutputFormatJSONSchema:
 		dto := responsesTextFormatDTO{
 			Type:        string(canonical.OutputFormatJSONSchema),
-			Name:        strings.TrimSpace(format.Name),
-			Description: strings.TrimSpace(format.Description),
+			Name:        strings.TrimSpace(format.Name),        // swobu:io-string source=domain
+			Description: strings.TrimSpace(format.Description), // swobu:io-string source=domain
 		}
 		if !format.Schema.IsEmpty() {
 			dto.Schema = json.RawMessage(format.Schema.RawObject())

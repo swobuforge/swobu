@@ -20,11 +20,11 @@ type liveMatrixResponse struct {
 }
 
 func TestLiveClientBackendHelloMatrix(t *testing.T) {
-	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_SMOKE")) != "1" {
+	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_SMOKE")) != "1" { // swobu:io-string source=domain
 		t.Skip("set SWOBU_LIVE_SMOKE=1 to run live client/backend smoke matrix") // swobu:lint ignore no-test-skip because=live smoke requires opt-in environment
 	}
 
-	daemonURL := strings.TrimSpace(os.Getenv("SWOBU_LIVE_DAEMON_URL"))
+	daemonURL := strings.TrimSpace(os.Getenv("SWOBU_LIVE_DAEMON_URL")) // swobu:io-string source=domain
 	if daemonURL == "" {
 		daemonURL = "http://127.0.0.1:7926"
 	}
@@ -72,7 +72,7 @@ func TestLiveClientBackendHelloMatrix(t *testing.T) {
 
 	httpClient := &http.Client{Timeout: 20 * time.Second}
 	for bi, endpoint := range backends {
-		endpoint = strings.TrimSpace(endpoint)
+		endpoint = strings.TrimSpace(endpoint) // swobu:io-string source=domain
 		for _, client := range clients {
 			testName := fmt.Sprintf("%s_%s", client.id, backendLabel[bi])
 			t.Run(testName, func(t *testing.T) {
@@ -124,7 +124,7 @@ func postClientHello(
 
 func requireEnv(t *testing.T, key string) string {
 	t.Helper()
-	value := strings.TrimSpace(os.Getenv(key))
+	value := strings.TrimSpace(os.Getenv(key)) // swobu:io-string source=domain
 	if value == "" {
 		t.Fatalf("required env %s is empty", key)
 	}
@@ -133,7 +133,7 @@ func requireEnv(t *testing.T, key string) string {
 
 func envOrDefault(t *testing.T, key string, fallback string) string {
 	t.Helper()
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" { // swobu:io-string source=domain
 		return value
 	}
 	return fallback

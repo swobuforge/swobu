@@ -39,7 +39,7 @@ func responsesProjectedOrRawToolName(id canonical.SemanticToolID, name string, p
 	if trimmedName == "" {
 		return "", canonical.BadRequest("response request tool declarations require a name")
 	}
-	if strings.Contains(strings.TrimSpace(id.Path), "/") {
+	if strings.Contains(strings.TrimSpace(id.Path), "/") { // swobu:io-string source=domain
 		projected, err := canonical.ProjectedToolName(projector)
 		if err != nil {
 			return "", err
@@ -115,10 +115,10 @@ func responsesResolvePlainToolByName(tools []canonical.ToolDecl, name, specificT
 		if normalizedSpecific != "" && toolType != normalizedSpecific {
 			continue
 		}
-		if strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
+		if strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") { // swobu:io-string source=domain
 			continue
 		}
-		if strings.TrimSpace(tool.ToolName()) != name {
+		if strings.TrimSpace(tool.ToolName()) != name { // swobu:io-string source=domain
 			continue
 		}
 		if matched && (found.ToolID() != tool.ToolID() || foundType != toolType) {

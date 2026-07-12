@@ -45,8 +45,8 @@ func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModel
 }
 
 func handleRoutingModelCatalogLoaded(model *Model, value stateeffect.RoutingModelCatalogLoaded) []update.Effect {
-	scope := strings.TrimSpace(value.Scope) // swobu:io-string source=boundary
-	if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.AuthHeader), strings.TrimSpace(value.CredentialRef), strings.TrimSpace(value.ProviderProtocol)) {
+	scope := strings.TrimSpace(value.Scope)                                                                                                                                                                                                             // swobu:io-string source=boundary
+	if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.AuthHeader), strings.TrimSpace(value.CredentialRef), strings.TrimSpace(value.ProviderProtocol)) { // swobu:io-string source=domain
 		return nil
 	}
 	if scope == RoutingModelCatalogScopeCreateDraft {

@@ -64,7 +64,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 }
 
 func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
-	if strings.TrimSpace(req.Request.Model()) == "" {
+	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=domain
 		return nil, canonical.BadRequest("canonical request is required")
 	}
 	resolvedDelivery, err := resolveChatGPTDelivery(req.Target.ProviderProtocol)

@@ -127,7 +127,7 @@ func NewGenerationControls(params GenerationControlsParams) (GenerationControls,
 		}
 		stopSequences := make([]string, 0, len(params.StopSequences))
 		for _, seq := range params.StopSequences {
-			if strings.TrimSpace(seq) == "" {
+			if strings.TrimSpace(seq) == "" { // swobu:io-string source=domain
 				return GenerationControls{}, BadRequest("generation controls stop sequence must not be empty")
 			}
 			stopSequences = append(stopSequences, seq)

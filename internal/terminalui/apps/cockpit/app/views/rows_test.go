@@ -29,7 +29,7 @@ func TestSettingActionRowEmitsCockpitActionAndFocusSignals(t *testing.T) {
 
 	buf := paint.NewBuffer(geom.Rect{W: 80, H: 1})
 	paintLayoutTree(tree, buf, &layout.PaintContext{FocusedID: tree.ID}, geom.Point{})
-	out := strings.TrimSpace(buf.String())
+	out := strings.TrimSpace(buf.String()) // swobu:io-string source=domain
 	if !strings.Contains(out, "ask question") {
 		t.Fatalf("render = %q, want label text", out)
 	}
@@ -91,7 +91,7 @@ func TestSettingStaticRowDoesNotFocus(t *testing.T) {
 
 	buf := paint.NewBuffer(geom.Rect{W: 48, H: 1})
 	paintLayoutTree(tree, buf, &layout.PaintContext{FocusedID: tree.ID}, geom.Point{})
-	out := strings.TrimSpace(buf.String())
+	out := strings.TrimSpace(buf.String()) // swobu:io-string source=domain
 	if !strings.Contains(out, "delete workspace") {
 		t.Fatalf("render = %q, want static label", out)
 	}

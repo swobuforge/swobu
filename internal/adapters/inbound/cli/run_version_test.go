@@ -18,7 +18,7 @@ func TestRunner_VersionFlag_PrintsVersion(t *testing.T) {
 	if exitCode != ExitHealthy {
 		t.Fatalf("exit code = %d, want %d; stderr=%q", exitCode, ExitHealthy, stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) == "" {
+	if strings.TrimSpace(stdout.String()) == "" { // swobu:io-string source=domain
 		t.Fatal("stdout empty, want version value")
 	}
 }
@@ -34,7 +34,7 @@ func TestRunner_VersionSubcommand_PrintsVersion(t *testing.T) {
 	if exitCode != ExitHealthy {
 		t.Fatalf("exit code = %d, want %d; stderr=%q", exitCode, ExitHealthy, stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) == "" {
+	if strings.TrimSpace(stdout.String()) == "" { // swobu:io-string source=domain
 		t.Fatal("stdout empty, want version value")
 	}
 }
