@@ -15,8 +15,7 @@ func TestCanonicalRequest_DoesNotExposeClientAdapterSelectors(t *testing.T) {
 	if _, ok := reqType.MethodByName("PreviousResponseID"); ok {
 		t.Fatal("CanonicalRequest must not expose raw previous_response_id selector")
 	}
-	// ToolMode was a temporary compatibility shim and must not reappear on the
-	// canonical request surface.
+	// ToolMode is intentionally absent from the canonical request surface.
 	if _, ok := reqType.MethodByName("ToolMode"); ok {
 		t.Fatal("CanonicalRequest must not expose ToolMode compatibility shim")
 	}
