@@ -382,9 +382,6 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	if got, ok := typed.Turn().PreviousID(); !ok || got.String() != "resp_123" {
 		t.Fatalf("previous_response_id = %q, want %q", got, "resp_123")
 	}
-	if !typed.CacheIntent().IsZero() {
-		t.Fatalf("cache intent = %+v, want zero", typed.CacheIntent())
-	}
 	items := typed.Items()
 	if len(items) != 3 {
 		t.Fatalf("conversation len = %d, want 3", len(items))
@@ -711,6 +708,46 @@ func TestHandler_DoesNotWriteExchangeErrorAfterStreamingCommit(t *testing.T) {
 	assertNoExchangeErrorAfterStreamingCommit(t)
 }
 
+func TestHandler_DoesNotLogAfterCommitOnStreamingDisconnect(t *testing.T) {
+	setDefaultLogger, logs := testDebugLogger()
+	defer setDefaultLogger()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	handler := NewHandler(staticRequestIngress{
+		out: exchange.RequestOutput{
+			Response: exchange.TransportResponse{
+				Transport: transportpkg.TransportResponse{
+					Status: http.StatusOK,
+					Header: http.Header{
+						"Content-Type": []string{"text/event-stream"},
+					},
+					Body: &firstChunkThenErrorBody{},
+				},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req = req.WithContext(ctx)
+	rec := &writeHeaderCountingResponseWriter{
+		cancelAfterWriteCount: 1,
+		cancel:                cancel,
+	}
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.writeHeaderCount != 1 {
+		t.Fatalf("writeHeader count = %d, want 1", rec.writeHeaderCount)
+	}
+	if rec.writeCount == 0 {
+		t.Fatal("body was not written")
+	}
+	if strings.Contains(logs.String(), "response_write_after_commit_failed") {
+		t.Fatalf("logs unexpectedly contain after-commit failure:\n%s", logs.String())
+	}
+}
+
 func assertNoExchangeErrorAfterStreamingCommit(t *testing.T) {
 	t.Helper()
 
@@ -939,29 +976,29 @@ func decodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest
 	}
 	switch canonical.ClientFamily(doc.Family) {
 	case canonical.ClientFamilyChatCompletions:
-		request, clientDelivery, err := chatcompletions.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		result, err := chatcompletions.ClientRequestDecoder{}.DecodeClientRequest(doc)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
-		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+		return result.Value.Request, normalizeStreamingDeliveryForTest(result.Value.Delivery, in.ResponseFraming), nil
 	case canonical.ClientFamilyResponses:
-		request, clientDelivery, err := responses.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		result, err := responses.ClientRequestDecoder{}.DecodeClientRequest(doc)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
-		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+		return result.Value.Request, normalizeStreamingDeliveryForTest(result.Value.Delivery, in.ResponseFraming), nil
 	case canonical.ClientFamilyCompletions:
-		request, clientDelivery, err := completions.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		result, err := completions.ClientRequestDecoder{}.DecodeClientRequest(doc)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
-		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+		return result.Value.Request, normalizeStreamingDeliveryForTest(result.Value.Delivery, in.ResponseFraming), nil
 	case canonical.ClientFamilyMessages:
-		request, clientDelivery, err := messages.ClientRequestDecoder{}.DecodeClientRequest(doc)
+		result, err := messages.ClientRequestDecoder{}.DecodeClientRequest(doc)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
-		return request, normalizeStreamingDeliveryForTest(clientDelivery, in.ResponseFraming), nil
+		return result.Value.Request, normalizeStreamingDeliveryForTest(result.Value.Delivery, in.ResponseFraming), nil
 	default:
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), errors.New("unsupported captured request family")
 	}
@@ -1023,35 +1060,71 @@ func testDocumentFromOutput(family canonical.ClientFamily, output canonical.Cano
 	return doc
 }
 
-func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) interface {
-	EncodeResponseDocument(canonical.CanonicalOutput) (carrier.WireDocument, error)
-} {
+type responseDocumentEncoderForTest struct {
+	encode func(canonical.CanonicalOutput) (carrier.WireDocument, error)
+}
+
+func (e responseDocumentEncoderForTest) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+	return e.encode(output)
+}
+
+func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) responseDocumentEncoderForTest {
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
-		return chatcompletions.ResponseDocumentEncoder{}
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+			result, err := chatcompletions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			return result.Value, err
+		}}
 	case canonical.ClientFamilyResponses:
-		return responses.ResponseDocumentEncoder{}
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+			result, err := responses.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			return result.Value, err
+		}}
 	case canonical.ClientFamilyCompletions:
-		return completions.ResponseDocumentEncoder{}
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+			result, err := completions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			return result.Value, err
+		}}
 	case canonical.ClientFamilyMessages:
-		return messages.ResponseDocumentEncoder{}
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+			result, err := messages.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			return result.Value, err
+		}}
 	default:
 		panic("test response document encoder missing for family " + string(family))
 	}
 }
 
-func testResponseStreamEncoderForFamily(family canonical.ClientFamily) interface {
-	EncodeResponseStream(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
-} {
+type responseStreamEncoderForTest struct {
+	encode func(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
+}
+
+func (e responseStreamEncoderForTest) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+	return e.encode(events, d)
+}
+
+func testResponseStreamEncoderForFamily(family canonical.ClientFamily) responseStreamEncoderForTest {
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
-		return chatcompletions.ResponseStreamEncoder{}
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+			result, err := chatcompletions.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
+			return result.Value, err
+		}}
 	case canonical.ClientFamilyResponses:
-		return responses.ResponseStreamEncoder{}
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+			result, err := responses.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
+			return result.Value, err
+		}}
 	case canonical.ClientFamilyCompletions:
-		return completions.ResponseStreamEncoder{}
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+			result, err := completions.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
+			return result.Value, err
+		}}
 	case canonical.ClientFamilyMessages:
-		return messages.ResponseStreamEncoder{}
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+			result, err := messages.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
+			return result.Value, err
+		}}
 	default:
 		panic("test response stream encoder missing for family " + string(family))
 	}
@@ -1063,10 +1136,12 @@ func (h *modelsCapableHandler) ListModels(_ context.Context, in exchange.ListMod
 }
 
 type writeHeaderCountingResponseWriter struct {
-	header           http.Header
-	statusCode       int
-	writeHeaderCount int
-	writeCount       int
+	header                http.Header
+	statusCode            int
+	writeHeaderCount      int
+	writeCount            int
+	cancelAfterWriteCount int
+	cancel                func()
 }
 
 func (w *writeHeaderCountingResponseWriter) Header() http.Header {
@@ -1083,6 +1158,9 @@ func (w *writeHeaderCountingResponseWriter) WriteHeader(statusCode int) {
 
 func (w *writeHeaderCountingResponseWriter) Write(p []byte) (int, error) {
 	w.writeCount++
+	if w.cancelAfterWriteCount > 0 && w.writeCount == w.cancelAfterWriteCount && w.cancel != nil {
+		w.cancel()
+	}
 	return len(p), nil
 }
 

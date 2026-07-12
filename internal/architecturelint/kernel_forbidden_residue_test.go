@@ -17,7 +17,6 @@ func TestKernelOwnershipNames_RejectForbiddenResidue(t *testing.T) {
 	scopes := []string{
 		filepath.Join(root, "exchange"),
 		filepath.Join(root, "carrier"),
-		filepath.Join(root, "transform"),
 		filepath.Join(root, "report"),
 		filepath.Join(root, "delivery"),
 		filepath.Join(root, "ports"),
@@ -74,7 +73,6 @@ func TestKernelComments_RejectEscapeHatchPhrase(t *testing.T) {
 	scopes := []string{
 		filepath.Join(root, "exchange"),
 		filepath.Join(root, "carrier"),
-		filepath.Join(root, "transform"),
 		filepath.Join(root, "report"),
 		filepath.Join(root, "delivery"),
 		filepath.Join(root, "ports"),

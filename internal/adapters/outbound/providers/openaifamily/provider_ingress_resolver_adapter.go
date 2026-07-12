@@ -4,16 +4,21 @@ package openaifamily
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
+	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -58,8 +63,9 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	}
 }
 
-// Execute performs provider HTTP transport only. Exchange orchestration,
-// transforms, and semantic decode live in exchange.
+// Execute performs provider HTTP transport only. Exchange orchestration and
+// semantic decode live in exchange while provider-edge wire patchers live in
+// provider-owned helper packages.
 func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
 	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadRequest("canonical request is required")
@@ -84,6 +90,12 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if wireReqCarrier.IsEmpty() {
 		return nil, canonical.InternalError("provider request document is required")
 	}
+	if err := providercompat.EmitStructuredOutputDecisions(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, req.Request.OutputFormat()); err != nil {
+		return nil, err
+	}
+	if err := providercompat.EmitToolSchemaStrictDecision(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, req.Request.Tools(), true); err != nil {
+		return nil, err
+	}
 	path, err := exchangeruntime.ProviderRequestPath(req.Target.ProviderID(), req.Target.ProtocolKind)
 	if err != nil {
 		return nil, err
@@ -96,7 +108,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		bytes.NewReader(wireReqBody),
 	)
 	if err != nil {
-		return nil, canonical.BadEndpoint("OpenAI-family provider request could not be built")
+		badEndpoint := canonical.BadEndpoint("OpenAI-family provider request could not be built")
+		badEndpoint.Details = map[string]string{
+			"request_build_error": detailErrorMessage(err), // swobu:io-string source=boundary
+		}
+		return nil, badEndpoint
 	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -110,7 +126,13 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, canonical.BadEndpoint("OpenAI-family provider request failed before backend response")
+		// Preserve the causal transport error so request-outcome logs can tell
+		// a connection/URL failure from the generic BAD_ENDPOINT wrapper.
+		badEndpoint := canonical.BadEndpoint("OpenAI-family provider request failed before backend response")
+		badEndpoint.Details = map[string]string{
+			"request_transport_error": detailErrorMessage(err), // swobu:io-string source=boundary
+		}
+		return nil, badEndpoint
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
@@ -124,7 +146,9 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 			_ = resp.Body.Close()
 		}()
 		backendErr := httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
-		return nil, classifyBackendError(backendErr)
+		classifiedErr := classifyBackendError(backendErr)
+		emitBackendErrorClassDecision(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, classifiedErr)
+		return nil, classifiedErr
 	}
 	if req.Contract.ProviderDelivery.IsStreaming() {
 		return carrier.WireStream{
@@ -187,4 +211,55 @@ func providerCredentialRequiredMessage(providerSpec string) string {
 		return "provider credential reference is required"
 	}
 	return string(providerID) + " provider credential reference is required"
+}
+
+func detailErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	if cause := errors.Unwrap(err); cause != nil {
+		if message := strings.TrimSpace(cause.Error()); message != "" { // swobu:io-string source=boundary
+			return message
+		}
+	}
+	return strings.TrimSpace(err.Error()) // swobu:io-string source=boundary
+}
+
+func emitBackendErrorClassDecision(ctx context.Context, sink effect.Sink, exchangeID string, providerID string, protocol protocolkind.ProtocolKind, classifiedErr error) {
+	if sink == nil {
+		return
+	}
+	var backendClassifiedErr canonical.ClassifiedBackendError
+	if !errors.As(classifiedErr, &backendClassifiedErr) {
+		return
+	}
+	subject := backendErrorClassSubject(routeDecisionSubject(providerID, string(protocol)), backendClassifiedErr.Class)
+	if subject == "" {
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.ErrorClass,
+			Outcome: compat.Approx,
+			Subject: subject,
+		},
+	})
+}
+
+func routeDecisionSubject(providerID string, protocol string) compat.Subject {
+	providerID = strings.TrimSpace(providerID) // swobu:io-string source=boundary
+	protocol = strings.TrimSpace(protocol)     // swobu:io-string source=boundary
+	if providerID == "" || protocol == "" {
+		return ""
+	}
+	return compat.Subject("route:provider/" + providerID + "/protocol/" + protocol)
+}
+
+func backendErrorClassSubject(routeSubject compat.Subject, class canonical.BackendErrorClass) compat.Subject {
+	routeSubject = compat.Subject(strings.TrimSpace(string(routeSubject))) // swobu:io-string source=boundary
+	class = canonical.BackendErrorClass(strings.TrimSpace(string(class)))  // swobu:io-string source=boundary
+	if routeSubject == "" || class == "" {
+		return ""
+	}
+	return compat.Subject(string(routeSubject) + "/error_class/" + string(class))
 }

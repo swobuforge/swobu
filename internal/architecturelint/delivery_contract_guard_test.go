@@ -11,7 +11,7 @@ func TestDeliveryContracts_DoNotUseStreamingBoolSignatures(t *testing.T) {
 	t.Parallel()
 
 	roots := []string{
-		filepath.Join("..", "app", "requestpath"),
+		filepath.Join("..", "exchange"),
 		filepath.Join("..", "adapters", "inbound", "httpapi"),
 		filepath.Join("..", "ports"),
 	}

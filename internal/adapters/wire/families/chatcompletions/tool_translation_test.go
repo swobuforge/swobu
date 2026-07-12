@@ -28,7 +28,7 @@ func TestEncodeChatCompletionsTool_RejectsUnsupportedKindsWithKindDetail(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := encodeChatCompletionsTool(tc.tool)
+			_, err := encodeChatCompletionsTool(tc.tool, nil, "", 0)
 			if err == nil {
 				t.Fatal("expected encodeChatCompletionsTool to reject unsupported kind")
 			}

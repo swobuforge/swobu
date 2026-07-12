@@ -49,42 +49,6 @@ func SupportsProviderProtocolForSpec(spec string, providerProtocol string) bool 
 	return false
 }
 
-// RequestFeaturesForSpecAndKind returns the declared request features for one
-// provider spec and protocol kind. The catalog owns the support matrix so
-// provider dispatch can fail closed before protocol encoding.
-func RequestFeaturesForSpecAndKind(spec string, protocolKind protocolkind.ProtocolKind) []RequestFeature {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return nil
-	}
-	seen := make(map[RequestFeature]struct{})
-	out := make([]RequestFeature, 0)
-	for _, protocol := range profile.ProviderProtocols {
-		if protocol.Kind != protocolKind {
-			continue
-		}
-		for _, feature := range protocol.RequestFeatures {
-			if _, ok := seen[feature]; ok {
-				continue
-			}
-			seen[feature] = struct{}{}
-			out = append(out, feature)
-		}
-	}
-	return out
-}
-
-// SupportsRequestFeatureForSpecAndKind reports whether a provider spec and
-// protocol kind can truthfully carry one request feature.
-func SupportsRequestFeatureForSpecAndKind(spec string, protocolKind protocolkind.ProtocolKind, feature RequestFeature) bool {
-	for _, supported := range RequestFeaturesForSpecAndKind(spec, protocolKind) {
-		if supported == feature {
-			return true
-		}
-	}
-	return false
-}
-
 // ResolveConcreteProtocolForAutoAtBoundary chooses one concrete protocol for a
 // provider when callers require a concrete fallback value.
 func ResolveConcreteProtocolForAutoAtBoundary(spec string) (string, bool) {

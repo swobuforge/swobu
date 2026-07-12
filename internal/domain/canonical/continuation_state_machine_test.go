@@ -172,6 +172,52 @@ func TestContinuationRuntime_PrepareRequest_PreservesNativeContinuationWhenSafe(
 	}
 }
 
+func TestContinuationRuntime_PrepareRequest_FailsClosedOnUnsafeNativeReplaySelection(t *testing.T) {
+	store := &fakeContinuationStore{
+		records: map[ContinuationID]ContinuationRecord{
+			NewContinuationID("resp_prev"): {
+				ID: NewContinuationID("resp_prev"),
+				RequestDelta: NewCanonicalRequest(RequestParams{
+					Model: "m",
+					Items: []CanonicalItem{
+						NewTextItem(ItemAuthorUser, "hi"),
+						NewTextItem(ItemAuthorAssistant, "hello"),
+					},
+				}),
+				Response: NewConversationOutput(
+					"resp_prev",
+					"m",
+					[]OutputItem{NewTextOutputItem("text_0", "hello")},
+					"completed",
+				),
+				Status: ContinuationStatusCompleted,
+			},
+		},
+	}
+	runtime := NewContinuationRuntime(store)
+
+	_, err := runtime.PrepareRequest(
+		context.Background(),
+		NewContinuationNamespace("alpha"),
+		protocolkind.Responses,
+		NewCanonicalRequest(RequestParams{
+			Model: "m",
+			Turn:  NewTurnRef("resp_prev"),
+			Items: []CanonicalItem{
+				NewTextItem(ItemAuthorUser, "hi"),
+				NewTextItem(ItemAuthorUser, "bye"),
+			},
+		}),
+	)
+	if err == nil {
+		t.Fatal("PrepareRequest returned nil error, want unsafe replay rejection")
+	}
+	var unsafeReplayErr UnsafeNativeReplayError
+	if !errors.As(err, &unsafeReplayErr) {
+		t.Fatalf("PrepareRequest returned err=%v, want UnsafeNativeReplayError", err)
+	}
+}
+
 func TestContinuationRuntime_PrepareRequest_FailsClosedOnUnknownContinuationID(t *testing.T) {
 	runtime := NewContinuationRuntime(&fakeContinuationStore{})
 	_, err := runtime.PrepareRequest(

@@ -7,12 +7,13 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error) {
 	message, err := chatMessageFromOutput(output)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return exchange.Result[carrier.WireDocument]{}, err
 	}
 	raw, err := json.Marshal(chatCompletionsResponseDTO{
 		ID:     sse.FallbackID(output.ResultID(), "chatcmpl_swobu"),
@@ -26,7 +27,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Usage: chatUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return exchange.Result[carrier.WireDocument]{}, err
 	}
-	return carrier.NewWireDocument("", protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{}), nil
+	return exchange.NewResult(carrier.NewWireDocument("", protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{})), nil
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 type messageBody struct {
@@ -34,6 +35,10 @@ type toolCustomBody struct {
 }
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
+	return EncodeCarrierWithEffects(req, d, nil, "")
+}
+
+func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.WireDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -46,14 +51,14 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	if err != nil {
 		return carrier.WireDocument{}, err
 	}
-	wireTools, err := encodeChatCompletionsTools(tools)
+	wireTools, err := encodeChatCompletionsTools(tools, sink, exchangeID)
 	if err != nil {
 		return carrier.WireDocument{}, err
 	}
 	if d.Mode == delivery.Streaming && hasChatCompletionsCustomTools(tools) {
 		return carrier.WireDocument{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
 	}
-	choice, err := encodeChatCompletionsToolChoice(req.ToolPolicy(), tools)
+	choice, err := encodeChatCompletionsToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
 		return carrier.WireDocument{}, err
 	}

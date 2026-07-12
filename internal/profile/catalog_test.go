@@ -2,8 +2,6 @@ package profile
 
 import (
 	"testing"
-
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestCatalog_SpecSupport(t *testing.T) {
@@ -191,34 +189,5 @@ func TestCatalog_ConcreteProviderProtocolsForSpec_OrderIsCanonical(t *testing.T)
 	chatgpt := ConcreteProviderProtocolsForSpec("chatgpt")
 	if len(chatgpt) != 1 || chatgpt[0] != "responses_stream" {
 		t.Fatalf("chatgpt concrete protocols=%v want [responses_stream]", chatgpt)
-	}
-}
-
-func TestCatalog_RequestFeatureSupportByProtocol(t *testing.T) {
-	t.Parallel()
-
-	if !SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Responses, RequestFeatureJSONSchemaOutput) {
-		t.Fatal("openai responses should support JSON schema output")
-	}
-	if !SupportsRequestFeatureForSpecAndKind("openai", protocolkind.ChatCompletions, RequestFeatureStopSequences) {
-		t.Fatal("openai chat completions should support stop sequences")
-	}
-	if !SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Responses, RequestFeatureToolBatchAtMostOne) {
-		t.Fatal("openai responses should support tool-call batch at most one")
-	}
-	if !SupportsRequestFeatureForSpecAndKind("anthropic", protocolkind.Messages, RequestFeatureToolBatchAtMostOne) {
-		t.Fatal("anthropic messages should support tool-call batch at most one")
-	}
-	if !SupportsRequestFeatureForSpecAndKind("anthropic", protocolkind.Messages, RequestFeatureFunctionTools) {
-		t.Fatal("anthropic messages should support function tools")
-	}
-	if SupportsRequestFeatureForSpecAndKind("anthropic", protocolkind.Messages, RequestFeatureJSONSchemaOutput) {
-		t.Fatal("anthropic messages must not advertise JSON schema output")
-	}
-	if SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Completions, RequestFeatureJSONSchemaOutput) {
-		t.Fatal("completions must not advertise JSON schema output")
-	}
-	if SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Completions, RequestFeatureToolBatchAtMostOne) {
-		t.Fatal("completions must not advertise tool-call batch support")
 	}
 }

@@ -97,3 +97,35 @@ func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testin
 		t.Fatalf("writeHeader count = %d, want 0", writer.writeHeaderCount)
 	}
 }
+
+func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resp := exchange.RequestOutput{
+		Response: exchange.TransportResponse{
+			Transport: transportpkg.TransportResponse{
+				Status: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/event-stream"},
+				},
+				Body: &firstChunkThenErrorBody{},
+			},
+		},
+	}
+
+	writer := &writeHeaderCountingResponseWriter{
+		cancelAfterWriteCount: 1,
+		cancel:                cancel,
+	}
+	err := writeSuccessResponse(ctx, writer, "req_test_4", canonical.ClientFamilyResponses, resp)
+	if err != nil {
+		t.Fatalf("writeSuccessResponse returned error: %v", err)
+	}
+	if writer.writeHeaderCount != 1 {
+		t.Fatalf("writeHeader count = %d, want 1", writer.writeHeaderCount)
+	}
+	if writer.writeCount == 0 {
+		t.Fatal("body was not written")
+	}
+}

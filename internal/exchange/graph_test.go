@@ -9,12 +9,12 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
-	"github.com/swobuforge/swobu/internal/observation"
 )
 
 func TestPortLinkAndResultCarryTypedValueAndEffects(t *testing.T) {
@@ -35,7 +35,11 @@ func TestPortLinkAndResultCarryTypedValueAndEffects(t *testing.T) {
 		func(_ context.Context, input string) (Result[string], error) {
 			return NewResult(
 				input+"-done",
-				effect.ObservationEffect{Observation: observation.ObservationRecord{Code: "graph_link"}},
+				effect.Compatibility{
+					Feature: compat.ToolCallID,
+					Outcome: compat.Approx,
+					Subject: compat.Subject("graph_link"),
+				},
 			), nil
 		},
 	)
@@ -50,8 +54,8 @@ func TestPortLinkAndResultCarryTypedValueAndEffects(t *testing.T) {
 	if len(result.Effects) != 1 {
 		t.Fatalf("result effects len = %d, want 1", len(result.Effects))
 	}
-	if got := result.Effects[0].Kind(); got != effect.KindObservation {
-		t.Fatalf("effect kind = %q, want %q", got, effect.KindObservation)
+	if got := result.Effects[0].Kind(); got != effect.KindCompatibility {
+		t.Fatalf("effect kind = %q, want %q", got, effect.KindCompatibility)
 	}
 }
 
@@ -80,6 +84,62 @@ func TestExchangeGraph_BuildPathMaterializesModelBeforeProtocolResolution(t *tes
 	}
 	if got := path.ProtocolKind; got != protocolkind.Responses {
 		t.Fatalf("path protocol kind = %q, want responses", got)
+	}
+}
+
+func TestExchangeGraph_BuildPathRejectsUnsafeNativeReplaySelection(t *testing.T) {
+	_, endpoint := testGraphEndpoint(t)
+	store := &graphContinuationStore{
+		records: map[canonical.ContinuationID]canonical.ContinuationRecord{
+			canonical.NewContinuationID("resp_prev"): {
+				ID: canonical.NewContinuationID("resp_prev"),
+				RequestDelta: canonical.NewCanonicalRequest(canonical.RequestParams{
+					Model: "m",
+					Items: []canonical.CanonicalItem{
+						canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+						canonical.NewTextItem(canonical.ItemAuthorAssistant, "hello"),
+					},
+				}),
+				Response: canonical.NewConversationOutput(
+					"resp_prev",
+					"m",
+					[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "hello")},
+					"completed",
+				),
+				Status: canonical.ContinuationStatusCompleted,
+			},
+		},
+	}
+	sink := &recordingEffectSink{}
+	graph := exchangeGraph{
+		DeliverySelector: FixedDeliverySelector{},
+		Continuation:     canonical.NewContinuationRuntime(store),
+		Runner:           Runner{EffectSink: sink},
+	}
+
+	_, err := graph.buildPath(context.Background(), "ex_graph", endpoint.Name(), endpoint.SelectedProviderConfig(), delivery.BufferedDelivery(), canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "m",
+		Turn:  canonical.NewTurnRef("resp_prev"),
+		Items: []canonical.CanonicalItem{
+			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			canonical.NewTextItem(canonical.ItemAuthorUser, "bye"),
+		},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "native continuation state is unsafe") {
+		t.Fatalf("buildPath() error = %v, want unsafe native replay rejection", err)
+	}
+	if len(sink.effects) != 1 {
+		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
+	}
+	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	if !ok {
+		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+	}
+	if compatEffect.Feature != compat.WireNativePayload || compatEffect.Outcome != compat.Reject {
+		t.Fatalf("captured effect = %#v, want wire.native_payload reject", compatEffect)
+	}
+	if compatEffect.Subject != compat.Subject("state:turn.request.raw") {
+		t.Fatalf("compatibility subject = %q, want state subject", compatEffect.Subject)
 	}
 }
 
@@ -345,4 +405,27 @@ func testGraphEndpointWithMissingModelFirstPath(t *testing.T) (endpointintent.En
 		t.Fatalf("NewEndpoint returned error: %v", err)
 	}
 	return name, endpoint
+}
+
+type graphContinuationStore struct {
+	records map[canonical.ContinuationID]canonical.ContinuationRecord
+}
+
+func (s *graphContinuationStore) Put(context.Context, canonical.ContinuationRecord) error {
+	return nil
+}
+
+func (s *graphContinuationStore) Get(context.Context, canonical.ContinuationID) (canonical.ContinuationRecord, bool, error) {
+	return canonical.ContinuationRecord{}, false, nil
+}
+
+func (s *graphContinuationStore) Chain(_ context.Context, id canonical.ContinuationID) ([]canonical.ContinuationRecord, error) {
+	if s.records == nil {
+		return nil, nil
+	}
+	rec, ok := s.records[id]
+	if !ok {
+		return nil, nil
+	}
+	return []canonical.ContinuationRecord{rec.Clone()}, nil
 }

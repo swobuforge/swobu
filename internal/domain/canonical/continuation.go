@@ -149,6 +149,28 @@ type ContinuationRuntime struct {
 	store ContinuationStore
 }
 
+// UnsafeNativeReplayError marks a continuation selection that cannot preserve
+// provider-native replay safely.
+type UnsafeNativeReplayError struct {
+	Cause Error
+}
+
+func NewUnsafeNativeReplayError(message string) UnsafeNativeReplayError {
+	trimmed := strings.TrimSpace(message) // swobu:io-string source=boundary
+	if trimmed == "" {
+		trimmed = "native continuation state is unsafe"
+	}
+	return UnsafeNativeReplayError{Cause: BadRequest(trimmed)}
+}
+
+func (e UnsafeNativeReplayError) Error() string {
+	return e.Cause.Error()
+}
+
+func (e UnsafeNativeReplayError) Unwrap() error {
+	return e.Cause
+}
+
 // NewContinuationRuntime creates a request-path continuation helper around one
 // semantic continuation store.
 func NewContinuationRuntime(store ContinuationStore) ContinuationRuntime {
@@ -193,6 +215,9 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 	case prefixLen == 0:
 		thread = append(cloneCanonicalItems(anchor), cloneCanonicalItems(currentThread)...)
 	default:
+		if targetProtocol == protocolkind.Responses {
+			return CanonicalRequest{}, NewUnsafeNativeReplayError("native continuation state is unsafe")
+		}
 		thread = cloneCanonicalItems(currentThread)
 		keepNativeContinuation = false
 	}
@@ -202,9 +227,9 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 		preparedTurn = request.Turn().Clone()
 	}
 
-	// When the target cannot consume native continuation safely, the semantic
-	// thread is materialized and the native selector is cleared to avoid
-	// duplicate history injection.
+	// Safe native continuation keeps the turn reference. Unsafe native replay on
+	// a same-protocol target fails closed instead of silently materializing a
+	// divergent thread.
 	return NewCanonicalRequest(RequestParams{
 		Model:         request.Model(),
 		Items:         thread,
@@ -214,7 +239,6 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 		ToolCallBatch: request.ToolCallBatch(),
 		Controls:      request.Controls(),
 		OutputFormat:  request.OutputFormat(),
-		CacheIntent:   request.CacheIntent(),
 	}), nil
 }
 
@@ -303,7 +327,6 @@ func buildContinuationRecord(namespace ContinuationNamespace, request CanonicalR
 		ToolPolicy:   request.ToolPolicy(),
 		Controls:     request.Controls(),
 		OutputFormat: request.OutputFormat(),
-		CacheIntent:  request.CacheIntent(),
 	})
 	record := ContinuationRecord{
 		ID:           NewContinuationID(output.ResultID()),

@@ -7,7 +7,7 @@ import (
 )
 
 // ProviderRequestPath centralizes provider request path selection for the
-// shared wire-family codec seam so provider adapters do not each own the same
+// provider-edge protocol bundle so provider adapters do not each own the same
 // protocol switch.
 func ProviderRequestPath(providerSpec string, kind protocolkind.ProtocolKind) (string, error) {
 	providerID, ok := profile.ParseProviderID(providerSpec)

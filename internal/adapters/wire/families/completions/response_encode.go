@@ -7,12 +7,13 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error) {
 	for _, item := range output.Items() {
 		if item.Kind != canonical.ItemKindText {
-			return carrier.WireDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool-bearing output items")
+			return exchange.Result[carrier.WireDocument]{}, canonical.UnsupportedOperation("completions protocol does not support tool-bearing output items")
 		}
 	}
 	raw, err := json.Marshal(completionsResponseDTO{
@@ -27,7 +28,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Usage: completionsUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return exchange.Result[carrier.WireDocument]{}, err
 	}
-	return carrier.NewWireDocument("", protocolkind.Completions, "application/json", nil, raw, carrier.Meta{}), nil
+	return exchange.NewResult(carrier.NewWireDocument("", protocolkind.Completions, "application/json", nil, raw, carrier.Meta{})), nil
 }

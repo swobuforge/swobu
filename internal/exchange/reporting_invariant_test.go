@@ -3,57 +3,56 @@ package exchange
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/report"
-	"github.com/swobuforge/swobu/internal/transform"
+	"github.com/swobuforge/swobu/internal/effect"
+	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 )
 
-type invariantDocTransform struct {
+type invariantDocPatch struct {
 	id      string
 	mutated bool
-	losses  []report.Loss
+	effects []effect.Effect
 	nextRaw []byte
 }
 
-func (t invariantDocTransform) ID() string { return t.id }
-func (t invariantDocTransform) Stage() transform.Stage {
-	return transform.StageRequestDocumentOut
+func (t invariantDocPatch) ID() string { return t.id }
+func (t invariantDocPatch) Stage() stage.Stage {
+	return stage.StageRequestDocumentOut
 }
-func (t invariantDocTransform) Capabilities() transform.MiddlewareCapabilities {
-	return transform.MiddlewareCapabilities{}
+func (t invariantDocPatch) Capabilities() stage.StageCapabilities {
+	return stage.StageCapabilities{}
 }
-func (t invariantDocTransform) Match(transform.Context, carrier.WireDocument) bool { return true }
-func (t invariantDocTransform) Apply(_ transform.Context, in carrier.WireDocument) (carrier.WireDocument, transform.Outcome, error) {
+func (t invariantDocPatch) Match(stage.Context, carrier.WireDocument) bool { return true }
+func (t invariantDocPatch) Apply(_ stage.Context, in carrier.WireDocument) (stage.Result[carrier.WireDocument], error) {
 	out := in
 	out.Raw = append([]byte(nil), t.nextRaw...)
-	return out, transform.Outcome{
+	return stage.Result[carrier.WireDocument]{
+		Value:   out,
 		Mutated: t.mutated,
-		Losses:  append([]report.Loss(nil), t.losses...),
+		Effects: append([]effect.Effect(nil), t.effects...),
 	}, nil
 }
 
-func TestApplyDocumentTransform_FailsOnSilentMutation(t *testing.T) {
-	reg := transform.NewRegistry([]transform.DocumentTransform{
-		invariantDocTransform{
+func TestApplyDocumentPatch_FailsOnSilentMutation(t *testing.T) {
+	reg := stage.NewStageMechanics([]stage.DocumentPatch{
+		invariantDocPatch{
 			id:      "silent_change",
 			mutated: false,
 			nextRaw: []byte(`{"model":"m","input":"changed"}`),
 		},
 	}, nil)
 
-	_, err := applyDocumentMiddleware(
+	_, err := applyDocumentPatches(
 		context.Background(),
 		reg,
 		"ex_invariant",
-		"",
-		"",
-		"",
-		transform.StageRequestDocumentOut,
-		providerRequestWireOutPort(),
+		stage.StageRequestDocumentOut,
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
 			Family: canonical.ClientFamilyResponses,
@@ -67,24 +66,20 @@ func TestApplyDocumentTransform_FailsOnSilentMutation(t *testing.T) {
 	}
 }
 
-func TestApplyDocumentTransform_FailsOnReportedMutationWithoutChange(t *testing.T) {
-	reg := transform.NewRegistry([]transform.DocumentTransform{
-		invariantDocTransform{
+func TestApplyDocumentPatch_FailsOnReportedMutationWithoutChange(t *testing.T) {
+	reg := stage.NewStageMechanics([]stage.DocumentPatch{
+		invariantDocPatch{
 			id:      "false_mutation",
 			mutated: true,
 			nextRaw: []byte(`{"model":"m","input":"hi"}`),
 		},
 	}, nil)
 
-	_, err := applyDocumentMiddleware(
+	_, err := applyDocumentPatches(
 		context.Background(),
 		reg,
 		"ex_invariant",
-		"",
-		"",
-		"",
-		transform.StageRequestDocumentOut,
-		providerRequestWireOutPort(),
+		stage.StageRequestDocumentOut,
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
 			Family: canonical.ClientFamilyResponses,
@@ -98,30 +93,26 @@ func TestApplyDocumentTransform_FailsOnReportedMutationWithoutChange(t *testing.
 	}
 }
 
-func TestApplyDocumentTransform_RejectsUnsupportedProjectionLoss(t *testing.T) {
-	reg := transform.NewRegistry([]transform.DocumentTransform{
-		invariantDocTransform{
+func TestApplyDocumentPatch_PreservesRejectEffectOnError(t *testing.T) {
+	rejectEffect := effect.Compatibility{
+		Feature: compat.RequestStructuredOutput,
+		Outcome: compat.Reject,
+		Subject: compat.Subject("/input"),
+	}
+	reg := stage.NewStageMechanics([]stage.DocumentPatch{
+		invariantDocPatch{
 			id:      "lossy_change",
 			mutated: false,
+			effects: []effect.Effect{rejectEffect},
 			nextRaw: []byte(`{"model":"m"}`),
-			losses: []report.Loss{{
-				Field:    "/input",
-				Kind:     report.LossUnsupportedField,
-				Reason:   "removed unsupported field",
-				Severity: report.SeverityWarning,
-			}},
 		},
 	}, nil)
 
-	_, err := applyDocumentMiddleware(
+	result, err := applyDocumentPatches(
 		context.Background(),
 		reg,
 		"ex_invariant",
-		"",
-		"",
-		"",
-		transform.StageRequestDocumentOut,
-		providerRequestWireOutPort(),
+		stage.StageRequestDocumentOut,
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
 			Family: canonical.ClientFamilyResponses,
@@ -130,8 +121,27 @@ func TestApplyDocumentTransform_RejectsUnsupportedProjectionLoss(t *testing.T) {
 		},
 		delivery.BufferedDelivery(),
 	)
+	if err == nil {
+		t.Fatal("expected error for reject effect")
+	}
 	var unsupported UnsupportedProjectionError
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("expected UnsupportedProjectionError, got %v", err)
+	}
+	if unsupported.Field != "/input" {
+		t.Fatalf("unsupported field = %q, want /input", unsupported.Field)
+	}
+	if len(result.Effects) != 1 {
+		t.Fatalf("result effects len=%d want=1", len(result.Effects))
+	}
+	gotReject, ok := result.Effects[0].(effect.Compatibility)
+	if !ok {
+		t.Fatalf("result effect type = %T, want effect.Compatibility", result.Effects[0])
+	}
+	if gotReject.Feature != compat.RequestStructuredOutput || gotReject.Outcome != compat.Reject || gotReject.Subject != compat.Subject("/input") {
+		t.Fatalf("result reject effect = %#v, want structured_output/reject//input", gotReject)
+	}
+	if !strings.Contains(unsupported.Reason, "reject") {
+		t.Fatalf("unsupported reason = %q, want reject detail", unsupported.Reason)
 	}
 }

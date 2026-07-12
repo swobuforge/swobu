@@ -78,7 +78,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 	clientRequest := []byte(readFile(t, filepath.Join(caseDir, "client_request.body.json")))
 	upstreamResponseBody := []byte(readFile(t, filepath.Join(caseDir, "upstream_response.body.json")))
 	upstreamResponseSSE := readFile(t, filepath.Join(caseDir, "upstream_response.sse"))
-	request, _, err := clientCodec.DecodeClientRequest(carrier.NewWireDocument(
+	result, err := clientCodec.DecodeClientRequest(carrier.NewWireDocument(
 		carrier.StageClientRequestIn,
 		protocolkind.ProtocolKind(clientFamily),
 		"application/json",
@@ -89,6 +89,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 	if err != nil {
 		t.Fatalf("decode client request: %v", err)
 	}
+	request := result.Value.Request
 	var capturedProviderRequest []byte
 	runner := withRuntimeRunner(func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 		capturedProviderRequest = append(capturedProviderRequest[:0], req.RequestDocument.RawBytes()...)

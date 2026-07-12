@@ -19,11 +19,12 @@ func TestRealize_NormalizesCodexPayload(t *testing.T) {
 			},
 		}),
 		delivery.StreamingDelivery(delivery.FramingSSE),
+		"",
 	)
 	if err != nil {
 		t.Fatalf("realize: %v", err)
 	}
-	raw := wireReq.Raw
+	raw := wireReq.Value.Raw
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
@@ -68,11 +69,12 @@ func TestRealize_AcceptsBufferedClientPreferenceViaStreamNativeEncoding(t *testi
 			},
 		}),
 		delivery.BufferedDelivery(),
+		"",
 	)
 	if err != nil {
 		t.Fatalf("realize: %v", err)
 	}
-	raw := wireReq.Raw
+	raw := wireReq.Value.Raw
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)

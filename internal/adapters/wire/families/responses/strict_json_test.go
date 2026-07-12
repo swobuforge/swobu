@@ -11,7 +11,7 @@ import (
 )
 
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","unexpected":true}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 }
 
 func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	wantFormat := `{"type":"grammar", "syntax":"lark", "definition":"start: \"x\" LF\n%import common.LF"}`
 	customTool := canonical.NewCustomToolDecl("apply_patch", "apply_patch", "edit files", canonical.NewToolFormatObject(wantFormat))
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","tools":[{"type":"custom","name":"` + customTool.ToolName() + `","format":` + wantFormat + `}]}`)

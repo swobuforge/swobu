@@ -68,7 +68,7 @@ type RecentTrafficRow struct {
 	ModelRequested      string                 `json:"model_requested,omitempty"`
 	ModelResolved       string                 `json:"model_resolved,omitempty"`
 	ModelResolutionMode string                 `json:"model_resolution_mode,omitempty"`
-	Mutations           []evidence.Mutation    `json:"wire_transform_mutations,omitempty"`
+	Mutations           []evidence.Mutation    `json:"wire_patch_mutations,omitempty"`
 	ExchangeDiagnostics []string               `json:"exchange_diagnostics,omitempty"`
 	StageReports        []evidence.StageReport `json:"exchange_stage_reports,omitempty"`
 }

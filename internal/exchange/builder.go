@@ -36,17 +36,17 @@ func Tags[I any, O any](tags ...Tag) LinkOption[I, O] {
 	}
 }
 
-type middlewareRegistrationRecord[T any] struct {
-	middleware Middleware[T, T]
-	when       []Predicate
+type wrapperRegistrationRecord[T any] struct {
+	wrapper Wrapper[T, T]
+	when    []Predicate
 }
 
-// Builder assembles a same-port link chain and middleware wrappers for one
+// Builder assembles a same-port link chain and stage wrapper mechanics for one
 // exchange port visit.
 type Builder[T any] struct {
-	port        Port[T]
-	links       []Link[T, T]
-	middlewares []middlewareRegistrationRecord[T]
+	port     Port[T]
+	links    []Link[T, T]
+	wrappers []wrapperRegistrationRecord[T]
 }
 
 // NewBuilder constructs one same-port exchange builder.
@@ -72,19 +72,19 @@ func (b *Builder[T]) Link(id LinkID, step Step[T, T], opts ...LinkOption[T, T]) 
 	return b
 }
 
-// Use registers one middleware wrapper for the builder port.
-func (b *Builder[T]) Use(middleware Middleware[T, T], when ...Predicate) *Builder[T] {
+// Wrap registers one stage wrapper for the builder port.
+func (b *Builder[T]) Wrap(wrapper Wrapper[T, T], when ...Predicate) *Builder[T] {
 	if b == nil {
 		return nil
 	}
-	b.middlewares = append(b.middlewares, middlewareRegistrationRecord[T]{
-		middleware: middleware,
-		when:       append([]Predicate(nil), when...),
+	b.wrappers = append(b.wrappers, wrapperRegistrationRecord[T]{
+		wrapper: wrapper,
+		when:    append([]Predicate(nil), when...),
 	})
 	return b
 }
 
-// Build composes the active same-port links and middleware around the provided
+// Build composes the active same-port links and wrappers around the provided
 // terminal step.
 func (b Builder[T]) Build(ctx Context, base Step[T, T]) (Step[T, T], error) {
 	if base == nil {
@@ -98,15 +98,15 @@ func (b Builder[T]) Build(ctx Context, base Step[T, T]) (Step[T, T], error) {
 	for i := len(links) - 1; i >= 0; i-- {
 		step = composeLink(links[i], step)
 	}
-	for i := len(b.middlewares) - 1; i >= 0; i-- {
-		reg := b.middlewares[i]
+	for i := len(b.wrappers) - 1; i >= 0; i-- {
+		reg := b.wrappers[i]
 		if !predicatesPass(ctx, reg.when) {
 			continue
 		}
-		if reg.middleware == nil {
-			return nil, fmt.Errorf("exchange builder middleware %d is required", i)
+		if reg.wrapper == nil {
+			return nil, fmt.Errorf("exchange builder wrapper %d is required", i)
 		}
-		step = reg.middleware(step)
+		step = reg.wrapper(step)
 	}
 	return step, nil
 }

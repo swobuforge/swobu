@@ -81,10 +81,9 @@ type Profile struct {
 }
 
 type ProviderProtocolSpec struct {
-	Name            string
-	Kind            protocolkind.ProtocolKind
-	Frame           string
-	RequestFeatures []RequestFeature
+	Name  string
+	Kind  protocolkind.ProtocolKind
+	Frame string
 }
 
 func profileFor(spec string) (Profile, bool) {

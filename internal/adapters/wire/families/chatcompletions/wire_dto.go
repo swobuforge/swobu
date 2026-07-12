@@ -3,20 +3,18 @@ package chatcompletions
 import "encoding/json"
 
 type chatCompletionsRequestDTO struct {
-	Model                string                             `json:"model"`
-	Messages             []chatCompletionsMessageDTO        `json:"messages"`
-	Tools                []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
-	ToolChoice           json.RawMessage                    `json:"tool_choice,omitempty"`
-	ParallelToolCalls    json.RawMessage                    `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat       json.RawMessage                    `json:"response_format,omitempty"`
-	Temperature          json.RawMessage                    `json:"temperature,omitempty"`
-	MaxTokens            json.RawMessage                    `json:"max_tokens,omitempty"`
-	TopP                 json.RawMessage                    `json:"top_p,omitempty"`
-	Stop                 json.RawMessage                    `json:"stop,omitempty"`
-	Stream               json.RawMessage                    `json:"stream,omitempty"`
-	StreamOptions        json.RawMessage                    `json:"stream_options,omitempty"`
-	PromptCacheKey       json.RawMessage                    `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention json.RawMessage                    `json:"prompt_cache_retention,omitempty"`
+	Model             string                             `json:"model"`
+	Messages          []chatCompletionsMessageDTO        `json:"messages"`
+	Tools             []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
+	ToolChoice        json.RawMessage                    `json:"tool_choice,omitempty"`
+	ParallelToolCalls json.RawMessage                    `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat    json.RawMessage                    `json:"response_format,omitempty"`
+	Temperature       json.RawMessage                    `json:"temperature,omitempty"`
+	MaxTokens         json.RawMessage                    `json:"max_tokens,omitempty"`
+	TopP              json.RawMessage                    `json:"top_p,omitempty"`
+	Stop              json.RawMessage                    `json:"stop,omitempty"`
+	Stream            json.RawMessage                    `json:"stream,omitempty"`
+	StreamOptions     json.RawMessage                    `json:"stream_options,omitempty"`
 }
 
 type chatCompletionsMessageDTO struct {

@@ -78,12 +78,19 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 	}
 	prefix, err := readFirstStreamChunk(response.Body)
 	if err != nil {
+		if streamDownstreamClosed(ctx, closeDone) {
+			return nil
+		}
 		return canonical.InternalError("stream decoding failed")
 	}
 	copyResponseHeaders(w, response.Header)
 	w.WriteHeader(response.Status)
 	if len(prefix) > 0 {
 		if _, err := w.Write(prefix); err != nil {
+			closeBody()
+			if streamDownstreamClosed(ctx, closeDone) {
+				return nil
+			}
 			return canonical.InternalError("stream decoding failed")
 		}
 	}
@@ -122,6 +129,10 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 	for chunk := range chunks {
 		if len(chunk.bytes) > 0 {
 			if _, err := w.Write(chunk.bytes); err != nil {
+				closeBody()
+				if streamDownstreamClosed(ctx, closeDone) {
+					return nil
+				}
 				return canonical.InternalError("stream decoding failed")
 			}
 			// Emit provider chunks promptly so the client connection can signal
@@ -134,6 +145,9 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 			continue
 		}
 		if errors.Is(chunk.err, io.EOF) {
+			return nil
+		}
+		if streamDownstreamClosed(ctx, closeDone) {
 			return nil
 		}
 		return canonical.InternalError("stream decoding failed")
@@ -151,6 +165,21 @@ func readFirstStreamChunk(body io.ReadCloser) ([]byte, error) {
 		return nil, err
 	}
 	return append([]byte(nil), buf[:n]...), nil
+}
+
+// Downstream disconnect is a terminal transport event, not a stream decode
+// failure. Once the request context is canceled or the close signal fires, the
+// stream writer should stop converting read/write fallout into internal errors.
+func streamDownstreamClosed(ctx context.Context, closeDone <-chan struct{}) bool {
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+	select {
+	case <-closeDone:
+		return true
+	default:
+		return false
+	}
 }
 
 func copyResponseHeaders(w http.ResponseWriter, header http.Header) {

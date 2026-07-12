@@ -60,17 +60,23 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 	}
 	args := state.arguments.String()
 	argsDoneType := "response.function_call_arguments.done"
-	if state.toolType == canonical.ToolTypeCustom {
-		argsDoneType = "response.custom_tool_call_input.done"
-	}
-	argsDone, err := json.Marshal(responsesToolArgumentsDoneEventDTO{
+	argsDone := responsesToolArgumentsDoneEventDTO{
 		Type:        argsDoneType,
 		ItemID:      state.itemID,
 		OutputIndex: state.outputIndex,
 		CallID:      state.callID,
 		Name:        state.name,
-		Input:       args,
-	})
+	}
+	if state.toolType == canonical.ToolTypeCustom {
+		argsDoneType = "response.custom_tool_call_input.done"
+		argsDone.Input = args
+	} else {
+		argsDone.Arguments = args
+	}
+	argsDone.Type = argsDoneType
+	// Keep function-call arguments OpenAI-shaped so OpenAI-family clients can
+	// consume the stream without a field-name shim.
+	argsDoneBytes, err := json.Marshal(argsDone)
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
@@ -84,7 +90,7 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 	}
 	e.outputItems = append(e.outputItems, responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "completed", args))
 	delete(e.toolItems, itemID)
-	return [][]byte{argsDone, itemDone}, nil
+	return [][]byte{argsDoneBytes, itemDone}, nil
 }
 
 func (e *ResponseStreamWireEncoder) flushOpenItems() ([][]byte, error) {

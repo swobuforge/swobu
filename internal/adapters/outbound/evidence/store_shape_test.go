@@ -42,15 +42,15 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 		ClientFamily: evidence.ClientFamily("responses"),
 		Mutations: []evidence.Mutation{{
 			Stage:         "encode",
-			Transform:     "openaifamily.CacheAffinityWireTransform",
+			PatchID:       "openaifamily.CacheAffinityWirePatch",
 			Changed:       true,
 			ChangedFields: []string{"prompt_cache_key"},
 		}},
-		ExchangeDiagnostics: []string{"high_transform_noop_ratio:4/5"},
+		ExchangeDiagnostics: []string{"high_patch_noop_ratio:4/5"},
 		StageReports: []evidence.StageReport{{
 			Stage:   "provider.wire.out",
 			Carrier: "wire_document",
-			Applied: []string{"openaifamily.CacheAffinityWireTransform"},
+			Applied: []string{"openaifamily.CacheAffinityWirePatch"},
 			Mutated: true,
 		}},
 	})
@@ -82,8 +82,34 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if _, ok := row["token_usage"]; !ok {
 		t.Fatalf("row missing token_usage object: %#v", row)
 	}
-	if _, ok := row["wire_transform_mutations"]; !ok {
-		t.Fatalf("row missing wire_transform_mutations: %#v", row)
+	if _, ok := row["wire_patch_mutations"]; !ok {
+		t.Fatalf("row missing wire_patch_mutations: %#v", row)
+	}
+	mutationsRaw, ok := row["wire_patch_mutations"].([]any)
+	if !ok || len(mutationsRaw) != 1 {
+		t.Fatalf("row wire_patch_mutations shape = %#v, want one mutation", row["wire_patch_mutations"])
+	}
+	mutation, ok := mutationsRaw[0].(map[string]any)
+	if !ok {
+		t.Fatalf("wire_patch_mutations entry shape = %#v, want map", mutationsRaw[0])
+	}
+	for _, key := range []string{"leg", "patch_id", "changed", "changed_fields"} {
+		if _, ok := mutation[key]; !ok {
+			t.Fatalf("wire_patch_mutations entry missing %q: %#v", key, mutation)
+		}
+	}
+	if got, _ := mutation["leg"].(string); got != "encode" {
+		t.Fatalf("wire_patch_mutations entry leg = %#v, want encode", mutation["leg"])
+	}
+	if got, _ := mutation["patch_id"].(string); got != "openaifamily.CacheAffinityWirePatch" {
+		t.Fatalf("wire_patch_mutations entry patch_id = %#v, want openaifamily.CacheAffinityWirePatch", mutation["patch_id"])
+	}
+	if got, _ := mutation["changed"].(bool); !got {
+		t.Fatalf("wire_patch_mutations entry changed = %#v, want true", mutation["changed"])
+	}
+	changedFields, ok := mutation["changed_fields"].([]any)
+	if !ok || len(changedFields) != 1 || changedFields[0] != "prompt_cache_key" {
+		t.Fatalf("wire_patch_mutations entry changed_fields = %#v, want one changed field", mutation["changed_fields"])
 	}
 	if _, ok := row["exchange_diagnostics"]; !ok {
 		t.Fatalf("row missing exchange_diagnostics: %#v", row)
@@ -112,8 +138,8 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if !ok || len(appliedRaw) != 1 {
 		t.Fatalf("stage report applied = %#v, want one id", stageReport["applied"])
 	}
-	if got, _ := appliedRaw[0].(string); got != "openaifamily.CacheAffinityWireTransform" {
-		t.Fatalf("stage report applied[0] = %#v, want openaifamily.CacheAffinityWireTransform", appliedRaw[0])
+	if got, _ := appliedRaw[0].(string); got != "openaifamily.CacheAffinityWirePatch" {
+		t.Fatalf("stage report applied[0] = %#v, want openaifamily.CacheAffinityWirePatch", appliedRaw[0])
 	}
 	for _, forbidden := range []string{"ttfb_millis", "dur_millis", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"} {
 		if _, ok := row[forbidden]; ok {

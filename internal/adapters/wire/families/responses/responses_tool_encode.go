@@ -1,20 +1,24 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
-func encodeResponsesTools(tools []canonical.ToolDecl) ([]any, error) {
+func encodeResponsesTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) ([]any, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]any, 0, len(tools))
-	for _, tool := range tools {
-		wire, err := encodeResponsesTool(tool)
+	for idx, tool := range tools {
+		wire, err := encodeResponsesTool(tool, sink, exchangeID, idx)
 		if err != nil {
 			return nil, err
 		}
@@ -23,19 +27,19 @@ func encodeResponsesTools(tools []canonical.ToolDecl) ([]any, error) {
 	return out, nil
 }
 
-func encodeResponsesTool(tool canonical.ToolDecl) (map[string]any, error) {
+func encodeResponsesTool(tool canonical.ToolDecl, sink effect.Sink, exchangeID string, index int) (map[string]any, error) {
 	if tool == nil {
 		return nil, canonical.BadRequest("response request tool declarations are invalid")
 	}
 	switch decl := tool.(type) {
 	case canonical.FunctionToolDecl:
-		return encodeResponsesFunctionToolDecl(decl)
+		return encodeResponsesFunctionToolDecl(decl, sink, exchangeID, index)
 	case *canonical.FunctionToolDecl:
-		return encodeResponsesFunctionToolDecl(*decl)
+		return encodeResponsesFunctionToolDecl(*decl, sink, exchangeID, index)
 	case canonical.CustomToolDecl:
-		return encodeResponsesCustomToolDecl(decl)
+		return encodeResponsesCustomToolDecl(decl, sink, exchangeID, index)
 	case *canonical.CustomToolDecl:
-		return encodeResponsesCustomToolDecl(*decl)
+		return encodeResponsesCustomToolDecl(*decl, sink, exchangeID, index)
 	case canonical.CapabilityToolDecl:
 		return encodeResponsesCapabilityToolDecl(decl)
 	case *canonical.CapabilityToolDecl:
@@ -45,9 +49,12 @@ func encodeResponsesTool(tool canonical.ToolDecl) (map[string]any, error) {
 	}
 }
 
-func encodeResponsesFunctionToolDecl(decl canonical.FunctionToolDecl) (map[string]any, error) {
+func encodeResponsesFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect.Sink, exchangeID string, index int) (map[string]any, error) {
 	name, err := responsesToolWireName(decl)
 	if err != nil {
+		return nil, err
+	}
+	if err := emitResponsesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
 		return nil, err
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
@@ -70,9 +77,12 @@ func encodeResponsesFunctionToolDecl(decl canonical.FunctionToolDecl) (map[strin
 	return wire, nil
 }
 
-func encodeResponsesCustomToolDecl(decl canonical.CustomToolDecl) (map[string]any, error) {
+func encodeResponsesCustomToolDecl(decl canonical.CustomToolDecl, sink effect.Sink, exchangeID string, index int) (map[string]any, error) {
 	name, err := responsesToolWireName(decl)
 	if err != nil {
+		return nil, err
+	}
+	if err := emitResponsesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
 		return nil, err
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
@@ -155,7 +165,7 @@ func responsesToolConfigFromCanonical(config canonical.ToolCapabilityConfig) (ma
 	return obj, nil
 }
 
-func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl) (any, error) {
+func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -183,6 +193,9 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl) (
 		if err != nil {
 			return nil, err
 		}
+		if err := emitResponsesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tool_choice/name")); err != nil {
+			return nil, err
+		}
 		if resolvedType == "" {
 			resolvedType = "function"
 		}
@@ -195,10 +208,30 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl) (
 	}
 }
 
+func emitResponsesToolNameNamespaceDecision(sink effect.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
+	if sink == nil || subject == "" {
+		return nil
+	}
+	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
+		return nil
+	}
+	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.ToolNameNamespace,
+			Outcome: outcome,
+			Subject: subject,
+		},
+	}); err != nil {
+		return canonical.InternalError("compatibility effect sink commit failed")
+	}
+	return nil
+}
+
 type responsesToolNamespaceContext struct {
 	path         []string
 	descriptions []string
 	execution    string
+	index        int
 }
 
 func cloneBoolPointer(ptr *bool) *bool {

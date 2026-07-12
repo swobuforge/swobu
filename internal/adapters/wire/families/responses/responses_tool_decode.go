@@ -3,20 +3,23 @@ package responses
 import (
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
-func decodeResponsesTools(tools []responsesToolDefinitionDTO) ([]canonical.ToolDecl, error) {
+func decodeResponsesTools(tools []responsesToolDefinitionDTO, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]canonical.ToolDecl, 0, len(tools))
 	seen := map[string]struct{}{}
-	for _, tool := range tools {
-		decls, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{})
+	for idx, tool := range tools {
+		decls, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{index: idx}, sink, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +42,7 @@ func decodeResponsesTools(tools []responsesToolDefinitionDTO) ([]canonical.ToolD
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Responses tool variants.
-func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext) ([]canonical.ToolDecl, error) {
+func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
 	if kind == "" {
 		switch {
@@ -53,7 +56,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 	}
 	switch kind {
 	case "namespace":
-		return decodeResponsesNamespaceTool(tool, ctx)
+		return decodeResponsesNamespaceTool(tool, ctx, sink, exchangeID)
 	case "function":
 		if len(ctx.path) > 0 {
 			decl, err := decodeResponsesNestedFunctionTool(tool, ctx)
@@ -62,7 +65,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 			}
 			return []canonical.ToolDecl{decl}, nil
 		}
-		decl, err := decodeResponsesFlatFunctionTool(tool)
+		decl, err := decodeResponsesFlatFunctionTool(tool, ctx, sink, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -75,7 +78,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 			}
 			return []canonical.ToolDecl{decl}, nil
 		}
-		decl, err := decodeResponsesFlatCustomTool(tool)
+		decl, err := decodeResponsesFlatCustomTool(tool, ctx, sink, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +102,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 	}
 }
 
-func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext) ([]canonical.ToolDecl, error) {
+func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return nil, canonical.BadRequest("responses request tool namespace declarations require a name")
@@ -113,8 +116,8 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 		return nil, nil
 	}
 	out := make([]canonical.ToolDecl, 0, len(tool.Tools))
-	for _, child := range tool.Tools {
-		decls, err := decodeResponsesToolNode(child, nextCtx)
+	for idx, child := range tool.Tools {
+		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, descriptions: nextCtx.descriptions, execution: nextCtx.execution, index: idx}, sink, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -123,7 +126,7 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 	return out, nil
 }
 
-func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO) (canonical.ToolDecl, error) {
+func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) (canonical.ToolDecl, error) {
 	schema, err := responsesToolParametersFromWire(tool.Parameters)
 	if err != nil {
 		return nil, err
@@ -135,6 +138,11 @@ func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO) (canonical
 	id, leaf, err := responsesFlatToolIdentityFromWire(name, canonical.ToolKindFunction, "tools[].name", "function")
 	if err != nil {
 		return nil, err
+	}
+	if _, _, projected := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction); projected {
+		if err := emitResponsesToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tools/"+strconv.Itoa(ctx.index)+"/name")); err != nil {
+			return nil, err
+		}
 	}
 	decl := canonical.NewFunctionToolDecl(id.String(), leaf, tool.Description, schema)
 	decl.Strict = cloneBoolPointer(tool.Strict)
@@ -158,7 +166,7 @@ func decodeResponsesNestedFunctionTool(tool responsesToolDefinitionDTO, ctx resp
 	return decl, nil
 }
 
-func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO) (canonical.ToolDecl, error) {
+func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) (canonical.ToolDecl, error) {
 	format, err := responsesToolFormatFromWire(tool.Format)
 	if err != nil {
 		return nil, err
@@ -170,6 +178,11 @@ func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO) (canonical.T
 	id, leaf, err := responsesFlatToolIdentityFromWire(name, canonical.ToolKindCustom, "tools[].name", "custom")
 	if err != nil {
 		return nil, err
+	}
+	if _, _, projected := canonical.ToolIdentityFromWire(name, canonical.ToolKindCustom); projected {
+		if err := emitResponsesToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tools/"+strconv.Itoa(ctx.index)+"/name")); err != nil {
+			return nil, err
+		}
 	}
 	decl := canonical.NewCustomToolDecl(id.String(), leaf, tool.Description, format)
 	decl.Execution = normalizeToolExecutionOwner(tool.Execution)

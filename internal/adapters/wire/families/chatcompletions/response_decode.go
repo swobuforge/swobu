@@ -10,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	deliverycompat "github.com/swobuforge/swobu/internal/adapters/wire/families/deliverycompat"
 	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 type responseBody struct {
@@ -78,7 +81,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReader, error) {
+func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink effect.Sink) (canonical.EventReader, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("chat completions response is invalid JSON")
@@ -87,6 +90,12 @@ func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReade
 		return nil, canonical.InternalError("chat completions response is missing choices")
 	}
 	choice := dto.Choices[0]
+	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
+	emitUsageInputTokensDecision(ctx, sink, exchangeID, usage)
+	emitUsageOutputTokensDecision(ctx, sink, exchangeID, usage)
+	emitUsageReasoningTokensDecision(ctx, sink, exchangeID, usage)
+	emitUsageCacheReadTokensDecision(ctx, sink, exchangeID, usage)
+	emitUsageCacheWriteTokensDecision(ctx, sink, exchangeID, usage)
 	items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
 	if err != nil {
 		return nil, err
@@ -97,15 +106,98 @@ func decodeResponseBuffered(raw []byte, exchangeID string) (canonical.EventReade
 		dto.Model,
 		items,
 		choice.FinishReason,
-		core.ExtractTokenUsage(raw, tokenUsagePathSpec),
+		usage,
 	)), nil
 }
 
+func emitUsageInputTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
+	if sink == nil {
+		return
+	}
+	if _, ok := usage.InputTokens(); !ok {
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.UsageInputTokens,
+			Outcome: compat.Exact,
+			Subject: compat.Subject("wire:/usage/input_tokens"),
+		},
+	})
+}
+
+func emitUsageOutputTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
+	if sink == nil {
+		return
+	}
+	if _, ok := usage.OutputTokens(); !ok {
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.UsageOutputTokens,
+			Outcome: compat.Exact,
+			Subject: compat.Subject("wire:/usage/output_tokens"),
+		},
+	})
+}
+
+func emitUsageReasoningTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
+	if sink == nil {
+		return
+	}
+	if _, ok := usage.ReasoningTokens(); !ok {
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.UsageReasoningTokens,
+			Outcome: compat.Exact,
+			Subject: compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"),
+		},
+	})
+}
+
+func emitUsageCacheReadTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
+	if sink == nil {
+		return
+	}
+	if _, ok := usage.CacheReadTokens(); !ok {
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.UsageCacheReadTokens,
+			Outcome: compat.Exact,
+			Subject: compat.Subject("wire:/usage/cache_read_tokens"),
+		},
+	})
+}
+
+func emitUsageCacheWriteTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
+	if sink == nil {
+		return
+	}
+	if _, ok := usage.CacheWriteTokens(); !ok {
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.UsageCacheWriteTokens,
+			Outcome: compat.Exact,
+			Subject: compat.Subject("wire:/usage/cache_write_tokens"),
+		},
+	})
+}
+
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
-func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonical.EventReader {
+func decodeResponseStream(stream carrier.WireStream, exchangeID string, sink effect.Sink) canonical.EventReader {
+	recording := &effect.RecordingSink{Delegate: sink}
 	return &chatCompletionsEventReader{
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		sink:        recording,
+		recording:   recording,
 		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
 		toolCalls:   map[int]streamToolState{},
 		toolEnvIDs:  map[int]canonical.EnvelopeID{},
@@ -116,6 +208,8 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonica
 type chatCompletionsEventReader struct {
 	exchangeID  string
 	responseID  canonical.EnvelopeID
+	sink        effect.Sink
+	recording   *effect.RecordingSink
 	reader      *core.SSEReaderCloser
 	started     bool
 	resultID    string
@@ -130,6 +224,13 @@ type chatCompletionsEventReader struct {
 	seq         int64
 }
 
+func (s *chatCompletionsEventReader) Effects() []effect.Effect {
+	if s.recording == nil {
+		return nil
+	}
+	return append([]effect.Effect(nil), s.recording.Effects...)
+}
+
 type streamToolState struct {
 	OutputItemID string
 	ToolUseID    string
@@ -139,7 +240,7 @@ type streamToolState struct {
 
 // ordered state machine over text, tool calls, and terminal frames.
 // variants while maintaining canonical output ordering.
-func (s *chatCompletionsEventReader) Next(context.Context) (canonical.Event, error) {
+func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
 		s.pending = s.pending[1:]
@@ -149,6 +250,7 @@ func (s *chatCompletionsEventReader) Next(context.Context) (canonical.Event, err
 		event, err := s.reader.Next()
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
+				deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
 				s.closeOpenChildren(canonical.EnvelopeStatusError)
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
@@ -168,6 +270,11 @@ func (s *chatCompletionsEventReader) Next(context.Context) (canonical.Event, err
 		chunkUsage := core.ExtractTokenUsage(rawChunk, tokenUsagePathSpec)
 		if !chunkUsage.IsZero() {
 			s.latestUsage = chunkUsage
+			emitUsageInputTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
+			emitUsageOutputTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
+			emitUsageReasoningTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
+			emitUsageCacheReadTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
+			emitUsageCacheWriteTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
@@ -194,7 +301,7 @@ func (s *chatCompletionsEventReader) Next(context.Context) (canonical.Event, err
 		if err := s.applyChoiceDelta(choice); err != nil {
 			return canonical.Event{}, err
 		}
-		s.applyChoiceFinish(choice)
+		s.applyChoiceFinish(ctx, choice)
 		if len(s.pending) > 0 {
 			return s.shiftPending(), nil
 		}
@@ -218,7 +325,7 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 	return nil
 }
 
-func (s *chatCompletionsEventReader) applyChoiceFinish(choice streamChoiceBody) {
+func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choice streamChoiceBody) {
 	if strings.TrimSpace(choice.FinishReason) == "" || s.completed { // swobu:io-string source=boundary
 		return
 	}
@@ -234,6 +341,7 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(choice streamChoiceBody) 
 		delete(s.toolEnvIDs, idx)
 	}
 	s.completed = true
+	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)

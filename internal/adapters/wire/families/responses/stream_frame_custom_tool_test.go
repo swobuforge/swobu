@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -17,7 +18,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
 
-	handled, _, err := s.handleFrame(streamFrame{
+	handled, _, err := s.handleFrame(context.Background(), streamFrame{
 		Type: "response.output_item.added",
 		Item: struct {
 			ID          string `json:"id"`
@@ -44,7 +45,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 		t.Fatalf("tool type = %q, want %q", state.toolType, canonical.ToolTypeCustom)
 	}
 
-	handled, _, err = s.handleFrame(streamFrame{
+	handled, _, err = s.handleFrame(context.Background(), streamFrame{
 		Type:      "response.custom_tool_call_input.delta",
 		ItemID:    "custom_1",
 		CallID:    "call_1",
@@ -63,7 +64,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 		t.Fatalf("tool input = %q, want patch contents", got)
 	}
 
-	handled, _, err = s.handleFrame(streamFrame{
+	handled, _, err = s.handleFrame(context.Background(), streamFrame{
 		Type:      "response.custom_tool_call_input.done",
 		ItemID:    "custom_1",
 		CallID:    "call_1",

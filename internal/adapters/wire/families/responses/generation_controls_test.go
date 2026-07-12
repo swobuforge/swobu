@@ -65,7 +65,7 @@ func TestEncode_RejectsStopSequences(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","max_output_tokens":64,"temperature":0.2,"top_p":0.8}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
@@ -83,7 +83,7 @@ func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 }
 
 func TestDecodeRequest_RejectsStopSequences(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","stop":["END"]}`)
 	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
 	if err == nil || !strings.Contains(err.Error(), "stop sequences") {
@@ -156,7 +156,7 @@ func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","text":{"format":{"type":"json_schema","name":"reply_shape","description":"structured reply","schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false},"strict":true}}}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
 	if err != nil {

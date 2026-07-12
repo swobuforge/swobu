@@ -32,15 +32,15 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	chain := []string{"bridge", "responses"}
 	mutations := []Mutation{{
 		Stage:         "encode",
-		Transform:     "openaifamily.CacheAffinityWireTransform",
+		PatchID:       "openaifamily.CacheAffinityWirePatch",
 		Changed:       true,
 		ChangedFields: []string{"prompt_cache_key"},
 	}}
-	diagnostics := []string{"high_transform_noop_ratio:4/5"}
+	diagnostics := []string{"high_patch_noop_ratio:4/5"}
 	stageReports := []StageReport{{
 		Stage:   "provider.wire.out",
 		Carrier: "wire_document",
-		Applied: []string{"openaifamily.CacheAffinityWireTransform"},
+		Applied: []string{"openaifamily.CacheAffinityWirePatch"},
 		Mutated: true,
 	}}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
@@ -106,16 +106,16 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	mutations[0].ChangedFields[0] = "mutated"
 	gotMutations := event.Mutations()
 	if len(gotMutations) != 1 || gotMutations[0].ChangedFields[0] != "prompt_cache_key" {
-		t.Fatalf("wire transform mutations = %#v", gotMutations)
+		t.Fatalf("wire patch mutations = %#v", gotMutations)
 	}
 	diagnostics[0] = "mutated"
 	gotDiagnostics := event.ExchangeDiagnostics()
-	if len(gotDiagnostics) != 1 || gotDiagnostics[0] != "high_transform_noop_ratio:4/5" {
+	if len(gotDiagnostics) != 1 || gotDiagnostics[0] != "high_patch_noop_ratio:4/5" {
 		t.Fatalf("exchange diagnostics = %#v", gotDiagnostics)
 	}
 	stageReports[0].Applied[0] = "mutated"
 	gotStageReports := event.StageReports()
-	if len(gotStageReports) != 1 || gotStageReports[0].Applied[0] != "openaifamily.CacheAffinityWireTransform" {
+	if len(gotStageReports) != 1 || gotStageReports[0].Applied[0] != "openaifamily.CacheAffinityWirePatch" {
 		t.Fatalf("exchange stage reports = %#v", gotStageReports)
 	}
 }
@@ -169,7 +169,7 @@ func TestTrafficEvent_RejectsDuplicateStageReports(t *testing.T) {
 	}
 }
 
-func TestTrafficEvent_RejectsMutatedStageReportWithoutAppliedTransforms(t *testing.T) {
+func TestTrafficEvent_RejectsMutatedStageReportWithoutAppliedPatches(t *testing.T) {
 	requestID, err := ParseRequestID("req-mut-stage")
 	if err != nil {
 		t.Fatalf("ParseRequestID returned error: %v", err)
@@ -250,7 +250,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 		StatusCode: 200,
 		Mutations: []Mutation{{
 			Stage:         "encode",
-			Transform:     "p.encode",
+			PatchID:       "p.encode",
 			Changed:       true,
 			ChangedFields: []string{"f1"},
 		}},
@@ -272,7 +272,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 
 	refetchedMutations := event.Mutations()
 	if refetchedMutations[0].ChangedFields[0] != "f1" {
-		t.Fatalf("wire transform changed_fields mutated through accessor: %#v", refetchedMutations)
+		t.Fatalf("wire patch changed_fields mutated through accessor: %#v", refetchedMutations)
 	}
 	refetchedStages := event.StageReports()
 	if refetchedStages[0].Applied[0] != "p.encode" {
@@ -297,7 +297,7 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 			{
 				Stage:   " Provider.Wire.Out ",
 				Carrier: " Wire_Document ",
-				Applied: []string{" z.transform ", "a.transform", "a.transform"},
+				Applied: []string{" z.patch ", "a.patch", "a.patch"},
 				Mutated: true,
 			},
 		},
@@ -315,8 +315,8 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 	if reports[0].Carrier != "wire_document" {
 		t.Fatalf("carrier=%q want wire_document", reports[0].Carrier)
 	}
-	if len(reports[0].Applied) != 2 || reports[0].Applied[0] != "a.transform" || reports[0].Applied[1] != "z.transform" {
-		t.Fatalf("applied=%#v want [a.transform z.transform]", reports[0].Applied)
+	if len(reports[0].Applied) != 2 || reports[0].Applied[0] != "a.patch" || reports[0].Applied[1] != "z.patch" {
+		t.Fatalf("applied=%#v want [a.patch z.patch]", reports[0].Applied)
 	}
 }
 

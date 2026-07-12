@@ -20,14 +20,12 @@ func TestImportBoundaries_CanonicalPackage(t *testing.T) {
 	})
 }
 
-func TestImportBoundaries_RequestpathPackage(t *testing.T) {
+func TestImportBoundaries_ExchangeRuntimePackage(t *testing.T) {
 	t.Parallel()
-	assertPackageImportsNotPrefixed(t, packageDirFromHere(t, "..", "app", "requestpath"), []string{
+	assertPackageImportsNotPrefixed(t, packageDirFromHere(t, "..", "adapters", "wire", "exchangeruntime"), []string{
 		"github.com/swobuforge/swobu/internal/adapters/outbound/providers",
-		"github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic",
-		"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrocknative",
-		"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily",
-		"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaireal",
+		"github.com/swobuforge/swobu/internal/app",
+		"github.com/swobuforge/swobu/internal/bootstrap",
 	})
 }
 

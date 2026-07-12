@@ -18,7 +18,6 @@ func TestEncode_PreservesToolsAndOmitsProviderCacheFields(t *testing.T) {
 		Tools: []canonical.ToolDecl{
 			functionTool,
 		},
-		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention24H}),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -30,10 +29,10 @@ func TestEncode_PreservesToolsAndOmitsProviderCacheFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if _, ok := body["prompt_cache_key"]; ok {
-		t.Fatalf("prompt_cache_key must be provider transform concern")
+		t.Fatalf("prompt_cache_key must be provider adapter concern")
 	}
 	if _, ok := body["prompt_cache_retention"]; ok {
-		t.Fatalf("prompt_cache_retention must be provider transform concern")
+		t.Fatalf("prompt_cache_retention must be provider adapter concern")
 	}
 	tools, ok := body["tools"].([]any)
 	if !ok {
@@ -58,15 +57,12 @@ func TestEncode_PreservesToolsAndOmitsProviderCacheFields(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","name":"` + functionTool.ToolName() + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","input":"hi"}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
-	}
-	if !got.CacheIntent().IsZero() {
-		t.Fatalf("cache intent=%+v want zero", got.CacheIntent())
 	}
 	tools := got.Tools()
 	if len(tools) != 1 || tools[0].ToolName() != "get_weather" {

@@ -57,7 +57,7 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesProjectedToolChoice(t *t
 		]
 	}`)
 
-	got, _, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -129,7 +129,7 @@ func TestDecodeRequest_RejectsNamespaceWithoutSupportedChildren(t *testing.T) {
 		]
 	}`)
 
-	_, _, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -164,7 +164,7 @@ func TestDecodeRequest_DecodesUnnamespacedFlatFunctionToolName(t *testing.T) {
 		]
 	}`)
 
-	got, _, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -184,12 +184,63 @@ func TestDecodeRequest_DecodesUnnamespacedFlatFunctionToolName(t *testing.T) {
 	}
 }
 
-func TestDecodeRequest_RejectsMalformedProjectedFlatFunctionToolNameWithContext(t *testing.T) {
+func TestDecodeRequest_DecodesLeadingUnderscorePlainFunctionToolNameRaw(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
 		"model":"gpt-4o-mini",
 		"input":"ping",
+		"tool_choice":{"type":"function","name":"__bash__cdaxodhis2"},
+		"tools":[
+			{
+				"type":"function",
+				"name":"__bash__cdaxodhis2",
+				"description":"search text",
+				"parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}
+			}
+		]
+	}`)
+
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+		Family: protocolkind.Responses,
+		Raw:    raw,
+	})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
+	}
+	tools := got.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("tools len = %d, want 1", len(tools))
+	}
+	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "__bash__cdaxodhis2")
+	wantID := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "__bash__cdaxodhis2").String()
+	if functionTool.ToolID().String() != wantID {
+		t.Fatalf("function tool id = %q, want %q", functionTool.ToolID(), wantID)
+	}
+
+	policy := got.ToolPolicy()
+	if policy.Mode != canonical.ToolPolicySpecific {
+		t.Fatalf("tool policy mode = %q, want specific", policy.Mode)
+	}
+	specific, ok := policy.SpecificID()
+	if !ok {
+		t.Fatal("tool policy specific is missing")
+	}
+	if specific.String() != wantID {
+		t.Fatalf("tool policy specific = %q, want %q", specific, wantID)
+	}
+	if specificType, ok := policy.SpecificToolType(); !ok || specificType != canonical.ToolTypeFunction {
+		t.Fatalf("tool policy specific type = %q, want function", specificType)
+	}
+}
+
+func TestDecodeRequest_DecodesProjectedLookingFlatFunctionToolNameAsRaw(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"model":"gpt-4o-mini",
+		"input":"ping",
+		"tool_choice":{"type":"function","name":"exec_command__bogus"},
 		"tools":[
 			{
 				"type":"function",
@@ -200,25 +251,36 @@ func TestDecodeRequest_RejectsMalformedProjectedFlatFunctionToolNameWithContext(
 		]
 	}`)
 
-	_, _, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
-	if err == nil {
-		t.Fatal("expected DecodeClientRequest to reject a malformed projected flat function tool name")
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("expected canonical.Error, got %T", err)
+	tools := got.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
-	if compatErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
+	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "exec_command__bogus")
+	wantID := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "exec_command__bogus").String()
+	if functionTool.ToolID().String() != wantID {
+		t.Fatalf("function tool id = %q, want %q", functionTool.ToolID(), wantID)
 	}
-	if !strings.Contains(compatErr.Message, `responses request tools[].name (function) name "exec_command__bogus" is invalid`) {
-		t.Fatalf("error message = %q, want function tool field context", compatErr.Message)
+
+	policy := got.ToolPolicy()
+	if policy.Mode != canonical.ToolPolicySpecific {
+		t.Fatalf("tool policy mode = %q, want specific", policy.Mode)
 	}
-	if !strings.Contains(compatErr.Message, "undeclared tool") {
-		t.Fatalf("error message = %q, want undeclared tool cause", compatErr.Message)
+	specific, ok := policy.SpecificID()
+	if !ok {
+		t.Fatal("tool policy specific is missing")
+	}
+	if specific.String() != wantID {
+		t.Fatalf("tool policy specific = %q, want %q", specific, wantID)
+	}
+	if specificType, ok := policy.SpecificToolType(); !ok || specificType != canonical.ToolTypeFunction {
+		t.Fatalf("tool policy specific type = %q, want function", specificType)
 	}
 }
 

@@ -152,27 +152,31 @@ type TrafficEventInput struct {
 	StageReports              []StageReport
 }
 
+// Mutation is the canonical runtime-evidence row for one wire-patch fact.
+// Projectors reuse this exact shape so the evidence and projection contracts do
+// not drift apart.
 type Mutation struct {
-	Stage         string
-	Transform     string
-	Changed       bool
-	ChangedFields []string
+	Stage         string   `json:"leg"`
+	PatchID       string   `json:"patch_id"`
+	Changed       bool     `json:"changed"`
+	ChangedFields []string `json:"changed_fields,omitempty"`
 }
 
+// HasChanges reports whether the patch actually mutated the carrier.
 func (m Mutation) HasChanges() bool {
 	return m.Changed
 }
 
 type StageReport struct {
 	// Stage is the canonical stage slot identity (for example,
-	// provider.wire.out/provider.wire.in) where one wire transform set
+	// provider.wire.out/provider.wire.in) where one wire patch set
 	// executed.
 	Stage string `json:"stage"`
 	// Carrier is the canonical carrier kind mutated or observed by this stage.
 	Carrier string `json:"carrier"`
-	// Applied lists normalized transform identifiers that ran in this stage.
+	// Applied lists normalized patch identifiers that ran in this stage.
 	Applied []string `json:"applied,omitempty"`
-	// Mutated reports whether at least one applied transform changed carrier
+	// Mutated reports whether at least one applied patch changed carrier
 	// content for this exchange path.
 	Mutated bool `json:"mutated"`
 }
@@ -303,9 +307,9 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 func normalizeTrafficEventMutations(src []Mutation) []Mutation {
 	normalized := make([]Mutation, 0, len(src))
 	for _, m := range src {
-		m.Stage = strings.TrimSpace(m.Stage)         // swobu:io-string source=domain
-		m.Transform = strings.TrimSpace(m.Transform) // swobu:io-string source=domain
-		if m.Stage == "" || m.Transform == "" {
+		m.Stage = strings.TrimSpace(m.Stage)     // swobu:io-string source=domain
+		m.PatchID = strings.TrimSpace(m.PatchID) // swobu:io-string source=domain
+		if m.Stage == "" || m.PatchID == "" {
 			continue
 		}
 		m.ChangedFields = normalizeTrafficEventStrings(m.ChangedFields)
@@ -325,7 +329,7 @@ func normalizeTrafficEventStageReports(src []StageReport) ([]StageReport, error)
 		}
 		report.Applied = normalizeTrafficEventUniqueStrings(report.Applied)
 		if report.Mutated && len(report.Applied) == 0 {
-			return nil, fmt.Errorf("exchange stage report %q/%q mutated without applied transforms", report.Stage, report.Carrier)
+			return nil, fmt.Errorf("exchange stage report %q/%q mutated without applied patches", report.Stage, report.Carrier)
 		}
 		key := report.Stage + "\x00" + report.Carrier
 		if _, exists := seenStageCarrier[key]; exists {

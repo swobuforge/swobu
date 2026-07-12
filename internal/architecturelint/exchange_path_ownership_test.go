@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestExchangePathDoesNotImportRequestpath(t *testing.T) {
+func TestExchangePathDoesNotImportLegacyRequestpath(t *testing.T) {
 	root := packageDirFromHere(t, "..")
 	targets := []string{
 		filepath.Join(root, "adapters", "inbound", "httpapi"),
@@ -24,12 +24,12 @@ func TestExchangePathDoesNotImportRequestpath(t *testing.T) {
 			if strings.HasSuffix(file, "_test.go") {
 				continue
 			}
-			assertNoRequestpathImport(t, file)
+			assertNoLegacyRequestpathImport(t, file)
 		}
 	}
 }
 
-func assertNoRequestpathImport(t *testing.T, path string) {
+func assertNoLegacyRequestpathImport(t *testing.T, path string) {
 	t.Helper()
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)

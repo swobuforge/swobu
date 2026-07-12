@@ -161,7 +161,7 @@ func renderTrafficListRow(width int, focused bool, row state.TrafficRow, open bo
 		Kind:   strings.TrimSpace(outcome + " " + trafficKind(row)), // swobu:io-string source=boundary
 		Route:  trafficBurnSummary(usage),
 		Timing: trafficTiming(row),
-		Result: strings.TrimSpace(trafficCacheSummary(row) + " · " + trafficTransformSummary(row) + " · " + trafficStageReportSummary(row) + " · " + trafficDiagnosticSummary(row)), // swobu:io-string source=boundary
+		Result: strings.TrimSpace(trafficCacheSummary(row) + " · " + trafficPatchSummary(row) + " · " + trafficStageReportSummary(row) + " · " + trafficDiagnosticSummary(row)), // swobu:io-string source=boundary
 		Action: action,
 	})
 }
@@ -176,12 +176,12 @@ func trafficOpenDetailRows(row state.TrafficRow) []retained.ViewSpec[state.Model
 		trafficDetailLine("http", trafficHTTPStatus(row)),
 		trafficDetailLine("ttfb", previewTTFB(row)),
 		trafficDetailLine("duration", previewDuration(row)),
-		trafficDetailLine("patches", trafficTransformSummary(row)),
+		trafficDetailLine("patches", trafficPatchSummary(row)),
 		trafficDetailLine("stages", trafficStageReportSummary(row)),
 		trafficDetailLine("diagnostics", trafficDiagnosticSummary(row)),
 	}
 	rows = append(rows, trafficTokenDetailLines(row)...)
-	rows = append(rows, trafficTransformDetailLines(row)...)
+	rows = append(rows, trafficPatchDetailLines(row)...)
 	rows = append(rows, trafficStageReportDetailLines(row)...)
 	return append(rows, trafficDiagnosticDetailLines(row)...)
 }
@@ -279,7 +279,7 @@ func trafficCacheSummary(row state.TrafficRow) string {
 	return fmt.Sprintf("c %d%%", percentage(usage.cacheRead, usage.input))
 }
 
-func trafficTransformSummary(row state.TrafficRow) string {
+func trafficPatchSummary(row state.TrafficRow) string {
 	if len(row.Mutations) == 0 {
 		return "p n/a"
 	}
@@ -292,9 +292,9 @@ func trafficTransformSummary(row state.TrafficRow) string {
 	return fmt.Sprintf("p %d/%d", changed, len(row.Mutations))
 }
 
-func trafficTransformDetailLines(row state.TrafficRow) []retained.ViewSpec[state.Model] {
+func trafficPatchDetailLines(row state.TrafficRow) []retained.ViewSpec[state.Model] {
 	if len(row.Mutations) == 0 {
-		return []retained.ViewSpec[state.Model]{trafficDetailLine("transform detail", "none")}
+		return []retained.ViewSpec[state.Model]{trafficDetailLine("patch detail", "none")}
 	}
 	out := make([]retained.ViewSpec[state.Model], 0, len(row.Mutations))
 	for _, m := range row.Mutations {
@@ -306,8 +306,8 @@ func trafficTransformDetailLines(row state.TrafficRow) []retained.ViewSpec[state
 		if len(m.ChangedFields) > 0 {
 			fieldSummary = strings.Join(m.ChangedFields, ", ")
 		}
-		line := fmt.Sprintf("%s %s (%s) [%s]", strings.TrimSpace(m.Stage), strings.TrimSpace(m.Transform), status, fieldSummary) // swobu:io-string source=boundary
-		out = append(out, trafficDetailLine("transform detail", line))
+		line := fmt.Sprintf("%s %s (%s) [%s]", strings.TrimSpace(m.Stage), strings.TrimSpace(m.PatchID), status, fieldSummary) // swobu:io-string source=boundary
+		out = append(out, trafficDetailLine("patch detail", line))
 	}
 	return out
 }

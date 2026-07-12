@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 )
 
 // PortID names one typed location in the exchange graph.
@@ -39,10 +36,10 @@ type LinkID string
 // Step is one typed exchange operation.
 type Step[I any, O any] func(context.Context, I) (Result[O], error)
 
-// Middleware wraps one step without changing the step's input or output type.
-type Middleware[I any, O any] func(next Step[I, O]) Step[I, O]
+// Wrapper wraps one step without changing the step's input or output type.
+type Wrapper[I any, O any] func(next Step[I, O]) Step[I, O]
 
-// Predicate decides whether one link or middleware is available in the current
+// Predicate decides whether one link or stage wrapper is available in the current
 // exchange context.
 type Predicate func(Context) bool
 
@@ -55,21 +52,6 @@ type Context struct {
 	ExchangeID string
 	Target     *RoutableTarget
 	Delivery   delivery.Delivery
-}
-
-// Result carries the next graph value plus any side effects the step wants
-// committed outside the step itself.
-type Result[T any] struct {
-	Value   T
-	Effects []effect.Effect
-}
-
-// NewResult clones the provided effects into one typed graph result.
-func NewResult[T any](value T, effects ...effect.Effect) Result[T] {
-	return Result[T]{
-		Value:   value,
-		Effects: append([]effect.Effect(nil), effects...),
-	}
 }
 
 // Link connects one typed port to another with one step.
@@ -107,24 +89,4 @@ func (l Link[I, O]) Run(ctx context.Context, input I) (Result[O], error) {
 		return Result[O]{}, errors.New("exchange link step is required")
 	}
 	return l.Step(ctx, input)
-}
-
-func clientRequestWireInPort() Port[carrier.WireDocument] {
-	return NewPort[carrier.WireDocument](PortID("client.wire.in"))
-}
-
-func providerRequestWireOutPort() Port[carrier.WireDocument] {
-	return NewPort[carrier.WireDocument](PortID("provider.request.wire_out"))
-}
-
-func providerResponseWireInPort() Port[carrier.WireDocument] {
-	return NewPort[carrier.WireDocument](PortID("provider.response.wire_in"))
-}
-
-func semanticEventsPort() Port[canonical.EventReader] {
-	return NewPort[canonical.EventReader](PortID("semantic.response_events"))
-}
-
-func clientOutputPort() Port[canonical.CanonicalOutput] {
-	return NewPort[canonical.CanonicalOutput](PortID("client.response.snapshot"))
 }

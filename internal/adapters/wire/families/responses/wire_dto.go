@@ -3,23 +3,21 @@ package responses
 import "encoding/json"
 
 type responsesRequestDTO struct {
-	Model                string                       `json:"model"`
-	Input                json.RawMessage              `json:"input"`
-	ToolChoice           json.RawMessage              `json:"tool_choice"`
-	ParallelToolCalls    json.RawMessage              `json:"parallel_tool_calls,omitempty"`
-	Tools                []responsesToolDefinitionDTO `json:"tools,omitempty"`
-	PreviousResponseID   string                       `json:"previous_response_id"`
-	Conversation         string                       `json:"conversation"`
-	Instructions         json.RawMessage              `json:"instructions,omitempty"`
-	Text                 *responsesTextDTO            `json:"text,omitempty"`
-	Store                json.RawMessage              `json:"store,omitempty"`
-	MaxOutputTokens      json.RawMessage              `json:"max_output_tokens,omitempty"`
-	Temperature          json.RawMessage              `json:"temperature,omitempty"`
-	TopP                 json.RawMessage              `json:"top_p,omitempty"`
-	Stop                 json.RawMessage              `json:"stop,omitempty"`
-	Stream               json.RawMessage              `json:"stream,omitempty"`
-	PromptCacheKey       json.RawMessage              `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention json.RawMessage              `json:"prompt_cache_retention,omitempty"`
+	Model              string                       `json:"model"`
+	Input              json.RawMessage              `json:"input"`
+	ToolChoice         json.RawMessage              `json:"tool_choice"`
+	ParallelToolCalls  json.RawMessage              `json:"parallel_tool_calls,omitempty"`
+	Tools              []responsesToolDefinitionDTO `json:"tools,omitempty"`
+	PreviousResponseID string                       `json:"previous_response_id"`
+	Conversation       string                       `json:"conversation"`
+	Instructions       json.RawMessage              `json:"instructions,omitempty"`
+	Text               *responsesTextDTO            `json:"text,omitempty"`
+	Store              json.RawMessage              `json:"store,omitempty"`
+	MaxOutputTokens    json.RawMessage              `json:"max_output_tokens,omitempty"`
+	Temperature        json.RawMessage              `json:"temperature,omitempty"`
+	TopP               json.RawMessage              `json:"top_p,omitempty"`
+	Stop               json.RawMessage              `json:"stop,omitempty"`
+	Stream             json.RawMessage              `json:"stream,omitempty"`
 }
 
 type responsesTextDTO struct {
@@ -220,7 +218,10 @@ type responsesToolArgumentsDoneEventDTO struct {
 	OutputIndex int    `json:"output_index"`
 	CallID      string `json:"call_id"`
 	Name        string `json:"name"`
-	Input       string `json:"input,omitempty"`
+	// OpenAI-style function_call_arguments.done events carry `arguments`.
+	// Custom tool input events use `input`; the encoder sets the matching field.
+	Arguments string `json:"arguments,omitempty"`
+	Input     string `json:"input,omitempty"`
 }
 
 type responsesCompletedEventDTO struct {

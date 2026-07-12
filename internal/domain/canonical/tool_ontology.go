@@ -302,23 +302,58 @@ func ResolveToolDeclByName(tools []ToolDecl, name string, specificType string) (
 	normalizedSpecific := strings.ToLower(strings.TrimSpace(specificType)) // swobu:io-string source=domain
 	if normalizedSpecific != "" {
 		kind := ToolKind(normalizedSpecific)
-		specificID, _, err := ParseProjectedToolName(trimmed, kind)
-		if err != nil {
-			return nil, "", err
+		if specificID, _, projected := ToolIdentityFromWire(trimmed, kind); projected {
+			if found, foundType, resolveErr := ResolveToolDeclByID(tools, specificID, normalizedSpecific); resolveErr == nil {
+				return found, foundType, nil
+			}
 		}
-		return ResolveToolDeclByID(tools, specificID, normalizedSpecific)
+		return resolvePlainToolDeclByName(tools, trimmed, normalizedSpecific)
 	}
-	if specificID, _, err := ParseProjectedToolName(trimmed, ToolKindFunction); err == nil {
+	if specificID, _, projected := ToolIdentityFromWire(trimmed, ToolKindFunction); projected {
 		if found, foundType, resolveErr := ResolveToolDeclByID(tools, specificID, ToolTypeFunction); resolveErr == nil {
 			return found, foundType, nil
 		}
 	}
-	if specificID, _, err := ParseProjectedToolName(trimmed, ToolKindCustom); err == nil {
+	if specificID, _, projected := ToolIdentityFromWire(trimmed, ToolKindCustom); projected {
 		if found, foundType, resolveErr := ResolveToolDeclByID(tools, specificID, ToolTypeCustom); resolveErr == nil {
 			return found, foundType, nil
 		}
 	}
-	return nil, "", BadRequest("canonical request tool references are undeclared")
+	return resolvePlainToolDeclByName(tools, trimmed, "")
+}
+
+func resolvePlainToolDeclByName(tools []ToolDecl, name string, specificType string) (ToolDecl, string, error) {
+	normalizedSpecific := strings.ToLower(strings.TrimSpace(specificType)) // swobu:io-string source=domain
+	var (
+		found     ToolDecl
+		foundType string
+		matched   bool
+	)
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		toolType := ToolDeclKind(tool)
+		if normalizedSpecific != "" && toolType != normalizedSpecific {
+			continue
+		}
+		if strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") { // swobu:io-string source=domain
+			continue
+		}
+		if strings.TrimSpace(tool.ToolName()) != name { // swobu:io-string source=domain
+			continue
+		}
+		if matched && (found.ToolID() != tool.ToolID() || foundType != toolType) {
+			return nil, "", BadRequest("canonical request tool references are ambiguous")
+		}
+		found = tool
+		foundType = toolType
+		matched = true
+	}
+	if !matched {
+		return nil, "", BadRequest("canonical request tool references are undeclared tool")
+	}
+	return found, foundType, nil
 }
 
 func cloneBoolPointer(ptr *bool) *bool {

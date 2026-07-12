@@ -2,18 +2,33 @@ package messages
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
+	shared "github.com/swobuforge/swobu/internal/adapters/wire/shared"
 	openaicompat "github.com/swobuforge/swobu/internal/adapters/wire/shared/openaicompat"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
+	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestDecode, error) {
+		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
+		return exchange.ClientRequestDecode{
+			Request:  request,
+			Delivery: delivery,
+		}, err
+	})
+}
+
+func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
@@ -22,14 +37,14 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
 	}
-	tools, err := decodeMessagesTools(dto.Tools)
+	tools, err := decodeMessagesTools(dto.Tools, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if err := rejectMessagesStructuredOutput(dto.ResponseFormat); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	toolPolicy, err := decodeMessagesToolChoice(dto.ToolChoice, tools)
+	toolPolicy, err := decodeMessagesToolChoice(dto.ToolChoice, tools, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -133,6 +148,11 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			}
 			decoded = append(decoded, canonical.NewToolResultItem(author, toolUseID, text)) // swobu:io-string source=boundary
 			pending = removePendingToolUseID(pending, toolUseID)
+		case "":
+			if len(strings.TrimSpace(string(part.CacheControl))) > 0 || len(strings.TrimSpace(string(part.CachePoint))) > 0 {
+				return nil
+			}
+			return canonical.BadRequest("messages request content contains an unsupported part type")
 		default:
 			return canonical.BadRequest("messages request content contains an unsupported part type")
 		}
@@ -165,6 +185,31 @@ func decodeToolResultText(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	return builder.String(), nil
+}
+
+func decodeMessagesTools(tools []messagesToolDTO, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	out := make([]canonical.ToolDecl, 0, len(tools))
+	for idx, tool := range tools {
+		schema, err := messagesToolSchemaFromWire(tool.InputSchema)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
+		if name == "" {
+			return nil, canonical.BadRequest("messages request tool declarations require a name")
+		}
+		id, leaf, projected := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
+		if projected {
+			if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tools/"+fmt.Sprint(idx)+"/name")); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, canonical.NewFunctionToolDecl(id.String(), leaf, tool.Description, schema))
+	}
+	return out, nil
 }
 
 func removePendingToolUseID(pending []string, toolUseID string) []string {

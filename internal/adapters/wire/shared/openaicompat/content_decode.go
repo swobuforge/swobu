@@ -13,15 +13,17 @@ import (
 // The helper keeps the raw part type and common payload fields so callers can
 // share one walker while preserving family-specific interpretation and errors.
 type ContentPartItem struct {
-	Type       string          `json:"type"`
-	Text       string          `json:"text,omitempty"`
-	InputText  string          `json:"input_text,omitempty"`
-	OutputText string          `json:"output_text,omitempty"`
-	ID         string          `json:"id,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	ToolUseID  string          `json:"tool_use_id,omitempty"`
-	Content    json.RawMessage `json:"content,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	InputText    string          `json:"input_text,omitempty"`
+	OutputText   string          `json:"output_text,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      json.RawMessage `json:"content,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+	CachePoint   json.RawMessage `json:"cachePoint,omitempty"`
 }
 
 func AuthorForRole(role string) canonical.ItemAuthor {

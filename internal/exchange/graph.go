@@ -2,12 +2,15 @@ package exchange
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -154,6 +157,7 @@ func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpoin
 				state.request,
 			)
 			if err != nil {
+				recordUnsafeNativeReplayDecision(ctx, g.Runner.EffectSink, exchangeID, err)
 				return Result[exchangePathState]{}, err
 			}
 			state.request = preparedRequest
@@ -237,6 +241,20 @@ func (g exchangeGraph) resolveProviderDelivery(ctx context.Context, clientDelive
 	return selector.SelectProviderDelivery(ctx, clientDelivery, observed), nil
 }
 
+func recordUnsafeNativeReplayDecision(ctx context.Context, sink effect.Sink, exchangeID string, err error) {
+	var unsafeReplayErr canonical.UnsafeNativeReplayError
+	if !errors.As(err, &unsafeReplayErr) {
+		return
+	}
+	commitEffectsBestEffort(ctx, sink, exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.WireNativePayload,
+			Outcome: compat.Reject,
+			Subject: compat.Subject("state:turn.request.raw"),
+		},
+	})
+}
+
 func resolveProviderProtocolKind(targetSpec string, targetProtocol string, configured protocolkind.ProtocolKind, request canonical.CanonicalRequest) (protocolkind.ProtocolKind, error) {
 	if !profile.SupportsSpec(targetSpec) {
 		return "", canonical.BadEndpoint("provider id is unsupported")
@@ -276,11 +294,10 @@ func materializeRequestForExecution(request canonical.CanonicalRequest, modelID 
 		return request
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:       modelID,
-		Items:       request.Items(),
-		Tools:       request.Tools(),
-		Turn:        request.Turn(),
-		ToolPolicy:  request.ToolPolicy(),
-		CacheIntent: request.CacheIntent(),
+		Model:      modelID,
+		Items:      request.Items(),
+		Tools:      request.Tools(),
+		Turn:       request.Turn(),
+		ToolPolicy: request.ToolPolicy(),
 	})
 }

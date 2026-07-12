@@ -87,7 +87,7 @@ func TestTrafficCacheSummary(t *testing.T) {
 	}
 }
 
-func TestTrafficTransformSummary(t *testing.T) {
+func TestTrafficPatchSummary(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -103,8 +103,8 @@ func TestTrafficTransformSummary(t *testing.T) {
 			name: "changed and noop mix",
 			row: state.TrafficRow{
 				Mutations: []stateModel.Mutation{
-					{Stage: "encode", Transform: "A", Changed: true},
-					{Stage: "decode", Transform: "B", Changed: false},
+					{Stage: "encode", PatchID: "A", Changed: true},
+					{Stage: "decode", PatchID: "B", Changed: false},
 				},
 			},
 			want: "p 1/2",
@@ -113,31 +113,31 @@ func TestTrafficTransformSummary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := trafficTransformSummary(tt.row)
+			got := trafficPatchSummary(tt.row)
 			if got != tt.want {
-				t.Fatalf("trafficTransformSummary()=%q want %q", got, tt.want)
+				t.Fatalf("trafficPatchSummary()=%q want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestTrafficTransformDetailLines(t *testing.T) {
+func TestTrafficPatchDetailLines(t *testing.T) {
 	row := state.TrafficRow{
 		Mutations: []stateModel.Mutation{
 			{
 				Stage:         "encode",
-				Transform:     "openaifamily.CacheAffinityWireTransform",
+				PatchID:       "openaifamily.CacheAffinityWirePatch",
 				Changed:       true,
 				ChangedFields: []string{"prompt_cache_key"},
 			},
 			{
-				Stage:     "decode",
-				Transform: "openaifamily.DecodeWireTransform",
-				Changed:   false,
+				Stage:   "decode",
+				PatchID: "openaifamily.DecodeWirePatch",
+				Changed: false,
 			},
 		},
 	}
-	lines := trafficTransformDetailLines(row)
+	lines := trafficPatchDetailLines(row)
 	if len(lines) != 2 {
 		t.Fatalf("len(lines) = %d, want 2", len(lines))
 	}
@@ -148,14 +148,14 @@ func TestTrafficDiagnosticSummary(t *testing.T) {
 	if got := trafficDiagnosticSummary(state.TrafficRow{}); got != "d n/a" {
 		t.Fatalf("trafficDiagnosticSummary()=%q want d n/a", got)
 	}
-	row := state.TrafficRow{ExchangeDiagnostics: []string{"high_transform_noop_ratio:4/5", "repeated_decode_mutation:x:2"}}
+	row := state.TrafficRow{ExchangeDiagnostics: []string{"high_patch_noop_ratio:4/5", "repeated_decode_mutation:x:2"}}
 	if got := trafficDiagnosticSummary(row); got != "d 2" {
 		t.Fatalf("trafficDiagnosticSummary()=%q want d 2", got)
 	}
 }
 
 func TestTrafficDiagnosticDetailLines(t *testing.T) {
-	row := state.TrafficRow{ExchangeDiagnostics: []string{"high_transform_noop_ratio:4/5"}}
+	row := state.TrafficRow{ExchangeDiagnostics: []string{"high_patch_noop_ratio:4/5"}}
 	lines := trafficDiagnosticDetailLines(row)
 	if len(lines) != 1 {
 		t.Fatalf("len(lines) = %d, want 1", len(lines))
@@ -181,7 +181,7 @@ func TestTrafficStageReportSummary(t *testing.T) {
 func TestTrafficStageReportDetailLines(t *testing.T) {
 	row := state.TrafficRow{
 		StageReports: []stateModel.StageReport{
-			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"openaifamily.CacheAffinityWireTransform"}, Mutated: true},
+			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"openaifamily.CacheAffinityWirePatch"}, Mutated: true},
 			{Stage: "provider.wire.in", Carrier: "wire_document", Mutated: false},
 		},
 	}

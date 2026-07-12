@@ -22,7 +22,6 @@ func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
 		Tools: []canonical.ToolDecl{
 			functionTool,
 		},
-		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention24H}),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -57,7 +56,7 @@ func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
 	projectedName, err := canonical.ProjectedToolName(functionTool)
 	if err != nil {
@@ -67,9 +66,6 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
-	}
-	if !got.CacheIntent().IsZero() {
-		t.Fatalf("cache intent=%+v want zero", got.CacheIntent())
 	}
 	tools := got.Tools()
 	if len(tools) != 1 || tools[0].ToolName() != "get_weather" {

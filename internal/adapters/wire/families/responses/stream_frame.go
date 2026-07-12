@@ -1,9 +1,11 @@
 package responses
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	deliverycompat "github.com/swobuforge/swobu/internal/adapters/wire/families/deliverycompat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -34,7 +36,7 @@ type streamFrame struct {
 	} `json:"item"`
 }
 
-func (s *responsesEventReader) handleFrame(frame streamFrame) (bool, canonical.Event, error) {
+func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFrame) (bool, canonical.Event, error) {
 	frameType := strings.TrimSpace(frame.Type) // swobu:io-string source=provider-wire
 	switch frameType {
 	case "response.created":
@@ -72,7 +74,7 @@ func (s *responsesEventReader) handleFrame(frame streamFrame) (bool, canonical.E
 		}
 		return true, s.shiftPendingEvent(), nil
 	case "response.completed":
-		s.handleResponseCompleted(frame)
+		s.handleResponseCompleted(ctx, frame)
 		return true, s.shiftPendingEvent(), nil
 	case "error":
 		return false, canonical.Event{}, canonical.InternalError("responses stream returned an error event")
@@ -181,12 +183,13 @@ func (s *responsesEventReader) handleOutputItemDone(frame streamFrame) bool {
 	}
 }
 
-func (s *responsesEventReader) handleResponseCompleted(frame streamFrame) {
+func (s *responsesEventReader) handleResponseCompleted(ctx context.Context, frame streamFrame) {
 	s.completed = true
 	status := strings.TrimSpace(frame.Status) // swobu:io-string source=boundary
 	if status == "" {
 		status = strings.TrimSpace(frame.Response.Status) // swobu:io-string source=boundary
 	}
+	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.closeOpenText(canonical.EnvelopeStatusCompleted)
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)

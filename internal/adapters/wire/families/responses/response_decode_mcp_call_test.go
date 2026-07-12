@@ -10,14 +10,14 @@ import (
 func TestDecodeOutputItems_AcceptsMcpCallAsToolUse(t *testing.T) {
 	t.Parallel()
 
-	items, err := decodeOutputItems([]responsesWireOutputItemDTO{
+	items, err := decodeOutputItems(context.Background(), []responsesWireOutputItemDTO{
 		{
 			Type:      "mcp_call",
 			ID:        "mcp_1",
 			Name:      "Read",
 			Arguments: `{"path":"workspace/file.txt"}`,
 		},
-	}, "")
+	}, "", "ex_mcp", nil)
 	if err != nil {
 		t.Fatalf("decodeOutputItems returned error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestDecodeResponseBuffered_AcceptsMcpCall(t *testing.T) {
 		"output":[{"type":"mcp_call","id":"mcp_1","name":"Read","arguments":"{\"path\":\"workspace/file.txt\"}"}]
 	}`)
 
-	reader, err := decodeResponseBuffered(raw, "ex_mcp")
+	reader, err := decodeResponseBuffered(context.Background(), raw, "ex_mcp", nil)
 	if err != nil {
 		t.Fatalf("decodeResponseBuffered returned error: %v", err)
 	}

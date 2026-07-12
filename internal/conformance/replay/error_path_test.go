@@ -35,7 +35,7 @@ func TestExchangeReplay_ResponsesStreamErrorPath(t *testing.T) {
 	}
 
 	clientRequest := []byte(readFile(t, filepath.Join(caseDir, "client_request.body.json")))
-	request, _, err := clientCodec.DecodeClientRequest(carrier.NewWireDocument(
+	result, err := clientCodec.DecodeClientRequest(carrier.NewWireDocument(
 		carrier.StageClientRequestIn,
 		protocolkind.ProtocolKind(clientFamily),
 		"application/json",
@@ -46,6 +46,7 @@ func TestExchangeReplay_ResponsesStreamErrorPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode client request: %v", err)
 	}
+	request := result.Value.Request
 
 	malformedUpstream := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"m","status":"in_progress"}}`,

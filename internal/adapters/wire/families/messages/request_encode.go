@@ -1,13 +1,17 @@
 package messages
 
 import (
+	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 const defaultMessagesMaxTokens = 256
@@ -28,6 +32,10 @@ type contentID struct {
 }
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
+	return EncodeCarrierWithEffects(req, d, nil, "")
+}
+
+func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.WireDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -43,7 +51,7 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
-	if wireTools, err := encodeMessagesTools(tools); err != nil {
+	if wireTools, err := encodeMessagesTools(tools, sink, exchangeID); err != nil {
 		return carrier.WireDocument{}, err
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
@@ -57,7 +65,7 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
 		return carrier.WireDocument{}, err
 	}
-	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools)
+	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
 		return carrier.WireDocument{}, err
 	}
@@ -144,12 +152,14 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 	return out, nil
 }
 
-func encodeMessagesTools(tools []canonical.ToolDecl) ([]messagesToolDTO, error) {
+func encodeMessagesTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) ([]messagesToolDTO, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
+	// Messages wire has no strict tool-schema field; provider adapters emit the
+	// compatibility decision before this encoder runs.
 	out := make([]messagesToolDTO, 0, len(tools))
-	for _, tool := range tools {
+	for idx, tool := range tools {
 		decl, ok := tool.(canonical.FunctionToolDecl)
 		if !ok {
 			if ptr, ok := tool.(*canonical.FunctionToolDecl); ok {
@@ -166,6 +176,9 @@ func encodeMessagesTools(tools []canonical.ToolDecl) ([]messagesToolDTO, error) 
 		if err != nil {
 			return nil, err
 		}
+		if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, tool, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(idx)+"/name")); err != nil {
+			return nil, err
+		}
 		name = strings.TrimSpace(name) // swobu:io-string source=boundary
 		if name == "" {
 			return nil, canonical.BadRequest("messages protocol tool declarations require a name")
@@ -175,29 +188,6 @@ func encodeMessagesTools(tools []canonical.ToolDecl) ([]messagesToolDTO, error) 
 			Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=boundary
 			InputSchema: schema,
 		})
-	}
-	return out, nil
-}
-
-func decodeMessagesTools(tools []messagesToolDTO) ([]canonical.ToolDecl, error) {
-	if len(tools) == 0 {
-		return nil, nil
-	}
-	out := make([]canonical.ToolDecl, 0, len(tools))
-	for _, tool := range tools {
-		schema, err := messagesToolSchemaFromWire(tool.InputSchema)
-		if err != nil {
-			return nil, err
-		}
-		name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
-		if name == "" {
-			return nil, canonical.BadRequest("messages request tool declarations require a name")
-		}
-		id, leaf, err := canonical.ParseProjectedToolName(name, canonical.ToolKindFunction)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, canonical.NewFunctionToolDecl(id.String(), leaf, tool.Description, schema))
 	}
 	return out, nil
 }
@@ -241,6 +231,31 @@ func roleForMessagesItem(item canonical.CanonicalItem) string {
 	default:
 		return "user"
 	}
+}
+
+func emitMessagesToolNameNamespaceDecision(sink effect.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
+	if sink == nil {
+		return nil
+	}
+	if subject == "" {
+		return nil
+	}
+	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
+		return nil
+	}
+	if tool == nil && outcome == compat.Approx {
+		return nil
+	}
+	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.ToolNameNamespace,
+			Outcome: outcome,
+			Subject: subject,
+		},
+	}); err != nil {
+		return canonical.InternalError("compatibility effect sink commit failed")
+	}
+	return nil
 }
 
 func decodeToolArgumentsObject(input canonical.ToolArguments) (map[string]any, error) {

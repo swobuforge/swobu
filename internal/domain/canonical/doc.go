@@ -28,8 +28,9 @@
 // plain text remains the default, while structured JSON Schema output is
 // represented explicitly so adapters can lower or reject it without prompt
 // hacks or transport-only fields.
-// Canonical request cache intent remains minimal by law: only fields with at
-// least one active provider consumer are allowed in this package surface.
+// Request-side cache controls are not active runtime truth in v0. Transport
+// decoders may accept cache-shaped fields for compatibility, but canonical
+// request semantics do not preserve them.
 // Protocol-edge DTOs, realized wire payloads, and transport mechanics must
 // stay outside this package.
 package canonical

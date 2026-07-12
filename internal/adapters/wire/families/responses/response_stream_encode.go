@@ -10,13 +10,14 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 	return &sseEnvelopeStreamEncoder{adapter: sse.NewEnvelopeEventAdapter()}
 }
 
-func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (exchange.Result[carrier.WireStream], error) {
 	state := e.newStreamState()
 	framing := carrier.FramingSSE
 	if d.Framing == delivery.FramingWebSocket {
@@ -51,5 +52,5 @@ func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader
 	}()
 	// Stage marks the carrier boundary for this streamed response leg; the
 	// exchange graph owns path selection above the adapter edge.
-	return carrier.WireStream{Stage: carrier.StageClientResponseOut, Family: protocolkind.Responses, Framing: framing, Frames: carrier.FrameReaderFromReadCloser(pr)}, nil
+	return exchange.NewResult(carrier.WireStream{Stage: carrier.StageClientResponseOut, Family: protocolkind.Responses, Framing: framing, Frames: carrier.FrameReaderFromReadCloser(pr)}), nil
 }

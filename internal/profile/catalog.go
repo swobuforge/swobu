@@ -12,78 +12,36 @@ var (
 		"X-API-Key",
 		"api-key",
 	}
-	providerRequestFeaturesResponses = []RequestFeature{
-		RequestFeatureFunctionTools,
-		RequestFeatureToolChoiceNone,
-		RequestFeatureToolChoiceRequired,
-		RequestFeatureToolChoiceSpecific,
-		RequestFeatureToolBatchAtMostOne,
-		RequestFeatureMaxOutputTokens,
-		RequestFeatureTemperature,
-		RequestFeatureTopP,
-		RequestFeatureJSONSchemaOutput,
-		RequestFeatureUsageReasoningTokens,
-	}
-	providerRequestFeaturesChatCompletions = []RequestFeature{
-		RequestFeatureFunctionTools,
-		RequestFeatureToolChoiceNone,
-		RequestFeatureToolChoiceRequired,
-		RequestFeatureToolChoiceSpecific,
-		RequestFeatureToolBatchAtMostOne,
-		RequestFeatureMaxOutputTokens,
-		RequestFeatureTemperature,
-		RequestFeatureTopP,
-		RequestFeatureStopSequences,
-		RequestFeatureJSONSchemaOutput,
-		RequestFeatureUsageReasoningTokens,
-	}
-	providerRequestFeaturesMessages = []RequestFeature{
-		RequestFeatureFunctionTools,
-		RequestFeatureToolChoiceNone,
-		RequestFeatureToolChoiceRequired,
-		RequestFeatureToolChoiceSpecific,
-		RequestFeatureToolBatchAtMostOne,
-		RequestFeatureMaxOutputTokens,
-		RequestFeatureTemperature,
-		RequestFeatureTopP,
-		RequestFeatureStopSequences,
-	}
-	providerRequestFeaturesCompletions = []RequestFeature{
-		RequestFeatureMaxOutputTokens,
-		RequestFeatureTemperature,
-		RequestFeatureTopP,
-		RequestFeatureStopSequences,
-	}
 	providerProtocolsOpenAIFamily = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 	}
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 	}
 	providerProtocolsAnthropic = []ProviderProtocolSpec{
-		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
-		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
 	providerProtocolsBedrock = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
-		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
-		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
 	providerProtocolsAzure = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 	}
 )
 

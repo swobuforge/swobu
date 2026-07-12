@@ -21,39 +21,42 @@ type StoreBackedSink struct {
 func (s StoreBackedSink) Commit(ctx context.Context, _ string, effects []Effect) error {
 	for _, applied := range effects {
 		switch e := applied.(type) {
-		case ObservationEffect:
+		case Compatibility:
 			if s.Observations != nil {
-				obs := stampObservationRecord(e.Observation)
-				if err := s.Observations.Put(ctx, obs); err != nil {
+				obs := compatibilityObservationRecord(e)
+				if err := s.Observations.Put(ctx, stampObservationRecord(obs)); err != nil {
 					return err
 				}
 			}
-		case LossEffect:
-			if s.Observations != nil {
-				obs := stampObservationRecord(e.Observation)
-				reasonCode := strings.TrimSpace(string(e.Loss.ReasonCode)) // swobu:io-string source=boundary
-				if obs.Code == "" {
-					obs.Code = reasonCode
-				}
-				if obs.Reason == "" {
-					obs.Reason = strings.TrimSpace(e.Loss.Reason) // swobu:io-string source=boundary
-				}
-				if obs.Code == "" {
-					obs.Code = "loss"
-				}
-				if err := s.Observations.Put(ctx, obs); err != nil {
-					return err
-				}
-			}
-		case StateCaptureEffect:
+		case TurnState:
 			if s.TurnState != nil {
-				if err := s.TurnState.Put(ctx, e.Key, append([]byte(nil), e.Value...)); err != nil {
+				key := turnstate.TurnStateKey{
+					Subject: e.Key,
+					Kind:    turnstate.TurnStateKind(e.Op),
+				}
+				if err := s.TurnState.Put(ctx, key, append([]byte(nil), e.Value...)); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func compatibilityObservationRecord(decision Compatibility) observation.ObservationRecord {
+	code := strings.TrimSpace(string(decision.Feature)) // swobu:io-string source=boundary
+	reason := strings.TrimSpace(string(decision.Outcome)) // swobu:io-string source=boundary
+	subject := strings.TrimSpace(string(decision.Subject)) // swobu:io-string source=boundary
+	if subject != "" {
+		if reason != "" {
+			reason += " "
+		}
+		reason += subject
+	}
+	return observation.ObservationRecord{
+		Code:   code,
+		Reason: reason,
+	}
 }
 
 func stampObservationRecord(obs observation.ObservationRecord) observation.ObservationRecord {

@@ -17,6 +17,7 @@ import (
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt/codexwire"
+	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -71,10 +72,14 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	wireReq, err := codexwire.EncodeProviderRequestDocument(req.Request, resolvedDelivery)
+	wireReqResult, err := codexwire.EncodeProviderRequestDocument(req.Request, resolvedDelivery, req.ExchangeID)
+	if commitErr := providercompat.CommitEffects(ctx, req.EffectSink, req.ExchangeID, wireReqResult.Effects); commitErr != nil {
+		return nil, commitErr
+	}
 	if err != nil {
 		return nil, err
 	}
+	wireReq := wireReqResult.Value
 	baseURL := resolveChatGPTExecuteBaseURL(req.Target.BaseURL)
 	bodyBytes := wireReq.RawBytes()
 	newRequest := func(token string) (*http.Request, error) {

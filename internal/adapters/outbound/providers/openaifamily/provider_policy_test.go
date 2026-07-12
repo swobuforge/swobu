@@ -42,26 +42,6 @@ func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
 	}
 }
 
-func TestProviderPolicy_Facts_UseCanonicalCacheIntent(t *testing.T) {
-	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{
-			Key:       "repo-alpha",
-			Retention: canonical.CacheRetention24H,
-		}),
-	})
-
-	facts := NewOpenAIPolicy().Facts(req)
-	if facts.CacheAffinityKey != "repo-alpha" || facts.CacheAffinityRetention != "24h" {
-		t.Fatalf("unexpected openai facts: %#v", facts)
-	}
-
-	ollamaFacts := NewOllamaPolicy().Facts(req)
-	if ollamaFacts.CacheAffinityKey != "repo-alpha" || ollamaFacts.CacheAffinityRetention != "24h" {
-		t.Fatalf("unexpected ollama facts: %#v", ollamaFacts)
-	}
-}
-
 func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *testing.T) {
 	raw := []byte(`{"id":"chatcmpl_1","model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 	for _, profile := range []ProviderRoutePolicy{
@@ -70,14 +50,11 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		NewOpenAICompatiblePolicy(),
 		NewOpenRouterPolicy(),
 	} {
-		if profile.UsageDecoder() == nil {
-			t.Fatalf("provider=%s usage adapter is nil", profile.ProviderID())
-		}
-		resp, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(carrier.WireDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
+		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), carrier.WireDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
 		if err != nil {
 			t.Fatalf("provider=%s decode: %v", profile.ProviderID(), err)
 		}
-		closed, err := canonical.ReadClosedEnvelope(context.Background(), resp, canonical.EnvResponse)
+		closed, err := canonical.ReadClosedEnvelope(context.Background(), respResult.Value, canonical.EnvResponse)
 		if err != nil {
 			t.Fatalf("provider=%s envelope read: %v", profile.ProviderID(), err)
 		}

@@ -23,17 +23,17 @@ func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T)
 		{name: "missing frames", wire: carrier.WireStream{Family: protocolkind.Messages, Framing: carrier.FramingSSE}, reasonMatch: "frames must be configured"},
 	}
 
-	codec := ProviderEnvelopeDecoder{}
+	codec := legacyProviderEnvelopeDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := codec.DecodeProviderEnvelope(tt.wire, "ex_guard")
-			_, err := reader.Next(context.Background())
-			if err == nil {
+			reader := codec.DecodeProviderEnvelope(tt.wire, "ex_guard", nil)
+			_, readErr := reader.Next(context.Background())
+			if readErr == nil {
 				t.Fatal("expected decode stream guard error, got nil")
 			}
 			var compatErr canonical.Error
-			if !errors.As(err, &compatErr) {
-				t.Fatalf("expected canonical.Error, got %T", err)
+			if !errors.As(readErr, &compatErr) {
+				t.Fatalf("expected canonical.Error, got %T", readErr)
 			}
 			if compatErr.Code != canonical.ErrorCodeInternal {
 				t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeInternal)

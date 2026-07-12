@@ -69,7 +69,7 @@ func TestDecodeChatCompletionsToolChoice_DefaultsBySurface(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := decodeChatCompletionsToolChoice(rawJSON(tc.raw), tc.tools)
+			got, err := decodeChatCompletionsToolChoice(rawJSON(tc.raw), tc.tools, nil, "")
 			if err != nil {
 				t.Fatalf("decodeChatCompletionsToolChoice returned error: %v", err)
 			}
@@ -148,7 +148,7 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := encodeChatCompletionsToolChoice(tc.policy, tc.tools)
+			got, err := encodeChatCompletionsToolChoice(tc.policy, tc.tools, nil, "")
 			if err != nil {
 				t.Fatalf("encodeChatCompletionsToolChoice returned error: %v", err)
 			}
@@ -160,7 +160,7 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 func TestEncodeChatCompletionsToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeChatCompletionsToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil)
+	_, err := encodeChatCompletionsToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, "")
 	if err == nil {
 		t.Fatal("expected encodeChatCompletionsToolChoice to reject required without tools")
 	}

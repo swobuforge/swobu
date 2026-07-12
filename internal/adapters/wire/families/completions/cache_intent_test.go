@@ -12,9 +12,8 @@ import (
 
 func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:       "gpt-4o-mini",
-		Items:       []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention24H}),
+		Model: "gpt-4o-mini",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -26,24 +25,24 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if _, ok := body["prompt_cache_key"]; ok {
-		t.Fatalf("prompt_cache_key must be provider transform concern")
+		t.Fatalf("prompt_cache_key must be provider adapter concern")
 	}
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","prompt":"hi","prompt_cache_key":"repo"}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
-	if !got.CacheIntent().IsZero() {
-		t.Fatalf("cache intent=%+v want zero", got.CacheIntent())
+	if got.Model() != "gpt-4o-mini" {
+		t.Fatalf("model = %q, want %q", got.Model(), "gpt-4o-mini")
 	}
 }
 
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","prompt":"hi","unexpected":true}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
 	if err != nil {
@@ -51,8 +50,5 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	}
 	if got.Model() != "gpt-4o-mini" {
 		t.Fatalf("model = %q, want %q", got.Model(), "gpt-4o-mini")
-	}
-	if !got.CacheIntent().IsZero() {
-		t.Fatalf("cache intent=%+v want zero", got.CacheIntent())
 	}
 }

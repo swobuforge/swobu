@@ -56,7 +56,7 @@ func TestClientRequestDecoder_DecodesToolChoiceBySurface(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			raw := messagesToolChoiceRequestJSON(t, tc.toolChoice, tc.includeTools, functionTool)
-			got, resolvedDelivery, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewWireDocument(
+			got, resolvedDelivery, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewWireDocument(
 				carrier.StageClientRequestIn,
 				protocolkind.Messages,
 				"application/json",

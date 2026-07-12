@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 type EndpointReader interface {
@@ -30,6 +31,7 @@ type ProviderRequest struct {
 	Target          RoutableTarget
 	ExchangeID      string
 	ClientFamily    canonical.ClientFamily
+	EffectSink      effect.Sink
 }
 
 func NewProviderRequest(
@@ -39,7 +41,12 @@ func NewProviderRequest(
 	wireRequest carrier.WireDocument,
 	contract ExecutionContract,
 	target RoutableTarget,
+	effectSink ...effect.Sink,
 ) ProviderRequest {
+	var sink effect.Sink
+	if len(effectSink) > 0 {
+		sink = effectSink[0]
+	}
 	return ProviderRequest{
 		ExchangeID:      exchangeID,
 		ClientFamily:    clientFamily,
@@ -47,6 +54,7 @@ func NewProviderRequest(
 		RequestDocument: wireRequest.Clone(),
 		Contract:        contract,
 		Target:          target.Clone(),
+		EffectSink:      sink,
 	}
 }
 

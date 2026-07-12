@@ -7,9 +7,10 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error) {
 	items := output.Items()
 	content := make([]messagesResponsePartDTO, 0, len(items))
 	for _, item := range items {
@@ -18,12 +19,12 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 			content = append(content, messagesResponsePartDTO{Type: "text", Text: item.Text})
 		case canonical.ItemKindToolUse:
 			if item.ToolType != "" && item.ToolType != canonical.ToolTypeFunction {
-				return carrier.WireDocument{}, canonical.UnsupportedOperation("messages protocol only supports function tool output")
+				return exchange.Result[carrier.WireDocument]{}, canonical.UnsupportedOperation("messages protocol only supports function tool output")
 			}
 			input := map[string]any{}
 			if raw := item.Input.RawObject(); raw != "" {
 				if err := json.Unmarshal([]byte(raw), &input); err != nil {
-					return carrier.WireDocument{}, canonical.BadRequest("messages tool_use input is invalid JSON object")
+					return exchange.Result[carrier.WireDocument]{}, canonical.BadRequest("messages tool_use input is invalid JSON object")
 				}
 			}
 			content = append(content, messagesResponsePartDTO{
@@ -33,9 +34,9 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 				Input: input,
 			})
 		case canonical.ItemKindToolResult:
-			return carrier.WireDocument{}, canonical.UnsupportedOperation("messages protocol does not support tool result output items")
+			return exchange.Result[carrier.WireDocument]{}, canonical.UnsupportedOperation("messages protocol does not support tool result output items")
 		default:
-			return carrier.WireDocument{}, canonical.UnsupportedOperation("messages protocol does not support this output item kind")
+			return exchange.Result[carrier.WireDocument]{}, canonical.UnsupportedOperation("messages protocol does not support this output item kind")
 		}
 	}
 	stopReason := "end_turn"
@@ -52,9 +53,9 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Usage:      messagesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return exchange.Result[carrier.WireDocument]{}, err
 	}
-	return carrier.NewWireDocument("", protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}), nil
+	return exchange.NewResult(carrier.NewWireDocument("", protocolkind.Messages, "application/json", nil, raw, carrier.Meta{})), nil
 }
 
 func messagesUsageFromCanonical(usage canonical.TokenUsage) *messagesUsageDTO {

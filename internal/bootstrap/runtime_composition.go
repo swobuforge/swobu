@@ -24,6 +24,7 @@ func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		Target:          req.Target,
 		ExchangeID:      req.ExchangeID,
 		ClientFamily:    req.ClientFamily,
+		EffectSink:      req.EffectSink,
 	}
 	ingress, err := a.ingress.ResolveProviderIngress(ctx, portsReq)
 	return ingress, err

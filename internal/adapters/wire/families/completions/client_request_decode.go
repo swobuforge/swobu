@@ -8,9 +8,20 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
+	var effects []effect.Effect
+	request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, effect.AccumulatorSink{Effects: &effects}, "")
+	return exchange.NewResult(exchange.ClientRequestDecode{
+		Request:  request,
+		Delivery: delivery,
+	}, effects...), err
+}
+
+func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto completionsRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "completions request", nil); err != nil {

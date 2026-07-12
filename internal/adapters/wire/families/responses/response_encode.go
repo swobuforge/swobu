@@ -7,9 +7,10 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error) {
 	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
 	for _, item := range output.Items() {
@@ -47,10 +48,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Usage:      responsesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return exchange.Result[carrier.WireDocument]{}, err
 	}
 	logResponsesEgressBuffered(encodedBody)
-	return carrier.NewWireDocument("", protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{}), nil
+	return exchange.NewResult(carrier.NewWireDocument("", protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})), nil
 }
 
 func responsesUsageFromCanonical(usage canonical.TokenUsage) *responsesUsageDTO {

@@ -10,6 +10,8 @@
 // responses-specific behavior such as function-call argument streaming and
 // reasoning-token usage accounting.
 // Responses reasoning output is not part of the current canonical v0 band and
-// must fail closed instead of disappearing from decode. Client request
-// decoding uses the shared ingress helper for top-level request parsing.
+// must fail closed with a response.reasoning rejection decision instead of
+// disappearing from decode. Client request decoding uses the shared ingress
+// helper for top-level request parsing and normalizes stringified
+// function_call.arguments payloads emitted by OpenAI-family client bridges.
 package responses

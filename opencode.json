@@ -6,7 +6,8 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Swobu",
       "options": {
-        "baseURL": "http://127.0.0.1:7926/c/dev/v1"
+        "baseURL": "http://127.0.0.1:7926/c/dev/v1",
+        "apiKey": "{env:OPENAI_API_KEY}"
       },
       "models": {
         "primary": { "name": "Primary" }

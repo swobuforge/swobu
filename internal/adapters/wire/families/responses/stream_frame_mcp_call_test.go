@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -17,7 +18,7 @@ func TestResponsesEventReader_AcceptsMcpCallStreamFrames(t *testing.T) {
 		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
 
-	handled, _, err := s.handleFrame(streamFrame{
+	handled, _, err := s.handleFrame(context.Background(), streamFrame{
 		Type: "response.output_item.added",
 		Item: struct {
 			ID          string `json:"id"`
@@ -40,7 +41,7 @@ func TestResponsesEventReader_AcceptsMcpCallStreamFrames(t *testing.T) {
 		t.Fatal("handleFrame(output_item.added) not handled")
 	}
 
-	handled, _, err = s.handleFrame(streamFrame{
+	handled, _, err = s.handleFrame(context.Background(), streamFrame{
 		Type:      "response.mcp_call_arguments.delta",
 		ItemID:    "mcp_1",
 		CallID:    "mcp_1",

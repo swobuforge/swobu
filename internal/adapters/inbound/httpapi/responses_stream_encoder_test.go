@@ -90,12 +90,78 @@ func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T)
 	if !contains(types, "response.output_item.done") {
 		t.Fatalf("event types = %#v, want response.output_item.done", types)
 	}
+	doneFrame := frameOfType(frames, "response.function_call_arguments.done")
+	if doneFrame == nil {
+		t.Fatal("missing response.function_call_arguments.done frame")
+	}
+	if got, ok := doneFrame["arguments"].(string); !ok || got != "{\"pattern\":\"TODO\"}" {
+		t.Fatalf("response.function_call_arguments.done arguments = %#v, want pattern JSON", doneFrame["arguments"])
+	}
+	if _, ok := doneFrame["input"]; ok {
+		t.Fatalf("response.function_call_arguments.done unexpectedly included input: %#v", doneFrame)
+	}
+	completed := frames[len(frames)-1]
+	response := objectAt(completed, "response")
+	output, ok := response["output"].([]any)
+	if !ok || len(output) == 0 {
+		t.Fatalf("response.completed output = %#v, want non-empty list", response["output"])
+	}
+	toolOutput, ok := output[0].(map[string]any)
+	if !ok {
+		t.Fatalf("response.completed output[0] = %#v, want object", output[0])
+	}
+	if got, ok := toolOutput["arguments"].(string); !ok || got != "{\"pattern\":\"TODO\"}" {
+		t.Fatalf("response.completed output[0].arguments = %#v, want pattern JSON", toolOutput["arguments"])
+	}
+	if _, ok := toolOutput["input"]; ok {
+		t.Fatalf("response.completed output[0] unexpectedly included input: %#v", toolOutput)
+	}
 	for _, frame := range frames {
 		if frame["type"] == "response.function_call_arguments.delta" || frame["type"] == "response.function_call_arguments.done" {
 			if _, ok := frame["output_index"].(float64); !ok {
 				t.Fatalf("%s missing output_index: %#v", frame["type"], frame)
 			}
 		}
+	}
+}
+
+func TestResponsesWireEventEncoder_CustomToolLifecycleUsesInputField(t *testing.T) {
+	encoder := responses.NewResponseStreamWireEncoder()
+	events := []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "resp_3", Model: "m"},
+		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
+		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom, ArgumentsDelta: "{\"patch\":\"x\"}"},
+		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
+		{Kind: sse.StreamEventCompleted, FinishReason: "completed"},
+	}
+	frames := encodeAllFrames(t, &encoder, events)
+
+	doneFrame := frameOfType(frames, "response.custom_tool_call_input.done")
+	if doneFrame == nil {
+		t.Fatal("missing response.custom_tool_call_input.done frame")
+	}
+	if got, ok := doneFrame["input"].(string); !ok || got != "{\"patch\":\"x\"}" {
+		t.Fatalf("response.custom_tool_call_input.done input = %#v, want patch JSON", doneFrame["input"])
+	}
+	if _, ok := doneFrame["arguments"]; ok {
+		t.Fatalf("response.custom_tool_call_input.done unexpectedly included arguments: %#v", doneFrame)
+	}
+
+	completed := frames[len(frames)-1]
+	response := objectAt(completed, "response")
+	output, ok := response["output"].([]any)
+	if !ok || len(output) == 0 {
+		t.Fatalf("response.completed output = %#v, want non-empty list", response["output"])
+	}
+	toolOutput, ok := output[0].(map[string]any)
+	if !ok {
+		t.Fatalf("response.completed output[0] = %#v, want object", output[0])
+	}
+	if got, ok := toolOutput["input"].(string); !ok || got != "{\"patch\":\"x\"}" {
+		t.Fatalf("response.completed output[0].input = %#v, want patch JSON", toolOutput["input"])
+	}
+	if _, ok := toolOutput["arguments"]; ok {
+		t.Fatalf("response.completed output[0] unexpectedly included arguments: %#v", toolOutput)
 	}
 }
 
@@ -133,19 +199,20 @@ func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder,
 	t.Helper()
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {
-		frames, err := encoder.Encode(sse.StreamEvent{
-			Kind:           event.Kind,
-			ResultID:       event.ResultID,
-			Model:          event.Model,
-			ItemKind:       event.ItemKind,
-			ItemID:         event.ItemID,
-			TextDelta:      event.TextDelta,
-			ToolUseID:      event.ToolUseID,
-			Name:           event.Name,
-			ArgumentsDelta: event.ArgumentsDelta,
-			FinishReason:   event.FinishReason,
-			Usage:          event.Usage,
-		})
+			frames, err := encoder.Encode(sse.StreamEvent{
+				Kind:           event.Kind,
+				ResultID:       event.ResultID,
+				Model:          event.Model,
+				ItemKind:       event.ItemKind,
+				ItemID:         event.ItemID,
+				TextDelta:      event.TextDelta,
+				ToolUseID:      event.ToolUseID,
+				Name:           event.Name,
+				ToolType:       event.ToolType,
+				ArgumentsDelta: event.ArgumentsDelta,
+				FinishReason:   event.FinishReason,
+				Usage:          event.Usage,
+			})
 		if err != nil {
 			t.Fatalf("Encode(%s) returned error: %v", event.Kind, err)
 		}
@@ -193,6 +260,15 @@ func contains(items []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func frameOfType(frames []map[string]any, target string) map[string]any {
+	for _, frame := range frames {
+		if frame["type"] == target {
+			return frame
+		}
+	}
+	return nil
 }
 
 func equalStrings(left []string, right []string) bool {

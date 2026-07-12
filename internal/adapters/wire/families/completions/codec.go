@@ -61,9 +61,10 @@ func (s *completionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return n
 func completionsUsageFromCanonical(usage canonical.TokenUsage) *completionsUsageDTO {
 	input, hasInput := usage.InputTokens()
 	output, hasOutput := usage.OutputTokens()
+	reasoning, hasReasoning := usage.ReasoningTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasCacheRead && !hasCacheWrite {
+	if !hasInput && !hasOutput && !hasReasoning && !hasCacheRead && !hasCacheWrite {
 		return nil
 	}
 	dto := &completionsUsageDTO{
@@ -75,6 +76,13 @@ func completionsUsageFromCanonical(usage canonical.TokenUsage) *completionsUsage
 		dto.PromptDetails = &completionsPromptUsageDTO{
 			CachedTokens:     cacheRead,
 			CacheWriteTokens: cacheWrite,
+		}
+	}
+	if hasReasoning {
+		// Preserve provider-reported reasoning usage as a separate accounting
+		// fact; do not fold it into total_tokens or drop a zero value.
+		dto.CompletionDetails = &completionsCompletionTokenDetailsDTO{
+			ReasoningTokens: reasoning,
 		}
 	}
 	return dto

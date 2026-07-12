@@ -28,7 +28,7 @@ type daemonRawTrafficRow struct {
 	ObservedAt          string                     `json:"observed_at,omitempty"`
 	Timing              *daemonRawTimingFields     `json:"timing,omitempty"`
 	TokenUsage          *daemonRawTokenUsageFields `json:"token_usage,omitempty"`
-	Mutations           []stateModel.Mutation      `json:"wire_transform_mutations,omitempty"`
+	Mutations           []stateModel.Mutation      `json:"wire_patch_mutations,omitempty"`
 	ExchangeDiagnostics []string                   `json:"exchange_diagnostics,omitempty"`
 	StageReports        []stateModel.StageReport   `json:"exchange_stage_reports,omitempty"`
 }
@@ -262,7 +262,7 @@ func validateStageReports(reports []stateModel.StageReport) error {
 			appliedCount++
 		}
 		if appliedCount == 0 {
-			return fmt.Errorf("entry %d mutated without applied transforms", i)
+			return fmt.Errorf("entry %d mutated without applied patches", i)
 		}
 	}
 	return nil

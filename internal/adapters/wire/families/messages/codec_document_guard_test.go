@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -22,10 +23,10 @@ func TestDecodeProviderDocument_InvalidWireCarrierFailsImmediately(t *testing.T)
 		{name: "missing body", doc: carrier.NewWireDocument(carrier.StageProviderIngressIn, protocolkind.Messages, "application/json", nil, nil, carrier.Meta{}), reasonMatch: "body must be configured"},
 	}
 
-	codec := ProviderDocumentDecoder{}
+	codec := legacyProviderDocumentDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := codec.DecodeProviderDocument(tt.doc, "ex_guard")
+			_, err := codec.DecodeProviderDocument(context.Background(), tt.doc, "ex_guard", nil)
 			if err == nil {
 				t.Fatal("expected decode document guard error, got nil")
 			}

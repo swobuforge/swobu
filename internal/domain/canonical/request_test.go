@@ -98,9 +98,6 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 		Model:         "m",
 		Turn:          NewTurnRef("resp_123"),
 		ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
-		CacheIntent: NewCacheIntent(CacheIntentParams{
-			Key: "repo-alpha",
-		}),
 		Items: []CanonicalItem{
 			NewToolUseItem(ItemAuthorAssistant, "", "call_1", "grep", NewToolArgumentsObject(`{"pattern":"TODO"}`)),
 		},
@@ -135,7 +132,7 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	if gotBatch := req.ToolCallBatch(); gotBatch.Mode != ToolCallBatchAtMostOne {
 		t.Fatalf("tool call batch mode = %q, want %q", gotBatch.Mode, ToolCallBatchAtMostOne)
 	}
-	if prev, ok := cloned.Turn().PreviousID(); !ok || prev.String() != "resp_123" || cloned.CacheIntent().Key() != "repo-alpha" {
+	if prev, ok := cloned.Turn().PreviousID(); !ok || prev.String() != "resp_123" {
 		t.Fatalf("clone lost response state")
 	}
 	if gotBatch := cloned.ToolCallBatch(); gotBatch.Mode != ToolCallBatchAtMostOne {

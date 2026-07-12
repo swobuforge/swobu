@@ -1,12 +1,24 @@
 package responses
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
+
+type recordingEffectSink struct {
+	effects []effect.Effect
+}
+
+func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+	s.effects = append(s.effects, effects...)
+	return nil
+}
 
 func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 	t.Parallel()
@@ -16,8 +28,9 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 		"model":"m",
 		"output":[{"type":"reasoning","id":"reasoning_1"}]
 	}`)
+	sink := &recordingEffectSink{}
 
-	_, err := decodeResponseBuffered(raw, "ex_reasoning")
+	_, err := decodeResponseBuffered(context.Background(), raw, "ex_reasoning", sink)
 	if err == nil {
 		t.Fatal("expected decodeResponseBuffered to reject reasoning output")
 	}
@@ -30,5 +43,18 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 	}
 	if !strings.Contains(compatErr.Message, "reasoning") {
 		t.Fatalf("error message = %q, want reasoning to be mentioned", compatErr.Message)
+	}
+	if len(sink.effects) != 1 {
+		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
+	}
+	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	if !ok {
+		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+	}
+	if compatEffect.Feature != compat.ResponseReasoning || compatEffect.Outcome != compat.Reject {
+		t.Fatalf("captured effect = %#v, want response.reasoning reject", compatEffect)
+	}
+	if compatEffect.Subject != compat.Subject("wire:/output/0/type") {
+		t.Fatalf("captured subject = %q, want wire:/output/0/type", compatEffect.Subject)
 	}
 }

@@ -26,7 +26,6 @@ type CanonicalRequest struct {
 	toolBatch    ToolCallBatchPolicy
 	controls     GenerationControls
 	outputFormat OutputFormat
-	cacheIntent  CacheIntent
 }
 
 // RequestParams contains normalized semantic input for one request, including
@@ -42,7 +41,6 @@ type RequestParams struct {
 	ToolCallBatch ToolCallBatchPolicy
 	Controls      GenerationControls
 	OutputFormat  OutputFormat
-	CacheIntent   CacheIntent
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
@@ -60,10 +58,6 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		toolBatch:    params.ToolCallBatch.Clone(),
 		controls:     params.Controls.Clone(),
 		outputFormat: params.OutputFormat.Clone(),
-		cacheIntent: NewCacheIntent(CacheIntentParams{
-			Key:       params.CacheIntent.Key(),
-			Retention: params.CacheIntent.Retention(),
-		}),
 	}
 }
 
@@ -103,10 +97,6 @@ func (r CanonicalRequest) OutputFormat() OutputFormat {
 	return r.outputFormat.Clone()
 }
 
-func (r CanonicalRequest) CacheIntent() CacheIntent {
-	return r.cacheIntent
-}
-
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
 		Model:         r.model,
@@ -117,7 +107,6 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 		ToolCallBatch: r.toolBatch,
 		Controls:      r.controls,
 		OutputFormat:  r.outputFormat,
-		CacheIntent:   r.cacheIntent,
 	})
 }
 

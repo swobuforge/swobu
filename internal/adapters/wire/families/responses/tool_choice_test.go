@@ -92,7 +92,7 @@ func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := DecodeResponsesToolPolicy(rawJSON(tc.raw), tc.tools)
+			got, err := DecodeResponsesToolPolicy(rawJSON(tc.raw), tc.tools, nil, "")
 			if err != nil {
 				t.Fatalf("DecodeResponsesToolPolicy returned error: %v", err)
 			}
@@ -119,7 +119,7 @@ func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
 func TestDecodeResponsesToolPolicy_RejectsMalformedProjectedSpecificToolChoiceNameWithContext(t *testing.T) {
 	t.Parallel()
 
-	_, err := DecodeResponsesToolPolicy(rawJSON(`{"type":"function","name":"exec_command__bogus"}`), nil)
+	_, err := DecodeResponsesToolPolicy(rawJSON(`{"type":"function","name":"exec_command__bogus"}`), nil, nil, "")
 	if err == nil {
 		t.Fatal("expected DecodeResponsesToolPolicy to reject a malformed projected tool_choice name")
 	}
@@ -148,7 +148,7 @@ func TestDecodeResponsesToolPolicy_RejectsRawPlainNameForNamespacedTool(t *testi
 		canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`),
 	)
 
-	_, err := DecodeResponsesToolPolicy(rawJSON(`{"type":"function","name":"grep"}`), []canonical.ToolDecl{namespacedFunctionTool})
+	_, err := DecodeResponsesToolPolicy(rawJSON(`{"type":"function","name":"grep"}`), []canonical.ToolDecl{namespacedFunctionTool}, nil, "")
 	if err == nil {
 		t.Fatal("expected DecodeResponsesToolPolicy to reject a raw plain tool_choice name for a namespaced tool")
 	}
@@ -241,7 +241,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := encodeToolChoice(tc.policy, tc.tools)
+			got, err := encodeToolChoice(tc.policy, tc.tools, nil, "")
 			if err != nil {
 				t.Fatalf("encodeToolChoice returned error: %v", err)
 			}
@@ -253,7 +253,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 func TestEncodeToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil)
+	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, "")
 	if err == nil {
 		t.Fatal("expected encodeToolChoice to reject required without tools")
 	}

@@ -13,8 +13,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
+	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/observation"
-	"github.com/swobuforge/swobu/internal/transform"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	"github.com/swobuforge/swobu/internal/turnstate"
 )
@@ -37,7 +37,7 @@ type RuntimePoliciesSpec struct {
 	EffectSink        effect.Sink
 }
 
-// RuntimeResolver provides client and provider codec lookup for request ingress and the exchange runner.
+// RuntimeResolver provides client codec lookup and provider protocol-bundle lookup for request ingress and the exchange runner.
 type RuntimeResolver interface {
 	ClientCodec(canonical.ClientFamily) ClientCodec
 	ProviderRequestDocumentEncoder(protocolkind.ProtocolKind) ProviderRequestDocumentEncoder
@@ -74,7 +74,7 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 			DeliverySelector: selector,
 			Observations:     policies.ObservationStore,
 			Continuation:     continuation,
-			Runner:           Runner{Runtime: runtime, Transforms: transform.Registry{}, EffectSink: sink},
+			Runner:           Runner{Runtime: runtime, StageMechanics: stage.StageMechanics{}, EffectSink: sink},
 		},
 	}
 }
@@ -148,15 +148,11 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	requestDocResult, err := applyDocumentMiddleware(
+	requestDocResult, err := applyDocumentPatches(
 		ctx,
-		transform.Registry{},
+		stage.StageMechanics{},
 		exchangeID,
-		"",
-		"",
-		"",
-		transform.StageClientWireIn,
-		clientRequestWireInPort(),
+		stage.StageClientWireIn,
 		requestDoc,
 		delivery.BufferedDelivery(),
 	)
@@ -164,10 +160,14 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		return TransportResponse{}, RoutableTarget{}, err
 	}
 	requestDoc = requestDocResult.Value
-	request, decodedDelivery, err := clientCodec.DecodeClientRequest(requestDoc)
+	commitEffectsBestEffort(ctx, h.graph.Runner.EffectSink, exchangeID, requestDocResult.Effects)
+	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc)
+	commitEffectsBestEffort(ctx, h.graph.Runner.EffectSink, exchangeID, decodeResult.Effects)
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
+	request := decodeResult.Value.Request
+	decodedDelivery := decodeResult.Value.Delivery
 	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=domain
 		return TransportResponse{}, RoutableTarget{}, canonical.BadRequest("canonical request is required")
 	}

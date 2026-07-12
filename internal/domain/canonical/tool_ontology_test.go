@@ -223,6 +223,45 @@ func TestProjectedToolName_RoundTripsStructuredFunctionAndCustomDeclarations(t *
 	}
 }
 
+func TestProjectedToolName_LeavesPlainFunctionAndCustomDeclarationsRaw(t *testing.T) {
+	t.Parallel()
+
+	function := NewFunctionToolDecl(
+		"exec_command",
+		"exec_command",
+		"Run a shell command.",
+		NewToolSchemaObject(`{"type":"object","properties":{"cmd":{"type":"string"}}}`),
+	)
+	custom := NewCustomToolDecl(
+		"apply_patch",
+		"apply_patch",
+		"Use the apply_patch tool to edit files.",
+		NewToolFormatObject(`{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`),
+	)
+
+	for _, tc := range []struct {
+		name string
+		tool ToolDecl
+		want string
+	}{
+		{name: "function", tool: function, want: "exec_command"},
+		{name: "custom", tool: custom, want: "apply_patch"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			projected, err := ProjectedToolName(tc.tool)
+			if err != nil {
+				t.Fatalf("ProjectedToolName returned error: %v", err)
+			}
+			if projected != tc.want {
+				t.Fatalf("ProjectedToolName = %q, want %q", projected, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveToolDeclByName_RejectsMalformedProjectedNames(t *testing.T) {
 	t.Parallel()
 
@@ -234,6 +273,28 @@ func TestResolveToolDeclByName_RejectsMalformedProjectedNames(t *testing.T) {
 	)
 	if _, _, err := ResolveToolDeclByName([]ToolDecl{tool}, "exec_command__bogus", string(ToolKindFunction)); !isCanonicalBadRequest(err) {
 		t.Fatalf("expected malformed projected name to fail closed, got %v", err)
+	}
+}
+
+func TestResolveToolDeclByName_TreatsPlainProjectionLookingNamesAsRaw(t *testing.T) {
+	t.Parallel()
+
+	tool := NewFunctionToolDecl(
+		"__bash__cdaxodhis2",
+		"__bash__cdaxodhis2",
+		"Run a shell command.",
+		NewToolSchemaObject(`{"type":"object","properties":{"cmd":{"type":"string"}}}`),
+	)
+
+	resolved, kind, err := ResolveToolDeclByName([]ToolDecl{tool}, "__bash__cdaxodhis2", string(ToolKindFunction))
+	if err != nil {
+		t.Fatalf("ResolveToolDeclByName returned error: %v", err)
+	}
+	if kind != string(ToolKindFunction) {
+		t.Fatalf("resolved kind = %q, want %q", kind, ToolKindFunction)
+	}
+	if resolved.ToolID() != tool.ToolID() {
+		t.Fatalf("resolved tool id = %q, want %q", resolved.ToolID(), tool.ToolID())
 	}
 }
 

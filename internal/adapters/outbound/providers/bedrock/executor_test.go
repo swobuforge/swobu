@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -44,16 +46,34 @@ func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind
 	if codec == nil {
 		t.Fatalf("provider request encoder missing for protocol %s", kind)
 	}
-	wireRequest, err := codec.EncodeProviderRequestDocument(request, providerDelivery)
+	wireRequestResult, err := codec.EncodeProviderRequestDocument(request, providerDelivery, "")
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}
 	return ports.NewProviderRequest(
 		request,
-		wireRequest,
+		wireRequestResult.Value,
 		exchange.NewExecutionContract(providerDelivery),
 		newBedrockTarget(baseURL, credentialRef, kind),
 	)
+}
+
+type recordingEffectSink struct {
+	effects []effect.Effect
+}
+
+func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+	s.effects = append(s.effects, effects...)
+	return nil
+}
+
+func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	return body
 }
 
 func TestProviderRequestPathForProtocol_MantleFamiliesOnly(t *testing.T) {
@@ -532,6 +552,96 @@ func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T
 	}
 	if err := stream.Frames.Close(); err != nil {
 		t.Fatalf("close stream: %v", err)
+	}
+}
+
+func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
+
+	sawBody := make(chan string, 1)
+	sawErr := make(chan error, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%q want POST", r.Method)
+		}
+		if r.URL.Path != "/messages" {
+			t.Fatalf("path=%q want /messages", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			sawErr <- err
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = r.Body.Close()
+		sawBody <- string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","model":"openai.gpt-4.1-mini","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+	}))
+	defer upstream.Close()
+
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "openai.gpt-4.1-mini",
+		Items: []canonical.CanonicalItem{
+			canonical.NewTextItem(canonical.ItemAuthorUser, "ping"),
+		},
+	})
+	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(protocolkind.Messages)
+	if codec == nil {
+		t.Fatal("provider request encoder missing for messages")
+	}
+	wireRequestResult, err := codec.EncodeProviderRequestDocument(request, delivery.BufferedDelivery(), "")
+	if err != nil {
+		t.Fatalf("encode provider request document: %v", err)
+	}
+	exec := NewExecutor(upstream.Client())
+	sink := &recordingEffectSink{}
+	req := ports.NewProviderRequest(
+		request,
+		wireRequestResult.Value,
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
+		newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages),
+		sink,
+	)
+	req.ExchangeID = "ex-bedrock-cache-breakpoint"
+
+	ingress, err := exec.ResolveProviderIngress(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ResolveProviderIngress error: %v", err)
+	}
+	doc, ok := ingress.(carrier.WireDocument)
+	if !ok {
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireDocument", ingress)
+	}
+	if string(doc.RawBytes()) == "" {
+		t.Fatal("expected upstream response body")
+	}
+
+	var body string
+	select {
+	case err := <-sawErr:
+		t.Fatalf("read request body: %v", err)
+	case body = <-sawBody:
+	}
+	payload := mustJSONBodyMap(t, []byte(body))
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%T len=%d want one message", payload["messages"], len(messages))
+	}
+	firstMsg, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("messages[0]=%T want map[string]any", messages[0])
+	}
+	content, ok := firstMsg["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content=%T len=%d want one content block", firstMsg["content"], len(content))
+	}
+	if _, ok := content[0].(map[string]any); !ok {
+		t.Fatalf("content[0]=%T want map[string]any", content[0])
+	}
+
+	if len(sink.effects) != 0 {
+		t.Fatalf("captured effects len=%d want 0", len(sink.effects))
 	}
 }
 

@@ -14,8 +14,6 @@ type messagesRequestDTO struct {
 	TopP                   json.RawMessage      `json:"top_p,omitempty"`
 	StopSequences          json.RawMessage      `json:"stop_sequences,omitempty"`
 	Stream                 json.RawMessage      `json:"stream,omitempty"`
-	PromptCacheKey         json.RawMessage      `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention   json.RawMessage      `json:"prompt_cache_retention,omitempty"`
 }
 
 type messagesMessageDTO struct {

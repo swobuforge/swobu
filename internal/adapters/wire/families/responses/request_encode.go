@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 type EncodeOptions struct {
@@ -40,10 +41,10 @@ type functionCallOutputItem struct {
 }
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	return encodeCarrierWithOptions(req, d, EncodeOptions{})
+	return EncodeCarrierWithEffects(req, d, nil, "", EncodeOptions{})
 }
 
-func encodeCarrierWithOptions(req canonical.CanonicalRequest, d delivery.Delivery, options EncodeOptions) (carrier.WireDocument, error) {
+func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string, options EncodeOptions) (carrier.WireDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -66,12 +67,12 @@ func encodeCarrierWithOptions(req canonical.CanonicalRequest, d delivery.Deliver
 	if trimmed := strings.TrimSpace(options.Instructions); trimmed != "" { // swobu:io-string source=boundary
 		payload["instructions"] = trimmed
 	}
-	if choice, err := encodeToolChoice(req.ToolPolicy(), tools); err != nil {
+	if choice, err := encodeToolChoice(req.ToolPolicy(), tools, sink, exchangeID); err != nil {
 		return carrier.WireDocument{}, err
 	} else if choice != nil {
 		payload["tool_choice"] = choice
 	}
-	if wireTools, err := encodeResponsesTools(tools); err != nil {
+	if wireTools, err := encodeResponsesTools(tools, sink, exchangeID); err != nil {
 		return carrier.WireDocument{}, err
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools

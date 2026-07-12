@@ -20,7 +20,7 @@ func TestCustomToolResponseRoundTrip(t *testing.T) {
 		"stop",
 	)
 
-	wire, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	wire, err := (legacyResponseDocumentEncoder{}).EncodeResponseDocument(output)
 	if err != nil {
 		t.Fatalf("EncodeResponseDocument returned error: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestCustomToolResponseRoundTrip(t *testing.T) {
 		t.Fatalf("custom input = %q, want patch contents", call.Custom.Input)
 	}
 
-	reader, err := decodeResponseBuffered(wire.Raw, "ex_custom")
+	reader, err := decodeResponseBuffered(context.Background(), wire.Raw, "ex_custom", nil)
 	if err != nil {
 		t.Fatalf("decodeResponseBuffered returned error: %v", err)
 	}

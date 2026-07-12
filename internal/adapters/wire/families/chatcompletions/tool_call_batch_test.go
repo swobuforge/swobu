@@ -11,7 +11,7 @@ import (
 )
 
 func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	cases := []struct {
 		name string
 		raw  string
@@ -47,7 +47,7 @@ func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
 }
 
 func TestDecodeRequest_RejectsParallelToolCallsWrongType(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"parallel_tool_calls":"nope"}`)})
 	if err == nil {
 		t.Fatal("expected DecodeClientRequest to reject invalid parallel_tool_calls")

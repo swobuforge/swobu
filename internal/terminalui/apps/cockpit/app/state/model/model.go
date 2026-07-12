@@ -132,14 +132,14 @@ type TrafficRow struct {
 	OutputTokens        *int          `json:"output_tokens,omitempty"`
 	CacheReadTokens     *int          `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens    *int          `json:"cache_write_tokens,omitempty"`
-	Mutations           []Mutation    `json:"wire_transform_mutations,omitempty"`
+	Mutations           []Mutation    `json:"wire_patch_mutations,omitempty"`
 	ExchangeDiagnostics []string      `json:"exchange_diagnostics,omitempty"`
 	StageReports        []StageReport `json:"exchange_stage_reports,omitempty"`
 }
 
 type Mutation struct {
 	Stage         string   `json:"leg"`
-	Transform     string   `json:"transform"`
+	PatchID       string   `json:"patch_id"`
 	Changed       bool     `json:"changed"`
 	ChangedFields []string `json:"changed_fields,omitempty"`
 }

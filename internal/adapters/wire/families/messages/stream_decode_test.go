@@ -14,7 +14,7 @@ import (
 func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testing.T) {
 	t.Parallel()
 
-	codec := ResponseStreamEncoder{}
+	codec := legacyResponseStreamEncoder{}
 	outputTokens := 2
 	usage := mustTokenUsage(t, nil, &outputTokens, nil, nil)
 	events := canonical.EventSequence{

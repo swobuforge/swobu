@@ -8,7 +8,7 @@ import (
 )
 
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"unexpected":true,"stream":true}`)
 	got, delivery, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
@@ -23,7 +23,7 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 }
 
 func TestDecodeRequest_AcceptsStreamOptionsField(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`)
 	got, delivery, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {

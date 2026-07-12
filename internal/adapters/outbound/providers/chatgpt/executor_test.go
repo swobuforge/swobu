@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -37,12 +38,21 @@ func (failingCredentialResolver) ResolveCredential(ctx context.Context, provider
 
 type captureRoundTripper struct {
 	lastRequest *http.Request
+	lastBody    []byte
 	statusCode  int
 	body        string
 }
 
 func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	c.lastRequest = req.Clone(req.Context())
+	if req.Body != nil {
+		defer func() { _ = req.Body.Close() }()
+		raw, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		c.lastBody = append(c.lastBody[:0], raw...)
+	}
 	body := c.body
 	if body == "" {
 		body = `{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`
@@ -57,6 +67,24 @@ func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
 	}, nil
+}
+
+type recordingEffectSink struct {
+	effects []effect.Effect
+}
+
+func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+	s.effects = append(s.effects, effects...)
+	return nil
+}
+
+func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	return body
 }
 
 func TestListModels_LoadsBundledTierModels(t *testing.T) {
@@ -248,6 +276,55 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 	}
 	if rt.lastRequest.Header.Get(chatGPTSubagentHeaderKey) != chatGPTSubagentHeaderVal {
 		t.Fatalf("subagent=%q", rt.lastRequest.Header.Get(chatGPTSubagentHeaderKey))
+	}
+}
+
+func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
+	t.Parallel()
+
+	rt := &captureRoundTripper{}
+	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
+	sink := &recordingEffectSink{}
+	req := ports.NewProviderRequest(
+		canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: "gpt-5.4-mini",
+			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+		}),
+		carrier.WireDocument{},
+		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		exchange.NewRoutableTarget(
+			"draft",
+			string(profile.ProviderSpecChatGPT),
+			"https://api.openai.com/v1",
+			"keychain:chatgpt/plus/sess_abc",
+			protocolkind.Responses,
+			"backend_chatgpt",
+			"", "responses_stream",
+		),
+		sink,
+	)
+	req.ExchangeID = "ex-chatgpt-cache"
+
+	resp, err := exec.ResolveProviderIngress(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	streamBody, ok := resp.(carrier.WireStream)
+	if !ok || streamBody.Frames == nil {
+		t.Fatal("expected transport stream response")
+	}
+	if closeErr := streamBody.Frames.Close(); closeErr != nil {
+		t.Fatalf("close stream: %v", closeErr)
+	}
+	body := mustJSONBodyMap(t, rt.lastBody)
+	if _, ok := body["prompt_cache_key"]; ok {
+		t.Fatalf("prompt_cache_key must be omitted")
+	}
+	if _, ok := body["prompt_cache_retention"]; ok {
+		t.Fatalf("prompt_cache_retention must be omitted")
+	}
+	if len(sink.effects) != 0 {
+		t.Fatalf("compatibility effects len=%d want 0", len(sink.effects))
 	}
 }
 

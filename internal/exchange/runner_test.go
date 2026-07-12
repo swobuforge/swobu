@@ -1,4 +1,4 @@
-package exchange
+package exchange_test
 
 import (
 	"context"
@@ -15,7 +15,8 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/transform"
+	. "github.com/swobuforge/swobu/internal/exchange"
+	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 )
 
 type blockingEnvelopeReader struct {
@@ -90,7 +91,7 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 		t.Fatalf("ingress stream body was nil")
 	}
 	if !out.Progressive {
-		t.Fatal("streaming response should remain progressive without buffering middleware")
+		t.Fatal("streaming response should remain progressive without buffering wrapper")
 	}
 	streamRaw, readErr := io.ReadAll(out.Transport.Body)
 	if readErr != nil {
@@ -101,16 +102,43 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 	}
 }
 
-func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenMiddlewareBuffersResponse(t *testing.T) {
+func TestRunnerRun_StreamingWebSocketPreservesJsonTransport(t *testing.T) {
+	runner := withRuntime(bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)))
+	out, err := runner.Run(context.Background(), ExchangeInput{
+		ExchangeID:       "ex_test_websocket_stream",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingWebSocket),
+		Request:          testCanonicalRequest("m"),
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.BufferedDelivery(),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := out.Transport.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", got)
+	}
+	raw, readErr := io.ReadAll(out.Transport.Body)
+	if readErr != nil {
+		t.Fatalf("read websocket stream: %v", readErr)
+	}
+	if !strings.Contains(string(raw), `"type":"response.completed"`) {
+		t.Fatalf("websocket stream missing completion event: %s", string(raw))
+	}
+}
+
+func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenWrapperBuffersResponse(t *testing.T) {
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 	runner := withRuntime(streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE))))
-	runner.Transforms = transform.NewRegistry(nil, []transform.EventStreamTransform{
-		bufferingResponseTransform{},
+	runner.StageMechanics = stage.NewStageMechanics(nil, []stage.EventStreamWrapper{
+		bufferingResponseWrapper{},
 	})
 	out, err := runner.Run(context.Background(), ExchangeInput{
-		ExchangeID:       "ex_test_stream_buffered_middleware",
+		ExchangeID:       "ex_test_stream_buffered_wrapper",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
@@ -123,7 +151,7 @@ func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenMiddlewareBuffersRes
 		t.Fatalf("Run() error = %v", err)
 	}
 	if out.Progressive {
-		t.Fatal("buffering middleware should disable progressive streaming truth")
+		t.Fatal("buffering wrapper should disable progressive streaming truth")
 	}
 }
 
@@ -290,30 +318,30 @@ func streamingProviderIngressResolver(stream io.ReadCloser) func(context.Context
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
-			Framing: toCarrierFraming(delivery.Framing(req.Contract.ProviderDelivery.Framing)),
+			Framing: carrier.Framing(req.Contract.ProviderDelivery.Framing),
 			Frames:  carrier.FrameReaderFromReadCloser(stream),
 		}, nil
 	}
 }
 
-type bufferingResponseTransform struct{}
+type bufferingResponseWrapper struct{}
 
-func (bufferingResponseTransform) ID() string { return "test.buffering" }
+func (bufferingResponseWrapper) ID() string { return "test.buffering" }
 
-func (bufferingResponseTransform) Stage() transform.Stage {
-	return transform.StageSemanticEvents
+func (bufferingResponseWrapper) Stage() stage.Stage {
+	return stage.StageSemanticEvents
 }
 
-func (bufferingResponseTransform) Capabilities() transform.MiddlewareCapabilities {
-	return transform.MiddlewareCapabilities{BuffersResponse: true}
+func (bufferingResponseWrapper) Capabilities() stage.StageCapabilities {
+	return stage.StageCapabilities{BuffersResponse: true}
 }
 
-func (bufferingResponseTransform) Match(transform.Context, canonical.EventReader) bool {
+func (bufferingResponseWrapper) Match(stage.Context, canonical.EventReader) bool {
 	return true
 }
 
-func (bufferingResponseTransform) Wrap(_ transform.Context, reader canonical.EventReader) (canonical.EventReader, transform.Outcome, error) {
-	return reader, transform.Outcome{}, nil
+func (bufferingResponseWrapper) Wrap(_ stage.Context, reader canonical.EventReader) (stage.Result[canonical.EventReader], error) {
+	return stage.Result[canonical.EventReader]{Value: reader}, nil
 }
 
 func withRuntime(providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)) Runner {
@@ -421,25 +449,25 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct {
 	req interface {
-		DecodeClientRequest(carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error)
+		DecodeClientRequest(carrier.WireDocument) (Result[ClientRequestDecode], error)
 	}
 	doc interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (carrier.WireDocument, error)
+		EncodeResponseDocument(canonical.CanonicalOutput) (Result[carrier.WireDocument], error)
 	}
 	stream interface {
-		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
+		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (Result[carrier.WireStream], error)
 	}
 }
 
-func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestDecode], error) {
 	return c.req.DecodeClientRequest(doc)
 }
 
-func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.WireDocument], error) {
 	return c.doc.EncodeResponseDocument(output)
 }
 
-func (c testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+func (c testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.WireStream], error) {
 	return c.stream.EncodeResponseStream(events, d)
 }
 

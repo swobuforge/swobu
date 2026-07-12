@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/observation"
-	"github.com/swobuforge/swobu/internal/report"
+	"github.com/swobuforge/swobu/internal/turnstate"
 )
 
 type recordingObservationStore struct {
@@ -21,59 +22,65 @@ func (s *recordingObservationStore) Query(context.Context, observation.Observati
 	return nil, nil
 }
 
-func TestStoreBackedSink_CommitStampsObservationMetadata(t *testing.T) {
+type recordingTurnStateStore struct {
+	records []turnstate.TurnStateKey
+	values  [][]byte
+}
+
+func (s *recordingTurnStateStore) Put(_ context.Context, key turnstate.TurnStateKey, value []byte) error {
+	s.records = append(s.records, key)
+	s.values = append(s.values, append([]byte(nil), value...))
+	return nil
+}
+
+func (s *recordingTurnStateStore) Get(context.Context, turnstate.TurnStateKey) ([]byte, bool, error) {
+	return nil, false, nil
+}
+
+func TestStoreBackedSink_CommitPersistsCompatibilityAndTurnState(t *testing.T) {
 	store := &recordingObservationStore{}
-	sink := StoreBackedSink{Observations: store}
+	turnStore := &recordingTurnStateStore{}
+	sink := StoreBackedSink{Observations: store, TurnState: turnStore}
 
 	err := sink.Commit(context.Background(), "ex-1", []Effect{
-		ObservationEffect{Observation: observation.ObservationRecord{
-			RouteID:    "backend-a",
-			ProviderID: "openai",
-			ModelID:    "m",
-			Code:       "obs.code",
-			Reason:     "obs reason",
-		}},
-		LossEffect{
-			Loss: report.Loss{
-				ReasonCode: report.ReasonCode("loss_code"),
-				Reason:     "loss reason",
-				Field:      "field",
-				Kind:       report.LossUnsupportedField,
-				Severity:   report.SeverityWarning,
-			},
-			Observation: observation.ObservationRecord{
-				RouteID:    "backend-a",
-				ProviderID: "openai",
-				ModelID:    "m",
-			},
+		Compatibility{
+			Feature: compat.ToolCallID,
+			Outcome: compat.Approx,
+			Subject: compat.Subject("wire:/input/0/call_id"),
+		},
+		TurnState{
+			Op:    TurnStateReplay,
+			Key:   "turn.request.raw",
+			Value: []byte("raw-bytes"),
 		},
 	})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
 	}
-	if len(store.records) != 2 {
-		t.Fatalf("records len=%d want=2", len(store.records))
+	if len(store.records) != 1 {
+		t.Fatalf("records len=%d want=1", len(store.records))
 	}
 
 	first := store.records[0]
-	if first.RouteID != "backend-a" || first.ProviderID != "openai" || first.ModelID != "m" {
-		t.Fatalf("first record route metadata = %#v, want backend-a/openai/m", first)
+	if first.Code != string(compat.ToolCallID) {
+		t.Fatalf("first record code = %q, want %q", first.Code, compat.ToolCallID)
 	}
-	if first.Code != "obs.code" || first.Reason != "obs reason" {
-		t.Fatalf("first record observation payload = %#v, want obs.code/obs reason", first)
+	if first.Reason != "approx wire:/input/0/call_id" {
+		t.Fatalf("first record reason = %q, want approx wire:/input/0/call_id", first.Reason)
 	}
 	if first.ObservedAt == 0 {
 		t.Fatal("first record observed_at must be stamped")
 	}
-
-	second := store.records[1]
-	if second.RouteID != "backend-a" || second.ProviderID != "openai" || second.ModelID != "m" {
-		t.Fatalf("second record route metadata = %#v, want backend-a/openai/m", second)
+	if len(turnStore.records) != 1 {
+		t.Fatalf("turn state len=%d want=1", len(turnStore.records))
 	}
-	if second.Code != "loss_code" || second.Reason != "loss reason" {
-		t.Fatalf("second record loss payload = %#v, want loss_code/loss reason", second)
+	if got := turnStore.records[0].Subject; got != "turn.request.raw" {
+		t.Fatalf("turn state subject = %q, want turn.request.raw", got)
 	}
-	if second.ObservedAt == 0 {
-		t.Fatal("second record observed_at must be stamped")
+	if got := turnStore.records[0].Kind; got != turnstate.TurnStateKind(TurnStateReplay) {
+		t.Fatalf("turn state kind = %q, want %q", got, TurnStateReplay)
+	}
+	if got := string(turnStore.values[0]); got != "raw-bytes" {
+		t.Fatalf("turn state value = %q, want raw-bytes", got)
 	}
 }

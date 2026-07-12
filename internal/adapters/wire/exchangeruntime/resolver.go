@@ -127,24 +127,24 @@ func (r RuntimeResolver) providerBundle(kind protocolkind.ProtocolKind) protocol
 
 type ClientCodecBundle struct {
 	request interface {
-		DecodeClientRequest(carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error)
+		DecodeClientRequest(carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error)
 	}
 	document interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (carrier.WireDocument, error)
+		EncodeResponseDocument(canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error)
 	}
 	stream interface {
-		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
+		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (exchange.Result[carrier.WireStream], error)
 	}
 }
 
-func (b ClientCodecBundle) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (b ClientCodecBundle) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
 	return b.request.DecodeClientRequest(doc)
 }
 
-func (b ClientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (b ClientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error) {
 	return b.document.EncodeResponseDocument(output)
 }
 
-func (b ClientCodecBundle) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+func (b ClientCodecBundle) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (exchange.Result[carrier.WireStream], error) {
 	return b.stream.EncodeResponseStream(events, d)
 }

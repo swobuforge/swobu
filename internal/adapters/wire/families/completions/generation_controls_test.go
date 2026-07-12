@@ -53,7 +53,7 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-3.5","prompt":"hi","max_tokens":99,"temperature":0.15,"top_p":0.7,"stop":["END","DONE"]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
 	if err != nil {
@@ -93,7 +93,7 @@ func TestEncode_RejectsStructuredOutputFormat(t *testing.T) {
 }
 
 func TestDecodeRequest_RejectsStructuredOutputFormat(t *testing.T) {
-	codec := ClientRequestDecoder{}
+	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-3.5","prompt":"hi","response_format":{"type":"json_schema","json_schema":{"name":"reply_shape","schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}}`)
 	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
 	if err == nil || !strings.Contains(err.Error(), "structured output") {

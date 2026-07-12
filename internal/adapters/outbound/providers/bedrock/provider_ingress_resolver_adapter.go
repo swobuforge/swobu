@@ -9,11 +9,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
+	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -67,6 +69,12 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	wireReqCarrier := req.RequestDocument
 	if wireReqCarrier.IsEmpty() {
 		return nil, canonical.InternalError("provider request document is required")
+	}
+	if err := providercompat.EmitStructuredOutputDecisions(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, req.Request.OutputFormat()); err != nil {
+		return nil, err
+	}
+	if err := providercompat.EmitToolSchemaStrictDecision(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, req.Request.Tools(), req.Target.ProtocolKind != protocolkind.Messages); err != nil {
+		return nil, err
 	}
 
 	wireReqBody := wireReqCarrier.RawBytes()

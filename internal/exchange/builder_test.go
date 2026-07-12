@@ -10,33 +10,33 @@ import (
 
 type markerEffect string
 
-func (e markerEffect) Kind() effect.Kind { return effect.KindObservation }
+func (e markerEffect) Kind() effect.Kind { return effect.KindCompatibility }
 
-func TestBuilder_BuildWrapsMiddlewareInRegistrationOrder(t *testing.T) {
+func TestBuilder_BuildWrapsWrappersInRegistrationOrder(t *testing.T) {
 	port := NewPort[string](PortID("semantic.request"))
 	builder := NewBuilder(port)
 	builder.Link("normalize", func(_ context.Context, input string) (Result[string], error) {
 		return NewResult(input+"|link", markerEffect("link")), nil
 	})
-	builder.Use(func(next Step[string, string]) Step[string, string] {
+	builder.Wrap(func(next Step[string, string]) Step[string, string] {
 		return func(ctx context.Context, input string) (Result[string], error) {
-			res, err := next(ctx, input+"|mw1-in")
+			res, err := next(ctx, input+"|wrap1-in")
 			if err != nil {
 				return Result[string]{}, err
 			}
-			res.Value += "|mw1-out"
-			res.Effects = append([]effect.Effect{markerEffect("mw1")}, res.Effects...)
+			res.Value += "|wrap1-out"
+			res.Effects = append([]effect.Effect{markerEffect("wrap1")}, res.Effects...)
 			return res, nil
 		}
 	})
-	builder.Use(func(next Step[string, string]) Step[string, string] {
+	builder.Wrap(func(next Step[string, string]) Step[string, string] {
 		return func(ctx context.Context, input string) (Result[string], error) {
-			res, err := next(ctx, input+"|mw2-in")
+			res, err := next(ctx, input+"|wrap2-in")
 			if err != nil {
 				return Result[string]{}, err
 			}
-			res.Value += "|mw2-out"
-			res.Effects = append([]effect.Effect{markerEffect("mw2")}, res.Effects...)
+			res.Value += "|wrap2-out"
+			res.Effects = append([]effect.Effect{markerEffect("wrap2")}, res.Effects...)
 			return res, nil
 		}
 	})
@@ -53,11 +53,11 @@ func TestBuilder_BuildWrapsMiddlewareInRegistrationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("step() error = %v", err)
 	}
-	if got.Value != "start|mw1-in|mw2-in|link|base|mw2-out|mw1-out" {
-		t.Fatalf("value = %q, want %q", got.Value, "start|mw1-in|mw2-in|link|base|mw2-out|mw1-out")
+	if got.Value != "start|wrap1-in|wrap2-in|link|base|wrap2-out|wrap1-out" {
+		t.Fatalf("value = %q, want %q", got.Value, "start|wrap1-in|wrap2-in|link|base|wrap2-out|wrap1-out")
 	}
-	if gotEffects := markerEffectIDs(got.Effects); strings.Join(gotEffects, ",") != "mw1,mw2,link,base" {
-		t.Fatalf("effects = %v, want %v", gotEffects, []string{"mw1", "mw2", "link", "base"})
+	if gotEffects := markerEffectIDs(got.Effects); strings.Join(gotEffects, ",") != "wrap1,wrap2,link,base" {
+		t.Fatalf("effects = %v, want %v", gotEffects, []string{"wrap1", "wrap2", "link", "base"})
 	}
 }
 

@@ -1,21 +1,25 @@
 package chatcompletions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes tool declaration variants.
-func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO) ([]canonical.ToolDecl, error) {
+func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]canonical.ToolDecl, 0, len(tools))
-	for _, tool := range tools {
+	for idx, tool := range tools {
 		kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
 		switch kind {
 		case "function":
@@ -30,9 +34,11 @@ func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO) ([]can
 			if name == "" {
 				return nil, canonical.BadRequest("chat completions request tool declarations require a name")
 			}
-			id, leaf, err := canonical.ParseProjectedToolName(name, canonical.ToolKindFunction)
-			if err != nil {
-				return nil, err
+			id, leaf, projected := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
+			if projected {
+				if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tools/"+strconv.Itoa(idx)+"/name")); err != nil {
+					return nil, err
+				}
 			}
 			decl := canonical.NewFunctionToolDecl(id.String(), leaf, tool.Function.Description, schema)
 			decl.Strict = cloneBoolPointer(tool.Function.Strict)
@@ -49,9 +55,11 @@ func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO) ([]can
 			if name == "" {
 				return nil, canonical.BadRequest("chat completions request custom tools require a name")
 			}
-			id, leaf, err := canonical.ParseProjectedToolName(name, canonical.ToolKindCustom)
-			if err != nil {
-				return nil, err
+			id, leaf, projected := canonical.ToolIdentityFromWire(name, canonical.ToolKindCustom)
+			if projected {
+				if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tools/"+strconv.Itoa(idx)+"/name")); err != nil {
+					return nil, err
+				}
 			}
 			decl := canonical.NewCustomToolDecl(id.String(), leaf, tool.Custom.Description, format)
 			out = append(out, decl)
@@ -73,13 +81,13 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 	return canonical.NewToolSchemaObject(trimmed), nil
 }
 
-func encodeChatCompletionsTools(tools []canonical.ToolDecl) ([]chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) ([]chatCompletionsToolDefinitionDTO, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]chatCompletionsToolDefinitionDTO, 0, len(tools))
-	for _, tool := range tools {
-		wire, err := encodeChatCompletionsTool(tool)
+	for idx, tool := range tools {
+		wire, err := encodeChatCompletionsTool(tool, sink, exchangeID, idx)
 		if err != nil {
 			return nil, err
 		}
@@ -88,27 +96,30 @@ func encodeChatCompletionsTools(tools []canonical.ToolDecl) ([]chatCompletionsTo
 	return out, nil
 }
 
-func encodeChatCompletionsTool(tool canonical.ToolDecl) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsTool(tool canonical.ToolDecl, sink effect.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
 	if tool == nil {
 		return chatCompletionsToolDefinitionDTO{}, canonical.BadRequest("chat completions request tool declarations are invalid")
 	}
 	switch decl := tool.(type) {
 	case canonical.FunctionToolDecl:
-		return encodeChatCompletionsFunctionToolDecl(decl)
+		return encodeChatCompletionsFunctionToolDecl(decl, sink, exchangeID, index)
 	case *canonical.FunctionToolDecl:
-		return encodeChatCompletionsFunctionToolDecl(*decl)
+		return encodeChatCompletionsFunctionToolDecl(*decl, sink, exchangeID, index)
 	case canonical.CustomToolDecl:
-		return encodeChatCompletionsCustomToolDecl(decl)
+		return encodeChatCompletionsCustomToolDecl(decl, sink, exchangeID, index)
 	case *canonical.CustomToolDecl:
-		return encodeChatCompletionsCustomToolDecl(*decl)
+		return encodeChatCompletionsCustomToolDecl(*decl, sink, exchangeID, index)
 	default:
 		return chatCompletionsToolDefinitionDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool declarations; got " + chatCompletionsUnsupportedToolKind(tool))
 	}
 }
 
-func encodeChatCompletionsFunctionToolDecl(decl canonical.FunctionToolDecl) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
 	name, err := canonical.ProjectedToolName(decl)
 	if err != nil {
+		return chatCompletionsToolDefinitionDTO{}, err
+	}
+	if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
 		return chatCompletionsToolDefinitionDTO{}, err
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
@@ -133,9 +144,12 @@ func encodeChatCompletionsFunctionToolDecl(decl canonical.FunctionToolDecl) (cha
 	return wire, nil
 }
 
-func encodeChatCompletionsCustomToolDecl(decl canonical.CustomToolDecl) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsCustomToolDecl(decl canonical.CustomToolDecl, sink effect.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
 	name, err := canonical.ProjectedToolName(decl)
 	if err != nil {
+		return chatCompletionsToolDefinitionDTO{}, err
+	}
+	if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
 		return chatCompletionsToolDefinitionDTO{}, err
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
@@ -204,7 +218,7 @@ func chatCompletionsUnsupportedToolKind(tool canonical.ToolDecl) string {
 	return "unknown"
 }
 
-func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDecl) (canonical.ToolPolicy, error) {
+func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
 		if len(tools) > 0 {
@@ -252,7 +266,17 @@ func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.Tool
 		}
 		resolved, resolvedType, err := canonical.ResolveToolDeclByName(tools, name, canonical.ToolTypeFunction)
 		if err != nil {
+			if strings.Contains(name, "__") {
+				if emitErr := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, nil, compat.Reject, compat.Subject("wire:/tool_choice/name")); emitErr != nil {
+					return canonical.ToolPolicy{}, emitErr
+				}
+			}
 			return canonical.ToolPolicy{}, err
+		}
+		if strings.Contains(name, "__") {
+			if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tool_choice/name")); err != nil {
+				return canonical.ToolPolicy{}, err
+			}
 		}
 		specificID := resolved.ToolID()
 		policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specificID)
@@ -265,7 +289,17 @@ func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.Tool
 		}
 		resolved, resolvedType, err := canonical.ResolveToolDeclByName(tools, name, canonical.ToolTypeCustom)
 		if err != nil {
+			if strings.Contains(name, "__") {
+				if emitErr := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, nil, compat.Reject, compat.Subject("wire:/tool_choice/name")); emitErr != nil {
+					return canonical.ToolPolicy{}, emitErr
+				}
+			}
 			return canonical.ToolPolicy{}, err
+		}
+		if strings.Contains(name, "__") {
+			if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tool_choice/name")); err != nil {
+				return canonical.ToolPolicy{}, err
+			}
 		}
 		specificID := resolved.ToolID()
 		policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specificID)
@@ -284,6 +318,25 @@ func cloneBoolPointer(ptr *bool) *bool {
 	return &value
 }
 
+func emitChatCompletionsToolNameNamespaceDecision(sink effect.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
+	if sink == nil || subject == "" {
+		return nil
+	}
+	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
+		return nil
+	}
+	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
+		effect.Compatibility{
+			Feature: compat.ToolNameNamespace,
+			Outcome: outcome,
+			Subject: subject,
+		},
+	}); err != nil {
+		return canonical.InternalError("compatibility effect sink commit failed")
+	}
+	return nil
+}
+
 func hasChatCompletionsCustomTools(tools []canonical.ToolDecl) bool {
 	for _, tool := range tools {
 		if tool == nil {
@@ -297,7 +350,7 @@ func hasChatCompletionsCustomTools(tools []canonical.ToolDecl) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
-func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl) (any, error) {
+func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -323,6 +376,9 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 		}
 		name, err := canonical.ProjectedToolName(decl)
 		if err != nil {
+			return nil, err
+		}
+		if err := emitChatCompletionsToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tool_choice/name")); err != nil {
 			return nil, err
 		}
 		switch resolvedType {

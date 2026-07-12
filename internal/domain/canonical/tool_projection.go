@@ -49,11 +49,11 @@ func projectedToolNameForID(id SemanticToolID, kind string) (string, error) {
 	if leaf == "" {
 		return "", BadRequest("canonical tool projection requires a tool name")
 	}
-	digest := toolProjectionDigest(normalizedID.String())
-	if namespace != "" {
-		return namespace + toolProjectionSeparator + leaf + toolProjectionSeparator + digest, nil
+	if namespace == "" {
+		return leaf, nil
 	}
-	return toolProjectionSeparator + leaf + toolProjectionSeparator + digest, nil
+	digest := toolProjectionDigest(normalizedID.String())
+	return namespace + toolProjectionSeparator + leaf + toolProjectionSeparator + digest, nil
 }
 
 // ParseProjectedToolName resolves one projected wire name back to canonical
@@ -113,6 +113,34 @@ func ParseProjectedToolName(raw string, kind ToolKind) (SemanticToolID, string, 
 		return SemanticToolID{}, "", BadRequest("canonical request tool references an undeclared tool")
 	}
 	return foundID, foundLeaf, nil
+}
+
+// ToolIdentityFromWire resolves one flat wire token into a canonical tool ID
+// and visible leaf name.
+//
+// Namespace-bearing projections round-trip to their canonical identity.
+// Otherwise the token stays raw.
+func ToolIdentityFromWire(raw string, kind ToolKind) (SemanticToolID, string, bool) {
+	trimmed := strings.TrimSpace(raw) // swobu:io-string source=boundary
+	if trimmed == "" {
+		return SemanticToolID{}, "", false
+	}
+	id, leaf, ok := verifiedProjectedToolIdentityFromWire(trimmed, kind)
+	if ok {
+		return id, leaf, true
+	}
+	return NewSemanticToolIDFor(ToolOriginRequest, kind, trimmed), trimmed, false
+}
+
+func verifiedProjectedToolIdentityFromWire(name string, kind ToolKind) (SemanticToolID, string, bool) {
+	id, leaf, err := ParseProjectedToolName(strings.TrimSpace(name), kind) // swobu:io-string source=boundary
+	if err != nil {
+		return SemanticToolID{}, "", false
+	}
+	if !strings.Contains(strings.TrimSpace(id.Path), "/") { // swobu:io-string source=domain
+		return SemanticToolID{}, "", false
+	}
+	return id, leaf, true
 }
 
 func toolProjectionDigest(material string) string {

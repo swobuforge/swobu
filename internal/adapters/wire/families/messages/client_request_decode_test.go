@@ -38,7 +38,7 @@ func TestClientRequestDecoder_InfersSinglePendingToolResultID(t *testing.T) {
 		]
 	}`)
 
-	request, clientDelivery, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewWireDocument(
+	request, clientDelivery, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewWireDocument(
 		carrier.StageClientRequestIn,
 		protocolkind.Messages,
 		"application/json",

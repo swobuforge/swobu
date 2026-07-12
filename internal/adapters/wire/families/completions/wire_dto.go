@@ -3,16 +3,14 @@ package completions
 import "encoding/json"
 
 type completionsRequestDTO struct {
-	Model                string          `json:"model"`
-	Prompt               string          `json:"prompt"`
-	ResponseFormat       json.RawMessage `json:"response_format,omitempty"`
-	MaxTokens            json.RawMessage `json:"max_tokens,omitempty"`
-	Temperature          json.RawMessage `json:"temperature,omitempty"`
-	TopP                 json.RawMessage `json:"top_p,omitempty"`
-	Stop                 json.RawMessage `json:"stop,omitempty"`
-	Stream               json.RawMessage `json:"stream,omitempty"`
-	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
+	Model          string          `json:"model"`
+	Prompt         string          `json:"prompt"`
+	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
+	MaxTokens      json.RawMessage `json:"max_tokens,omitempty"`
+	Temperature    json.RawMessage `json:"temperature,omitempty"`
+	TopP           json.RawMessage `json:"top_p,omitempty"`
+	Stop           json.RawMessage `json:"stop,omitempty"`
+	Stream         json.RawMessage `json:"stream,omitempty"`
 }
 
 type completionsResponseDTO struct {
@@ -36,13 +34,20 @@ type completionsChunkDTO struct {
 }
 
 type completionsUsageDTO struct {
-	PromptTokens     int                        `json:"prompt_tokens"`
-	CompletionTokens int                        `json:"completion_tokens"`
-	TotalTokens      int                        `json:"total_tokens"`
-	PromptDetails    *completionsPromptUsageDTO `json:"prompt_tokens_details,omitempty"`
+	PromptTokens      int                                   `json:"prompt_tokens"`
+	CompletionTokens  int                                   `json:"completion_tokens"`
+	TotalTokens       int                                   `json:"total_tokens"`
+	PromptDetails     *completionsPromptUsageDTO            `json:"prompt_tokens_details,omitempty"`
+	CompletionDetails *completionsCompletionTokenDetailsDTO `json:"completion_tokens_details,omitempty"`
 }
 
 type completionsPromptUsageDTO struct {
 	CachedTokens     int `json:"cached_tokens,omitempty"`
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+}
+
+type completionsCompletionTokenDetailsDTO struct {
+	// Zero is meaningful here; omitempty would erase a provider-reported
+	// reasoning token count from the protocol surface.
+	ReasoningTokens int `json:"reasoning_tokens"`
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
+	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -69,10 +70,17 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if resolvedDelivery.IsStreaming() && resolvedDelivery.Framing != delivery.FramingSSE {
 		return nil, canonical.UnsupportedDelivery("anthropic provider does not implement the requested delivery framing")
 	}
-	wireReq, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(req.Request, resolvedDelivery)
+	if err := providercompat.EmitToolSchemaStrictDecision(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, req.Request.Tools(), false); err != nil {
+		return nil, err
+	}
+	wireReqResult, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(req.Request, resolvedDelivery, req.ExchangeID)
+	if commitErr := providercompat.CommitEffects(ctx, req.EffectSink, req.ExchangeID, wireReqResult.Effects); commitErr != nil {
+		return nil, commitErr
+	}
 	if err != nil {
 		return nil, err
 	}
+	wireReq := wireReqResult.Value
 	wireReqBody := wireReq.RawBytes()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpedge.JoinBaseURLAndPath(req.Target.BaseURL, "/messages"), bytes.NewReader(wireReqBody))
 	if err != nil {

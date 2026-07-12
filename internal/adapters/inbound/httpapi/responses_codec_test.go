@@ -64,7 +64,7 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := responses.DecodeResponsesToolPolicy(rawJSON(tc.raw), tc.tools)
+			got, err := responses.DecodeResponsesToolPolicy(rawJSON(tc.raw), tc.tools, nil, "")
 			if err != nil {
 				t.Fatalf("decodeResponsesToolPolicy returned error: %v", err)
 			}
@@ -106,7 +106,7 @@ func TestDecodeResponsesToolPolicy_UnknownValuesFailClosed(t *testing.T) {
 		`{"type":""}`,
 		`{}`,
 	} {
-		got, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil)
+		got, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil, nil, "")
 		if !isBadRequestError(err) {
 			t.Fatalf("raw=%s err=%v, want BAD_REQUEST", raw, err)
 		}
@@ -129,7 +129,7 @@ func TestDecodeResponsesToolPolicy_InvalidShapesFailBadRequest(t *testing.T) {
 		`{"type":"future_mode","name":"grep"}`,
 		`{`,
 	} {
-		_, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil)
+		_, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil, nil, "")
 		if !isBadRequestError(err) {
 			t.Fatalf("raw=%s err=%v, want BAD_REQUEST", raw, err)
 		}

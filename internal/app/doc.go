@@ -2,9 +2,13 @@
 //
 // The real ownership lives in child packages:
 //
-// - `app/requestpath`: one protocol request lifecycle
+// - `app/operator/authplane`: auth/session orchestration and credential state
+// - `app/operator/chatgptlogin`: ChatGPT auth callback and device-flow helpers
+// - `app/operator/client`: client-facing endpoint selection and probe helpers
+// - `app/operator/clientprofile`: operator client profile actions and catalogs
+// - `app/operator/controlplane`: daemon version and control-plane helpers
+// - `app/operator/daemonlifecycle`: daemon start/attach/shutdown use cases
 // - `app/operator/endpoints`: daemon-owned endpoint-intent control use cases
-// - `app/operator/modelcatalog`: daemon-owned operator model-catalog query
 //
 // Inbound adapters call these use-case packages. The daemon process hosts them.
 // They are neither UI packages nor runtime-container packages.
