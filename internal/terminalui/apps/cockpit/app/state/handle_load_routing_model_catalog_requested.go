@@ -9,7 +9,7 @@ import (
 )
 
 func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModelCatalogRequestedAction) []update.Effect {
-	scope := strings.TrimSpace(value.Scope) // swobu:io-string source=boundary
+	scope := strings.TrimSpace(value.Scope)           // swobu:io-string source=boundary
 	authHeader := strings.TrimSpace(value.AuthHeader) // swobu:io-string source=boundary
 	if authHeader == "" {
 		authHeader = stateModel.ProviderDefaultAuthHeader(value.ProviderSpec)

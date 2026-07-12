@@ -330,9 +330,9 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 	if err != nil {
 		normalized := normalizeModelCatalogProbeLoadError(err)
 		return []update.Action{RoutingModelCatalogLoaded{
-			Scope:            strings.TrimSpace(eff.Scope),            // swobu:io-string source=boundary
-			ProviderSpec:     strings.TrimSpace(eff.ProviderSpec),     // swobu:io-string source=boundary
-			BaseURL:          strings.TrimSpace(eff.BaseURL),          // swobu:io-string source=boundary
+			Scope:            strings.TrimSpace(eff.Scope),        // swobu:io-string source=boundary
+			ProviderSpec:     strings.TrimSpace(eff.ProviderSpec), // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(eff.BaseURL),      // swobu:io-string source=boundary
 			AuthHeader:       authHeader,
 			CredentialRef:    strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
@@ -340,9 +340,9 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 		}}
 	}
 	return []update.Action{RoutingModelCatalogLoaded{
-		Scope:                    strings.TrimSpace(eff.Scope),            // swobu:io-string source=boundary
-		ProviderSpec:             strings.TrimSpace(eff.ProviderSpec),     // swobu:io-string source=boundary
-		BaseURL:                  strings.TrimSpace(eff.BaseURL),          // swobu:io-string source=boundary
+		Scope:                    strings.TrimSpace(eff.Scope),        // swobu:io-string source=boundary
+		ProviderSpec:             strings.TrimSpace(eff.ProviderSpec), // swobu:io-string source=boundary
+		BaseURL:                  strings.TrimSpace(eff.BaseURL),      // swobu:io-string source=boundary
 		AuthHeader:               authHeader,
 		CredentialRef:            strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 		ProviderProtocol:         strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary

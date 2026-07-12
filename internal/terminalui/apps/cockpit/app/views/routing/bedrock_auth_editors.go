@@ -159,13 +159,13 @@ func addModelBedrockAuthProfileEditor(ctx *retained.Context[state.Model], draft 
 			next.ModelID = ""
 			panel.setDraft(next)
 			return []update.Action{
-					state.LoadRoutingModelCatalogRequestedAction{
-						Scope:            state.RoutingModelCatalogScopeAddModelDraft,
-						ProviderSpec:     trimRoutingInput(next.ProviderSpec),
-						AuthHeader:       trimRoutingInput(next.AuthHeader),
-						ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
-						BaseURL:          trimRoutingInput(next.BaseURL),
-						CredentialRef:    trimRoutingInput(next.CredentialRef),
+				state.LoadRoutingModelCatalogRequestedAction{
+					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+					AuthHeader:       trimRoutingInput(next.AuthHeader),
+					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
+					BaseURL:          trimRoutingInput(next.BaseURL),
+					CredentialRef:    trimRoutingInput(next.CredentialRef),
 				},
 				state.SetInteractionMode{Mode: state.InteractionModeManageList},
 				interaction.FocusKeyAction{Key: "add-model/profile"},

@@ -26,7 +26,7 @@ type bedrockAuthMode string
 const (
 	bedrockAuthModeAWSProfile bedrockAuthMode = "aws_profile"
 	bedrockAuthModeAPIKeyEnv  bedrockAuthMode = "api_key_env"
-	bedrockSigningService     = "bedrock"
+	bedrockSigningService                     = "bedrock"
 )
 
 func mustParseURL(raw string) *url.URL {

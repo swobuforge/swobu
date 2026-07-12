@@ -335,8 +335,8 @@ func handleFilterableQueryInput(
 	setState(cur)
 	filtered := filterablePickerItems(items, cur.Query)
 	if len(filtered) == 1 && filtered[0].OnChoose != nil {
-		typed := strings.TrimSpace(cur.Query) // swobu:io-string source=boundary
-		label := strings.TrimSpace(filtered[0].Label) // swobu:io-string source=boundary
+		typed := strings.TrimSpace(cur.Query)           // swobu:io-string source=boundary
+		label := strings.TrimSpace(filtered[0].Label)   // swobu:io-string source=boundary
 		search := strings.TrimSpace(filtered[0].Search) // swobu:io-string source=boundary
 		if search == "" {
 			search = label

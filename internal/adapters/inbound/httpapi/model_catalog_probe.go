@@ -49,7 +49,7 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 	}
-	authHeader := strings.TrimSpace(query.Get("auth_header")) // swobu:io-string source=boundary
+	authHeader := strings.TrimSpace(query.Get("auth_header"))             // swobu:io-string source=boundary
 	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
 	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
 	models, resolvedVariant, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, providerProtocol)
