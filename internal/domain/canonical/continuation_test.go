@@ -48,12 +48,35 @@ func TestCurrentTurnDelta_FallsBackToCloneWhenNoUserItemExists(t *testing.T) {
 
 func TestContinuationRecord_CloneCopiesPointerFieldsAndPayloads(t *testing.T) {
 	parent := NewContinuationID("resp_parent")
+	maxTokens := 32
+	controls, err := NewGenerationControls(GenerationControlsParams{
+		MaxOutputTokens: &maxTokens,
+	})
+	if err != nil {
+		t.Fatalf("NewGenerationControls returned error: %v", err)
+	}
+	outputFormat, err := NewOutputFormat(OutputFormatParams{
+		Kind:        OutputFormatJSONSchema,
+		Name:        "continuation_reply",
+		Description: "structured continuation reply",
+		Schema:      NewRawJSONObject(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		Strict:      true,
+	})
+	if err != nil {
+		t.Fatalf("NewOutputFormat returned error: %v", err)
+	}
 	record := ContinuationRecord{
-		ID:           NewContinuationID("resp_child"),
-		Parent:       &parent,
-		RouteID:      "alpha",
-		ModelID:      "m",
-		RequestDelta: NewCanonicalRequest(RequestParams{Model: "m", Items: []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")}}),
+		ID:      NewContinuationID("resp_child"),
+		Parent:  &parent,
+		RouteID: "alpha",
+		ModelID: "m",
+		RequestDelta: NewCanonicalRequest(RequestParams{
+			Model:         "m",
+			Items:         []CanonicalItem{NewTextItem(ItemAuthorUser, "hi")},
+			ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
+			Controls:      controls,
+			OutputFormat:  outputFormat,
+		}),
 		Response: NewConversationOutput(
 			"resp_child",
 			"m",
@@ -68,6 +91,15 @@ func TestContinuationRecord_CloneCopiesPointerFieldsAndPayloads(t *testing.T) {
 	}
 	if cloned.RequestDelta.Items()[0].Text != "hi" {
 		t.Fatal("Clone() lost request delta")
+	}
+	if got := cloned.RequestDelta.ToolCallBatch(); got.Mode != ToolCallBatchAtMostOne {
+		t.Fatalf("Clone() lost tool call batch: %q", got.Mode)
+	}
+	if got, ok := cloned.RequestDelta.Controls().Limits.MaxOutputTokens.Value(); !ok || got != 32 {
+		t.Fatalf("Clone() lost generation controls: (%d, %v)", got, ok)
+	}
+	if gotFormat := cloned.RequestDelta.OutputFormat(); gotFormat.Kind != OutputFormatJSONSchema || gotFormat.Name != "continuation_reply" || gotFormat.Description != "structured continuation reply" || gotFormat.Schema.RawObject() != `{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}` || !gotFormat.Strict {
+		t.Fatalf("Clone() lost output format: %#v", gotFormat)
 	}
 	if cloned.Response.ResultID() != "resp_child" {
 		t.Fatal("Clone() lost response snapshot")

@@ -15,11 +15,18 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	}
 	inputTokens := 100
 	outputTokens := 7
+	reasoningTokens := 11
 	cacheReadTokens := 64
 	cacheWriteTokens := 4
-	usage, err := NewTokenUsageWithOptional(&inputTokens, &outputTokens, &cacheReadTokens, &cacheWriteTokens)
+	usage, err := NewTokenUsage(TokenUsageParams{
+		InputTokens:      &inputTokens,
+		OutputTokens:     &outputTokens,
+		ReasoningTokens:  &reasoningTokens,
+		CacheReadTokens:  &cacheReadTokens,
+		CacheWriteTokens: &cacheWriteTokens,
+	})
 	if err != nil {
-		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
+		t.Fatalf("NewTokenUsage returned error: %v", err)
 	}
 
 	chain := []string{"bridge", "responses"}
@@ -86,6 +93,9 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	}
 	if got, ok := event.TokenUsage().OutputTokens(); !ok || got != 7 {
 		t.Fatalf("token usage output = (%d,%v), want (7,true)", got, ok)
+	}
+	if got, ok := event.TokenUsage().ReasoningTokens(); !ok || got != 11 {
+		t.Fatalf("token usage reasoning = (%d,%v), want (11,true)", got, ok)
 	}
 	if got, ok := event.TokenUsage().CacheReadTokens(); !ok || got != 64 {
 		t.Fatalf("token usage cache read = (%d,%v), want (64,true)", got, ok)

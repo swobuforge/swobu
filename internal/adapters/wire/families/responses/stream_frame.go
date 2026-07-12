@@ -12,6 +12,7 @@ type streamFrame struct {
 	ID        string `json:"id"`
 	Model     string `json:"model"`
 	Delta     string `json:"delta"`
+	Input     string `json:"input"`
 	Status    string `json:"status"`
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
@@ -28,6 +29,7 @@ type streamFrame struct {
 		CallID      string `json:"call_id"`
 		Name        string `json:"name"`
 		Arguments   string `json:"arguments"`
+		Input       string `json:"input"`
 		ServerLabel string `json:"server_label"`
 	} `json:"item"`
 }
@@ -42,10 +44,13 @@ func (s *responsesEventReader) handleFrame(frame streamFrame) (bool, canonical.E
 		s.handleOutputTextDelta(frame)
 		return true, s.shiftPendingEvent(), nil
 	case "response.function_call_arguments.delta":
-		s.handleFunctionCallArgumentsDelta(frame)
+		s.handleToolArgumentsDelta(frame, canonical.ToolTypeFunction)
 		return true, s.shiftPendingEvent(), nil
 	case "response.mcp_call_arguments.delta":
-		s.handleFunctionCallArgumentsDelta(frame)
+		s.handleToolArgumentsDelta(frame, canonical.ToolTypeFunction)
+		return true, s.shiftPendingEvent(), nil
+	case "response.custom_tool_call_input.delta":
+		s.handleToolArgumentsDelta(frame, canonical.ToolTypeCustom)
 		return true, s.shiftPendingEvent(), nil
 	case "response.output_item.added":
 		if !s.handleOutputItemAdded(frame) {
@@ -53,10 +58,18 @@ func (s *responsesEventReader) handleFrame(frame streamFrame) (bool, canonical.E
 		}
 		return true, s.shiftPendingEvent(), nil
 	case "response.function_call_arguments.done":
-		s.handleFunctionCallArgumentsDone(frame)
+		s.handleToolArgumentsDone(frame, canonical.ToolTypeFunction)
 		return true, s.shiftPendingEvent(), nil
 	case "response.mcp_call_arguments.done":
-		s.handleFunctionCallArgumentsDone(frame)
+		s.handleToolArgumentsDone(frame, canonical.ToolTypeFunction)
+		return true, s.shiftPendingEvent(), nil
+	case "response.custom_tool_call_input.done":
+		s.handleToolArgumentsDone(frame, canonical.ToolTypeCustom)
+		return true, s.shiftPendingEvent(), nil
+	case "response.output_item.done":
+		if !s.handleOutputItemDone(frame) {
+			return false, canonical.Event{}, nil
+		}
 		return true, s.shiftPendingEvent(), nil
 	case "response.completed":
 		s.handleResponseCompleted(frame)
@@ -96,46 +109,76 @@ func (s *responsesEventReader) handleOutputTextDelta(frame streamFrame) {
 	s.enqueueTextDelta(s.textEnvID, frame.Delta)
 }
 
-func (s *responsesEventReader) handleFunctionCallArgumentsDelta(frame streamFrame) {
+func (s *responsesEventReader) handleToolArgumentsDelta(frame streamFrame, toolType string) {
 	itemID := fallbackItemID(frame.ItemID, frame.CallID)
-	if s.toolEnvIDs[itemID] == "" {
-		toolEnvID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, itemID))
-		s.toolEnvIDs[itemID] = toolEnvID
-		s.enqueueEnvelopeStart(toolEnvID, s.responseID, canonical.EnvelopeStartPayload{
-			Kind:      canonical.EnvToolCall,
-			Name:      frame.Name,
-			ToolUseID: frame.CallID,
-		}, canonical.EventMetadataFields{NativeID: itemID})
-	}
-	s.enqueueArgsDelta(s.toolEnvIDs[itemID], frame.Delta)
+	s.ensureToolState(itemID, toolType, frame.CallID, frame.Name)
+	s.enqueueToolArgs(itemID, frame.Delta)
 }
 
 func (s *responsesEventReader) handleOutputItemAdded(frame streamFrame) bool {
-	itemType := strings.TrimSpace(frame.Item.Type)             // swobu:io-string source=boundary
-	if itemType != "function_call" && itemType != "mcp_call" { // swobu:io-string source=boundary
+	itemType := strings.TrimSpace(frame.Item.Type) // swobu:io-string source=boundary
+	var toolType string
+	switch itemType {
+	case "function_call", "mcp_call":
+		toolType = canonical.ToolTypeFunction
+	case "custom_tool_call":
+		toolType = canonical.ToolTypeCustom
+	default:
 		return false
 	}
 	itemID := fallbackItemID(frame.Item.ID, frame.Item.CallID)
-	if s.toolEnvIDs[itemID] != "" {
+	if _, ok := s.toolStates[itemID]; ok {
 		return false
 	}
-	toolEnvID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, itemID))
-	s.toolEnvIDs[itemID] = toolEnvID
-	s.enqueueEnvelopeStart(toolEnvID, s.responseID, canonical.EnvelopeStartPayload{
-		Kind:      canonical.EnvToolCall,
-		Name:      frame.Item.Name,
-		ToolUseID: frame.Item.CallID,
-	}, canonical.EventMetadataFields{NativeID: itemID})
+	state := s.ensureToolState(itemID, toolType, frame.Item.CallID, frame.Item.Name)
+	initial := ""
+	if toolType == canonical.ToolTypeCustom {
+		initial = frame.Item.Input
+	} else {
+		initial = frame.Item.Arguments
+	}
+	if initial != "" {
+		s.enqueueArgsDelta(state.envID, initial)
+		s.toolInputs[itemID] += initial
+	}
 	return true
 }
 
-func (s *responsesEventReader) handleFunctionCallArgumentsDone(frame streamFrame) {
+func (s *responsesEventReader) handleToolArgumentsDone(frame streamFrame, toolType string) {
 	itemID := fallbackItemID(frame.ItemID, frame.CallID)
-	toolEnvID := s.toolEnvIDs[itemID]
-	if toolEnvID != "" {
-		s.enqueueEnvelopeEnd(toolEnvID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
+	state := s.ensureToolState(itemID, toolType, frame.CallID, frame.Name)
+	finalInput := frame.Input
+	if finalInput == "" {
+		if toolType == canonical.ToolTypeCustom {
+			finalInput = frame.Item.Input
+		} else {
+			finalInput = frame.Arguments
+			if finalInput == "" {
+				finalInput = frame.Item.Arguments
+			}
+		}
 	}
-	delete(s.toolEnvIDs, itemID)
+	if finalInput != "" && s.toolInputs[itemID] == "" {
+		s.enqueueArgsDelta(state.envID, finalInput)
+		s.toolInputs[itemID] = finalInput
+	}
+	s.enqueueEnvelopeEnd(state.envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
+	delete(s.toolStates, itemID)
+	delete(s.toolInputs, itemID)
+}
+
+func (s *responsesEventReader) handleOutputItemDone(frame streamFrame) bool {
+	itemType := strings.TrimSpace(frame.Item.Type) // swobu:io-string source=boundary
+	switch itemType {
+	case "function_call", "mcp_call":
+		s.handleToolArgumentsDone(frame, canonical.ToolTypeFunction)
+		return true
+	case "custom_tool_call":
+		s.handleToolArgumentsDone(frame, canonical.ToolTypeCustom)
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *responsesEventReader) handleResponseCompleted(frame streamFrame) {

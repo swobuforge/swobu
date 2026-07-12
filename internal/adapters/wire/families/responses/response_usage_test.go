@@ -12,7 +12,7 @@ func TestDecodeResponseBuffered_MapsInputOutputAndCacheUsage(t *testing.T) {
 		"id":"resp_1",
 		"model":"m",
 		"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
-		"usage":{"input_tokens":91,"output_tokens":6,"input_tokens_details":{"cached_tokens":64,"cache_write_tokens":3}}
+		"usage":{"input_tokens":91,"output_tokens":6,"output_tokens_details":{"reasoning_tokens":4},"input_tokens_details":{"cached_tokens":64,"cache_write_tokens":3}}
 	}`)
 
 	reader, err := decodeResponseBuffered(raw, "ex_usage")
@@ -34,6 +34,10 @@ func TestDecodeResponseBuffered_MapsInputOutputAndCacheUsage(t *testing.T) {
 	output, ok := out.Usage().OutputTokens()
 	if !ok || output != 6 {
 		t.Fatalf("output tokens = (%d,%v), want (6,true)", output, ok)
+	}
+	reasoning, ok := out.Usage().ReasoningTokens()
+	if !ok || reasoning != 4 {
+		t.Fatalf("reasoning tokens = (%d,%v), want (4,true)", reasoning, ok)
 	}
 	cacheRead, ok := out.Usage().CacheReadTokens()
 	if !ok || cacheRead != 64 {

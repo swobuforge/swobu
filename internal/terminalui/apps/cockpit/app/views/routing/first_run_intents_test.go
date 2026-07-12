@@ -39,6 +39,15 @@ func TestFirstRunCredentialSummaryMatrix(t *testing.T) {
 	}
 }
 
+func TestAppendCreateCredentialRows_KeychainShowsRawPasteEditor(t *testing.T) {
+	t.Parallel()
+
+	rows := appendCreateCredentialRows(nil, "openai", "keychain")
+	if len(rows) == 0 {
+		t.Fatal("expected keychain create extras to render")
+	}
+}
+
 func TestCreateDraftProtocolModeRow_DefaultsAndResolvesProviderProtocol(t *testing.T) {
 	t.Parallel()
 

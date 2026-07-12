@@ -62,6 +62,9 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 		{"usageMetadata", "candidatesTokenCount"},
 		{"usage", "outputTokens"},
 	},
+	ReasoningPaths: [][]string{
+		{"usage", "completion_tokens_details", "reasoning_tokens"},
+	},
 	CacheReadPaths: [][]string{
 		{"usage", "prompt_tokens_details", "cached_tokens"},
 		{"usage", "input_tokens_details", "cached_tokens"},
@@ -333,22 +336,71 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 		out = append(out, canonical.NewTextOutputItem("text_"+strconv.Itoa(idx), item.Text))
 	}
 	for _, call := range toolCalls {
-		if call.Type != "" && call.Type != "function" {
-			return nil, canonical.InternalError("chat completions response tool call type is unsupported")
-		}
 		itemID := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if itemID == "" {
 			itemID = "tool_0"
 		}
-		toolUseID := strings.TrimSpace(call.ID)                    // swobu:io-string source=boundary
-		functionName := strings.TrimSpace(call.Function.Name)      // swobu:io-string source=boundary
-		functionArgs := strings.TrimSpace(call.Function.Arguments) // swobu:io-string source=boundary
-		out = append(out, canonical.NewToolUseOutputItem(
-			itemID,
-			toolUseID,
-			functionName,
-			canonical.NewToolArgumentsObject(functionArgs),
-		))
+		toolUseID := itemID
+		normalizedType := strings.ToLower(strings.TrimSpace(call.Type)) // swobu:io-string source=provider-wire
+		switch normalizedType {
+		case "function":
+			if call.Function == nil {
+				return nil, canonical.InternalError("chat completions response function tool call is incomplete")
+			}
+			functionName := strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
+			if functionName == "" {
+				return nil, canonical.InternalError("chat completions response function tool call is missing a name")
+			}
+			out = append(out, canonical.NewToolUseOutputItem(
+				itemID,
+				toolUseID,
+				functionName,
+				canonical.NewToolArgumentsObject(call.Function.Arguments),
+			))
+		case "custom":
+			if call.Custom == nil {
+				return nil, canonical.InternalError("chat completions response custom tool call is incomplete")
+			}
+			customName := strings.TrimSpace(call.Custom.Name) // swobu:io-string source=boundary
+			if customName == "" {
+				return nil, canonical.InternalError("chat completions response custom tool call is missing a name")
+			}
+			out = append(out, canonical.NewCustomToolUseOutputItem(
+				itemID,
+				toolUseID,
+				customName,
+				canonical.NewToolArgumentsObject(call.Custom.Input),
+			))
+		case "":
+			switch {
+			case call.Function != nil && call.Custom == nil:
+				functionName := strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
+				if functionName == "" {
+					return nil, canonical.InternalError("chat completions response function tool call is missing a name")
+				}
+				out = append(out, canonical.NewToolUseOutputItem(
+					itemID,
+					toolUseID,
+					functionName,
+					canonical.NewToolArgumentsObject(call.Function.Arguments),
+				))
+			case call.Custom != nil && call.Function == nil:
+				customName := strings.TrimSpace(call.Custom.Name) // swobu:io-string source=boundary
+				if customName == "" {
+					return nil, canonical.InternalError("chat completions response custom tool call is missing a name")
+				}
+				out = append(out, canonical.NewCustomToolUseOutputItem(
+					itemID,
+					toolUseID,
+					customName,
+					canonical.NewToolArgumentsObject(call.Custom.Input),
+				))
+			default:
+				return nil, canonical.InternalError("chat completions response tool call type is unsupported")
+			}
+		default:
+			return nil, canonical.InternalError("chat completions response tool call type is unsupported")
+		}
 	}
 	return out, nil
 }

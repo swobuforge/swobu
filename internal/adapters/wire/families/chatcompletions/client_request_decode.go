@@ -15,13 +15,21 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
-	if err := sse.DecodeStrictJSON(raw, &dto, "chat completions request"); err != nil {
+	if err := sse.DecodePermissiveJSON(raw, &dto, "chat completions request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request is missing required fields")
 	}
 	tools, err := decodeChatCompletionsTools(dto.Tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	toolPolicy, err := decodeChatCompletionsToolChoice(dto.ToolChoice, tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	toolCallBatch, err := decodeChatCompletionsToolCallBatch(dto.ParallelToolCalls)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -37,14 +45,26 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 		}
 		items = append(items, decoded...)
 	}
+	controls, err := decodeChatCompletionsGenerationControls(dto)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	outputFormat, err := decodeChatCompletionsOutputFormat(dto.ResponseFormat)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		Items: items,
-		Tools: tools,
+		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		Items:         items,
+		Tools:         tools,
+		ToolPolicy:    toolPolicy,
+		ToolCallBatch: toolCallBatch,
+		Controls:      controls,
+		OutputFormat:  outputFormat,
 	}), resolvedDelivery, nil
 }
 
@@ -71,25 +91,38 @@ func decodeChatCompletionsItems(
 	}
 	items := append([]canonical.CanonicalItem(nil), textItems...)
 	for idx, call := range toolCalls {
-		if call.Type != "" && call.Type != "function" {
-			return nil, canonical.BadRequest("chat completions request contains an unsupported tool call type")
-		}
-		if strings.TrimSpace(call.Function.Name) == "" { // swobu:io-string source=boundary
-			return nil, canonical.BadRequest("chat completions tool calls require a function name")
-		}
-		input, err := sse.DecodeJSONObject(call.Function.Arguments, "chat completions tool call arguments are invalid")
-		if err != nil {
-			return nil, err
-		}
-		args, err := json.Marshal(input)
-		if err != nil {
-			return nil, canonical.BadRequest("chat completions tool call arguments are invalid")
-		}
 		id := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if id == "" {
 			id = openaicompat.GeneratedToolUseID(msgIdx, idx)
 		}
-		items = append(items, canonical.NewToolUseItem(author, "", id, strings.TrimSpace(call.Function.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+		switch strings.ToLower(strings.TrimSpace(call.Type)) {
+		case "", "function":
+			if call.Function == nil {
+				return nil, canonical.BadRequest("chat completions tool calls require a function body")
+			}
+			if strings.TrimSpace(call.Function.Name) == "" { // swobu:io-string source=boundary
+				return nil, canonical.BadRequest("chat completions tool calls require a function name")
+			}
+			input, err := sse.DecodeJSONObject(call.Function.Arguments, "chat completions tool call arguments are invalid")
+			if err != nil {
+				return nil, err
+			}
+			args, err := json.Marshal(input)
+			if err != nil {
+				return nil, canonical.BadRequest("chat completions tool call arguments are invalid")
+			}
+			items = append(items, canonical.NewToolUseItem(author, "", id, strings.TrimSpace(call.Function.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+		case "custom":
+			if call.Custom == nil {
+				return nil, canonical.BadRequest("chat completions custom tool calls require a custom body")
+			}
+			if strings.TrimSpace(call.Custom.Name) == "" { // swobu:io-string source=boundary
+				return nil, canonical.BadRequest("chat completions custom tool calls require a custom name")
+			}
+			items = append(items, canonical.NewCustomToolUseItem(author, "", id, strings.TrimSpace(call.Custom.Name), canonical.NewToolArgumentsObject(call.Custom.Input))) // swobu:io-string source=boundary
+		default:
+			return nil, canonical.BadRequest("chat completions request contains an unsupported tool call type")
+		}
 	}
 	return items, nil
 }

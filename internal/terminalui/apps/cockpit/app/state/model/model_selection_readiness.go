@@ -57,7 +57,7 @@ func EvaluateModelSelectionGateState(input ModelSelectionReadinessGateInput) Mod
 			}
 		}
 	}
-	if ProviderCredentialVariantIsInteractive(provider, credentialRef) && !input.InteractiveAuthResolved {
+	if ProviderCredentialModeIsInteractive(provider, credentialRef) && !input.InteractiveAuthResolved {
 		return ModelSelectionGateState{
 			Blocked: true,
 			Reason:  ModelSelectionBlockInteractiveAuthPending,

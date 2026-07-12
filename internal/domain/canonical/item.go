@@ -27,6 +27,7 @@ type CanonicalItem struct {
 	Author    ItemAuthor
 	Kind      ItemKind
 	ItemID    string
+	ToolType  string
 	Text      string
 	ToolUseID string
 	Name      string
@@ -46,10 +47,17 @@ func NewToolUseItem(author ItemAuthor, itemID string, toolUseID string, name str
 		Author:    author,
 		Kind:      ItemKindToolUse,
 		ItemID:    itemID,
+		ToolType:  ToolTypeFunction,
 		ToolUseID: toolUseID,
 		Name:      name,
 		Input:     input,
 	}
+}
+
+func NewCustomToolUseItem(author ItemAuthor, itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
+	item := NewToolUseItem(author, itemID, toolUseID, name, input)
+	item.ToolType = ToolTypeCustom
+	return item
 }
 
 func NewToolResultItem(author ItemAuthor, toolUseID string, text string) CanonicalItem {
@@ -66,6 +74,7 @@ func (i CanonicalItem) Clone() CanonicalItem {
 		Author:    i.Author,
 		Kind:      i.Kind,
 		ItemID:    i.ItemID,
+		ToolType:  i.ToolType,
 		Text:      i.Text,
 		ToolUseID: i.ToolUseID,
 		Name:      i.Name,

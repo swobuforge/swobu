@@ -13,11 +13,16 @@ import (
 func TestClientRequestDecoder_InfersSinglePendingToolResultID(t *testing.T) {
 	t.Parallel()
 
+	functionTool := canonical.NewFunctionToolDecl("workspace/Read", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`))
+	projectedFunctionName, err := canonical.ProjectedToolName(functionTool)
+	if err != nil {
+		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
+	}
 	raw := []byte(`{
 		"model":"m",
 		"tools":[
 			{
-				"name":"Read",
+				"name":"` + projectedFunctionName + `",
 				"description":"read files",
 				"input_schema":{"type":"object","properties":{"path":{"type":"string"}}}
 			}

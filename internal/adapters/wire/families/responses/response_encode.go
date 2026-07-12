@@ -10,7 +10,7 @@ import (
 )
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
-	encoded := make([]responsesOutputItemDTO, 0, len(output.Items()))
+	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
 	for _, item := range output.Items() {
 		switch item.Kind {
@@ -27,12 +27,14 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 				}},
 			})
 		case canonical.ItemKindToolUse:
-			encoded = append(encoded, responsesOutputItemDTO{
-				Type:      "function_call",
-				CallID:    item.ToolUseID,
-				Name:      item.Name,
-				Arguments: item.Input.RawObject(),
-			})
+			encoded = append(encoded, responsesWireToolItem(
+				sse.FallbackID(item.ItemID, item.ToolUseID),
+				item.ToolUseID,
+				item.Name,
+				item.ToolType,
+				"completed",
+				item.Input.RawObject(),
+			))
 		}
 	}
 	encodedBody, err := json.Marshal(responsesResponseDTO{
@@ -54,9 +56,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 func responsesUsageFromCanonical(usage canonical.TokenUsage) *responsesUsageDTO {
 	input, hasInput := usage.InputTokens()
 	output, hasOutput := usage.OutputTokens()
+	reasoning, hasReasoning := usage.ReasoningTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasCacheRead && !hasCacheWrite {
+	if !hasInput && !hasOutput && !hasReasoning && !hasCacheRead && !hasCacheWrite {
 		return nil
 	}
 	dto := &responsesUsageDTO{
@@ -68,6 +71,13 @@ func responsesUsageFromCanonical(usage canonical.TokenUsage) *responsesUsageDTO 
 		dto.InputDetails = &responsesInputDetailsDTO{
 			CachedTokens:     cacheRead,
 			CacheWriteTokens: cacheWrite,
+		}
+	}
+	if hasReasoning {
+		// Preserve provider-reported reasoning usage as a separate accounting
+		// fact; do not fold it into total_tokens or drop a zero value.
+		dto.OutputDetails = &responsesOutputDetailsDTO{
+			ReasoningTokens: reasoning,
 		}
 	}
 	return dto

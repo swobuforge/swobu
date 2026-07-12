@@ -7,8 +7,12 @@ type chatCompletionsRequestDTO struct {
 	Messages             []chatCompletionsMessageDTO        `json:"messages"`
 	Tools                []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
 	ToolChoice           json.RawMessage                    `json:"tool_choice,omitempty"`
+	ParallelToolCalls    json.RawMessage                    `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat       json.RawMessage                    `json:"response_format,omitempty"`
 	Temperature          json.RawMessage                    `json:"temperature,omitempty"`
 	MaxTokens            json.RawMessage                    `json:"max_tokens,omitempty"`
+	TopP                 json.RawMessage                    `json:"top_p,omitempty"`
+	Stop                 json.RawMessage                    `json:"stop,omitempty"`
 	Stream               json.RawMessage                    `json:"stream,omitempty"`
 	StreamOptions        json.RawMessage                    `json:"stream_options,omitempty"`
 	PromptCacheKey       json.RawMessage                    `json:"prompt_cache_key,omitempty"`
@@ -23,9 +27,10 @@ type chatCompletionsMessageDTO struct {
 }
 
 type chatCompletionsToolCallDTO struct {
-	ID       string                         `json:"id"`
-	Type     string                         `json:"type"`
-	Function chatCompletionsToolFunctionDTO `json:"function"`
+	ID       string                            `json:"id"`
+	Type     string                            `json:"type"`
+	Function *chatCompletionsToolFunctionDTO   `json:"function,omitempty"`
+	Custom   *chatCompletionsToolCallCustomDTO `json:"custom,omitempty"`
 }
 
 type chatCompletionsToolFunctionDTO struct {
@@ -33,9 +38,15 @@ type chatCompletionsToolFunctionDTO struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+type chatCompletionsToolCallCustomDTO struct {
+	Name  string `json:"name"`
+	Input string `json:"input"`
+}
+
 type chatCompletionsToolDefinitionDTO struct {
-	Type     string                                   `json:"type"`
-	Function chatCompletionsToolDefinitionFunctionDTO `json:"function"`
+	Type     string                                    `json:"type"`
+	Function *chatCompletionsToolDefinitionFunctionDTO `json:"function,omitempty"`
+	Custom   *chatCompletionsToolDefinitionCustomDTO   `json:"custom,omitempty"`
 }
 
 type chatCompletionsToolDefinitionFunctionDTO struct {
@@ -43,6 +54,12 @@ type chatCompletionsToolDefinitionFunctionDTO struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters"`
 	Strict      *bool           `json:"strict,omitempty"`
+}
+
+type chatCompletionsToolDefinitionCustomDTO struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Format      json.RawMessage `json:"format,omitempty"`
 }
 
 type chatCompletionsResponseDTO struct {
@@ -54,15 +71,22 @@ type chatCompletionsResponseDTO struct {
 }
 
 type chatCompletionsUsageDTO struct {
-	PromptTokens     int                                   `json:"prompt_tokens"`
-	CompletionTokens int                                   `json:"completion_tokens"`
-	TotalTokens      int                                   `json:"total_tokens"`
-	PromptDetails    *chatCompletionsPromptTokenDetailsDTO `json:"prompt_tokens_details,omitempty"`
+	PromptTokens      int                                       `json:"prompt_tokens"`
+	CompletionTokens  int                                       `json:"completion_tokens"`
+	TotalTokens       int                                       `json:"total_tokens"`
+	PromptDetails     *chatCompletionsPromptTokenDetailsDTO     `json:"prompt_tokens_details,omitempty"`
+	CompletionDetails *chatCompletionsCompletionTokenDetailsDTO `json:"completion_tokens_details,omitempty"`
 }
 
 type chatCompletionsPromptTokenDetailsDTO struct {
 	CachedTokens     int `json:"cached_tokens,omitempty"`
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+}
+
+type chatCompletionsCompletionTokenDetailsDTO struct {
+	// Zero is meaningful here; omitempty would erase a provider-reported
+	// reasoning token count from the protocol surface.
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 type chatCompletionsChoiceDTO struct {
@@ -79,14 +103,20 @@ type chatCompletionsResponseMessageDTO struct {
 }
 
 type chatCompletionsResponseToolCallDTO struct {
-	ID       string                             `json:"id"`
-	Type     string                             `json:"type"`
-	Function chatCompletionsResponseFunctionDTO `json:"function"`
+	ID       string                              `json:"id"`
+	Type     string                              `json:"type"`
+	Function *chatCompletionsResponseFunctionDTO `json:"function,omitempty"`
+	Custom   *chatCompletionsResponseCustomDTO   `json:"custom,omitempty"`
 }
 
 type chatCompletionsResponseFunctionDTO struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+type chatCompletionsResponseCustomDTO struct {
+	Name  string `json:"name"`
+	Input string `json:"input"`
 }
 
 type chatCompletionsDeltaDTO struct {

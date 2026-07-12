@@ -12,16 +12,32 @@ import (
 func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 	t.Parallel()
 
-	specificID := canonical.NewSemanticToolID("tool_0")
+	functionTool := canonical.NewFunctionToolDecl("tool_0", "grep", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))
+	customTool := canonical.NewCustomToolDecl("apply_patch", "apply_patch", "edit files", canonical.NewToolFormatObject(`{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`))
+	wantFunctionSpecific := functionTool.ToolID().String()
+	wantCustomSpecific := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindCustom, "apply_patch").String()
 	tests := []struct {
 		name         string
 		raw          string
 		tools        []canonical.ToolDecl
 		wantMode     canonical.ToolPolicyMode
 		wantSpecific string
+		wantType     string
 	}{
 		{name: "empty", raw: "", wantMode: canonical.ToolPolicyNone},
 		{name: "null", raw: "null", wantMode: canonical.ToolPolicyNone},
+		{
+			name:     "empty with tools defaults to auto",
+			raw:      "",
+			tools:    []canonical.ToolDecl{functionTool},
+			wantMode: canonical.ToolPolicyAuto,
+		},
+		{
+			name:     "null with tools defaults to auto",
+			raw:      "null",
+			tools:    []canonical.ToolDecl{functionTool},
+			wantMode: canonical.ToolPolicyAuto,
+		},
 		{name: "string none", raw: `"none"`, wantMode: canonical.ToolPolicyNone},
 		{name: "string auto", raw: `"auto"`, wantMode: canonical.ToolPolicyAuto},
 		{name: "string required", raw: `"required"`, wantMode: canonical.ToolPolicyRequired},
@@ -30,9 +46,18 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 		{
 			name:         "object function",
 			raw:          `{"type":"function","name":"grep"}`,
-			tools:        []canonical.ToolDecl{canonical.NewFunctionToolDecl(string(specificID), "grep", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))},
+			tools:        []canonical.ToolDecl{functionTool},
 			wantMode:     canonical.ToolPolicySpecific,
-			wantSpecific: specificID.String(),
+			wantSpecific: wantFunctionSpecific,
+			wantType:     "function",
+		},
+		{
+			name:         "object custom",
+			raw:          `{"type":"custom","name":"apply_patch"}`,
+			tools:        []canonical.ToolDecl{customTool},
+			wantMode:     canonical.ToolPolicySpecific,
+			wantSpecific: wantCustomSpecific,
+			wantType:     "custom",
 		},
 	}
 
@@ -50,6 +75,9 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 				if specific, ok := got.SpecificID(); ok {
 					t.Fatalf("tool policy specific = %q, want none", specific)
 				}
+				if specificType, ok := got.SpecificToolType(); ok {
+					t.Fatalf("tool policy specific type = %q, want none", specificType)
+				}
 				return
 			}
 			specific, ok := got.SpecificID()
@@ -58,6 +86,11 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 			}
 			if specific.String() != tc.wantSpecific {
 				t.Fatalf("tool policy specific = %q, want %q", specific, tc.wantSpecific)
+			}
+			if tc.wantType != "" {
+				if specificType, ok := got.SpecificToolType(); !ok || specificType != tc.wantType {
+					t.Fatalf("tool policy specific type = %q, want %q", specificType, tc.wantType)
+				}
 			}
 		})
 	}
@@ -93,6 +126,7 @@ func TestDecodeResponsesToolPolicy_InvalidShapesFailBadRequest(t *testing.T) {
 		`{"type":{}}`,
 		`{"type":[]}`,
 		`{"type":"function"}`,
+		`{"type":"future_mode","name":"grep"}`,
 		`{`,
 	} {
 		_, err := responses.DecodeResponsesToolPolicy(rawJSON(raw), nil)

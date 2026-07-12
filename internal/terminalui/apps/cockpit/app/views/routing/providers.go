@@ -205,6 +205,13 @@ func createProviderPropertyRows(
 			CreateMode:     createMode,
 		})))
 	}
+	if providerConfig != nil && strings.EqualFold(credentialSource(providerConfig.CredentialRef), "keychain") {
+		rows = append(rows, retained.Named[state.Model]("keychain", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{
+			ProviderConfig: providerConfig,
+			EndpointName:   endpointName,
+			CreateMode:     createMode,
+		})))
+	}
 	if !createMode && providerConfig != nil {
 		rows = append(rows,
 			retained.Named[state.Model]("delete", providerDeleteRow(endpointName, providerConfig)),

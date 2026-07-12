@@ -18,6 +18,10 @@ func NewToolUseOutputItem(itemID string, toolUseID string, name string, input To
 	return NewToolUseItem(ItemAuthorAssistant, itemID, toolUseID, name, input)
 }
 
+func NewCustomToolUseOutputItem(itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
+	return NewCustomToolUseItem(ItemAuthorAssistant, itemID, toolUseID, name, input)
+}
+
 type CanonicalOutput interface {
 	// SemanticKind reports which semantic family this successful canonical output represents.
 	SemanticKind() SemanticKind

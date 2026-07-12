@@ -107,6 +107,28 @@ func TestReadClosedEnvelope_Response(t *testing.T) {
 }
 
 func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
+	maxTokens := 96
+	temperature := 0.3
+	topP := 0.8
+	controls, err := NewGenerationControls(GenerationControlsParams{
+		MaxOutputTokens: &maxTokens,
+		StopSequences:   []string{"END"},
+		Temperature:     &temperature,
+		TopP:            &topP,
+	})
+	if err != nil {
+		t.Fatalf("NewGenerationControls returned error: %v", err)
+	}
+	outputFormat, err := NewOutputFormat(OutputFormatParams{
+		Kind:        OutputFormatJSONSchema,
+		Name:        "request_shape",
+		Description: "structured request shape",
+		Schema:      NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict:      true,
+	})
+	if err != nil {
+		t.Fatalf("NewOutputFormat returned error: %v", err)
+	}
 	in := NewCanonicalRequest(RequestParams{
 		Model: "gpt-r",
 		Items: []CanonicalItem{
@@ -116,7 +138,10 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 		Tools: []ToolDecl{
 			NewFunctionToolDecl("tool_1", "search", "search the workspace", NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
 		},
-		ToolPolicy: NewToolPolicy(ToolPolicyRequired, nil),
+		ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
+		ToolPolicy:    NewToolPolicy(ToolPolicyRequired, nil),
+		Controls:      controls,
+		OutputFormat:  outputFormat,
 	})
 	events, err := SynthesizeRequestFromCanonicalRequest("ex_req_rt", in)
 	if err != nil {
@@ -152,8 +177,26 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	if got := typed.ToolPolicy(); got.Mode != ToolPolicyRequired {
 		t.Fatalf("tool policy mode = %q, want %q", got.Mode, ToolPolicyRequired)
 	}
+	if got := typed.ToolCallBatch(); got.Mode != ToolCallBatchAtMostOne {
+		t.Fatalf("tool call batch mode = %q, want %q", got.Mode, ToolCallBatchAtMostOne)
+	}
 	if got := typed.Tools()[0].(FunctionToolDecl); got.ToolName() != "search" || !strings.Contains(got.ToolInputSchema().RawObject(), `"q"`) {
 		t.Fatalf("tool declaration roundtrip = %#v", got)
+	}
+	if got, ok := typed.Controls().Limits.MaxOutputTokens.Value(); !ok || got != 96 {
+		t.Fatalf("controls max_output_tokens = (%d, %v), want (96, true)", got, ok)
+	}
+	if got := typed.Controls().Limits.StopSequences; len(got) != 1 || got[0] != "END" {
+		t.Fatalf("controls stop sequences = %#v, want [END]", got)
+	}
+	if got, ok := typed.Controls().Sampling.Temperature.Value(); !ok || got != 0.3 {
+		t.Fatalf("controls temperature = (%v, %v), want (0.3, true)", got, ok)
+	}
+	if got, ok := typed.Controls().Sampling.TopP.Value(); !ok || got != 0.8 {
+		t.Fatalf("controls top_p = (%v, %v), want (0.8, true)", got, ok)
+	}
+	if gotFormat := typed.OutputFormat(); gotFormat.Kind != OutputFormatJSONSchema || gotFormat.Name != "request_shape" || gotFormat.Description != "structured request shape" || gotFormat.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || !gotFormat.Strict {
+		t.Fatalf("output format = %#v, want structured json schema", gotFormat)
 	}
 }
 

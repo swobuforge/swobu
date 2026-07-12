@@ -33,19 +33,36 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	default:
 		return carrier.WireDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
 	}
-	wireMessages, err := encodeItems(req.Items())
+	items := req.Items()
+	tools := req.Tools()
+	wireMessages, err := encodeItems(items)
 	if err != nil {
 		return carrier.WireDocument{}, err
 	}
 	payload := map[string]any{
-		"model":      req.Model(),
-		"messages":   wireMessages,
-		"max_tokens": defaultMessagesMaxTokens,
+		"model":    req.Model(),
+		"messages": wireMessages,
 	}
-	if wireTools, err := encodeMessagesTools(req.Tools()); err != nil {
+	if wireTools, err := encodeMessagesTools(tools); err != nil {
 		return carrier.WireDocument{}, err
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
+	}
+	if err := encodeMessagesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
+		return carrier.WireDocument{}, err
+	}
+	if err := encodeMessagesGenerationControls(payload, req.Controls()); err != nil {
+		return carrier.WireDocument{}, err
+	}
+	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
+		return carrier.WireDocument{}, err
+	}
+	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools)
+	if err != nil {
+		return carrier.WireDocument{}, err
+	}
+	if choice != nil {
+		payload["tool_choice"] = choice
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
@@ -69,6 +86,7 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 		return nil, canonical.BadRequest("messages protocol requires at least one canonical item")
 	}
 	out := make([]messageBody, 0, len(items))
+	toolTypes := map[string]string{}
 	for i := 0; i < len(items); {
 		role := roleForMessagesItem(items[i])
 		content := make([]contentID, 0, 1)
@@ -81,10 +99,14 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 					Text: current.Text,
 				})
 			case canonical.ItemKindToolUse:
+				if current.ToolType != "" && current.ToolType != canonical.ToolTypeFunction {
+					return nil, canonical.UnsupportedOperation("messages protocol only supports function tool uses")
+				}
 				input, err := decodeToolArgumentsObject(current.Input)
 				if err != nil {
 					return nil, err
 				}
+				toolTypes[current.ToolUseID] = current.ToolType
 				content = append(content, contentID{
 					Type:  "tool_use",
 					ID:    strings.TrimSpace(current.ToolUseID), // swobu:io-string source=boundary
@@ -97,6 +119,9 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 			case canonical.ItemKindToolResult:
 				if strings.TrimSpace(current.ToolUseID) == "" { // swobu:io-string source=boundary
 					return nil, canonical.BadRequest("messages protocol tool_result items require tool_use_id")
+				}
+				if toolType := toolTypes[current.ToolUseID]; toolType != "" && toolType != canonical.ToolTypeFunction {
+					return nil, canonical.UnsupportedOperation("messages protocol only supports function tool results")
 				}
 				content = append(content, contentID{
 					Type:      "tool_result",
@@ -137,7 +162,11 @@ func encodeMessagesTools(tools []canonical.ToolDecl) ([]messagesToolDTO, error) 
 		if err != nil {
 			return nil, err
 		}
-		name := strings.TrimSpace(decl.ToolName()) // swobu:io-string source=boundary
+		name, err := canonical.ProjectedToolName(decl)
+		if err != nil {
+			return nil, err
+		}
+		name = strings.TrimSpace(name) // swobu:io-string source=boundary
 		if name == "" {
 			return nil, canonical.BadRequest("messages protocol tool declarations require a name")
 		}
@@ -164,7 +193,11 @@ func decodeMessagesTools(tools []messagesToolDTO) ([]canonical.ToolDecl, error) 
 		if name == "" {
 			return nil, canonical.BadRequest("messages request tool declarations require a name")
 		}
-		out = append(out, canonical.NewFunctionToolDecl(name, name, tool.Description, schema))
+		id, leaf, err := canonical.ParseProjectedToolName(name, canonical.ToolKindFunction)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, canonical.NewFunctionToolDecl(id.String(), leaf, tool.Description, schema))
 	}
 	return out, nil
 }

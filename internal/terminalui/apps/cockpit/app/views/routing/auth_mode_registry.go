@@ -12,19 +12,19 @@ import (
 
 // authModeDescriptorSpec is the universal schema entry for one auth mode option.
 type authModeDescriptorSpec struct {
-	Variant     profile.AuthVariant
+	Mode        profile.AuthMode
 	Label       string
 	Interactive bool
 }
 
 func authModeDescriptorsForSpec(providerSpec string) []authModeDescriptorSpec {
-	variants := profile.SupportedAuthVariantsForSpec(strings.TrimSpace(providerSpec)) // swobu:io-string source=boundary
-	out := make([]authModeDescriptorSpec, 0, len(variants))
-	for _, variant := range variants {
+	modes := profile.SupportedAuthModesForSpec(strings.TrimSpace(providerSpec)) // swobu:io-string source=boundary
+	out := make([]authModeDescriptorSpec, 0, len(modes))
+	for _, mode := range modes {
 		out = append(out, authModeDescriptorSpec{
-			Variant:     variant,
-			Label:       authVariantDisplayLabel(variant),
-			Interactive: profile.IsInteractiveAuthVariant(variant),
+			Mode:        mode,
+			Label:       authModeDisplayLabel(mode),
+			Interactive: profile.IsInteractiveAuthMode(mode),
 		})
 	}
 	return out
@@ -85,9 +85,22 @@ func (fileAuthModeRowRenderer) RenderAddModelExtras(providerSpec string, credent
 	return nil
 }
 
+type keychainAuthModeRowRenderer struct{}
+
+func (keychainAuthModeRowRenderer) RenderCreateExtras(providerSpec string, credentialRef string) []retained.ViewSpec[state.Model] {
+	return []retained.ViewSpec[state.Model]{
+		retained.Named[state.Model]("keychain", providerKeychainKeyNameRow(providerKeychainKeyNameRowSpec{CreateMode: true})),
+	}
+}
+
+func (keychainAuthModeRowRenderer) RenderAddModelExtras(providerSpec string, credentialRef string) []retained.ViewSpec[state.Model] {
+	return nil
+}
+
 var authModeRowRenderers = map[string]authModeRowRenderer{
-	"env":  envAuthModeRowRenderer{},
-	"file": fileAuthModeRowRenderer{},
+	"env":      envAuthModeRowRenderer{},
+	"file":     fileAuthModeRowRenderer{},
+	"keychain": keychainAuthModeRowRenderer{},
 }
 
 func authModeRendererForCredentialRef(credentialRef string) authModeRowRenderer {

@@ -91,10 +91,10 @@ func evaluateCreateDraftCredentialState(provider, baseURL, credentialRef string,
 	if credentialRef == "" {
 		return RouteSetupSlotMissing
 	}
-	if ProviderCredentialVariantIsInteractive(provider, credentialRef) {
+	if ProviderCredentialModeIsInteractive(provider, credentialRef) {
 		return RouteSetupSlotLoading
 	}
-	if isExternalCredentialAuthorityVariant(provider, credentialRef) {
+	if isExternalCredentialAuthorityMode(provider, credentialRef) {
 		return RouteSetupSlotExternal
 	}
 	source := credentialSource(credentialRef)
@@ -140,17 +140,17 @@ func CreateDraftCredentialStrategySelectable(provider string) bool {
 	if provider == "" {
 		return false
 	}
-	return len(profile.SupportedAuthVariantsForSpec(provider)) > 0
+	return len(profile.SupportedAuthModesForSpec(provider)) > 0
 }
 
-func isExternalCredentialAuthorityVariant(provider, credentialRef string) bool {
+func isExternalCredentialAuthorityMode(provider, credentialRef string) bool {
 	source := strings.TrimSpace(credentialSource(credentialRef)) // swobu:io-string source=boundary
 	if source == "" {
 		return false
 	}
-	variant := profile.AuthVariant(strings.ToLower(source))                             // swobu:io-string source=boundary
-	for _, mode := range profile.AllowedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
-		if mode.Variant == variant && mode.Kind == profile.AuthNone {
+	requestedMode := profile.AuthMode(strings.ToLower(source))                                 // swobu:io-string source=boundary
+	for _, allowedMode := range profile.AllowedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
+		if allowedMode.Mode == requestedMode && allowedMode.Kind == profile.AuthNone {
 			return true
 		}
 	}

@@ -53,9 +53,9 @@ func firstRunCredentialSummary(provider, baseURL, credentialRef string) string {
 		if strings.EqualFold(provider, "bedrock") && isBedrockAWSProfileCredentialRef(resolvedRef) {
 			return "external: AWS chain"
 		}
-		variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(cred))) // swobu:io-string source=boundary
-		if profile.SupportsAuthVariant(provider, variant) {
-			return authVariantDisplayLabel(variant)
+		mode := profile.AuthMode(strings.ToLower(strings.TrimSpace(cred))) // swobu:io-string source=boundary
+		if profile.SupportsAuthMode(provider, mode) {
+			return authModeDisplayLabel(mode)
 		}
 		if strings.EqualFold(cred, "env") {
 			if strings.EqualFold(provider, "bedrock") {
@@ -97,8 +97,8 @@ func isResolvedInteractiveCredential(provider, credentialRef string) bool {
 		return false
 	}
 	hasInteractive := false
-	for _, variant := range profile.SupportedAuthVariantsForSpec(provider) {
-		if profile.IsInteractiveAuthVariant(variant) {
+	for _, mode := range profile.SupportedAuthModesForSpec(provider) {
+		if profile.IsInteractiveAuthMode(mode) {
 			hasInteractive = true
 			break
 		}
@@ -110,10 +110,10 @@ func isResolvedInteractiveCredential(provider, credentialRef string) bool {
 	if source == "" {
 		return false
 	}
-	if profile.SupportsAuthVariant(provider, profile.AuthVariant(source)) {
+	if profile.SupportsAuthMode(provider, profile.AuthMode(source)) {
 		return false
 	}
-	return !profile.SupportsAuthVariant(provider, profile.AuthVariant(source))
+	return !profile.SupportsAuthMode(provider, profile.AuthMode(source))
 }
 
 func createDraftCredentialRefFromActions(actions []update.Action) string {

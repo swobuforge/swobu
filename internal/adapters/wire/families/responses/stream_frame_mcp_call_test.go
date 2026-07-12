@@ -12,7 +12,8 @@ func TestResponsesEventReader_AcceptsMcpCallStreamFrames(t *testing.T) {
 	s := &responsesEventReader{
 		exchangeID:  "ex",
 		responseID:  "ex:response:0",
-		toolEnvIDs:  map[string]canonical.EnvelopeID{},
+		toolStates:  map[string]responsesToolState{},
+		toolInputs:  map[string]string{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
 
@@ -24,6 +25,7 @@ func TestResponsesEventReader_AcceptsMcpCallStreamFrames(t *testing.T) {
 			CallID      string `json:"call_id"`
 			Name        string `json:"name"`
 			Arguments   string `json:"arguments"`
+			Input       string `json:"input"`
 			ServerLabel string `json:"server_label"`
 		}{
 			ID:   "mcp_1",

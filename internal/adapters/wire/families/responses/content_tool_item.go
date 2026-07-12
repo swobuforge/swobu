@@ -9,14 +9,14 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func (e *ResponseStreamWireEncoder) ensureToolItem(itemID string, callID string, name string) ([][]byte, error) {
+func (e *ResponseStreamWireEncoder) ensureToolItem(itemID string, callID string, name string, toolType string) ([][]byte, error) {
 	if state := e.toolItems[itemID]; state != nil {
 		return nil, nil
 	}
-	return e.openToolItem(itemID, callID, name)
+	return e.openToolItem(itemID, callID, name, toolType)
 }
 
-func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, name string) ([][]byte, error) {
+func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, name string, toolType string) ([][]byte, error) {
 	if strings.TrimSpace(itemID) == "" { // swobu:io-string source=boundary
 		itemID = "fc_swobu_" + strconv.Itoa(e.nextOutputIndex)
 	}
@@ -29,25 +29,23 @@ func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, n
 		}
 		return nil, nil
 	}
+	normalizedType := strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
+	if normalizedType == "" {
+		normalizedType = canonical.ToolTypeFunction
+	}
 	state := &responsesToolItemState{
 		itemID:      itemID,
 		outputIndex: e.nextOutputIndex,
 		callID:      callID,
 		name:        name,
+		toolType:    normalizedType,
 	}
 	e.nextOutputIndex++
 	e.toolItems[itemID] = state
 	added, err := json.Marshal(responsesOutputItemEventDTO{
 		Type:        "response.output_item.added",
 		OutputIndex: state.outputIndex,
-		Item: responsesOutputItemFunctionCallDTO{
-			ID:        state.itemID,
-			Type:      "function_call",
-			Status:    "in_progress",
-			CallID:    state.callID,
-			Name:      state.name,
-			Arguments: "",
-		},
+		Item:        responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "in_progress", ""),
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
@@ -61,12 +59,17 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 		return nil, nil
 	}
 	args := state.arguments.String()
+	argsDoneType := "response.function_call_arguments.done"
+	if state.toolType == canonical.ToolTypeCustom {
+		argsDoneType = "response.custom_tool_call_input.done"
+	}
 	argsDone, err := json.Marshal(responsesToolArgumentsDoneEventDTO{
-		Type:        "response.function_call_arguments.done",
+		Type:        argsDoneType,
 		ItemID:      state.itemID,
 		OutputIndex: state.outputIndex,
 		CallID:      state.callID,
 		Name:        state.name,
+		Input:       args,
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
@@ -74,26 +77,12 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 	itemDone, err := json.Marshal(responsesOutputItemEventDTO{
 		Type:        "response.output_item.done",
 		OutputIndex: state.outputIndex,
-		Item: responsesOutputItemFunctionCallDTO{
-			ID:        state.itemID,
-			Type:      "function_call",
-			Status:    "completed",
-			CallID:    state.callID,
-			Name:      state.name,
-			Arguments: args,
-		},
+		Item:        responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "completed", args),
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
-	e.outputItems = append(e.outputItems, responsesOutputItemFunctionCallDTO{
-		ID:        state.itemID,
-		Type:      "function_call",
-		Status:    "completed",
-		CallID:    state.callID,
-		Name:      state.name,
-		Arguments: args,
-	})
+	e.outputItems = append(e.outputItems, responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "completed", args))
 	delete(e.toolItems, itemID)
 	return [][]byte{argsDone, itemDone}, nil
 }
@@ -118,4 +107,26 @@ func (e *ResponseStreamWireEncoder) flushOpenItems() ([][]byte, error) {
 		frames = append(frames, toolFrames...)
 	}
 	return frames, nil
+}
+
+func responsesWireToolItem(itemID string, callID string, name string, toolType string, status string, payload string) any {
+	normalizedType := strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
+	if normalizedType == canonical.ToolTypeCustom {
+		return responsesOutputItemCustomToolCallDTO{
+			ID:     itemID,
+			Type:   "custom_tool_call",
+			Status: status,
+			CallID: callID,
+			Name:   name,
+			Input:  payload,
+		}
+	}
+	return responsesOutputItemFunctionCallDTO{
+		ID:        itemID,
+		Type:      "function_call",
+		Status:    status,
+		CallID:    callID,
+		Name:      name,
+		Arguments: payload,
+	}
 }

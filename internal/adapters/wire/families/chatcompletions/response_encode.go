@@ -10,13 +10,17 @@ import (
 )
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+	message, err := chatMessageFromOutput(output)
+	if err != nil {
+		return carrier.WireDocument{}, err
+	}
 	raw, err := json.Marshal(chatCompletionsResponseDTO{
 		ID:     sse.FallbackID(output.ResultID(), "chatcmpl_swobu"),
 		Object: "chat.completion",
 		Model:  output.Model(),
 		Choices: []chatCompletionsChoiceDTO{{
 			Index:        0,
-			Message:      chatMessageFromOutput(output),
+			Message:      message,
 			FinishReason: sse.DefaultFinishReason(output.FinishReason(), "stop"),
 		}},
 		Usage: chatUsageFromCanonical(output.Usage()),

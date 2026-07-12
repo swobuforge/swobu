@@ -166,6 +166,7 @@ func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*C
 			toolUseID = string(ev.EnvID)
 		}
 		item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, EmptyToolArguments())
+		item.ToolType = payload.ToolType
 		item.Author = ItemAuthorAssistant
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
@@ -179,15 +180,19 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 		return CanonicalRequest{}, fmt.Errorf("closed envelope is not a request")
 	}
 	var (
-		model        string
-		toolsRaw     string
-		toolPolicy   ToolPolicy
-		itemsByID    = map[EnvelopeID]*CanonicalItem{}
-		toolArgsByID = map[EnvelopeID]string{}
-		orderedIDs   = make([]EnvelopeID, 0)
+		model            string
+		toolsRaw         string
+		toolPolicy       ToolPolicy
+		toolCallBatchRaw string
+		toolCallBatch    ToolCallBatchPolicy
+		controlsRaw      string
+		outputFormatRaw  string
+		itemsByID        = map[EnvelopeID]*CanonicalItem{}
+		toolArgsByID     = map[EnvelopeID]string{}
+		orderedIDs       = make([]EnvelopeID, 0)
 	)
 	for _, ev := range e.Events {
-		if err := requestProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &model, &toolsRaw, &toolPolicy); err != nil {
+		if err := requestProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &model, &toolsRaw, &toolPolicy, &toolCallBatchRaw, &controlsRaw, &outputFormatRaw); err != nil {
 			return CanonicalRequest{}, err
 		}
 	}
@@ -207,7 +212,19 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 	if err != nil {
 		return CanonicalRequest{}, err
 	}
-	return NewCanonicalRequest(RequestParams{Model: model, Items: items, Tools: tools, ToolPolicy: toolPolicy}), nil
+	toolCallBatch, err = decodeToolCallBatchMetadata(toolCallBatchRaw)
+	if err != nil {
+		return CanonicalRequest{}, err
+	}
+	controls, err := decodeGenerationControlsMetadata(controlsRaw)
+	if err != nil {
+		return CanonicalRequest{}, err
+	}
+	outputFormat, err := decodeOutputFormatMetadata(outputFormatRaw)
+	if err != nil {
+		return CanonicalRequest{}, err
+	}
+	return NewCanonicalRequest(RequestParams{Model: model, Items: items, Tools: tools, ToolPolicy: toolPolicy, ToolCallBatch: toolCallBatch, Controls: controls, OutputFormat: outputFormat}), nil
 }
 
 func requestProjectionApplyEvent(
@@ -218,6 +235,9 @@ func requestProjectionApplyEvent(
 	model *string,
 	toolsRaw *string,
 	toolPolicy *ToolPolicy,
+	toolCallBatchRaw *string,
+	controlsRaw *string,
+	outputFormatRaw *string,
 ) error {
 	switch ev.Kind {
 	case EventMetadata:
@@ -235,6 +255,15 @@ func requestProjectionApplyEvent(
 					return err
 				}
 				*toolPolicy = policy
+			}
+			if payload.Values["tool_call_batch"] != "" {
+				*toolCallBatchRaw = payload.Values["tool_call_batch"]
+			}
+			if payload.Values["generation_controls"] != "" {
+				*controlsRaw = payload.Values["generation_controls"]
+			}
+			if payload.Values["output_format"] != "" {
+				*outputFormatRaw = payload.Values["output_format"]
 			}
 		}
 	case EventEnvelopeStart:
@@ -265,6 +294,7 @@ func requestProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*Ca
 	}
 	if payload.Kind == EnvToolCall {
 		item := NewToolUseItem(payload.Role, string(ev.EnvID), payload.ToolUseID, payload.Name, EmptyToolArguments())
+		item.ToolType = payload.ToolType
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
 		return

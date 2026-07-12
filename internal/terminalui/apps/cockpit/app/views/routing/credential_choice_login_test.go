@@ -3,12 +3,14 @@ package routing
 import (
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func TestApplyProviderCredentialSelection_ChatGPTLoginTriggersAuthSession(t *testing.T) {
 	pc := &state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt"}
-	actions := applyProviderCredentialSelection("chatgpt_login", "chatgpt", pc, "acme", false)
+	actions := applyProviderCredentialSelection(profile.AuthModeChatGPTLogin, "chatgpt", pc, "acme", false)
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}
@@ -19,7 +21,7 @@ func TestApplyProviderCredentialSelection_ChatGPTLoginTriggersAuthSession(t *tes
 
 func TestApplyProviderCredentialSelection_ChatGPTLoginCreateModeSetsLoginMarker(t *testing.T) {
 	t.Parallel()
-	actions := applyProviderCredentialSelection("chatgpt_login", "chatgpt", nil, "", true)
+	actions := applyProviderCredentialSelection(profile.AuthModeChatGPTLogin, "chatgpt", nil, "", true)
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}
@@ -65,5 +67,43 @@ func TestCredentialOptionItems_Bedrock_IncludesCanonicalModesOnly(t *testing.T) 
 	}
 	if !labels["Bedrock API key"] {
 		t.Fatalf("labels=%v; missing Bedrock API key", labels)
+	}
+}
+
+func TestCredentialOptionItems_OpenAIIncludesPasteRawSource(t *testing.T) {
+	t.Parallel()
+	items := credentialOptionItems("", nil, "openai")
+	labels := map[string]bool{}
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["paste raw"] {
+		t.Fatalf("labels=%v; missing paste raw", labels)
+	}
+}
+
+func TestCredentialOptionItems_ExposeCanonicalModeToSelectionCallback(t *testing.T) {
+	t.Parallel()
+	var got credentialChoiceOption
+	items := credentialOptionItems("", func(choice credentialChoiceOption) []update.Action {
+		got = choice
+		return nil
+	}, "openai")
+	var found bool
+	for _, item := range items {
+		if item.Label == "paste raw" {
+			found = true
+			item.OnChoose()
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing paste raw option")
+	}
+	if got.Mode != profile.AuthModeKeychain {
+		t.Fatalf("choice mode=%q want keychain", got.Mode)
+	}
+	if got.FocusKey != "keychain" {
+		t.Fatalf("choice focus key=%q want keychain", got.FocusKey)
 	}
 }

@@ -14,27 +14,21 @@ const (
 	AuthCredentialRef AuthKind = "credential_ref"
 )
 
-type AuthVariant string
+// AuthMode names one provider auth path in the catalog.
+//
+// It is the canonical selector for credential-ref sources (env/file/keychain),
+// ambient AWS auth, and interactive login/device flows. It is not a storage
+// source type.
+type AuthMode string
 
 const (
-	AuthVariantEnv               AuthVariant = "env"
-	AuthVariantFile              AuthVariant = "file"
-	AuthVariantAWSProfile        AuthVariant = "aws_profile"
-	AuthVariantAWSEnvSession     AuthVariant = "aws_env_session"
-	AuthVariantChatGPTLogin      AuthVariant = "chatgpt_login"
-	AuthVariantChatGPTDeviceAuth AuthVariant = "chatgpt_device_auth"
-)
-
-type AuthModeID string
-
-const (
-	AuthModeNone               AuthModeID = "none"
-	AuthModeTokenEnv           AuthModeID = "token_env"
-	AuthModeTokenFile          AuthModeID = "token_file"
-	AuthModeAWSProfile         AuthModeID = "aws_profile"
-	AuthModeAWSEnvSession      AuthModeID = "aws_env_session"
-	AuthModeInteractiveBrowser AuthModeID = "interactive_browser"
-	AuthModeInteractiveDevice  AuthModeID = "interactive_device"
+	AuthModeEnv               AuthMode = "env"
+	AuthModeFile              AuthMode = "file"
+	AuthModeKeychain          AuthMode = "keychain"
+	AuthModeAWSProfile        AuthMode = "aws_profile"
+	AuthModeAWSEnvSession     AuthMode = "aws_env_session"
+	AuthModeChatGPTLogin      AuthMode = "chatgpt_login"
+	AuthModeChatGPTDeviceAuth AuthMode = "chatgpt_device_auth"
 )
 
 type AuthModeRequirement string
@@ -45,9 +39,9 @@ const (
 	AuthModeRequirementExceptLoopbackExecute AuthModeRequirement = "except_loopback_execute_origin"
 )
 
+// AuthModeSpec declares one allowed auth path for a provider.
 type AuthModeSpec struct {
-	ID          AuthModeID
-	Variant     AuthVariant
+	Mode        AuthMode
 	Kind        AuthKind
 	Requirement AuthModeRequirement
 	Interactive bool
@@ -81,14 +75,16 @@ type Profile struct {
 	DefaultAuthHeader       string
 	VisibleInOperatorUI     bool
 	ProviderProtocols       []ProviderProtocolSpec
-	AllowedAuthModes        []AuthModeSpec
-	DeclaredCapabilities    []Capability
+	// AllowedAuthModes lists the auth paths this provider declares.
+	AllowedAuthModes     []AuthModeSpec
+	DeclaredCapabilities []Capability
 }
 
 type ProviderProtocolSpec struct {
-	Name  string
-	Kind  protocolkind.ProtocolKind
-	Frame string
+	Name            string
+	Kind            protocolkind.ProtocolKind
+	Frame           string
+	RequestFeatures []RequestFeature
 }
 
 var (
@@ -97,36 +93,78 @@ var (
 		"X-API-Key",
 		"api-key",
 	}
+	providerRequestFeaturesResponses = []RequestFeature{
+		RequestFeatureFunctionTools,
+		RequestFeatureToolChoiceNone,
+		RequestFeatureToolChoiceRequired,
+		RequestFeatureToolChoiceSpecific,
+		RequestFeatureToolBatchAtMostOne,
+		RequestFeatureMaxOutputTokens,
+		RequestFeatureTemperature,
+		RequestFeatureTopP,
+		RequestFeatureJSONSchemaOutput,
+		RequestFeatureUsageReasoningTokens,
+	}
+	providerRequestFeaturesChatCompletions = []RequestFeature{
+		RequestFeatureFunctionTools,
+		RequestFeatureToolChoiceNone,
+		RequestFeatureToolChoiceRequired,
+		RequestFeatureToolChoiceSpecific,
+		RequestFeatureToolBatchAtMostOne,
+		RequestFeatureMaxOutputTokens,
+		RequestFeatureTemperature,
+		RequestFeatureTopP,
+		RequestFeatureStopSequences,
+		RequestFeatureJSONSchemaOutput,
+		RequestFeatureUsageReasoningTokens,
+	}
+	providerRequestFeaturesMessages = []RequestFeature{
+		RequestFeatureFunctionTools,
+		RequestFeatureToolChoiceNone,
+		RequestFeatureToolChoiceRequired,
+		RequestFeatureToolChoiceSpecific,
+		RequestFeatureToolBatchAtMostOne,
+		RequestFeatureMaxOutputTokens,
+		RequestFeatureTemperature,
+		RequestFeatureTopP,
+		RequestFeatureStopSequences,
+	}
+	providerRequestFeaturesCompletions = []RequestFeature{
+		RequestFeatureMaxOutputTokens,
+		RequestFeatureTemperature,
+		RequestFeatureTopP,
+		RequestFeatureStopSequences,
+	}
 	providerProtocolsOpenAIFamily = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
 	}
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
 	}
 	providerProtocolsAnthropic = []ProviderProtocolSpec{
-		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
-		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
 	}
 	providerProtocolsBedrock = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
-		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesMessages)},
 	}
 	providerProtocolsAzure = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesResponses)},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesChatCompletions)},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent, RequestFeatures: slices.Clone(providerRequestFeaturesCompletions)},
 	}
 )
 
@@ -140,7 +178,7 @@ func catalog() []Profile {
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeNone, Variant: "", Kind: AuthNone, Requirement: AuthModeRequirementNever},
+				{Mode: "", Kind: AuthNone, Requirement: AuthModeRequirementNever},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -153,8 +191,9 @@ func catalog() []Profile {
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
-				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeKeychain, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -166,8 +205,8 @@ func catalog() []Profile {
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeInteractiveBrowser, Variant: AuthVariantChatGPTLogin, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
-				{ID: AuthModeInteractiveDevice, Variant: AuthVariantChatGPTDeviceAuth, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
+				{Mode: AuthModeChatGPTLogin, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
+				{Mode: AuthModeChatGPTDeviceAuth, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways, Interactive: true},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -180,8 +219,9 @@ func catalog() []Profile {
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsAnthropic),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
-				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeKeychain, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -194,8 +234,9 @@ func catalog() []Profile {
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
-				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeKeychain, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -208,9 +249,9 @@ func catalog() []Profile {
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsBedrock),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeAWSProfile, Variant: AuthVariantAWSProfile, Kind: AuthNone, Requirement: AuthModeRequirementNever},
-				{ID: AuthModeAWSEnvSession, Variant: AuthVariantAWSEnvSession, Kind: AuthNone, Requirement: AuthModeRequirementNever},
-				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeAWSProfile, Kind: AuthNone, Requirement: AuthModeRequirementNever},
+				{Mode: AuthModeAWSEnvSession, Kind: AuthNone, Requirement: AuthModeRequirementNever},
+				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -223,8 +264,9 @@ func catalog() []Profile {
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsAzure),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
-				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeKeychain, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -237,9 +279,10 @@ func catalog() []Profile {
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
-				{ID: AuthModeNone, Variant: "", Kind: AuthNone, Requirement: AuthModeRequirementExceptLoopbackExecute},
-				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
-				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: "", Kind: AuthNone, Requirement: AuthModeRequirementExceptLoopbackExecute},
+				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{Mode: AuthModeKeychain, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
@@ -296,31 +339,31 @@ func AllowedAuthModesForSpec(spec string) []AuthModeSpec {
 	return slices.Clone(profile.AllowedAuthModes)
 }
 
-func SupportedAuthVariantsForSpec(spec string) []AuthVariant {
+func SupportedAuthModesForSpec(spec string) []AuthMode {
 	modes := AllowedAuthModesForSpec(spec)
-	out := make([]AuthVariant, 0, len(modes))
+	out := make([]AuthMode, 0, len(modes))
 	for _, mode := range modes {
-		variant := mode.Variant
-		if strings.TrimSpace(string(variant)) == "" { // swobu:io-string source=domain
+		threadingMode := mode.Mode
+		if strings.TrimSpace(string(threadingMode)) == "" { // swobu:io-string source=domain
 			continue
 		}
-		out = append(out, variant)
+		out = append(out, threadingMode)
 	}
 	return slices.Compact(out)
 }
 
-func SupportsAuthVariant(spec string, variant AuthVariant) bool {
-	for _, supported := range SupportedAuthVariantsForSpec(spec) {
-		if supported == variant {
+func SupportsAuthMode(spec string, mode AuthMode) bool {
+	for _, supported := range SupportedAuthModesForSpec(spec) {
+		if supported == mode {
 			return true
 		}
 	}
 	return false
 }
 
-func IsInteractiveAuthVariant(variant AuthVariant) bool {
-	switch variant {
-	case AuthVariantChatGPTLogin, AuthVariantChatGPTDeviceAuth:
+func IsInteractiveAuthMode(mode AuthMode) bool {
+	switch mode {
+	case AuthModeChatGPTLogin, AuthModeChatGPTDeviceAuth:
 		return true
 	default:
 		return false

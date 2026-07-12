@@ -86,6 +86,7 @@ type EnvelopeStartPayload struct {
 	Role      ItemAuthor
 	Name      string
 	ToolUseID string
+	ToolType  string
 }
 
 type EnvelopeEndPayload struct {

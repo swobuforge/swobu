@@ -148,7 +148,7 @@ func TestEvaluateModelSelectionReadiness_AuthFailureNormalizesOperatorMessage(t 
 	}
 }
 
-func TestEvaluateModelSelectionReadiness_ProviderAuthVariantMatrix_NoEmptyBlockedMessage(t *testing.T) {
+func TestEvaluateModelSelectionReadiness_ProviderAuthModeMatrix_NoEmptyBlockedMessage(t *testing.T) {
 	t.Parallel()
 
 	specs := profile.SupportedSpecs()
@@ -158,7 +158,7 @@ func TestEvaluateModelSelectionReadiness_ProviderAuthVariantMatrix_NoEmptyBlocke
 			t.Fatalf("provider %q has no auth modes", spec)
 		}
 		for _, mode := range modes {
-			ref := string(mode.Variant)
+			ref := string(mode.Mode)
 			if ref == "" {
 				ref = ""
 			}
@@ -169,7 +169,7 @@ func TestEvaluateModelSelectionReadiness_ProviderAuthVariantMatrix_NoEmptyBlocke
 				InteractiveAuthResolved: false,
 			})
 			if got.Blocked && got.Message == "" {
-				t.Fatalf("provider=%q variant=%q blocked with empty message", spec, mode.Variant)
+				t.Fatalf("provider=%q mode=%q blocked with empty message", spec, mode.Mode)
 			}
 		}
 	}

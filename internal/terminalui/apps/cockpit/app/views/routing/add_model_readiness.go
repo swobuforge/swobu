@@ -17,8 +17,8 @@ func isEmptyFileCredentialRef(ref string) bool {
 
 func addModelCreateReady(draft state.ProviderConfigSnapshot) bool {
 	requiresInteractiveAuth := false
-	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(draft.ProviderSpec)) { // swobu:io-string source=boundary
-		if profile.IsInteractiveAuthVariant(variant) {
+	for _, mode := range profile.SupportedAuthModesForSpec(strings.TrimSpace(draft.ProviderSpec)) { // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthMode(mode) {
 			requiresInteractiveAuth = true
 			break
 		}

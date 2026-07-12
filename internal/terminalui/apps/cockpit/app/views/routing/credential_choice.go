@@ -21,6 +21,15 @@ type providerCredentialChoiceRowSpec struct {
 	CreateMode     bool
 }
 
+// credentialChoiceOption carries the canonical auth mode plus display data.
+// Mode drives behavior; Label is presentation-only.
+type credentialChoiceOption struct {
+	Mode  profile.AuthMode
+	Label string
+	// FocusKey is retained-TUI plumbing, not credential semantics.
+	FocusKey string
+}
+
 func providerCredentialChoiceRow(spec providerCredentialChoiceRowSpec) retained.ViewSpec[state.Model] {
 	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		return buildProviderCredentialChoiceRow(ctx, spec)
@@ -35,20 +44,24 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 		currentRef = strings.TrimSpace(pc.CredentialRef)  // swobu:io-string source=boundary
 		providerSpec = strings.TrimSpace(pc.ProviderSpec) // swobu:io-string source=boundary
 	}
-	current := credentialSource(currentRef)
+	currentChoice := credentialSource(currentRef)
+	current := currentChoice
 	if isResolvedInteractiveCredential(providerSpec, currentRef) {
 		current = "signed in"
+	}
+	if strings.EqualFold(currentChoice, "keychain") && profile.SupportsAuthMode(providerSpec, profile.AuthModeKeychain) {
+		current = authModeDisplayLabel(profile.AuthModeKeychain)
 	}
 	if current == "" {
 		current = selectors.CredentialSummaryFromProviderConfig(pc)
 	}
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	items := credentialOptionItems(current, func(value string) []update.Action {
+	items := credentialOptionItems(currentChoice, func(choice credentialChoiceOption) []update.Action {
 		setOpen(false)
-		actions := applyProviderCredentialSelection(value, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
+		actions := applyProviderCredentialSelection(choice.Mode, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
 		actions = append(actions, state.SetInteractionMode{Mode: state.InteractionModeManageList})
-		if focusKey := credentialPostSelectionFocusKey(value); focusKey != "" {
+		if focusKey := strings.TrimSpace(choice.FocusKey); focusKey != "" {
 			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
 		}
 		return actions
@@ -99,25 +112,14 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 	return out
 }
 
-func credentialPostSelectionFocusKey(raw string) string {
-	lowered := strings.ToLower(strings.TrimSpace(raw)) // swobu:io-string source=boundary
-	if lowered == "file" {
-		return "credential-file"
-	}
-	if lowered == "env" || lowered == "env var" {
-		return "env"
-	}
-	return ""
-}
-
-func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	credentialRef = strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
-	providerSpec = strings.TrimSpace(providerSpec)   // swobu:io-string source=boundary
-	endpointName = strings.TrimSpace(endpointName)   // swobu:io-string source=boundary
-	variant := profile.AuthVariant(strings.ToLower(credentialRef))
-	if profile.IsInteractiveAuthVariant(variant) {
+func applyProviderCredentialSelection(credentialRef profile.AuthMode, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
+	ref := strings.TrimSpace(string(credentialRef)) // swobu:io-string source=boundary
+	providerSpec = strings.TrimSpace(providerSpec)  // swobu:io-string source=boundary
+	endpointName = strings.TrimSpace(endpointName)  // swobu:io-string source=boundary
+	mode := profile.AuthMode(strings.ToLower(ref))
+	if profile.IsInteractiveAuthMode(mode) {
 		if createMode {
-			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
+			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}
 		}
 		if providerConfig == nil || endpointName == "" {
 			return nil
@@ -133,35 +135,31 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 			AuthScope:      stateModel.AuthScopeEndpointProvider,
 		}}
 	}
-	if strings.EqualFold(credentialRef, "env") {
-		credentialRef = encodeCredentialEnvRef(profile.DefaultEnvKeyForSpec(providerSpec))
+	if strings.EqualFold(ref, "env") {
+		ref = encodeCredentialEnvRef(profile.DefaultEnvKeyForSpec(providerSpec))
 	}
-	if strings.EqualFold(credentialRef, "file") {
-		credentialRef = encodeCredentialFileRef("")
+	if strings.EqualFold(ref, "file") {
+		ref = encodeCredentialFileRef("")
 	}
 	if createMode {
-		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
+		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: ref}}
 	}
 	if providerConfig == nil || endpointName == "" {
 		return nil
 	}
 	next := *providerConfig
-	next.CredentialRef = credentialRef
+	next.CredentialRef = ref
 	return routingSaveProviderConfigActions(endpointName, next, "provider/auth")
 }
 
 func credentialOptionItems(
 	current string,
-	onChoose func(string) []update.Action,
+	onChoose func(credentialChoiceOption) []update.Action,
 	providerSpec string,
 ) []views.FilterablePickerItem {
-	type option struct {
-		Value string
-		Label string
-	}
-	containsOptionValue := func(values []option, value string) bool {
+	containsOptionValue := func(values []credentialChoiceOption, value string) bool {
 		for _, item := range values {
-			if strings.TrimSpace(item.Value) == strings.TrimSpace(value) { // swobu:io-string source=boundary
+			if strings.TrimSpace(string(item.Mode)) == strings.TrimSpace(value) { // swobu:io-string source=boundary
 				return true
 			}
 		}
@@ -181,37 +179,47 @@ func credentialOptionItems(
 		return true
 	}
 	descriptors := authModeDescriptorsForSpec(providerSpec)
-	options := make([]option, 0, len(descriptors))
+	options := make([]credentialChoiceOption, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == profile.AuthVariantAWSEnvSession { // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Mode == profile.AuthModeAWSEnvSession { // swobu:io-string source=boundary
 			// Bedrock exposes one canonical AWS chain affordance in UI.
 			continue
 		}
 		label := descriptor.Label
-		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Variant == profile.AuthVariantEnv { // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "bedrock") && descriptor.Mode == profile.AuthModeEnv { // swobu:io-string source=boundary
 			label = "Bedrock API key"
 		}
-		options = append(options, option{
-			Value: string(descriptor.Variant),
-			Label: label,
+		focusKey := ""
+		switch descriptor.Mode {
+		case profile.AuthModeFile:
+			focusKey = "credential-file"
+		case profile.AuthModeEnv:
+			focusKey = "env"
+		case profile.AuthModeKeychain:
+			focusKey = "keychain"
+		}
+		options = append(options, credentialChoiceOption{
+			Mode:     descriptor.Mode,
+			Label:    label,
+			FocusKey: focusKey,
 		})
 	}
 	current = strings.TrimSpace(current) // swobu:io-string source=boundary
 	if shouldExposeCurrentAsOption(providerSpec, current) && !containsOptionValue(options, current) {
-		options = append([]option{{Value: current, Label: current}}, options...)
+		options = append([]credentialChoiceOption{{Mode: profile.AuthMode(current), Label: current}}, options...)
 	}
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
 		choice := option
-		key := strings.TrimSpace(choice.Value) // swobu:io-string source=boundary
+		key := strings.TrimSpace(string(choice.Mode)) // swobu:io-string source=boundary
 		items = append(items, views.FilterablePickerItem{
 			Key:      key,
-			Label:    strings.TrimSpace(choice.Label),                      // swobu:io-string source=boundary
-			Search:   choice.Value + " " + strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
-			Selected: choice.Value == current,
+			Label:    strings.TrimSpace(choice.Label),                             // swobu:io-string source=boundary
+			Search:   string(choice.Mode) + " " + strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
+			Selected: string(choice.Mode) == current,
 			OnChoose: func() []update.Action {
 				if onChoose != nil {
-					return onChoose(choice.Value)
+					return onChoose(choice)
 				}
 				return nil
 			},
@@ -222,7 +230,7 @@ func credentialOptionItems(
 
 func credentialOptionRows(
 	current string,
-	onChoose func(string) []update.Action,
+	onChoose func(credentialChoiceOption) []update.Action,
 	onCancel func() []update.Action,
 	providerSpec string,
 	_ bool,

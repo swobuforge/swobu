@@ -163,6 +163,18 @@ func SynthesizeRequestFromCanonicalRequest(exchangeID string, request CanonicalR
 	if err != nil {
 		return nil, err
 	}
+	toolCallBatchRaw, err := encodeToolCallBatchMetadata(request.ToolCallBatch())
+	if err != nil {
+		return nil, err
+	}
+	controlsRaw, err := encodeGenerationControlsMetadata(request.Controls())
+	if err != nil {
+		return nil, err
+	}
+	outputFormatRaw, err := encodeOutputFormatMetadata(request.OutputFormat())
+	if err != nil {
+		return nil, err
+	}
 	events := []Event{
 		{
 			ExchangeID: exchangeID,
@@ -176,9 +188,12 @@ func SynthesizeRequestFromCanonicalRequest(exchangeID string, request CanonicalR
 		},
 	}
 	metadata := map[string]string{
-		"model":       request.Model(),
-		"tools":       toolsRaw,
-		"tool_policy": toolPolicyRaw,
+		"model":               request.Model(),
+		"tools":               toolsRaw,
+		"tool_policy":         toolPolicyRaw,
+		"tool_call_batch":     toolCallBatchRaw,
+		"generation_controls": controlsRaw,
+		"output_format":       outputFormatRaw,
 	}
 	events = append(events, Event{
 		ExchangeID: exchangeID,
@@ -232,87 +247,131 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 		return "", nil
 	}
 	type requestToolDeclMetadataDTO struct {
-		Kind             string          `json:"kind,omitempty"`
-		ID               string          `json:"id,omitempty"`
-		Name             string          `json:"name,omitempty"`
-		Description      string          `json:"description,omitempty"`
-		InputSchema      json.RawMessage `json:"input_schema,omitempty"`
-		Capability       string          `json:"capability,omitempty"`
-		CapabilityConfig json.RawMessage `json:"capability_config,omitempty"`
-		Execution        string          `json:"execution,omitempty"`
+		Kind             string                       `json:"kind,omitempty"`
+		ID               string                       `json:"id,omitempty"`
+		Name             string                       `json:"name,omitempty"`
+		Description      string                       `json:"description,omitempty"`
+		InputSchema      json.RawMessage              `json:"input_schema,omitempty"`
+		Strict           *bool                        `json:"strict,omitempty"`
+		Format           json.RawMessage              `json:"format,omitempty"`
+		Capability       string                       `json:"capability,omitempty"`
+		CapabilityConfig json.RawMessage              `json:"capability_config,omitempty"`
+		Execution        string                       `json:"execution,omitempty"`
 	}
-	dto := make([]requestToolDeclMetadataDTO, 0, len(tools))
-	for _, tool := range tools {
-		if tool == nil {
-			return "", BadRequest("canonical request tool declarations are invalid")
+	var encodeDecls func([]ToolDecl) ([]requestToolDeclMetadataDTO, error)
+	encodeDecls = func(tools []ToolDecl) ([]requestToolDeclMetadataDTO, error) {
+		dto := make([]requestToolDeclMetadataDTO, 0, len(tools))
+		for _, tool := range tools {
+			if tool == nil {
+				return nil, BadRequest("canonical request tool declarations are invalid")
+			}
+			execution := strings.TrimSpace(string(tool.Owner())) // swobu:io-string source=domain
+			switch decl := tool.(type) {
+			case FunctionToolDecl:
+				schema, err := encodeToolSchemaMetadataForTest(decl.ToolInputSchema())
+				if err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(decl.ToolName()) == "" { // swobu:io-string source=domain
+					return nil, BadRequest("canonical request tool declarations require a name")
+				}
+				dto = append(dto, requestToolDeclMetadataDTO{
+					Kind:        "function",
+					ID:          strings.TrimSpace(decl.ToolID().String()),
+					Name:        strings.TrimSpace(decl.ToolName()),
+					Description: strings.TrimSpace(decl.ToolDescription()),
+					InputSchema: schema,
+					Strict:      cloneBoolPointer(decl.Strict),
+					Execution:   execution,
+				})
+			case *FunctionToolDecl:
+				schema, err := encodeToolSchemaMetadataForTest(decl.ToolInputSchema())
+				if err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(decl.ToolName()) == "" { // swobu:io-string source=domain
+					return nil, BadRequest("canonical request tool declarations require a name")
+				}
+				dto = append(dto, requestToolDeclMetadataDTO{
+					Kind:        "function",
+					ID:          strings.TrimSpace(decl.ToolID().String()),
+					Name:        strings.TrimSpace(decl.ToolName()),
+					Description: strings.TrimSpace(decl.ToolDescription()),
+					InputSchema: schema,
+					Strict:      cloneBoolPointer(decl.Strict),
+					Execution:   execution,
+				})
+			case CustomToolDecl:
+				format, err := encodeToolFormatMetadataForTest(decl.Format)
+				if err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(decl.ToolName()) == "" { // swobu:io-string source=domain
+					return nil, BadRequest("canonical request tool declarations require a name")
+				}
+				dto = append(dto, requestToolDeclMetadataDTO{
+					Kind:        "custom",
+					ID:          strings.TrimSpace(decl.ToolID().String()),
+					Name:        strings.TrimSpace(decl.ToolName()),
+					Description: strings.TrimSpace(decl.ToolDescription()),
+					Format:      format,
+					Execution:   execution,
+				})
+			case *CustomToolDecl:
+				format, err := encodeToolFormatMetadataForTest(decl.Format)
+				if err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(decl.ToolName()) == "" { // swobu:io-string source=domain
+					return nil, BadRequest("canonical request tool declarations require a name")
+				}
+				dto = append(dto, requestToolDeclMetadataDTO{
+					Kind:        "custom",
+					ID:          strings.TrimSpace(decl.ToolID().String()),
+					Name:        strings.TrimSpace(decl.ToolName()),
+					Description: strings.TrimSpace(decl.ToolDescription()),
+					Format:      format,
+					Execution:   execution,
+				})
+			case CapabilityToolDecl:
+				config, err := encodeToolCapabilityConfigMetadataForTest(decl.CapabilityConfig())
+				if err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(string(decl.ToolCapability())) == "" { // swobu:io-string source=domain
+					return nil, BadRequest("canonical request tool declarations require a capability")
+				}
+				dto = append(dto, requestToolDeclMetadataDTO{
+					Kind:             "capability",
+					ID:               strings.TrimSpace(decl.ToolID().String()),
+					Capability:       strings.TrimSpace(string(decl.ToolCapability())),
+					CapabilityConfig: config,
+					Execution:        execution,
+				})
+			case *CapabilityToolDecl:
+				config, err := encodeToolCapabilityConfigMetadataForTest(decl.CapabilityConfig())
+				if err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(string(decl.ToolCapability())) == "" { // swobu:io-string source=domain
+					return nil, BadRequest("canonical request tool declarations require a capability")
+				}
+				dto = append(dto, requestToolDeclMetadataDTO{
+					Kind:             "capability",
+					ID:               strings.TrimSpace(decl.ToolID().String()),
+					Capability:       strings.TrimSpace(string(decl.ToolCapability())),
+					CapabilityConfig: config,
+					Execution:        execution,
+				})
+			default:
+				return nil, InternalError("canonical request tool declarations contain an unsupported tool declaration type")
+			}
 		}
-		execution := strings.TrimSpace(string(tool.Owner())) // swobu:io-string source=domain
-		switch decl := tool.(type) {
-		case FunctionToolDecl:
-			schema, err := encodeToolSchemaMetadataForTest(decl.ToolInputSchema())
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(decl.ToolName()) == "" { // swobu:io-string source=domain
-				return "", BadRequest("canonical request tool declarations require a name")
-			}
-			dto = append(dto, requestToolDeclMetadataDTO{
-				Kind:        "function",
-				ID:          strings.TrimSpace(string(decl.ToolID())),
-				Name:        strings.TrimSpace(decl.ToolName()),
-				Description: strings.TrimSpace(decl.ToolDescription()),
-				InputSchema: schema,
-				Execution:   execution,
-			})
-		case *FunctionToolDecl:
-			schema, err := encodeToolSchemaMetadataForTest(decl.ToolInputSchema())
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(decl.ToolName()) == "" { // swobu:io-string source=domain
-				return "", BadRequest("canonical request tool declarations require a name")
-			}
-			dto = append(dto, requestToolDeclMetadataDTO{
-				Kind:        "function",
-				ID:          strings.TrimSpace(string(decl.ToolID())),
-				Name:        strings.TrimSpace(decl.ToolName()),
-				Description: strings.TrimSpace(decl.ToolDescription()),
-				InputSchema: schema,
-				Execution:   execution,
-			})
-		case CapabilityToolDecl:
-			config, err := encodeToolCapabilityConfigMetadataForTest(decl.CapabilityConfig())
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(string(decl.ToolCapability())) == "" { // swobu:io-string source=domain
-				return "", BadRequest("canonical request tool declarations require a capability")
-			}
-			dto = append(dto, requestToolDeclMetadataDTO{
-				Kind:             "capability",
-				ID:               strings.TrimSpace(string(decl.ToolID())),
-				Capability:       strings.TrimSpace(string(decl.ToolCapability())),
-				CapabilityConfig: config,
-				Execution:        execution,
-			})
-		case *CapabilityToolDecl:
-			config, err := encodeToolCapabilityConfigMetadataForTest(decl.CapabilityConfig())
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(string(decl.ToolCapability())) == "" { // swobu:io-string source=domain
-				return "", BadRequest("canonical request tool declarations require a capability")
-			}
-			dto = append(dto, requestToolDeclMetadataDTO{
-				Kind:             "capability",
-				ID:               strings.TrimSpace(string(decl.ToolID())),
-				Capability:       strings.TrimSpace(string(decl.ToolCapability())),
-				CapabilityConfig: config,
-				Execution:        execution,
-			})
-		default:
-			return "", InternalError("canonical request tool declarations contain an unsupported tool declaration type")
-		}
+		return dto, nil
+	}
+	dto, err := encodeDecls(tools)
+	if err != nil {
+		return "", err
 	}
 	raw, err := json.Marshal(dto)
 	if err != nil {
@@ -329,6 +388,22 @@ func encodeToolSchemaMetadataForTest(schema ToolSchema) (json.RawMessage, error)
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
 		return nil, BadRequest("canonical request tool declarations require a JSON object input_schema")
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return nil, InternalError("canonical request tool declarations could not be encoded")
+	}
+	return json.RawMessage(normalized), nil
+}
+
+func encodeToolFormatMetadataForTest(format ToolFormat) (json.RawMessage, error) {
+	raw := strings.TrimSpace(format.RawObject()) // swobu:io-string source=domain
+	if raw == "" {
+		return nil, BadRequest("canonical request tool declarations require format")
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return nil, BadRequest("canonical request tool declarations require a JSON object format")
 	}
 	normalized, err := json.Marshal(obj)
 	if err != nil {
@@ -358,13 +433,17 @@ func encodeToolPolicyMetadataForTest(policy ToolPolicy) (string, error) {
 		return "", err
 	}
 	type requestToolPolicyMetadataDTO struct {
-		Mode     string `json:"mode"`
-		Specific string `json:"specific,omitempty"`
+		Mode         string `json:"mode"`
+		Specific     string `json:"specific,omitempty"`
+		SpecificType string `json:"specific_type,omitempty"`
 	}
 	dto := requestToolPolicyMetadataDTO{Mode: string(policy.Mode)}
 	if specific, ok := policy.SpecificID(); ok {
 		dto.Mode = string(ToolPolicySpecific)
-		dto.Specific = string(specific)
+		dto.Specific = specific.String()
+		if specificType, ok := policy.SpecificToolType(); ok {
+			dto.SpecificType = specificType
+		}
 	}
 	raw, err := json.Marshal(dto)
 	if err != nil {

@@ -5,12 +5,29 @@
 // error boundary. Continuation-aware flows use TurnRef and ContinuationRecord
 // so semantic chain ownership stays separate from provider-native turn-state
 // bytes. Canonical requests now also own the semantic tool ontology:
-// function/capability declarations, execution ownership, and tool policy are
-// represented separately so adapters can lower to wire formats without
-// collapsing distinct lifecycles into one flat tool blob.
+// function/custom/capability declarations, execution ownership, structured
+// tool identity, and tool policy are represented separately so adapters can
+// lower to wire formats without collapsing distinct lifecycles into one flat
+// tool blob. Tool-call payloads stay raw until the wire edge can prove the
+// projection is lossless. Structured tool IDs render as
+// tool:v1/{origin}/{kind}/{path}; flat wire names are deterministic
+// projections of those IDs, not canonical truth.
 // Canonical outputs may also carry provider-neutral token usage and cache
-// accounting so adapters can expose runtime cost facts without provider-
+// accounting, including reasoning-token breakdowns when the source protocol
+// exposes them, so adapters can expose runtime cost facts without provider-
 // dialect leakage into core nouns.
+// Canonical requests also own the semantic generation-control band:
+// max_output_tokens, temperature, top_p, and stop sequences are represented
+// separately so adapters can lower or reject them without inventing wire-only
+// request state.
+// Canonical requests also own the semantic tool-call batch band:
+// parallel_tool_calls:false / disable_parallel_tool_use:true lowerings are
+// represented explicitly so adapters can lower or reject them without inventing
+// provider-only batching semantics.
+// Canonical requests also own the final-answer output-format band:
+// plain text remains the default, while structured JSON Schema output is
+// represented explicitly so adapters can lower or reject it without prompt
+// hacks or transport-only fields.
 // Canonical request cache intent remains minimal by law: only fields with at
 // least one active provider consumer are allowed in this package surface.
 // Protocol-edge DTOs, realized wire payloads, and transport mechanics must

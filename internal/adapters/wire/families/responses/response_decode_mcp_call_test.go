@@ -2,7 +2,6 @@ package responses
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -11,16 +10,7 @@ import (
 func TestDecodeOutputItems_AcceptsMcpCallAsToolUse(t *testing.T) {
 	t.Parallel()
 
-	items, err := decodeOutputItems([]struct {
-		Type        string          `json:"type"`
-		ID          string          `json:"id"`
-		Role        string          `json:"role"`
-		Content     json.RawMessage `json:"content"`
-		CallID      string          `json:"call_id"`
-		Name        string          `json:"name"`
-		Arguments   string          `json:"arguments"`
-		ServerLabel string          `json:"server_label"`
-	}{
+	items, err := decodeOutputItems([]responsesWireOutputItemDTO{
 		{
 			Type:      "mcp_call",
 			ID:        "mcp_1",

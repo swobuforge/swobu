@@ -54,20 +54,33 @@ func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
 	}
 }
 
-func TestStoreKeychainCredential_FailsWhenKeyringUnavailable(t *testing.T) {
+func TestStoreKeychainCredential_FallsBackToFileWhenKeyringUnavailable(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
+	origGet := keyringGet
+	t.Cleanup(func() { keyringGet = origGet })
 
 	keyringSet = func(scope, user, pass string) error {
 		return fmt.Errorf("backend unavailable")
 	}
-
-	err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123")
-	if err == nil {
-		t.Fatal("StoreKeychainCredential returned nil error; want fail-fast keyring error")
+	keyringGet = func(scope, user string) (string, error) {
+		return "", fmt.Errorf("backend unavailable")
 	}
-	if !strings.Contains(err.Error(), "keyring write failed") {
-		t.Fatalf("unexpected error: %v", err)
+
+	if err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123"); err != nil {
+		t.Fatalf("StoreKeychainCredential returned error: %v", err)
+	}
+	raw, err := ResolveStoredSecretByRef("openrouter", "keychain:openrouter/default")
+	if err != nil {
+		t.Fatalf("ResolveStoredSecretByRef returned error: %v", err)
+	}
+	bundle, _, err := DecodeTokenBundle(raw)
+	if err != nil {
+		t.Fatalf("decode fallback bundle: %v", err)
+	}
+	if bundle.AccessToken != "token-123" {
+		t.Fatalf("access_token=%q want token-123", bundle.AccessToken)
 	}
 }
 
@@ -103,5 +116,35 @@ func TestStoreMaterializedCredential_FileWritesWithoutKeyring(t *testing.T) {
 	}
 	if ref != "secretfile:chatgpt/default" {
 		t.Fatalf("ref=%q", ref)
+	}
+}
+
+func TestStoreSecretByRef_KeychainFallsBackToFileWhenKeyringUnavailable(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+	origSet := keyringSet
+	t.Cleanup(func() { keyringSet = origSet })
+	origGet := keyringGet
+	t.Cleanup(func() { keyringGet = origGet })
+
+	keyringSet = func(scope, user, pass string) error {
+		return fmt.Errorf("backend unavailable")
+	}
+	keyringGet = func(scope, user string) (string, error) {
+		return "", fmt.Errorf("backend unavailable")
+	}
+
+	raw, err := EncodeTokenBundle(TokenBundle{AccessToken: "token-123"})
+	if err != nil {
+		t.Fatalf("encode bundle: %v", err)
+	}
+	if err := StoreSecretByRef("openrouter", "keychain:openrouter/default", raw); err != nil {
+		t.Fatalf("StoreSecretByRef returned error: %v", err)
+	}
+	got, err := ResolveStoredSecretByRef("openrouter", "keychain:openrouter/default")
+	if err != nil {
+		t.Fatalf("ResolveStoredSecretByRef returned error: %v", err)
+	}
+	if got != raw {
+		t.Fatalf("resolved raw bundle mismatch: got %q want %q", got, raw)
 	}
 }

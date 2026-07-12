@@ -17,6 +17,9 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		case canonical.ItemKindText:
 			content = append(content, messagesResponsePartDTO{Type: "text", Text: item.Text})
 		case canonical.ItemKindToolUse:
+			if item.ToolType != "" && item.ToolType != canonical.ToolTypeFunction {
+				return carrier.WireDocument{}, canonical.UnsupportedOperation("messages protocol only supports function tool output")
+			}
 			input := map[string]any{}
 			if raw := item.Input.RawObject(); raw != "" {
 				if err := json.Unmarshal([]byte(raw), &input); err != nil {
@@ -29,6 +32,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 				Name:  item.Name,
 				Input: input,
 			})
+		case canonical.ItemKindToolResult:
+			return carrier.WireDocument{}, canonical.UnsupportedOperation("messages protocol does not support tool result output items")
+		default:
+			return carrier.WireDocument{}, canonical.UnsupportedOperation("messages protocol does not support this output item kind")
 		}
 	}
 	stopReason := "end_turn"

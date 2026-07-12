@@ -152,16 +152,16 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 
 func parseBedrockAuthMode(credentialRef string) (mode bedrockAuthMode, value string) {
 	ref := trimBedrockInput(credentialRef)
-	if ref == "" || strings.EqualFold(ref, string(profile.AuthVariantAWSProfile)) {
+	if ref == "" || strings.EqualFold(ref, string(profile.AuthModeAWSProfile)) {
 		return bedrockAuthModeAWSProfile, ""
 	}
-	if strings.EqualFold(ref, string(profile.AuthVariantAWSEnvSession)) {
+	if strings.EqualFold(ref, string(profile.AuthModeAWSEnvSession)) {
 		return bedrockAuthModeAWSProfile, ""
 	}
 	if strings.HasPrefix(lowerBedrockInput(ref), "profile:") { // swobu:io-string source=boundary
 		return bedrockAuthModeAWSProfile, trimBedrockInput(ref[len("profile:"):])
 	}
-	if strings.EqualFold(ref, string(profile.AuthVariantEnv)) {
+	if strings.EqualFold(ref, string(profile.AuthModeEnv)) {
 		return bedrockAuthModeAPIKeyEnv, "AWS_BEARER_TOKEN_BEDROCK"
 	}
 	if strings.HasPrefix(lowerBedrockInput(ref), "env:") { // swobu:io-string source=boundary

@@ -15,7 +15,7 @@ import (
 
 // BuildSection is the top-level routing section builder.
 // Model-creation row grammar is documented in model_creation_flow.md.
-// It routes to create or workspace variants based on whether an endpoint is selected.
+// It routes to create or workspace modes based on whether an endpoint is selected.
 func BuildSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	var out retained.ViewSpec[state.Model]
@@ -168,7 +168,7 @@ func buildCreateRunOnRow(
 						nextBaseURL = bedrockBaseURLForRegion(region)
 					}
 				}
-				nextVariant := profile.ProviderProtocolAuto
+				nextMode := profile.ProviderProtocolAuto
 				return []update.Action{
 					state.SetCreateDraftProviderSpec{ProviderSpec: specChoice},
 					state.SetCreateDraftCredentialRef{CredentialRef: ""},
@@ -176,8 +176,8 @@ func buildCreateRunOnRow(
 					state.LoadRoutingModelCatalogRequestedAction{
 						Scope:            state.RoutingModelCatalogScopeCreateDraft,
 						ProviderSpec:     specChoice,
-						AuthHeader:       strings.TrimSpace(authHeader),  // swobu:io-string source=boundary
-						ProviderProtocol: strings.TrimSpace(nextVariant), // swobu:io-string source=boundary
+						AuthHeader:       strings.TrimSpace(authHeader), // swobu:io-string source=boundary
+						ProviderProtocol: strings.TrimSpace(nextMode),   // swobu:io-string source=boundary
 						BaseURL:          nextBaseURL,
 						CredentialRef:    "",
 					},
@@ -217,17 +217,16 @@ func buildCreateUseKeyFromRow(
 	if !state.CreateDraftCredentialStrategySelectable(provider) {
 		return views.RowStatic(views.RowUseKeyFrom, credSummary)
 	}
-	items := credentialOptionItems(credentialSource(credentialRef), func(choice string) []update.Action {
-		actions := applyProviderCredentialSelection(choice, provider, nil, "", true)
+	items := credentialOptionItems(credentialSource(credentialRef), func(choice credentialChoiceOption) []update.Action {
+		actions := applyProviderCredentialSelection(choice.Mode, provider, nil, "", true)
 		nextRef := createDraftCredentialRefFromActions(actions)
 		setKeyPickerState("")
-		variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
-		if profile.IsInteractiveAuthVariant(variant) {
+		if profile.IsInteractiveAuthMode(choice.Mode) {
 			draft := createDraftAuthProviderConfig(provider, baseURL, nextRef)
-			if variant == profile.AuthVariantChatGPTLogin {
+			if choice.Mode == profile.AuthModeChatGPTLogin {
 				actions = append(actions, state.ResetAuthSessionUIRequestedAction{})
 			}
-			if variant == profile.AuthVariantChatGPTDeviceAuth {
+			if choice.Mode == profile.AuthModeChatGPTDeviceAuth {
 				actions = append(actions, startAuthActionsForCreateDraft(draft)...)
 			}
 		}
@@ -242,8 +241,12 @@ func buildCreateUseKeyFromRow(
 				CredentialRef:    nextRef,
 			},
 			state.SetInteractionMode{Mode: state.InteractionModeNAV},
-			interaction.FocusKeyAction{Key: "use_key_from"},
 		)
+		focusKey := "use_key_from"
+		if choice.Mode == profile.AuthModeKeychain {
+			focusKey = "keychain"
+		}
+		actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
 		return actions
 	}, provider)
 	useKeyFrom := views.RowChoiceWithHooks(views.RowUseKeyFrom, credSummary, func() []update.Action {
@@ -282,8 +285,8 @@ func buildCreateUseKeyFromRow(
 func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state.Model] {
 	provider := model.CreateDraftProviderConfig.ProviderSpec
 	source := credentialSource(model.CreateDraftProviderConfig.CredentialRef)
-	variant := profile.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
-	if !profile.SupportsAuthVariant(provider, variant) || !profile.IsInteractiveAuthVariant(variant) {
+	mode := profile.AuthMode(strings.ToLower(source)) // swobu:io-string source=boundary
+	if !profile.SupportsAuthMode(provider, mode) || !profile.IsInteractiveAuthMode(mode) {
 		return nil
 	}
 	draft := createDraftAuthProviderConfig(
@@ -294,14 +297,14 @@ func buildCreateInteractiveAuthRows(model state.Model) []retained.ViewSpec[state
 	return interactiveAuthStatusRows(model, interactiveAuthRenderConfig{
 		EndpointName: "",
 		Draft:        draft,
-		Variant:      variant,
+		Mode:         mode,
 		StartAuth: func(next state.ProviderConfigSnapshot) []update.Action {
 			return startAuthActionsForCreateDraft(next)
 		},
 		SwitchToDeviceAuth: func(next state.ProviderConfigSnapshot) []update.Action {
-			next.CredentialRef = string(profile.AuthVariantChatGPTDeviceAuth)
+			next.CredentialRef = string(profile.AuthModeChatGPTDeviceAuth)
 			actions := []update.Action{
-				state.SetCreateDraftCredentialRef{CredentialRef: string(profile.AuthVariantChatGPTDeviceAuth)},
+				state.SetCreateDraftCredentialRef{CredentialRef: string(profile.AuthModeChatGPTDeviceAuth)},
 				state.ResetAuthSessionUIRequestedAction{},
 			}
 			return append(actions, startAuthActionsForCreateDraft(next)...)

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -234,7 +235,10 @@ func logRequestOutcome(
 	statusCode := http.StatusOK
 	errorOrigin := ""
 	backendRef := ""
+	errorMessage := ""
+	errorCode := ""
 	if err != nil {
+		errorMessage = err.Error()
 		result = "swobu_error"
 		errorOrigin = string(canonical.ErrorOriginSwobu)
 		var backendErr canonical.BackendError
@@ -245,9 +249,13 @@ func logRequestOutcome(
 			backendRef = strings.TrimSpace(backendErr.BackendRef) // swobu:io-string source=boundary
 		} else {
 			statusCode = statusCodeForExchangeError(err)
+			var swobuErr canonical.Error
+			if errors.As(err, &swobuErr) {
+				errorCode = string(swobuErr.Code)
+			}
 		}
 	}
-	slog.Debug("protocol request outcome",
+	attrs := []any{
 		"component", "httpapi",
 		"event", "request_outcome",
 		"request_id", requestID,
@@ -258,7 +266,31 @@ func logRequestOutcome(
 		"status_code", statusCode,
 		"error_origin", errorOrigin,
 		"backend_ref", backendRef,
-	)
+	}
+	if errorMessage != "" {
+		attrs = append(attrs, "error_message", errorMessage)
+	}
+	if errorCode != "" {
+		attrs = append(attrs, "error_code", errorCode)
+	}
+	if err != nil {
+		var swobuErr canonical.Error
+		if errors.As(err, &swobuErr) && len(swobuErr.Details) > 0 {
+			keys := make([]string, 0, len(swobuErr.Details))
+			for key := range swobuErr.Details {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				value := strings.TrimSpace(swobuErr.Details[key]) // swobu:io-string source=boundary
+				if value == "" {
+					continue
+				}
+				attrs = append(attrs, "error_detail_"+key, value)
+			}
+		}
+	}
+	slog.Debug("protocol request outcome", attrs...)
 }
 
 func statusCodeForExchangeError(err error) int {

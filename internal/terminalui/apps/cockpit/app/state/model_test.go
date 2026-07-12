@@ -379,6 +379,71 @@ func TestReduce_StoreKeychainCredentialTransitionsThroughBusyAndSaved(t *testing
 	}
 }
 
+func TestReduce_StoreKeychainCredentialReloadsActiveDraftCatalog(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		model     Model
+		wantScope string
+		wantRef   string
+		wantProv  string
+	}{
+		{
+			name: "create draft",
+			model: Model{
+				CreateDraftProviderConfig: ProviderConfigSnapshot{
+					ProviderSpec:     "openai",
+					CredentialRef:    "keychain",
+					ProviderProtocol: "auto",
+				},
+			},
+			wantScope: RoutingModelCatalogScopeCreateDraft,
+			wantRef:   "keychain",
+			wantProv:  "openai",
+		},
+		{
+			name: "add model draft",
+			model: Model{
+				CurrentEndpoint:               "acme",
+				AddModelDraftProviderSpec:     "openai",
+				AddModelDraftBaseURL:          "https://api.openai.com/v1",
+				AddModelDraftAuthHeader:       "Authorization",
+				AddModelDraftCredentialRef:    "keychain",
+				AddModelDraftProviderProtocol: "auto",
+			},
+			wantScope: RoutingModelCatalogScopeAddModelDraft,
+			wantRef:   "keychain",
+			wantProv:  "openai",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			effects := Reduce(&tt.model, KeychainCredentialStored{ProviderSpec: "openai", KeyName: "openai/default"})
+			if len(effects) != 1 {
+				t.Fatalf("effect count = %d, want 1", len(effects))
+			}
+			load, ok := effects[0].(LoadRoutingModelCatalogEffect)
+			if !ok {
+				t.Fatalf("effect type = %T, want LoadRoutingModelCatalogEffect", effects[0])
+			}
+			if load.Scope != tt.wantScope {
+				t.Fatalf("scope=%q want %q", load.Scope, tt.wantScope)
+			}
+			if load.ProviderSpec != tt.wantProv {
+				t.Fatalf("provider spec=%q want %q", load.ProviderSpec, tt.wantProv)
+			}
+			if load.CredentialRef != tt.wantRef {
+				t.Fatalf("credential ref=%q want %q", load.CredentialRef, tt.wantRef)
+			}
+		})
+	}
+}
+
 func TestReduce_EndpointCopyNoteAnchorsAndClearsOnWorkspaceSelectionChange(t *testing.T) {
 	t.Parallel()
 

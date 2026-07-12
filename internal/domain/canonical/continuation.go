@@ -206,12 +206,15 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 	// thread is materialized and the native selector is cleared to avoid
 	// duplicate history injection.
 	return NewCanonicalRequest(RequestParams{
-		Model:       request.Model(),
-		Items:       thread,
-		Tools:       request.Tools(),
-		Turn:        preparedTurn,
-		ToolPolicy:  request.ToolPolicy(),
-		CacheIntent: request.CacheIntent(),
+		Model:         request.Model(),
+		Items:         thread,
+		Tools:         request.Tools(),
+		Turn:          preparedTurn,
+		ToolPolicy:    request.ToolPolicy(),
+		ToolCallBatch: request.ToolCallBatch(),
+		Controls:      request.Controls(),
+		OutputFormat:  request.OutputFormat(),
+		CacheIntent:   request.CacheIntent(),
 	}), nil
 }
 
@@ -293,12 +296,14 @@ func buildContinuationRecord(namespace ContinuationNamespace, request CanonicalR
 	}
 	requestDelta := CurrentTurnDelta(request.Items())
 	delta := NewCanonicalRequest(RequestParams{
-		Model:       request.Model(),
-		Items:       requestDelta,
-		Tools:       request.Tools(),
-		Turn:        TurnRef{},
-		ToolPolicy:  request.ToolPolicy(),
-		CacheIntent: request.CacheIntent(),
+		Model:        request.Model(),
+		Items:        requestDelta,
+		Tools:        request.Tools(),
+		Turn:         TurnRef{},
+		ToolPolicy:   request.ToolPolicy(),
+		Controls:     request.Controls(),
+		OutputFormat: request.OutputFormat(),
+		CacheIntent:  request.CacheIntent(),
 	})
 	record := ContinuationRecord{
 		ID:           NewContinuationID(output.ResultID()),

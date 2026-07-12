@@ -16,13 +16,24 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
-	if err := sse.DecodeStrictJSON(raw, &dto, "messages request"); err != nil {
+	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
 	}
 	tools, err := decodeMessagesTools(dto.Tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	if err := rejectMessagesStructuredOutput(dto.ResponseFormat); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	toolPolicy, err := decodeMessagesToolChoice(dto.ToolChoice, tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	toolCallBatch, err := decodeMessagesToolCallBatch(dto.DisableParallelToolUse)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -40,14 +51,21 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 		items = append(items, decoded...)
 		pendingToolUseIDs = nextPending
 	}
+	controls, err := decodeMessagesGenerationControls(dto)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		Items: items,
-		Tools: tools,
+		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		Items:         items,
+		Tools:         tools,
+		ToolPolicy:    toolPolicy,
+		ToolCallBatch: toolCallBatch,
+		Controls:      controls,
 	}), resolvedDelivery, nil
 }
 

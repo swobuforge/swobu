@@ -41,19 +41,23 @@ func cloneToolDecls(tools []ToolDecl) []ToolDecl {
 }
 
 type requestToolDeclMetadataDTO struct {
-	Kind             string          `json:"kind,omitempty"`
-	ID               string          `json:"id,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	Description      string          `json:"description,omitempty"`
-	InputSchema      json.RawMessage `json:"input_schema,omitempty"`
-	Capability       string          `json:"capability,omitempty"`
-	CapabilityConfig json.RawMessage `json:"capability_config,omitempty"`
-	Execution        string          `json:"execution,omitempty"`
+	Kind             string                       `json:"kind,omitempty"`
+	ID               string                       `json:"id,omitempty"`
+	Name             string                       `json:"name,omitempty"`
+	Description      string                       `json:"description,omitempty"`
+	InputSchema      json.RawMessage              `json:"input_schema,omitempty"`
+	Strict           *bool                        `json:"strict,omitempty"`
+	Format           json.RawMessage              `json:"format,omitempty"`
+	Tools            []requestToolDeclMetadataDTO `json:"tools,omitempty"`
+	Capability       string                       `json:"capability,omitempty"`
+	CapabilityConfig json.RawMessage              `json:"capability_config,omitempty"`
+	Execution        string                       `json:"execution,omitempty"`
 }
 
 type requestToolPolicyMetadataDTO struct {
-	Mode     string `json:"mode"`
-	Specific string `json:"specific,omitempty"`
+	Mode         string `json:"mode"`
+	Specific     string `json:"specific,omitempty"`
+	SpecificType string `json:"specific_type,omitempty"`
 }
 
 func decodeRequestToolDeclsMetadata(raw string) ([]ToolDecl, error) {
@@ -72,9 +76,14 @@ func decodeRequestToolDeclsMetadata(raw string) ([]ToolDecl, error) {
 		kindRaw := strings.TrimSpace(tool.Kind) // swobu:io-string source=domain
 		kind := strings.ToLower(kindRaw)
 		capability := strings.TrimSpace(tool.Capability) // swobu:io-string source=domain
+		if len(tool.Tools) > 0 {
+			return nil, BadRequest("canonical request tool namespace declarations are unsupported")
+		}
 		if kind == "" {
 			if capability != "" {
 				kind = "capability"
+			} else if len(tool.Format) > 0 {
+				kind = "custom"
 			} else {
 				kind = "function"
 			}
@@ -89,6 +98,19 @@ func decodeRequestToolDeclsMetadata(raw string) ([]ToolDecl, error) {
 				return nil, BadRequest("canonical request tool declarations require a name")
 			}
 			decl := NewFunctionToolDecl(tool.ID, name, tool.Description, schema)
+			decl.Strict = cloneBoolPointer(tool.Strict)
+			decl.Execution = execution
+			tools = append(tools, decl)
+		} else if kind == "custom" {
+			format, err := decodeToolFormatMetadata(tool.Format)
+			if err != nil {
+				return nil, err
+			}
+			name := strings.TrimSpace(tool.Name) // swobu:io-string source=domain
+			if name == "" {
+				return nil, BadRequest("canonical request tool declarations require a name")
+			}
+			decl := NewCustomToolDecl(tool.ID, name, tool.Description, format)
 			decl.Execution = execution
 			tools = append(tools, decl)
 		} else if kind == "capability" {
@@ -109,6 +131,17 @@ func decodeRequestToolDeclsMetadata(raw string) ([]ToolDecl, error) {
 	return tools, nil
 }
 
+func decodeRequestToolDeclsMetadataFromDTO(dto []requestToolDeclMetadataDTO) ([]ToolDecl, error) {
+	if len(dto) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(dto)
+	if err != nil {
+		return nil, InternalError("canonical request tool declarations could not be decoded")
+	}
+	return decodeRequestToolDeclsMetadata(string(raw))
+}
+
 func decodeToolSchemaMetadata(raw json.RawMessage) (ToolSchema, error) {
 	rawText := string(raw)                // swobu:io-string source=domain
 	trimmed := strings.TrimSpace(rawText) // swobu:io-string source=domain
@@ -126,6 +159,19 @@ func decodeToolSchemaMetadata(raw json.RawMessage) (ToolSchema, error) {
 	return NewToolSchemaObject(string(normalized)), nil
 }
 
+func decodeToolFormatMetadata(raw json.RawMessage) (ToolFormat, error) {
+	rawText := string(raw)                // swobu:io-string source=domain
+	trimmed := strings.TrimSpace(rawText) // swobu:io-string source=domain
+	if trimmed == "" || trimmed == "null" {
+		return ToolFormat{}, BadRequest("canonical request tool declarations require format")
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ToolFormat{}, BadRequest("canonical request tool declarations are invalid")
+	}
+	return NewToolFormatObject(rawText), nil
+}
+
 func decodeToolCapabilityConfigMetadata(raw json.RawMessage) (ToolCapabilityConfig, error) {
 	rawText := string(raw)                // swobu:io-string source=domain
 	trimmed := strings.TrimSpace(rawText) // swobu:io-string source=domain
@@ -136,11 +182,7 @@ func decodeToolCapabilityConfigMetadata(raw json.RawMessage) (ToolCapabilityConf
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ToolCapabilityConfig{}, BadRequest("canonical request tool capability config is invalid")
 	}
-	normalized, err := json.Marshal(obj)
-	if err != nil {
-		return ToolCapabilityConfig{}, InternalError("canonical request tool capability config could not be decoded")
-	}
-	return NewToolCapabilityConfigObject(string(normalized)), nil
+	return NewToolCapabilityConfigObject(rawText), nil
 }
 
 func decodeToolPolicyMetadata(raw string) (ToolPolicy, error) {
@@ -163,7 +205,9 @@ func decodeToolPolicyMetadata(raw string) (ToolPolicy, error) {
 			return ToolPolicy{}, BadRequest("canonical request tool policy specific mode is invalid")
 		}
 		specificID := NewSemanticToolID(specific)
-		return NewToolPolicy(ToolPolicySpecific, &specificID), nil
+		policy := NewToolPolicy(ToolPolicySpecific, &specificID)
+		policy.SpecificType = strings.ToLower(strings.TrimSpace(dto.SpecificType)) // swobu:io-string source=domain
+		return policy, nil
 	}
 	if mode == ToolPolicySpecific {
 		return ToolPolicy{}, BadRequest("canonical request tool policy specific mode requires a tool id")

@@ -1,7 +1,8 @@
 package responses
 
 import (
-	"errors"
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -9,21 +10,64 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeRequest_RejectsUnknownField(t *testing.T) {
+func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	codec := ClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","unexpected":true}`)
-	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
-	if err == nil {
-		t.Fatal("expected error")
+	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest() error = %v", err)
 	}
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("expected canonical.Error, got %T", err)
+	if got.Model() != "gpt-4o-mini" {
+		t.Fatalf("model = %q, want %q", got.Model(), "gpt-4o-mini")
 	}
-	if compatErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
+	items := got.Items()
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if got := compatErr.Details["json_pointer"]; got != "/unexpected" {
-		t.Fatalf("json_pointer = %q, want %q", got, "/unexpected")
+	if items[0].Text != "hi" {
+		t.Fatalf("item text = %q, want %q", items[0].Text, "hi")
+	}
+}
+
+func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
+	codec := ClientRequestDecoder{}
+	wantFormat := `{"type":"grammar", "syntax":"lark", "definition":"start: \"x\" LF\n%import common.LF"}`
+	customTool := canonical.NewCustomToolDecl("apply_patch", "apply_patch", "edit files", canonical.NewToolFormatObject(wantFormat))
+	req := []byte(`{"model":"gpt-4o-mini","input":"hi","tools":[{"type":"custom","name":"` + customTool.ToolName() + `","format":` + wantFormat + `}]}`)
+	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest: %v", err)
+	}
+	if got.Model() != "gpt-4o-mini" {
+		t.Fatalf("model = %q, want %q", got.Model(), "gpt-4o-mini")
+	}
+	tools := got.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("tools len = %d, want 1", len(tools))
+	}
+	custom, ok := tools[0].(canonical.CustomToolDecl)
+	if !ok {
+		t.Fatalf("tool = %T, want CustomToolDecl", tools[0])
+	}
+	if custom.ToolName() != "apply_patch" {
+		t.Fatalf("tool name = %q, want %q", custom.ToolName(), "apply_patch")
+	}
+	if custom.Format.RawObject() != wantFormat {
+		t.Fatalf("custom format raw = %q, want %q", custom.Format.RawObject(), wantFormat)
+	}
+}
+
+func assertJSONEqual(t *testing.T, gotRaw, wantRaw string) {
+	t.Helper()
+	var got any
+	var want any
+	if err := json.Unmarshal([]byte(gotRaw), &got); err != nil {
+		t.Fatalf("json.Unmarshal(got): %v", err)
+	}
+	if err := json.Unmarshal([]byte(wantRaw), &want); err != nil {
+		t.Fatalf("json.Unmarshal(want): %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("json mismatch\ngot:  %s\nwant: %s", gotRaw, wantRaw)
 	}
 }

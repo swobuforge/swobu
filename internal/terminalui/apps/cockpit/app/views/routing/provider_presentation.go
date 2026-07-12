@@ -14,33 +14,35 @@ func providerDisplayName(spec string) string {
 	return profile.ProviderDisplayName
 }
 
-func authVariantDisplayLabel(variant profile.AuthVariant) string {
-	switch variant {
-	case profile.AuthVariantChatGPTLogin:
+func authModeDisplayLabel(mode profile.AuthMode) string {
+	switch mode {
+	case profile.AuthModeChatGPTLogin:
 		return "browser login"
-	case profile.AuthVariantChatGPTDeviceAuth:
+	case profile.AuthModeChatGPTDeviceAuth:
 		return "device code"
-	case profile.AuthVariantEnv:
+	case profile.AuthModeEnv:
 		return "env var"
-	case profile.AuthVariantFile:
+	case profile.AuthModeFile:
 		return "file"
-	case profile.AuthVariantAWSProfile:
+	case profile.AuthModeKeychain:
+		return "paste raw"
+	case profile.AuthModeAWSProfile:
 		return "AWS chain"
-	case profile.AuthVariantAWSEnvSession:
+	case profile.AuthModeAWSEnvSession:
 		return "AWS chain"
 	default:
-		return string(variant)
+		return string(mode)
 	}
 }
 
-func authVariantStartAction(spec string, variant profile.AuthVariant) (label string, verb string, ok bool) {
-	if !profile.SupportsAuthVariant(strings.TrimSpace(spec), variant) || !profile.IsInteractiveAuthVariant(variant) { // swobu:io-string source=boundary
+func authModeStartAction(spec string, mode profile.AuthMode) (label string, verb string, ok bool) {
+	if !profile.SupportsAuthMode(strings.TrimSpace(spec), mode) || !profile.IsInteractiveAuthMode(mode) { // swobu:io-string source=boundary
 		return "", "", false
 	}
-	switch variant {
-	case profile.AuthVariantChatGPTDeviceAuth:
+	switch mode {
+	case profile.AuthModeChatGPTDeviceAuth:
 		return "start device auth", "start", true
-	case profile.AuthVariantChatGPTLogin:
+	case profile.AuthModeChatGPTLogin:
 		return "start login", "login", true
 	default:
 		return "start login", "login", true

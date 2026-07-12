@@ -100,10 +100,10 @@ func buildWorkspaceAddModelDetailRows(
 		Scope:      buildAddModelScopeRow(ctx, draft, panel),
 	})
 	effectiveCredentialRef := effectiveAddModelCredentialRef(model, draft)
-	authVariant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(strings.TrimSpace(draft.CredentialRef))))) // swobu:io-string source=boundary
+	authMode := profile.AuthMode(strings.ToLower(strings.TrimSpace(credentialSource(strings.TrimSpace(draft.CredentialRef))))) // swobu:io-string source=boundary
 	authViewState := interactiveAuthPhaseNone
-	if strings.EqualFold(providerSpec, "chatgpt") && profile.IsInteractiveAuthVariant(authVariant) {
-		authViewState = classifyInteractiveAuthPhase(model, strings.TrimSpace(snapshot.Name), draft, authVariant) // swobu:io-string source=boundary
+	if strings.EqualFold(providerSpec, "chatgpt") && profile.IsInteractiveAuthMode(authMode) {
+		authViewState = classifyInteractiveAuthPhase(model, strings.TrimSpace(snapshot.Name), draft, authMode) // swobu:io-string source=boundary
 	}
 	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
 		ProviderSpec:            providerSpec,
@@ -209,6 +209,9 @@ func appendWorkspaceAddModelCredentialRows(
 		rows = append(rows, retained.Named[state.Model]("add-model/credential-file", buildAddModelCredentialFileRow(ctx, draft, panel)))
 		rows = append(rows, authModeRendererForCredentialRef(draft.CredentialRef).RenderAddModelExtras(providerSpec, draft.CredentialRef)...)
 	}
+	if strings.EqualFold(source, "keychain") {
+		rows = append(rows, retained.Named[state.Model]("add-model/keychain", buildAddModelKeychainKeyNameRow(ctx, model, draft, panel)))
+	}
 	return rows
 }
 
@@ -278,7 +281,7 @@ func buildAddModelProviderItems(model state.Model, endpointName string, draft st
 			next.ModelID = ""
 			next.TargetAlias = ""
 			if strings.EqualFold(spec, "chatgpt") {
-				next.CredentialRef = string(profile.AuthVariantChatGPTLogin)
+				next.CredentialRef = string(profile.AuthModeChatGPTLogin)
 			}
 			panel.setDraft(next)
 			panel.setProviderPickerOpen(false)

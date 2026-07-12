@@ -88,7 +88,7 @@ func TestInteractiveAddModelCredentialRows_RequireSessionState(t *testing.T) {
 	}
 }
 
-func TestAddModelCredentialSummary_InteractiveVariantShowsSignedInAfterResolution(t *testing.T) {
+func TestAddModelCredentialSummary_InteractiveModeShowsSignedInAfterResolution(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -125,7 +125,7 @@ func TestAddModelCredentialSummary_ResolvedPendingSessionShowsReauthInProgress(t
 	}
 }
 
-func TestAddModelCredentialSummary_UsesDisplayLabelForAuthVariant(t *testing.T) {
+func TestAddModelCredentialSummary_UsesDisplayLabelForAuthMode(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{}
@@ -154,8 +154,8 @@ func TestAddModelCredentialSummary_MissingWhenUnset(t *testing.T) {
 func TestClassifyInteractiveAuthPhase_BrowserNotStarted(t *testing.T) {
 	t.Parallel()
 	model := state.Model{}
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTLogin)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTLogin); got != interactiveAuthPhaseStartRequired {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTLogin); got != interactiveAuthPhaseStartRequired {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseStartRequired)
 	}
 }
@@ -166,8 +166,8 @@ func TestClassifyInteractiveAuthPhase_BrowserInProgress(t *testing.T) {
 		SessionID:    "sess-1",
 		SessionState: "pending",
 	})
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTLogin)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTLogin); got != interactiveAuthPhaseInProgress {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTLogin); got != interactiveAuthPhaseInProgress {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseInProgress)
 	}
 }
@@ -183,8 +183,8 @@ func TestClassifyInteractiveAuthPhase_CreateDraftBrowserInProgress(t *testing.T)
 			},
 		},
 	}
-	draft := state.ProviderConfigSnapshot{Ref: "create-draft", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTLogin)}
-	if got := classifyInteractiveAuthPhase(model, "", draft, profile.AuthVariantChatGPTLogin); got != interactiveAuthPhaseInProgress {
+	draft := state.ProviderConfigSnapshot{Ref: "create-draft", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "", draft, profile.AuthModeChatGPTLogin); got != interactiveAuthPhaseInProgress {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseInProgress)
 	}
 }
@@ -195,8 +195,8 @@ func TestClassifyInteractiveAuthPhase_IgnoresSessionFromOtherProviderRef(t *test
 		SessionID:    "sess-1",
 		SessionState: "pending",
 	})
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTLogin)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTLogin); got != interactiveAuthPhaseStartRequired {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTLogin); got != interactiveAuthPhaseStartRequired {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseStartRequired)
 	}
 }
@@ -209,8 +209,8 @@ func TestClassifyInteractiveAuthPhase_DeviceCodeInProgress(t *testing.T) {
 		URL:          "https://chatgpt.com/activate",
 		UserCode:     "VBMS-V2R4K",
 	})
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTDeviceAuth)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTDeviceAuth); got != interactiveAuthPhaseInProgress {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTDeviceAuth)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTDeviceAuth); got != interactiveAuthPhaseInProgress {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseInProgress)
 	}
 }
@@ -221,8 +221,8 @@ func TestClassifyInteractiveAuthPhase_SignedIn(t *testing.T) {
 		AddModelDraftProviderSpec:  "chatgpt",
 		AddModelDraftCredentialRef: "keychain:chatgpt/default",
 	}
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTLogin)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTLogin); got != interactiveAuthPhaseResolved {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTLogin); got != interactiveAuthPhaseResolved {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseResolved)
 	}
 }
@@ -233,8 +233,8 @@ func TestClassifyInteractiveAuthPhase_Expired(t *testing.T) {
 		SessionID:    "sess-1",
 		SessionState: "expired",
 	})
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTDeviceAuth)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTDeviceAuth); got != interactiveAuthPhaseExpired {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTDeviceAuth)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTDeviceAuth); got != interactiveAuthPhaseExpired {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseExpired)
 	}
 }
@@ -246,8 +246,8 @@ func TestClassifyInteractiveAuthPhase_BrowserUnavailable(t *testing.T) {
 		SessionState: "failed",
 		SessionError: "could not open default browser",
 	})
-	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthVariantChatGPTLogin)}
-	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthVariantChatGPTLogin); got != interactiveAuthPhaseStartUnavailable {
+	draft := state.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt", CredentialRef: string(profile.AuthModeChatGPTLogin)}
+	if got := classifyInteractiveAuthPhase(model, "acme", draft, profile.AuthModeChatGPTLogin); got != interactiveAuthPhaseStartUnavailable {
 		t.Fatalf("state=%q want=%q", got, interactiveAuthPhaseStartUnavailable)
 	}
 }
@@ -261,13 +261,13 @@ func addModelAuthSessionModel(endpointName string, providerRef string, session s
 
 func TestShouldRenderInteractiveAuthCode_DeviceOnly(t *testing.T) {
 	t.Parallel()
-	if !shouldRenderInteractiveAuthCode(profile.AuthVariantChatGPTDeviceAuth, "VBMS-V2R4K") {
-		t.Fatal("device code variant should render code")
+	if !shouldRenderInteractiveAuthCode(profile.AuthModeChatGPTDeviceAuth, "VBMS-V2R4K") {
+		t.Fatal("device code mode should render code")
 	}
-	if shouldRenderInteractiveAuthCode(profile.AuthVariantChatGPTLogin, "VBMS-V2R4K") {
-		t.Fatal("browser login variant must not render device code")
+	if shouldRenderInteractiveAuthCode(profile.AuthModeChatGPTLogin, "VBMS-V2R4K") {
+		t.Fatal("browser login mode must not render device code")
 	}
-	if shouldRenderInteractiveAuthCode(profile.AuthVariantChatGPTDeviceAuth, "") {
+	if shouldRenderInteractiveAuthCode(profile.AuthModeChatGPTDeviceAuth, "") {
 		t.Fatal("empty user code must not render")
 	}
 }

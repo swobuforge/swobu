@@ -15,6 +15,7 @@ import (
 	openrouterprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -98,6 +99,9 @@ func (r ProviderIngressResolverComposition) ResolveProviderIngress(ctx context.C
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRequestFeatureSupport(string(runtime.ProviderID), req.Target.ProtocolKind, req.Request); err != nil {
+		return nil, err
+	}
 	return runtime.IngressResolver.ResolveProviderIngress(ctx, req)
 }
 
@@ -142,4 +146,59 @@ func (r ProviderIngressResolverComposition) runtimeForTargetProvider(rawProvider
 	default:
 		return providersruntime.ProviderRuntimeBundle{}, canonical.BadEndpoint("provider id is unsupported")
 	}
+}
+
+// validateRequestFeatureSupport fails closed before protocol encoding when the
+// selected provider protocol cannot truthfully carry one canonical request
+// feature. This keeps provider support decisions at the provider edge rather
+// than inside wire syntax adapters.
+func validateRequestFeatureSupport(providerID string, protocolKind protocolkind.ProtocolKind, request canonical.CanonicalRequest) error {
+	tools := request.Tools()
+	if request.OutputFormat().Kind == canonical.OutputFormatJSONSchema &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureJSONSchemaOutput) {
+		return canonical.UnsupportedOperation("provider target does not support structured JSON schema output")
+	}
+
+	controls := request.Controls()
+	if _, ok := controls.Limits.MaxOutputTokens.Value(); ok &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureMaxOutputTokens) {
+		return canonical.UnsupportedOperation("provider target does not support max output tokens")
+	}
+	if _, ok := controls.Sampling.Temperature.Value(); ok &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureTemperature) {
+		return canonical.UnsupportedOperation("provider target does not support temperature")
+	}
+	if _, ok := controls.Sampling.TopP.Value(); ok &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureTopP) {
+		return canonical.UnsupportedOperation("provider target does not support top_p")
+	}
+	if len(controls.Limits.StopSequences) > 0 &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureStopSequences) {
+		return canonical.UnsupportedOperation("provider target does not support stop sequences")
+	}
+
+	if len(tools) > 0 &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureFunctionTools) {
+		return canonical.UnsupportedOperation("provider target does not support tool declarations")
+	}
+	// Batch lowering is inert without tools; fail closed before encoding when
+	// the selected protocol cannot truthfully carry at_most_one.
+	if batch := request.ToolCallBatch(); len(tools) > 0 && batch.Mode == canonical.ToolCallBatchAtMostOne &&
+		!profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureToolBatchAtMostOne) {
+		return canonical.UnsupportedOperation("provider target does not support at-most-one tool call batching")
+	}
+
+	// ToolPolicyNone collapses with the zero value, so the gate only checks the
+	// positive lowerings that require an explicit protocol surface.
+	switch request.ToolPolicy().Mode {
+	case canonical.ToolPolicyRequired:
+		if !profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureToolChoiceRequired) {
+			return canonical.UnsupportedOperation("provider target does not support required tool choice")
+		}
+	case canonical.ToolPolicySpecific:
+		if !profile.SupportsRequestFeatureForSpecAndKind(providerID, protocolKind, profile.RequestFeatureToolChoiceSpecific) {
+			return canonical.UnsupportedOperation("provider target does not support specific tool choice")
+		}
+	}
+	return nil
 }

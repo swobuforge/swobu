@@ -2,6 +2,8 @@ package profile
 
 import (
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestCatalog_SpecSupport(t *testing.T) {
@@ -71,19 +73,27 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 		t.Fatal("bedrock should default to AWS profile mode without credential_ref requirement")
 	}
 
-	chatgptVariants := SupportedAuthVariantsForSpec("chatgpt")
-	if len(chatgptVariants) < 2 {
-		t.Fatalf("chatgpt auth variants=%v want at least 2", chatgptVariants)
+	chatgptModes := SupportedAuthModesForSpec("chatgpt")
+	if len(chatgptModes) < 2 {
+		t.Fatalf("chatgpt auth modes=%v want at least 2", chatgptModes)
 	}
-	if chatgptVariants[0] != AuthVariantChatGPTLogin {
-		t.Fatalf("chatgpt default auth variant=%q want=%q", chatgptVariants[0], AuthVariantChatGPTLogin)
+	if chatgptModes[0] != AuthModeChatGPTLogin {
+		t.Fatalf("chatgpt default auth mode=%q want=%q", chatgptModes[0], AuthModeChatGPTLogin)
+	}
+
+	openAIModes := SupportedAuthModesForSpec("openai")
+	if len(openAIModes) != 3 {
+		t.Fatalf("openai auth modes=%v want exactly 3", openAIModes)
+	}
+	if openAIModes[0] != AuthModeEnv || openAIModes[1] != AuthModeFile || openAIModes[2] != AuthModeKeychain {
+		t.Fatalf("openai auth modes=%v want env/file/keychain", openAIModes)
 	}
 
 	modes := AllowedAuthModesForSpec("chatgpt")
 	if len(modes) < 2 {
 		t.Fatalf("chatgpt allowed auth modes=%v want at least 2", modes)
 	}
-	if modes[0].ID != AuthModeInteractiveBrowser || !modes[0].Interactive {
+	if modes[0].Mode != AuthModeChatGPTLogin || !modes[0].Interactive {
 		t.Fatalf("chatgpt mode[0]=%+v", modes[0])
 	}
 
@@ -91,13 +101,13 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if len(bedrockModes) != 3 {
 		t.Fatalf("bedrock allowed auth modes=%v want exactly 3", bedrockModes)
 	}
-	if bedrockModes[0].ID != AuthModeAWSProfile || bedrockModes[0].Variant != AuthVariantAWSProfile {
+	if bedrockModes[0].Mode != AuthModeAWSProfile {
 		t.Fatalf("bedrock mode[0]=%+v", bedrockModes[0])
 	}
-	if bedrockModes[1].ID != AuthModeAWSEnvSession || bedrockModes[1].Variant != AuthVariantAWSEnvSession {
+	if bedrockModes[1].Mode != AuthModeAWSEnvSession {
 		t.Fatalf("bedrock mode[1]=%+v", bedrockModes[1])
 	}
-	if bedrockModes[2].ID != AuthModeTokenEnv || bedrockModes[2].Variant != AuthVariantEnv {
+	if bedrockModes[2].Mode != AuthModeEnv {
 		t.Fatalf("bedrock mode[2]=%+v", bedrockModes[2])
 	}
 
@@ -119,11 +129,14 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 
 	azureModes := AllowedAuthModesForSpec("azure")
-	if len(azureModes) != 2 {
-		t.Fatalf("azure allowed auth modes=%v want exactly 2", azureModes)
+	if len(azureModes) != 3 {
+		t.Fatalf("azure allowed auth modes=%v want exactly 3", azureModes)
 	}
-	if azureModes[0].ID != AuthModeTokenEnv || azureModes[1].ID != AuthModeTokenFile {
-		t.Fatalf("azure allowed auth modes=%v want env/file", azureModes)
+	if azureModes[0].Mode != AuthModeEnv || azureModes[1].Mode != AuthModeFile {
+		t.Fatalf("azure allowed auth modes=%v want env/file/keychain prefix", azureModes)
+	}
+	if azureModes[2].Mode != AuthModeKeychain {
+		t.Fatalf("azure allowed auth modes=%v want keychain third", azureModes)
 	}
 	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("azure"); !ok || got != "responses" {
 		t.Fatalf("azure auto protocol=%q ok=%v want responses", got, ok)
@@ -178,5 +191,34 @@ func TestCatalog_ConcreteProviderProtocolsForSpec_OrderIsCanonical(t *testing.T)
 	chatgpt := ConcreteProviderProtocolsForSpec("chatgpt")
 	if len(chatgpt) != 1 || chatgpt[0] != "responses_stream" {
 		t.Fatalf("chatgpt concrete protocols=%v want [responses_stream]", chatgpt)
+	}
+}
+
+func TestCatalog_RequestFeatureSupportByProtocol(t *testing.T) {
+	t.Parallel()
+
+	if !SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Responses, RequestFeatureJSONSchemaOutput) {
+		t.Fatal("openai responses should support JSON schema output")
+	}
+	if !SupportsRequestFeatureForSpecAndKind("openai", protocolkind.ChatCompletions, RequestFeatureStopSequences) {
+		t.Fatal("openai chat completions should support stop sequences")
+	}
+	if !SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Responses, RequestFeatureToolBatchAtMostOne) {
+		t.Fatal("openai responses should support tool-call batch at most one")
+	}
+	if !SupportsRequestFeatureForSpecAndKind("anthropic", protocolkind.Messages, RequestFeatureToolBatchAtMostOne) {
+		t.Fatal("anthropic messages should support tool-call batch at most one")
+	}
+	if !SupportsRequestFeatureForSpecAndKind("anthropic", protocolkind.Messages, RequestFeatureFunctionTools) {
+		t.Fatal("anthropic messages should support function tools")
+	}
+	if SupportsRequestFeatureForSpecAndKind("anthropic", protocolkind.Messages, RequestFeatureJSONSchemaOutput) {
+		t.Fatal("anthropic messages must not advertise JSON schema output")
+	}
+	if SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Completions, RequestFeatureJSONSchemaOutput) {
+		t.Fatal("completions must not advertise JSON schema output")
+	}
+	if SupportsRequestFeatureForSpecAndKind("openai", protocolkind.Completions, RequestFeatureToolBatchAtMostOne) {
+		t.Fatal("completions must not advertise tool-call batch support")
 	}
 }

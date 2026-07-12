@@ -10,12 +10,17 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
+func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
+	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
+	projectedName, err := canonical.ProjectedToolName(functionTool)
+	if err != nil {
+		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
+	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "gpt-4o-mini",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		Tools: []canonical.ToolDecl{
-			canonical.NewFunctionToolDecl("tool_0", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`)),
+			functionTool,
 		},
 		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention24H}),
 	})
@@ -34,14 +39,31 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	if _, ok := body["prompt_cache_retention"]; ok {
 		t.Fatalf("prompt_cache_retention must be provider transform concern")
 	}
-	if _, ok := body["tools"]; ok {
-		t.Fatalf("tools must stay out of the provider request body")
+	tools, ok := body["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one tool declaration", body["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tools[0] = %T, want map[string]any", tools[0])
+	}
+	function, ok := tool["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools[0].function = %T, want map[string]any", tool["function"])
+	}
+	if gotName, _ := function["name"].(string); gotName != projectedName {
+		t.Fatalf("function name = %q, want %q", gotName, projectedName)
 	}
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := ClientRequestDecoder{}
-	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"get_weather","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
+	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
+	projectedName, err := canonical.ProjectedToolName(functionTool)
+	if err != nil {
+		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
+	}
+	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"` + projectedName + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)

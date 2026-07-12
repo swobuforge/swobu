@@ -13,7 +13,7 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto completionsRequestDTO
-	if err := sse.DecodeStrictJSON(raw, &dto, "completions request"); err != nil {
+	if err := sse.DecodePermissiveJSON(raw, &dto, "completions request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	if dto.Prompt == "" {
@@ -27,8 +27,16 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
+	if err := rejectCompletionsStructuredOutput(dto.ResponseFormat); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	controls, err := decodeCompletionsGenerationControls(dto)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:     strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
 		InputText: dto.Prompt,
+		Controls:  controls,
 	}), resolvedDelivery, nil
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -45,19 +46,26 @@ func TestApplyAddModelCredentialSourceChoice_FileAndEnvResetModelAndPersistRef(t
 		CredentialRef: "",
 		ModelID:       "some-model",
 	}
-	fileNext := applyAddModelCredentialSourceChoice(base, "file")
+	fileNext := applyAddModelCredentialSourceChoice(base, profile.AuthModeFile)
 	if got := fileNext.CredentialRef; got != "file" {
 		t.Fatalf("file credential ref=%q want %q", got, "file")
 	}
 	if got := fileNext.ModelID; got != "" {
 		t.Fatalf("file model id=%q want cleared", got)
 	}
-	envNext := applyAddModelCredentialSourceChoice(base, "env")
+	envNext := applyAddModelCredentialSourceChoice(base, profile.AuthModeEnv)
 	if got := envNext.CredentialRef; got == "" || got == "env" {
 		t.Fatalf("env credential ref=%q want concrete env key", got)
 	}
 	if got := envNext.ModelID; got != "" {
 		t.Fatalf("env model id=%q want cleared", got)
+	}
+	keychainNext := applyAddModelCredentialSourceChoice(base, profile.AuthModeKeychain)
+	if got := keychainNext.CredentialRef; got != "keychain" {
+		t.Fatalf("keychain credential ref=%q want %q", got, "keychain")
+	}
+	if got := keychainNext.ModelID; got != "" {
+		t.Fatalf("keychain model id=%q want cleared", got)
 	}
 }
 

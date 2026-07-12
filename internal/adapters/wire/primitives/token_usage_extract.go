@@ -10,6 +10,7 @@ import (
 type TokenUsagePathSpec struct {
 	InputPaths      [][]string
 	OutputPaths     [][]string
+	ReasoningPaths  [][]string
 	CacheReadPaths  [][]string
 	CacheWritePaths [][]string
 }
@@ -26,9 +27,18 @@ func ExtractTokenUsage(raw []byte, spec TokenUsagePathSpec) canonical.TokenUsage
 	}
 	input := findFirstInt(payload, spec.InputPaths)
 	output := findFirstInt(payload, spec.OutputPaths)
+	// Reasoning tokens are preserved as a separate usage fact when the provider
+	// exposes them; unknown paths stay unknown instead of being invented.
+	reasoning := findFirstInt(payload, spec.ReasoningPaths)
 	cacheRead := findFirstInt(payload, spec.CacheReadPaths)
 	cacheWrite := findFirstInt(payload, spec.CacheWritePaths)
-	usage, err := canonical.NewTokenUsageWithOptional(input, output, cacheRead, cacheWrite)
+	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens:      input,
+		OutputTokens:     output,
+		ReasoningTokens:  reasoning,
+		CacheReadTokens:  cacheRead,
+		CacheWriteTokens: cacheWrite,
+	})
 	if err != nil {
 		return canonical.NewUnknownTokenUsage()
 	}

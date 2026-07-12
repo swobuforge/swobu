@@ -16,19 +16,10 @@ import (
 )
 
 type responseEnvelope struct {
-	ID         string `json:"id"`
-	Model      string `json:"model"`
-	OutputText string `json:"output_text"`
-	Output     []struct {
-		Type        string          `json:"type"`
-		ID          string          `json:"id"`
-		Role        string          `json:"role"`
-		Content     json.RawMessage `json:"content"`
-		CallID      string          `json:"call_id"`
-		Name        string          `json:"name"`
-		Arguments   string          `json:"arguments"`
-		ServerLabel string          `json:"server_label"`
-	} `json:"output"`
+	ID         string                       `json:"id"`
+	Model      string                       `json:"model"`
+	OutputText string                       `json:"output_text"`
+	Output     []responsesWireOutputItemDTO `json:"output"`
 }
 
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
@@ -49,6 +40,10 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 		{"usageMetadata", "candidatesTokenCount"},
 		{"usage", "outputTokens"},
 		{"response", "usage", "outputTokens"},
+	},
+	ReasoningPaths: [][]string{
+		{"usage", "output_tokens_details", "reasoning_tokens"},
+		{"response", "usage", "output_tokens_details", "reasoning_tokens"},
 	},
 	CacheReadPaths: [][]string{
 		{"usage", "input_tokens_details", "cached_tokens"},
@@ -98,7 +93,8 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string) canonica
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
 		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
-		toolEnvIDs:  map[string]canonical.EnvelopeID{},
+		toolStates:  map[string]responsesToolState{},
+		toolInputs:  map[string]string{},
 		textOpen:    false,
 		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
@@ -109,7 +105,8 @@ type responsesEventReader struct {
 	responseID  canonical.EnvelopeID
 	reader      *core.SSEReaderCloser
 	pending     canonical.EventSequence
-	toolEnvIDs  map[string]canonical.EnvelopeID
+	toolStates  map[string]responsesToolState
+	toolInputs  map[string]string
 	textOpen    bool
 	textEnvID   canonical.EnvelopeID
 	started     bool
@@ -118,8 +115,14 @@ type responsesEventReader struct {
 	seq         int64
 }
 
-// ordered state machine over text, tool calls, reasoning, and terminal frames.
-// variants while maintaining canonical output ordering.
+type responsesToolState struct {
+	envID    canonical.EnvelopeID
+	toolType string
+}
+
+// ordered state machine over text, tool calls, and terminal frames.
+// Reasoning is not part of the current canonical v0 grammar and must fail
+// closed instead of disappearing from decode.
 func (s *responsesEventReader) Next(context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
@@ -255,10 +258,47 @@ func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
 }
 
 func (s *responsesEventReader) closeOpenTools(status canonical.EnvelopeStatus) {
-	for itemID, envID := range s.toolEnvIDs {
-		s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, status)
-		delete(s.toolEnvIDs, itemID)
+	for itemID, state := range s.toolStates {
+		s.enqueueEnvelopeEnd(state.envID, canonical.EnvToolCall, status)
+		delete(s.toolStates, itemID)
+		delete(s.toolInputs, itemID)
 	}
+}
+
+func (s *responsesEventReader) ensureToolState(itemID string, toolType string, callID string, name string) responsesToolState {
+	if state, ok := s.toolStates[itemID]; ok {
+		if state.toolType == "" && strings.TrimSpace(toolType) != "" {
+			state.toolType = strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
+			s.toolStates[itemID] = state
+		}
+		return state
+	}
+	normalizedType := strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
+	if normalizedType == "" {
+		normalizedType = canonical.ToolTypeFunction
+	}
+	envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, itemID))
+	state := responsesToolState{envID: envID, toolType: normalizedType}
+	s.toolStates[itemID] = state
+	s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{
+		Kind:      canonical.EnvToolCall,
+		Name:      name,
+		ToolUseID: callID,
+		ToolType:  normalizedType,
+	}, canonical.EventMetadataFields{NativeID: itemID})
+	return state
+}
+
+func (s *responsesEventReader) enqueueToolArgs(itemID string, args string) {
+	if args == "" { // swobu:io-string source=boundary
+		return
+	}
+	state, ok := s.toolStates[itemID]
+	if !ok {
+		return
+	}
+	s.toolInputs[itemID] += args
+	s.enqueueArgsDelta(state.envID, args)
 }
 
 func fallbackItemID(itemID string, callID string) string {
@@ -271,16 +311,7 @@ func fallbackItemID(itemID string, callID string) string {
 	return "tool_0"
 }
 
-func decodeOutputItems(items []struct {
-	Type        string          `json:"type"`
-	ID          string          `json:"id"`
-	Role        string          `json:"role"`
-	Content     json.RawMessage `json:"content"`
-	CallID      string          `json:"call_id"`
-	Name        string          `json:"name"`
-	Arguments   string          `json:"arguments"`
-	ServerLabel string          `json:"server_label"`
-}, outputText string) ([]canonical.OutputItem, error) {
+func decodeOutputItems(items []responsesWireOutputItemDTO, outputText string) ([]canonical.OutputItem, error) {
 	output := make([]canonical.OutputItem, 0, len(items))
 	for _, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
@@ -304,17 +335,12 @@ func decodeOutputItems(items []struct {
 				return nil, err
 			}
 		case "function_call", "mcp_call":
-			rawArgs := strings.TrimSpace(item.Arguments) // swobu:io-string source=boundary
+			rawArgs := item.Arguments
 			if rawArgs != "" {
 				decoded := map[string]any{}
 				if err := json.Unmarshal([]byte(rawArgs), &decoded); err != nil {
 					return nil, canonical.InternalError("responses tool call arguments are invalid")
 				}
-				normalized, err := json.Marshal(decoded)
-				if err != nil {
-					return nil, canonical.InternalError("responses tool call arguments are invalid")
-				}
-				rawArgs = string(normalized)
 			}
 			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			if itemID == "" {
@@ -331,8 +357,24 @@ func decodeOutputItems(items []struct {
 				name,
 				canonical.NewToolArgumentsObject(rawArgs),
 			))
+		case "custom_tool_call":
+			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
+			if itemID == "" {
+				itemID = fallbackItemID("", item.CallID)
+			}
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
+			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
+			if callID == "" {
+				callID = itemID
+			}
+			output = append(output, canonical.NewCustomToolUseOutputItem(
+				itemID,
+				callID,
+				name,
+				canonical.NewToolArgumentsObject(item.Input),
+			))
 		case "reasoning":
-			continue
+			return nil, canonical.UnsupportedOperation("responses reasoning output is not supported by swobu v0")
 		default:
 			return nil, canonical.UnsupportedOperation("responses output item type is not implemented")
 		}

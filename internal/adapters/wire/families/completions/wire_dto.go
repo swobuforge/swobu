@@ -5,6 +5,11 @@ import "encoding/json"
 type completionsRequestDTO struct {
 	Model                string          `json:"model"`
 	Prompt               string          `json:"prompt"`
+	ResponseFormat       json.RawMessage `json:"response_format,omitempty"`
+	MaxTokens            json.RawMessage `json:"max_tokens,omitempty"`
+	Temperature          json.RawMessage `json:"temperature,omitempty"`
+	TopP                 json.RawMessage `json:"top_p,omitempty"`
+	Stop                 json.RawMessage `json:"stop,omitempty"`
 	Stream               json.RawMessage `json:"stream,omitempty"`
 	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`

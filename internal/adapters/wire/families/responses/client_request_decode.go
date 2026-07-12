@@ -17,7 +17,7 @@ import (
 func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto responsesRequestDTO
-	if err := sse.DecodeStrictJSON(raw, &dto, "responses request"); err != nil {
+	if err := sse.DecodePermissiveJSON(raw, &dto, "responses request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID)) // swobu:io-string source=boundary
@@ -46,13 +46,28 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	toolCallBatch, err := decodeResponsesToolCallBatch(dto.ParallelToolCalls)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	controls, err := decodeResponsesGenerationControls(dto)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	outputFormat, err := decodeResponsesOutputFormat(dto.Text)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:      strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		InputText:  inputText,
-		Items:      conversation,
-		Tools:      tools,
-		ToolPolicy: toolPolicy,
-		Turn:       canonical.NewTurnRef(dto.PreviousResponseID), // swobu:io-string source=boundary
+		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		InputText:     inputText,
+		Items:         conversation,
+		Tools:         tools,
+		ToolPolicy:    toolPolicy,
+		ToolCallBatch: toolCallBatch,
+		Controls:      controls,
+		OutputFormat:  outputFormat,
+		Turn:          canonical.NewTurnRef(dto.PreviousResponseID), // swobu:io-string source=boundary
 	})
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {

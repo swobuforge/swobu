@@ -89,7 +89,88 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 		"result=backend_error",
 		"error_origin=backend",
 		"backend_ref=openai",
+		"error_message=\"backend error from openai (502): {\\\"error\\\":\\\"provider failed\\\"}\"",
 		"status_code=502",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
+		}
+	}
+}
+
+func TestHandler_LogsSwobuErrorDetailsOnFailure(t *testing.T) {
+	setDefaultLogger, logs := testDebugLogger()
+	defer setDefaultLogger()
+
+	handler := NewHandler(staticRequestIngress{
+		err: canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool declarations; got namespace"),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("User-Agent", "Codex/1.0")
+	req.Header.Set("X-Request-Id", "req_swobu")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("failure status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	out := logs.String()
+	for _, want := range []string{
+		"event=request_outcome",
+		"request_id=req_swobu",
+		"result=swobu_error",
+		"error_origin=swobu",
+		"error_code=UNSUPPORTED_OPERATION",
+		"error_message=\"UNSUPPORTED_OPERATION: chat completions protocol only supports function and custom tool declarations; got namespace\"",
+		"status_code=400",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
+		}
+	}
+}
+
+func TestHandler_LogsResponsesToolReferenceDetailsOnFailure(t *testing.T) {
+	setDefaultLogger, logs := testDebugLogger()
+	defer setDefaultLogger()
+
+	handler := NewHandler(staticRequestIngress{
+		err: canonical.Error{
+			Code:    canonical.ErrorCodeBadRequest,
+			Message: `responses request tools[].name (function) name "exec_command__bogus" is invalid: canonical request tool references are undeclared tool`,
+			Origin:  canonical.ErrorOriginSwobu,
+			Details: map[string]string{
+				"request_field": "tools[].name",
+				"tool_kind":     "function",
+				"tool_name":     "exec_command__bogus",
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"ping","tools":[{"type":"function","name":"exec_command__bogus","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}]}`))
+	req.Header.Set("User-Agent", "Codex/1.0")
+	req.Header.Set("X-Request-Id", "req_tool_ref")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("failure status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	out := logs.String()
+	for _, want := range []string{
+		"event=request_outcome",
+		"request_id=req_tool_ref",
+		"result=swobu_error",
+		"error_origin=swobu",
+		"error_code=BAD_REQUEST",
+		`error_message="BAD_REQUEST: responses request tools[].name (function) name \"exec_command__bogus\" is invalid: canonical request tool references are undeclared tool"`,
+		"error_detail_request_field=tools[].name",
+		"error_detail_tool_kind=function",
+		"error_detail_tool_name=exec_command__bogus",
+		"status_code=400",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
@@ -262,6 +343,30 @@ func TestHandler_RejectsDecodedBodyOverLimit(t *testing.T) {
 	}
 }
 
+func TestHandler_AcceptsUnexpectedTopLevelFieldInRequestBody(t *testing.T) {
+	capturing := &capturingRequestIngress{}
+	handler := NewHandler(capturing)
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}],"unexpected":true}`))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	typed := testDecodeCapturedRequest(t, capturing.got)
+	if typed.Model() != "m" {
+		t.Fatalf("model = %q, want %q", typed.Model(), "m")
+	}
+	items := typed.Items()
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	if items[0].Text != "hi" {
+		t.Fatalf("item text = %q, want %q", items[0].Text, "hi")
+	}
+}
+
 func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
@@ -312,7 +417,12 @@ func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolPolicy(t *test
 func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := NewHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tools":[{"type":"function","name":"grep","description":"search text","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}],"tool_choice":{"type":"function","name":"grep"},"input":"continue"}`))
+	functionTool := canonical.NewFunctionToolDecl("grep", "grep", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))
+	projectedFunctionName, err := canonical.ProjectedToolName(functionTool)
+	if err != nil {
+		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tools":[{"type":"function","name":"`+projectedFunctionName+`","description":"search text","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}],"tool_choice":{"type":"function","name":"`+projectedFunctionName+`"},"input":"continue"}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -324,8 +434,9 @@ func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *te
 	if got := typed.ToolPolicy(); got.Mode != canonical.ToolPolicySpecific {
 		t.Fatalf("tool policy mode = %q, want %q", got.Mode, canonical.ToolPolicySpecific)
 	}
-	if specific, ok := typed.ToolPolicy().SpecificID(); !ok || specific.String() != "grep" {
-		t.Fatalf("tool policy specific = %q, want %q", specific, "grep")
+	wantSpecific := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "grep").String()
+	if specific, ok := typed.ToolPolicy().SpecificID(); !ok || specific.String() != wantSpecific {
+		t.Fatalf("tool policy specific = %q, want %q", specific, wantSpecific)
 	}
 }
 

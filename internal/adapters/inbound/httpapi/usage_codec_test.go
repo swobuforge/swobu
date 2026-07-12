@@ -33,6 +33,36 @@ func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.prompt_tokens_details.cache_write_tokens", 5)
 }
 
+func TestChatCompletionsCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
+	input := 100
+	outputTokens := 7
+	reasoning := 6
+	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens:     &input,
+		OutputTokens:    &outputTokens,
+		ReasoningTokens: &reasoning,
+	})
+	if err != nil {
+		t.Fatalf("NewTokenUsage returned error: %v", err)
+	}
+	output := canonical.NewConversationOutputWithUsage(
+		"chatcmpl_reasoning",
+		"m",
+		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		"stop",
+		usage,
+	)
+	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	if err != nil {
+		t.Fatalf("encodeBuffered returned error: %v", err)
+	}
+	var dto map[string]any
+	if err := json.Unmarshal(doc.Raw, &dto); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	assertUsageFieldNumber(t, dto, "usage.completion_tokens_details.reasoning_tokens", 6)
+}
+
 func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 80, 9, 33, 2)
 	output := canonical.NewConversationOutputWithUsage(
@@ -54,6 +84,36 @@ func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.output_tokens", 9)
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cached_tokens", 33)
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cache_write_tokens", 2)
+}
+
+func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
+	input := 80
+	outputTokens := 9
+	reasoning := 4
+	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens:     &input,
+		OutputTokens:    &outputTokens,
+		ReasoningTokens: &reasoning,
+	})
+	if err != nil {
+		t.Fatalf("NewTokenUsage returned error: %v", err)
+	}
+	output := canonical.NewConversationOutputWithUsage(
+		"resp_reasoning",
+		"m",
+		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		"completed",
+		usage,
+	)
+	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	if err != nil {
+		t.Fatalf("encodeBuffered returned error: %v", err)
+	}
+	var dto map[string]any
+	if err := json.Unmarshal(doc.Raw, &dto); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	assertUsageFieldNumber(t, dto, "usage.output_tokens_details.reasoning_tokens", 4)
 }
 
 func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {

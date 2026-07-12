@@ -3,6 +3,7 @@ package chatcompletions
 
 import (
 	"encoding/json"
+	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -51,6 +52,9 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		return [][]byte{sse.SSEData(raw)}, nil
 	case sse.StreamEventItemStarted:
 		if event.ItemKind == canonical.ItemKindToolUse {
+			if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom {
+				return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
+			}
 			index := len(s.toolByID)
 			s.toolByID[event.ItemID] = index
 			raw, _ := json.Marshal(chatCompletionsResponseDTO{
@@ -92,6 +96,9 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		})
 		return [][]byte{sse.SSEData(raw)}, nil
 	case sse.StreamEventToolUseArgumentsDelta:
+		if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom {
+			return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
+		}
 		index, ok := s.toolByID[event.ItemID]
 		if !ok {
 			startFrames, err := s.Encode(sse.StreamEvent{
@@ -151,45 +158,76 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 
 func (s *chatCompletionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
 
-func chatMessageFromOutput(output canonical.CanonicalOutput) chatCompletionsResponseMessageDTO {
-	text := sse.OutputText(output.Items())
+func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsResponseMessageDTO, error) {
 	message := chatCompletionsResponseMessageDTO{
 		Role: "assistant",
 	}
-	if text != "" {
-		message.Content = text
+	var text strings.Builder
+	toolCalls := make([]chatCompletionsResponseToolCallDTO, 0)
+	for _, item := range output.Items() {
+		switch item.Kind {
+		case canonical.ItemKindText:
+			text.WriteString(item.Text)
+		case canonical.ItemKindToolUse:
+			wire, err := chatToolCallFromOutputItem(item)
+			if err != nil {
+				return chatCompletionsResponseMessageDTO{}, err
+			}
+			toolCalls = append(toolCalls, wire)
+		default:
+			return chatCompletionsResponseMessageDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports text and tool use output items")
+		}
 	}
-	if toolCalls := chatToolCalls(output.Items()); len(toolCalls) > 0 {
+	if content := text.String(); content != "" {
+		message.Content = content
+	}
+	if len(toolCalls) > 0 {
 		message.ToolCalls = toolCalls
 	}
-	return message
+	return message, nil
 }
 
-func chatToolCalls(items []canonical.OutputItem) []chatCompletionsResponseToolCallDTO {
-	out := make([]chatCompletionsResponseToolCallDTO, 0)
-	for _, item := range items {
-		if item.Kind != canonical.ItemKindToolUse {
-			continue
-		}
-		args := item.Input.RawObject()
-		out = append(out, chatCompletionsResponseToolCallDTO{
-			ID:   item.ToolUseID,
+func chatToolCallFromOutputItem(item canonical.OutputItem) (chatCompletionsResponseToolCallDTO, error) {
+	toolUseID := strings.TrimSpace(item.ToolUseID) // swobu:io-string source=boundary
+	if toolUseID == "" {
+		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require tool_use_id")
+	}
+	name := strings.TrimSpace(item.Name) // swobu:io-string source=boundary
+	if name == "" {
+		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require a name")
+	}
+	args := item.Input.RawObject()
+	switch strings.ToLower(strings.TrimSpace(item.ToolType)) {
+	case "", canonical.ToolTypeFunction:
+		return chatCompletionsResponseToolCallDTO{
+			ID:   toolUseID,
 			Type: "function",
-			Function: chatCompletionsResponseFunctionDTO{
-				Name:      item.Name,
+			Function: &chatCompletionsResponseFunctionDTO{
+				Name:      name,
 				Arguments: args,
 			},
-		})
+		}, nil
+	case canonical.ToolTypeCustom:
+		return chatCompletionsResponseToolCallDTO{
+			ID:   toolUseID,
+			Type: "custom",
+			Custom: &chatCompletionsResponseCustomDTO{
+				Name:  name,
+				Input: args,
+			},
+		}, nil
+	default:
+		return chatCompletionsResponseToolCallDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool output items")
 	}
-	return out
 }
 
 func chatUsageFromCanonical(usage canonical.TokenUsage) *chatCompletionsUsageDTO {
 	input, hasInput := usage.InputTokens()
 	output, hasOutput := usage.OutputTokens()
+	reasoning, hasReasoning := usage.ReasoningTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasCacheRead && !hasCacheWrite {
+	if !hasInput && !hasOutput && !hasReasoning && !hasCacheRead && !hasCacheWrite {
 		return nil
 	}
 	dto := &chatCompletionsUsageDTO{
@@ -201,6 +239,13 @@ func chatUsageFromCanonical(usage canonical.TokenUsage) *chatCompletionsUsageDTO
 		dto.PromptDetails = &chatCompletionsPromptTokenDetailsDTO{
 			CachedTokens:     cacheRead,
 			CacheWriteTokens: cacheWrite,
+		}
+	}
+	if hasReasoning {
+		// Preserve provider-reported reasoning usage as a separate accounting
+		// fact; do not fold it into total_tokens or drop a zero value.
+		dto.CompletionDetails = &chatCompletionsCompletionTokenDetailsDTO{
+			ReasoningTokens: reasoning,
 		}
 	}
 	return dto

@@ -14,7 +14,7 @@ var keyringGet = keyringcommodity.Get
 
 // StoreKeychainCredential writes a provider-scoped keychain secret.
 func StoreKeychainCredential(providerSpec string, keyName string, secret string) error {
-	_, err := StoreMaterializedCredential(providerSpec, keyName, secret, CredentialWritePolicyKeyring)
+	_, err := StoreMaterializedCredential(providerSpec, keyName, secret, CredentialWritePolicyAuto)
 	return err
 }
 
@@ -79,6 +79,9 @@ func StoreSecretByRef(providerSpec string, credentialRef string, secret string) 
 	}
 	if kind == "secret" {
 		if err := keyringSet(KeyringScopeForProvider(providerSpec), name, secret); err != nil {
+			if fallbackErr := (&secretFileStore{}).Store(name, secret); fallbackErr == nil {
+				return nil
+			}
 			return fmt.Errorf("keyring write failed for %q: %w", name, err)
 		}
 		return nil
@@ -97,10 +100,16 @@ func ResolveStoredSecretByRef(providerSpec string, credentialRef string) (string
 	if kind == "secret" {
 		token, err := keyringGet(KeyringScopeForProvider(providerSpec), name)
 		if err != nil {
+			if fallback, fallbackErr := (&secretFileStore{}).ResolveRaw(name); fallbackErr == nil {
+				return fallback, nil
+			}
 			return "", fmt.Errorf("keyring lookup failed for %q: %w", name, err)
 		}
 		token = strings.TrimSpace(token) // swobu:io-string source=boundary
 		if token == "" {
+			if fallback, fallbackErr := (&secretFileStore{}).ResolveRaw(name); fallbackErr == nil {
+				return fallback, nil
+			}
 			return "", fmt.Errorf("keyring token for %q is empty", name)
 		}
 		return token, nil
@@ -112,8 +121,8 @@ func ResolveStoredSecretByRef(providerSpec string, credentialRef string) (string
 }
 
 func parseStoredSecretRef(providerSpec string, credentialRef string) (name string, kind string, err error) {
-	ref := strings.TrimSpace(credentialRef)                                 // swobu:io-string source=boundary
-	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // swobu:io-string source=boundary
+	ref := strings.TrimSpace(credentialRef)                                                                                                         // swobu:io-string source=boundary
+	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) || strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // swobu:io-string source=boundary
 		name, err := secretCredentialName(providerSpec, ref)
 		return name, "secret", err
 	}

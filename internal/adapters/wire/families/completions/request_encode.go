@@ -14,10 +14,27 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	default:
 		return carrier.WireDocument{}, canonical.UnsupportedDelivery("prompt requests do not implement the requested delivery mode on the completions protocol")
 	}
+	if !req.ToolPolicy().IsZero() {
+		return carrier.WireDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool choice")
+	}
+	if len(req.Tools()) > 0 {
+		return carrier.WireDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool declarations")
+	}
+	if err := rejectCompletionsOutputFormat(req.OutputFormat()); err != nil {
+		return carrier.WireDocument{}, err
+	}
+
+	prompt, err := promptFromItems(req.Items())
+	if err != nil {
+		return carrier.WireDocument{}, err
+	}
 
 	payload := map[string]any{
 		"model":  req.Model(),
-		"prompt": textFromItems(req.Items()),
+		"prompt": prompt,
+	}
+	if err := encodeCompletionsGenerationControls(payload, req.Controls()); err != nil {
+		return carrier.WireDocument{}, err
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
@@ -37,12 +54,17 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	), nil
 }
 
-func textFromItems(items []canonical.CanonicalItem) string {
+func promptFromItems(items []canonical.CanonicalItem) (string, error) {
 	out := ""
 	for _, item := range items {
-		if item.Kind == canonical.ItemKindText {
+		switch item.Kind {
+		case canonical.ItemKindText:
 			out += item.Text
+		case canonical.ItemKindToolUse, canonical.ItemKindToolResult:
+			return "", canonical.UnsupportedOperation("completions protocol does not support tool-bearing canonical items")
+		default:
+			return "", canonical.UnsupportedOperation("completions protocol does not support this canonical item kind")
 		}
 	}
-	return out
+	return out, nil
 }

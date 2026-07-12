@@ -2,8 +2,9 @@ package canonical
 
 import "strings"
 
-// ToolArguments stores semantic tool-call input as one object payload
-// payload string. The canonical core does not expose dynamic map payloads.
+// ToolArguments stores semantic tool-call input as one raw payload string.
+// Function tools usually validate this as a JSON object at the wire edge.
+// Custom tools preserve the raw payload bytes without forcing object shape.
 type ToolArguments struct {
 	rawObject string
 }
@@ -13,7 +14,7 @@ func EmptyToolArguments() ToolArguments {
 }
 
 func NewToolArgumentsObject(raw string) ToolArguments {
-	return ToolArguments{rawObject: strings.TrimSpace(raw)} // swobu:io-string source=domain
+	return ToolArguments{rawObject: raw}
 }
 
 func (a ToolArguments) RawObject() string {

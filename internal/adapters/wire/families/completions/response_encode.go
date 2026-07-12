@@ -10,6 +10,11 @@ import (
 )
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+	for _, item := range output.Items() {
+		if item.Kind != canonical.ItemKindText {
+			return carrier.WireDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool-bearing output items")
+		}
+	}
 	raw, err := json.Marshal(completionsResponseDTO{
 		ID:     sse.FallbackID(output.ResultID(), "cmpl_swobu"),
 		Object: "text_completion",

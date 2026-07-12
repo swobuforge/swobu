@@ -11,11 +11,16 @@ import (
 )
 
 func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
+	functionTool := canonical.NewFunctionToolDecl("Read", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`))
+	projectedName, err := canonical.ProjectedToolName(functionTool)
+	if err != nil {
+		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
+	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "claude",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		Tools: []canonical.ToolDecl{
-			canonical.NewFunctionToolDecl("tool_0", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`)),
+			functionTool,
 		},
 		CacheIntent: canonical.NewCacheIntent(canonical.CacheIntentParams{Key: "repo", Retention: canonical.CacheRetention1H}),
 	})
@@ -34,6 +39,13 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	tools, ok := body["tools"].([]any)
 	if !ok || len(tools) != 1 {
 		t.Fatalf("tools = %#v, want one tool declaration", body["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tools[0] = %T, want map[string]any", tools[0])
+	}
+	if gotName, _ := tool["name"].(string); gotName != projectedName {
+		t.Fatalf("tool name = %q, want %q", gotName, projectedName)
 	}
 }
 

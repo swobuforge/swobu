@@ -29,6 +29,7 @@ type responsesToolItemState struct {
 	outputIndex int
 	callID      string
 	name        string
+	toolType    string
 	arguments   strings.Builder
 }
 
@@ -120,7 +121,7 @@ func (e *ResponseStreamWireEncoder) encodeItemStarted(event sse.StreamEvent) ([]
 		}
 		return append(frames, opened...), nil
 	case canonical.ItemKindToolUse:
-		return e.openToolItem(event.ItemID, event.ToolUseID, event.Name)
+		return e.openToolItem(event.ItemID, event.ToolUseID, event.Name, event.ToolType)
 	default:
 		return nil, nil
 	}
@@ -160,7 +161,7 @@ func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEve
 	if itemID == "" {
 		itemID = "fc_swobu_" + strconv.Itoa(e.nextOutputIndex)
 	}
-	frames, err := e.ensureToolItem(itemID, event.ToolUseID, event.Name)
+	frames, err := e.ensureToolItem(itemID, event.ToolUseID, event.Name, event.ToolType)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +176,12 @@ func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEve
 		state.name = event.Name
 	}
 	state.arguments.WriteString(event.ArgumentsDelta)
+	deltaType := "response.function_call_arguments.delta"
+	if strings.ToLower(strings.TrimSpace(state.toolType)) == canonical.ToolTypeCustom {
+		deltaType = "response.custom_tool_call_input.delta"
+	}
 	delta, err := json.Marshal(responsesToolArgumentsDeltaEventDTO{
-		Type:        "response.function_call_arguments.delta",
+		Type:        deltaType,
 		ItemID:      state.itemID,
 		OutputIndex: state.outputIndex,
 		CallID:      state.callID,

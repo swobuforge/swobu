@@ -108,7 +108,7 @@ func TestEvaluateCreateDraftRouteSetup_BedrockExplicitAWSProfileIsExternal(t *te
 	}
 }
 
-func TestCreateDraftCredentialStrategySelectable_ProviderDeclaredVariants(t *testing.T) {
+func TestCreateDraftCredentialStrategySelectable_ProviderDeclaredModes(t *testing.T) {
 	if CreateDraftCredentialStrategySelectable("ollama") {
 		t.Fatalf("ollama should not expose credential strategy chooser")
 	}

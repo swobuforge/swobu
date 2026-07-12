@@ -15,6 +15,9 @@ import (
 func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) (canonical.ToolPolicy, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
+		if len(tools) > 0 {
+			return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
+		}
 		return canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), nil
 	}
 
@@ -53,59 +56,27 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) 
 		return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
 	case "required":
 		return canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil
-	case "function":
+	case "function", "custom":
 		name := strings.TrimSpace(objectMode.Name) // swobu:io-string source=provider-wire
+		fieldPath := "tool_choice.name"
 		if name == "" {
-			functionName := strings.TrimSpace(objectMode.Function.Name) // swobu:io-string source=provider-wire
-			name = functionName
+			name = strings.TrimSpace(objectMode.Function.Name) // swobu:io-string source=provider-wire
+			fieldPath = "tool_choice.function.name"
 		}
 		if name == "" {
-			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice function requires a name")
+			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice specific requires a tool name")
 		}
-		specific, err := resolveResponsesSpecificToolID(tools, name)
+		resolved, _, err := responsesResolveToolChoiceByWireName(tools, name, normalizedType, fieldPath)
 		if err != nil {
 			return canonical.ToolPolicy{}, err
 		}
-		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific), nil
+		specific := resolved.ToolID()
+		policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific)
+		policy.SpecificType = normalizedType
+		return policy, nil
 	default:
 		return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
 	}
-}
-
-func resolveResponsesSpecificToolID(tools []canonical.ToolDecl, name string) (canonical.SemanticToolID, error) {
-	trimmed := strings.TrimSpace(name) // swobu:io-string source=boundary
-	if trimmed == "" {
-		return "", canonical.BadRequest("responses request tool_choice requires a tool name")
-	}
-	var (
-		found   canonical.SemanticToolID
-		matched bool
-	)
-	for _, tool := range tools {
-		if tool == nil {
-			continue
-		}
-		decl, ok := tool.(canonical.FunctionToolDecl)
-		if !ok {
-			if ptr, ok := tool.(*canonical.FunctionToolDecl); ok {
-				decl = *ptr
-			} else {
-				continue
-			}
-		}
-		if !strings.EqualFold(decl.ToolName(), trimmed) {
-			continue
-		}
-		if matched && found != decl.ToolID() {
-			return "", canonical.BadRequest("responses request tool_choice name is ambiguous")
-		}
-		found = decl.ToolID()
-		matched = true
-	}
-	if !matched {
-		return "", canonical.BadRequest("responses request tool_choice references an undeclared tool")
-	}
-	return found.Clone(), nil
 }
 
 type sseEnvelopeStreamEncoder struct {

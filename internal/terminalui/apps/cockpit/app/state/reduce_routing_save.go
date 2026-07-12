@@ -116,10 +116,53 @@ func reduceRoutingCredentialState(model *Model, action update.Action) ([]update.
 		clearSaveErrors(model)
 		model.LastStoredKeyProviderSpec = strings.TrimSpace(value.ProviderSpec) // swobu:io-string source=boundary
 		model.LastStoredKeySlotName = strings.TrimSpace(value.KeyName)          // swobu:io-string source=boundary
+		if effects := reloadRoutingModelCatalogAfterKeychainStore(model, value.ProviderSpec); len(effects) != 0 {
+			return effects, true
+		}
 		return nil, true
 	default:
 		return nil, false
 	}
+}
+
+func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec string) []update.Effect {
+	providerSpec = strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
+	if providerSpec == "" {
+		return nil
+	}
+	isKeychainRef := func(ref string) bool {
+		trimmed := strings.TrimSpace(ref) // swobu:io-string source=boundary
+		if trimmed == "" {
+			return false
+		}
+		lowered := strings.ToLower(trimmed)
+		return lowered == "keychain" || strings.HasPrefix(lowered, "keychain:")
+	}
+	if strings.TrimSpace(model.CurrentEndpoint) == "" {
+		draft := model.CreateDraftProviderConfig
+		if !strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), providerSpec) || !isKeychainRef(draft.CredentialRef) {
+			return nil
+		}
+		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+			Scope:            RoutingModelCatalogScopeCreateDraft,
+			ProviderSpec:     strings.TrimSpace(draft.ProviderSpec),  // swobu:io-string source=boundary
+			BaseURL:          strings.TrimSpace(draft.BaseURL),       // swobu:io-string source=boundary
+			AuthHeader:       strings.TrimSpace(draft.AuthHeader),    // swobu:io-string source=boundary
+			CredentialRef:    strings.TrimSpace(draft.CredentialRef), // swobu:io-string source=boundary
+			ProviderProtocol: strings.TrimSpace(draft.ProviderProtocol),
+		}}
+	}
+	if !strings.EqualFold(strings.TrimSpace(model.AddModelDraftProviderSpec), providerSpec) || !isKeychainRef(model.AddModelDraftCredentialRef) {
+		return nil
+	}
+	return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+		Scope:            RoutingModelCatalogScopeAddModelDraft,
+		ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),  // swobu:io-string source=boundary
+		BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),       // swobu:io-string source=boundary
+		AuthHeader:       strings.TrimSpace(model.AddModelDraftAuthHeader),    // swobu:io-string source=boundary
+		CredentialRef:    strings.TrimSpace(model.AddModelDraftCredentialRef), // swobu:io-string source=boundary
+		ProviderProtocol: strings.TrimSpace(model.AddModelDraftProviderProtocol),
+	}}
 }
 
 func reduceProviderAuthSessionStarted(model *Model, value stateeffect.ProviderAuthSessionStarted) []update.Effect {

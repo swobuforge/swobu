@@ -13,28 +13,36 @@ const (
 
 // CanonicalRequest is the single semantic request representation in core.
 // Transport/profile/protocol specifics must stay outside this type.
-// Tool declarations and policy belong here because they are request grammar,
-// not wire shape.
+// Tool declarations, tool policy, tool-call batch policy, generation controls,
+// and output format belong here because they are request grammar, not wire
+// shape.
 type CanonicalRequest struct {
 	model string
 	items []CanonicalItem
 	tools []ToolDecl
 
-	turn        TurnRef
-	toolPolicy  ToolPolicy
-	cacheIntent CacheIntent
+	turn         TurnRef
+	toolPolicy   ToolPolicy
+	toolBatch    ToolCallBatchPolicy
+	controls     GenerationControls
+	outputFormat OutputFormat
+	cacheIntent  CacheIntent
 }
 
 // RequestParams contains normalized semantic input for one request, including
-// semantic tool declarations, tool policy, and the canonical turn reference.
+// semantic tool declarations, tool policy, tool-call batch policy, generation
+// controls, output format, and the canonical turn reference.
 type RequestParams struct {
-	Model       string
-	Items       []CanonicalItem
-	Tools       []ToolDecl
-	InputText   string
-	Turn        TurnRef
-	ToolPolicy  ToolPolicy
-	CacheIntent CacheIntent
+	Model         string
+	Items         []CanonicalItem
+	Tools         []ToolDecl
+	InputText     string
+	Turn          TurnRef
+	ToolPolicy    ToolPolicy
+	ToolCallBatch ToolCallBatchPolicy
+	Controls      GenerationControls
+	OutputFormat  OutputFormat
+	CacheIntent   CacheIntent
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
@@ -44,11 +52,14 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		items = append(items, NewTextItem(ItemAuthorUser, params.InputText))
 	}
 	return CanonicalRequest{
-		model:      strings.TrimSpace(params.Model), // swobu:io-string source=domain
-		items:      items,
-		tools:      tools,
-		turn:       params.Turn.Clone(),
-		toolPolicy: params.ToolPolicy.Clone(),
+		model:        strings.TrimSpace(params.Model), // swobu:io-string source=domain
+		items:        items,
+		tools:        tools,
+		turn:         params.Turn.Clone(),
+		toolPolicy:   params.ToolPolicy.Clone(),
+		toolBatch:    params.ToolCallBatch.Clone(),
+		controls:     params.Controls.Clone(),
+		outputFormat: params.OutputFormat.Clone(),
 		cacheIntent: NewCacheIntent(CacheIntentParams{
 			Key:       params.CacheIntent.Key(),
 			Retention: params.CacheIntent.Retention(),
@@ -80,18 +91,33 @@ func (r CanonicalRequest) ToolPolicy() ToolPolicy {
 	return r.toolPolicy.Clone()
 }
 
+func (r CanonicalRequest) ToolCallBatch() ToolCallBatchPolicy {
+	return r.toolBatch.Clone()
+}
+
+func (r CanonicalRequest) Controls() GenerationControls {
+	return r.controls.Clone()
+}
+
+func (r CanonicalRequest) OutputFormat() OutputFormat {
+	return r.outputFormat.Clone()
+}
+
 func (r CanonicalRequest) CacheIntent() CacheIntent {
 	return r.cacheIntent
 }
 
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
-		Model:       r.model,
-		Items:       r.items,
-		Tools:       r.tools,
-		Turn:        r.turn,
-		ToolPolicy:  r.toolPolicy,
-		CacheIntent: r.cacheIntent,
+		Model:         r.model,
+		Items:         r.items,
+		Tools:         r.tools,
+		Turn:          r.turn,
+		ToolPolicy:    r.toolPolicy,
+		ToolCallBatch: r.toolBatch,
+		Controls:      r.controls,
+		OutputFormat:  r.outputFormat,
+		CacheIntent:   r.cacheIntent,
 	})
 }
 

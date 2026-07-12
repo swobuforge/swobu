@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -195,5 +196,59 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	}
 	if err := exchange.ValidateProviderIngress(ollamaResp); err != nil {
 		t.Fatalf("ollama ingress invalid: %v", err)
+	}
+}
+
+func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T) {
+	t.Parallel()
+
+	composition := NewProviderIngressResolverComposition(http.DefaultClient, testCredentialResolver{}, "")
+	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:        canonical.OutputFormatJSONSchema,
+		Name:        "reply_shape",
+		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		Strict:      true,
+		Description: "structured reply",
+	})
+	if err != nil {
+		t.Fatalf("NewOutputFormat returned error: %v", err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        "m",
+		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		OutputFormat: outputFormat,
+	})
+	req := ports.NewProviderRequest(
+		request,
+		carrier.WireDocument{},
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
+		exchange.NewRoutableTarget("backend-b", "anthropic", "https://example.test/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
+	)
+
+	_, err = composition.ResolveProviderIngress(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "structured JSON schema output") {
+		t.Fatalf("structured output should fail closed before encoding, got err=%v", err)
+	}
+}
+
+func TestServices_ValidateRequestFeatureSupport_AcceptsToolCallBatchAtMostOne(t *testing.T) {
+	t.Parallel()
+
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "m",
+		Items: []canonical.CanonicalItem{
+			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+		},
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("tool_0", "search", "search the workspace", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
+		},
+		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+	})
+
+	if err := validateRequestFeatureSupport("openai", protocolkind.Responses, request); err != nil {
+		t.Fatalf("openai responses batch support failed: %v", err)
+	}
+	if err := validateRequestFeatureSupport("anthropic", protocolkind.Messages, request); err != nil {
+		t.Fatalf("anthropic messages batch support failed: %v", err)
 	}
 }

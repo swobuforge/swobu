@@ -26,6 +26,7 @@ type StreamEvent struct {
 
 	ToolUseID      string
 	Name           string
+	ToolType       string
 	ArgumentsDelta string
 
 	FinishReason string

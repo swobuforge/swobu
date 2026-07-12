@@ -19,16 +19,16 @@ var modelCatalogAuthErrorMarkers = []string{
 	"sign in",
 }
 
-func ProviderCredentialVariantIsInteractive(provider, credentialRef string) bool {
+func ProviderCredentialModeIsInteractive(provider, credentialRef string) bool {
 	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	if ref == "" {
 		return false
 	}
-	variant := profile.AuthVariant(strings.ToLower(credentialSource(ref)))  // swobu:io-string source=boundary
-	if !profile.SupportsAuthVariant(strings.TrimSpace(provider), variant) { // swobu:io-string source=boundary
+	mode := profile.AuthMode(strings.ToLower(credentialSource(ref)))  // swobu:io-string source=boundary
+	if !profile.SupportsAuthMode(strings.TrimSpace(provider), mode) { // swobu:io-string source=boundary
 		return false
 	}
-	return profile.IsInteractiveAuthVariant(variant)
+	return profile.IsInteractiveAuthMode(mode)
 }
 
 func ProviderCredentialSelectionRequired(provider, baseURL, credentialRef string) bool {
@@ -36,15 +36,15 @@ func ProviderCredentialSelectionRequired(provider, baseURL, credentialRef string
 		return false
 	}
 	interactiveRequired := false
-	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
-		if profile.IsInteractiveAuthVariant(variant) {
+	for _, mode := range profile.SupportedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthMode(mode) {
 			interactiveRequired = true
 			break
 		}
 	}
 	if interactiveRequired {
 		ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
-		return ref == "" || ProviderCredentialVariantIsInteractive(provider, ref)
+		return ref == "" || ProviderCredentialModeIsInteractive(provider, ref)
 	}
 	if strings.TrimSpace(credentialRef) != "" { // swobu:io-string source=boundary
 		return true
@@ -72,7 +72,7 @@ func ProviderModelCatalogLoadBlocked(provider, baseURL, credentialRef string) bo
 	if ref == "" {
 		return true
 	}
-	if ProviderCredentialVariantIsInteractive(provider, ref) {
+	if ProviderCredentialModeIsInteractive(provider, ref) {
 		return true
 	}
 	source := credentialSource(ref)
@@ -89,8 +89,8 @@ func ProviderModelCatalogBlockedMessage(provider, baseURL, credentialRef string)
 	if profile.RequiresExplicitExecuteBaseURL(provider) && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=boundary
 		return "set backend URL before loading models"
 	}
-	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
-		if profile.IsInteractiveAuthVariant(variant) {
+	for _, mode := range profile.SupportedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
+		if profile.IsInteractiveAuthMode(mode) {
 			return ""
 		}
 	}
@@ -118,7 +118,7 @@ func ProviderModelCatalogAuthFailureMessage(provider string, credentialRef strin
 	normalized := strings.TrimSpace(strings.TrimPrefix(trimmed, "BAD_ENDPOINT:")) // swobu:io-string source=boundary
 	if strings.EqualFold(normalized, "chatgpt subscription tier could not be resolved from credential") {
 		if strings.EqualFold(strings.TrimSpace(provider), "chatgpt") && // swobu:io-string source=boundary
-			!ProviderCredentialVariantIsInteractive(provider, credentialRef) &&
+			!ProviderCredentialModeIsInteractive(provider, credentialRef) &&
 			strings.TrimSpace(credentialRef) != "" { // swobu:io-string source=boundary
 			return "signed-in account could not resolve ChatGPT subscription tier; sign in another account"
 		}

@@ -30,7 +30,9 @@ func (OSKeyringClient) Get(scope, user string) (string, error) {
 	return keyringcommodity.Get(scope, user)
 }
 
-// KeyringCredentialSourceResolver resolves keychain credential refs against OS keyring.
+// KeyringCredentialSourceResolver resolves keychain credential refs against OS
+// keyring and falls back to the file-backed secret store when keyring lookup
+// fails or returns unusable data.
 type KeyringCredentialSourceResolver struct {
 	client KeyringClient
 }
@@ -42,6 +44,9 @@ func NewKeyringResolver(client KeyringClient) KeyringCredentialSourceResolver {
 	return KeyringCredentialSourceResolver{client: client}
 }
 
+// ResolveCredential returns the access token stored behind a keychain ref.
+// The keyring client is the primary lookup path; file-backed fallback keeps the
+// canonical credential ref usable when the OS keyring is unavailable.
 func (r KeyringCredentialSourceResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	_ = ctx
 	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
@@ -66,17 +71,32 @@ func (r KeyringCredentialSourceResolver) ResolveCredential(ctx context.Context, 
 		token = result.token
 		err = result.err
 	case <-time.After(keyringLookupTimeout):
-		return "", fmt.Errorf("keyring lookup timed out for %q", keyName)
+		err = fmt.Errorf("keyring lookup timed out for %q", keyName)
+	}
+	if accessToken, tokenErr := decodeStoredAccessToken(token, keyName, "keyring"); tokenErr == nil && err == nil {
+		return accessToken, nil
+	}
+	if fallback, fallbackErr := (&secretFileStore{}).ResolveRaw(keyName); fallbackErr == nil {
+		if accessToken, tokenErr := decodeStoredAccessToken(fallback, keyName, "file-backed"); tokenErr == nil {
+			return accessToken, nil
+		} else if err == nil {
+			err = tokenErr
+		}
 	}
 	if err != nil {
 		return "", fmt.Errorf("keyring lookup failed for %q: %w", keyName, err)
 	}
-	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
-		return "", fmt.Errorf("keyring token for %q is empty", keyName)
+	return "", fmt.Errorf("keyring credential for %q is unavailable", keyName)
+}
+
+func decodeStoredAccessToken(raw string, keyName string, source string) (string, error) {
+	token := strings.TrimSpace(raw) // swobu:io-string source=boundary
+	if token == "" {
+		return "", fmt.Errorf("%s token for %q is empty", source, keyName)
 	}
 	bundle, _, err := DecodeTokenBundle(token)
 	if err != nil {
-		return "", fmt.Errorf("keyring token for %q is invalid: %w", keyName, err)
+		return "", fmt.Errorf("%s token for %q is invalid: %w", source, keyName, err)
 	}
 	return bundle.AccessToken, nil
 }

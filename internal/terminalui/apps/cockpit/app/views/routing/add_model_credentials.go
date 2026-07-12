@@ -26,21 +26,23 @@ func buildAddModelCredentialRow(model state.Model, endpointName string, draft st
 	if !panel.credentialUI.SourcePickerOpen {
 		return row
 	}
-	options := credentialOptionRows(credentialSource(draft.CredentialRef), func(choice string) []update.Action {
-		next := applyAddModelCredentialSourceChoice(draft, choice)
+	options := credentialOptionRows(credentialSource(draft.CredentialRef), func(choice credentialChoiceOption) []update.Action {
+		next := applyAddModelCredentialSourceChoice(draft, choice.Mode)
 		panel.setDraft(next)
 		nextUI := closeAddModelCredentialUIState(panel.credentialUI)
-		if strings.EqualFold(strings.TrimSpace(choice), "file") { // swobu:io-string source=boundary
+		if choice.Mode == profile.AuthModeFile {
 			currentPath := credentialFilePath(next.CredentialRef)
 			nextUI.FileBrowse = initialCredentialFileBrowseState(currentPath)
 			nextUI.FilePicker = views.DefaultFilterablePickerState()
 		}
 		panel.setCredentialUI(nextUI)
-		variant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(choice))) // swobu:io-string source=boundary
-		if profile.IsInteractiveAuthVariant(variant) {
-			next.CredentialRef = string(variant)
+		if choice.Mode == profile.AuthModeKeychain {
+			return []update.Action{interaction.FocusKeyAction{Key: "add-model/keychain"}}
+		}
+		if profile.IsInteractiveAuthMode(choice.Mode) {
+			next.CredentialRef = string(choice.Mode)
 			// Browser flow starts only when operator activates "sign in".
-			if strings.EqualFold(string(variant), "chatgpt_login") {
+			if choice.Mode == profile.AuthModeChatGPTLogin {
 				return []update.Action{state.ResetAddModelAuthUIRequested{}}
 			}
 			// Device-code flow starts immediately to generate link+code.
@@ -62,9 +64,9 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 	providerSpec := strings.TrimSpace(draft.ProviderSpec)                          // swobu:io-string source=boundary
 	authState := addModelAuthStateForDraft(model, endpointName, draft)
 	authStatus := newInteractiveAuthStatusComponent(providerSpec, resolvedRef, authState.SessionState, authState.SessionError)
-	draftVariant := profile.AuthVariant(strings.ToLower(strings.TrimSpace(credentialSource(draftRef)))) // swobu:io-string source=boundary
-	if profile.SupportsAuthVariant(providerSpec, draftVariant) &&
-		profile.IsInteractiveAuthVariant(draftVariant) &&
+	draftMode := profile.AuthMode(strings.ToLower(strings.TrimSpace(credentialSource(draftRef)))) // swobu:io-string source=boundary
+	if profile.SupportsAuthMode(providerSpec, draftMode) &&
+		profile.IsInteractiveAuthMode(draftMode) &&
 		resolvedRef != "" &&
 		!strings.EqualFold(resolvedRef, draftRef) {
 		return authStatus.SignedInSummary()
@@ -76,12 +78,12 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 	if strings.EqualFold(providerSpec, "bedrock") && isBedrockAWSProfileCredentialRef(resolvedRef) {
 		return "AWS profile"
 	}
-	variant := profile.AuthVariant(strings.ToLower(source)) // swobu:io-string source=boundary
-	if profile.SupportsAuthVariant(providerSpec, variant) && profile.IsInteractiveAuthVariant(variant) {
-		if resolvedRef != "" && !strings.EqualFold(resolvedRef, string(variant)) {
+	mode := profile.AuthMode(strings.ToLower(source)) // swobu:io-string source=boundary
+	if profile.SupportsAuthMode(providerSpec, mode) && profile.IsInteractiveAuthMode(mode) {
+		if resolvedRef != "" && !strings.EqualFold(resolvedRef, string(mode)) {
 			return authStatus.SignedInSummary()
 		}
-		return authVariantDisplayLabel(variant)
+		return authModeDisplayLabel(mode)
 	}
 	if isResolvedInteractiveCredential(providerSpec, resolvedRef) {
 		return authStatus.SignedInSummary()
@@ -111,8 +113,8 @@ func addModelCredentialSummary(model state.Model, endpointName string, draft sta
 		}
 		return "file"
 	}
-	if profile.SupportsAuthVariant(providerSpec, variant) {
-		return authVariantDisplayLabel(variant)
+	if profile.SupportsAuthMode(providerSpec, mode) {
+		return authModeDisplayLabel(mode)
 	}
 	return selectors.CredentialSummaryFromProviderConfig(&draft)
 }
@@ -308,14 +310,17 @@ func addModelCredentialFilePickerItems(
 	}, currentPath, onChooseFile)
 }
 
-func applyAddModelCredentialSourceChoice(draft state.ProviderConfigSnapshot, choice string) state.ProviderConfigSnapshot {
+func applyAddModelCredentialSourceChoice(draft state.ProviderConfigSnapshot, choice profile.AuthMode) state.ProviderConfigSnapshot {
 	next := draft
-	ref := strings.TrimSpace(choice) // swobu:io-string source=boundary
-	if strings.EqualFold(ref, "env") {
+	ref := strings.TrimSpace(string(choice)) // swobu:io-string source=boundary
+	if choice == profile.AuthModeEnv {
 		ref = encodeCredentialEnvRef(profile.DefaultEnvKeyForSpec(strings.TrimSpace(next.ProviderSpec))) // swobu:io-string source=boundary
 	}
-	if strings.EqualFold(ref, "file") {
+	if choice == profile.AuthModeFile {
 		ref = encodeCredentialFileRef("")
+	}
+	if choice == profile.AuthModeKeychain {
+		ref = encodeCredentialKeychainRef("")
 	}
 	next.CredentialRef = ref
 	next.ModelID = ""
@@ -347,17 +352,17 @@ func buildAddModelCreateRow(model state.Model, snapshot *state.EndpointSnapshot,
 func effectiveAddModelCredentialRef(model state.Model, draft state.ProviderConfigSnapshot) string {
 	ref := strings.TrimSpace(draft.CredentialRef)         // swobu:io-string source=boundary
 	providerSpec := strings.TrimSpace(draft.ProviderSpec) // swobu:io-string source=boundary
-	interactiveVariants := make(map[string]struct{}, 2)
-	for _, variant := range profile.SupportedAuthVariantsForSpec(providerSpec) {
-		if profile.IsInteractiveAuthVariant(variant) {
-			interactiveVariants[strings.ToLower(strings.TrimSpace(string(variant)))] = struct{}{} // swobu:io-string source=boundary
+	interactiveModes := make(map[string]struct{}, 2)
+	for _, mode := range profile.SupportedAuthModesForSpec(providerSpec) {
+		if profile.IsInteractiveAuthMode(mode) {
+			interactiveModes[strings.ToLower(strings.TrimSpace(string(mode)))] = struct{}{} // swobu:io-string source=boundary
 		}
 	}
-	if len(interactiveVariants) == 0 {
+	if len(interactiveModes) == 0 {
 		return ref
 	}
 	if ref != "" {
-		if _, ok := interactiveVariants[strings.ToLower(ref)]; !ok { // swobu:io-string source=boundary
+		if _, ok := interactiveModes[strings.ToLower(ref)]; !ok { // swobu:io-string source=boundary
 			return ref
 		}
 	}

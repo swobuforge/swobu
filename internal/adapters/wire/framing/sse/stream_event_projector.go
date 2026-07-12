@@ -65,7 +65,7 @@ func (a *EnvelopeEventAdapter) translateEnvelopeStart(ev canonical.Event, emitte
 		itemID := a.resolveItemID(ev)
 		a.itemKinds[ev.EnvID] = canonical.ItemKindToolUse
 		a.itemIDs[ev.EnvID] = itemID
-		*emitted = append(*emitted, StreamEvent{Kind: StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: itemID, ToolUseID: payload.ToolUseID, Name: payload.Name})
+		*emitted = append(*emitted, StreamEvent{Kind: StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: itemID, ToolUseID: payload.ToolUseID, Name: payload.Name, ToolType: payload.ToolType})
 	}
 }
 
