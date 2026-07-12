@@ -240,18 +240,21 @@ const (
 // ParseToolPolicyMode parses one raw tool-policy mode without silently
 // defaulting unknown values.
 func ParseToolPolicyMode(raw string) (ToolPolicyMode, bool) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "none":
+	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
+	normalized := strings.ToLower(trimmed)
+	if normalized == "none" {
 		return ToolPolicyNone, true
-	case "auto":
-		return ToolPolicyAuto, true
-	case "required":
-		return ToolPolicyRequired, true
-	case "specific":
-		return ToolPolicySpecific, true
-	default:
-		return "", false
 	}
+	if normalized == "auto" {
+		return ToolPolicyAuto, true
+	}
+	if normalized == "required" {
+		return ToolPolicyRequired, true
+	}
+	if normalized == "specific" {
+		return ToolPolicySpecific, true
+	}
+	return "", false
 }
 
 func normalizeToolPolicyMode(mode ToolPolicyMode) ToolPolicyMode {

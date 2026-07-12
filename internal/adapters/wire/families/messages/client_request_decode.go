@@ -74,7 +74,8 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			}
 			decoded = append(decoded, canonical.NewTextItem(author, part.Text))
 		case "tool_use":
-			if strings.TrimSpace(part.Name) == "" { // swobu:io-string source=boundary
+			name := strings.TrimSpace(part.Name) // swobu:io-string source=boundary
+			if name == "" {
 				return canonical.BadRequest("messages request tool_use parts require a name")
 			}
 			input, err := sse.DecodeJSONObject(part.Input, "messages request tool_use input is invalid")
@@ -85,14 +86,14 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			if err != nil {
 				return canonical.BadRequest("messages request tool_use input is invalid")
 			}
-			toolUseID := strings.TrimSpace(part.ID)
+			toolUseID := strings.TrimSpace(part.ID) // swobu:io-string source=boundary
 			if toolUseID == "" {
 				toolUseID = openaicompat.GeneratedToolUseID(msgIdx, partIdx)
 			}
 			pending = append(pending, toolUseID)
-			decoded = append(decoded, canonical.NewToolUseItem(author, "", toolUseID, strings.TrimSpace(part.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+			decoded = append(decoded, canonical.NewToolUseItem(author, "", toolUseID, name, canonical.NewToolArgumentsObject(string(args))))
 		case "tool_result":
-			toolUseID := strings.TrimSpace(part.ToolUseID)
+			toolUseID := strings.TrimSpace(part.ToolUseID) // swobu:io-string source=boundary
 			if toolUseID == "" {
 				if len(pending) != 1 {
 					slog.Debug("messages tool_result missing tool_use_id",

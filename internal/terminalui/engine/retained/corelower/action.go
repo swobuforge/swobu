@@ -15,12 +15,12 @@ import (
 type actionRenderNode struct {
 	layout.Sized
 	label       string
-	signal      core.Signal
-	focusSignal core.Signal
+	signal      core.SignalEvent
+	focusSignal core.SignalEvent
 	focusable   bool
 }
 
-func lowerAction(n core.Node, _ Env) (layout.RenderNode, error) {
+func lowerAction(n core.Node, _ EnvConfig) (layout.RenderNode, error) {
 	signal, err := firstSignal(n)
 	if err != nil {
 		return nil, err
@@ -34,7 +34,7 @@ func lowerAction(n core.Node, _ Env) (layout.RenderNode, error) {
 	}, nil
 }
 
-func firstSignal(n core.Node) (core.Signal, error) {
+func firstSignal(n core.Node) (core.SignalEvent, error) {
 	if signals := n.InteractionValue().Signals; len(signals) > 0 {
 		for _, signal := range signals {
 			if signal.Kind != "" {
@@ -43,26 +43,26 @@ func firstSignal(n core.Node) (core.Signal, error) {
 		}
 	}
 	if len(n.InteractionValue().FocusSignals) > 0 {
-		return core.Signal{}, nil
+		return core.SignalEvent{}, nil
 	}
 	if specs := n.ContractValue().Signals; len(specs) > 0 {
 		for _, spec := range specs {
 			if spec.Kind != "" {
-				return core.Signal{Kind: spec.Kind}, nil
+				return core.SignalEvent{Kind: spec.Kind}, nil
 			}
 		}
 	}
 	if n.InteractionValue().Focus.Mode == core.FocusNone {
-		return core.Signal{}, nil
+		return core.SignalEvent{}, nil
 	}
-	return core.Signal{}, fmt.Errorf("action node has no signal")
+	return core.SignalEvent{}, fmt.Errorf("action node has no signal")
 }
 
-func firstFocusSignal(n core.Node) core.Signal {
+func firstFocusSignal(n core.Node) core.SignalEvent {
 	if signals := n.InteractionValue().FocusSignals; len(signals) > 0 {
 		return signals[0]
 	}
-	return core.Signal{}
+	return core.SignalEvent{}
 }
 
 func (a *actionRenderNode) Measure(c geom.Constraints, ctx *layout.LayoutContext) geom.Size {

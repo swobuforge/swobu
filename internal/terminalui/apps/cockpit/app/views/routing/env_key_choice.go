@@ -29,10 +29,12 @@ func buildProviderEnvKeyRow(ctx *retained.Context[state.Model], spec providerEnv
 	if pc == nil || !strings.EqualFold(credentialSource(pc.CredentialRef), "env") {
 		return nil
 	}
-	current := strings.TrimSpace(envCredentialKey(pc.CredentialRef))                   // swobu:io-string source=boundary
-	summary, editorValue := envKeySummary(strings.TrimSpace(pc.ProviderSpec), current) // swobu:io-string source=boundary
+	normalizedProviderSpec := strings.TrimSpace(pc.ProviderSpec)         // swobu:io-string source=boundary
+	normalizedProviderProtocol := strings.TrimSpace(pc.ProviderProtocol) // swobu:io-string source=boundary
+	current := strings.TrimSpace(envCredentialKey(pc.CredentialRef))     // swobu:io-string source=boundary
+	summary, editorValue := envKeySummary(normalizedProviderSpec, current)
 	rowLabel := "env key"
-	if strings.EqualFold(strings.TrimSpace(pc.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
+	if strings.EqualFold(normalizedProviderSpec, "bedrock") {
 		rowLabel = "env"
 	}
 	row := backendURLEditorRow(
@@ -42,8 +44,8 @@ func buildProviderEnvKeyRow(ctx *retained.Context[state.Model], spec providerEnv
 		editorValue,
 		"env variable",
 		func(value string) []update.Action {
-			draftBaseURL := effectiveCreateDraftBaseURL(model, strings.TrimSpace(pc.ProviderSpec))                                                                                                        // swobu:io-string source=boundary
-			return applyProviderEnvKeySelection(strings.TrimSpace(pc.ProviderSpec), strings.TrimSpace(pc.ProviderProtocol), value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode, draftBaseURL) // swobu:io-string source=boundary
+			draftBaseURL := effectiveCreateDraftBaseURL(model, normalizedProviderSpec)
+			return applyProviderEnvKeySelection(normalizedProviderSpec, normalizedProviderProtocol, value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode, draftBaseURL)
 		},
 	)
 	return row
@@ -60,18 +62,23 @@ func envKeySummary(providerSpec string, explicitKey string) (summary string, edi
 }
 
 func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, envKey string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool, createDraftBaseURL string) []update.Action {
+	providerSpec = strings.TrimSpace(providerSpec)             // swobu:io-string source=boundary
+	providerProtocol = strings.TrimSpace(providerProtocol)     // swobu:io-string source=boundary
+	envKey = strings.TrimSpace(envKey)                         // swobu:io-string source=boundary
+	endpointName = strings.TrimSpace(endpointName)             // swobu:io-string source=boundary
+	createDraftBaseURL = strings.TrimSpace(createDraftBaseURL) // swobu:io-string source=boundary
 	ref := encodeCredentialEnvRef(envKey)
 	if createMode {
-		baseURL := strings.TrimSpace(createDraftBaseURL) // swobu:io-string source=boundary
+		baseURL := createDraftBaseURL
 		if baseURL == "" {
-			baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
+			baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec))
 		}
 		baseURL = resolveBedrockMantleBaseURL(providerSpec, envKey, baseURL)
 		authHeader := ""
 		if providerConfig != nil {
-			authHeader = strings.TrimSpace(providerConfig.AuthHeader)
+			authHeader = strings.TrimSpace(providerConfig.AuthHeader) // swobu:io-string source=boundary
 		}
-		if strings.EqualFold(strings.TrimSpace(providerSpec), "openai_compatible") && authHeader == "" {
+		if strings.EqualFold(providerSpec, "openai_compatible") && authHeader == "" {
 			authHeader = stateModel.ProviderDefaultAuthHeader(providerSpec)
 		}
 		return []update.Action{
@@ -79,21 +86,22 @@ func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, 
 			state.SetCreateDraftModelIDAction{ModelID: ""},
 			state.LoadRoutingModelCatalogRequestedAction{
 				Scope:            state.RoutingModelCatalogScopeCreateDraft,
-				ProviderSpec:     strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
+				ProviderSpec:     providerSpec,
 				AuthHeader:       authHeader,
-				ProviderProtocol: strings.TrimSpace(providerProtocol), // swobu:io-string source=boundary
+				ProviderProtocol: providerProtocol,
 				BaseURL:          baseURL,
 				CredentialRef:    ref,
 			},
 		}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
+	if providerConfig == nil || endpointName == "" {
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	next.BaseURL = resolveBedrockMantleBaseURL(providerSpec, envKey, strings.TrimSpace(next.BaseURL)) // swobu:io-string source=boundary
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/env")    // swobu:io-string source=boundary
+	nextBaseURL := strings.TrimSpace(next.BaseURL) // swobu:io-string source=boundary
+	next.BaseURL = resolveBedrockMantleBaseURL(providerSpec, envKey, nextBaseURL)
+	return routingSaveProviderConfigActions(endpointName, next, "provider/env")
 }
 
 func resolveBedrockMantleBaseURL(providerSpec, envKey, currentBaseURL string) string {

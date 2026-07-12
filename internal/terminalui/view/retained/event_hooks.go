@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-type eventHook struct {
+type eventHookRecord struct {
 	handle func(interaction.Event) *interaction.Event
 }
 
@@ -22,16 +22,16 @@ func UseEvent[M any](ctx *Context[M], handle func(interaction.Event) *interactio
 	if handle == nil {
 		return
 	}
-	ctx.eventHooks = append(ctx.eventHooks, eventHook{handle: handle})
+	ctx.eventHooks = append(ctx.eventHooks, eventHookRecord{handle: handle})
 }
 
-func wrapEventHooks(node RenderNode, hooks []eventHook) RenderNode {
+func wrapEventHooks(node RenderNode, hooks []eventHookRecord) RenderNode {
 	if node == nil || len(hooks) == 0 {
 		return node
 	}
 	return eventHookRenderNode{
 		RenderNode: node,
-		hooks:      append([]eventHook(nil), hooks...),
+		hooks:      append([]eventHookRecord(nil), hooks...),
 	}
 }
 
@@ -39,7 +39,7 @@ func wrapEventHooks(node RenderNode, hooks []eventHook) RenderNode {
 // interfaces while applying local event transformers before the wrapped node.
 type eventHookRenderNode struct {
 	RenderNode
-	hooks []eventHook
+	hooks []eventHookRecord
 }
 
 func (h eventHookRenderNode) HandleEventTransform(ev interaction.Event, node *layout.LayoutNode) (*interaction.Event, []update.Action) {

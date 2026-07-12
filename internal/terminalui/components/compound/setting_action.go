@@ -14,23 +14,22 @@ type SettingRowProps struct {
 	Label       string
 	Value       string
 	ActionLabel string
-	Signal      core.Signal
+	Signal      core.SignalEvent
 	// FocusSignal is emitted when the row gains focus.
-	FocusSignal core.Signal
+	FocusSignal core.SignalEvent
 	Disabled    bool
 	Selected    bool
-	Help        []core.HelpBinding
+	Help        []core.HelpBindingSpec
 }
 
 // SettingRow returns one semantic action row rendered as a single focusable
 // action node. It keeps the layout bridge narrow while the retained core
 // adapter is still migrating.
 func SettingRow(p SettingRowProps) core.Node {
-	line := strings.Join(filterParts(
-		strings.TrimSpace(p.Label),
-		strings.TrimSpace(p.Value),
-		strings.TrimSpace(p.ActionLabel),
-	), "  ")
+	label := strings.TrimSpace(p.Label)             // swobu:io-string source=boundary
+	value := strings.TrimSpace(p.Value)             // swobu:io-string source=boundary
+	actionLabel := strings.TrimSpace(p.ActionLabel) // swobu:io-string source=boundary
+	line := strings.Join(filterParts(label, value, actionLabel), "  ")
 
 	row := primitive.Action(primitive.ActionProps{
 		Key:         p.Key,

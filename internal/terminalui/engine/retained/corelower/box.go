@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerBox(n core.Node, env Env) (layout.RenderNode, error) {
+func lowerBox(n core.Node, env EnvConfig) (layout.RenderNode, error) {
 	children, err := lowerChildren(n.ChildrenValue(), n.LayoutValue().Flow.Axis, env)
 	if err != nil {
 		return nil, err
@@ -16,13 +16,13 @@ func lowerBox(n core.Node, env Env) (layout.RenderNode, error) {
 	}
 	box := layout.NewBox(children)
 	inset := n.LayoutValue().Inset
-	if inset != (core.Inset{}) {
+	if inset != (core.Insets{}) {
 		box.Padding = geom.Insets{Top: inset.Top, Right: inset.Right, Bottom: inset.Bottom, Left: inset.Left}
 	}
 	return box, nil
 }
 
-func lowerChildren(nodes []core.Node, axis core.Axis, env Env) (layout.RenderNode, error) {
+func lowerChildren(nodes []core.Node, axis core.Axis, env EnvConfig) (layout.RenderNode, error) {
 	switch len(nodes) {
 	case 0:
 		return nil, nil

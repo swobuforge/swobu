@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -121,14 +120,6 @@ func (loop *AppLoop[M]) executeEffect(eff update.Effect) {
 		ctx = context.Background()
 	}
 	if _, ok := eff.(interface{ RunImmediately() }); ok {
-		actions := eff.Execute(ctx)
-		select {
-		case loop.followUp <- actions:
-		case <-ctx.Done():
-		}
-		return
-	}
-	if _, ok := eff.(stateeffect.FocusNextAfterRebuildEffect); ok {
 		actions := eff.Execute(ctx)
 		select {
 		case loop.followUp <- actions:

@@ -27,8 +27,8 @@ const (
 	TriTrue
 )
 
-// StyleMods captures orthogonal visual modifiers.
-type StyleMods struct {
+// StyleOptions captures orthogonal visual modifiers.
+type StyleOptions struct {
 	Bold      Tri
 	Dim       Tri
 	Underline Tri
@@ -54,5 +54,5 @@ type Style struct {
 	Token   StyleToken
 	Variant Variant
 	State   VisualState
-	Mods    StyleMods
+	Mods    StyleOptions
 }

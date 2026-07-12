@@ -49,8 +49,8 @@ func (ctx *Context[M]) Emit(action update.Action) {
 	}
 }
 
-// Runtime captures the component runtime hooks needed by migration adapters.
-type Runtime[M any] struct {
+// ComponentRuntimeState captures the component runtime hooks needed by migration adapters.
+type ComponentRuntimeState[M any] struct {
 	Local    LocalScope
 	Model    func() M
 	Dispatch func(update.Action)
@@ -59,7 +59,7 @@ type Runtime[M any] struct {
 }
 
 // NewContext constructs one component context from runtime hooks.
-func NewContext[M any](runtime Runtime[M]) *Context[M] {
+func NewContext[M any](runtime ComponentRuntimeState[M]) *Context[M] {
 	return &Context[M]{
 		Local:    runtime.Local,
 		Model:    runtime.Model,
@@ -70,11 +70,11 @@ func NewContext[M any](runtime Runtime[M]) *Context[M] {
 }
 
 // Runtime returns a copy of the context runtime hooks for bridge adapters.
-func (ctx *Context[M]) Runtime() Runtime[M] {
+func (ctx *Context[M]) Runtime() ComponentRuntimeState[M] {
 	if ctx == nil {
-		return Runtime[M]{}
+		return ComponentRuntimeState[M]{}
 	}
-	return Runtime[M]{
+	return ComponentRuntimeState[M]{
 		Local:    ctx.Local,
 		Model:    ctx.Model,
 		Dispatch: ctx.dispatch,
@@ -89,7 +89,7 @@ func buildChildContext[M any](parent *Context[M]) *Context[M] {
 	slot := parent.childSlot
 	parent.childSlot++
 	local := parent.Local.WithPrefix("build/" + strconv.Itoa(slot))
-	return NewContext(Runtime[M]{
+	return NewContext(ComponentRuntimeState[M]{
 		Local:    local,
 		Model:    parent.Model,
 		Dispatch: parent.dispatch,

@@ -9,10 +9,8 @@ import (
 )
 
 // RenderNode is the app-facing alias for the engine's structural node type.
-//
-// Deprecated: app-facing code should return semantic core nodes through a
-// lowering adapter. RenderNode remains only for retained compatibility during
-// the migration window.
+// Retained adapters still use it while they lower semantic core nodes into the
+// engine rendergraph.
 type RenderNode = layout.RenderNode
 
 // LocalScope is the node-scoped local state capability exposed to views.
@@ -33,8 +31,8 @@ type Context[M any] struct {
 	building    bool
 	hookSlot    int
 	childSlot   int
-	effectHooks []effectHook
-	eventHooks  []eventHook
+	effectHooks []effectHookRecord
+	eventHooks  []eventHookRecord
 }
 
 // ViewSpec is the declarative composition value used by app and toolkit code.

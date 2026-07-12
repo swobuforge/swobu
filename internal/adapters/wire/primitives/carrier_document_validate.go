@@ -16,7 +16,8 @@ func ValidateResponseCarrierDocument(doc carrier.WireDocument, expectedProtocol 
 	if doc.Stage != carrier.StageProviderIngressIn {
 		return fmt.Errorf("wire document stage must be %q", carrier.StageProviderIngressIn)
 	}
-	if strings.TrimSpace(doc.Media) != "application/json" {
+	media := strings.TrimSpace(doc.Media) // swobu:io-string source=boundary
+	if media != "application/json" {
 		return fmt.Errorf("wire document media must be %q", "application/json")
 	}
 	if doc.IsEmpty() {

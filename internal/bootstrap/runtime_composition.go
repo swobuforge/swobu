@@ -11,65 +11,74 @@ import (
 	"github.com/swobuforge/swobu/internal/ports"
 )
 
-type providerServicesAdapter struct {
+type providerIngressResolverAdapter struct {
 	ingress ports.ProviderIngressResolver
 	catalog ports.ProviderModelCatalog
 }
 
-func (a providerServicesAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
-	return a.ingress.ResolveProviderIngress(ctx, req)
+func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+	portsReq := ports.ProviderRequest{
+		Request:         req.Request,
+		RequestDocument: req.RequestDocument,
+		Contract:        req.Contract,
+		Target:          req.Target,
+		ExchangeID:      req.ExchangeID,
+		ClientFamily:    req.ClientFamily,
+	}
+	ingress, err := a.ingress.ResolveProviderIngress(ctx, portsReq)
+	return ingress, err
 }
 
-func (a providerServicesAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
+func (a providerIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	return a.catalog.ValidateCredentials(ctx, target)
 }
 
-func (a providerServicesAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (a providerIngressResolverAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	return a.catalog.ListModels(ctx, target)
 }
 
-// daemonRuntimeComposition is the explicit runtime composition root for the
+// daemonProviderModelCatalogComposition is the explicit runtime composition root for the
 // daemon live path. It owns the one codec lookup surface and the one provider
 // lookup surface without introducing a registry layer.
-type daemonRuntimeComposition struct {
+type daemonProviderModelCatalogComposition struct {
 	wire      exchangeruntime.RuntimeResolver
-	providers providerServicesAdapter
+	providers providerIngressResolverAdapter
 }
 
-func newDaemonRuntimeComposition(wire exchangeruntime.RuntimeResolver, ingress ports.ProviderIngressResolver, catalog ports.ProviderModelCatalog) daemonRuntimeComposition {
-	return daemonRuntimeComposition{
+func newDaemonProviderModelCatalogComposition(wire exchangeruntime.RuntimeResolver, ingress ports.ProviderIngressResolver, catalog ports.ProviderModelCatalog) daemonProviderModelCatalogComposition {
+	return daemonProviderModelCatalogComposition{
 		wire: wire,
-		providers: providerServicesAdapter{
+		providers: providerIngressResolverAdapter{
 			ingress: ingress,
 			catalog: catalog,
 		},
 	}
 }
 
-func (r daemonRuntimeComposition) ClientCodec(f canonical.ClientFamily) exchange.ClientCodec {
+func (r daemonProviderModelCatalogComposition) ClientCodec(f canonical.ClientFamily) exchange.ClientCodec {
 	return r.wire.ClientCodec(f)
 }
 
-func (r daemonRuntimeComposition) ProviderRequestDocumentEncoder(kind protocolkind.ProtocolKind) exchange.ProviderRequestDocumentEncoder {
+func (r daemonProviderModelCatalogComposition) ProviderRequestDocumentEncoder(kind protocolkind.ProtocolKind) exchange.ProviderRequestDocumentEncoder {
 	return r.wire.ProviderRequestDocumentEncoder(kind)
 }
 
-func (r daemonRuntimeComposition) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) exchange.ProviderEnvelopeDecoder {
+func (r daemonProviderModelCatalogComposition) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) exchange.ProviderEnvelopeDecoder {
 	return r.wire.ProviderEnvelopeDecoder(kind, d)
 }
 
-func (r daemonRuntimeComposition) ProviderDocumentDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) exchange.ProviderDocumentDecoder {
+func (r daemonProviderModelCatalogComposition) ProviderDocumentDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) exchange.ProviderDocumentDecoder {
 	return r.wire.ProviderDocumentDecoder(kind, d)
 }
 
-func (r daemonRuntimeComposition) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+func (r daemonProviderModelCatalogComposition) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 	return r.providers.ResolveProviderIngress(ctx, req)
 }
 
-func (r daemonRuntimeComposition) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
+func (r daemonProviderModelCatalogComposition) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	return r.providers.ValidateCredentials(ctx, target)
 }
 
-func (r daemonRuntimeComposition) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (r daemonProviderModelCatalogComposition) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	return r.providers.ListModels(ctx, target)
 }

@@ -8,18 +8,18 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-// Env carries lowering-time knobs. It is empty for the first bridge pass.
-type Env struct{}
+// EnvConfig carries lowering-time knobs. It is empty for the first bridge pass.
+type EnvConfig struct{}
 
 // Lower turns one semantic core tree into one retained rendergraph tree.
-func Lower(root core.Node, env Env) (layout.RenderNode, error) {
+func Lower(root core.Node, env EnvConfig) (layout.RenderNode, error) {
 	if diagnostics := core.Validate(root); len(diagnostics) > 0 {
 		return nil, fmt.Errorf("invalid core node: %s", joinDiagnostics(diagnostics))
 	}
 	return lowerNode(root, env)
 }
 
-func lowerNode(n core.Node, env Env) (layout.RenderNode, error) {
+func lowerNode(n core.Node, env EnvConfig) (layout.RenderNode, error) {
 	switch n.Kind() {
 	case core.KindText:
 		return lowerText(n, env)

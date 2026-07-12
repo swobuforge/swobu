@@ -111,8 +111,9 @@ func payloadMaxOffset(rowCount int, maxHeight int) int {
 }
 
 func actionStableID(action clientprofile.Action) string {
-	if strings.TrimSpace(action.ID) != "" { // swobu:io-string source=boundary
-		return strings.TrimSpace(action.ID) // swobu:io-string source=boundary
+	id := strings.TrimSpace(action.ID) // swobu:io-string source=boundary
+	if id != "" {
+		return id
 	}
 	if action.RowLabel() != "" {
 		return action.RowLabel()
@@ -123,9 +124,10 @@ func actionStableID(action clientprofile.Action) string {
 func clientPickerFocusKey(profile clientprofile.Profile) string {
 	id := ""
 	if profile != nil {
-		id = strings.TrimSpace(profile.Identity().ID)
+		identity := profile.Identity()
+		id = strings.TrimSpace(identity.ID) // swobu:io-string source=boundary
 		if id == "" {
-			id = strings.TrimSpace(profile.Identity().Label)
+			id = strings.TrimSpace(identity.Label) // swobu:io-string source=boundary
 		}
 	}
 	if id == "" {

@@ -102,7 +102,7 @@ type ContinuationRecord struct {
 	Provider     protocolkind.ProtocolKind
 	ModelID      string
 	RequestDelta CanonicalRequest
-	Response     CanonicalOutputData
+	Response     CanonicalOutputProjection
 	Status       ContinuationStatus
 	CreatedAt    time.Time
 	ExpiresAt    *time.Time
@@ -287,7 +287,7 @@ func buildContinuationRecord(namespace ContinuationNamespace, request CanonicalR
 	if output == nil || output.ResultID() == "" {
 		return ContinuationRecord{}, false, nil
 	}
-	response, ok := output.CloneOutput().(CanonicalOutputData)
+	response, ok := output.CloneOutput().(CanonicalOutputProjection)
 	if !ok {
 		return ContinuationRecord{}, false, InternalError("canonical output snapshot could not be cloned for continuation capture")
 	}

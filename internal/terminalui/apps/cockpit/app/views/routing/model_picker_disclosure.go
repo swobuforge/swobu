@@ -45,9 +45,9 @@ func buildModelPickerItems(options []modelPickerOption) []views.FilterablePicker
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, opt := range options {
 		option := opt
-		key := strings.TrimSpace(option.Key)
+		key := strings.TrimSpace(option.Key) // swobu:io-string source=boundary
 		if key == "" {
-			key = strings.TrimSpace(option.Label)
+			key = strings.TrimSpace(option.Label) // swobu:io-string source=boundary
 		}
 		items = append(items, views.FilterablePickerItem{
 			Key:      key,

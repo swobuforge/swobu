@@ -14,29 +14,29 @@ type CoreViewSpec[M any] interface {
 	BuildCoreNode(ctx *component.Context[M]) core.Node
 }
 
-type componentScope struct {
+type componentLocalScopeAdapter struct {
 	scope LocalScope
 }
 
-func (s componentScope) Get(slot int) (any, bool) {
+func (s componentLocalScopeAdapter) Get(slot int) (any, bool) {
 	if s.scope == nil {
 		return nil, false
 	}
 	return s.scope.Get(slot)
 }
 
-func (s componentScope) Set(slot int, value any) {
+func (s componentLocalScopeAdapter) Set(slot int, value any) {
 	if s.scope == nil {
 		return
 	}
 	s.scope.Set(slot, value)
 }
 
-func (s componentScope) WithPrefix(prefix string) component.LocalScope {
+func (s componentLocalScopeAdapter) WithPrefix(prefix string) component.LocalScope {
 	if s.scope == nil {
-		return componentScope{}
+		return componentLocalScopeAdapter{}
 	}
-	return componentScope{scope: s.scope.WithPrefix(prefix)}
+	return componentLocalScopeAdapter{scope: s.scope.WithPrefix(prefix)}
 }
 
 // FromCore lowers one semantic component view into the retained view contract.
@@ -48,15 +48,15 @@ func FromCore[M any](v component.View[M]) ViewSpec[M] {
 		if ctx == nil {
 			return nil
 		}
-		cctx := component.NewContext(component.Runtime[M]{
-			Local:    componentScope{scope: ctx.Local},
+		cctx := component.NewContext(component.ComponentRuntimeState[M]{
+			Local:    componentLocalScopeAdapter{scope: ctx.Local},
 			Model:    ctx.Model,
 			Dispatch: ctx.dispatch,
 			Emit:     ctx.emit,
 			Building: ctx.building,
 		})
 		node := v.BuildCoreNode(cctx)
-		renderNode, err := corelower.Lower(node, corelower.Env{})
+		renderNode, err := corelower.Lower(node, corelower.EnvConfig{})
 		if err != nil {
 			panic(fmt.Sprintf("corelower failed: %v", err))
 		}

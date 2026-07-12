@@ -21,7 +21,7 @@ import (
 func buildDaemonServeMux(
 	daemon *Daemon,
 	runtimeCfg config.RuntimeConfig,
-	runtime daemonRuntimeComposition,
+	runtime daemonProviderModelCatalogComposition,
 	continuation ports.ContinuationStore,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {

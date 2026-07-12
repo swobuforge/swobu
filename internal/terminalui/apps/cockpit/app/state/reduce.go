@@ -133,7 +133,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.CreateDraftModelTestPassed = false
 		refreshFirstRunFooterAffordance(model)
 		return true
-	case SetCreateDraftAuthHeader:
+	case SetCreateDraftAuthHeaderAction:
 		authHeader := strings.TrimSpace(value.AuthHeader)                                                                                // swobu:io-string source=boundary
 		if strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "openai_compatible") && authHeader == "" { // swobu:io-string source=boundary
 			authHeader = stateModel.ProviderDefaultAuthHeader(model.CreateDraftProviderConfig.ProviderSpec)

@@ -46,7 +46,8 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) 
 	if err := json.Unmarshal(raw, &objectMode); err != nil {
 		return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
 	}
-	normalizedType := strings.ToLower(strings.TrimSpace(objectMode.Type)) // swobu:io-string source=provider-wire
+	normalizedTypeRaw := strings.TrimSpace(objectMode.Type) // swobu:io-string source=provider-wire
+	normalizedType := strings.ToLower(normalizedTypeRaw)
 	switch normalizedType {
 	case "auto":
 		return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
@@ -55,7 +56,8 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl) 
 	case "function":
 		name := strings.TrimSpace(objectMode.Name) // swobu:io-string source=provider-wire
 		if name == "" {
-			name = strings.TrimSpace(objectMode.Function.Name)
+			functionName := strings.TrimSpace(objectMode.Function.Name) // swobu:io-string source=provider-wire
+			name = functionName
 		}
 		if name == "" {
 			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice function requires a name")
@@ -91,7 +93,7 @@ func resolveResponsesSpecificToolID(tools []canonical.ToolDecl, name string) (ca
 				continue
 			}
 		}
-		if !strings.EqualFold(strings.TrimSpace(decl.ToolName()), trimmed) {
+		if !strings.EqualFold(decl.ToolName(), trimmed) {
 			continue
 		}
 		if matched && found != decl.ToolID() {

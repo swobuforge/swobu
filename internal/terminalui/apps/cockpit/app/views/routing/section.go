@@ -46,15 +46,15 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 		setModelPickerOpen(false)
 	}
 
-	runOn := buildCreateRunOnRow(ctx, provider, providerProtocol, strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader), runPickerOpen, setRunPickerOpen, pickerState, setPickerState, closeCreateTransients)
+	runOn := buildCreateRunOnRow(ctx, provider, providerProtocol, model.CreateDraftProviderConfig.AuthHeader, runPickerOpen, setRunPickerOpen, pickerState, setPickerState, closeCreateTransients)
 	rows := []retained.ViewSpec[state.Model]{retained.Named[state.Model]("run_on", runOn)}
 
 	flow := state.EvaluateCreateDraftRouteSetup(model.CreateDraftProviderConfig)
 	if flow.CredentialVisible {
-		useKeyFrom := buildCreateUseKeyFromRow(ctx, provider, providerProtocol, strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader), credSummary, baseURL, cred, keyPickerState, setKeyPickerState, pickerState, setPickerState, closeCreateTransients)
+		useKeyFrom := buildCreateUseKeyFromRow(ctx, provider, providerProtocol, model.CreateDraftProviderConfig.AuthHeader, credSummary, baseURL, cred, keyPickerState, setKeyPickerState, pickerState, setPickerState, closeCreateTransients)
 		rows = append(rows, retained.Named[state.Model]("use_key_from", useKeyFrom))
 	}
-	if strings.EqualFold(strings.TrimSpace(provider), "bedrock") { // swobu:io-string source=boundary
+	if strings.EqualFold(provider, "bedrock") { // swobu:io-string source=boundary
 		rows = append(rows, retained.Named[state.Model]("profile", bedrockAuthProfileEditor(bedrockAuthProfileEditorSpec{
 			ProviderConfig: &model.CreateDraftProviderConfig,
 			CreateMode:     true,

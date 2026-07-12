@@ -12,26 +12,11 @@ import (
 // builder.
 type LinkOption[I any, O any] func(*Link[I, O])
 
-// When marks one link as available only when every predicate passes.
-func When[I any, O any](predicates ...Predicate) LinkOption[I, O] {
-	return func(link *Link[I, O]) {
-		link.When = append(link.When, predicates...)
-	}
-}
-
 // After declares that one link should run after the provided link IDs when the
 // dependencies are present.
 func After[I any, O any](ids ...LinkID) LinkOption[I, O] {
 	return func(link *Link[I, O]) {
 		link.After = append(link.After, ids...)
-	}
-}
-
-// Before declares that one link should run before the provided link IDs when
-// the dependencies are present.
-func Before[I any, O any](ids ...LinkID) LinkOption[I, O] {
-	return func(link *Link[I, O]) {
-		link.Before = append(link.Before, ids...)
 	}
 }
 

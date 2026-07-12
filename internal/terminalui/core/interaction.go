@@ -28,38 +28,38 @@ type FocusSpec struct {
 	Trap bool
 }
 
-// KeyPattern is a semantic match token for keyboard input.
-type KeyPattern struct {
+// KeyMatch is a semantic match token for keyboard input.
+type KeyMatch struct {
 	Name string
 }
 
 // KeyEnter returns the enter key pattern.
-func KeyEnter() KeyPattern { return KeyPattern{Name: "enter"} }
+func KeyEnter() KeyMatch { return KeyMatch{Name: "enter"} }
 
 // KeyEsc returns the escape key pattern.
-func KeyEsc() KeyPattern { return KeyPattern{Name: "esc"} }
+func KeyEsc() KeyMatch { return KeyMatch{Name: "esc"} }
 
 // KeyRune returns one rune-pattern binding.
-func KeyRune(r rune) KeyPattern { return KeyPattern{Name: string(r)} }
+func KeyRune(r rune) KeyMatch { return KeyMatch{Name: string(r)} }
 
-// KeyBinding maps one key pattern to an intent.
-type KeyBinding struct {
-	Pattern KeyPattern
+// KeyBindingSpec maps one key pattern to an intent.
+type KeyBindingSpec struct {
+	Pattern KeyMatch
 	Intent  Intent
 }
 
-// HelpBinding describes one footer/help binding.
-type HelpBinding struct {
+// HelpBindingSpec describes one footer/help binding.
+type HelpBindingSpec struct {
 	Key   string
 	Label string
 }
 
-// Interaction is the semantic interaction envelope for one node.
-type Interaction struct {
+// InteractionSpec is the semantic interaction envelope for one node.
+type InteractionSpec struct {
 	Focus   FocusSpec
-	Keymap  []KeyBinding
-	Help    []HelpBinding
-	Signals []Signal
+	Keymap  []KeyBindingSpec
+	Help    []HelpBindingSpec
+	Signals []SignalEvent
 	// FocusSignals are emitted when the lowered node gains focus.
-	FocusSignals []Signal
+	FocusSignals []SignalEvent
 }

@@ -111,19 +111,25 @@ func credentialPostSelectionFocusKey(raw string) string {
 }
 
 func applyProviderCredentialSelection(credentialRef string, providerSpec string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	credentialRef = strings.TrimSpace(credentialRef)               // swobu:io-string source=boundary
-	variant := profile.AuthVariant(strings.ToLower(credentialRef)) // swobu:io-string source=boundary
+	credentialRef = strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
+	providerSpec = strings.TrimSpace(providerSpec)   // swobu:io-string source=boundary
+	endpointName = strings.TrimSpace(endpointName)   // swobu:io-string source=boundary
+	variant := profile.AuthVariant(strings.ToLower(credentialRef))
 	if profile.IsInteractiveAuthVariant(variant) {
 		if createMode {
 			return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 		}
-		if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
+		if providerConfig == nil || endpointName == "" {
 			return nil
 		}
+		providerRef := ""
+		if providerConfig != nil {
+			providerRef = strings.TrimSpace(providerConfig.Ref) // swobu:io-string source=boundary
+		}
 		return []update.Action{state.StartProviderAuthSessionRequested{
-			EndpointName:   strings.TrimSpace(endpointName), // swobu:io-string source=boundary
+			EndpointName:   endpointName,
 			ProviderConfig: *providerConfig,
-			OwnerKey:       stateModel.EndpointProviderAuthOwnerKey(strings.TrimSpace(endpointName), strings.TrimSpace(providerConfig.Ref)).String(), // swobu:io-string source=boundary
+			OwnerKey:       stateModel.EndpointProviderAuthOwnerKey(endpointName, providerRef).String(),
 			AuthScope:      stateModel.AuthScopeEndpointProvider,
 		}}
 	}
@@ -136,12 +142,12 @@ func applyProviderCredentialSelection(credentialRef string, providerSpec string,
 	if createMode {
 		return []update.Action{state.SetCreateDraftCredentialRef{CredentialRef: credentialRef}}
 	}
-	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
+	if providerConfig == nil || endpointName == "" {
 		return nil
 	}
 	next := *providerConfig
 	next.CredentialRef = credentialRef
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/auth") // swobu:io-string source=boundary
+	return routingSaveProviderConfigActions(endpointName, next, "provider/auth")
 }
 
 func credentialOptionItems(
@@ -197,8 +203,9 @@ func credentialOptionItems(
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
 		choice := option
+		key := strings.TrimSpace(choice.Value) // swobu:io-string source=boundary
 		items = append(items, views.FilterablePickerItem{
-			Key:      strings.TrimSpace(choice.Value),
+			Key:      key,
 			Label:    strings.TrimSpace(choice.Label),                      // swobu:io-string source=boundary
 			Search:   choice.Value + " " + strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
 			Selected: choice.Value == current,

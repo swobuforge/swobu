@@ -14,6 +14,8 @@ import (
 // post-open focus handoff is deterministic.
 type FocusNextAfterRebuildEffect struct{}
 
+func (FocusNextAfterRebuildEffect) RunImmediately() {}
+
 func (eff FocusNextAfterRebuildEffect) Execute(ctx context.Context) []update.Action {
 	select {
 	case <-ctx.Done():

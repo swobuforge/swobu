@@ -234,14 +234,15 @@ func (s *responsesEventReader) handleStreamDone() {
 }
 
 func (s *responsesEventReader) handleTerminalCompletion(status string) {
-	if strings.TrimSpace(status) == "" {
-		status = "completed"
+	normalizedStatus := strings.TrimSpace(status) // swobu:io-string source=provider-wire
+	if normalizedStatus == "" {
+		normalizedStatus = "completed"
 	}
 	s.completed = true
 	s.closeOpenText(canonical.EnvelopeStatusCompleted)
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)
-	s.enqueueFinish(status)
+	s.enqueueFinish(normalizedStatus)
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 

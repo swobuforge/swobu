@@ -23,27 +23,3 @@ func (f ViewFunc[M]) BuildCoreNode(ctx *Context[M]) (node core.Node) {
 	}()
 	return f(ctx)
 }
-
-// Build adapts a child-producing function into a View with isolated child
-// hook state.
-func Build[M any](fn func(ctx *Context[M]) View[M]) View[M] {
-	if fn == nil {
-		return ViewFunc[M](func(*Context[M]) core.Node {
-			return core.Box()
-		})
-	}
-	return ViewFunc[M](func(ctx *Context[M]) core.Node {
-		if ctx == nil {
-			return core.Box()
-		}
-		childCtx := buildChildContext(ctx)
-		defer func() {
-			childCtx.building = false
-		}()
-		child := fn(childCtx)
-		if child == nil {
-			return core.Box()
-		}
-		return child.BuildCoreNode(childCtx)
-	})
-}

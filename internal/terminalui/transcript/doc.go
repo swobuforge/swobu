@@ -5,6 +5,5 @@
 // semantics + render mode intent. Rendering strategies consume this contract
 // but are implemented elsewhere.
 //
-// Deprecated compatibility aliases remain in internal/terminalui/view during
-// the quarantine window. New code should import transcript directly.
+// New code should import transcript directly.
 package transcript

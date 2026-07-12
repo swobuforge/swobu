@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type staticCredentialProvider struct {
@@ -42,9 +43,7 @@ func TestResolveProviderIngress_UsesContractDeliveryForStreamingRequests(t *test
 	defer server.Close()
 
 	adapter := NewExecutor(server.Client(), staticCredentialProvider{token: "test-token"})
-	req := exchange.NewProviderRequest(
-		"ex-1",
-		"responses",
+	req := ports.NewProviderRequest(
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "claude-sonnet-4-20250514",
 			Items: []canonical.CanonicalItem{

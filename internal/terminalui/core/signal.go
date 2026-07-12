@@ -1,7 +1,7 @@
 package core
 
-// Signal is a generic semantic event emitted by interactive nodes.
-type Signal struct {
+// SignalEvent is a generic semantic event emitted by interactive nodes.
+type SignalEvent struct {
 	Kind string
 	Data any
 }

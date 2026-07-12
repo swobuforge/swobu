@@ -54,6 +54,8 @@ func (i *EnvelopeIndex) Observe(ev Event) error {
 			entry.kind = payload.Kind
 		}
 		entry.closed = true
+	default:
+		// Other event kinds do not affect closed-envelope tracking.
 	}
 	if err := i.rememberObservedAliasLocked(ev, entry.kind); err != nil {
 		return err
@@ -104,7 +106,7 @@ func (i *EnvelopeIndex) Closed(id EnvelopeID) (*ClosedEnvelope, bool) {
 
 // ProjectResponse reconstructs one closed response envelope into canonical
 // output data.
-func (i *EnvelopeIndex) ProjectResponse(id EnvelopeID) (*CanonicalOutputData, error) {
+func (i *EnvelopeIndex) ProjectResponse(id EnvelopeID) (*CanonicalOutputProjection, error) {
 	closed, ok := i.Closed(id)
 	if !ok {
 		return nil, fmt.Errorf("closed response envelope %q not found", id)

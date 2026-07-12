@@ -5,7 +5,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerLayer(n core.Node, env Env) (layout.RenderNode, error) {
+func lowerLayer(n core.Node, env EnvConfig) (layout.RenderNode, error) {
 	children := n.ChildrenValue()
 	switch len(children) {
 	case 0:

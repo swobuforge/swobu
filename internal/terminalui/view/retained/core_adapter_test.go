@@ -21,8 +21,8 @@ func TestFromCoreRendersSemanticRows(t *testing.T) {
 			Label:       "ask question",
 			Value:       "",
 			ActionLabel: "open ↵",
-			Signal:      core.Signal{Kind: "cockpit.help.open", Data: struct{}{}},
-			Help:        []core.HelpBinding{{Key: "↵", Label: "open"}},
+			Signal:      core.SignalEvent{Kind: "cockpit.help.open", Data: struct{}{}},
+			Help:        []core.HelpBindingSpec{{Key: "↵", Label: "open"}},
 		})
 	}))
 

@@ -34,7 +34,7 @@ type SetCreateDraftBaseURL struct {
 	BaseURL string
 }
 
-type SetCreateDraftAuthHeader struct {
+type SetCreateDraftAuthHeaderAction struct {
 	AuthHeader string
 }
 

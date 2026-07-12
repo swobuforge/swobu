@@ -20,8 +20,8 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-// ProviderRuntimeComposition is the outbound provider composition and dispatch owner.
-type ProviderRuntimeComposition struct {
+// ProviderIngressResolverComposition is the outbound provider composition and dispatch owner.
+type ProviderIngressResolverComposition struct {
 	ollama           providersruntime.ProviderRuntimeBundle
 	openai           providersruntime.ProviderRuntimeBundle
 	openrouter       providersruntime.ProviderRuntimeBundle
@@ -32,29 +32,29 @@ type ProviderRuntimeComposition struct {
 	chatgpt          providersruntime.ProviderRuntimeBundle
 }
 
-// NewProviderRuntimeComposition composes concrete provider adapters once at the composition edge.
-func NewProviderRuntimeComposition(client *http.Client, credentials providersruntime.CredentialProvider) ProviderRuntimeComposition {
+// NewProviderIngressResolverComposition composes concrete provider adapters once at the composition edge.
+func NewProviderIngressResolverComposition(client *http.Client, credentials providersruntime.CredentialProvider, azureProjectEndpoint string) ProviderIngressResolverComposition {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	build := func(providerID profile.ProviderID) providersruntime.ProviderRuntimeBundle {
-		runtime := runtimeForProvider(client, credentials, providerID)
+		runtime := runtimeForProvider(client, credentials, providerID, "")
 		validateRuntimeAgainstProfile(profile.Profile{ProviderID: providerID}, runtime)
 		return runtime
 	}
-	return ProviderRuntimeComposition{
+	return ProviderIngressResolverComposition{
 		ollama:           build(profile.ProviderSpecOllama),
 		openai:           build(profile.ProviderSpecOpenAI),
 		openrouter:       build(profile.ProviderSpecOpenRouter),
 		openaiCompatible: build(profile.ProviderSpecOpenAICompatible),
 		anthropic:        build(profile.ProviderSpecAnthropic),
-		azure:            build(profile.ProviderSpecAzure),
+		azure:            runtimeForProvider(client, credentials, profile.ProviderSpecAzure, azureProjectEndpoint),
 		bedrock:          build(profile.ProviderSpecBedrock),
 		chatgpt:          build(profile.ProviderSpecChatGPT),
 	}
 }
 
-func runtimeForProvider(client *http.Client, credentials providersruntime.CredentialProvider, providerID profile.ProviderID) providersruntime.ProviderRuntimeBundle {
+func runtimeForProvider(client *http.Client, credentials providersruntime.CredentialProvider, providerID profile.ProviderID, azureProjectEndpoint string) providersruntime.ProviderRuntimeBundle {
 	switch providerID {
 	case profile.ProviderSpecOllama:
 		return ollamaprovider.NewRuntime(client, credentials)
@@ -67,7 +67,7 @@ func runtimeForProvider(client *http.Client, credentials providersruntime.Creden
 	case profile.ProviderSpecAnthropic:
 		return anthropicprovider.NewRuntime(providerID, client, credentials)
 	case profile.ProviderSpecAzure:
-		return azureprovider.NewRuntime(client, credentials)
+		return azureprovider.NewRuntime(client, credentials, azureProjectEndpoint)
 	case profile.ProviderSpecBedrock:
 		return bedrockprovider.NewRuntime(providerID, client, credentials)
 	case profile.ProviderSpecChatGPT:
@@ -93,7 +93,7 @@ func validateRuntimeAgainstProfile(providerProfile profile.Profile, runtime prov
 	}
 }
 
-func (r ProviderRuntimeComposition) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
+func (r ProviderIngressResolverComposition) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
 	runtime, err := r.runtimeForTargetProvider(req.Target.ProviderID())
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (r ProviderRuntimeComposition) ResolveProviderIngress(ctx context.Context, 
 	return runtime.IngressResolver.ResolveProviderIngress(ctx, req)
 }
 
-func (r ProviderRuntimeComposition) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (r ProviderIngressResolverComposition) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
 	runtime, err := r.runtimeForTargetProvider(target.ProviderID())
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (r ProviderRuntimeComposition) ListModels(ctx context.Context, target excha
 	return runtime.ModelCatalogClient.ListModels(ctx, target)
 }
 
-func (r ProviderRuntimeComposition) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
+func (r ProviderIngressResolverComposition) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	runtime, err := r.runtimeForTargetProvider(target.ProviderID())
 	if err != nil {
 		return err
@@ -117,7 +117,7 @@ func (r ProviderRuntimeComposition) ValidateCredentials(ctx context.Context, tar
 	return runtime.ModelCatalogClient.ValidateCredentials(ctx, target)
 }
 
-func (r ProviderRuntimeComposition) runtimeForTargetProvider(rawProviderID string) (providersruntime.ProviderRuntimeBundle, error) {
+func (r ProviderIngressResolverComposition) runtimeForTargetProvider(rawProviderID string) (providersruntime.ProviderRuntimeBundle, error) {
 	providerID, ok := profile.ParseProviderID(rawProviderID)
 	if !ok {
 		return providersruntime.ProviderRuntimeBundle{}, canonical.BadEndpoint("provider id is unsupported")

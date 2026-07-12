@@ -381,10 +381,11 @@ func applyDocumentMiddleware(ctx context.Context, registry transform.Registry, e
 }
 
 func observationRecordForExchange(routeID string, providerID string, modelID string, code string, reason string) observation.ObservationRecord {
+	normalizedModelID := strings.TrimSpace(modelID) // swobu:io-string source=boundary
 	return observation.ObservationRecord{
 		RouteID:    strings.TrimSpace(routeID), // swobu:io-string source=boundary
-		ProviderID: strings.TrimSpace(providerID),
-		ModelID:    strings.TrimSpace(modelID),
+		ProviderID: providerID,
+		ModelID:    normalizedModelID,
 		Code:       strings.TrimSpace(code),   // swobu:io-string source=boundary
 		Reason:     strings.TrimSpace(reason), // swobu:io-string source=boundary
 	}

@@ -18,8 +18,8 @@ const (
 	DimMinMax
 )
 
-// Dim is one dimension of semantic layout.
-type Dim struct {
+// DimSize is one dimension of semantic layout.
+type DimSize struct {
 	Mode   DimMode
 	Value  int
 	Min    int
@@ -28,28 +28,28 @@ type Dim struct {
 }
 
 // Fit resolves to content size.
-func Fit() Dim { return Dim{Mode: DimFit} }
+func Fit() DimSize { return DimSize{Mode: DimFit} }
 
 // Fixed resolves to one exact size.
-func Fixed(n int) Dim { return Dim{Mode: DimFixed, Value: n} }
+func Fixed(n int) DimSize { return DimSize{Mode: DimFixed, Value: n} }
 
 // Fill resolves to available space, weighted relative to siblings.
-func Fill(weight int) Dim {
+func Fill(weight int) DimSize {
 	if weight <= 0 {
 		weight = 1
 	}
-	return Dim{Mode: DimFill, Weight: weight}
+	return DimSize{Mode: DimFill, Weight: weight}
 }
 
 // MinMax resolves within a bounded range.
-func MinMax(min int, max Dim) Dim {
-	return Dim{Mode: DimMinMax, Min: min, Max: max.Value, Weight: max.Weight}
+func MinMax(min int, max DimSize) DimSize {
+	return DimSize{Mode: DimMinMax, Min: min, Max: max.Value, Weight: max.Weight}
 }
 
 // Size carries semantic width and height dimensions.
 type Size struct {
-	Width  Dim
-	Height Dim
+	Width  DimSize
+	Height DimSize
 }
 
 // FlowMode selects the structural flow behavior.
@@ -78,14 +78,14 @@ const (
 	AlignStretch
 )
 
-// Align describes layout alignment intent.
-type Align struct {
+// AlignPolicy describes layout alignment intent.
+type AlignPolicy struct {
 	Main  AlignMode
 	Cross AlignMode
 }
 
-// Inset describes semantic padding/inset edges.
-type Inset struct {
+// Insets describes semantic padding/inset edges.
+type Insets struct {
 	Top, Right, Bottom, Left int
 }
 
@@ -102,7 +102,7 @@ const (
 type Layout struct {
 	Size     Size
 	Flow     Flow
-	Align    Align
-	Inset    Inset
+	Align    AlignPolicy
+	Inset    Insets
 	Overflow Overflow
 }

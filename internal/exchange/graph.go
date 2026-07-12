@@ -27,7 +27,7 @@ type exchangeGraphInput struct {
 	Endpoint       endpointintent.Endpoint
 }
 
-type exchangePath struct {
+type exchangePathRecord struct {
 	Request          canonical.CanonicalRequest
 	Target           RoutableTarget
 	ProviderDelivery delivery.Delivery
@@ -45,12 +45,12 @@ func (g exchangeGraph) Execute(ctx context.Context, in exchangeGraphInput) (Tran
 	return orderedFallbackExecutor{Runner: g.Runner}.Execute(ctx, in, paths)
 }
 
-func (g exchangeGraph) buildPaths(ctx context.Context, exchangeID string, endpoint endpointintent.Endpoint, clientDelivery delivery.Delivery, request canonical.CanonicalRequest) ([]exchangePath, error) {
+func (g exchangeGraph) buildPaths(ctx context.Context, exchangeID string, endpoint endpointintent.Endpoint, clientDelivery delivery.Delivery, request canonical.CanonicalRequest) ([]exchangePathRecord, error) {
 	providerConfigs := orderedPathProviderConfigs(endpoint)
 	if len(providerConfigs) == 0 {
 		return nil, canonical.BadEndpoint("endpoint has no provider path")
 	}
-	paths := make([]exchangePath, 0, len(providerConfigs))
+	paths := make([]exchangePathRecord, 0, len(providerConfigs))
 	var lastErr error
 	for _, providerConfig := range providerConfigs {
 		path, err := g.buildPath(ctx, exchangeID, endpoint.Name(), providerConfig, clientDelivery, request)
@@ -82,14 +82,14 @@ type exchangePathState struct {
 	protocolKind     protocolkind.ProtocolKind
 }
 
-func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpointName endpointintent.EndpointName, providerConfig endpointintent.ProviderConfig, clientDelivery delivery.Delivery, request canonical.CanonicalRequest) (exchangePath, error) {
+func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpointName endpointintent.EndpointName, providerConfig endpointintent.ProviderConfig, clientDelivery delivery.Delivery, request canonical.CanonicalRequest) (exchangePathRecord, error) {
 	routeProfile, ok := profile.ResolveRouteProfile(
 		providerConfig.ProviderSpec().String(),
 		providerConfig.BaseURL(),
 		providerConfig.CredentialRef(),
 	)
 	if !ok {
-		return exchangePath{}, canonical.BadEndpoint("selected provider route is unsupported")
+		return exchangePathRecord{}, canonical.BadEndpoint("selected provider route is unsupported")
 	}
 	target := NewRoutableTarget(
 		providerConfig.Ref().String(),
@@ -104,7 +104,7 @@ func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpoin
 	target.AuthHeader = providerConfig.AuthHeader()
 	modelID, err := providerConfigModelID(providerConfig)
 	if err != nil {
-		return exchangePath{}, err
+		return exchangePathRecord{}, err
 	}
 	builder := NewBuilder(NewPort[exchangePathState](PortID("exchange.path")))
 	builder.Link(
@@ -170,7 +170,7 @@ func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpoin
 		return NewResult(state), nil
 	})
 	if err != nil {
-		return exchangePath{}, err
+		return exchangePathRecord{}, err
 	}
 	state, err := step(ctx, exchangePathState{
 		endpointName:   endpointName,
@@ -180,9 +180,9 @@ func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpoin
 		modelID:        modelID,
 	})
 	if err != nil {
-		return exchangePath{}, err
+		return exchangePathRecord{}, err
 	}
-	return exchangePath{
+	return exchangePathRecord{
 		Request:          state.Value.request,
 		Target:           state.Value.target,
 		ProviderDelivery: state.Value.providerDelivery,

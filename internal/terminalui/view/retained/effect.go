@@ -15,7 +15,7 @@ type effectState struct {
 	cleanup func()
 }
 
-type effectHook struct {
+type effectHookRecord struct {
 	state     *effectState
 	run       func() func()
 	shouldRun bool
@@ -63,16 +63,16 @@ func (e effectCleanupEffect) Execute(_ context.Context) []update.Action {
 // while attaching useEffect bookkeeping to the wrapped subtree.
 type effectHookRenderNode struct {
 	RenderNode
-	hooks []effectHook
+	hooks []effectHookRecord
 }
 
-func wrapEffectHooks(node RenderNode, hooks []effectHook) RenderNode {
+func wrapEffectHooks(node RenderNode, hooks []effectHookRecord) RenderNode {
 	if node == nil || len(hooks) == 0 {
 		return node
 	}
 	return effectHookRenderNode{
 		RenderNode: node,
-		hooks:      append([]effectHook(nil), hooks...),
+		hooks:      append([]effectHookRecord(nil), hooks...),
 	}
 }
 
@@ -89,7 +89,7 @@ func UseEffect[M any](ctx *Context[M], effect func() func(), deps ...any) {
 	state := loadEffectState(ctx, slot)
 	shouldRun := len(deps) == 0 || !depsEqual(state.deps, deps)
 	state.deps = cloneDeps(deps)
-	ctx.effectHooks = append(ctx.effectHooks, effectHook{
+	ctx.effectHooks = append(ctx.effectHooks, effectHookRecord{
 		state:     state,
 		run:       effect,
 		shouldRun: shouldRun,

@@ -83,10 +83,6 @@ func bedrockProfileSummary(profile string) string {
 	return profile
 }
 
-func bedrockDiscoveredAWSProfiles() []string {
-	return stateModel.BedrockDiscoveredAWSProfiles()
-}
-
 func isBedrockAWSProfileCredentialRef(ref string) bool {
 	trimmed := trimRoutingInput(ref)
 	if trimmed == "" {

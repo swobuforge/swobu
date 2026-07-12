@@ -108,15 +108,15 @@ func TestLowerInputHandlesEditingKeysWithoutMutatingValue(t *testing.T) {
 func lowerInputTree(t *testing.T, value string) *layout.LayoutNode {
 	t.Helper()
 
-	node := core.Input(value).Interaction(core.Interaction{
+	node := core.Input(value).Interaction(core.InteractionSpec{
 		Focus: core.FocusSpec{Mode: core.Focusable},
-		Signals: []core.Signal{
+		Signals: []core.SignalEvent{
 			{Kind: "input.change"},
 			{Kind: "input.commit"},
 			{Kind: "input.cancel", Data: "keep"},
 		},
 	})
-	renderNode, err := Lower(node, Env{})
+	renderNode, err := Lower(node, EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}

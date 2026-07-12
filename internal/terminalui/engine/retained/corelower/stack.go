@@ -5,7 +5,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerStack(n core.Node, env Env) (layout.RenderNode, error) {
+func lowerStack(n core.Node, env EnvConfig) (layout.RenderNode, error) {
 	axis := n.LayoutValue().Flow.Axis
 	if n.LayoutValue().Flow.Mode != core.FlowStack {
 		axis = core.AxisVertical

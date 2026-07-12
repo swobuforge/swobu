@@ -12,42 +12,6 @@ type markerEffect string
 
 func (e markerEffect) Kind() effect.Kind { return effect.KindObservation }
 
-func TestBuilder_BuildOrdersLinksByDependencyAndSkipsPredicateFailures(t *testing.T) {
-	port := NewPort[string](PortID("semantic.request"))
-	builder := NewBuilder(port)
-	builder.Link("normalize.a", func(_ context.Context, input string) (Result[string], error) {
-		return NewResult(input+"|a", markerEffect("a")), nil
-	})
-	builder.Link("normalize.b", func(_ context.Context, input string) (Result[string], error) {
-		return NewResult(input+"|b", markerEffect("b")), nil
-	}, After[string, string]("normalize.a"))
-	builder.Link("normalize.skip", func(context.Context, string) (Result[string], error) {
-		return NewResult("unexpected", markerEffect("skip")), nil
-	}, When[string, string](func(Context) bool { return false }))
-	builder.Link("normalize.c", func(_ context.Context, input string) (Result[string], error) {
-		return NewResult(input+"|c", markerEffect("c")), nil
-	}, Before[string, string]("normalize.b"))
-
-	base := func(_ context.Context, input string) (Result[string], error) {
-		return NewResult(input+"|base", markerEffect("base")), nil
-	}
-
-	step, err := builder.Build(Context{}, base)
-	if err != nil {
-		t.Fatalf("Build() error = %v", err)
-	}
-	got, err := step(context.Background(), "start")
-	if err != nil {
-		t.Fatalf("step() error = %v", err)
-	}
-	if got.Value != "start|a|c|b|base" {
-		t.Fatalf("value = %q, want %q", got.Value, "start|a|c|b|base")
-	}
-	if gotEffects := markerEffectIDs(got.Effects); strings.Join(gotEffects, ",") != "a,c,b,base" {
-		t.Fatalf("effects = %v, want %v", gotEffects, []string{"a", "c", "b", "base"})
-	}
-}
-
 func TestBuilder_BuildWrapsMiddlewareInRegistrationOrder(t *testing.T) {
 	port := NewPort[string](PortID("semantic.request"))
 	builder := NewBuilder(port)

@@ -182,9 +182,7 @@ func TestListModels_OpenAICompatibleUsesAzureProjectDeploymentsWhenConfigured(t 
 	}))
 	defer srv.Close()
 
-	t.Setenv("SWOBU_AZURE_OPENAI_PROJECT_ENDPOINT", srv.URL+"/api/projects/contact-5464")
-
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAICompatiblePolicy())
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAICompatiblePolicy(), srv.URL+"/api/projects/contact-5464")
 	target := exchange.NewRoutableTarget(
 		"draft",
 		"openai_compatible",

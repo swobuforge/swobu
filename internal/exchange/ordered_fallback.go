@@ -16,7 +16,7 @@ type orderedFallbackExecutor struct {
 	Runner Runner
 }
 
-func (e orderedFallbackExecutor) Execute(ctx context.Context, in exchangeGraphInput, paths []exchangePath) (TransportResponse, RoutableTarget, error) {
+func (e orderedFallbackExecutor) Execute(ctx context.Context, in exchangeGraphInput, paths []exchangePathRecord) (TransportResponse, RoutableTarget, error) {
 	for i, path := range paths {
 		contract := NewExecutionContract(in.ClientDelivery).WithProviderDelivery(path.ProviderDelivery)
 		response, runErr := e.Runner.Run(ctx, ExchangeInput{

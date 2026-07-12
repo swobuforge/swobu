@@ -150,7 +150,7 @@ func applyProviderAuthHeaderSelection(authHeader string, providerConfig *state.P
 	authHeader = strings.TrimSpace(authHeader) // swobu:io-string source=boundary
 	if createMode {
 		actions := []update.Action{
-			state.SetCreateDraftAuthHeader{AuthHeader: authHeader},
+			state.SetCreateDraftAuthHeaderAction{AuthHeader: authHeader},
 			state.SetCreateDraftModelIDAction{ModelID: ""},
 		}
 		if providerConfig == nil {

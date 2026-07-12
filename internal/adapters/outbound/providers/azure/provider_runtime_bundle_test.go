@@ -9,7 +9,7 @@ import (
 func TestNewRuntime_UsesAzureProviderIDAndSharedKernel(t *testing.T) {
 	t.Parallel()
 
-	bundle := NewRuntime(nil, nil)
+	bundle := NewRuntime(nil, nil, "")
 	if got := bundle.ProviderID; got != profile.ProviderSpecAzure {
 		t.Fatalf("provider id=%q want %q", got, profile.ProviderSpecAzure)
 	}

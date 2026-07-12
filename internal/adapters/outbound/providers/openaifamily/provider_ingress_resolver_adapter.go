@@ -19,31 +19,37 @@ import (
 )
 
 type ProviderIngressResolverAdapter struct {
-	client      *http.Client
-	credentials providersruntime.CredentialProvider
-	profile     ProviderRoutePolicy
+	client               *http.Client
+	credentials          providersruntime.CredentialProvider
+	profile              ProviderRoutePolicy
+	azureProjectEndpoint string
 }
 
 const swobuCallerUAHeaderValue = "swobu/dev"
 
 // NewExecutor builds the OpenAI-family provider wiring adapter around commodity HTTP transport.
-func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy) ProviderIngressResolverAdapter {
+func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy, azureProjectEndpoint ...string) ProviderIngressResolverAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	if profile == nil {
 		panic("openaifamily: route profile is required")
 	}
+	endpoint := ""
+	if len(azureProjectEndpoint) > 0 {
+		endpoint = azureProjectEndpoint[0]
+	}
 	return ProviderIngressResolverAdapter{
-		client:      client,
-		credentials: credentials,
-		profile:     profile,
+		client:               client,
+		credentials:          credentials,
+		profile:              profile,
+		azureProjectEndpoint: endpoint,
 	}
 }
 
 // NewRuntime builds a complete OpenAI-family provider runtime for one provider policy.
-func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy) providersruntime.ProviderRuntimeBundle {
-	executor := NewExecutor(client, credentials, profile)
+func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy, azureProjectEndpoint ...string) providersruntime.ProviderRuntimeBundle {
+	executor := NewExecutor(client, credentials, profile, azureProjectEndpoint...)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderID(),
 		IngressResolver:    executor,

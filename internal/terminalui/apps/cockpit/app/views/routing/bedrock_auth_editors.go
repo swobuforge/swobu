@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
@@ -25,7 +26,7 @@ func bedrockAuthProfileEditor(spec bedrockAuthProfileEditorSpec) retained.ViewSp
 		if !isBedrockAWSProfileCredentialRef(pc.CredentialRef) {
 			return nil
 		}
-		profiles := bedrockDiscoveredAWSProfiles()
+		profiles := stateModel.BedrockDiscoveredAWSProfiles()
 		profile := trimRoutingInput(bedrockProfileFromCredentialRef(pc.CredentialRef))
 		return bedrockProfilePickerRow(ctx, bedrockProfilePickerRowSpec{
 			Summary:   bedrockProfileSummary(profile),
@@ -42,13 +43,14 @@ func bedrockAuthProfileEditor(spec bedrockAuthProfileEditorSpec) retained.ViewSp
 					next := model.CreateDraftProviderConfig
 					next.CredentialRef = ref
 					baseURL := effectiveDraftBaseURL(next)
+					authHeader := strings.TrimSpace(next.AuthHeader) // swobu:io-string source=boundary
 					return []update.Action{
 						state.SetCreateDraftCredentialRef{CredentialRef: ref},
 						state.SetCreateDraftModelIDAction{ModelID: ""},
 						state.LoadRoutingModelCatalogRequestedAction{
 							Scope:            state.RoutingModelCatalogScopeCreateDraft,
 							ProviderSpec:     "bedrock",
-							AuthHeader:       strings.TrimSpace(next.AuthHeader),
+							AuthHeader:       authHeader,
 							ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
 							BaseURL:          baseURL,
 							CredentialRef:    ref,
@@ -145,7 +147,7 @@ func addModelBedrockAuthProfileEditor(ctx *retained.Context[state.Model], draft 
 	if !isBedrockAWSProfileCredentialRef(draft.CredentialRef) {
 		return nil
 	}
-	profiles := bedrockDiscoveredAWSProfiles()
+	profiles := stateModel.BedrockDiscoveredAWSProfiles()
 	profile := trimRoutingInput(bedrockProfileFromCredentialRef(draft.CredentialRef))
 	return bedrockProfilePickerRow(ctx, bedrockProfilePickerRowSpec{
 		Summary:   bedrockProfileSummary(profile),

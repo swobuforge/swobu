@@ -21,15 +21,15 @@ func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 		Label:       "ask question",
 		Value:       "",
 		ActionLabel: "open ↵",
-		Signal:      core.Signal{Kind: "cockpit.help.open", Data: struct{}{}},
-		Help:        []core.HelpBinding{{Key: "↵", Label: "open"}},
+		Signal:      core.SignalEvent{Kind: "cockpit.help.open", Data: struct{}{}},
+		Help:        []core.HelpBindingSpec{{Key: "↵", Label: "open"}},
 	})
 
 	if diags := core.Validate(node); len(diags) != 0 {
 		t.Fatalf("validate diagnostics = %#v, want none", diags)
 	}
 
-	lowered, err := corelower.Lower(node, corelower.Env{})
+	lowered, err := corelower.Lower(node, corelower.EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower setting row: %v", err)
 	}
@@ -69,9 +69,9 @@ func TestSettingRowEmitsFocusAndActivationSignals(t *testing.T) {
 		Label:       "delete workspace",
 		Value:       "",
 		ActionLabel: "delete ↵",
-		Signal:      core.Signal{Kind: "cockpit.row.delete", Data: struct{}{}},
-		FocusSignal: core.Signal{Kind: "cockpit.row.focus", Data: "delete"},
-		Help:        []core.HelpBinding{{Key: "↵", Label: "delete"}},
+		Signal:      core.SignalEvent{Kind: "cockpit.row.delete", Data: struct{}{}},
+		FocusSignal: core.SignalEvent{Kind: "cockpit.row.focus", Data: "delete"},
+		Help:        []core.HelpBindingSpec{{Key: "↵", Label: "delete"}},
 	})
 
 	interactionValue := node.InteractionValue()
@@ -82,7 +82,7 @@ func TestSettingRowEmitsFocusAndActivationSignals(t *testing.T) {
 		t.Fatalf("focus signal kind = %q, want cockpit.row.focus", got)
 	}
 
-	lowered, err := corelower.Lower(node, corelower.Env{})
+	lowered, err := corelower.Lower(node, corelower.EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower setting row: %v", err)
 	}

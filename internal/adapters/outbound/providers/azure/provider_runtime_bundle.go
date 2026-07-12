@@ -7,6 +7,6 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 )
 
-func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	return openaifamily.NewRuntime(client, credentials, openaifamily.NewAzurePolicy())
+func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, azureProjectEndpoint string) providersruntime.ProviderRuntimeBundle {
+	return openaifamily.NewRuntime(client, credentials, openaifamily.NewAzurePolicy(), azureProjectEndpoint)
 }

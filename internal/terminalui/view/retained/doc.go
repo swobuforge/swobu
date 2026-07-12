@@ -1,5 +1,5 @@
-// Package view defines retained interactive view composition primitives under
-// the shared terminalui/view namespace.
+// Package retained defines retained interactive view composition primitives
+// under the shared terminalui/view namespace.
 //
 // Keep import usage explicit:
 //   - internal/terminalui/component: author-facing semantic component API
@@ -8,11 +8,10 @@
 //     component constructors
 //   - internal/terminalui/transcript: canonical transcript view specs and
 //     render-mode semantics
-//   - internal/terminalui/view: TODO: deprecated compatibility shim during quarantine
 //   - internal/terminalui/view/retained: retained interactive composition API,
 //     local state and memo/effect hooks, and local event ownership hooks
 //
-// RenderNode is still a TODO: compatibility alias here; new app-facing code should
-// target component/core nodes and lowering adapters instead of rendergraph
-// internals. FromCore remains the retained bridge during migration.
+// RenderNode is the engine rendergraph alias used by retained adapters. New
+// app-facing code should target component/core nodes and lowering adapters
+// instead of rendergraph internals. FromCore remains the retained bridge.
 package retained

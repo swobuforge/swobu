@@ -21,37 +21,37 @@ func SettingActionRow(
 	action update.Action,
 	disabled bool,
 ) retained.ViewSpec[state.Model] {
-	verb = strings.TrimSpace(verb)
-	if verb == "" {
-		verb = "act"
+	normalizedVerb := strings.TrimSpace(verb) // swobu:io-string source=boundary
+	if normalizedVerb == "" {
+		normalizedVerb = "act"
 	}
-	focusSignal := core.Signal{}
+	focusSignal := core.SignalEvent{}
 	if !disabled {
-		focusSignal = core.Signal{
+		focusSignal = core.SignalEvent{
 			Kind: cockpitRowFocusSignalKind,
-			Data: state.SetFocusedRowAffordance{Verb: verb, AllowSpace: false},
+			Data: state.SetFocusedRowAffordance{Verb: normalizedVerb, AllowSpace: false},
 		}
 	}
-	activationSignal := core.Signal{}
+	activationSignal := core.SignalEvent{}
 	if action != nil {
-		activationSignal = core.Signal{
+		activationSignal = core.SignalEvent{
 			Kind: cockpitActionSignalKind,
 			Data: action,
 		}
 	}
-	return settingRow(key, label, value, verb+" ↵", activationSignal, focusSignal, disabled)
+	return settingRow(key, label, value, normalizedVerb+" ↵", activationSignal, focusSignal, disabled)
 }
 
 // SettingStaticRow returns one non-interactive semantic row for plain values.
 func SettingStaticRow(label, value string) retained.ViewSpec[state.Model] {
-	return settingRow(core.K(""), label, value, "", core.Signal{Kind: cockpitStaticRowSignalKind}, core.Signal{}, true)
+	return settingRow(core.K(""), label, value, "", core.SignalEvent{Kind: cockpitStaticRowSignalKind}, core.SignalEvent{}, true)
 }
 
 func settingRow(
 	key core.Key,
 	label, value, actionLabel string,
-	signal core.Signal,
-	focusSignal core.Signal,
+	signal core.SignalEvent,
+	focusSignal core.SignalEvent,
 	disabled bool,
 ) retained.ViewSpec[state.Model] {
 	return CoreNodeAsRetained[state.Model](compound.SettingRow(compound.SettingRowProps{
@@ -62,12 +62,12 @@ func settingRow(
 		Signal:      signal,
 		FocusSignal: focusSignal,
 		Disabled:    disabled,
-		Help: func() []core.HelpBinding {
-			verb := strings.TrimSpace(strings.TrimSuffix(actionLabel, " ↵"))
-			if verb == "" {
+		Help: func() []core.HelpBindingSpec {
+			actionVerb := strings.TrimSpace(strings.TrimSuffix(actionLabel, " ↵")) // swobu:io-string source=boundary
+			if actionVerb == "" {
 				return nil
 			}
-			return []core.HelpBinding{{Key: "↵", Label: verb}}
+			return []core.HelpBindingSpec{{Key: "↵", Label: actionVerb}}
 		}(),
 	}))
 }

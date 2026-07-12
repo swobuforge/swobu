@@ -19,8 +19,8 @@ func TestApplyProviderAuthHeaderSelection_CreateModeReloadsCatalog(t *testing.T)
 	if len(actions) != 3 {
 		t.Fatalf("actions len=%d want 3", len(actions))
 	}
-	if _, ok := actions[0].(state.SetCreateDraftAuthHeader); !ok {
-		t.Fatalf("actions[0]=%T want SetCreateDraftAuthHeader", actions[0])
+	if _, ok := actions[0].(state.SetCreateDraftAuthHeaderAction); !ok {
+		t.Fatalf("actions[0]=%T want SetCreateDraftAuthHeaderAction", actions[0])
 	}
 	if _, ok := actions[1].(state.SetCreateDraftModelIDAction); !ok {
 		t.Fatalf("actions[1]=%T want SetCreateDraftModelIDAction", actions[1])

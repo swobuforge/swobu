@@ -51,7 +51,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
 
 	openAIReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -91,7 +91,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
 
 	openAIModels, err := composition.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
@@ -114,7 +114,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderRuntimeComposition(http.DefaultClient, testCredentialResolver{})
+	composition := NewProviderIngressResolverComposition(http.DefaultClient, testCredentialResolver{}, "")
 	_, err := composition.ResolveProviderIngress(context.Background(), mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     "m",
@@ -141,7 +141,7 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
 	err := composition.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
@@ -163,7 +163,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},

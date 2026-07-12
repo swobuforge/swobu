@@ -51,51 +51,6 @@ func TestUseState_RetainsValuePerSlot(t *testing.T) {
 	}
 }
 
-func TestUseMemo_CachesByDependencyIdentity(t *testing.T) {
-	scope := mapScope{m: make(map[string]any)}
-	ctx := &Context[struct{}]{
-		Local:    scope,
-		Model:    func() struct{} { return struct{}{} },
-		building: true,
-	}
-	calls := 0
-
-	got := UseMemo(ctx, func() string {
-		calls++
-		return "first"
-	}, "dep")
-	if got != "first" {
-		t.Fatalf("first memo = %q, want first", got)
-	}
-	if calls != 1 {
-		t.Fatalf("compute calls = %d, want 1", calls)
-	}
-
-	ctx.hookSlot = 0
-	got = UseMemo(ctx, func() string {
-		calls++
-		return "second"
-	}, "dep")
-	if got != "first" {
-		t.Fatalf("cached memo = %q, want first", got)
-	}
-	if calls != 1 {
-		t.Fatalf("compute calls after cache hit = %d, want 1", calls)
-	}
-
-	ctx.hookSlot = 0
-	got = UseMemo(ctx, func() string {
-		calls++
-		return "third"
-	}, "next")
-	if got != "third" {
-		t.Fatalf("invalidated memo = %q, want third", got)
-	}
-	if calls != 2 {
-		t.Fatalf("compute calls after dep change = %d, want 2", calls)
-	}
-}
-
 func TestBuildRoot_PanicsOnDispatchDuringBuild(t *testing.T) {
 	defer func() {
 		if recover() == nil {

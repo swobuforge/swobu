@@ -5,6 +5,6 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerText(n core.Node, _ Env) (layout.RenderNode, error) {
+func lowerText(n core.Node, _ EnvConfig) (layout.RenderNode, error) {
 	return layout.NewText(n.ContentValue().Text), nil
 }

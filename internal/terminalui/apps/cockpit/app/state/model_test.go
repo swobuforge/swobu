@@ -112,7 +112,7 @@ func TestReduce_SetCreateDraftAuthHeader_DefaultsAndResetsModelSelection(t *test
 		CreateDraftModelError:        "stale",
 	}
 
-	Reduce(&model, SetCreateDraftAuthHeader{AuthHeader: ""})
+	Reduce(&model, SetCreateDraftAuthHeaderAction{AuthHeader: ""})
 
 	if got := model.CreateDraftProviderConfig.AuthHeader; got != "Authorization" {
 		t.Fatalf("auth header=%q want Authorization", got)

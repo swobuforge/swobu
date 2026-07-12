@@ -19,16 +19,16 @@ type SlotSpec struct {
 	Summary  string
 }
 
-// FocusGuarantee describes how focus should behave for the node.
-type FocusGuarantee struct {
+// FocusPolicy describes how focus should behave for the node.
+type FocusPolicy struct {
 	FocusableWhenEnabled bool
 	TrapsFocus           bool
 }
 
-// LayoutGuarantee describes the node's minimum layout promise.
-type LayoutGuarantee struct {
-	Height Dim
-	Width  Dim
+// LayoutPolicy describes the node's minimum layout promise.
+type LayoutPolicy struct {
+	Height DimSize
+	Width  DimSize
 }
 
 // Contract is the runtime-readable semantic contract for one node.
@@ -39,8 +39,8 @@ type Contract struct {
 	Signals  []SignalSpec
 	Requires []Capability
 	Slots    []SlotSpec
-	Layout   LayoutGuarantee
-	Focus    FocusGuarantee
-	Help     []HelpBinding
+	Layout   LayoutPolicy
+	Focus    FocusPolicy
+	Help     []HelpBindingSpec
 	States   []VisualState
 }

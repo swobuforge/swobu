@@ -15,13 +15,13 @@ const (
 	KindTable
 )
 
-// Content carries one node's semantic payload.
-type Content struct {
+// ContentPayload carries one node's semantic payload.
+type ContentPayload struct {
 	Text string
 }
 
-// Debug carries optional authoring metadata.
-type Debug struct {
+// DebugMetadata carries optional authoring metadata.
+type DebugMetadata struct {
 	Name string
 	File string
 }
@@ -33,19 +33,19 @@ type Node struct {
 	stateful     bool
 	layout       Layout
 	style        Style
-	interaction  Interaction
+	interaction  InteractionSpec
 	contract     Contract
-	content      Content
+	content      ContentPayload
 	children     []Node
 	scrollOffset int
-	debug        Debug
+	debug        DebugMetadata
 }
 
 // Text creates one semantic text node.
 func Text(value string) Node {
 	return Node{
 		kind:    KindText,
-		content: Content{Text: value},
+		content: ContentPayload{Text: value},
 		layout:  Layout{Size: Size{Width: Fit(), Height: Fit()}},
 		style:   Style{Token: TokenTextDefault},
 	}
@@ -87,29 +87,14 @@ func Layer(children ...Node) Node {
 	}
 }
 
-// Scroll creates one vertical scroll container.
-func Scroll(child Node, offset int) Node {
-	return Node{
-		kind:     KindScroll,
-		children: []Node{child},
-		layout: Layout{
-			Size:     Size{Width: Fill(1), Height: Fill(1)},
-			Overflow: OverflowScroll,
-		},
-		scrollOffset: offset,
-		style:        Style{Token: TokenSurfaceDefault},
-		debug:        Debug{Name: "scroll", File: ""},
-	}
-}
-
 // Input creates one focusable semantic text input.
 func Input(value string) Node {
 	return Node{
 		kind:    KindInput,
-		content: Content{Text: value},
+		content: ContentPayload{Text: value},
 		layout:  Layout{Size: Size{Width: Fill(1), Height: Fit()}},
 		style:   Style{Token: TokenTextDefault},
-		interaction: Interaction{
+		interaction: InteractionSpec{
 			Focus: FocusSpec{Mode: Focusable},
 		},
 	}
@@ -123,30 +108,30 @@ func (n Node) Stateful() Node {
 }
 
 // Action creates one focusable action node that emits one signal when activated.
-func Action(label string, signal Signal) Node {
+func Action(label string, signal SignalEvent) Node {
 	node := Text(label)
 	node.kind = KindAction
-	node.interaction = Interaction{
+	node.interaction = InteractionSpec{
 		Focus: FocusSpec{Mode: Focusable},
-		Keymap: []KeyBinding{{
+		Keymap: []KeyBindingSpec{{
 			Pattern: KeyEnter(),
 			Intent:  IntentActivate,
 		}},
-		Help: []HelpBinding{
+		Help: []HelpBindingSpec{
 			{Key: "enter", Label: "activate"},
 		},
-		Signals: []Signal{signal},
+		Signals: []SignalEvent{signal},
 	}
 	node.contract = Contract{
 		Name:    "Action",
 		Purpose: "Focusable semantic action.",
 		Signals: []SignalSpec{{Kind: signal.Kind}},
-		Layout: LayoutGuarantee{
+		Layout: LayoutPolicy{
 			Width:  Fill(1),
 			Height: Fit(),
 		},
-		Focus: FocusGuarantee{FocusableWhenEnabled: true},
-		Help: []HelpBinding{
+		Focus: FocusPolicy{FocusableWhenEnabled: true},
+		Help: []HelpBindingSpec{
 			{Key: "enter", Label: "activate"},
 		},
 	}
@@ -172,7 +157,7 @@ func (n Node) Style(style Style) Node {
 }
 
 // Interaction returns a copy of the node with the supplied interaction contract.
-func (n Node) Interaction(interaction Interaction) Node {
+func (n Node) Interaction(interaction InteractionSpec) Node {
 	n.interaction = cloneInteraction(interaction)
 	return n
 }
@@ -190,7 +175,7 @@ func (n Node) Children(children ...Node) Node {
 }
 
 // Debug returns a copy of the node with the supplied debug metadata.
-func (n Node) Debug(debug Debug) Node {
+func (n Node) Debug(debug DebugMetadata) Node {
 	n.debug = debug
 	return n
 }
@@ -208,19 +193,19 @@ func (n Node) LayoutValue() Layout { return n.layout }
 func (n Node) StyleValue() Style { return n.style }
 
 // InteractionValue returns the node interaction contract.
-func (n Node) InteractionValue() Interaction { return cloneInteraction(n.interaction) }
+func (n Node) InteractionValue() InteractionSpec { return cloneInteraction(n.interaction) }
 
 // ContractValue returns the node contract.
 func (n Node) ContractValue() Contract { return cloneContract(n.contract) }
 
 // ContentValue returns the node content.
-func (n Node) ContentValue() Content { return n.content }
+func (n Node) ContentValue() ContentPayload { return n.content }
 
 // ChildrenValue returns a copy of the node's children.
 func (n Node) ChildrenValue() []Node { return cloneNodes(n.children) }
 
 // DebugValue returns the node debug metadata.
-func (n Node) DebugValue() Debug { return n.debug }
+func (n Node) DebugValue() DebugMetadata { return n.debug }
 
 // ScrollOffsetValue returns the semantic scroll offset.
 func (n Node) ScrollOffsetValue() int { return n.scrollOffset }
@@ -229,11 +214,11 @@ func cloneNodes(children []Node) []Node {
 	return append([]Node(nil), children...)
 }
 
-func cloneInteraction(interaction Interaction) Interaction {
-	interaction.Keymap = append([]KeyBinding(nil), interaction.Keymap...)
-	interaction.Help = append([]HelpBinding(nil), interaction.Help...)
-	interaction.Signals = append([]Signal(nil), interaction.Signals...)
-	interaction.FocusSignals = append([]Signal(nil), interaction.FocusSignals...)
+func cloneInteraction(interaction InteractionSpec) InteractionSpec {
+	interaction.Keymap = append([]KeyBindingSpec(nil), interaction.Keymap...)
+	interaction.Help = append([]HelpBindingSpec(nil), interaction.Help...)
+	interaction.Signals = append([]SignalEvent(nil), interaction.Signals...)
+	interaction.FocusSignals = append([]SignalEvent(nil), interaction.FocusSignals...)
 	return interaction
 }
 
@@ -242,7 +227,7 @@ func cloneContract(contract Contract) Contract {
 	contract.Signals = append([]SignalSpec(nil), contract.Signals...)
 	contract.Requires = append([]Capability(nil), contract.Requires...)
 	contract.Slots = append([]SlotSpec(nil), contract.Slots...)
-	contract.Help = append([]HelpBinding(nil), contract.Help...)
+	contract.Help = append([]HelpBindingSpec(nil), contract.Help...)
 	contract.States = append([]VisualState(nil), contract.States...)
 	return contract
 }

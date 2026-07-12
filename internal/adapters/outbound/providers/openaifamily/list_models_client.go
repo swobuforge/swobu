@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
@@ -24,7 +23,7 @@ func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target e
 		return nil, canonical.BadEndpoint(providerCredentialRequiredMessage(target.ProviderID()))
 	}
 
-	if projectEndpoint := azureProjectEndpointForModelCatalog(target.BaseURL); projectEndpoint != "" {
+	if projectEndpoint := azureProjectEndpointForModelCatalog(target.BaseURL, e.azureProjectEndpoint); projectEndpoint != "" {
 		return e.listAzureProjectDeployments(ctx, target, projectEndpoint)
 	}
 
@@ -60,10 +59,10 @@ func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target e
 }
 
 type azureProjectDeploymentsListResponse struct {
-	Value []azureProjectDeployment `json:"value"`
+	Value []azureProjectDeploymentEntry `json:"value"`
 }
 
-type azureProjectDeployment struct {
+type azureProjectDeploymentEntry struct {
 	Name string `json:"name"`
 }
 
@@ -107,7 +106,7 @@ func (e ProviderIngressResolverAdapter) listAzureProjectDeployments(ctx context.
 	return models, nil
 }
 
-func azureProjectEndpointForModelCatalog(baseURL string) string {
+func azureProjectEndpointForModelCatalog(baseURL string, projectEndpoint string) string {
 	baseURL = strings.TrimSpace(baseURL) // swobu:io-string source=boundary
 	if baseURL == "" {
 		return ""
@@ -115,7 +114,7 @@ func azureProjectEndpointForModelCatalog(baseURL string) string {
 	if !strings.Contains(strings.ToLower(baseURL), ".openai.azure.com/openai/v1") && !strings.Contains(strings.ToLower(baseURL), ".services.ai.azure.com/openai/v1") {
 		return ""
 	}
-	projectEndpoint := strings.TrimSpace(os.Getenv("SWOBU_AZURE_OPENAI_PROJECT_ENDPOINT"))
+	projectEndpoint = strings.TrimSpace(projectEndpoint) // swobu:io-string source=boundary
 	if projectEndpoint == "" {
 		return ""
 	}

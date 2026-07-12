@@ -63,7 +63,7 @@ func TestStackStoresVerticalFlow(t *testing.T) {
 func TestActionSeedsFocusableInteractionAndContract(t *testing.T) {
 	t.Parallel()
 
-	node := Action("open", Signal{Kind: "opened"})
+	node := Action("open", SignalEvent{Kind: "opened"})
 	if got := node.Kind(); got != KindAction {
 		t.Fatalf("kind = %v, want KindAction", got)
 	}
@@ -78,41 +78,5 @@ func TestActionSeedsFocusableInteractionAndContract(t *testing.T) {
 	}
 	if got := len(node.ContractValue().Signals); got != 1 {
 		t.Fatalf("contract signals = %d, want 1", got)
-	}
-}
-
-func TestInputSeedsFocusableValueNode(t *testing.T) {
-	t.Parallel()
-
-	node := Input("ac")
-	if got := node.Kind(); got != KindInput {
-		t.Fatalf("kind = %v, want KindInput", got)
-	}
-	if got := node.ContentValue().Text; got != "ac" {
-		t.Fatalf("content = %q, want ac", got)
-	}
-	if got := node.LayoutValue().Size.Width.Mode; got != DimFill {
-		t.Fatalf("width mode = %v, want DimFill", got)
-	}
-	if got := node.LayoutValue().Size.Height.Mode; got != DimFit {
-		t.Fatalf("height mode = %v, want DimFit", got)
-	}
-	if got := node.InteractionValue().Focus.Mode; got != Focusable {
-		t.Fatalf("focus mode = %v, want Focusable", got)
-	}
-	if got := node.StyleValue().Token; got != TokenTextDefault {
-		t.Fatalf("token = %q, want text.default", got)
-	}
-}
-
-func TestScrollStoresOffset(t *testing.T) {
-	t.Parallel()
-
-	node := Scroll(Text("content"), 7)
-	if got := node.Kind(); got != KindScroll {
-		t.Fatalf("kind = %v, want KindScroll", got)
-	}
-	if got := node.ScrollOffsetValue(); got != 7 {
-		t.Fatalf("scroll offset = %d, want 7", got)
 	}
 }

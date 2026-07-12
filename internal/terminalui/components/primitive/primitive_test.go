@@ -12,39 +12,15 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-func TestTextMutedAndStacksExposeSemanticTokens(t *testing.T) {
-	t.Parallel()
-
-	text := Text("hello")
-	if got := text.ContentValue().Text; got != "hello" {
-		t.Fatalf("text content = %q, want hello", got)
-	}
-
-	muted := Muted("quiet")
-	if got := muted.StyleValue().Token; got != core.TokenTextMuted {
-		t.Fatalf("muted token = %q, want %q", got, core.TokenTextMuted)
-	}
-
-	vertical := VStack(Text("a"), Text("b"))
-	if got := vertical.LayoutValue().Flow.Axis; got != core.AxisVertical {
-		t.Fatalf("vstack axis = %v, want vertical", got)
-	}
-
-	horizontal := HStack(Text("a"), Text("b"))
-	if got := horizontal.LayoutValue().Flow.Axis; got != core.AxisHorizontal {
-		t.Fatalf("hstack axis = %v, want horizontal", got)
-	}
-}
-
 func TestActionEmitsSignalAndHonorsDisabledFocus(t *testing.T) {
 	t.Parallel()
 
 	node := Action(ActionProps{
 		Key:    core.K("help.ask"),
 		Label:  "ask question  open ↵",
-		Signal: core.Signal{Kind: "cockpit.help.open", Data: struct{}{}},
+		Signal: core.SignalEvent{Kind: "cockpit.help.open", Data: struct{}{}},
 	})
-	lowered, err := corelower.Lower(node, corelower.Env{})
+	lowered, err := corelower.Lower(node, corelower.EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower action: %v", err)
 	}
@@ -76,10 +52,10 @@ func TestActionEmitsSignalAndHonorsDisabledFocus(t *testing.T) {
 	disabled := Action(ActionProps{
 		Key:      core.K("help.disabled"),
 		Label:    "disabled",
-		Signal:   core.Signal{Kind: "cockpit.help.open"},
+		Signal:   core.SignalEvent{Kind: "cockpit.help.open"},
 		Disabled: true,
 	})
-	disabledLowered, err := corelower.Lower(disabled, corelower.Env{})
+	disabledLowered, err := corelower.Lower(disabled, corelower.EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower disabled action: %v", err)
 	}
@@ -96,47 +72,5 @@ func TestActionEmitsSignalAndHonorsDisabledFocus(t *testing.T) {
 	disabledLowered.Paint(buf, &layout.LayoutNode{BorderRect: rect}, &layout.PaintContext{})
 	if got := buf.String(); got != "disabled" {
 		t.Fatalf("disabled paint = %q, want disabled", got)
-	}
-}
-
-func TestInputSeedsSemanticSignalsAndContract(t *testing.T) {
-	t.Parallel()
-
-	node := Input(InputProps{
-		Key:        core.K("env-input"),
-		Label:      "env",
-		Value:      "ac",
-		EmptyValue: "workspace",
-		OnChange:   core.Signal{Kind: "cockpit.input.change"},
-		OnCommit:   core.Signal{Kind: "cockpit.input.commit"},
-		OnCancel:   core.Signal{Kind: "cockpit.input.cancel"},
-	})
-
-	if got := node.Kind(); got != core.KindInput {
-		t.Fatalf("kind = %v, want KindInput", got)
-	}
-	if got := node.KeyValue(); got != core.K("env-input") {
-		t.Fatalf("key = %q, want env-input", got)
-	}
-	if got := node.ContentValue().Text; got != "ac" {
-		t.Fatalf("content = %q, want ac", got)
-	}
-	if got := node.DebugValue().Name; got != "env" {
-		t.Fatalf("debug name = %q, want env", got)
-	}
-	if got := node.InteractionValue().Focus.Mode; got != core.Focusable {
-		t.Fatalf("focus mode = %v, want Focusable", got)
-	}
-	if got := len(node.InteractionValue().Signals); got != 3 {
-		t.Fatalf("signal count = %d, want 3", got)
-	}
-	if got := node.InteractionValue().Signals[0].Kind; got != "cockpit.input.change" {
-		t.Fatalf("change signal kind = %q, want cockpit.input.change", got)
-	}
-	if got := node.ContractValue().Name; got != "Input" {
-		t.Fatalf("contract name = %q, want Input", got)
-	}
-	if got := len(node.ContractValue().Signals); got != 3 {
-		t.Fatalf("contract signals = %d, want 3", got)
 	}
 }

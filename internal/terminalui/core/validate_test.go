@@ -55,7 +55,7 @@ func TestValidateRejectsInteractiveChildWithoutKeyInsideDynamicCollection(t *tes
 	root := Node{
 		kind: KindList,
 		children: []Node{
-			Action("open", Signal{Kind: "opened"}),
+			Action("open", SignalEvent{Kind: "opened"}),
 		},
 	}
 	diags := Validate(root)
@@ -88,7 +88,7 @@ func TestValidatePermitsKeyedInteractiveChildrenInsideDynamicCollection(t *testi
 	root := Node{
 		kind: KindList,
 		children: []Node{
-			Action("open", Signal{Kind: "opened"}).Key(K("open")),
+			Action("open", SignalEvent{Kind: "opened"}).Key(K("open")),
 		},
 	}
 	diags := Validate(root)

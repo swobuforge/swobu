@@ -8,9 +8,16 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-type ProviderRequest = exchange.ProviderRequest
-
-type ProviderIngress = exchange.ProviderIngress
+// ProviderRequest carries one resolved exchange path and its realized provider
+// wire into provider ingress.
+type ProviderRequest struct {
+	Request         canonical.CanonicalRequest
+	RequestDocument carrier.WireDocument
+	Contract        exchange.ExecutionContract
+	Target          exchange.RoutableTarget
+	ExchangeID      string
+	ClientFamily    canonical.ClientFamily
+}
 
 // NewProviderRequest packages one canonical request with its already-realized
 // provider wire document for provider ingress.
@@ -22,6 +29,8 @@ func NewProviderRequest(request canonical.CanonicalRequest, requestDocument carr
 		Target:          target.Clone(),
 	}
 }
+
+type ProviderIngress = any
 
 type ProviderIngressResolver interface {
 	ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error)

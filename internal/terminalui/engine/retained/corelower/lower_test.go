@@ -15,7 +15,7 @@ import (
 func TestLowerTextPaintsText(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Text("hello"), Env{})
+	renderNode, err := Lower(core.Text("hello"), EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestLowerTextPaintsText(t *testing.T) {
 func TestLowerStackLowersChildrenInOrder(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Stack(core.AxisVertical, core.Text("a"), core.Text("b")), Env{})
+	renderNode, err := Lower(core.Stack(core.AxisVertical, core.Text("a"), core.Text("b")), EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestLowerRejectsDuplicateSiblingKeys(t *testing.T) {
 	_, err := Lower(core.Box(
 		core.Text("a").Key(core.K("dup")),
 		core.Text("b").Key(core.K("dup")),
-	), Env{})
+	), EnvConfig{})
 	if err == nil {
 		t.Fatal("expected duplicate-key lowering failure")
 	}
@@ -57,7 +57,7 @@ func TestLowerRejectsDuplicateSiblingKeys(t *testing.T) {
 func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Action("open", core.Signal{Kind: "opened"}), Env{})
+	renderNode, err := Lower(core.Action("open", core.SignalEvent{Kind: "opened"}), EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -87,13 +87,13 @@ func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 	t.Parallel()
 
-	node := core.Action("delete", core.Signal{}).
+	node := core.Action("delete", core.SignalEvent{}).
 		Key(core.K("workspace/delete")).
-		Interaction(core.Interaction{
+		Interaction(core.InteractionSpec{
 			Focus:  core.FocusSpec{Mode: core.Focusable},
-			Keymap: []core.KeyBinding{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
-			Help:   []core.HelpBinding{{Key: "enter", Label: "delete"}},
-			FocusSignals: []core.Signal{{
+			Keymap: []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
+			Help:   []core.HelpBindingSpec{{Key: "enter", Label: "delete"}},
+			FocusSignals: []core.SignalEvent{{
 				Kind: "cockpit.row.focus",
 				Data: "delete",
 			}},
@@ -101,12 +101,12 @@ func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 		Contract(core.Contract{
 			Name:    "Action",
 			Purpose: "Focusable semantic action.",
-			Help:    []core.HelpBinding{{Key: "enter", Label: "delete"}},
-			Focus:   core.FocusGuarantee{FocusableWhenEnabled: true},
-			Layout:  core.LayoutGuarantee{Width: core.Fill(1), Height: core.Fit()},
+			Help:    []core.HelpBindingSpec{{Key: "enter", Label: "delete"}},
+			Focus:   core.FocusPolicy{FocusableWhenEnabled: true},
+			Layout:  core.LayoutPolicy{Width: core.Fill(1), Height: core.Fit()},
 		})
 
-	renderNode, err := Lower(node, Env{})
+	renderNode, err := Lower(node, EnvConfig{})
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}

@@ -5,7 +5,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerScroll(n core.Node, env Env) (layout.RenderNode, error) {
+func lowerScroll(n core.Node, env EnvConfig) (layout.RenderNode, error) {
 	children := n.ChildrenValue()
 	if len(children) == 0 {
 		return layout.NewText(""), nil

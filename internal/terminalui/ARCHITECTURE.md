@@ -15,8 +15,7 @@ Rules:
   interaction, and contract vocabulary without owning runtime or terminal I/O.
 - `corelower` is the bridge from semantic `core.Node` into retained
   rendergraph primitives.
-- `view` is the deprecated transcript compatibility shim; new code should use
-  `transcript` directly.
+- `transcript` is the canonical transcript API for line-oriented output.
 - `view/retained` owns the bridge functions that lower core views into the
   retained view contract.
 - Components describe UI.

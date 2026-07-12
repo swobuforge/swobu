@@ -12,7 +12,7 @@ func TestReduce_CoreSignalActionRecursesIntoInnerAction(t *testing.T) {
 
 	model := Model{}
 	effects := Reduce(&model, update.CoreSignalAction{
-		Signal: core.Signal{Kind: "cockpit.test", Data: SetCreateDraftName{Name: "jobs"}},
+		Signal: core.SignalEvent{Kind: "cockpit.test", Data: SetCreateDraftName{Name: "jobs"}},
 	})
 
 	if got := model.CreateDraftName; got != "jobs" {

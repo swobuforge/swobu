@@ -7,11 +7,11 @@ import "github.com/swobuforge/swobu/internal/terminalui/core"
 type ActionProps struct {
 	Key    core.Key
 	Label  string
-	Signal core.Signal
+	Signal core.SignalEvent
 	// FocusSignal is emitted when the action gains focus.
-	FocusSignal core.Signal
+	FocusSignal core.SignalEvent
 	Disabled    bool
-	Help        []core.HelpBinding
+	Help        []core.HelpBindingSpec
 }
 
 // Action returns one semantic action node with enter binding and optional
@@ -19,7 +19,7 @@ type ActionProps struct {
 func Action(p ActionProps) core.Node {
 	help := p.Help
 	if len(help) == 0 {
-		help = []core.HelpBinding{{Key: "enter", Label: "activate"}}
+		help = []core.HelpBindingSpec{{Key: "enter", Label: "activate"}}
 	}
 
 	state := core.StateDefault
@@ -31,7 +31,7 @@ func Action(p ActionProps) core.Node {
 		focusMode = core.FocusNone
 	}
 
-	signals := make([]core.Signal, 0, 2)
+	signals := make([]core.SignalEvent, 0, 2)
 	contractSignals := make([]core.SignalSpec, 0, 2)
 	if p.Signal.Kind != "" {
 		signals = append(signals, p.Signal)
@@ -41,16 +41,16 @@ func Action(p ActionProps) core.Node {
 	return core.Action(p.Label, p.Signal).
 		Key(p.Key).
 		Style(core.Style{Token: token, State: state}).
-		Interaction(core.Interaction{
+		Interaction(core.InteractionSpec{
 			Focus:   core.FocusSpec{Mode: focusMode},
-			Keymap:  []core.KeyBinding{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
+			Keymap:  []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
 			Help:    help,
 			Signals: signals,
-			FocusSignals: func() []core.Signal {
+			FocusSignals: func() []core.SignalEvent {
 				if p.FocusSignal.Kind == "" {
 					return nil
 				}
-				return []core.Signal{p.FocusSignal}
+				return []core.SignalEvent{p.FocusSignal}
 			}(),
 		}).
 		Contract(core.Contract{
@@ -58,10 +58,10 @@ func Action(p ActionProps) core.Node {
 			Purpose: "Focusable semantic action.",
 			Signals: contractSignals,
 			Help:    help,
-			Focus: core.FocusGuarantee{
+			Focus: core.FocusPolicy{
 				FocusableWhenEnabled: !p.Disabled,
 			},
-			Layout: core.LayoutGuarantee{
+			Layout: core.LayoutPolicy{
 				Width:  core.Fill(1),
 				Height: core.Fit(),
 			},

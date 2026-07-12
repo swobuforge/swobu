@@ -15,19 +15,19 @@ import (
 type inputRenderNode struct {
 	layout.Sized
 	value     string
-	onChange  core.Signal
-	onCommit  core.Signal
-	onCancel  core.Signal
+	onChange  core.SignalEvent
+	onCommit  core.SignalEvent
+	onCancel  core.SignalEvent
 	focusable bool
 }
 
-func lowerInput(n core.Node, _ Env) (layout.RenderNode, error) {
+func lowerInput(n core.Node, _ EnvConfig) (layout.RenderNode, error) {
 	signals := n.InteractionValue().Signals
 	if len(signals) < 3 {
 		// Keep the bridge permissive during migration: bare core.Input nodes can
 		// still lower, but they only become interactive once the semantic wrapper
 		// supplies change/commit/cancel signal slots.
-		signals = append(signals, make([]core.Signal, 3-len(signals))...)
+		signals = append(signals, make([]core.SignalEvent, 3-len(signals))...)
 	}
 	return &inputRenderNode{
 		Sized:     layout.Sized{Sizing: layout.Sizing{W: layout.SizeGrow, H: layout.SizeFit}},
@@ -136,7 +136,7 @@ func (i *inputRenderNode) renderLine(focused bool) string {
 	return marker + value
 }
 
-func withData(signal core.Signal, data any) core.Signal {
+func withData(signal core.SignalEvent, data any) core.SignalEvent {
 	next := signal
 	next.Data = data
 	return next

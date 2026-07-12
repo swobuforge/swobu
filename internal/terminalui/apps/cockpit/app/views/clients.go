@@ -278,7 +278,7 @@ func buildActionRows(model state.Model, actions []clientprofile.Action, baseURL 
 }
 
 func actionRowFocusKey(action clientprofile.Action, seen map[string]int) string {
-	base := strings.TrimSpace(action.ID)
+	base := strings.TrimSpace(action.ID) // swobu:io-string source=boundary
 	if base == "" {
 		base = action.RowLabel()
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
 
 func bedrockDefaultProfileFromEnvOrList(profiles []string) string {
@@ -96,10 +97,10 @@ func TestBedrockDiscoveredAWSProfiles_DedupesAndKeepsOrder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(awsDir, "credentials"), []byte(credentialsRaw), 0o600); err != nil {
 		t.Fatalf("write credentials: %v", err)
 	}
-	got := bedrockDiscoveredAWSProfiles()
+	got := stateModel.BedrockDiscoveredAWSProfiles()
 	want := []string{"default", "prod", "dev", "qa"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("bedrockDiscoveredAWSProfiles=%v want %v", got, want)
+		t.Fatalf("stateModel.BedrockDiscoveredAWSProfiles=%v want %v", got, want)
 	}
 }
 
@@ -131,10 +132,10 @@ func TestBedrockDiscoveredAWSProfiles_UsesActiveAWSFiles(t *testing.T) {
 	t.Setenv("AWS_CONFIG_FILE", activeConfig)
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", activeCreds)
 
-	got := bedrockDiscoveredAWSProfiles()
+	got := stateModel.BedrockDiscoveredAWSProfiles()
 	want := []string{"swobu-bedrock"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("bedrockDiscoveredAWSProfiles=%v want %v", got, want)
+		t.Fatalf("stateModel.BedrockDiscoveredAWSProfiles=%v want %v", got, want)
 	}
 }
 
@@ -145,9 +146,9 @@ func TestBedrockDiscoveredAWSProfiles_NoAWSDir_ReturnsEmpty(t *testing.T) {
 	t.Setenv("AWS_CONFIG_FILE", "")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 
-	got := bedrockDiscoveredAWSProfiles()
+	got := stateModel.BedrockDiscoveredAWSProfiles()
 	if len(got) != 0 {
-		t.Fatalf("bedrockDiscoveredAWSProfiles=%v want empty", got)
+		t.Fatalf("stateModel.BedrockDiscoveredAWSProfiles=%v want empty", got)
 	}
 }
 
@@ -168,9 +169,9 @@ func TestBedrockDiscoveredAWSProfiles_EmptyAndInvalidFiles_ReturnsEmpty(t *testi
 		t.Fatalf("write credentials: %v", err)
 	}
 
-	got := bedrockDiscoveredAWSProfiles()
+	got := stateModel.BedrockDiscoveredAWSProfiles()
 	if len(got) != 0 {
-		t.Fatalf("bedrockDiscoveredAWSProfiles=%v want empty", got)
+		t.Fatalf("stateModel.BedrockDiscoveredAWSProfiles=%v want empty", got)
 	}
 }
 

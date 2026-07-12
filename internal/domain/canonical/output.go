@@ -35,9 +35,9 @@ type CanonicalOutput interface {
 	CloneOutput() CanonicalOutput
 }
 
-// CanonicalOutputData is the fully materialized canonical success value in the canonical core.
+// CanonicalOutputProjection is the fully materialized canonical success value in the canonical core.
 // Streaming is modeled as ordered assembly of this object rather than as a separate semantic path.
-type CanonicalOutputData struct {
+type CanonicalOutputProjection struct {
 	semanticKind SemanticKind
 	resultID     string
 	model        string
@@ -46,8 +46,8 @@ type CanonicalOutputData struct {
 	usage        TokenUsage
 }
 
-func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
-	return CanonicalOutputData{
+func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
+	return CanonicalOutputProjection{
 		semanticKind: semanticKind,
 		resultID:     resultID,
 		model:        model,
@@ -57,51 +57,51 @@ func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string
 	}
 }
 
-func NewConversationOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputData {
+func NewConversationOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputProjection {
 	return NewConversationOutputWithUsage(resultID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewConversationOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
+func NewConversationOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
 	return NewOutputWithUsage(SemanticKindConversation, resultID, model, items, finishReason, usage)
 }
 
-func NewPromptOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputData {
+func NewPromptOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputProjection {
 	return NewPromptOutputWithUsage(resultID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewPromptOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputData {
+func NewPromptOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
 	return NewOutputWithUsage(SemanticKindPrompt, resultID, model, items, finishReason, usage)
 }
 
-func (o CanonicalOutputData) SemanticKind() SemanticKind {
+func (o CanonicalOutputProjection) SemanticKind() SemanticKind {
 	return o.semanticKind
 }
 
-func (o CanonicalOutputData) ResultID() string {
+func (o CanonicalOutputProjection) ResultID() string {
 	return o.resultID
 }
 
-func (o CanonicalOutputData) Model() string {
+func (o CanonicalOutputProjection) Model() string {
 	return o.model
 }
 
-func (o CanonicalOutputData) FinishReason() string {
+func (o CanonicalOutputProjection) FinishReason() string {
 	return o.finishReason
 }
 
-func (o CanonicalOutputData) Items() []CanonicalItem {
+func (o CanonicalOutputProjection) Items() []CanonicalItem {
 	return cloneCanonicalItems(o.items)
 }
 
-func (o CanonicalOutputData) Usage() TokenUsage {
+func (o CanonicalOutputProjection) Usage() TokenUsage {
 	return o.usage
 }
 
-func (o CanonicalOutputData) CloneOutput() CanonicalOutput {
+func (o CanonicalOutputProjection) CloneOutput() CanonicalOutput {
 	return NewOutputWithUsage(o.semanticKind, o.resultID, o.model, o.items, o.finishReason, o.usage)
 }
 
-func (o CanonicalOutputData) Text() string {
+func (o CanonicalOutputProjection) Text() string {
 	out := ""
 	for _, item := range o.items {
 		if item.Kind != ItemKindText {

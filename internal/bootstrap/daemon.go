@@ -105,14 +105,15 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		composition := providersadapter.NewProviderRuntimeComposition(
+		composition := providersadapter.NewProviderIngressResolverComposition(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
+			config.ReadEnvTrim(config.EnvAzureOpenAIProjectEndpoint),
 		)
 		providers = composition
 		modelCatalog = composition
 	}
-	runtimeRoot := newDaemonRuntimeComposition(exchangeruntime.NewResolver(), providers, modelCatalog)
+	runtimeRoot := newDaemonProviderModelCatalogComposition(exchangeruntime.NewResolver(), providers, modelCatalog)
 	evidence := in.Evidence
 	if evidence == nil {
 		daemon.evidence = evidencestore.NewStore(evidencestore.StoreConfig{})
