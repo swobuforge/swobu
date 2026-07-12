@@ -1,4 +1,4 @@
-// Package view is a deprecated compatibility shim for the transcript package.
+// Package view is a TODO: deprecated compatibility shim for the transcript package.
 //
 // New transcript-shaped root-view code lives in internal/terminalui/transcript.
 // This package remains only to keep the quarantine migration safe while direct

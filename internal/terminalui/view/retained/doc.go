@@ -8,11 +8,11 @@
 //     component constructors
 //   - internal/terminalui/transcript: canonical transcript view specs and
 //     render-mode semantics
-//   - internal/terminalui/view: deprecated compatibility shim during quarantine
+//   - internal/terminalui/view: TODO: deprecated compatibility shim during quarantine
 //   - internal/terminalui/view/retained: retained interactive composition API,
 //     local state and memo/effect hooks, and local event ownership hooks
 //
-// RenderNode is still a compatibility alias here; new app-facing code should
+// RenderNode is still a TODO: compatibility alias here; new app-facing code should
 // target component/core nodes and lowering adapters instead of rendergraph
 // internals. FromCore remains the retained bridge during migration.
 package retained
