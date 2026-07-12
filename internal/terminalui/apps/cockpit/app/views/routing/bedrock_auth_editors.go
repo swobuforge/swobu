@@ -48,6 +48,7 @@ func bedrockAuthProfileEditor(spec bedrockAuthProfileEditorSpec) retained.ViewSp
 						state.LoadRoutingModelCatalogRequestedAction{
 							Scope:            state.RoutingModelCatalogScopeCreateDraft,
 							ProviderSpec:     "bedrock",
+							AuthHeader:       strings.TrimSpace(next.AuthHeader),
 							ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
 							BaseURL:          baseURL,
 							CredentialRef:    ref,
@@ -118,6 +119,7 @@ func bedrockAuthRegionEditor(spec bedrockAuthRegionEditorSpec) retained.ViewSpec
 						state.LoadRoutingModelCatalogRequestedAction{
 							Scope:            state.RoutingModelCatalogScopeCreateDraft,
 							ProviderSpec:     "bedrock",
+							AuthHeader:       trimRoutingInput(model.CreateDraftProviderConfig.AuthHeader),
 							ProviderProtocol: trimRoutingInput(pc.ProviderProtocol),
 							BaseURL:          baseURL,
 							CredentialRef:    credentialRef,
@@ -157,12 +159,13 @@ func addModelBedrockAuthProfileEditor(ctx *retained.Context[state.Model], draft 
 			next.ModelID = ""
 			panel.setDraft(next)
 			return []update.Action{
-				state.LoadRoutingModelCatalogRequestedAction{
-					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
-					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
-					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
-					BaseURL:          trimRoutingInput(next.BaseURL),
-					CredentialRef:    trimRoutingInput(next.CredentialRef),
+					state.LoadRoutingModelCatalogRequestedAction{
+						Scope:            state.RoutingModelCatalogScopeAddModelDraft,
+						ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+						AuthHeader:       trimRoutingInput(next.AuthHeader),
+						ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
+						BaseURL:          trimRoutingInput(next.BaseURL),
+						CredentialRef:    trimRoutingInput(next.CredentialRef),
 				},
 				state.SetInteractionMode{Mode: state.InteractionModeManageList},
 				interaction.FocusKeyAction{Key: "add-model/profile"},
@@ -200,6 +203,7 @@ func addModelBedrockAuthRegionEditor(ctx *retained.Context[state.Model], draft s
 				state.LoadRoutingModelCatalogRequestedAction{
 					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
 					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+					AuthHeader:       trimRoutingInput(next.AuthHeader),
 					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
 					BaseURL:          trimRoutingInput(next.BaseURL),
 					CredentialRef:    trimRoutingInput(next.CredentialRef),
@@ -234,6 +238,7 @@ func addModelBedrockAuthEnvEditor(ctx *retained.Context[state.Model], draft stat
 				state.LoadRoutingModelCatalogRequestedAction{
 					Scope:            state.RoutingModelCatalogScopeAddModelDraft,
 					ProviderSpec:     trimRoutingInput(next.ProviderSpec),
+					AuthHeader:       trimRoutingInput(next.AuthHeader),
 					ProviderProtocol: trimRoutingInput(next.ProviderProtocol),
 					BaseURL:          trimRoutingInput(next.BaseURL),
 					CredentialRef:    trimRoutingInput(next.CredentialRef),

@@ -195,6 +195,13 @@ func (f focusLeaf) HitTest(local geom.Point, _ *layout.LayoutNode) bool {
 
 func (f focusLeaf) CanFocus(*layout.LayoutNode) bool { return true }
 
+type effectFocusRoot struct{}
+
+func (effectFocusRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
+	retained.UseEffect(ctx, func() func() { return nil })
+	return focusLeaf{id: "effect"}
+}
+
 type scrollFocusRoot struct {
 	rows int
 }
@@ -451,6 +458,16 @@ func TestDispatchEvent_ClickFocusesTargetAndTabNeedsRenderNodeHandler(t *testing
 	rt.DispatchEvent(interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyShiftTab})
 	if rt.Focused == nil || rt.Focused.ID != rt.Tree.Kids[1].ID {
 		t.Fatalf("focused after shift+tab = %#v, want unchanged focused node without tab handler", rt.Focused)
+	}
+}
+
+func TestDispatchEvent_UseEffectWrappedFocusableLeafStillReceivesHitTest(t *testing.T) {
+	rt := New(struct{}{}, func(*struct{}, update.Action) []update.Effect { return nil })
+	rt.Rebuild(asView(effectFocusRoot{}), geom.Rect{W: 4, H: 4})
+
+	rt.DispatchEvent(interaction.Event{Kind: interaction.EventMouseDown, Pos: geom.Point{X: 0, Y: 0}})
+	if rt.Focused == nil || rt.Focused.ID != rt.Tree.ID {
+		t.Fatalf("focused after click = %#v, want effect-wrapped root", rt.Focused)
 	}
 }
 

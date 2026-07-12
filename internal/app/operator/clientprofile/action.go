@@ -4,23 +4,11 @@ import "strings"
 
 // Action is one operator-visible row for a selected client profile.
 type Action struct {
-	ID        string
-	Label     string
-	Summary   string
-	Verb      string
-	FocusVerb string
-	Content   string
-}
-
-func (a Action) IsConfigured() bool {
-	return a.RowLabel() != "" && a.ActionVerb() != ""
-}
-
-func (a Action) EffectiveFocusVerb() string {
-	if strings.TrimSpace(a.FocusVerb) != "" { // swobu:io-string source=boundary
-		return strings.TrimSpace(a.FocusVerb) // swobu:io-string source=boundary
-	}
-	return a.ActionVerb()
+	ID      string
+	Label   string
+	Summary string
+	Verb    string
+	Content string
 }
 
 func (a Action) HasPayload() bool {
@@ -29,10 +17,6 @@ func (a Action) HasPayload() bool {
 
 func (a Action) IsRunAction() bool {
 	return a.ActionVerb() == "run"
-}
-
-func (a Action) IsCopyAction() bool {
-	return a.ActionVerb() == "copy"
 }
 
 func (a Action) RowLabel() string {

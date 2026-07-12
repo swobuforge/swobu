@@ -1,0 +1,1 @@
+{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/acme/v1","api":"openai-responses","apiKey":"swobu-placeholder","authHeader":true,"compat":{"supportsDeveloperRole":false},"models":[{"id":"gpt-4.1-mini"}]}}}

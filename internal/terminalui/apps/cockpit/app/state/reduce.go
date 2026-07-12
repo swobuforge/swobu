@@ -12,6 +12,12 @@ import (
 
 // Reduce owns the first design-conforming cockpit's durable app-state updates.
 func Reduce(model *Model, action update.Action) []update.Effect {
+	if coreAction, ok := action.(update.CoreSignalAction); ok {
+		if next, ok := coreAction.Signal.Data.(update.Action); ok {
+			return Reduce(model, next)
+		}
+		return nil
+	}
 	if model.ControlPlane != nil && !allowWhileControlPlaneIncompatible(action) {
 		return nil
 	}
@@ -84,6 +90,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""
+		model.CreateDraftModelAuthHeader = ""
 		model.CreateDraftModelBaseURL = ""
 		model.CreateDraftModelCredentialRef = ""
 		model.CreateDraftModelTestProtocol = ""
@@ -102,6 +109,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""
+		model.CreateDraftModelAuthHeader = ""
 		model.CreateDraftModelBaseURL = ""
 		model.CreateDraftModelCredentialRef = ""
 		model.CreateDraftModelTestProtocol = ""
@@ -118,6 +126,26 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""
+		model.CreateDraftModelAuthHeader = ""
+		model.CreateDraftModelBaseURL = ""
+		model.CreateDraftModelCredentialRef = ""
+		model.CreateDraftModelTestProtocol = ""
+		model.CreateDraftModelTestPassed = false
+		refreshFirstRunFooterAffordance(model)
+		return true
+	case SetCreateDraftAuthHeader:
+		authHeader := strings.TrimSpace(value.AuthHeader)                                                                                // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "openai_compatible") && authHeader == "" { // swobu:io-string source=boundary
+			authHeader = stateModel.ProviderDefaultAuthHeader(model.CreateDraftProviderConfig.ProviderSpec)
+		}
+		model.CreateDraftProviderConfig.AuthHeader = authHeader
+		model.CreateDraftProviderConfig.ModelID = ""
+		model.WorkspaceSaveError = ""
+		model.CreateDraftModelIDs = nil
+		model.CreateDraftModelError = ""
+		model.CreateDraftModelProbePending = false
+		model.CreateDraftModelProviderSpec = ""
+		model.CreateDraftModelAuthHeader = ""
 		model.CreateDraftModelBaseURL = ""
 		model.CreateDraftModelCredentialRef = ""
 		model.CreateDraftModelTestProtocol = ""
@@ -126,6 +154,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		return true
 	case SetCreateDraftProviderProtocol:
 		model.CreateDraftProviderConfig.ProviderProtocol = strings.TrimSpace(value.ProviderProtocol) // swobu:io-string source=boundary
+		model.WorkspaceSaveError = ""
 		model.CreateDraftModelTestProtocol = ""
 		model.CreateDraftModelTestPassed = false
 		refreshFirstRunFooterAffordance(model)

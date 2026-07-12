@@ -21,6 +21,7 @@ func TestReduce_ClientLaunchRequested_EndToEndLaunchFlow(t *testing.T) {
 		{name: "aider", preset: "aider", binaryName: "aider", expectedNote: "aider exited with code 0"},
 		{name: "continue", preset: "continue", binaryName: "cn", expectedNote: "cn exited with code 0"},
 		{name: "opencode", preset: "opencode", binaryName: "opencode", expectedNote: "opencode exited with code 0"},
+		{name: "pi", preset: "pi", binaryName: "pi", expectedNote: "pi exited with code 0"},
 	}
 
 	for _, tc := range tests {

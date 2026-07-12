@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 )
@@ -18,6 +19,19 @@ type testCredentialResolver struct{}
 
 func (testCredentialResolver) ResolveCredential(context.Context, string, string) (string, error) {
 	return "token_test", nil
+}
+
+func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target exchange.RoutableTarget) ports.ProviderRequest {
+	t.Helper()
+	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(target.ProtocolKind)
+	if codec == nil {
+		t.Fatalf("provider request encoder missing for protocol %s", target.ProtocolKind)
+	}
+	wireRequest, err := codec.EncodeProviderRequestDocument(request, contract.ProviderDelivery)
+	if err != nil {
+		t.Fatalf("encode provider request document: %v", err)
+	}
+	return ports.NewProviderRequest(request, wireRequest, contract, target)
 }
 
 func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
@@ -37,29 +51,29 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
 
-	openAIReq := ports.NewProviderRequest(
+	openAIReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
-		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	)
-	if _, err := registry.ResolveProviderIngress(context.Background(), openAIReq); err != nil {
+	if _, err := composition.ResolveProviderIngress(context.Background(), openAIReq); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
 
-	anthropicReq := ports.NewProviderRequest(
+	anthropicReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
-		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)
-	if _, err := registry.ResolveProviderIngress(context.Background(), anthropicReq); err != nil {
+	if _, err := composition.ResolveProviderIngress(context.Background(), anthropicReq); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 }
@@ -77,9 +91,9 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
 
-	openAIModels, err := registry.ListModels(context.Background(), exchange.NewRoutableTarget(
+	openAIModels, err := composition.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -89,7 +103,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai model catalog len=%d want 2", len(openAIModels))
 	}
 
-	_, err = registry.ListModels(context.Background(), exchange.NewRoutableTarget(
+	_, err = composition.ListModels(context.Background(), exchange.NewRoutableTarget(
 		"backend-b", "chatgpt", upstream.URL+"/v1", "keychain:chatgpt/default", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
@@ -100,13 +114,13 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	t.Parallel()
 
-	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{})
-	_, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
+	composition := NewProviderRuntimeComposition(http.DefaultClient, testCredentialResolver{})
+	_, err := composition.ResolveProviderIngress(context.Background(), mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     "m",
 			InputText: "hi",
 		}),
-		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
@@ -127,8 +141,8 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	err := registry.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
+	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
+	err := composition.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -149,7 +163,7 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 	}))
 	defer upstream.Close()
 
-	registry := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
+	composition := NewProviderRuntimeComposition(upstream.Client(), testCredentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
@@ -159,9 +173,9 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 		}),
 	})
 
-	openAIResp, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
+	openAIResp, err := composition.ResolveProviderIngress(context.Background(), mustProviderRequestWithDocument(t,
 		request,
-		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {
@@ -171,9 +185,9 @@ func TestServices_OpenAIFamilyCacheRetentionDegradation_IsProviderDeterministic(
 		t.Fatalf("openai ingress invalid: %v", err)
 	}
 
-	ollamaResp, err := registry.ResolveProviderIngress(context.Background(), ports.NewProviderRequest(
+	ollamaResp, err := composition.ResolveProviderIngress(context.Background(), mustProviderRequestWithDocument(t,
 		request,
-		ports.NewExecutionContract(protocolsurface.BufferedDelivery()),
+		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "chat_completions"),
 	))
 	if err != nil {

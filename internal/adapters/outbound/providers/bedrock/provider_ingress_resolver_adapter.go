@@ -1,37 +1,28 @@
 package bedrock
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
-	"slices"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
+	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-const (
-	bedrockSigningService    = "bedrock"
-	swobuCallerUAHeaderValue = "swobu/dev"
-)
+const swobuCallerUAHeaderValue = "swobu/dev"
 
 type ProviderIngressResolverAdapter struct {
 	client *http.Client
-}
-
-var bedrockControlPlaneBaseURL = func(region string) string {
-	return fmt.Sprintf("https://bedrock.%s.amazonaws.com", trimBedrockInput(region)) // swobu:io-string source=boundary
 }
 
 func NewExecutor(client *http.Client) ProviderIngressResolverAdapter {
@@ -52,53 +43,103 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 }
 
 func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
-	if trimBedrockInput(req.Request.Model()) == "" {
+	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadRequest("canonical request is required")
 	}
-	if trimBedrockInput(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
+	if strings.TrimSpace(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
 	}
-	if err := validateBedrockRuntimeEndpoint(req.Target.BaseURL); err != nil {
+	if err := validateBedrockMantleEndpoint(req.Target.BaseURL); err != nil {
 		return nil, err
 	}
-	op, err := resolveBedrockOperation(req.Target.ProviderProtocol)
+	if err := req.Contract.ProviderDelivery.Validate(); err != nil {
+		return nil, canonical.UnsupportedDelivery("bedrock provider delivery is unsupported")
+	}
+	if req.Contract.ProviderDelivery.IsStreaming() && req.Contract.ProviderDelivery.Framing != delivery.FramingSSE {
+		return nil, canonical.UnsupportedDelivery("bedrock provider does not implement the requested delivery framing")
+	}
+
+	path, err := exchangeruntime.ProviderRequestPath(req.Target.ProviderID(), req.Target.ProtocolKind)
 	if err != nil {
 		return nil, err
 	}
-	client, err := e.runtimeClient(ctx, req.Target.BaseURL, req.Target.CredentialRef)
+
+	wireReqCarrier := req.RequestDocument
+	if wireReqCarrier.IsEmpty() {
+		return nil, canonical.InternalError("provider request document is required")
+	}
+
+	wireReqBody := wireReqCarrier.RawBytes()
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		httpedge.JoinBaseURLAndPath(req.Target.BaseURL, path),
+		bytes.NewReader(wireReqBody),
+	)
 	if err != nil {
+		return nil, canonical.BadEndpoint("bedrock provider request could not be built")
+	}
+	if len(wireReqBody) > 0 {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
+
+	if err := applyBedrockAuth(ctx, req.Target.CredentialRef, httpReq, wireReqBody); err != nil {
 		return nil, err
 	}
-	if op.invokeModel {
-		return e.executeInvokeModel(ctx, client, req, op.deliveryMode)
+
+	resp, err := e.client.Do(httpReq)
+	if err != nil {
+		return nil, canonical.BadEndpoint("bedrock provider request failed before backend response")
 	}
-	return e.executeConverse(ctx, client, req, op.deliveryMode)
+	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
+	if err != nil {
+		defer func() { _ = resp.Body.Close() }()
+		return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
+	}
+	resp = decodedResp
+	if resp.StatusCode >= 400 {
+		defer func() { _ = resp.Body.Close() }()
+		backendErr := httpedge.ReadBackendHTTPError(resp, req.Target.BackendRef)
+		logBedrockBackendDiagnostic("execute", req.Target, path, wireReqBody, backendErr)
+		return nil, backendErr
+	}
+	if req.Contract.ProviderDelivery.IsStreaming() {
+		return carrier.WireStream{
+			Stage:   carrier.StageProviderIngressIn,
+			Family:  req.Target.ProtocolKind,
+			Framing: carrier.FramingSSE,
+			Header:  resp.Header.Clone(),
+			Frames:  carrier.FrameReaderFromReadCloser(resp.Body),
+		}, nil
+	}
+	raw, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return nil, canonical.InternalError("backend success response could not be read")
+	}
+	return carrier.NewWireDocument(
+		carrier.StageProviderIngressIn,
+		req.Target.ProtocolKind,
+		"application/json",
+		resp.Header.Clone(),
+		raw,
+		carrier.Meta{},
+	), nil
 }
 
 func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
-	mode, value := parseBedrockAuthMode(target.CredentialRef)
-	if mode != bedrockAuthModeAWSProfile && mode != bedrockAuthModeAPIKeyEnv {
-		return nil, canonical.BadEndpoint("bedrock auth mode is unsupported")
-	}
-	if trimBedrockInput(target.BaseURL) == "" { // swobu:io-string source=boundary
+	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
 	}
-	if err := validateBedrockRuntimeEndpoint(target.BaseURL); err != nil {
+	if err := validateBedrockMantleEndpoint(target.BaseURL); err != nil {
 		return nil, err
 	}
-	profile := ""
-	if mode == bedrockAuthModeAWSProfile {
-		profile = value
-	}
-	region, err := bedrockSigningRegion(ctx, mustParseURL(target.BaseURL), profile)
-	if err != nil {
-		return nil, err
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, bedrockControlPlaneBaseURL(region)+"/foundation-models", nil)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpedge.JoinBaseURLAndPath(target.BaseURL, "/models"), nil)
 	if err != nil {
 		return nil, canonical.BadEndpoint("bedrock provider model catalog request could not be built")
 	}
-	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 	if err := applyBedrockAuth(ctx, target.CredentialRef, httpReq, nil); err != nil {
@@ -108,164 +149,26 @@ func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target e
 	if err != nil {
 		return nil, canonical.BadEndpoint("bedrock provider model catalog request failed before backend response")
 	}
-	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
+	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
 		defer func() { _ = resp.Body.Close() }()
 		return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
 	}
+	resp = decodedResp
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.BackendRef)
-		logBedrockBackendDiagnostic("list_models", target, "/foundation-models", nil, backendErr)
+		logBedrockBackendDiagnostic("list_models", target, "/models", nil, backendErr)
 		return nil, backendErr
 	}
-	var out struct {
-		ModelSummaries []struct {
-			ModelID string `json:"modelId"`
-		} `json:"modelSummaries"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	models, err := modelcatalogopenai.DecodeModelIDs(resp.Body)
+	if err != nil {
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
-	models := make([]string, 0, len(out.ModelSummaries))
-	for _, summary := range out.ModelSummaries {
-		modelID := trimBedrockInput(summary.ModelID)
-		if modelID != "" {
-			models = append(models, modelID)
-		}
-	}
-	slices.Sort(models)
 	return models, nil
 }
 
 func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
 	_, err := e.ListModels(ctx, target)
 	return err
-}
-
-func (e ProviderIngressResolverAdapter) runtimeClient(ctx context.Context, baseURL string, credentialRef string) (*bedrockruntime.Client, error) {
-	mode, value := parseBedrockAuthMode(credentialRef)
-	region, err := bedrockSigningRegion(ctx, mustParseURL(baseURL), "")
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := loadBedrockAWSConfig(ctx, region, mode, value)
-	if err != nil {
-		return nil, err
-	}
-	cfg.HTTPClient = e.client
-	return bedrockruntime.NewFromConfig(cfg, func(o *bedrockruntime.Options) {
-		o.BaseEndpoint = aws.String(baseURL)
-		o.AuthSchemePreference = []string{"sigv4"}
-		if mode == bedrockAuthModeAWSProfile {
-			o.BearerAuthTokenProvider = nil
-		}
-	}), nil
-}
-
-func (e ProviderIngressResolverAdapter) executeConverse(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, deliveryMode delivery.Mode) (ports.ProviderIngress, error) {
-	modelID := bedrockModelFromRequest(req.Request)
-	if trimBedrockInput(modelID) == "" {
-		return nil, canonical.BadRequest("bedrock model id is required")
-	}
-	messages, err := bedrockMessagesFromRequest(req.Request)
-	if err != nil {
-		return nil, err
-	}
-	input := &bedrockruntime.ConverseInput{ModelId: aws.String(modelID), Messages: messages}
-	if deliveryMode == delivery.Streaming {
-		streamOut, err := client.ConverseStream(ctx, &bedrockruntime.ConverseStreamInput{ModelId: input.ModelId, Messages: input.Messages})
-		if err != nil {
-			return nil, classifyBedrockSDKError(err)
-		}
-		text, usage, stop := collectConverseStream(streamOut)
-		output := mustConversationOutput(modelID, text, stop, usage)
-		return synthesizeBedrockProviderSemanticEventsResult(req.ExchangeID, req.Target.ProtocolKind, output)
-	}
-	out, err := client.Converse(ctx, input)
-	if err != nil {
-		return nil, classifyBedrockSDKError(err)
-	}
-	text, stop, usage := decodeConverseOutput(out)
-	output := mustConversationOutput(modelID, text, stop, usage)
-	return synthesizeBedrockProviderSemanticEventsResult(req.ExchangeID, req.Target.ProtocolKind, output)
-}
-
-func (e ProviderIngressResolverAdapter) executeInvokeModel(ctx context.Context, client *bedrockruntime.Client, req ports.ProviderRequest, deliveryMode delivery.Mode) (ports.ProviderIngress, error) {
-	modelID := trimBedrockInput(req.Request.Model())
-	if modelID == "" {
-		return nil, canonical.BadRequest("bedrock model id is required")
-	}
-	payload, err := json.Marshal(map[string]any{"inputText": bedrockPromptText(req.Request)})
-	if err != nil {
-		return nil, canonical.BadRequest("bedrock invoke_model payload could not be encoded")
-	}
-	if deliveryMode == delivery.Streaming {
-		out, err := client.InvokeModelWithResponseStream(ctx, &bedrockruntime.InvokeModelWithResponseStreamInput{
-			ModelId:     aws.String(modelID),
-			Body:        payload,
-			ContentType: aws.String("application/json"),
-			Accept:      aws.String("application/json"),
-		})
-		if err != nil {
-			return nil, classifyBedrockSDKError(err)
-		}
-		raw := collectInvokeModelResponseStream(out)
-		decoded, err := decodeInvokeModelBuffered(raw)
-		if err != nil {
-			return nil, err
-		}
-		return synthesizeBedrockProviderSemanticEventsResult(req.ExchangeID, req.Target.ProtocolKind, decoded)
-	}
-	out, err := client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
-		ModelId:     aws.String(modelID),
-		Body:        payload,
-		ContentType: aws.String("application/json"),
-		Accept:      aws.String("application/json"),
-	})
-	if err != nil {
-		return nil, classifyBedrockSDKError(err)
-	}
-	decoded, err := decodeInvokeModelBuffered(out.Body)
-	if err != nil {
-		return nil, err
-	}
-	return synthesizeBedrockProviderSemanticEventsResult(req.ExchangeID, req.Target.ProtocolKind, decoded)
-}
-
-func synthesizeBedrockProviderSemanticEventsResult(exchangeID string, kind protocolkind.ProtocolKind, output canonical.CanonicalOutput) (ports.ProviderIngress, error) {
-	if err := validateBedrockSyntheticProtocol(kind); err != nil {
-		return nil, err
-	}
-	if output == nil {
-		return nil, canonical.InternalError("bedrock semantic event synthesis failed")
-	}
-	return carrier.CanonicalEventStream{Events: canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		exchangeID,
-		output.ResultID(),
-		output.Model(),
-		output.Items(),
-		output.FinishReason(),
-		output.Usage(),
-	))}, nil
-}
-
-func validateBedrockSyntheticProtocol(kind protocolkind.ProtocolKind) error {
-	switch kind {
-	case protocolkind.ChatCompletions, protocolkind.Completions:
-		return nil
-	default:
-		return canonical.UnsupportedOperation("bedrock synthetic response protocol is not implemented")
-	}
-}
-
-func bedrockPromptText(request canonical.CanonicalRequest) string {
-	var out strings.Builder
-	for _, item := range request.Items() {
-		if item.Kind != canonical.ItemKindText {
-			continue
-		}
-		out.WriteString(item.Text)
-	}
-	return out.String()
 }

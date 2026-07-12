@@ -1,11 +1,13 @@
 # AWS Bedrock backend
 
-Configure AWS Bedrock in Swobu cockpit, including credential strategy and region.
+Configure AWS Bedrock Mantle in Swobu cockpit, including credential strategy
+and region.
 
 Current adapter scope is explicit:
-- execution: native Bedrock runtime operations (`Converse` for conversational canonicals and `InvokeModel` for prompt canonicals)
-- endpoint host requirement: `bedrock-runtime.<region>...` or `bedrock-mantle.<region>...`
-- model catalog: Bedrock control-plane `/foundation-models`
+- execution: Bedrock Mantle OpenAI-compatible requests on `/responses`,
+  `/chat/completions`, and `/messages`
+- endpoint host requirement: `bedrock-mantle.<region>.api.aws`
+- model catalog: Mantle `/models`
 
 If model loading or auth validation fails, record:
 - selected credential mode

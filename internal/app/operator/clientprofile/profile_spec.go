@@ -21,12 +21,11 @@ type ProfileSpec struct {
 
 // ActionSpec is a declarative action definition.
 type ActionSpec struct {
-	ID        string
-	Label     string
-	Summary   string
-	Verb      string
-	FocusVerb string
-	Content   string
+	ID      string
+	Label   string
+	Summary string
+	Verb    string
+	Content string
 }
 
 type profileSpecAdapter struct{ spec ProfileSpec }
@@ -44,12 +43,11 @@ func compileProfileActions(spec ProfileSpec, baseURL string) []Action {
 	actions := make([]Action, 0, len(spec.Actions))
 	for _, actionSpec := range spec.Actions {
 		actions = append(actions, Action{
-			ID:        actionSpec.ID,
-			Label:     renderTemplate(actionSpec.Label, vars),
-			Summary:   renderTemplate(actionSpec.Summary, vars),
-			Verb:      renderTemplate(actionSpec.Verb, vars),
-			FocusVerb: renderTemplate(actionSpec.FocusVerb, vars),
-			Content:   renderTemplate(actionSpec.Content, vars),
+			ID:      actionSpec.ID,
+			Label:   renderTemplate(actionSpec.Label, vars),
+			Summary: renderTemplate(actionSpec.Summary, vars),
+			Verb:    renderTemplate(actionSpec.Verb, vars),
+			Content: renderTemplate(actionSpec.Content, vars),
 		})
 	}
 	return actions

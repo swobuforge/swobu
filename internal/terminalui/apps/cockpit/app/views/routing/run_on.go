@@ -13,11 +13,34 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
+// useDeferredFocusOnOpen keeps the initial picker focus out of the activation
+// closure so the disclosure can commit before the first focus jump is sent.
+func useDeferredFocusOnOpen(ctx *retained.Context[state.Model], open bool, focusKey string) {
+	focusKey = strings.TrimSpace(focusKey) // swobu:io-string source=boundary
+	retained.UseEffect(ctx, func() func() {
+		if !open || focusKey == "" {
+			return nil
+		}
+		// Dispatch after commit so the picker subtree exists before focus is
+		// targeted at the first option.
+		ctx.Dispatch(interaction.FocusKeyAction{Key: focusKey})
+		return nil
+	}, open, focusKey)
+}
+
 // BuildRunOnCreateRow shows the run-on summary in create mode with disclosure when no provider is configured.
 func BuildRunOnCreateRow(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	onCancel := func() []update.Action {
+		setOpen(false)
+		return []update.Action{
+			state.SetInteractionMode{Mode: state.InteractionModeNAV},
+			interaction.FocusKeyAction{Key: "run_on"},
+		}
+	}
+	items := createRunOnChoiceItems(model, onCancel)
 	var cancelFn func() []update.Action
 	if open {
 		cancelFn = func() []update.Action {
@@ -36,20 +59,12 @@ func BuildRunOnCreateRow(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 			mode = state.InteractionModePickOne
 		}
 		actions := []update.Action{state.SetInteractionMode{Mode: mode}}
-		if nextOpen {
-			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("create-run-on-option", 0)})
-		}
 		return actions
 	}, cancelFn, views.FocusAffordance("choose", false))
+	useDeferredFocusOnOpen(ctx, open, views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "create-run-on-option"}))
 	out := parent
 	if open {
-		out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, createRunOnChoiceItems(model, func() []update.Action {
-			setOpen(false)
-			return []update.Action{
-				state.SetInteractionMode{Mode: state.InteractionModeNAV},
-				interaction.FocusKeyAction{Key: "run_on"},
-			}
-		}), views.FilterablePickerConfig{
+		out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
 			KeyPrefix:      "create-run-on-option",
 			BuildOptionRow: views.ChoicePickerOptionRow(false),
 			WindowSize:     6,
@@ -79,6 +94,7 @@ func createRunOnChoiceItems(model state.Model, onCancel func() []update.Action) 
 	summary := providerHumanIdentifier(*pc)
 	return []views.FilterablePickerItem{
 		{
+			Key:      providerSpec,
 			Label:    summary,
 			Selected: true,
 			OnChoose: func() []update.Action {
@@ -101,6 +117,7 @@ func primaryModelChoiceItems(snapshot *state.EndpointSnapshot, onCancel func() [
 		providerRef := strings.TrimSpace(pc.Ref) // swobu:io-string source=boundary
 		label := providerHumanIdentifier(pc)
 		items = append(items, views.FilterablePickerItem{
+			Key:      providerRef,
 			Label:    label,
 			Selected: providerRef == snapshot.SelectedProviderConfigRef,
 			OnChoose: func() []update.Action {
@@ -136,6 +153,11 @@ func BuildRunOnWorkspaceRow(ctx *retained.Context[state.Model]) retained.ViewSpe
 	if snapshot == nil {
 		out = views.RowStatic("primary", "not selected")
 	} else {
+		onCancel := func() []update.Action {
+			setOpen(false)
+			return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
+		}
+		items := primaryModelChoiceItems(snapshot, onCancel)
 		var cancelFn func() []update.Action
 		if open {
 			cancelFn = func() []update.Action {
@@ -154,24 +176,16 @@ func BuildRunOnWorkspaceRow(ctx *retained.Context[state.Model]) retained.ViewSpe
 				mode = state.InteractionModePickOne
 			}
 			actions := []update.Action{state.SetInteractionMode{Mode: mode}}
-			if nextOpen {
-				actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("primary-model-option", 0)})
-			}
 			return actions
 		}, cancelFn, views.FocusAffordance("choose", false))
+		useDeferredFocusOnOpen(ctx, open, views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "primary-model-option"}))
 		if !open {
 			out = parent
 			if message := views.ScopedError(model, "routing", "run_on"); message != "" {
 				out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(message)...)
 			}
 		} else {
-			out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, primaryModelChoiceItems(snapshot, func() []update.Action {
-				setOpen(false)
-				return []update.Action{
-					state.SetInteractionMode{Mode: state.InteractionModeNAV},
-					interaction.FocusKeyAction{Key: "run_on"},
-				}
-			}), views.FilterablePickerConfig{
+			out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
 				KeyPrefix:      "primary-model-option",
 				BuildOptionRow: views.ChoicePickerOptionRow(true),
 				WindowSize:     6,

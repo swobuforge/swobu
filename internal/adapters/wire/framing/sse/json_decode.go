@@ -3,6 +3,7 @@ package sse
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -51,7 +52,7 @@ func strictJSONDecodeError(err error, surface string) error {
 	matches := strictJSONUnknownFieldPattern.FindStringSubmatch(err.Error())
 	if len(matches) == 2 {
 		field := matches[1]
-		out := canonical.BadRequest(surface + " contains an unknown field")
+		out := canonical.BadRequest(fmt.Sprintf("%s contains an unknown field %q", surface, field))
 		out.Details = map[string]string{
 			"json_pointer": "/" + escapeJSONPointer(field),
 			"json_field":   field,

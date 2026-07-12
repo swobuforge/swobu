@@ -1,13 +1,14 @@
 // Package clientprofile defines operator-facing client profiles for cockpit
 // handoff rendering.
 //
-// Each client profile is colocated in one file and provides a single Actions
-// method that yields operator rows plus side-effect payloads derived from
-// runtime context (for example, endpoint base URL). A thin registry exposes
-// all available profiles.
+// Each supported client profile is colocated in one file and provides a single
+// Actions method that yields the run row plus its side-effect payload derived
+// from runtime context (for example, endpoint base URL). A thin registry
+// exposes all available supported profiles.
 //
-// A single capability matrix owns both operator-visible action rows and
-// interactive run wiring for supported clients.
+// A single capability matrix owns both operator-visible run rows and
+// interactive run wiring for supported clients. Non-run affordances are not
+// part of this package's supported surface.
 //
 // Run contract (hard law):
 //   - Every ActionKindRun command is interactive only.

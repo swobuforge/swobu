@@ -41,6 +41,7 @@ func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []
 		state.LoadRoutingModelCatalogRequestedAction{
 			Scope:            state.RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:     provider,
+			AuthHeader:       strings.TrimSpace(next.AuthHeader),       // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
 			BaseURL:          baseURL,
 			CredentialRef:    strings.TrimSpace(next.CredentialRef), // swobu:io-string source=boundary
@@ -81,6 +82,7 @@ func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []u
 		state.LoadRoutingModelCatalogRequestedAction{
 			Scope:            state.RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:     provider,
+			AuthHeader:       strings.TrimSpace(next.AuthHeader),       // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(next.BaseURL),          // swobu:io-string source=boundary
 			CredentialRef:    credentialRef,
@@ -144,6 +146,15 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 			CreateDraft:       &draft,
 		})
 	}
+	previewOptions := make([]modelPickerOption, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		id := strings.TrimSpace(modelID)
+		if id == "" {
+			continue
+		}
+		previewOptions = append(previewOptions, modelPickerOption{Key: id, Label: id})
+	}
+	previewFocusKey := modelPickerFirstFocusKey(previewOptions, spec.KeyPrefix)
 	modelRow := views.RowChoiceWithHooks(views.RowModel, modelSummary, func() []update.Action {
 		if provider == "" || readiness.Blocked {
 			return nil
@@ -156,8 +167,10 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		actions := spec.Binding.LoadCatalog(draft)
 		actions = append(actions,
 			state.SetInteractionMode{Mode: state.InteractionModePickOne},
-			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey(spec.KeyPrefix, 0)},
 		)
+		if previewFocusKey != "" {
+			actions = append(actions, interaction.FocusKeyAction{Key: previewFocusKey})
+		}
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
 	if readiness.Blocked {
@@ -195,6 +208,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 	for _, choice := range modelIDs {
 		modelChoice := choice
 		options = append(options, modelPickerOption{
+			Key:   modelChoice,
 			Label: modelChoice,
 			OnChoose: func() []update.Action {
 				next := draft

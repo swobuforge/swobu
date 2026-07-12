@@ -132,7 +132,7 @@ func evaluateModelState(provider, modelID string, credentialState RouteSetupSlot
 
 func providerRequiresScopeSlot(provider string) bool {
 	return strings.EqualFold(strings.TrimSpace(provider), "bedrock") || // swobu:io-string source=boundary
-		strings.EqualFold(strings.TrimSpace(provider), "openai_compatible") // swobu:io-string source=boundary
+		profile.RequiresExplicitExecuteBaseURL(provider)
 }
 
 func CreateDraftCredentialStrategySelectable(provider string) bool {
@@ -160,7 +160,7 @@ func isExternalCredentialAuthorityVariant(provider, credentialRef string) bool {
 func createDraftScopeMissing(provider, baseURL string) bool {
 	provider = strings.TrimSpace(provider) // swobu:io-string source=boundary
 	baseURL = strings.TrimSpace(baseURL)   // swobu:io-string source=boundary
-	if strings.EqualFold(provider, "openai_compatible") {
+	if profile.RequiresExplicitExecuteBaseURL(provider) {
 		return baseURL == ""
 	}
 	if !strings.EqualFold(provider, "bedrock") {
@@ -178,7 +178,10 @@ func createDraftScopeMissing(provider, baseURL string) bool {
 	if len(parts) < 4 {
 		return true
 	}
-	if !strings.HasPrefix(parts[0], "bedrock-runtime") {
+	if !strings.HasPrefix(parts[0], "bedrock-mantle") {
+		return true
+	}
+	if parts[2] != "api" || parts[3] != "aws" {
 		return true
 	}
 	return strings.TrimSpace(parts[1]) == "" // swobu:io-string source=boundary

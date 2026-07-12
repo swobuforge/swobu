@@ -149,3 +149,48 @@ func TestProviderConfig_WithProviderProtocolRejectsUnsupportedProtocol(t *testin
 		t.Fatalf("WithProviderProtocol(completions) error = %v, want ErrInvalidProviderConfig", err)
 	}
 }
+
+func TestProviderConfig_AuthHeaderDefaultsAndValidation(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-openai-compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "https://example.test/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if got := cfg.AuthHeader(); got != "Authorization" {
+		t.Fatalf("default auth header = %q, want Authorization", got)
+	}
+
+	cfg, err = cfg.WithAuthHeader("X-Custom-Token")
+	if err != nil {
+		t.Fatalf("WithAuthHeader returned error: %v", err)
+	}
+	if got := cfg.AuthHeader(); got != "X-Custom-Token" {
+		t.Fatalf("custom auth header = %q, want X-Custom-Token", got)
+	}
+	if _, err := cfg.WithAuthHeader("bad header"); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithAuthHeader(bad header) error = %v, want ErrInvalidProviderConfig", err)
+	}
+
+	openAIRef, err := ParseProviderConfigRef("cfg-openai")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	openAISpec, err := ParseProviderSpec("openai")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	openAIConfig, err := NewProviderConfig(openAIRef, openAISpec, "https://api.openai.com/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if _, err := openAIConfig.WithAuthHeader("X-API-Key"); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithAuthHeader on openai provider error = %v, want ErrInvalidProviderConfig", err)
+	}
+}

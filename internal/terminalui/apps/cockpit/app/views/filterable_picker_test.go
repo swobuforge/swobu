@@ -159,6 +159,35 @@ func TestFilterablePickerRows_ShowsFindAtMinThreshold(t *testing.T) {
 	}
 }
 
+func TestFilterablePickerItemFocusKey_PrefersExplicitItemKey(t *testing.T) {
+	items := []FilterablePickerItem{
+		{Key: "stable-a", Label: "alpha"},
+		{Label: "beta"},
+	}
+	if got := FilterablePickerItemFocusKey(items, FilterablePickerConfig{KeyPrefix: "opt"}, 0); got != "stable-a" {
+		t.Fatalf("focus key=%q want stable-a", got)
+	}
+	if got := FilterablePickerItemFocusKey(items, FilterablePickerConfig{KeyPrefix: "opt"}, 1); got != "opt/1" {
+		t.Fatalf("focus key=%q want opt/1", got)
+	}
+}
+
+func TestFilterablePickerFirstFocusKey_EmptyListReturnsEmpty(t *testing.T) {
+	if got := FilterablePickerFirstFocusKey(nil, FilterablePickerConfig{KeyPrefix: "opt"}); got != "" {
+		t.Fatalf("first focus key=%q want empty", got)
+	}
+}
+
+func TestFilterablePickerFirstFocusKey_UsesFirstStableKey(t *testing.T) {
+	items := []FilterablePickerItem{
+		{Key: "stable-a", Label: "alpha"},
+		{Key: "stable-b", Label: "beta"},
+	}
+	if got := FilterablePickerFirstFocusKey(items, FilterablePickerConfig{KeyPrefix: "opt"}); got != "stable-a" {
+		t.Fatalf("first focus key=%q want stable-a", got)
+	}
+}
+
 func TestTrimLastRune(t *testing.T) {
 	if got := trimLastRune("ab"); got != "a" {
 		t.Fatalf("trimLastRune(ab)=%q want a", got)
@@ -182,6 +211,88 @@ func TestFocusActionsAfterQueryChange_NoMatchesDoesNotStealFocus(t *testing.T) {
 	}, "zzz")
 	if len(actions) != 0 {
 		t.Fatalf("actions len=%d want 0 when query has no matches", len(actions))
+	}
+}
+
+func TestHandleFilterableQueryInput_PartialQueryDoesNotAutoChoose(t *testing.T) {
+	t.Parallel()
+
+	var gotState FilterablePickerState
+	chosen := false
+	handled, actions := handleFilterableQueryInput(
+		FilterablePickerState{},
+		func(next FilterablePickerState) { gotState = next },
+		[]FilterablePickerItem{
+			{
+				Label: "Kimi-K2.6",
+				OnChoose: func() []update.Action {
+					chosen = true
+					return nil
+				},
+			},
+		},
+		FilterablePickerConfig{KeyPrefix: "model"},
+		'k',
+	)
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if gotState.Query != "k" {
+		t.Fatalf("state query=%q want k", gotState.Query)
+	}
+	if chosen {
+		t.Fatal("partial query must not auto-select")
+	}
+	if len(actions) != 1 {
+		t.Fatalf("partial query actions len=%d want 1 focus action", len(actions))
+	}
+}
+
+func TestHandleFilterableQueryInput_ExactSingleMatchAutoChooses(t *testing.T) {
+	t.Parallel()
+
+	var gotState FilterablePickerState
+	chosen := false
+	items := []FilterablePickerItem{
+		{
+			Label: "Kimi-K2.6",
+			OnChoose: func() []update.Action {
+				chosen = true
+				return nil
+			},
+		},
+	}
+	query := "kimi-k2.6"
+	runes := []rune(query)
+	for i, r := range runes {
+		handled, actions := handleFilterableQueryInput(
+			gotState,
+			func(next FilterablePickerState) { gotState = next },
+			items,
+			FilterablePickerConfig{KeyPrefix: "model"},
+			r,
+		)
+		if !handled {
+			t.Fatalf("expected handled=true on rune %d", i)
+		}
+		if gotState.Query != string(runes[:i+1]) {
+			t.Fatalf("state query=%q want %q", gotState.Query, string(runes[:i+1]))
+		}
+		if i < len(runes)-1 {
+			if chosen {
+				t.Fatalf("partial query rune %d must not auto-select", i)
+			}
+			if len(actions) != 1 {
+				t.Fatalf("partial query rune %d actions len=%d want 1 focus action", i, len(actions))
+			}
+			continue
+		}
+		if !chosen {
+			t.Fatal("exact single match should auto-select")
+		}
+		if len(actions) != 0 {
+			t.Fatalf("exact single match actions len=%d want 0", len(actions))
+		}
 	}
 }
 

@@ -27,3 +27,18 @@ func TestDecodeRequest_RejectsUnknownField(t *testing.T) {
 		t.Fatalf("json_pointer = %q, want %q", got, "/unexpected")
 	}
 }
+
+func TestDecodeRequest_AcceptsStreamOptionsField(t *testing.T) {
+	codec := ClientRequestDecoder{}
+	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`)
+	got, delivery, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest() error = %v", err)
+	}
+	if got.Model() != "claude" {
+		t.Fatalf("model = %q, want %q", got.Model(), "claude")
+	}
+	if !delivery.IsStreaming() {
+		t.Fatalf("delivery is not streaming")
+	}
+}

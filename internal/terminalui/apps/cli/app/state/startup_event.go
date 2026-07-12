@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
-	"github.com/swobuforge/swobu/internal/terminalui/view"
+	"github.com/swobuforge/swobu/internal/terminalui/transcript"
 )
 
 type EventKind = daemonlifecycle.StartupEventKind
@@ -42,11 +42,11 @@ type SectionRow struct {
 type StartupState struct {
 	SplashPrinted bool
 	Sections      []SectionRow
-	Mode          view.RenderMode
+	Mode          transcript.RenderMode
 }
 
 func Initial() StartupState {
-	return StartupState{Mode: view.RenderModeAppend}
+	return StartupState{Mode: transcript.RenderModeAppend}
 }
 
 func Apply(current StartupState, event Event) StartupState {
@@ -84,24 +84,24 @@ func Apply(current StartupState, event Event) StartupState {
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "Update Available", Rows: rows})
 	case EventDaemonNotReachable:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 	case EventStartingDaemon:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 	case EventWaitingReadiness:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 	case EventDaemonReady:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 	case EventDaemonRuntimeStart:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 		rows := []string{"starting daemon runtime"}
 		if path := strings.TrimSpace(event.ConfigPath); path != "" { // swobu:io-string source=boundary
 			rows = append(rows, "config path: "+path)
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "Daemon Runtime", Rows: rows})
 	case EventDaemonRuntimeStop:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 	case EventStartupFailed:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 		rows := []string{strings.TrimSpace(event.Text)} // swobu:io-string source=boundary
 		for _, n := range event.NextAction {
 			if strings.TrimSpace(n) != "" { // swobu:io-string source=boundary
@@ -110,7 +110,7 @@ func Apply(current StartupState, event Event) StartupState {
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "startup failed", Rows: rows})
 	case EventStartupTimedOut:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 		rows := []string{strings.TrimSpace(event.Text)} // swobu:io-string source=boundary
 		for _, n := range event.NextAction {
 			if strings.TrimSpace(n) != "" { // swobu:io-string source=boundary
@@ -119,7 +119,7 @@ func Apply(current StartupState, event Event) StartupState {
 		}
 		next.Sections = append(next.Sections, SectionRow{Kind: "message", Title: "startup timed out", Rows: rows})
 	case EventHandoffToInteractive:
-		next.Mode = view.RenderModeAppend
+		next.Mode = transcript.RenderModeAppend
 	}
 	return next
 }

@@ -1,6 +1,8 @@
 package reconcile
 
 import (
+	"context"
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
@@ -37,6 +39,41 @@ func (r namedListRoot) BuildRenderNode(ctx *retained.Context[struct{}]) layout.R
 		children = append(children, layout.FlowChild{RenderNode: retained.Materialize(ctx, retained.Named(item, asView(childComponent{init: item})))})
 	}
 	return layout.NewColumn(children...)
+}
+
+type effectHarness struct {
+	show bool
+	dep  string
+	log  *[]string
+}
+
+func (r *effectHarness) BuildRenderNode(ctx *retained.Context[struct{}]) layout.RenderNode {
+	if !r.show {
+		return layout.NewColumn()
+	}
+	child := retained.Named("effect", retained.Build(r.buildView))
+	return layout.NewColumn(layout.FlowChild{RenderNode: retained.Materialize(ctx, child)})
+}
+
+func (r *effectHarness) buildView(_ *retained.Context[struct{}]) retained.ViewSpec[struct{}] {
+	dep := r.dep
+	log := r.log
+	return retained.View[struct{}](func(ctx *retained.Context[struct{}]) layout.RenderNode {
+		retained.UseEffect(ctx, func() func() {
+			*log = append(*log, "run:"+dep)
+			return func() {
+				*log = append(*log, "cleanup:"+dep)
+			}
+		}, dep)
+		return layout.NewText(dep)
+	})
+}
+
+func runLifecycleEffects(t *testing.T, effects []update.Effect) {
+	t.Helper()
+	for _, eff := range effects {
+		eff.Execute(context.Background())
+	}
 }
 
 func TestReconcile_PreservesNamedLocalStateAcrossReorder(t *testing.T) {
@@ -106,6 +143,100 @@ func TestReconcile_CleansLocalStateOnUnmount(t *testing.T) {
 	// After unmount, the named state should be cleaned up via DeletePrefix.
 	if _, ok := locals.values[StateKey{NodeID: tree.ID, SlotKey: "a/0"}]; ok {
 		t.Fatalf("local state for unmounted named child should be deleted")
+	}
+}
+
+func TestReconcile_UseEffectRerunsWithCleanupBeforeNextCommitAndUnmount(t *testing.T) {
+	locals := NewLocalStore()
+	reconciler := New[struct{}](locals)
+	log := make([]string, 0, 4)
+	root := &effectHarness{show: true, dep: "one", log: &log}
+
+	_, _, _, lifecycle := reconciler.Reconcile(
+		asView(root),
+		&struct{}{},
+		func(update.Action) {},
+		func(update.Action) {},
+	)
+	if len(lifecycle) != 1 {
+		t.Fatalf("initial lifecycle effects = %d, want 1", len(lifecycle))
+	}
+	runLifecycleEffects(t, lifecycle)
+	if got, want := log, []string{"run:one"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after initial commit = %#v, want %#v", got, want)
+	}
+
+	root.dep = "two"
+	_, _, _, lifecycle = reconciler.Reconcile(
+		asView(root),
+		&struct{}{},
+		func(update.Action) {},
+		func(update.Action) {},
+	)
+	if len(lifecycle) != 1 {
+		t.Fatalf("rerun lifecycle effects = %d, want 1", len(lifecycle))
+	}
+	runLifecycleEffects(t, lifecycle)
+	if got, want := log, []string{"run:one", "cleanup:one", "run:two"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after dependency change = %#v, want %#v", got, want)
+	}
+
+	_, _, _, lifecycle = reconciler.Reconcile(
+		asView(root),
+		&struct{}{},
+		func(update.Action) {},
+		func(update.Action) {},
+	)
+	if len(lifecycle) != 0 {
+		t.Fatalf("same-deps lifecycle effects = %d, want 0", len(lifecycle))
+	}
+	if got, want := log, []string{"run:one", "cleanup:one", "run:two"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after same-deps rebuild = %#v, want %#v", got, want)
+	}
+
+	root.show = false
+	_, _, _, lifecycle = reconciler.Reconcile(
+		asView(root),
+		&struct{}{},
+		func(update.Action) {},
+		func(update.Action) {},
+	)
+	if len(lifecycle) != 1 {
+		t.Fatalf("unmount lifecycle effects = %d, want 1", len(lifecycle))
+	}
+	runLifecycleEffects(t, lifecycle)
+	if got, want := log, []string{"run:one", "cleanup:one", "run:two", "cleanup:two"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after unmount = %#v, want %#v", got, want)
+	}
+}
+
+func TestReconcile_UseEffectCleansUpOnInitialUnmount(t *testing.T) {
+	locals := NewLocalStore()
+	reconciler := New[struct{}](locals)
+	log := make([]string, 0, 2)
+	root := &effectHarness{show: true, dep: "one", log: &log}
+
+	_, _, _, lifecycle := reconciler.Reconcile(
+		asView(root),
+		&struct{}{},
+		func(update.Action) {},
+		func(update.Action) {},
+	)
+	runLifecycleEffects(t, lifecycle)
+
+	root.show = false
+	_, _, _, lifecycle = reconciler.Reconcile(
+		asView(root),
+		&struct{}{},
+		func(update.Action) {},
+		func(update.Action) {},
+	)
+	if len(lifecycle) != 1 {
+		t.Fatalf("initial unmount lifecycle effects = %d, want 1", len(lifecycle))
+	}
+	runLifecycleEffects(t, lifecycle)
+	if got, want := log, []string{"run:one", "cleanup:one"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after initial unmount = %#v, want %#v", got, want)
 	}
 }
 

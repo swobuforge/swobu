@@ -13,7 +13,7 @@ func TestEffectiveDraftBaseURL_BedrockDerivesFromRegion(t *testing.T) {
 		ProviderSpec: "bedrock",
 		Region:       "eu-west-1",
 	})
-	want := "https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1"
+	want := "https://bedrock-mantle.eu-west-1.api.aws/v1"
 	if got != want {
 		t.Fatalf("base URL=%q want %q", got, want)
 	}
@@ -26,7 +26,7 @@ func TestEffectiveDraftBaseURL_BedrockDerivesFromEnvWhenRegionMissing(t *testing
 	got := effectiveDraftBaseURL(state.ProviderConfigSnapshot{
 		ProviderSpec: "bedrock",
 	})
-	want := "https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1"
+	want := "https://bedrock-mantle.us-west-2.api.aws/v1"
 	if got != want {
 		t.Fatalf("base URL=%q want %q", got, want)
 	}

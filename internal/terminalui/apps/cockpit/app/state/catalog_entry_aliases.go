@@ -30,6 +30,7 @@ const (
 
 var ProviderConfigForSpec = stateModel.ProviderConfigForSpec
 var ProviderRequiresCredential = stateModel.ProviderRequiresCredential
+var ProviderRequiresExplicitExecuteBaseURL = stateModel.ProviderRequiresExplicitExecuteBaseURL
 var ProviderSupportsCatalog = stateModel.ProviderSupportsCatalog
 var ProviderOptions = stateModel.ProviderOptions
 var ProviderCredentialSelectionRequired = stateModel.ProviderCredentialSelectionRequired

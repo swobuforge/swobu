@@ -181,7 +181,7 @@ func firstRunCreateReady(model *Model) bool {
 	if provider == "" {
 		return false
 	}
-	if provider == "openai_compatible" && strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) == "" { // swobu:io-string source=boundary
+	if ProviderRequiresExplicitExecuteBaseURL(provider) && strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL) == "" { // swobu:io-string source=boundary
 		return false
 	}
 	if strings.TrimSpace(model.CreateDraftProviderConfig.ModelID) == "" { // swobu:io-string source=boundary
@@ -239,8 +239,8 @@ func mismatchStageContextLines(rows []TrafficRow) []string {
 	return out
 }
 
-func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, credentialRef, providerProtocol string) bool {
-	id := newRoutingProbeIdentity(scope, providerSpec, baseURL, credentialRef)
+func matchesRoutingModelCatalogLoad(model *Model, scope, providerSpec, baseURL, authHeader, credentialRef, providerProtocol string) bool {
+	id := newRoutingProbeIdentity(scope, providerSpec, baseURL, authHeader, credentialRef)
 	_ = strings.TrimSpace(providerProtocol) // provider protocol does not key model-catalog identity // swobu:io-string source=boundary
 	if id.Scope == RoutingModelCatalogScopeCreateDraft {
 		return id.matchesCreateDraft(model)

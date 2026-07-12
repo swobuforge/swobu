@@ -39,7 +39,7 @@ func TestRoot_ScrollVisibilityProofMatrix(t *testing.T) {
 				)
 			},
 			assert: []string{
-				">     Other (Cline, Roo Code, OpenClaw, etc)",
+				">     Pi",
 			},
 		},
 		{
@@ -57,13 +57,13 @@ func TestRoot_ScrollVisibilityProofMatrix(t *testing.T) {
 					interaction.KeyDown,
 				)
 				dispatchKeys(rt, viewport, interaction.KeyEnter)
-				focusRowContaining(t, rt, viewport, "file config")
+				focusRowContaining(t, rt, viewport, "run")
 				dispatchKeys(rt, viewport, interaction.KeyEnter)
 			},
 			assert: []string{
 				"⛉ SWOBU",
 				"↑↓ move",
-				"tab tabs",
+				"? help",
 				"↓ more",
 			},
 		},

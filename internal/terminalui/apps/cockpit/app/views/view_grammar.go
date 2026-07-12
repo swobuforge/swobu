@@ -15,6 +15,8 @@ func cockpitRowPolicy() toolkitviews.LineLayoutPolicy {
 	return policy
 }
 
+// TODO: remove these transitional row wrappers after help/workspace/clients/
+// traffic/routing have been migrated to semantic constructors in rows.go.
 func RowKV(label, value, action string, onActivate func() []update.Action) retained.ViewSpec[state.Model] {
 	return toolkitviews.NewKeyValueActionRowWithPolicy[state.Model](label, value, action, cockpitRowPolicy(), onActivate)
 }

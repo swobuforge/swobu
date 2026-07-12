@@ -161,6 +161,7 @@ func buildAddModelEnvKeyRow(_ *retained.Context[state.Model], model state.Model,
 					state.LoadRoutingModelCatalogRequestedAction{
 						Scope:            state.RoutingModelCatalogScopeAddModelDraft,
 						ProviderSpec:     strings.TrimSpace(next.ProviderSpec),     // swobu:io-string source=boundary
+						AuthHeader:       strings.TrimSpace(next.AuthHeader),       // swobu:io-string source=boundary
 						ProviderProtocol: strings.TrimSpace(next.ProviderProtocol), // swobu:io-string source=boundary
 						BaseURL:          strings.TrimSpace(next.BaseURL),          // swobu:io-string source=boundary
 						CredentialRef:    strings.TrimSpace(next.CredentialRef),    // swobu:io-string source=boundary // swobu:io-string source=boundary
@@ -220,7 +221,9 @@ func buildAddModelCredentialFileRow(ctx *retained.Context[state.Model], draft st
 		if nextOpen {
 			nextUI.FileBrowse = initialCredentialFileBrowseState(currentPath)
 			nextUI.FilePicker = views.DefaultFilterablePickerState()
-			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("credential-file-option", 0)})
+			if focusKey := credentialFilePickerFirstFocusKey(nextUI.FileBrowse, currentPath); focusKey != "" {
+				actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+			}
 		}
 		panel.setCredentialUI(nextUI)
 		if nextOpen {
@@ -297,10 +300,11 @@ func addModelCredentialFilePickerItems(
 		nextUI.FileBrowse = nextBrowse
 		nextUI.FilePicker = views.DefaultFilterablePickerState()
 		setCredentialUI(nextUI)
-	}, func() []update.Action {
-		return []update.Action{
-			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("credential-file-option", 0)},
+	}, func(nextBrowse credentialFileBrowseState) []update.Action {
+		if focusKey := credentialFilePickerFirstFocusKey(nextBrowse, currentPath); focusKey != "" {
+			return []update.Action{interaction.FocusKeyAction{Key: focusKey}}
 		}
+		return nil
 	}, currentPath, onChooseFile)
 }
 

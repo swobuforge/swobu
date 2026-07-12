@@ -21,7 +21,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -68,11 +67,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if strings.TrimSpace(req.Request.Model()) == "" {
 		return nil, canonical.BadRequest("canonical request is required")
 	}
-	resolvedDelivery, err := resolveChatGPTProviderProtocol(req.Target.ProviderProtocol)
+	resolvedDelivery, err := resolveChatGPTDelivery(req.Target.ProviderProtocol)
 	if err != nil {
 		return nil, err
 	}
-	wireReq, err := codexwire.EncodeProviderRequestDocument(req.Request, toInternalDelivery(resolvedDelivery))
+	wireReq, err := codexwire.EncodeProviderRequestDocument(req.Request, resolvedDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -342,29 +341,18 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 	return strings.TrimRight(base, "/")
 }
 
-func resolveChatGPTProviderProtocol(providerProtocol string) (protocolsurface.Delivery, error) {
+func resolveChatGPTDelivery(providerProtocol string) (delivery.Delivery, error) {
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
 	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
-		return protocolsurface.BufferedDelivery(), canonical.BadEndpoint("chatgpt provider protocol must be concrete")
+		return delivery.BufferedDelivery(), canonical.BadEndpoint("chatgpt provider protocol must be concrete")
 	}
 	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecChatGPT), providerProtocol) {
-		return protocolsurface.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
+		return delivery.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
 	}
 	switch providerProtocol {
 	case "responses_stream":
-		return protocolsurface.StreamingDelivery(protocolsurface.FramingSSE), nil
+		return delivery.StreamingDelivery(delivery.FramingSSE), nil
 	default:
-		return protocolsurface.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
-	}
-}
-
-func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
-	switch surface.Variant {
-	case protocolsurface.DeliveryVariantStreaming:
-		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
-	case protocolsurface.DeliveryVariantBuffered:
-		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
-	default:
-		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
+		return delivery.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
 	}
 }

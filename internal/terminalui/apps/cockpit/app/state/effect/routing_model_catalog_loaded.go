@@ -11,6 +11,7 @@ type RoutingModelCatalogLoaded struct {
 	Scope                    string
 	ProviderSpec             string
 	BaseURL                  string
+	AuthHeader               string
 	CredentialRef            string
 	ProviderProtocol         string
 	ModelIDs                 []string

@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 type EndpointReader interface {
@@ -20,9 +19,12 @@ type ProviderIngressResolver interface {
 	ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error)
 }
 
-// ProviderRequest carries one resolved exchange attempt into provider ingress.
+// ProviderRequest carries one resolved exchange path and its realized provider
+// wire into provider ingress.
 type ProviderRequest struct {
-	Request         canonical.CanonicalRequest
+	Request canonical.CanonicalRequest
+	// RequestDocument is the already-realized provider wire document for the
+	// selected path.
 	RequestDocument carrier.WireDocument
 	Contract        ExecutionContract
 	Target          RoutableTarget
@@ -49,30 +51,30 @@ func NewProviderRequest(
 }
 
 type ExecutionContract struct {
-	// ClientDelivery is the adapter-edge delivery requested by the client-facing side.
-	ClientDelivery protocolsurface.Delivery
-	// ProviderDelivery is the adapter-edge delivery requested of the selected provider target.
-	ProviderDelivery protocolsurface.Delivery
+	// ClientDelivery is the canonical delivery requested by the client-facing side.
+	ClientDelivery delivery.Delivery
+	// ProviderDelivery is the canonical delivery requested of the selected provider target.
+	ProviderDelivery delivery.Delivery
 	// ConversionKind records the internal translation shape implied by the
 	// client/provider delivery pair.
 	ConversionKind delivery.Conversion
 }
 
-func NewExecutionContract(client protocolsurface.Delivery) ExecutionContract {
+func NewExecutionContract(client delivery.Delivery) ExecutionContract {
 	return NewExecutionContractForDeliveries(client, client)
 }
 
-func NewExecutionContractForDeliveries(clientDelivery protocolsurface.Delivery, providerDelivery protocolsurface.Delivery) ExecutionContract {
+func NewExecutionContractForDeliveries(clientDelivery delivery.Delivery, providerDelivery delivery.Delivery) ExecutionContract {
 	return ExecutionContract{
 		ClientDelivery:   clientDelivery,
 		ProviderDelivery: providerDelivery,
-		ConversionKind:   delivery.DeriveConversion(toInternalDelivery(clientDelivery), toInternalDelivery(providerDelivery)),
+		ConversionKind:   delivery.DeriveConversion(clientDelivery, providerDelivery),
 	}
 }
 
-func (c ExecutionContract) WithProviderDelivery(next protocolsurface.Delivery) ExecutionContract {
+func (c ExecutionContract) WithProviderDelivery(next delivery.Delivery) ExecutionContract {
 	c.ProviderDelivery = next
-	c.ConversionKind = delivery.DeriveConversion(toInternalDelivery(c.ClientDelivery), toInternalDelivery(c.ProviderDelivery))
+	c.ConversionKind = delivery.DeriveConversion(c.ClientDelivery, c.ProviderDelivery)
 	return c
 }
 
@@ -83,32 +85,10 @@ func (c ExecutionContract) Validate() error {
 	if err := c.ProviderDelivery.Validate(); err != nil {
 		return fmt.Errorf("provider delivery is invalid")
 	}
-	if want := delivery.DeriveConversion(toInternalDelivery(c.ClientDelivery), toInternalDelivery(c.ProviderDelivery)); want != c.ConversionKind {
+	if want := delivery.DeriveConversion(c.ClientDelivery, c.ProviderDelivery); want != c.ConversionKind {
 		return fmt.Errorf("delivery conversion kind is inconsistent with client/provider delivery")
 	}
 	return nil
-}
-
-func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
-	switch surface.Variant {
-	case protocolsurface.DeliveryVariantStreaming:
-		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
-	case protocolsurface.DeliveryVariantBuffered:
-		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
-	default:
-		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
-	}
-}
-
-func toProtocolsurfaceDelivery(in delivery.Delivery) protocolsurface.Delivery {
-	switch in.Mode {
-	case delivery.Streaming:
-		return protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariantStreaming, Framing: protocolsurface.Framing(in.Framing)}
-	case delivery.Buffered:
-		return protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariantBuffered, Framing: protocolsurface.Framing(in.Framing)}
-	default:
-		return protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariant(""), Framing: protocolsurface.Framing(in.Framing)}
-	}
 }
 
 type ProviderIngress any
@@ -148,6 +128,7 @@ type RoutableTarget struct {
 	ProviderSpec     string
 	BaseURL          string
 	CredentialRef    string
+	AuthHeader       string
 	ProtocolKind     protocolkind.ProtocolKind
 	AuthKind         string
 	SelectedFrame    string
@@ -159,11 +140,13 @@ func NewRoutableTarget(backendRef string, targetSpec string, baseURL string, cre
 	if len(targetProtocol) > 0 {
 		resolvedProviderProtocol = targetProtocol[0]
 	}
-	return RoutableTarget{BackendRef: backendRef, ProviderSpec: targetSpec, BaseURL: baseURL, CredentialRef: credentialRef, ProtocolKind: protocolKind, AuthKind: authKind, SelectedFrame: selectedFrame, ProviderProtocol: resolvedProviderProtocol}
+	return RoutableTarget{BackendRef: backendRef, ProviderSpec: targetSpec, BaseURL: baseURL, CredentialRef: credentialRef, AuthHeader: "", ProtocolKind: protocolKind, AuthKind: authKind, SelectedFrame: selectedFrame, ProviderProtocol: resolvedProviderProtocol}
 }
 
 func (t RoutableTarget) Clone() RoutableTarget {
-	return NewRoutableTarget(t.BackendRef, t.ProviderSpec, t.BaseURL, t.CredentialRef, t.ProtocolKind, t.AuthKind, t.SelectedFrame, t.ProviderProtocol)
+	cloned := NewRoutableTarget(t.BackendRef, t.ProviderSpec, t.BaseURL, t.CredentialRef, t.ProtocolKind, t.AuthKind, t.SelectedFrame, t.ProviderProtocol)
+	cloned.AuthHeader = t.AuthHeader
+	return cloned
 }
 
 func (t RoutableTarget) ProviderID() string { return t.ProviderSpec }

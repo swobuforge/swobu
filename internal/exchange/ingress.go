@@ -3,7 +3,6 @@ package exchange
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -26,10 +25,8 @@ const (
 
 // RequestIngress runs one client request lifecycle at the exchange boundary.
 type RequestIngress struct {
-	endpoints    EndpointReader
-	providerExec ProviderIngressResolver
-	runner       Runner
-	planner      RoutePlanner
+	endpoints EndpointReader
+	graph     exchangeGraph
 }
 
 type RuntimePoliciesSpec struct {
@@ -48,7 +45,13 @@ type RuntimeResolver interface {
 	ProviderDocumentDecoder(protocolkind.ProtocolKind, delivery.Delivery) ProviderDocumentDecoder
 }
 
-func NewIngress(endpoints EndpointReader, providerExec ProviderIngressResolver, runtime RuntimeResolver, policies RuntimePoliciesSpec) RequestIngress {
+// ExecutionRuntime resolves client codecs and provider ingress for one exchange run.
+type ExecutionRuntime interface {
+	RuntimeResolver
+	ProviderIngressResolver
+}
+
+func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
 	selector := policies.DeliverySelector
 	if selector == nil {
 		selector = FixedDeliverySelector{}
@@ -66,13 +69,12 @@ func NewIngress(endpoints EndpointReader, providerExec ProviderIngressResolver, 
 		}
 	}
 	return RequestIngress{
-		endpoints:    endpoints,
-		providerExec: providerExec,
-		runner:       Runner{ResolveProviderIngress: providerExec.ResolveProviderIngress, Runtime: runtime, Transforms: transform.Registry{}, EffectSink: sink},
-		planner: RoutePlanner{
+		endpoints: endpoints,
+		graph: exchangeGraph{
 			DeliverySelector: selector,
 			Observations:     policies.ObservationStore,
 			Continuation:     continuation,
+			Runner:           Runner{Runtime: runtime, Transforms: transform.Registry{}, EffectSink: sink},
 		},
 	}
 }
@@ -119,13 +121,6 @@ func (h RequestIngress) HandleRequestWithEndpoint(ctx context.Context, endpoint 
 }
 
 func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpointintent.Endpoint, in RequestInput) (TransportResponse, RoutableTarget, error) {
-	if h.providerExec == nil {
-		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("provider ingress resolver is not configured")
-	}
-	if h.runner.Runtime == nil {
-		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange runtime resolver is not configured")
-	}
-
 	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
@@ -133,11 +128,14 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if err := canonical.ValidateClientTransport(in.Request.Method, normalizedPath, false); err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
+	if h.graph.Runner.Runtime == nil {
+		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange runtime resolver is not configured")
+	}
 	clientFamily := in.ClientFamily
 	if clientFamily == "" {
 		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("client family is not configured")
 	}
-	clientCodec := h.runner.Runtime.ClientCodec(clientFamily)
+	clientCodec := h.graph.Runner.Runtime.ClientCodec(clientFamily)
 	if clientCodec == nil {
 		return TransportResponse{}, RoutableTarget{}, canonical.UnsupportedOperation("client family is not implemented")
 	}
@@ -150,7 +148,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	requestDocResult, err := applyDocumentTransform(
+	requestDocResult, err := applyDocumentMiddleware(
 		ctx,
 		transform.Registry{},
 		exchangeID,
@@ -158,6 +156,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		"",
 		"",
 		transform.StageClientWireIn,
+		clientRequestWireInPort(),
 		requestDoc,
 		delivery.BufferedDelivery(),
 	)
@@ -173,41 +172,17 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		return TransportResponse{}, RoutableTarget{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	routePlan, err := h.planner.Plan(ctx, RoutePlanInput{
-		Endpoint:       endpoint,
+	response, target, err := h.graph.Execute(ctx, exchangeGraphInput{
+		ExchangeID:     exchangeID,
+		ClientFamily:   clientFamily,
 		ClientDelivery: clientDelivery,
 		Request:        request,
+		Endpoint:       endpoint,
 	})
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	attempts := routePlan.Attempts
-	if len(attempts) == 0 {
-		attempts = []RouteAttempt{{
-			Request:          routePlan.Request,
-			Target:           routePlan.Target,
-			ProviderDelivery: routePlan.ProviderDelivery,
-			ProtocolKind:     routePlan.ProtocolKind,
-		}}
-	}
-	fallback := FallbackVendor{}
-	response, attempt, err := fallback.Execute(ctx, attempts, func(ctx context.Context, attempt RouteAttempt) (TransportResponse, error) {
-		contract := NewExecutionContract(toProtocolsurfaceDelivery(clientDelivery)).WithProviderDelivery(toProtocolsurfaceDelivery(attempt.ProviderDelivery))
-		return h.runner.Run(ctx, ExchangeInput{
-			ExchangeID:       exchangeID,
-			ClientFamily:     clientFamily,
-			ClientDelivery:   toInternalDelivery(contract.ClientDelivery),
-			Request:          attempt.Request,
-			Target:           attempt.Target,
-			Contract:         contract,
-			ProviderProtocol: attempt.ProtocolKind,
-			ProviderDelivery: toInternalDelivery(contract.ProviderDelivery),
-		})
-	})
-	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
-	}
-	return response, attempt.Target, nil
+	return response, target, nil
 }
 
 func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.WireDocument, error) {
@@ -239,18 +214,6 @@ func readTransportRequestBody(body io.ReadCloser) ([]byte, error) {
 		return nil, err
 	}
 	return raw, nil
-}
-
-func canFallbackOnExchangeError(err error) bool {
-	var backendErr canonical.BackendError
-	if errors.As(err, &backendErr) {
-		return true
-	}
-	var swobuErr canonical.Error
-	if errors.As(err, &swobuErr) && swobuErr.Code == canonical.ErrorCodeBadEndpoint {
-		return true
-	}
-	return false
 }
 
 func NewTransportRequest(method string, url string, header http.Header, body []byte) transportpkg.TransportRequest {

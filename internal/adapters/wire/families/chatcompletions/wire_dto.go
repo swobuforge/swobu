@@ -7,8 +7,10 @@ type chatCompletionsRequestDTO struct {
 	Messages             []chatCompletionsMessageDTO        `json:"messages"`
 	Tools                []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
 	ToolChoice           json.RawMessage                    `json:"tool_choice,omitempty"`
+	Temperature          json.RawMessage                    `json:"temperature,omitempty"`
 	MaxTokens            json.RawMessage                    `json:"max_tokens,omitempty"`
 	Stream               json.RawMessage                    `json:"stream,omitempty"`
+	StreamOptions        json.RawMessage                    `json:"stream_options,omitempty"`
 	PromptCacheKey       json.RawMessage                    `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage                    `json:"prompt_cache_retention,omitempty"`
 }

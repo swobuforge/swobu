@@ -49,5 +49,7 @@ func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader
 			}
 		}
 	}()
-	return carrier.WireStream{Family: protocolkind.Responses, Framing: framing, Frames: carrier.FrameReaderFromReadCloser(pr)}, nil
+	// Stage marks the carrier boundary for this streamed response leg; the
+	// exchange graph owns path selection above the adapter edge.
+	return carrier.WireStream{Stage: carrier.StageClientResponseOut, Family: protocolkind.Responses, Framing: framing, Frames: carrier.FrameReaderFromReadCloser(pr)}, nil
 }

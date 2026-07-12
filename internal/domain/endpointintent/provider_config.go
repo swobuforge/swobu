@@ -89,6 +89,7 @@ type ProviderConfig struct {
 	providerSpec     ProviderSpec
 	baseURL          string
 	credentialRef    string
+	authHeader       string
 	providerProtocol string
 	modelID          string
 	targetAlias      string
@@ -123,15 +124,22 @@ func NewProviderConfig(
 	if !ok {
 		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no default provider protocol", ErrInvalidProviderConfig)
 	}
-	return ProviderConfig{
+	config := ProviderConfig{
 		ref:              ref,
 		providerSpec:     spec,
 		baseURL:          baseURL,
 		credentialRef:    credentialRef,
+		authHeader:       "",
 		providerProtocol: providerProtocol,
 		modelID:          "",
 		targetAlias:      "",
-	}, nil
+	}
+	var err error
+	config, err = config.WithAuthHeader("")
+	if err != nil {
+		return ProviderConfig{}, err
+	}
+	return config, nil
 }
 
 func (c ProviderConfig) Ref() ProviderConfigRef {
@@ -150,6 +158,34 @@ func (c ProviderConfig) CredentialRef() string {
 	return c.credentialRef
 }
 
+func (c ProviderConfig) AuthHeader() string {
+	header := strings.TrimSpace(c.authHeader) // swobu:io-string source=boundary
+	if header != "" {
+		return header
+	}
+	if c.providerSpec.String() == "openai_compatible" {
+		return profile.DefaultAuthHeaderForSpec(c.providerSpec.String())
+	}
+	return ""
+}
+
+func isValidHTTPHeaderFieldName(name string) bool {
+	if strings.TrimSpace(name) == "" { // swobu:io-string source=boundary
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", r):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (c ProviderConfig) ProtocolKind() protocolkind.ProtocolKind {
 	kind, _, ok := profile.ProviderProtocolKindAndFrame(c.providerSpec.String(), c.providerProtocol)
 	if ok {
@@ -160,6 +196,13 @@ func (c ProviderConfig) ProtocolKind() protocolkind.ProtocolKind {
 
 func (c ProviderConfig) ProviderProtocol() string {
 	return c.providerProtocol
+}
+
+// WithProviderProtocolAuto preserves unresolved auto protocol selection so a
+// save-boundary caller can hand protocol realization to the daemon resolver.
+func (c ProviderConfig) WithProviderProtocolAuto() ProviderConfig {
+	c.providerProtocol = profile.ProviderProtocolAuto
+	return c
 }
 
 func (c ProviderConfig) WithProviderProtocol(providerProtocol string) (ProviderConfig, error) {
@@ -189,6 +232,31 @@ func (c ProviderConfig) WithProviderProtocol(providerProtocol string) (ProviderC
 		)
 	}
 	c.providerProtocol = providerProtocol
+	return c, nil
+}
+
+// WithAuthHeader stores the selected auth-header name for OpenAI-compatible
+// provider configs.
+func (c ProviderConfig) WithAuthHeader(authHeader string) (ProviderConfig, error) {
+	authHeader = strings.TrimSpace(authHeader) // swobu:io-string source=domain
+	if c.providerSpec.value == "" {
+		return ProviderConfig{}, fmt.Errorf("%w: provider spec is required", ErrInvalidProviderConfig)
+	}
+	if c.providerSpec.String() != "openai_compatible" {
+		if authHeader != "" {
+			return ProviderConfig{}, fmt.Errorf("%w: auth header is unsupported for provider %q", ErrInvalidProviderConfig, c.providerSpec.String())
+		}
+		c.authHeader = ""
+		return c, nil
+	}
+	if authHeader == "" {
+		c.authHeader = profile.DefaultAuthHeaderForSpec(c.providerSpec.String())
+		return c, nil
+	}
+	if !isValidHTTPHeaderFieldName(authHeader) {
+		return ProviderConfig{}, fmt.Errorf("%w: auth header %q is invalid", ErrInvalidProviderConfig, authHeader)
+	}
+	c.authHeader = authHeader
 	return c, nil
 }
 

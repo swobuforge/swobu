@@ -34,6 +34,7 @@ type openAIProviderRoutePolicy struct{}
 type ollamaProviderRoutePolicy struct{}
 type openAICompatibleProviderRoutePolicy struct{}
 type openRouterProviderRoutePolicy struct{}
+type azureProviderRoutePolicy struct{}
 type passthroughProviderUsageDecoder struct{}
 
 func (passthroughProviderUsageDecoder) DecodeToCanonical(_ RawUsageEnvelope, current canonical.TokenUsage) (canonical.TokenUsage, []report.Notice) {
@@ -74,7 +75,19 @@ func (openAICompatibleProviderRoutePolicy) Facts(req canonical.CanonicalRequest)
 func (openAICompatibleProviderRoutePolicy) UsageDecoder() ProviderUsageDecoder {
 	return passthroughProviderUsageDecoder{}
 }
-func (openAICompatibleProviderRoutePolicy) AuthStrategy() authStrategy { return xAPIKeyAuthStrategy() }
+func (openAICompatibleProviderRoutePolicy) AuthStrategy() authStrategy { return bearerAuthStrategy() }
+
+func (azureProviderRoutePolicy) ProviderID() profile.ProviderID {
+	return profile.ProviderSpecAzure
+}
+
+func (azureProviderRoutePolicy) Facts(req canonical.CanonicalRequest) ProfileFactRecord {
+	return routeProfileFactRecord(req)
+}
+func (azureProviderRoutePolicy) UsageDecoder() ProviderUsageDecoder {
+	return passthroughProviderUsageDecoder{}
+}
+func (azureProviderRoutePolicy) AuthStrategy() authStrategy { return apiKeyAuthStrategy() }
 
 func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 	return profile.ProviderSpecOpenRouter
@@ -103,3 +116,5 @@ func NewOpenAICompatiblePolicy() ProviderRoutePolicy {
 }
 
 func NewOpenRouterPolicy() ProviderRoutePolicy { return openRouterProviderRoutePolicy{} }
+
+func NewAzurePolicy() ProviderRoutePolicy { return azureProviderRoutePolicy{} }

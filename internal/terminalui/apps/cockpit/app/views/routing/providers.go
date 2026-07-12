@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
@@ -26,13 +27,15 @@ func BuildProvidersCreatePanel(ctx *retained.Context[state.Model]) retained.View
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	expanded, setExpanded := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	onClose := func() []update.Action {
+		setOpen(false)
+		setExpanded(false)
+		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
+	}
+	items := createProviderSpecItems(model, onClose)
 	var cancelFn func() []update.Action
 	if open || expanded {
-		cancelFn = func() []update.Action {
-			setOpen(false)
-			setExpanded(false)
-			return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
-		}
+		cancelFn = onClose
 	}
 	parent := views.RowManageWithHooks(views.RowProviders, fmt.Sprintf("%d configured", configured), func() []update.Action {
 		if open {
@@ -42,22 +45,20 @@ func BuildProvidersCreatePanel(ctx *retained.Context[state.Model]) retained.View
 		}
 		setOpen(true)
 		views.ResetFilterablePickerState(setPicker)
-		return []update.Action{
+		actions := []update.Action{
 			state.SetInteractionMode{Mode: state.InteractionModeManageList},
-			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("providers-create-option", 0)},
 		}
+		if focusKey := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "providers-create-option"}); focusKey != "" {
+			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+		}
+		return actions
 	}, cancelFn, views.FocusAffordance("manage", false))
 	var out retained.ViewSpec[state.Model]
 	if !open {
 		out = parent
 	} else {
-		onClose := func() []update.Action {
-			setOpen(false)
-			setExpanded(false)
-			return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
-		}
 		if draftProvider == nil {
-			out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, createProviderSpecItems(model, onClose), views.FilterablePickerConfig{
+			out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
 				KeyPrefix:      "providers-create-option",
 				BuildOptionRow: views.ChoicePickerOptionRow(true),
 				WindowSize:     6,
@@ -121,6 +122,7 @@ func createProviderSpecItems(model state.Model, onCancel func() []update.Action)
 		}
 		choiceSpec := spec
 		items = append(items, views.FilterablePickerItem{
+			Key:      spec,
 			Label:    label,
 			Search:   choiceSpec + " " + label,
 			Selected: choiceSpec == currentSpec,
@@ -146,6 +148,11 @@ func createProviderPropertyRows(
 	rows = appendCanonicalProviderConfigLayout(rows, "", canonicalProviderConfigLayout{
 		Provider: providerSpecRow(providerConfig),
 		Credential: providerCredentialChoiceRow(providerCredentialChoiceRowSpec{
+			ProviderConfig: providerConfig,
+			EndpointName:   endpointName,
+			CreateMode:     createMode,
+		}),
+		AuthHeader: providerAuthHeaderRow(providerAuthHeaderRowSpec{
 			ProviderConfig: providerConfig,
 			EndpointName:   endpointName,
 			CreateMode:     createMode,
@@ -224,7 +231,7 @@ func providerScopeRow(spec providerScopeRowSpec) retained.ViewSpec[state.Model] 
 			CreateMode:     spec.CreateMode,
 		})
 	}
-	if strings.EqualFold(providerSpec, "openai_compatible") {
+	if profile.RequiresExplicitExecuteBaseURL(providerSpec) {
 		return providerBackendURLRow(providerBackendURLRowSpec{
 			ProviderConfig: spec.ProviderConfig,
 			EndpointName:   spec.EndpointName,

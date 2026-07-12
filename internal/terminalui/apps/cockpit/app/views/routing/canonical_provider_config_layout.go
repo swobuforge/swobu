@@ -11,6 +11,7 @@ import (
 type canonicalProviderConfigLayout struct {
 	Provider   retained.ViewSpec[state.Model]
 	Credential retained.ViewSpec[state.Model]
+	AuthHeader retained.ViewSpec[state.Model]
 	Scope      retained.ViewSpec[state.Model]
 	Model      retained.ViewSpec[state.Model]
 	Protocol   retained.ViewSpec[state.Model]
@@ -28,6 +29,9 @@ func appendCanonicalProviderConfigLayout(rows []retained.ViewSpec[state.Model], 
 	}
 	if shared.Credential != nil {
 		rows = append(rows, retained.Named[state.Model](key("credential"), shared.Credential))
+	}
+	if shared.AuthHeader != nil {
+		rows = append(rows, retained.Named[state.Model](key("auth_header"), shared.AuthHeader))
 	}
 	if shared.Scope != nil {
 		rows = append(rows, retained.Named[state.Model](key("scope"), shared.Scope))

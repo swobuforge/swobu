@@ -9,26 +9,17 @@ import (
 )
 
 type DeliverySelector interface {
-	SelectProviderDelivery(ctx context.Context, route RouteSpec, client delivery.Delivery, observations observation.Snapshot) delivery.Delivery
+	SelectProviderDelivery(ctx context.Context, client delivery.Delivery, observations observation.Snapshot) delivery.Delivery
 }
 
 type FixedDeliverySelector struct{}
 
-func (FixedDeliverySelector) SelectProviderDelivery(_ context.Context, route RouteSpec, client delivery.Delivery, observations observation.Snapshot) delivery.Delivery {
-	target := route.Provider
+func (FixedDeliverySelector) SelectProviderDelivery(_ context.Context, client delivery.Delivery, observations observation.Snapshot) delivery.Delivery {
 	for _, obs := range observations {
 		code := strings.TrimSpace(obs.Code) // swobu:io-string source=boundary
 		if strings.EqualFold(code, "delivery.websocket.unavailable") {
-			for _, supported := range target.Delivery.Supported {
-				if supported.Mode == delivery.Streaming && supported.Framing == delivery.FramingSSE {
-					return supported
-				}
-			}
-			return delivery.BufferedDelivery()
+			return delivery.StreamingDelivery(delivery.FramingSSE)
 		}
-	}
-	if len(target.Delivery.Supported) > 0 {
-		return target.Delivery.Preferred
 	}
 	return client
 }

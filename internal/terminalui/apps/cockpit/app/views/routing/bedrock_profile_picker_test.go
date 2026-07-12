@@ -11,30 +11,31 @@ import (
 func TestBedrockProfilePickerToggleActions_OpenSetsPickerFocus(t *testing.T) {
 	t.Parallel()
 
-	actions := bedrockProfilePickerToggleActions(true, state.InteractionModeManageList)
+	items := bedrockProfilePickerItems([]string{"swobu-bedrock"}, "", nil)
+	actions := bedrockProfilePickerToggleActions(true, state.InteractionModeManageList, items)
 	if len(actions) != 2 {
 		t.Fatalf("actions len=%d want 2", len(actions))
 	}
-	focus, ok := actions[0].(interaction.FocusKeyAction)
+	mode, ok := actions[0].(state.SetInteractionMode)
 	if !ok {
-		t.Fatalf("action[0]=%T want interaction.FocusKeyAction", actions[0])
-	}
-	if want := views.FilterablePickerFocusKey("bedrock-profile-option", 0); focus.Key != want {
-		t.Fatalf("focus key=%q want %q", focus.Key, want)
-	}
-	mode, ok := actions[1].(state.SetInteractionMode)
-	if !ok {
-		t.Fatalf("action[1]=%T want state.SetInteractionMode", actions[1])
+		t.Fatalf("action[0]=%T want state.SetInteractionMode", actions[0])
 	}
 	if mode.Mode != state.InteractionModePickOne {
 		t.Fatalf("mode=%q want %q", mode.Mode, state.InteractionModePickOne)
+	}
+	focus, ok := actions[1].(interaction.FocusKeyAction)
+	if !ok {
+		t.Fatalf("action[1]=%T want interaction.FocusKeyAction", actions[1])
+	}
+	if want := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "bedrock-profile-option"}); focus.Key != want {
+		t.Fatalf("focus key=%q want %q", focus.Key, want)
 	}
 }
 
 func TestBedrockProfilePickerToggleActions_CloseRestoresCloseMode(t *testing.T) {
 	t.Parallel()
 
-	actions := bedrockProfilePickerToggleActions(false, state.InteractionModeManageList)
+	actions := bedrockProfilePickerToggleActions(false, state.InteractionModeManageList, nil)
 	if len(actions) != 1 {
 		t.Fatalf("actions len=%d want 1", len(actions))
 	}

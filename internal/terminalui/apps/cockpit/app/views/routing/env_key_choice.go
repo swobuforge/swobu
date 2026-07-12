@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
@@ -65,13 +66,21 @@ func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, 
 		if baseURL == "" {
 			baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 		}
-		baseURL = resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, baseURL)
+		baseURL = resolveBedrockMantleBaseURL(providerSpec, envKey, baseURL)
+		authHeader := ""
+		if providerConfig != nil {
+			authHeader = strings.TrimSpace(providerConfig.AuthHeader)
+		}
+		if strings.EqualFold(strings.TrimSpace(providerSpec), "openai_compatible") && authHeader == "" {
+			authHeader = stateModel.ProviderDefaultAuthHeader(providerSpec)
+		}
 		return []update.Action{
 			state.SetCreateDraftCredentialRef{CredentialRef: ref},
 			state.SetCreateDraftModelIDAction{ModelID: ""},
 			state.LoadRoutingModelCatalogRequestedAction{
 				Scope:            state.RoutingModelCatalogScopeCreateDraft,
-				ProviderSpec:     strings.TrimSpace(providerSpec),     // swobu:io-string source=boundary
+				ProviderSpec:     strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
+				AuthHeader:       authHeader,
 				ProviderProtocol: strings.TrimSpace(providerProtocol), // swobu:io-string source=boundary
 				BaseURL:          baseURL,
 				CredentialRef:    ref,
@@ -83,22 +92,30 @@ func applyProviderEnvKeySelection(providerSpec string, providerProtocol string, 
 	}
 	next := *providerConfig
 	next.CredentialRef = ref
-	next.BaseURL = resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, strings.TrimSpace(next.BaseURL)) // swobu:io-string source=boundary
-	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/env")              // swobu:io-string source=boundary
+	next.BaseURL = resolveBedrockMantleBaseURL(providerSpec, envKey, strings.TrimSpace(next.BaseURL)) // swobu:io-string source=boundary
+	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/env")    // swobu:io-string source=boundary
 }
 
-func resolveOpenAICompatibleBedrockBaseURL(providerSpec, envKey, currentBaseURL string) string {
+func resolveBedrockMantleBaseURL(providerSpec, envKey, currentBaseURL string) string {
 	providerSpec = strings.TrimSpace(providerSpec)     // swobu:io-string source=boundary
 	envKey = strings.TrimSpace(envKey)                 // swobu:io-string source=boundary
 	currentBaseURL = strings.TrimSpace(currentBaseURL) // swobu:io-string source=boundary
-	if !strings.EqualFold(providerSpec, "openai_compatible") {
-		return currentBaseURL
-	}
-	if !strings.EqualFold(envKey, "AWS_BEARER_TOKEN_BEDROCK") {
-		return currentBaseURL
-	}
 	if currentBaseURL != "" {
 		return currentBaseURL
 	}
-	return bedrockOpenAICompatibleBaseURLForRegion(bedrockResolvedRegion("", ""))
+	if strings.EqualFold(providerSpec, "bedrock") {
+		region := bedrockResolvedRegion("", currentBaseURL)
+		if region == "" {
+			region = bedrockDefaultRegionFromList()
+		}
+		return bedrockOpenAICompatibleBaseURLForRegion(region)
+	}
+	if strings.EqualFold(providerSpec, "openai_compatible") && strings.EqualFold(envKey, "AWS_BEARER_TOKEN_BEDROCK") {
+		region := bedrockResolvedRegion("", currentBaseURL)
+		if region == "" {
+			region = bedrockDefaultRegionFromList()
+		}
+		return bedrockOpenAICompatibleBaseURLForRegion(region)
+	}
+	return currentBaseURL
 }

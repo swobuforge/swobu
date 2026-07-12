@@ -15,7 +15,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/transform"
 )
 
@@ -43,7 +42,7 @@ func (r *blockingEnvelopeReader) Next(context.Context) (canonical.Event, error) 
 func (r *blockingEnvelopeReader) Close(context.Context) error { return nil }
 
 func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
-	runner := withRuntime(Runner{ResolveProviderIngress: bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`))})
+	runner := withRuntime(bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)))
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -52,7 +51,7 @@ func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -73,7 +72,7 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
-	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE)))})
+	runner := withRuntime(streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE))))
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test_stream",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -82,7 +81,7 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -106,11 +105,9 @@ func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenMiddlewareBuffersRes
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
-	runner := withRuntime(Runner{
-		ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE))),
-		Transforms: transform.NewRegistry(nil, []transform.EventStreamTransform{
-			bufferingResponseTransform{},
-		}),
+	runner := withRuntime(streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE))))
+	runner.Transforms = transform.NewRegistry(nil, []transform.EventStreamTransform{
+		bufferingResponseTransform{},
 	})
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test_stream_buffered_middleware",
@@ -120,7 +117,7 @@ func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenMiddlewareBuffersRes
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -141,7 +138,7 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
 
-	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(providerRead)})
+	runner := withRuntime(streamingProviderIngressResolver(providerRead))
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_test_stream_non_blocking",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -150,7 +147,7 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -184,9 +181,9 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 }
 
 func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
-	runner := withRuntime(Runner{ResolveProviderIngress: func(context.Context, ProviderRequest) (ProviderIngress, error) {
+	runner := withRuntime(func(context.Context, ProviderRequest) (ProviderIngress, error) {
 		return nil, nil
-	}})
+	})
 	_, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_invalid_transport_shape",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -195,7 +192,7 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
 		t.Fatal("Run() expected error for invalid provider ingress")
@@ -206,7 +203,7 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 }
 
 func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
-	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n")))})
+	runner := withRuntime(streamingProviderIngressResolver(io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n"))))
 	_, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_invalid_delivery_shape",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -215,7 +212,7 @@ func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
 		t.Fatal("Run() expected error for buffered delivery with transport stream")
@@ -235,7 +232,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		<-release
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
-	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(providerRead)})
+	runner := withRuntime(streamingProviderIngressResolver(providerRead))
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_chat_stream_non_blocking",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -244,7 +241,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -319,9 +316,23 @@ func (bufferingResponseTransform) Wrap(_ transform.Context, reader canonical.Eve
 	return reader, transform.Outcome{}, nil
 }
 
-func withRuntime(runner Runner) Runner {
-	runner.Runtime = testRuntimeResolver{}
-	return runner
+func withRuntime(providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)) Runner {
+	return Runner{Runtime: testExecutionRuntime{
+		testRuntimeResolver: testRuntimeResolver{},
+		providerIngress:     providerIngress,
+	}}
+}
+
+type testExecutionRuntime struct {
+	testRuntimeResolver
+	providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)
+}
+
+func (r testExecutionRuntime) ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error) {
+	if r.providerIngress == nil {
+		return nil, canonical.InternalError("test provider ingress resolver is required")
+	}
+	return r.providerIngress(ctx, req)
 }
 
 type testRuntimeResolver struct{}

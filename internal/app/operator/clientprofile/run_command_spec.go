@@ -33,7 +33,10 @@ func profileSpecFromCapability(spec capabilityClientSpec) ProfileSpec {
 func compileCapabilityActions(spec capabilityClientSpec) []ActionSpec {
 	actions := make([]ActionSpec, 0, len(spec.Actions))
 	for _, actionSpec := range spec.Actions {
-		desc := actionDescriptors[actionSpec.Kind]
+		desc, ok := actionDescriptors[actionSpec.Kind]
+		if !ok {
+			continue
+		}
 		summary := strings.TrimSpace(actionSpec.Summary) // swobu:io-string source=boundary
 		if summary == "" {
 			summary = desc.Summary
@@ -43,12 +46,11 @@ func compileCapabilityActions(spec capabilityClientSpec) []ActionSpec {
 			content = runActionContentTemplate(spec.Run)
 		}
 		actions = append(actions, ActionSpec{
-			ID:        actionSpec.ID,
-			Label:     desc.Label,
-			Summary:   summary,
-			Verb:      desc.Verb,
-			FocusVerb: actionSpec.FocusVerb,
-			Content:   content,
+			ID:      actionSpec.ID,
+			Label:   desc.Label,
+			Summary: summary,
+			Verb:    desc.Verb,
+			Content: content,
 		})
 	}
 	return actions
@@ -87,7 +89,7 @@ func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool)
 	if spec.Run.Prepare != nil {
 		command.Prepare = &RunPrepareFileSpec{
 			Path:           renderTemplate(spec.Run.Prepare.Path, vars),
-			Content:        runPrepareContent(*spec.Run.Prepare, spec, baseURL),
+			Content:        runPrepareContent(*spec.Run.Prepare, vars),
 			Mode:           spec.Run.Prepare.Mode,
 			WriteIfMissing: spec.Run.Prepare.WriteIfMissing,
 		}
@@ -154,15 +156,9 @@ func renderTemplateMap(values map[string]string, vars TemplateVars) map[string]s
 	return out
 }
 
-func runPrepareContent(prepare capabilityRunPrepareSpec, spec capabilityClientSpec, baseURL string) string {
-	if strings.TrimSpace(prepare.FromActionID) == "" { // swobu:io-string source=boundary
+func runPrepareContent(prepare capabilityRunPrepareSpec, vars TemplateVars) string {
+	if strings.TrimSpace(prepare.Content) == "" { // swobu:io-string source=boundary
 		return ""
 	}
-	actions := compileProfileActions(profileSpecFromCapability(spec), baseURL)
-	for _, action := range actions {
-		if strings.TrimSpace(action.ID) == strings.TrimSpace(prepare.FromActionID) { // swobu:io-string source=boundary
-			return action.Content
-		}
-	}
-	return ""
+	return renderTemplate(prepare.Content, vars)
 }

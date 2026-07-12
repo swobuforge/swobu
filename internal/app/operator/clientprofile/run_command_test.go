@@ -18,6 +18,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		t.Fatalf("Getwd: %v", err)
 	}
 	opencodeConfigPath := filepath.Join(cwd, "opencode.json")
+	piConfigPath := filepath.Join(cwd, ".pi", "agent")
 	tests := []struct {
 		clientID    string
 		binary      string
@@ -39,8 +40,6 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			binary:   "codex",
 			contains: []string{
 				`--dangerously-bypass-approvals-and-sandbox`,
-				`--disable`,
-				`apps`,
 				`model="gpt-5.5"`,
 				`model_provider="swobu"`,
 				`model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`,
@@ -75,6 +74,17 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 				"OPENCODE_CONFIG_CONTENT": `"apiKey":"{env:OPENAI_API_KEY}"`,
 			},
 			preparePath: "./opencode.json",
+		},
+		{
+			clientID: "pi",
+			binary:   "pi",
+			contains: []string{"--no-context-files", "--no-skills", "--provider", "swobu", "--model", "gpt-4.1-mini"},
+			envChecks: map[string]string{
+				"OPENAI_API_KEY":      "swobu-placeholder",
+				"PI_CODING_AGENT_DIR": piConfigPath,
+				"PI_OFFLINE":          "1",
+			},
+			preparePath: "./.pi/agent/models.json",
 		},
 	}
 
@@ -118,6 +128,19 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 			if !strings.Contains(command.Prepare.Content, "http://127.0.0.1:7926/c/acme/v1") {
 				t.Fatalf("prepare content=%q", command.Prepare.Content)
 			}
+			if tc.clientID == "pi" {
+				for _, fragment := range []string{
+					`"api":"openai-responses"`,
+					`"apiKey":"swobu-placeholder"`,
+					`"authHeader":true`,
+					`"supportsDeveloperRole":false`,
+					`"id":"gpt-4.1-mini"`,
+				} {
+					if !strings.Contains(command.Prepare.Content, fragment) {
+						t.Fatalf("pi prepare content=%q missing fragment=%q", command.Prepare.Content, fragment)
+					}
+				}
+			}
 		})
 	}
 }
@@ -126,7 +149,7 @@ func TestResolveRunCommand_RejectsBatchProbeArgs(t *testing.T) {
 	t.Parallel()
 
 	baseURL := "http://127.0.0.1:7926/c/acme/"
-	for _, clientID := range []string{"codex", "aider", "claude", "continue", "opencode"} {
+	for _, clientID := range []string{"codex", "aider", "claude", "continue", "opencode", "pi"} {
 		command, ok := ResolveRunCommand(clientID, baseURL, "")
 		if !ok {
 			t.Fatalf("ResolveRunCommand(%q) returned not ok", clientID)

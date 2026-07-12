@@ -138,6 +138,46 @@ func TestLoadRoutingModelCatalogEffect_ChatGPTTierlessCredentialErrorSurfaced(t 
 	}
 }
 
+func TestLoadRoutingModelCatalogEffect_OpenAICompatibleDefaultsAuthHeaderQueryParam(t *testing.T) {
+	sawAuthHeader := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_swobu/model-catalog" {
+			http.NotFound(w, r)
+			return
+		}
+		sawAuthHeader = r.URL.Query().Get("auth_header")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model_ids":["gpt-4.1-mini"]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+	actions := (LoadRoutingModelCatalogEffect{
+		Scope:            "create_draft",
+		ProviderSpec:     "openai_compatible",
+		BaseURL:          "https://example.test/v1",
+		CredentialRef:    "env:OPENAI_API_KEY",
+		ProviderProtocol: "auto",
+	}).Execute(context.Background())
+
+	if sawAuthHeader != "Authorization" {
+		t.Fatalf("auth header query=%q want Authorization", sawAuthHeader)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions length = %d, want 1", len(actions))
+	}
+	loaded, ok := actions[0].(RoutingModelCatalogLoaded)
+	if !ok {
+		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
+	}
+	if loaded.AuthHeader != "Authorization" {
+		t.Fatalf("loaded auth header=%q want Authorization", loaded.AuthHeader)
+	}
+	if len(loaded.ModelIDs) != 1 || loaded.ModelIDs[0] != "gpt-4.1-mini" {
+		t.Fatalf("loaded model ids=%v", loaded.ModelIDs)
+	}
+}
+
 func TestRefreshStatusProjectionEffect_MissingObservedAt_FailsFast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/_swobu/status-projection" {

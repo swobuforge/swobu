@@ -35,6 +35,12 @@ func TestProviderCredentialSelectionRequired(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "azure requires credential",
+			provider: "azure",
+			baseURL:  "https://contact-5464-resource.openai.azure.com/openai/v1",
+			want:     true,
+		},
+		{
 			name:     "OpenAI-compatible local does not require credential",
 			provider: "openai_compatible",
 			baseURL:  "http://localhost:11434/v1",

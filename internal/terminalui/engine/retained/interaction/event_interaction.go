@@ -33,6 +33,13 @@ type EventHandler interface {
 	HandleEvent(ev Event, node *layout.LayoutNode) []update.Action
 }
 
+// EventTransformer participates in runtime bubbling with explicit event
+// transformation. Returning nil consumes the event locally; returning the same
+// or a modified event bubbles that value to the parent after local handling.
+type EventTransformer interface {
+	HandleEventTransform(ev Event, node *layout.LayoutNode) (*Event, []update.Action)
+}
+
 // ScopedEventHandler participates in runtime bubbling. Implementations may
 // return handled=true with zero actions to consume an event locally.
 type ScopedEventHandler interface {

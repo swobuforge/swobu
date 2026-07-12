@@ -73,6 +73,15 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 	if w.CreateMode {
 		closeMode = state.InteractionModeNAV
 	}
+	previewOptions := make([]modelPickerOption, 0, len(model.AddModelDraftModelIDs))
+	for _, modelID := range model.AddModelDraftModelIDs {
+		id := strings.TrimSpace(modelID)
+		if id == "" {
+			continue
+		}
+		previewOptions = append(previewOptions, modelPickerOption{Key: id, Label: id})
+	}
+	previewFocusKey := modelPickerFirstFocusKey(previewOptions, "provider-model-option")
 	parent := views.RowChoiceWithCancel(views.RowModel, current, func() []update.Action {
 		nextOpen := !open
 		setOpen(nextOpen)
@@ -89,11 +98,14 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 			actions = append(actions, state.LoadRoutingModelCatalogRequestedAction{
 				Scope:            state.RoutingModelCatalogScopeAddModelDraft,
 				ProviderSpec:     strings.TrimSpace(pc.ProviderSpec),     // swobu:io-string source=boundary
+				AuthHeader:       strings.TrimSpace(pc.AuthHeader),       // swobu:io-string source=boundary
 				ProviderProtocol: strings.TrimSpace(pc.ProviderProtocol), // swobu:io-string source=boundary
 				BaseURL:          strings.TrimSpace(pc.BaseURL),          // swobu:io-string source=boundary
 				CredentialRef:    strings.TrimSpace(pc.CredentialRef),    // swobu:io-string source=boundary // swobu:io-string source=boundary
 			})
-			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("provider-model-option", 0)})
+			if previewFocusKey != "" {
+				actions = append(actions, interaction.FocusKeyAction{Key: previewFocusKey})
+			}
 		}
 		return actions
 	}, func() []update.Action {
@@ -117,6 +129,7 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 		selected := selectedModelID(ctx.Model(), w.ProviderConfig, w.CreateMode) == modelID
 		choice := modelID
 		options = append(options, modelPickerOption{
+			Key:      choice,
 			Label:    choice,
 			Selected: selected,
 			OnChoose: func() []update.Action {
@@ -164,6 +177,9 @@ func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.
 		return false
 	}
 	if model.AddModelDraftBaseURL != providerConfig.BaseURL {
+		return false
+	}
+	if model.AddModelDraftAuthHeader != providerConfig.AuthHeader {
 		return false
 	}
 	if model.AddModelDraftCredentialRef != providerConfig.CredentialRef {

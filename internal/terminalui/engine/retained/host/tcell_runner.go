@@ -44,7 +44,9 @@ func (r *Runner[M]) Run(ctx context.Context) error {
 		return err
 	}
 	defer r.Screen.Fini()
-	r.Screen.EnableMouse()
+	// Only button events are enabled at the terminal edge. Hover and drag
+	// motion must not leak into click-to-focus or activation semantics.
+	r.Screen.EnableMouse(tcell.MouseButtonEvents)
 	unregisterForeground := registerForegroundRunner(r.runForegroundHandoff)
 	defer unregisterForeground()
 
@@ -242,8 +244,22 @@ func mapTcellKey(tk tcell.Key, r rune) (interaction.Key, rune) {
 
 func mapMouseEvent(ev *tcell.EventMouse) interaction.Event {
 	x, y := ev.Position()
+	buttons := ev.Buttons()
+	kind := interaction.EventMouseUp
+	// ButtonNone covers release and hover/motion-without-buttons in tcell.
+	// Keep it inert so only actual button presses can focus or activate.
+	switch {
+	case buttons&tcell.WheelUp != 0:
+		kind = interaction.EventWheelUp
+	case buttons&tcell.WheelDown != 0:
+		kind = interaction.EventWheelDown
+	case buttons&tcell.WheelLeft != 0 || buttons&tcell.WheelRight != 0:
+		kind = interaction.EventMouseUp
+	case buttons != tcell.ButtonNone:
+		kind = interaction.EventMouseDown
+	}
 	return interaction.Event{
-		Kind: interaction.EventMouseDown,
+		Kind: kind,
 		Pos:  geom.Point{X: x, Y: y},
 	}
 }

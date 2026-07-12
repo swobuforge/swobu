@@ -27,6 +27,43 @@ func (k namedRenderNodeMeta) HandleEvent(ev interaction.Event, node *layout.Layo
 	}
 	return nil
 }
+func (k namedRenderNodeMeta) HandleEventTransform(ev interaction.Event, node *layout.LayoutNode) (*interaction.Event, []update.Action) {
+	if h, ok := k.RenderNode.(interaction.EventTransformer); ok {
+		return h.HandleEventTransform(ev, node)
+	}
+	if h, ok := k.RenderNode.(interaction.ScopedEventHandler); ok {
+		handled, actions := h.HandleScopedEvent(ev, node)
+		if handled {
+			return nil, actions
+		}
+		return &ev, actions
+	}
+	if h, ok := k.RenderNode.(interaction.EventHandler); ok {
+		actions := h.HandleEvent(ev, node)
+		if len(actions) > 0 {
+			return nil, actions
+		}
+	}
+	return &ev, nil
+}
+func (k namedRenderNodeMeta) PostCommitEffects() []update.Effect {
+	if h, ok := k.RenderNode.(interface{ PostCommitEffects() []update.Effect }); ok {
+		return h.PostCommitEffects()
+	}
+	return nil
+}
+func (k namedRenderNodeMeta) OnMountEffects() []update.Effect {
+	if h, ok := k.RenderNode.(interface{ OnMountEffects() []update.Effect }); ok {
+		return h.OnMountEffects()
+	}
+	return nil
+}
+func (k namedRenderNodeMeta) OnUnmountEffects() []update.Effect {
+	if h, ok := k.RenderNode.(interface{ OnUnmountEffects() []update.Effect }); ok {
+		return h.OnUnmountEffects()
+	}
+	return nil
+}
 func (k namedRenderNodeMeta) HandleScopedEvent(ev interaction.Event, node *layout.LayoutNode) (bool, []update.Action) {
 	if h, ok := k.RenderNode.(interaction.ScopedEventHandler); ok {
 		return h.HandleScopedEvent(ev, node)
@@ -99,7 +136,7 @@ func renderNamed[M any](ctx *Context[M], name string, child ViewSpec[M]) RenderN
 	return namedRenderNodeMeta{
 		RenderNode: node,
 		key:        name,
-		lifecycle:  captureLifecycle(child),
+		lifecycle:  mergeLifecycle(captureLifecycle(child), captureLifecycle(node)),
 	}
 }
 
@@ -115,7 +152,19 @@ func BuildViewRootNode[M any](root ViewSpec[M], local LocalScope, dispatch func(
 	if root == nil {
 		return nil
 	}
-	return buildViewNode(root, local, dispatch, emit, model)
+	node := buildViewNode(root, local, dispatch, emit, model)
+	if node == nil {
+		return nil
+	}
+	lifecycle := mergeLifecycle(captureLifecycle(root), captureLifecycle(node))
+	if len(lifecycle.OnMount) == 0 && len(lifecycle.OnUnmount) == 0 {
+		return node
+	}
+	return namedRenderNodeMeta{
+		RenderNode: node,
+		key:        "",
+		lifecycle:  lifecycle,
+	}
 }
 
 func NamedNodeMetadata(node RenderNode) (RenderNode, string, LifecycleEffects) {

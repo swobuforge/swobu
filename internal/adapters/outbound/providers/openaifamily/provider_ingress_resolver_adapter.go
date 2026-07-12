@@ -10,15 +10,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
-	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
+	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -76,25 +71,14 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if err := req.Contract.ProviderDelivery.Validate(); err != nil {
 		return nil, canonical.UnsupportedDelivery("OpenAI-family provider delivery is unsupported")
 	}
-	if req.Contract.ProviderDelivery.IsStreaming() && req.Contract.ProviderDelivery.Framing != protocolsurface.FramingSSE {
+	if req.Contract.ProviderDelivery.IsStreaming() && req.Contract.ProviderDelivery.Framing != delivery.FramingSSE {
 		return nil, canonical.UnsupportedDelivery("OpenAI-family provider does not implement the requested delivery framing")
 	}
 	wireReqCarrier := req.RequestDocument
 	if wireReqCarrier.IsEmpty() {
-		codec, codecErr := providerRequestEncoderForProtocol(req.Target.ProtocolKind)
-		if codecErr != nil {
-			if req.Target.ProtocolKind == protocolkind.Messages {
-				return nil, canonical.UnsupportedOperation("OpenAI-family provider does not implement the messages protocol")
-			}
-			return nil, codecErr
-		}
-		encoded, encodeErr := codec.EncodeProviderRequestDocument(req.Request, toInternalDelivery(req.Contract.ProviderDelivery))
-		if encodeErr != nil {
-			return nil, encodeErr
-		}
-		wireReqCarrier = encoded
+		return nil, canonical.InternalError("provider request document is required")
 	}
-	path, err := providerRequestPathForProtocol(req.Target.ProtocolKind)
+	path, err := exchangeruntime.ProviderRequestPath(req.Target.ProviderID(), req.Target.ProtocolKind)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +98,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := e.applyCredential(ctx, httpReq, req.Target.ProviderID(), req.Target.CredentialRef); err != nil {
+	if err := e.applyCredential(ctx, httpReq, req.Target.ProviderID(), req.Target.CredentialRef, req.Target.AuthHeader); err != nil {
 		return nil, err
 	}
 
@@ -160,25 +144,10 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	), nil
 }
 
-func providerRequestPathForProtocol(kind protocolkind.ProtocolKind) (string, error) {
-	switch kind {
-	case protocolkind.ChatCompletions:
-		return "/chat/completions", nil
-	case protocolkind.Responses:
-		return "/responses", nil
-	case protocolkind.Completions:
-		return "/completions", nil
-	case protocolkind.Messages:
-		return "/messages", nil
-	default:
-		return "", canonical.UnsupportedOperation("protocol kind is not implemented")
-	}
-}
-
 // applyCredential keeps auth resolution at the provider edge so canonicals and
 // app orchestration never need to know provider token mechanics.
-func (e ProviderIngressResolverAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {
-	auth := e.profile.AuthStrategy()
+func (e ProviderIngressResolverAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string, authHeader string) error {
+	auth := authStrategyForHeader(authHeader, e.profile.AuthStrategy())
 	if auth.Style == authStyleNone {
 		return nil
 	}
@@ -212,32 +181,4 @@ func providerCredentialRequiredMessage(providerSpec string) string {
 		return "provider credential reference is required"
 	}
 	return string(providerID) + " provider credential reference is required"
-}
-
-func toInternalDelivery(surface protocolsurface.Delivery) delivery.Delivery {
-	switch surface.Variant {
-	case protocolsurface.DeliveryVariantStreaming:
-		return delivery.Delivery{Mode: delivery.Streaming, Framing: delivery.Framing(surface.Framing)}
-	case protocolsurface.DeliveryVariantBuffered:
-		return delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.Framing(surface.Framing)}
-	default:
-		return delivery.Delivery{Mode: delivery.Mode(255), Framing: delivery.Framing(surface.Framing)}
-	}
-}
-
-func providerRequestEncoderForProtocol(kind protocolkind.ProtocolKind) (interface {
-	EncodeProviderRequestDocument(canonical.CanonicalRequest, delivery.Delivery) (carrier.WireDocument, error)
-}, error) {
-	switch kind {
-	case protocolkind.ChatCompletions:
-		return chatcompletions.ProviderRequestDocumentEncoder{}, nil
-	case protocolkind.Responses:
-		return responses.ProviderRequestDocumentEncoder{}, nil
-	case protocolkind.Completions:
-		return completions.ProviderRequestDocumentEncoder{}, nil
-	case protocolkind.Messages:
-		return messages.ProviderRequestDocumentEncoder{}, nil
-	default:
-		return nil, canonical.UnsupportedOperation("protocol kind is not implemented")
-	}
 }

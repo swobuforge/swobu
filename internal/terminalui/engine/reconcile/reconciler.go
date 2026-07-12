@@ -1,27 +1,27 @@
 package reconcile
 
-import "github.com/swobuforge/swobu/internal/terminalui/view"
+import "github.com/swobuforge/swobu/internal/terminalui/transcript"
 
 type Reconciler struct{}
 
-func (Reconciler) Reconcile(prev view.ViewSpec, next view.ViewSpec, mode view.RenderMode) []RenderOpEntry {
-	prevN := view.Normalize(prev)
-	nextN := view.Normalize(next)
-	return Reconciler{}.ReconcileScene(view.Project(prevN), view.Project(nextN), mode)
+func (Reconciler) Reconcile(prev transcript.ViewSpec, next transcript.ViewSpec, mode transcript.RenderMode) []RenderOpEntry {
+	prevN := transcript.Normalize(prev)
+	nextN := transcript.Normalize(next)
+	return Reconciler{}.ReconcileScene(transcript.Project(prevN), transcript.Project(nextN), mode)
 }
 
-func (Reconciler) ReconcileScene(prev view.SceneSnapshot, next view.SceneSnapshot, mode view.RenderMode) []RenderOpEntry {
+func (Reconciler) ReconcileScene(prev transcript.SceneSnapshot, next transcript.SceneSnapshot, mode transcript.RenderMode) []RenderOpEntry {
 	switch mode {
-	case view.RenderModeLive:
+	case transcript.RenderModeLive:
 		return reconcileLive(prev, next)
-	case view.RenderModeFullscreen:
+	case transcript.RenderModeFullscreen:
 		return reconcileFullscreen(prev, next)
 	default:
 		return reconcileAppend(prev, next)
 	}
 }
 
-func reconcileAppend(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpEntry {
+func reconcileAppend(prev transcript.SceneSnapshot, next transcript.SceneSnapshot) []RenderOpEntry {
 	prevDurable := prev.Durable
 	nextDurable := next.Durable
 	start := longestCommonPrefix(prevDurable, nextDurable)
@@ -32,7 +32,7 @@ func reconcileAppend(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderO
 	return ops
 }
 
-func reconcileLive(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpEntry {
+func reconcileLive(prev transcript.SceneSnapshot, next transcript.SceneSnapshot) []RenderOpEntry {
 	ops := reconcileAppend(prev, next)
 	p := last(prev.Ephemeral)
 	n := last(next.Ephemeral)
@@ -42,7 +42,7 @@ func reconcileLive(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpE
 	return ops
 }
 
-func reconcileFullscreen(prev view.SceneSnapshot, next view.SceneSnapshot) []RenderOpEntry {
+func reconcileFullscreen(prev transcript.SceneSnapshot, next transcript.SceneSnapshot) []RenderOpEntry {
 	p := prev.Durable
 	pn := prev.Ephemeral
 	if len(pn) > 0 {

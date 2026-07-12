@@ -297,6 +297,7 @@ type LoadRoutingModelCatalogEffect struct {
 	Scope            string
 	ProviderSpec     string
 	BaseURL          string
+	AuthHeader       string
 	CredentialRef    string
 	ProviderProtocol string
 }
@@ -306,6 +307,13 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec)) // swobu:io-string source=boundary
 	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {   // swobu:io-string source=boundary
 		query.Set("base_url", baseURL)
+	}
+	authHeader := strings.TrimSpace(eff.AuthHeader) // swobu:io-string source=boundary
+	if authHeader == "" {
+		authHeader = stateModel.ProviderDefaultAuthHeader(eff.ProviderSpec)
+	}
+	if authHeader != "" {
+		query.Set("auth_header", authHeader)
 	}
 	if credentialRef := strings.TrimSpace(eff.CredentialRef); credentialRef != "" { // swobu:io-string source=boundary
 		query.Set("credential_ref", credentialRef)
@@ -325,6 +333,7 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 			Scope:            strings.TrimSpace(eff.Scope),            // swobu:io-string source=boundary
 			ProviderSpec:     strings.TrimSpace(eff.ProviderSpec),     // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(eff.BaseURL),          // swobu:io-string source=boundary
+			AuthHeader:       authHeader,
 			CredentialRef:    strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
 			Error:            normalized,
@@ -334,6 +343,7 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 		Scope:                    strings.TrimSpace(eff.Scope),            // swobu:io-string source=boundary
 		ProviderSpec:             strings.TrimSpace(eff.ProviderSpec),     // swobu:io-string source=boundary
 		BaseURL:                  strings.TrimSpace(eff.BaseURL),          // swobu:io-string source=boundary
+		AuthHeader:               authHeader,
 		CredentialRef:            strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 		ProviderProtocol:         strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
 		ModelIDs:                 append([]string(nil), result.ModelIDs...),

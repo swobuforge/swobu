@@ -145,6 +145,54 @@ func TestInlineEditor_EmitsChangeCommitAndCancel(t *testing.T) {
 	var changed string
 	var committed string
 	cancelled := false
+	buildEditor := func(value string) *InputRenderNode {
+		editor := build(NewInlineEditor[struct{}](
+			"name",
+			value,
+			"workspace",
+			DefaultLineLayoutPolicy(),
+			func(value string) []update.Action { changed = value; return nil },
+			func(value string) []update.Action { committed = value; return nil },
+			func() []update.Action { cancelled = true; return nil },
+		))
+		in, ok := editor.(*InputRenderNode)
+		if !ok {
+			t.Fatalf("editor node type = %T, want *InputRenderNode", editor)
+		}
+		return in
+	}
+
+	editor := buildEditor("ac")
+	h := interaction.EventHandler(editor)
+	h.HandleEvent(interactionRune('m'), nil)
+	if changed != "acm" {
+		t.Fatalf("rune change changed=%q, want acm", changed)
+	}
+	editor = buildEditor(changed)
+	h = interaction.EventHandler(editor)
+	_ = h.HandleEvent(interactionBackspace(), nil)
+	if changed != "ac" {
+		t.Fatalf("backspace change = %q, want ac", changed)
+	}
+	editor = buildEditor(changed)
+	h = interaction.EventHandler(editor)
+	_ = h.HandleEvent(interactionKey(interaction.KeyEnter), nil)
+	if committed != "ac" {
+		t.Fatalf("commit = %q, want ac", committed)
+	}
+	editor = buildEditor(changed)
+	h = interaction.EventHandler(editor)
+	_ = h.HandleEvent(interactionKey(interaction.KeyEsc), nil)
+	if !cancelled {
+		t.Fatalf("cancel = %v, want true", cancelled)
+	}
+}
+
+func TestInlineEditor_IsControlledAndUsesCallerOwnedRebuildState(t *testing.T) {
+	t.Parallel()
+
+	var changed string
+	var committed string
 	editor := build(NewInlineEditor[struct{}](
 		"name",
 		"ac",
@@ -152,25 +200,34 @@ func TestInlineEditor_EmitsChangeCommitAndCancel(t *testing.T) {
 		DefaultLineLayoutPolicy(),
 		func(value string) []update.Action { changed = value; return nil },
 		func(value string) []update.Action { committed = value; return nil },
-		func() []update.Action { cancelled = true; return nil },
+		func() []update.Action { return nil },
 	))
+	in, ok := editor.(*InputRenderNode)
+	if !ok {
+		t.Fatalf("editor node type = %T, want *InputRenderNode", editor)
+	}
 
 	h := editor.(interaction.EventHandler)
-	h.HandleEvent(interactionRune('m'), nil)
+	_ = h.HandleEvent(interactionRune('m'), nil)
 	if changed != "acm" {
-		t.Fatalf("rune change changed=%q, want acm", changed)
+		t.Fatalf("changed=%q want acm", changed)
 	}
-	_ = h.HandleEvent(interactionBackspace(), nil)
-	if changed != "ac" {
-		t.Fatalf("backspace change = %q, want ac", changed)
+	if got := in.Value; got != "ac" {
+		t.Fatalf("render node value mutated to %q, want ac", got)
 	}
-	_ = h.HandleEvent(interactionKey(interaction.KeyEnter), nil)
-	if committed != "ac" {
-		t.Fatalf("commit = %q, want ac", committed)
-	}
-	_ = h.HandleEvent(interactionKey(interaction.KeyEsc), nil)
-	if !cancelled {
-		t.Fatalf("cancel = %v, want true", cancelled)
+
+	rebuilt := build(NewInlineEditor[struct{}](
+		"name",
+		changed,
+		"workspace",
+		DefaultLineLayoutPolicy(),
+		func(string) []update.Action { return nil },
+		func(value string) []update.Action { committed = value; return nil },
+		func() []update.Action { return nil },
+	))
+	_ = rebuilt.(interaction.EventHandler).HandleEvent(interactionKey(interaction.KeyEnter), nil)
+	if committed != "acm" {
+		t.Fatalf("commit=%q want acm", committed)
 	}
 }
 
@@ -254,22 +311,37 @@ func TestInlineEditor_EraseToEmptyThenCommit_SavesEmptyValue(t *testing.T) {
 	t.Parallel()
 
 	var committed string
-	editor := build(NewInlineEditor[struct{}](
-		"env",
-		"OPENAI_API_KEY",
-		"env variable",
-		DefaultLineLayoutPolicy(),
-		func(string) []update.Action { return nil },
-		func(value string) []update.Action {
-			committed = value
-			return nil
-		},
-		func() []update.Action { return nil },
-	))
-	h := editor.(interaction.EventHandler)
+	current := "OPENAI_API_KEY"
+	buildEditor := func(value string) *InputRenderNode {
+		editor := build(NewInlineEditor[struct{}](
+			"env",
+			value,
+			"env variable",
+			DefaultLineLayoutPolicy(),
+			func(value string) []update.Action {
+				current = value
+				return nil
+			},
+			func(value string) []update.Action {
+				committed = value
+				return nil
+			},
+			func() []update.Action { return nil },
+		))
+		in, ok := editor.(*InputRenderNode)
+		if !ok {
+			t.Fatalf("editor node type = %T, want *InputRenderNode", editor)
+		}
+		return in
+	}
+
+	editor := buildEditor(current)
+	h := interaction.EventHandler(editor)
 
 	for i := 0; i < len("OPENAI_API_KEY")+3; i++ {
 		_ = h.HandleEvent(interactionBackspace(), nil)
+		editor = buildEditor(current)
+		h = interaction.EventHandler(editor)
 	}
 	_ = h.HandleEvent(interactionKey(interaction.KeyEnter), nil)
 
@@ -283,25 +355,38 @@ func TestInlineEditor_TypeThenCancel_UsesCancelPath(t *testing.T) {
 
 	var changed string
 	cancelled := false
-	editor := build(NewInlineEditor[struct{}](
-		"name",
-		"acme",
-		"workspace",
-		DefaultLineLayoutPolicy(),
-		func(value string) []update.Action {
-			changed = value
-			return nil
-		},
-		func(string) []update.Action { return nil },
-		func() []update.Action {
-			cancelled = true
-			return nil
-		},
-	))
-	h := editor.(interaction.EventHandler)
+	buildEditor := func(value string) *InputRenderNode {
+		editor := build(NewInlineEditor[struct{}](
+			"name",
+			value,
+			"workspace",
+			DefaultLineLayoutPolicy(),
+			func(value string) []update.Action {
+				changed = value
+				return nil
+			},
+			func(string) []update.Action { return nil },
+			func() []update.Action {
+				cancelled = true
+				return nil
+			},
+		))
+		in, ok := editor.(*InputRenderNode)
+		if !ok {
+			t.Fatalf("editor node type = %T, want *InputRenderNode", editor)
+		}
+		return in
+	}
+
+	editor := buildEditor("acme")
+	h := interaction.EventHandler(editor)
 
 	_ = h.HandleEvent(interactionRune('-'), nil)
+	editor = buildEditor(changed)
+	h = interaction.EventHandler(editor)
 	_ = h.HandleEvent(interactionRune('2'), nil)
+	editor = buildEditor(changed)
+	h = interaction.EventHandler(editor)
 	_ = h.HandleEvent(interactionKey(interaction.KeyEsc), nil)
 
 	if changed != "acme-2" {

@@ -6,29 +6,29 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/terminalui/engine/reconcile"
-	"github.com/swobuforge/swobu/internal/terminalui/view"
+	"github.com/swobuforge/swobu/internal/terminalui/transcript"
 )
 
 type Renderer struct {
 	out        io.Writer
 	reconciler reconcile.Reconciler
-	mode       view.RenderMode
-	prev       view.ViewSpec
-	prevScene  view.SceneSnapshot
+	mode       transcript.RenderMode
+	prev       transcript.ViewSpec
+	prevScene  transcript.SceneSnapshot
 }
 
-func NewRenderer(out io.Writer, mode view.RenderMode) *Renderer {
+func NewRenderer(out io.Writer, mode transcript.RenderMode) *Renderer {
 	if out == nil {
 		out = io.Discard
 	}
 	return &Renderer{out: out, mode: mode}
 }
 
-func (r *Renderer) SetMode(mode view.RenderMode) { r.mode = mode }
+func (r *Renderer) SetMode(mode transcript.RenderMode) { r.mode = mode }
 
-func (r *Renderer) Render(next view.ViewSpec) {
-	nextN := view.Normalize(next)
-	nextScene := view.Project(nextN)
+func (r *Renderer) Render(next transcript.ViewSpec) {
+	nextN := transcript.Normalize(next)
+	nextScene := transcript.Project(nextN)
 	ops := r.reconciler.ReconcileScene(r.prevScene, nextScene, r.mode)
 	for _, op := range ops {
 		switch op.Kind {

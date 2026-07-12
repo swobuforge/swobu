@@ -25,6 +25,7 @@ type Model struct {
 	CreateDraftModelError          string
 	CreateDraftModelProbePending   bool
 	CreateDraftModelProviderSpec   string
+	CreateDraftModelAuthHeader     string
 	CreateDraftModelBaseURL        string
 	CreateDraftModelCredentialRef  string
 	CreateDraftModelTestProtocol   string
@@ -33,6 +34,7 @@ type Model struct {
 	AddModelDraftModelError        string
 	AddModelDraftModelProbePending bool
 	AddModelDraftProviderSpec      string
+	AddModelDraftAuthHeader        string
 	AddModelDraftProviderProtocol  string
 	AddModelDraftBaseURL           string
 	AddModelDraftCredentialRef     string
@@ -98,6 +100,7 @@ type ProviderConfigSnapshot struct {
 	ProviderSpec     string `json:"provider_spec"`
 	Region           string `json:"region,omitempty"`
 	BaseURL          string `json:"base_url,omitempty"`
+	AuthHeader       string `json:"auth_header,omitempty"`
 	CredentialRef    string `json:"credential_ref,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty"`

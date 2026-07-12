@@ -199,6 +199,7 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 			Scope:            RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:     strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec),  // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL),       // swobu:io-string source=boundary
+			AuthHeader:       strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader),    // swobu:io-string source=boundary
 			CredentialRef:    strings.TrimSpace(model.CreateDraftProviderConfig.CredentialRef), // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(model.CreateDraftProviderConfig.ProviderProtocol),
 		}}
@@ -217,6 +218,7 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 			Scope:            RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),     // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),          // swobu:io-string source=boundary
+			AuthHeader:       strings.TrimSpace(model.AddModelDraftAuthHeader),       // swobu:io-string source=boundary
 			CredentialRef:    strings.TrimSpace(model.AddModelDraftCredentialRef),    // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(model.AddModelDraftProviderProtocol), // swobu:io-string source=boundary
 		}}

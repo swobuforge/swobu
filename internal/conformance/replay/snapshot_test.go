@@ -90,7 +90,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 		t.Fatalf("decode client request: %v", err)
 	}
 	var capturedProviderRequest []byte
-	runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+	runner := withRuntimeRunner(func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 		capturedProviderRequest = append(capturedProviderRequest[:0], req.RequestDocument.RawBytes()...)
 		if providerDelivery.Mode == delivery.Streaming {
 			return carrier.WireStream{
@@ -108,7 +108,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 			upstreamResponseBody,
 			carrier.Meta{},
 		), nil
-	}})
+	})
 	out, err := runner.Run(context.Background(), exchange.ExchangeInput{
 		ExchangeID:       "fixture_exchange",
 		ClientFamily:     clientFamily,
@@ -117,7 +117,7 @@ func assertRunnerReplay(t *testing.T, contract fixture.CaseContract, caseDir str
 		ProviderProtocol: providerFamily,
 		ProviderDelivery: providerDelivery,
 		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", providerFamily, "", "", ""),
-		Contract:         exchange.NewExecutionContract(toProtocolsurfaceDelivery(clientDelivery)).WithProviderDelivery(toProtocolsurfaceDelivery(providerDelivery)),
+		Contract:         exchange.NewExecutionContract(clientDelivery).WithProviderDelivery(providerDelivery),
 	})
 	if err != nil {
 		t.Fatalf("runner replay failed: %v", err)

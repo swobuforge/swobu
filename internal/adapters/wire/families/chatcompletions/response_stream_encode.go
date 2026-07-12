@@ -44,5 +44,5 @@ func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader
 			}
 		}
 	}()
-	return carrier.WireStream{Family: protocolkind.ChatCompletions, Framing: carrier.FramingSSE, Frames: carrier.FrameReaderFromReadCloser(pr)}, nil
+	return carrier.WireStream{Stage: carrier.StageClientResponseOut, Family: protocolkind.ChatCompletions, Framing: carrier.FramingSSE, Frames: carrier.FrameReaderFromReadCloser(pr)}, nil
 }

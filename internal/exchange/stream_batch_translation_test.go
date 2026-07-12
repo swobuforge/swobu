@@ -9,14 +9,13 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 )
 
 func TestRunnerRun_StreamToBatchResponseProjectsProviderEventsInternally(t *testing.T) {
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
-	runner := withRuntime(Runner{ResolveProviderIngress: streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE)))})
+	runner := withRuntime(streamingProviderIngressResolver(io.NopCloser(strings.NewReader(providerSSE))))
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_stream_to_batch",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -25,7 +24,7 @@ func TestRunnerRun_StreamToBatchResponseProjectsProviderEventsInternally(t *test
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         NewExecutionContractForDeliveries(protocolsurface.BufferedDelivery(), protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+		Contract:         NewExecutionContractForDeliveries(delivery.BufferedDelivery(), delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -47,7 +46,7 @@ func TestRunnerRun_StreamToBatchResponseProjectsProviderEventsInternally(t *test
 }
 
 func TestRunnerRun_BatchToStreamResponseWithoutSourceIncrementality(t *testing.T) {
-	runner := withRuntime(Runner{ResolveProviderIngress: bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`))})
+	runner := withRuntime(bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)))
 	out, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_batch_to_stream",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -56,7 +55,7 @@ func TestRunnerRun_BatchToStreamResponseWithoutSourceIncrementality(t *testing.T
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContractForDeliveries(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE), protocolsurface.BufferedDelivery()),
+		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingSSE), delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)

@@ -7,11 +7,10 @@ import (
 	"testing"
 )
 
-func TestProviderRequestConstructor_HasSingleProductionCallsite(t *testing.T) {
+func TestProviderRequestConstructor_HasNoProductionCallsites(t *testing.T) {
 	t.Parallel()
 
 	root := packageDirFromHere(t, "..")
-	allowed := filepath.Join(root, "bootstrap", "provider_ingress_resolver_adapter.go")
 	var hits []string
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
@@ -36,7 +35,7 @@ func TestProviderRequestConstructor_HasSingleProductionCallsite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk internal tree: %v", err)
 	}
-	if len(hits) != 1 || hits[0] != allowed {
-		t.Fatalf("ports.NewProviderRequest production callsites=%v; want [%s]", hits, allowed)
+	if len(hits) != 0 {
+		t.Fatalf("ports.NewProviderRequest production callsites=%v; want none", hits)
 	}
 }

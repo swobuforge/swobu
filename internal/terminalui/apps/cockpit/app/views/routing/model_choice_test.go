@@ -47,3 +47,17 @@ func TestProviderModelCatalogChoicesAvailable_OpenAICompatibleUsesPicker(t *test
 		t.Fatalf("OpenAI-compatible provider should use model picker UX")
 	}
 }
+
+func TestProviderModelCatalogChoicesAvailable_AzureUsesPicker(t *testing.T) {
+	t.Parallel()
+
+	spec := providerModelChoiceRowSpec{
+		CreateMode: false,
+		ProviderConfig: &state.ProviderConfigSnapshot{
+			ProviderSpec: "azure",
+		},
+	}
+	if !providerModelCatalogChoicesAvailable(spec) {
+		t.Fatalf("Azure provider should use model picker UX")
+	}
+}

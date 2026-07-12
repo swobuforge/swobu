@@ -1,6 +1,6 @@
-// Package view defines the renderer-agnostic declarative terminal view tree.
+// Package view is a deprecated compatibility shim for the transcript package.
 //
-// It is intentionally minimal: composition structure + line retention semantics
-// + render mode intent. Rendering strategies (append/live/fullscreen/retained)
-// consume this contract but are implemented elsewhere.
+// New transcript-shaped root-view code lives in internal/terminalui/transcript.
+// This package remains only to keep the quarantine migration safe while direct
+// call sites move to the new canonical name.
 package view

@@ -53,6 +53,18 @@ func ProviderCredentialSelectionRequired(provider, baseURL, credentialRef string
 }
 
 func ProviderModelCatalogLoadBlocked(provider, baseURL, credentialRef string) bool {
+	if strings.EqualFold(strings.TrimSpace(provider), "bedrock") && isBedrockAWSProfileRef(credentialRef) { // swobu:io-string source=boundary
+		profileRef := strings.TrimSpace(bedrockProfileFromCredentialRef(credentialRef)) // swobu:io-string source=boundary
+		if profileRef == "" {
+			return true
+		}
+		if !bedrockAWSProfileAvailable(profileRef) {
+			return true
+		}
+	}
+	if profile.RequiresExplicitExecuteBaseURL(provider) && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=boundary
+		return true
+	}
 	if !ProviderCredentialSelectionRequired(provider, baseURL, credentialRef) {
 		return false
 	}
@@ -73,6 +85,9 @@ func ProviderModelCatalogLoadBlocked(provider, baseURL, credentialRef string) bo
 func ProviderModelCatalogBlockedMessage(provider, baseURL, credentialRef string) string {
 	if !ProviderModelCatalogLoadBlocked(provider, baseURL, credentialRef) {
 		return ""
+	}
+	if profile.RequiresExplicitExecuteBaseURL(provider) && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=boundary
+		return "set backend URL before loading models"
 	}
 	for _, variant := range profile.SupportedAuthVariantsForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary
 		if profile.IsInteractiveAuthVariant(variant) {

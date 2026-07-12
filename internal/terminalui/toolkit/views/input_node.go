@@ -107,7 +107,7 @@ func (i *InputRenderNode) parts(focused bool) rowParts {
 }
 
 func (i *InputRenderNode) change(value string) []update.Action {
-	i.Value = value
+	// Keep the render node immutable: caller-owned state owns the next frame.
 	if i.OnChange == nil {
 		return nil
 	}

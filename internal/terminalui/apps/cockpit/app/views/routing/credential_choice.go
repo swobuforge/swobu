@@ -44,6 +44,15 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 	}
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	items := credentialOptionItems(current, func(value string) []update.Action {
+		setOpen(false)
+		actions := applyProviderCredentialSelection(value, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
+		actions = append(actions, state.SetInteractionMode{Mode: state.InteractionModeManageList})
+		if focusKey := credentialPostSelectionFocusKey(value); focusKey != "" {
+			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+		}
+		return actions
+	}, providerSpec)
 	parent := views.RowChoiceWithCancel(views.RowUseKeyFrom, current, func() []update.Action {
 		nextOpen := !open
 		setOpen(nextOpen)
@@ -54,7 +63,9 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 		}
 		actions := []update.Action{state.SetInteractionMode{Mode: mode}}
 		if nextOpen {
-			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("credential-source-option", 0)})
+			if focusKey := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "credential-source-option"}); focusKey != "" {
+				actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+			}
 		}
 		return actions
 	}, func() []update.Action {
@@ -71,15 +82,6 @@ func buildProviderCredentialChoiceRow(ctx *retained.Context[state.Model], spec p
 			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("authentication needed - choose a credential ref to save")...)
 		}
 	} else {
-		items := credentialOptionItems(current, func(value string) []update.Action {
-			setOpen(false)
-			actions := applyProviderCredentialSelection(value, providerSpec, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
-			actions = append(actions, state.SetInteractionMode{Mode: state.InteractionModeManageList})
-			if focusKey := credentialPostSelectionFocusKey(value); focusKey != "" {
-				actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
-			}
-			return actions
-		}, providerSpec)
 		out = views.RenderFilterablePickerDisclosure(ctx, parent, picker, setPicker, items, views.FilterablePickerConfig{
 			KeyPrefix:      "credential-source-option",
 			BuildOptionRow: views.ChoicePickerOptionRow(true),
@@ -196,6 +198,7 @@ func credentialOptionItems(
 	for _, option := range options {
 		choice := option
 		items = append(items, views.FilterablePickerItem{
+			Key:      strings.TrimSpace(choice.Value),
 			Label:    strings.TrimSpace(choice.Label),                      // swobu:io-string source=boundary
 			Search:   choice.Value + " " + strings.TrimSpace(choice.Label), // swobu:io-string source=boundary
 			Selected: choice.Value == current,

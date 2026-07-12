@@ -28,3 +28,12 @@ func CaptureLifecycle(candidate any) LifecycleEffects {
 	}
 	return captureLifecycle(candidate)
 }
+
+func mergeLifecycle(a, b LifecycleEffects) LifecycleEffects {
+	out := LifecycleEffects{}
+	out.OnMount = append(out.OnMount, a.OnMount...)
+	out.OnMount = append(out.OnMount, b.OnMount...)
+	out.OnUnmount = append(out.OnUnmount, a.OnUnmount...)
+	out.OnUnmount = append(out.OnUnmount, b.OnUnmount...)
+	return out
+}

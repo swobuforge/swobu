@@ -61,6 +61,59 @@ func TestReduce_ProbeOrchestration_CreateDraftCatalogAndProbeFlow(t *testing.T) 
 
 }
 
+func TestReduce_ProbeOrchestration_CreateDraftCatalogTracksAuthHeaderTuple(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			ProviderSpec:     "openai_compatible",
+			BaseURL:          "https://example.test/v1",
+			CredentialRef:    "env:OPENAI_API_KEY",
+			ProviderProtocol: "auto",
+			ModelID:          "gpt-4.1-mini",
+			AuthHeader:       "X-API-Key",
+		},
+	}
+
+	catalogEffects := Reduce(&model, LoadRoutingModelCatalogRequestedAction{
+		Scope:            RoutingModelCatalogScopeCreateDraft,
+		ProviderSpec:     "openai_compatible",
+		BaseURL:          "https://example.test/v1",
+		AuthHeader:       "X-API-Key",
+		CredentialRef:    "env:OPENAI_API_KEY",
+		ProviderProtocol: "auto",
+	})
+	if len(catalogEffects) != 1 {
+		t.Fatalf("catalog effects len=%d want 1", len(catalogEffects))
+	}
+	loadEff, ok := catalogEffects[0].(stateeffect.LoadRoutingModelCatalogEffect)
+	if !ok {
+		t.Fatalf("catalog effect type=%T want LoadRoutingModelCatalogEffect", catalogEffects[0])
+	}
+	if loadEff.AuthHeader != "X-API-Key" {
+		t.Fatalf("load auth header=%q want X-API-Key", loadEff.AuthHeader)
+	}
+
+	Reduce(&model, stateeffect.RoutingModelCatalogLoaded{
+		Scope:            loadEff.Scope,
+		ProviderSpec:     loadEff.ProviderSpec,
+		BaseURL:          loadEff.BaseURL,
+		AuthHeader:       loadEff.AuthHeader,
+		CredentialRef:    loadEff.CredentialRef,
+		ProviderProtocol: loadEff.ProviderProtocol,
+		ModelIDs:         []string{"gpt-4.1-mini"},
+	})
+	if model.CreateDraftModelProbePending {
+		t.Fatal("create draft probe pending=true want false after loaded auth-header tuple")
+	}
+	if len(model.CreateDraftModelIDs) != 1 || model.CreateDraftModelIDs[0] != "gpt-4.1-mini" {
+		t.Fatalf("create draft model ids=%v", model.CreateDraftModelIDs)
+	}
+	if got := model.CreateDraftModelAuthHeader; got != "X-API-Key" {
+		t.Fatalf("create draft auth header=%q want X-API-Key", got)
+	}
+}
+
 func TestReduce_ProbeOrchestration_CreateDraftCatalogBlockedUntilCredentialConcrete(t *testing.T) {
 	t.Parallel()
 

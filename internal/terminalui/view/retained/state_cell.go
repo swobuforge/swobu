@@ -1,6 +1,6 @@
 package retained
 
-type localStateChangedAction struct{}
+import "github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 
 // UseState loads or initializes one retained local state value by hook order.
 // State identity is scoped to the current view instance and call position.
@@ -18,7 +18,7 @@ func UseState[M any, T any](ctx *Context[M], init func() T) (T, func(T)) {
 		return typed, func(v T) {
 			ctx.Local.Set(slot, v)
 			if ctx.dispatch != nil {
-				ctx.dispatch(localStateChangedAction{})
+				ctx.dispatch(update.LocalStateChangedAction{})
 			}
 		}
 	}
@@ -27,7 +27,7 @@ func UseState[M any, T any](ctx *Context[M], init func() T) (T, func(T)) {
 	return initial, func(v T) {
 		ctx.Local.Set(slot, v)
 		if ctx.dispatch != nil {
-			ctx.dispatch(localStateChangedAction{})
+			ctx.dispatch(update.LocalStateChangedAction{})
 		}
 	}
 }

@@ -10,7 +10,11 @@ import (
 
 func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModelCatalogRequestedAction) []update.Effect {
 	scope := strings.TrimSpace(value.Scope) // swobu:io-string source=boundary
-	id := newRoutingProbeIdentity(scope, value.ProviderSpec, value.BaseURL, value.CredentialRef)
+	authHeader := strings.TrimSpace(value.AuthHeader) // swobu:io-string source=boundary
+	if authHeader == "" {
+		authHeader = stateModel.ProviderDefaultAuthHeader(value.ProviderSpec)
+	}
+	id := newRoutingProbeIdentity(scope, value.ProviderSpec, value.BaseURL, authHeader, value.CredentialRef)
 	providerProtocol := strings.TrimSpace(value.ProviderProtocol) // swobu:io-string source=boundary
 	if stateModel.ProviderModelCatalogLoadBlocked(id.ProviderSpec, id.BaseURL, id.CredentialRef) {
 		return nil
@@ -34,6 +38,7 @@ func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModel
 		Scope:            scope,
 		ProviderSpec:     id.ProviderSpec,
 		BaseURL:          id.BaseURL,
+		AuthHeader:       id.AuthHeader,
 		CredentialRef:    id.CredentialRef,
 		ProviderProtocol: providerProtocol,
 	}}
@@ -41,7 +46,7 @@ func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModel
 
 func handleRoutingModelCatalogLoaded(model *Model, value stateeffect.RoutingModelCatalogLoaded) []update.Effect {
 	scope := strings.TrimSpace(value.Scope) // swobu:io-string source=boundary
-	if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.CredentialRef), strings.TrimSpace(value.ProviderProtocol)) {
+	if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.AuthHeader), strings.TrimSpace(value.CredentialRef), strings.TrimSpace(value.ProviderProtocol)) {
 		return nil
 	}
 	if scope == RoutingModelCatalogScopeCreateDraft {

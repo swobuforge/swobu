@@ -56,15 +56,15 @@ func CacheCapabilityFacts() []CacheCapabilityFact {
 		},
 		{
 			ProviderID:   ProviderSpecBedrock,
-			ProtocolKind: protocolkind.ChatCompletions,
-			Primitives:   []CachePrimitive{CachePrimitiveBreakpoint, CachePrimitiveRetentionHint},
-			Notes:        "Bedrock converse cachePoint is explicit breakpoint-style and model-dependent",
+			ProtocolKind: protocolkind.Responses,
+			Primitives:   []CachePrimitive{CachePrimitiveAutoPrefix, CachePrimitiveAffinityKey, CachePrimitiveRetentionHint},
+			Notes:        "Bedrock Mantle responses follows OpenAI-style cache controls where supported",
 		},
 		{
-			ProviderID:   ProviderSpecBedrock,
-			ProtocolKind: protocolkind.Completions,
-			Primitives:   []CachePrimitive{CachePrimitiveBreakpoint, CachePrimitiveRetentionHint},
-			Notes:        "Bedrock invoke paths can expose explicit cache checkpoints for supported models",
+			ProviderID:   ProviderSpecAzure,
+			ProtocolKind: protocolkind.Responses,
+			Primitives:   []CachePrimitive{CachePrimitiveAutoPrefix, CachePrimitiveAffinityKey, CachePrimitiveRetentionHint},
+			Notes:        "Azure OpenAI v1 responses follows OpenAI-family cache controls where supported",
 		},
 		{
 			ProviderID:   ProviderSpecOpenRouter,

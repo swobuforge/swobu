@@ -13,6 +13,7 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
+	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/evidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/ports"
@@ -104,13 +105,14 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		registry := providersadapter.NewProviderRegistry(
+		composition := providersadapter.NewProviderRuntimeComposition(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
 		)
-		providers = registry
-		modelCatalog = registry
+		providers = composition
+		modelCatalog = composition
 	}
+	runtimeRoot := newDaemonRuntimeComposition(exchangeruntime.NewResolver(), providers, modelCatalog)
 	evidence := in.Evidence
 	if evidence == nil {
 		daemon.evidence = evidencestore.NewStore(evidencestore.StoreConfig{})
@@ -119,7 +121,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.evidence = store
 	}
 	evidence = newTelemetryObservedEvidenceSink(evidence, daemon.observeTelemetryEvent)
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, providers, modelCatalog, in.Continuation, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, in.Continuation, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}

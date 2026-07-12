@@ -13,6 +13,7 @@ import (
 )
 
 type FilterablePickerItem struct {
+	// Key carries stable focus identity when the item has one.
 	Key      string
 	Label    string
 	Search   string
@@ -126,7 +127,7 @@ func handleFilterableKeyUp(cur FilterablePickerState, setState func(FilterablePi
 		cur.Offset = cur.Cursor
 	}
 	setState(cur)
-	return true, []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
+	return true, []update.Action{interaction.FocusKeyAction{Key: FilterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
 }
 
 func handleFilterableKeyDown(cur FilterablePickerState, setState func(FilterablePickerState), filteredNow []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
@@ -149,7 +150,7 @@ func handleFilterableKeyDown(cur FilterablePickerState, setState func(Filterable
 		cur.Offset = cur.Cursor - window + 1
 	}
 	setState(cur)
-	return true, []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
+	return true, []update.Action{interaction.FocusKeyAction{Key: FilterablePickerItemFocusKey(filteredNow, cfg, cur.Cursor)}}
 }
 
 func handleFilterableKeyBackspace(cur FilterablePickerState, setState func(FilterablePickerState), items []FilterablePickerItem, cfg FilterablePickerConfig) (bool, []update.Action) {
@@ -332,6 +333,18 @@ func handleFilterableQueryInput(
 	cur.Cursor = 0
 	cur.Offset = 0
 	setState(cur)
+	filtered := filterablePickerItems(items, cur.Query)
+	if len(filtered) == 1 && filtered[0].OnChoose != nil {
+		typed := strings.TrimSpace(cur.Query) // swobu:io-string source=boundary
+		label := strings.TrimSpace(filtered[0].Label) // swobu:io-string source=boundary
+		search := strings.TrimSpace(filtered[0].Search) // swobu:io-string source=boundary
+		if search == "" {
+			search = label
+		}
+		if strings.EqualFold(label, typed) || strings.EqualFold(search, typed) {
+			return true, filtered[0].OnChoose()
+		}
+	}
 	return true, focusActionsAfterQueryChange(items, cfg, cur.Query)
 }
 
@@ -357,12 +370,25 @@ func trimLastRune(s string) string {
 func focusActionsAfterQueryChange(items []FilterablePickerItem, cfg FilterablePickerConfig, query string) []update.Action {
 	filtered := filterablePickerItems(items, query)
 	if len(filtered) > 0 {
-		return []update.Action{interaction.FocusKeyAction{Key: filterablePickerItemFocusKey(filtered, cfg, 0)}}
+		return []update.Action{interaction.FocusKeyAction{Key: FilterablePickerItemFocusKey(filtered, cfg, 0)}}
 	}
 	return nil
 }
 
-func filterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg FilterablePickerConfig, index int) string {
+// FilterablePickerFirstFocusKey returns the key for the first picker item when
+// one exists. Empty lists intentionally stay unfocused so open actions do not
+// invent a synthetic fallback identity.
+func FilterablePickerFirstFocusKey(items []FilterablePickerItem, cfg FilterablePickerConfig) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return FilterablePickerItemFocusKey(items, cfg, 0)
+}
+
+// FilterablePickerItemFocusKey returns the focus key for the item at index.
+// If the item has an explicit Key, that stable identity wins; otherwise the
+// picker falls back to the legacy prefix/index key for unkeyed rows.
+func FilterablePickerItemFocusKey(filtered []FilterablePickerItem, cfg FilterablePickerConfig, index int) string {
 	if index < 0 {
 		index = 0
 	}

@@ -30,17 +30,6 @@ type bedrockProfilePickerRowSpec struct {
 func bedrockProfilePickerRow(ctx *retained.Context[state.Model], spec bedrockProfilePickerRowSpec) retained.ViewSpec[state.Model] {
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
-	parent := views.RowChoiceWithHooks("profile", spec.Summary, func() []update.Action {
-		nextOpen := !open
-		setOpen(nextOpen)
-		if nextOpen {
-			views.ResetFilterablePickerState(setPicker)
-		}
-		return bedrockProfilePickerToggleActions(nextOpen, spec.CloseMode)
-	}, nil, views.FocusAffordance("choose", false))
-	if !open {
-		return parent
-	}
 	items := bedrockProfilePickerItems(spec.Profiles, spec.Current, func(value string) []update.Action {
 		setOpen(false)
 		actions := []update.Action{state.SetInteractionMode{Mode: spec.CloseMode}}
@@ -52,6 +41,17 @@ func bedrockProfilePickerRow(ctx *retained.Context[state.Model], spec bedrockPro
 		}
 		return actions
 	})
+	parent := views.RowChoiceWithHooks("profile", spec.Summary, func() []update.Action {
+		nextOpen := !open
+		setOpen(nextOpen)
+		if nextOpen {
+			views.ResetFilterablePickerState(setPicker)
+		}
+		return bedrockProfilePickerToggleActions(nextOpen, spec.CloseMode, items)
+	}, nil, views.FocusAffordance("choose", false))
+	if !open {
+		return parent
+	}
 	if len(items) == 0 {
 		items = append(items, views.FilterablePickerItem{Label: "no profiles found", Search: "", Selected: false, OnChoose: nil})
 	}
@@ -75,6 +75,7 @@ func bedrockProfilePickerItems(profiles []string, current string, onChoose func(
 	items := make([]views.FilterablePickerItem, 0, len(profiles)+1)
 	current = trimRoutingInput(current)
 	items = append(items, views.FilterablePickerItem{
+		Key:      "auto",
 		Label:    "auto",
 		Search:   "auto aws chain default",
 		Selected: current == "",
@@ -92,6 +93,7 @@ func bedrockProfilePickerItems(profiles []string, current string, onChoose func(
 		}
 		value := candidate
 		items = append(items, views.FilterablePickerItem{
+			Key:      value,
 			Label:    value,
 			Search:   value,
 			Selected: strings.EqualFold(value, current),
@@ -106,12 +108,13 @@ func bedrockProfilePickerItems(profiles []string, current string, onChoose func(
 	return items
 }
 
-func bedrockProfilePickerToggleActions(open bool, closeMode string) []update.Action {
+func bedrockProfilePickerToggleActions(open bool, closeMode string, items []views.FilterablePickerItem) []update.Action {
 	if open {
-		return []update.Action{
-			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("bedrock-profile-option", 0)},
-			state.SetInteractionMode{Mode: state.InteractionModePickOne},
+		actions := []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
+		if focusKey := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "bedrock-profile-option"}); focusKey != "" {
+			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
 		}
+		return actions
 	}
 	return []update.Action{state.SetInteractionMode{Mode: closeMode}}
 }
@@ -133,15 +136,37 @@ func bedrockRegionPickerRow(ctx *retained.Context[state.Model], spec bedrockRegi
 	}
 	open, setOpen := retained.UseState(ctx, func() bool { return false })
 	picker, setPicker := retained.UseState(ctx, func() views.FilterablePickerState { return views.DefaultFilterablePickerState() })
+	items := make([]views.FilterablePickerItem, 0, len(regions))
+	for _, region := range regions {
+		choice := trimRoutingInput(region)
+		if choice == "" {
+			continue
+		}
+		items = append(items, views.FilterablePickerItem{
+			Key:      choice,
+			Label:    choice,
+			Search:   choice,
+			Selected: strings.EqualFold(choice, trimRoutingInput(spec.Current)),
+			OnChoose: func() []update.Action {
+				setOpen(false)
+				actions := spec.OnSave(choice)
+				return append(actions,
+					state.SetInteractionMode{Mode: spec.CloseMode},
+					interaction.FocusKeyAction{Key: spec.FocusKey},
+				)
+			},
+		})
+	}
 	parent := views.RowChoiceWithCancel(spec.Label, spec.Summary, func() []update.Action {
 		nextOpen := !open
 		setOpen(nextOpen)
 		if nextOpen {
 			views.ResetFilterablePickerState(setPicker)
-			return []update.Action{
-				state.SetInteractionMode{Mode: state.InteractionModePickOne},
-				interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("bedrock-region-option", 0)},
+			actions := []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
+			if focusKey := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "bedrock-region-option"}); focusKey != "" {
+				actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
 			}
+			return actions
 		}
 		return []update.Action{
 			state.SetInteractionMode{Mode: spec.CloseMode},
@@ -159,26 +184,6 @@ func bedrockRegionPickerRow(ctx *retained.Context[state.Model], spec bedrockRegi
 	})
 	if !open {
 		return parent
-	}
-	items := make([]views.FilterablePickerItem, 0, len(regions))
-	for _, region := range regions {
-		choice := trimRoutingInput(region)
-		if choice == "" {
-			continue
-		}
-		items = append(items, views.FilterablePickerItem{
-			Label:    choice,
-			Search:   choice,
-			Selected: strings.EqualFold(choice, trimRoutingInput(spec.Current)),
-			OnChoose: func() []update.Action {
-				setOpen(false)
-				actions := spec.OnSave(choice)
-				return append(actions,
-					state.SetInteractionMode{Mode: spec.CloseMode},
-					interaction.FocusKeyAction{Key: spec.FocusKey},
-				)
-			},
-		})
 	}
 	if len(items) == 0 {
 		return backendURLEditorRow(ctx, spec.Label, spec.Summary, spec.Current, spec.EditorHint, spec.OnSave)

@@ -136,23 +136,21 @@ func selectedClientActions(selected clientprofile.Profile, baseURL string) []cli
 		return nil
 	}
 	actions := selected.Actions(baseURL)
-	configured := make([]clientprofile.Action, 0, len(actions))
-	for _, action := range actions {
-		if action.IsConfigured() {
-			configured = append(configured, action)
-		}
-	}
-	if len(configured) == 0 {
+	if len(actions) == 0 {
 		return nil
 	}
-	return configured
+	return actions
 }
 
 func buildClientRow(profiles []clientprofile.Profile, summary string, local clientsSectionState) retained.ViewSpec[state.Model] {
 	selected := selectedClientProfile(profiles, local.selectedClientID)
 	selectedCursor := clientPickerCursorForSelection(profiles, selected)
+	selectedFocusKey := clientPickerFocusKey(selected)
+	if selectedCursor >= 0 && selectedCursor < len(profiles) {
+		selectedFocusKey = clientPickerFocusKey(profiles[selectedCursor])
+	}
 	clientRow := RowChoiceWithHooks("client", summary, func() []update.Action {
-		return toggleClientPicker(selectedCursor, local)
+		return toggleClientPicker(selectedFocusKey, selectedCursor, local)
 	}, func() []update.Action {
 		return closeClientPicker(local)
 	}, focusAffordance("choose", false))
@@ -170,7 +168,7 @@ func buildClientRow(profiles []clientprofile.Profile, summary string, local clie
 	return toolkitviews.KeyScope(disclosure, clientPickerKeyHandler(profiles, local))
 }
 
-func toggleClientPicker(selectedCursor int, local clientsSectionState) []update.Action {
+func toggleClientPicker(selectedFocusKey string, selectedCursor int, local clientsSectionState) []update.Action {
 	nextOpen := !local.clientPickerOpen
 	local.setClientPickerOpen(nextOpen)
 	if !nextOpen {
@@ -181,7 +179,7 @@ func toggleClientPicker(selectedCursor int, local clientsSectionState) []update.
 	}
 	local.setClientPickerCursor(selectedCursor)
 	return []update.Action{
-		interaction.FocusKeyAction{Key: clientPickerFocusKey(selectedCursor)},
+		interaction.FocusKeyAction{Key: selectedFocusKey},
 		state.SetInteractionMode{Mode: state.InteractionModePickOne},
 	}
 }
@@ -196,16 +194,16 @@ func closeClientPicker(local clientsSectionState) []update.Action {
 
 func buildClientPickerRows(profiles []clientprofile.Profile, local clientsSectionState, selected clientprofile.Profile) []retained.ViewSpec[state.Model] {
 	pickerRows := make([]retained.ViewSpec[state.Model], 0, len(profiles))
-	for i, profile := range profiles {
-		pickerRows = append(pickerRows, buildClientPickerRow(profile, i, local, selected))
+	for _, profile := range profiles {
+		pickerRows = append(pickerRows, buildClientPickerRow(profile, local, selected))
 	}
 	return pickerRows
 }
 
-func buildClientPickerRow(profile clientprofile.Profile, index int, local clientsSectionState, selected clientprofile.Profile) retained.ViewSpec[state.Model] {
+func buildClientPickerRow(profile clientprofile.Profile, local clientsSectionState, selected clientprofile.Profile) retained.ViewSpec[state.Model] {
 	choice := profile
 	isSelected := selected != nil && choice.Identity().ID == selected.Identity().ID
-	return retained.Named[state.Model](clientPickerFocusKey(index), toolkitviews.ListItemRowWithHooks[state.Model](
+	return retained.Named[state.Model](clientPickerFocusKey(choice), toolkitviews.ListItemRowWithHooks[state.Model](
 		toolkitviews.InsetLabel(choice.Identity().Label, 4),
 		isSelected,
 		false,
@@ -250,46 +248,49 @@ func clientPickerKeyHandler(profiles []clientprofile.Profile, local clientsSecti
 			return false, nil
 		}
 		if ev.Key == interaction.KeyUp {
-			return moveClientPickerCursor(local, -1, len(profiles))
+			return moveClientPickerCursor(profiles, local, -1)
 		}
 		if ev.Key == interaction.KeyDown {
-			return moveClientPickerCursor(local, 1, len(profiles))
+			return moveClientPickerCursor(profiles, local, 1)
 		}
 		return false, nil
 	}
 }
 
-func moveClientPickerCursor(local clientsSectionState, delta, optionCount int) (bool, []update.Action) {
+func moveClientPickerCursor(profiles []clientprofile.Profile, local clientsSectionState, delta int) (bool, []update.Action) {
 	next := local.clientPickerCursor + delta
-	if next < 0 || next >= optionCount {
+	if next < 0 || next >= len(profiles) {
 		return true, nil
 	}
 	local.setClientPickerCursor(next)
-	return true, []update.Action{interaction.FocusKeyAction{Key: clientPickerFocusKey(next)}}
+	return true, []update.Action{interaction.FocusKeyAction{Key: clientPickerFocusKey(profiles[next])}}
 }
 
 func buildActionRows(model state.Model, actions []clientprofile.Action, baseURL string, selected clientprofile.Profile, local clientsSectionState) []retained.ViewSpec[state.Model] {
 	rows := make([]retained.ViewSpec[state.Model], 0, len(actions))
 	seen := map[string]int{}
-	for index, action := range actions {
-		rowKey := actionRowFocusKey(action, index, seen)
+	for _, action := range actions {
+		rowKey := actionRowFocusKey(action, seen)
 		row := buildActionRow(model, action, baseURL, selected, local)
 		rows = append(rows, retained.Named[state.Model](rowKey, row))
 	}
 	return rows
 }
 
-func actionRowFocusKey(action clientprofile.Action, index int, seen map[string]int) string {
-	base := action.RowLabel()
+func actionRowFocusKey(action clientprofile.Action, seen map[string]int) string {
+	base := strings.TrimSpace(action.ID)
+	if base == "" {
+		base = action.RowLabel()
+	}
 	if base == "" {
 		base = "action"
 	}
 	count := seen[base]
 	seen[base] = count + 1
 	if count == 0 {
-		return base
+		return "client-action/" + base
 	}
-	return base + "/" + strconv.Itoa(index)
+	return "client-action/" + base + "/" + strconv.Itoa(count)
 }
 
 func buildActionRow(model state.Model, action clientprofile.Action, baseURL string, selected clientprofile.Profile, local clientsSectionState) retained.ViewSpec[state.Model] {
@@ -305,7 +306,7 @@ func buildActionRow(model state.Model, action clientprofile.Action, baseURL stri
 		local.setPayloadScrollOffset(0)
 		return nil
 	}, func() []update.Action {
-		return focusAffordance(action.EffectiveFocusVerb(), false)()
+		return focusAffordance(action.ActionVerb(), false)()
 	})
 	note := actionResultNote(model, action)
 	if local.expandedActionID != actionID || !action.HasPayload() {
@@ -331,44 +332,29 @@ func buildActionRow(model state.Model, action clientprofile.Action, baseURL stri
 }
 
 func actionResultNote(model state.Model, action clientprofile.Action) string {
-	verb := action.ActionVerb()
-	if verb == "run" {
+	if action.ActionVerb() == "run" {
 		return model.ClientLaunchNote
-	}
-	if verb == "copy" {
-		return model.ClientCopyNote
 	}
 	return ""
 }
 
 func activateClientAction(model state.Model, action clientprofile.Action, actionID, baseURL string, selected clientprofile.Profile, local clientsSectionState) []update.Action {
-	actions := make([]update.Action, 0, 2)
 	if action.HasPayload() {
 		if local.expandedActionID != actionID {
 			local.setExpandedActionID(actionID)
 			local.setPayloadScrollOffset(0)
 		}
 	}
-	verb := action.ActionVerb()
-	if verb == "run" {
-		if selected != nil {
-			actions = append(actions, state.ClientLaunchRequestedAction{
-				BaseURL: baseURL,
-				Preset:  selected.Identity().ID,
-				ModelID: selectedClientRunModelID(model),
-			})
-		}
-	}
-	if verb == "copy" {
-		copyValue := strings.TrimSpace(action.Content) // swobu:io-string source=boundary
-		if copyValue != "" {
-			actions = append(actions, state.ClientBaseURLCopyRequestedAction{Value: copyValue})
-		}
-	}
-	if len(actions) == 0 {
+	if action.ActionVerb() != "run" || selected == nil {
 		return nil
 	}
-	return actions
+	return []update.Action{
+		state.ClientLaunchRequestedAction{
+			BaseURL: baseURL,
+			Preset:  selected.Identity().ID,
+			ModelID: selectedClientRunModelID(model),
+		},
+	}
 }
 
 func selectedClientRunModelID(model state.Model) string {

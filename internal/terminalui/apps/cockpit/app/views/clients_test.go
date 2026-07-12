@@ -56,7 +56,7 @@ func TestToggleClientPicker_OpensAtCurrentSelection(t *testing.T) {
 		},
 	}
 
-	actions := toggleClientPicker(clientPickerCursorForSelection(profiles, selected), local)
+	actions := toggleClientPicker(clientPickerFocusKey(selected), clientPickerCursorForSelection(profiles, selected), local)
 	if !open {
 		t.Fatal("client picker should open")
 	}
@@ -70,7 +70,7 @@ func TestToggleClientPicker_OpensAtCurrentSelection(t *testing.T) {
 	if !ok {
 		t.Fatalf("action[0]=%T want interaction.FocusKeyAction", actions[0])
 	}
-	if want := clientPickerFocusKey(1); focus.Key != want {
+	if want := clientPickerFocusKey(selected); focus.Key != want {
 		t.Fatalf("focus key=%q want %q", focus.Key, want)
 	}
 	mode, ok := actions[1].(state.SetInteractionMode)
@@ -81,3 +81,41 @@ func TestToggleClientPicker_OpensAtCurrentSelection(t *testing.T) {
 		t.Fatalf("mode=%q want %q", mode.Mode, state.InteractionModePickOne)
 	}
 }
+
+func TestClientPickerFocusKey_UsesStableProfileIdentity(t *testing.T) {
+	t.Parallel()
+
+	first := stubClientProfile{id: "claude", label: "Claude"}
+	second := stubClientProfile{id: "claude", label: "Claude Code"}
+	if got, want := clientPickerFocusKey(first), "client-option/claude"; got != want {
+		t.Fatalf("focus key = %q, want %q", got, want)
+	}
+	if got, want := clientPickerFocusKey(second), "client-option/claude"; got != want {
+		t.Fatalf("focus key = %q, want %q", got, want)
+	}
+}
+
+func TestActionRowFocusKey_UsesStableActionIdentity(t *testing.T) {
+	t.Parallel()
+
+	seen := map[string]int{}
+	first := actionRowFocusKey(clientprofile.Action{ID: "run", Label: "Launch"}, seen)
+	second := actionRowFocusKey(clientprofile.Action{ID: "run", Label: "Copy"}, seen)
+	if got, want := first, "client-action/run"; got != want {
+		t.Fatalf("first key = %q, want %q", got, want)
+	}
+	if got, want := second, "client-action/run/1"; got != want {
+		t.Fatalf("second key = %q, want %q", got, want)
+	}
+}
+
+type stubClientProfile struct {
+	id    string
+	label string
+}
+
+func (s stubClientProfile) Identity() clientprofile.Identity {
+	return clientprofile.Identity{ID: s.id, Label: s.label}
+}
+
+func (s stubClientProfile) Actions(string) []clientprofile.Action { return nil }

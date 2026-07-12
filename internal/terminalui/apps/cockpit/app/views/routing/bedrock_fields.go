@@ -1,8 +1,6 @@
 package routing
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
@@ -86,63 +84,7 @@ func bedrockProfileSummary(profile string) string {
 }
 
 func bedrockDiscoveredAWSProfiles() []string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" { // swobu:io-string source=boundary
-		return nil
-	}
-	configPath := filepath.Join(home, ".aws", "config")
-	credentialsPath := filepath.Join(home, ".aws", "credentials")
-	seen := map[string]bool{}
-	out := make([]string, 0, 8)
-	appendUnique := func(name string) {
-		name = trimRoutingInput(name)
-		if name == "" || seen[name] {
-			return
-		}
-		seen[name] = true
-		out = append(out, name)
-	}
-	if raw, err := os.ReadFile(configPath); err == nil {
-		for _, profile := range parseAWSINIProfiles(string(raw), true) {
-			appendUnique(profile)
-		}
-	}
-	if raw, err := os.ReadFile(credentialsPath); err == nil {
-		for _, profile := range parseAWSINIProfiles(string(raw), false) {
-			appendUnique(profile)
-		}
-	}
-	return out
-}
-
-func parseAWSINIProfiles(raw string, fromConfig bool) []string {
-	lines := strings.Split(raw, "\n")
-	out := make([]string, 0, 8)
-	for _, line := range lines {
-		line = trimRoutingInput(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		if !strings.HasPrefix(line, "[") || !strings.HasSuffix(line, "]") {
-			continue
-		}
-		section := trimRoutingInput(line[1 : len(line)-1])
-		if section == "" {
-			continue
-		}
-		if fromConfig {
-			if strings.EqualFold(section, "default") {
-				out = append(out, "default")
-				continue
-			}
-			if strings.HasPrefix(strings.ToLower(section), "profile ") { // swobu:io-string source=boundary
-				out = append(out, trimRoutingInput(section[len("profile "):]))
-			}
-			continue
-		}
-		out = append(out, section)
-	}
-	return out
+	return stateModel.BedrockDiscoveredAWSProfiles()
 }
 
 func isBedrockAWSProfileCredentialRef(ref string) bool {

@@ -25,9 +25,13 @@ func TestCredentialFilePickerItems_DirectoryChoiceDelegatesResetAndFocus(t *test
 	items, err := credentialFilePickerItems(
 		browse,
 		func(next credentialFileBrowseState) { updated = next },
-		func() []update.Action {
+		func(next credentialFileBrowseState) []update.Action {
 			resetCalled = true
-			return []update.Action{interaction.FocusKeyAction{Key: "credential-file-option/0"}}
+			focusKey := credentialFilePickerFirstFocusKey(next, "")
+			if focusKey == "" {
+				return nil
+			}
+			return []update.Action{interaction.FocusKeyAction{Key: focusKey}}
 		},
 		"",
 		nil,

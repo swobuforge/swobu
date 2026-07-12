@@ -1,44 +1,49 @@
 package ports
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 func TestNewProviderRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}})
 	target := exchange.NewRoutableTarget("backend-a", "openai_"+"com"+"patible", "http://localhost:8080/v1", "cred-1", "chat_completions", "", "", "")
-	req := NewProviderRequest(request, NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)), target)
-	if req.Contract.ClientDelivery.Variant != protocolsurface.DeliveryVariantStreaming || req.Contract.ProviderDelivery.Variant != protocolsurface.DeliveryVariantStreaming {
+	wireRequest := carrier.NewWireDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"request":true}`), carrier.Meta{})
+	req := NewProviderRequest(request, wireRequest, exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)), target)
+	if req.Contract.ClientDelivery != delivery.StreamingDelivery(delivery.FramingSSE) || req.Contract.ProviderDelivery != delivery.StreamingDelivery(delivery.FramingSSE) {
 		t.Fatalf("delivery clone mismatch")
+	}
+	if !bytes.Equal(req.RequestDocument.RawBytes(), wireRequest.RawBytes()) {
+		t.Fatalf("request document clone mismatch")
 	}
 }
 
 func TestExecutionContract_WithProviderDelivery_OverridesProviderDeliveryOnly(t *testing.T) {
-	contract := NewExecutionContract(protocolsurface.BufferedDelivery()).WithProviderDelivery(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE))
-	if contract.ClientDelivery.Variant != protocolsurface.DeliveryVariantBuffered {
+	contract := exchange.NewExecutionContract(delivery.BufferedDelivery()).WithProviderDelivery(delivery.StreamingDelivery(delivery.FramingSSE))
+	if contract.ClientDelivery != delivery.BufferedDelivery() {
 		t.Fatalf("ingress delivery mode mismatch")
 	}
-	if contract.ProviderDelivery.Variant != protocolsurface.DeliveryVariantStreaming {
+	if contract.ProviderDelivery != delivery.StreamingDelivery(delivery.FramingSSE) {
 		t.Fatalf("provider delivery mode mismatch")
 	}
 }
 
 func TestExecutionContractValidate(t *testing.T) {
-	valid := NewExecutionContractForDeliveries(protocolsurface.BufferedDelivery(), protocolsurface.StreamingDelivery(protocolsurface.FramingSSE))
+	valid := exchange.NewExecutionContractForDeliveries(delivery.BufferedDelivery(), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid contract validate error: %v", err)
 	}
 
-	invalidDelivery := NewExecutionContractForDeliveries(protocolsurface.Delivery{Variant: protocolsurface.DeliveryVariantBuffered, Framing: protocolsurface.FramingSSE}, protocolsurface.BufferedDelivery())
+	invalidDelivery := exchange.NewExecutionContractForDeliveries(delivery.Delivery{Mode: delivery.Buffered, Framing: delivery.FramingSSE}, delivery.BufferedDelivery())
 	if err := invalidDelivery.Validate(); err == nil {
 		t.Fatalf("expected invalid ingress delivery contract error")
 	}

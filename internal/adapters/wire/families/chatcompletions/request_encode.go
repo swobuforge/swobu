@@ -53,6 +53,8 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 		return carrier.WireDocument{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
 	}
 
+	// Stage marks the carrier boundary for this wire leg; exchange path
+	// selection happens above this adapter.
 	return carrier.NewWireDocument(
 		carrier.StageProviderRequestOut,
 		"",

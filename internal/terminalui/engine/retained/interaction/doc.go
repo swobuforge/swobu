@@ -8,6 +8,8 @@
 //
 //   - [Hittable]: participates in mouse hit testing
 //   - [EventHandler]: processes keyboard and mouse events
+//   - [EventTransformer]: processes local events and can transform or consume
+//     them before bubbling continues
 //   - [ScopedEventHandler]: processes events with explicit bubbling semantics
 //   - [Focusable]: can receive focus during navigation
 //   - [FocusEvents]: observes focus enter/exit transitions

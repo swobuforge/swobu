@@ -9,7 +9,10 @@ import (
 )
 
 // RenderNode is the app-facing alias for the engine's structural node type.
-// App code returns RenderNode from BuildView; the engine owns the implementation.
+//
+// Deprecated: app-facing code should return semantic core nodes through a
+// lowering adapter. RenderNode remains only for retained compatibility during
+// the migration window.
 type RenderNode = layout.RenderNode
 
 // LocalScope is the node-scoped local state capability exposed to views.
@@ -23,13 +26,15 @@ type LocalScope interface {
 // author-facing views. Runtime identity, reconciliation tables, and other
 // engine internals stay private behind this seam.
 type Context[M any] struct {
-	Local     LocalScope
-	Model     func() M
-	dispatch  func(update.Action)
-	emit      func(update.Action)
-	building  bool
-	hookSlot  int
-	childSlot int
+	Local       LocalScope
+	Model       func() M
+	dispatch    func(update.Action)
+	emit        func(update.Action)
+	building    bool
+	hookSlot    int
+	childSlot   int
+	effectHooks []effectHook
+	eventHooks  []eventHook
 }
 
 // ViewSpec is the declarative composition value used by app and toolkit code.
@@ -43,7 +48,11 @@ func renderNode[M any](ctx *Context[M], w ViewSpec[M]) RenderNode {
 	if w == nil {
 		return nil
 	}
-	return w.BuildRenderNode(ctx)
+	if ctx == nil {
+		return w.BuildRenderNode(nil)
+	}
+	node := w.BuildRenderNode(ctx)
+	return wrapEventHooks(node, ctx.eventHooks)
 }
 
 // Materialize converts one declarative view value into a layout node.
@@ -75,15 +84,26 @@ func Build[M any](buildView func(ctx *Context[M]) ViewSpec[M]) ViewSpec[M] {
 			ctx.childSlot++
 			local := ctx.Local.WithPrefix("build/" + strconv.Itoa(slot))
 			childCtx := &Context[M]{
-				Local:     local,
-				Model:     ctx.Model,
-				dispatch:  ctx.dispatch,
-				emit:      ctx.emit,
-				building:  ctx.building,
-				hookSlot:  0,
-				childSlot: 0,
+				Local:       local,
+				Model:       ctx.Model,
+				dispatch:    ctx.dispatch,
+				emit:        ctx.emit,
+				building:    ctx.building,
+				hookSlot:    0,
+				childSlot:   0,
+				effectHooks: nil,
+				eventHooks:  nil,
 			}
-			return renderNode(childCtx, buildView(childCtx))
+			child := buildView(childCtx)
+			if child == nil {
+				childCtx.building = false
+				return nil
+			}
+			// Finalize the child scope here so nested hooks survive even though
+			// the parent build pass never sees this childCtx directly.
+			node := child.BuildRenderNode(childCtx)
+			childCtx.building = false
+			return wrapEventHooks(wrapEffectHooks(node, childCtx.effectHooks), childCtx.eventHooks)
 		},
 	}
 }
@@ -103,15 +123,26 @@ func BuildWithLifecycle[M any](
 			ctx.childSlot++
 			local := ctx.Local.WithPrefix("build/" + strconv.Itoa(slot))
 			childCtx := &Context[M]{
-				Local:     local,
-				Model:     ctx.Model,
-				dispatch:  ctx.dispatch,
-				emit:      ctx.emit,
-				building:  ctx.building,
-				hookSlot:  0,
-				childSlot: 0,
+				Local:       local,
+				Model:       ctx.Model,
+				dispatch:    ctx.dispatch,
+				emit:        ctx.emit,
+				building:    ctx.building,
+				hookSlot:    0,
+				childSlot:   0,
+				effectHooks: nil,
+				eventHooks:  nil,
 			}
-			return renderNode(childCtx, buildView(childCtx))
+			child := buildView(childCtx)
+			if child == nil {
+				childCtx.building = false
+				return nil
+			}
+			// Finalize the child scope here so nested hooks survive even though
+			// the parent build pass never sees this childCtx directly.
+			node := child.BuildRenderNode(childCtx)
+			childCtx.building = false
+			return wrapEventHooks(wrapEffectHooks(node, childCtx.effectHooks), childCtx.eventHooks)
 		},
 		onMount:   onMount,
 		onUnmount: onUnmount,
@@ -168,15 +199,17 @@ func (ctx *Context[M]) Emit(action update.Action) {
 
 func buildViewNode[M any](child ViewSpec[M], local LocalScope, dispatch func(update.Action), emit func(update.Action), model func() M) RenderNode {
 	ctx := &Context[M]{
-		Local:     local,
-		Model:     model,
-		dispatch:  dispatch,
-		emit:      emit,
-		building:  true,
-		hookSlot:  0,
-		childSlot: 0,
+		Local:       local,
+		Model:       model,
+		dispatch:    dispatch,
+		emit:        emit,
+		building:    true,
+		hookSlot:    0,
+		childSlot:   0,
+		effectHooks: nil,
+		eventHooks:  nil,
 	}
 	node := child.BuildRenderNode(ctx)
 	ctx.building = false
-	return node
+	return wrapEventHooks(wrapEffectHooks(node, ctx.effectHooks), ctx.eventHooks)
 }

@@ -21,79 +21,108 @@ type protocolBundle struct {
 // RuntimeResolver composes one exchange runtime protocol bundle set for all supported
 // client families and provider protocol kinds.
 type RuntimeResolver struct {
-	clientByFamily map[canonical.ClientFamily]exchange.ClientCodec
-	providerByKind map[protocolkind.ProtocolKind]protocolBundle
+	chatCompletionsClient exchange.ClientCodec
+	responsesClient       exchange.ClientCodec
+	completionsClient     exchange.ClientCodec
+	messagesClient        exchange.ClientCodec
+
+	chatCompletionsProvider protocolBundle
+	responsesProvider       protocolBundle
+	completionsProvider     protocolBundle
+	messagesProvider        protocolBundle
 }
 
 func NewResolver() RuntimeResolver {
 	return RuntimeResolver{
-		clientByFamily: map[canonical.ClientFamily]exchange.ClientCodec{
-			canonical.ClientFamilyChatCompletions: ClientCodecBundle{
-				request:  chatcompletions.ClientRequestDecoder{},
-				document: chatcompletions.ResponseDocumentEncoder{},
-				stream:   chatcompletions.ResponseStreamEncoder{},
-			},
-			canonical.ClientFamilyResponses: ClientCodecBundle{
-				request:  responses.ClientRequestDecoder{},
-				document: responses.ResponseDocumentEncoder{},
-				stream:   responses.ResponseStreamEncoder{},
-			},
-			canonical.ClientFamilyCompletions: ClientCodecBundle{
-				request:  completions.ClientRequestDecoder{},
-				document: completions.ResponseDocumentEncoder{},
-				stream:   completions.ResponseStreamEncoder{},
-			},
-			canonical.ClientFamilyMessages: ClientCodecBundle{
-				request:  messages.ClientRequestDecoder{},
-				document: messages.ResponseDocumentEncoder{},
-				stream:   messages.ResponseStreamEncoder{},
-			},
+		chatCompletionsClient: ClientCodecBundle{
+			request:  chatcompletions.ClientRequestDecoder{},
+			document: chatcompletions.ResponseDocumentEncoder{},
+			stream:   chatcompletions.ResponseStreamEncoder{},
 		},
-		providerByKind: map[protocolkind.ProtocolKind]protocolBundle{
-			protocolkind.ChatCompletions: {
-				requestEncoder:  chatcompletions.ProviderRequestDocumentEncoder{},
-				streamDecoder:   chatcompletions.ProviderEnvelopeDecoder{},
-				documentDecoder: chatcompletions.ProviderDocumentDecoder{},
-			},
-			protocolkind.Responses: {
-				requestEncoder:  responses.ProviderRequestDocumentEncoder{},
-				streamDecoder:   responses.ProviderEnvelopeDecoder{},
-				documentDecoder: responses.ProviderDocumentDecoder{},
-			},
-			protocolkind.Completions: {
-				requestEncoder:  completions.ProviderRequestDocumentEncoder{},
-				streamDecoder:   completions.ProviderEnvelopeDecoder{},
-				documentDecoder: completions.ProviderDocumentDecoder{},
-			},
-			protocolkind.Messages: {
-				requestEncoder:  messages.ProviderRequestDocumentEncoder{},
-				streamDecoder:   messages.ProviderEnvelopeDecoder{},
-				documentDecoder: messages.ProviderDocumentDecoder{},
-			},
+		responsesClient: ClientCodecBundle{
+			request:  responses.ClientRequestDecoder{},
+			document: responses.ResponseDocumentEncoder{},
+			stream:   responses.ResponseStreamEncoder{},
+		},
+		completionsClient: ClientCodecBundle{
+			request:  completions.ClientRequestDecoder{},
+			document: completions.ResponseDocumentEncoder{},
+			stream:   completions.ResponseStreamEncoder{},
+		},
+		messagesClient: ClientCodecBundle{
+			request:  messages.ClientRequestDecoder{},
+			document: messages.ResponseDocumentEncoder{},
+			stream:   messages.ResponseStreamEncoder{},
+		},
+		chatCompletionsProvider: protocolBundle{
+			requestEncoder:  chatcompletions.ProviderRequestDocumentEncoder{},
+			streamDecoder:   chatcompletions.ProviderEnvelopeDecoder{},
+			documentDecoder: chatcompletions.ProviderDocumentDecoder{},
+		},
+		responsesProvider: protocolBundle{
+			requestEncoder:  responses.ProviderRequestDocumentEncoder{},
+			streamDecoder:   responses.ProviderEnvelopeDecoder{},
+			documentDecoder: responses.ProviderDocumentDecoder{},
+		},
+		completionsProvider: protocolBundle{
+			requestEncoder:  completions.ProviderRequestDocumentEncoder{},
+			streamDecoder:   completions.ProviderEnvelopeDecoder{},
+			documentDecoder: completions.ProviderDocumentDecoder{},
+		},
+		messagesProvider: protocolBundle{
+			requestEncoder:  messages.ProviderRequestDocumentEncoder{},
+			streamDecoder:   messages.ProviderEnvelopeDecoder{},
+			documentDecoder: messages.ProviderDocumentDecoder{},
 		},
 	}
 }
 
 func (r RuntimeResolver) ClientCodec(f canonical.ClientFamily) exchange.ClientCodec {
-	return r.clientByFamily[f]
+	switch f {
+	case canonical.ClientFamilyChatCompletions:
+		return r.chatCompletionsClient
+	case canonical.ClientFamilyResponses:
+		return r.responsesClient
+	case canonical.ClientFamilyCompletions:
+		return r.completionsClient
+	case canonical.ClientFamilyMessages:
+		return r.messagesClient
+	default:
+		return nil
+	}
 }
 
 func (r RuntimeResolver) ProviderRequestDocumentEncoder(kind protocolkind.ProtocolKind) exchange.ProviderRequestDocumentEncoder {
-	return r.providerByKind[kind].requestEncoder
+	return r.providerBundle(kind).requestEncoder
 }
 
 func (r RuntimeResolver) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) exchange.ProviderEnvelopeDecoder {
 	if d.Mode != delivery.Streaming {
 		return nil
 	}
-	return r.providerByKind[kind].streamDecoder
+	return r.providerBundle(kind).streamDecoder
 }
 
 func (r RuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) exchange.ProviderDocumentDecoder {
 	if d.Mode != delivery.Buffered {
 		return nil
 	}
-	return r.providerByKind[kind].documentDecoder
+	return r.providerBundle(kind).documentDecoder
+}
+
+func (r RuntimeResolver) providerBundle(kind protocolkind.ProtocolKind) protocolBundle {
+	switch kind {
+	case protocolkind.ChatCompletions:
+		return r.chatCompletionsProvider
+	case protocolkind.Responses:
+		return r.responsesProvider
+	case protocolkind.Completions:
+		return r.completionsProvider
+	case protocolkind.Messages:
+		return r.messagesProvider
+	default:
+		return protocolBundle{}
+	}
 }
 
 type ClientCodecBundle struct {

@@ -152,8 +152,8 @@ func TestAddModelCredentialFilePickerItems_ParentChooseUpdatesBrowseAndDoesNotRe
 	if !ok {
 		t.Fatalf("action[0]=%T want interaction.FocusKeyAction", actions[0])
 	}
-	if focus.Key != views.FilterablePickerFocusKey("credential-file-option", 0) {
-		t.Fatalf("focus key=%q want %q", focus.Key, views.FilterablePickerFocusKey("credential-file-option", 0))
+	if want := credentialFilePickerFirstFocusKey(credentialFileBrowseState{Dir: tmp}, ""); focus.Key != want {
+		t.Fatalf("focus key=%q want %q", focus.Key, want)
 	}
 }
 

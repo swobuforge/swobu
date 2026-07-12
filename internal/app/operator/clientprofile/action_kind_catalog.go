@@ -8,11 +8,7 @@ import (
 type ActionKind string
 
 const (
-	ActionKindRun               ActionKind = "run"
-	ActionKindFileConfig        ActionKind = "file_config"
-	ActionKindEnvironmentValues ActionKind = "environment_values"
-	ActionKindOpenGuide         ActionKind = "open_guide"
-	ActionKindCopyValues        ActionKind = "copy_values"
+	ActionKindRun ActionKind = "run"
 )
 
 type capabilityClientSpec struct {
@@ -25,11 +21,10 @@ type capabilityClientSpec struct {
 }
 
 type capabilityActionSpec struct {
-	ID        string
-	Kind      ActionKind
-	Summary   string
-	FocusVerb string
-	Content   string
+	ID      string
+	Kind    ActionKind
+	Summary string
+	Content string
 }
 
 type capabilityRunSpec struct {
@@ -41,7 +36,7 @@ type capabilityRunSpec struct {
 
 type capabilityRunPrepareSpec struct {
 	Path           string
-	FromActionID   string
+	Content        string
 	Mode           fs.FileMode
 	WriteIfMissing bool
 }
@@ -53,11 +48,7 @@ type actionKindInfo struct {
 }
 
 var actionDescriptors = map[ActionKind]actionKindInfo{
-	ActionKindRun:               {Label: "run", Summary: "command", Verb: "run"},
-	ActionKindFileConfig:        {Label: "file config", Summary: "config", Verb: "copy"},
-	ActionKindEnvironmentValues: {Label: "environment values", Summary: ".env", Verb: "copy"},
-	ActionKindOpenGuide:         {Label: "open", Summary: "openai-style + anthropic-style", Verb: "view"},
-	ActionKindCopyValues:        {Label: "copy values", Summary: "base + model", Verb: "copy"},
+	ActionKindRun: {Label: "run", Summary: "command", Verb: "run"},
 }
 
 func capabilityCatalog() []capabilityClientSpec {
@@ -67,7 +58,7 @@ func capabilityCatalog() []capabilityClientSpec {
 		aiderClientSpec(),
 		continueClientSpec(),
 		opencodeClientSpec(),
-		otherClientSpec(),
+		piClientSpec(),
 	}
 }
 
@@ -81,19 +72,6 @@ func codexClientSpec() capabilityClientSpec {
 		},
 		Actions: []capabilityActionSpec{
 			{
-				ID:      "file-config",
-				Kind:    ActionKindFileConfig,
-				Summary: "~/.codex/config.toml",
-				Content: strings.Join([]string{
-					"model = \"{{primary_model}}\"",
-					"model_provider = \"swobu\"",
-					"",
-					"[model_providers.swobu]",
-					"name = \"Swobu\"",
-					"base_url = \"{{openai_base_url}}\"",
-				}, "\n"),
-			},
-			{
 				ID:   "run",
 				Kind: ActionKindRun,
 			},
@@ -102,7 +80,8 @@ func codexClientSpec() capabilityClientSpec {
 			Binary: "codex",
 			Args: []string{
 				"--dangerously-bypass-approvals-and-sandbox",
-				"--disable", "apps",
+				// `apps` is not a recognized Codex CLI feature flag in the current
+				// binary, and the interactive launcher path does not depend on it.
 				"-c", "model=\"{{primary_model}}\"",
 				"-c", "model_provider=\"swobu\"",
 				"-c", "model_providers.swobu.name=\"Swobu\"",
@@ -122,11 +101,6 @@ func claudeClientSpec() capabilityClientSpec {
 			{
 				ID:   "run",
 				Kind: ActionKindRun,
-			},
-			{
-				ID:      "env-copy",
-				Kind:    ActionKindEnvironmentValues,
-				Content: "ANTHROPIC_BASE_URL={{base_url}}\nANTHROPIC_MODEL={{primary_model}}",
 			},
 		},
 		Run: &capabilityRunSpec{
@@ -155,19 +129,8 @@ func aiderClientSpec() capabilityClientSpec {
 		Identity: Identity{ID: "aider", Label: "Aider"},
 		Actions: []capabilityActionSpec{
 			{
-				ID:      "file-config",
-				Kind:    ActionKindFileConfig,
-				Summary: ".aider.conf.yml",
-				Content: "model: openai/{{primary_model}}\nopenai-api-base: {{openai_base_url}}",
-			},
-			{
 				ID:   "run",
 				Kind: ActionKindRun,
-			},
-			{
-				ID:      "env-copy",
-				Kind:    ActionKindEnvironmentValues,
-				Content: "OPENAI_API_BASE={{openai_base_url}}\nOPENAI_API_KEY=swobu-placeholder",
 			},
 		},
 		Run: &capabilityRunSpec{
@@ -190,12 +153,6 @@ func continueClientSpec() capabilityClientSpec {
 		Identity: Identity{ID: "continue", Label: "Continue"},
 		Actions: []capabilityActionSpec{
 			{
-				ID:      "file-config",
-				Kind:    ActionKindFileConfig,
-				Summary: "swobu.continue.yaml",
-				Content: "name: Swobu\nversion: 1.0.0\nschema: v1\n\nmodels:\n  - name: Swobu Primary\n    provider: openai\n    model: primary\n    apiBase: {{openai_base_url}}\n    roles:\n      - chat\n      - edit\n      - apply",
-			},
-			{
 				ID:   "run",
 				Kind: ActionKindRun,
 			},
@@ -206,8 +163,22 @@ func continueClientSpec() capabilityClientSpec {
 				"--config", "./swobu.continue.yaml",
 			},
 			Prepare: &capabilityRunPrepareSpec{
-				Path:           "./swobu.continue.yaml",
-				FromActionID:   "file-config",
+				Path: "./swobu.continue.yaml",
+				Content: strings.Join([]string{
+					"name: Swobu",
+					"version: 1.0.0",
+					"schema: v1",
+					"",
+					"models:",
+					"  - name: Swobu Primary",
+					"    provider: openai",
+					"    model: primary",
+					"    apiBase: {{openai_base_url}}",
+					"    roles:",
+					"      - chat",
+					"      - edit",
+					"      - apply",
+				}, "\n"),
 				Mode:           0o600,
 				WriteIfMissing: true,
 			},
@@ -249,12 +220,6 @@ func opencodeClientSpec() capabilityClientSpec {
 		},
 		Actions: []capabilityActionSpec{
 			{
-				ID:      "file-config",
-				Kind:    ActionKindFileConfig,
-				Summary: "opencode.json",
-				Content: "{{opencode_config_pretty}}",
-			},
-			{
 				ID:   "run",
 				Kind: ActionKindRun,
 			},
@@ -268,27 +233,9 @@ func opencodeClientSpec() capabilityClientSpec {
 			},
 			Prepare: &capabilityRunPrepareSpec{
 				Path:           "./opencode.json",
-				FromActionID:   "file-config",
+				Content:        "{{opencode_config_pretty}}",
 				Mode:           0o600,
 				WriteIfMissing: true,
-			},
-		},
-	}
-}
-
-func otherClientSpec() capabilityClientSpec {
-	return capabilityClientSpec{
-		Identity: Identity{ID: "other", Label: "Other (Cline, Roo Code, OpenClaw, etc)"},
-		Actions: []capabilityActionSpec{
-			{
-				ID:      "open",
-				Kind:    ActionKindOpenGuide,
-				Content: "OpenAI-style + Anthropic-style\nBase URL: {{base_url}}\nModel:    {{primary_model}}\nSwobu autodetects v1 canonical.",
-			},
-			{
-				ID:      "copy-values",
-				Kind:    ActionKindCopyValues,
-				Content: "Base URL: {{base_url}}\nModel:    {{primary_model}}",
 			},
 		},
 	}

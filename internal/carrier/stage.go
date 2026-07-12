@@ -1,7 +1,8 @@
 package carrier
 
-// Stage identifies one exchange boundary segment where a carrier is observed or
-// transformed.
+// Stage identifies one carrier boundary segment where a value is observed or
+// transformed. Exchange role and path selection belong to ports and links, not
+// to this metadata token.
 type Stage string
 
 const (

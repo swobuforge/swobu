@@ -26,6 +26,7 @@ type bedrockAuthMode string
 const (
 	bedrockAuthModeAWSProfile bedrockAuthMode = "aws_profile"
 	bedrockAuthModeAPIKeyEnv  bedrockAuthMode = "api_key_env"
+	bedrockSigningService     = "bedrock"
 )
 
 func mustParseURL(raw string) *url.URL {
@@ -61,14 +62,17 @@ func signBedrockRequestWithAWSProfile(ctx context.Context, profile string, req *
 	if err != nil {
 		return err
 	}
-	cfg, err := loadBedrockAWSConfig(ctx, region, bedrockAuthModeAWSProfile, profile)
+	// Credential refs may carry an explicit @region suffix so provider config
+	// can override ambient env and host defaults without a separate auth mode.
+	profileName, _ := splitBedrockProfileAndRegion(profile)
+	cfg, err := loadBedrockAWSConfig(ctx, region, bedrockAuthModeAWSProfile, profileName)
 	if err != nil {
 		return err
 	}
 	creds, err := cfg.Credentials.Retrieve(ctx)
 	if err != nil {
-		if trimBedrockInput(profile) != "" {
-			return canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials for profile %q are unavailable or expired", profile))
+		if trimBedrockInput(profileName) != "" {
+			return canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials for profile %q are unavailable or expired", profileName))
 		}
 		return canonical.BadEndpoint("bedrock AWS credentials are unavailable or expired")
 	}
@@ -85,15 +89,15 @@ func signBedrockRequestWithAWSProfile(ctx context.Context, profile string, req *
 }
 
 func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMode, value string) (aws.Config, error) {
-	profile := ""
+	profileName, _ := splitBedrockProfileAndRegion(value)
 	if mode == bedrockAuthModeAWSProfile {
-		profile = value
+		value = profileName
 	}
 	loadOptions := []func(*config.LoadOptions) error{config.WithRegion(region)}
 	switch mode {
 	case bedrockAuthModeAWSProfile:
-		if trimBedrockInput(profile) != "" {
-			loadOptions = append(loadOptions, config.WithSharedConfigProfile(trimBedrockInput(profile)))
+		if trimBedrockInput(value) != "" {
+			loadOptions = append(loadOptions, config.WithSharedConfigProfile(trimBedrockInput(value)))
 		}
 	case bedrockAuthModeAPIKeyEnv:
 		envKey := value
@@ -114,7 +118,7 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 		return aws.Config{}, canonical.BadEndpoint("bedrock auth mode is unsupported")
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, loadOptions...)
-	if err != nil && mode == bedrockAuthModeAWSProfile && trimBedrockInput(profile) != "" {
+	if err != nil && mode == bedrockAuthModeAWSProfile && trimBedrockInput(value) != "" {
 		sharedConfig, sharedCreds, ok := defaultAWSSharedFiles()
 		if ok {
 			fallbackOpts := append([]func(*config.LoadOptions) error{}, loadOptions...)
@@ -126,19 +130,19 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 		}
 	}
 	if err != nil {
-		if trimBedrockInput(profile) != "" {
-			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS profile %q could not be loaded", profile))
+		if trimBedrockInput(value) != "" {
+			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS profile %q could not be loaded", value))
 		}
 		return aws.Config{}, canonical.BadEndpoint("bedrock AWS default credential chain could not be loaded")
 	}
 	if mode == bedrockAuthModeAWSProfile {
-		// Bedrock runtime execution for aws_profile/aws_env_session must use SigV4.
+		// Bedrock Mantle execution for aws_profile/aws_env_session must use SigV4.
 		// Some shared config chains can surface bearer providers (for example SSO),
-		// which breaks local/http test endpoints and non-bearer runtime flows.
+		// which breaks local/http test endpoints and non-bearer Mantle flows.
 		cfg.BearerAuthTokenProvider = nil
 		if _, credErr := cfg.Credentials.Retrieve(ctx); credErr != nil {
-			if trimBedrockInput(profile) != "" {
-				return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials for profile %q are unavailable or expired: %v", profile, credErr))
+			if trimBedrockInput(value) != "" {
+				return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials for profile %q are unavailable or expired: %v", value, credErr))
 			}
 			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS credentials are unavailable or expired: %v", credErr))
 		}
@@ -176,11 +180,14 @@ func bedrockSigningRegion(ctx context.Context, u *url.URL, profile string) (stri
 	if _, hostRegion := bedrockEndpointClassAndRegion(u.String()); hostRegion != "" {
 		return hostRegion, nil
 	}
-	if sdkRegion := bedrockRegionFromSDKConfig(ctx, profile); sdkRegion != "" {
+	profileName, explicitRegion := splitBedrockProfileAndRegion(profile)
+	if explicitRegion != "" {
+		return explicitRegion, nil
+	}
+	if sdkRegion := bedrockRegionFromSDKConfig(ctx, profileName); sdkRegion != "" {
 		return sdkRegion, nil
 	}
-	// TODO(bedrock-auth-ontology): allow explicit region in durable provider config once auth ontology supports non-token credential parameters.
-	return "", canonical.BadEndpoint("bedrock signing region is required (set AWS_REGION/AWS_DEFAULT_REGION or use a bedrock-runtime.<region> host)")
+	return "", canonical.BadEndpoint("bedrock signing region is required (set AWS_REGION/AWS_DEFAULT_REGION or use a bedrock-mantle.<region> host)")
 }
 
 func bedrockRegionFromSDKConfig(ctx context.Context, profile string) string {
@@ -204,6 +211,18 @@ func bedrockRegionFromSDKConfig(ctx context.Context, profile string) string {
 		return ""
 	}
 	return trimBedrockInput(cfg.Region)
+}
+
+func splitBedrockProfileAndRegion(value string) (profile string, region string) {
+	trimmed := trimBedrockInput(value)
+	if trimmed == "" {
+		return "", ""
+	}
+	profile, region, found := strings.Cut(trimmed, "@") // swobu:io-string source=boundary
+	if !found {
+		return trimmed, ""
+	}
+	return trimBedrockInput(profile), trimBedrockInput(region)
 }
 
 func defaultAWSSharedFiles() (configPath string, credentialsPath string, ok bool) {

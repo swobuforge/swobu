@@ -22,32 +22,43 @@ func (loop *AppLoop[M]) DispatchEvent(ev interaction.Event) bool {
 }
 
 func (loop *AppLoop[M]) dispatchWithPropagation(target *layout.LayoutNode, ev interaction.Event) bool {
-	for current := target; current != nil; current = current.Parent {
-		if handled, actions, ok := handleNodeEvent(current, ev); ok {
-			if len(actions) > 0 {
-				loop.Dispatch(actions)
-			}
-			if handled {
-				return true
-			}
+	handled := false
+	current := ev
+	for node := target; node != nil; node = node.Parent {
+		next, actions := handleNodeEvent(node, current)
+		if len(actions) > 0 {
+			loop.Dispatch(actions)
+			handled = true
 		}
+		if next == nil {
+			return true
+		}
+		current = *next
 	}
-	return false
+	return handled
 }
 
-func handleNodeEvent(node *layout.LayoutNode, ev interaction.Event) (handled bool, actions []update.Action, ok bool) {
+func handleNodeEvent(node *layout.LayoutNode, ev interaction.Event) (*interaction.Event, []update.Action) {
 	if node == nil {
-		return false, nil, false
+		return &ev, nil
+	}
+	if handler, has := node.RenderNode.(interaction.EventTransformer); has {
+		return handler.HandleEventTransform(ev, node)
 	}
 	if handler, has := node.RenderNode.(interaction.ScopedEventHandler); has {
-		handled, actions = handler.HandleScopedEvent(ev, node)
-		return handled, actions, true
+		handled, actions := handler.HandleScopedEvent(ev, node)
+		if handled {
+			return nil, actions
+		}
+		return &ev, actions
 	}
 	if handler, has := node.RenderNode.(interaction.EventHandler); has {
-		actions = handler.HandleEvent(ev, node)
-		return len(actions) > 0, actions, true
+		actions := handler.HandleEvent(ev, node)
+		if len(actions) > 0 {
+			return nil, actions
+		}
 	}
-	return false, nil, false
+	return &ev, nil
 }
 
 func (loop *AppLoop[M]) pickEventTarget(ev interaction.Event) *layout.LayoutNode {

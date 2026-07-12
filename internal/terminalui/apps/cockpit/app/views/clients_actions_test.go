@@ -1,34 +1,35 @@
 package views
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 )
 
-func TestSelectedClientActions_UsesProfileActionsForOther(t *testing.T) {
+func TestSelectedClientActions_UsesRunOnlyProfileActions(t *testing.T) {
 	t.Parallel()
 
 	baseURL := "http://127.0.0.1:7926/c/acme/"
-	profile := clientprofile.FindByID(clientprofile.Catalog(), "other")
+	profile := clientprofile.FindByID(clientprofile.Catalog(), "codex")
 	if profile == nil {
-		t.Fatal("other profile missing")
+		t.Fatal("codex profile missing")
 	}
 	actions := selectedClientActions(profile, baseURL)
-	if len(actions) != 2 {
-		t.Fatalf("action count=%d want 2", len(actions))
+	if len(actions) != 1 {
+		t.Fatalf("action count=%d want 1", len(actions))
 	}
-	if got := actions[0].RowLabel(); got != "open" {
+	if got := actions[0].RowLabel(); got != "run" {
 		t.Fatalf("row label[0]=%q", got)
 	}
-	if got := actions[0].ActionSummary(); got != "openai-style + anthropic-style" {
+	if got := actions[0].ActionSummary(); got != "command" {
 		t.Fatalf("summary[0]=%q", got)
 	}
-	if got := actions[0].ActionVerb(); got != "view" {
+	if got := actions[0].ActionVerb(); got != "run" {
 		t.Fatalf("verb=%q", got)
 	}
-	if got := actions[1].Content; got != "Base URL: http://127.0.0.1:7926/c/acme/\nModel:    swobu" {
-		t.Fatalf("copy values payload=%q", got)
+	if got := actions[0].Content; !strings.Contains(got, "codex --dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("run payload=%q", got)
 	}
 }
 

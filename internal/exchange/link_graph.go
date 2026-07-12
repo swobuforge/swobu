@@ -8,7 +8,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/effect"
-	"github.com/swobuforge/swobu/internal/transform"
 )
 
 // PortID names one typed location in the exchange graph.
@@ -54,17 +53,8 @@ type Tag string
 type Context struct {
 	Go         context.Context
 	ExchangeID string
-	Route      RouteSpec
 	Target     *RoutableTarget
 	Delivery   delivery.Delivery
-	Attempt    *AttemptInfo
-}
-
-// AttemptInfo records one selected attempt while the builder is evaluating a
-// port-local path.
-type AttemptInfo struct {
-	Index int
-	ID    LinkID
 }
 
 // Result carries the next graph value plus any side effects the step wants
@@ -119,17 +109,16 @@ func (l Link[I, O]) Run(ctx context.Context, input I) (Result[O], error) {
 	return l.Step(ctx, input)
 }
 
-func documentPortForStage(stage transform.Stage) Port[carrier.WireDocument] {
-	switch stage {
-	case transform.StageClientWireIn:
-		return NewPort[carrier.WireDocument](PortID("client.wire.in"))
-	case transform.StageRequestDocumentOut:
-		return NewPort[carrier.WireDocument](PortID("provider.request.wire_out"))
-	case transform.StageRequestDocumentIn:
-		return NewPort[carrier.WireDocument](PortID("provider.response.wire_in"))
-	default:
-		return NewPort[carrier.WireDocument](PortID(stage))
-	}
+func clientRequestWireInPort() Port[carrier.WireDocument] {
+	return NewPort[carrier.WireDocument](PortID("client.wire.in"))
+}
+
+func providerRequestWireOutPort() Port[carrier.WireDocument] {
+	return NewPort[carrier.WireDocument](PortID("provider.request.wire_out"))
+}
+
+func providerResponseWireInPort() Port[carrier.WireDocument] {
+	return NewPort[carrier.WireDocument](PortID("provider.response.wire_in"))
 }
 
 func semanticEventsPort() Port[canonical.EventReader] {

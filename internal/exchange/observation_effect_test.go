@@ -7,7 +7,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/report"
 	"github.com/swobuforge/swobu/internal/transform"
@@ -55,11 +54,9 @@ func (observationEmittingStreamTransform) Wrap(_ transform.Context, reader canon
 
 func TestRunnerRun_AttachesRouteIdentityToObservationEffects(t *testing.T) {
 	sink := &recordingEffectSink{}
-	runner := withRuntime(Runner{
-		ResolveProviderIngress: bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)),
-		Transforms:             transform.NewRegistry(nil, []transform.EventStreamTransform{observationEmittingStreamTransform{}}),
-		EffectSink:             sink,
-	})
+	runner := withRuntime(bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)))
+	runner.Transforms = transform.NewRegistry(nil, []transform.EventStreamTransform{observationEmittingStreamTransform{}})
+	runner.EffectSink = sink
 
 	_, err := runner.Run(context.Background(), ExchangeInput{
 		ExchangeID:       "ex_obs",
@@ -67,7 +64,7 @@ func TestRunnerRun_AttachesRouteIdentityToObservationEffects(t *testing.T) {
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-		Contract:         NewExecutionContract(protocolsurface.BufferedDelivery()),
+		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 	})

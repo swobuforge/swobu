@@ -120,6 +120,14 @@ func (loop *AppLoop[M]) executeEffect(eff update.Effect) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if _, ok := eff.(interface{ RunImmediately() }); ok {
+		actions := eff.Execute(ctx)
+		select {
+		case loop.followUp <- actions:
+		case <-ctx.Done():
+		}
+		return
+	}
 	if _, ok := eff.(stateeffect.FocusNextAfterRebuildEffect); ok {
 		actions := eff.Execute(ctx)
 		select {

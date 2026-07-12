@@ -62,6 +62,7 @@ const (
 	ProviderSpecAnthropic        ProviderID = "anthropic"
 	ProviderSpecOpenRouter       ProviderID = "openrouter"
 	ProviderSpecBedrock          ProviderID = "bedrock"
+	ProviderSpecAzure            ProviderID = "azure"
 	ProviderSpecOpenAICompatible ProviderID = "openai_compatible"
 
 	CapabilityModelCatalog Capability = "model_catalog"
@@ -77,6 +78,7 @@ type Profile struct {
 	SetupHint               string
 	DefaultBaseURL          string
 	DefaultCredentialEnvVar string
+	DefaultAuthHeader       string
 	VisibleInOperatorUI     bool
 	ProviderProtocols       []ProviderProtocolSpec
 	AllowedAuthModes        []AuthModeSpec
@@ -90,6 +92,11 @@ type ProviderProtocolSpec struct {
 }
 
 var (
+	openAICompatibleAuthHeaders = []string{
+		"Authorization",
+		"X-API-Key",
+		"api-key",
+	}
 	providerProtocolsOpenAIFamily = []ProviderProtocolSpec{
 		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
@@ -106,10 +113,20 @@ var (
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
 	providerProtocolsBedrock = []ProviderProtocolSpec{
-		{Name: "converse", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
-		{Name: "converse_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "invoke_model", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "invoke_model_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
+	}
+	providerProtocolsAzure = []ProviderProtocolSpec{
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 	}
 )
 
@@ -185,7 +202,7 @@ func catalog() []Profile {
 		{
 			ProviderID:              ProviderSpecBedrock,
 			ProviderDisplayName:     "AWS Bedrock",
-			SetupHint:               string(ProviderSpecBedrock) + "   Bedrock runtime endpoint URL",
+			SetupHint:               string(ProviderSpecBedrock) + "   Bedrock Mantle endpoint URL",
 			DefaultBaseURL:          "",
 			DefaultCredentialEnvVar: "AWS_BEARER_TOKEN_BEDROCK",
 			VisibleInOperatorUI:     true,
@@ -195,13 +212,28 @@ func catalog() []Profile {
 				{ID: AuthModeAWSEnvSession, Variant: AuthVariantAWSEnvSession, Kind: AuthNone, Requirement: AuthModeRequirementNever},
 				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
 			},
-			DeclaredCapabilities: []Capability{CapabilityStreaming},
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
+		},
+		{
+			ProviderID:              ProviderSpecAzure,
+			ProviderDisplayName:     "Azure OpenAI",
+			SetupHint:               string(ProviderSpecAzure) + "   Azure OpenAI v1 endpoint (https://resource.openai.azure.com/openai/v1)",
+			DefaultBaseURL:          "",
+			DefaultCredentialEnvVar: "AZURE_OPENAI_API_KEY",
+			VisibleInOperatorUI:     true,
+			ProviderProtocols:       slices.Clone(providerProtocolsAzure),
+			AllowedAuthModes: []AuthModeSpec{
+				{ID: AuthModeTokenEnv, Variant: AuthVariantEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{ID: AuthModeTokenFile, Variant: AuthVariantFile, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+			},
+			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
 			ProviderID:          ProviderSpecOpenAICompatible,
 			ProviderDisplayName: "OpenAI Compatible",
 			SetupHint:           string(ProviderSpecOpenAICompatible) + "   OpenAI-style URL (https://host/v1)",
 			DefaultBaseURL:      "",
+			DefaultAuthHeader:   "Authorization",
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 			AllowedAuthModes: []AuthModeSpec{
@@ -326,8 +358,40 @@ func DefaultEnvKeyForSpec(spec string) string {
 	return profile.DefaultCredentialEnvVar
 }
 
+// DefaultAuthHeaderForSpec returns the canonical auth header name for a
+// provider spec, or empty if the provider does not expose a header choice.
+func DefaultAuthHeaderForSpec(spec string) string {
+	profile, ok := profileFor(spec)
+	if !ok {
+		return ""
+	}
+	return profile.DefaultAuthHeader
+}
+
+// SupportedAuthHeadersForSpec returns the common auth-header picker options for
+// a provider spec. Manual entry remains a separate escape hatch.
+func SupportedAuthHeadersForSpec(spec string) []string {
+	switch strings.TrimSpace(spec) {
+	case string(ProviderSpecOpenAICompatible):
+		return slices.Clone(openAICompatibleAuthHeaders)
+	default:
+		return nil
+	}
+}
+
 func RequiresCredential(spec, baseURL string) bool {
 	return requiresCredentialFromModes(AllowedAuthModesForSpec(spec), baseURL)
+}
+
+// RequiresExplicitExecuteBaseURL reports whether the operator must set an
+// explicit non-default execute base URL for this provider spec.
+func RequiresExplicitExecuteBaseURL(spec string) bool {
+	switch strings.TrimSpace(spec) {
+	case string(ProviderSpecOpenAICompatible), string(ProviderSpecAzure):
+		return true
+	default:
+		return false
+	}
 }
 
 func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {

@@ -14,6 +14,7 @@ type SetCreateDraftProviderSpec = stateIntent.SetCreateDraftProviderSpec
 type SetCreateDraftModelIDAction = stateIntent.SetCreateDraftModelIDAction
 type SetCreateDraftCredentialRef = stateIntent.SetCreateDraftCredentialRef
 type SetCreateDraftBaseURL = stateIntent.SetCreateDraftBaseURL
+type SetCreateDraftAuthHeader = stateIntent.SetCreateDraftAuthHeader
 type SetCreateDraftTargetAlias = stateIntent.SetCreateDraftTargetAlias
 type SetCreateDraftProviderProtocol = stateIntent.SetCreateDraftProviderProtocol
 type RenameCurrentEndpoint = stateIntent.RenameCurrentEndpoint

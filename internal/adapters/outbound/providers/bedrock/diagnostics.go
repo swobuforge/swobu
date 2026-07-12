@@ -80,25 +80,13 @@ func bedrockEndpointClassAndRegion(baseURL string) (class string, region string)
 	}
 	host := strings.TrimSpace(strings.ToLower(u.Hostname())) // swobu:io-string source=boundary
 	parts := strings.Split(host, ".")
-	if len(parts) < 2 {
+	if len(parts) < 4 {
 		return class, ""
 	}
 	switch {
-	case strings.HasPrefix(parts[0], "bedrock-runtime"):
-		class = "bedrock_runtime_openai_compat"
-		if len(parts) >= 4 {
-			region = strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
-		}
-	case strings.HasPrefix(parts[0], "bedrock-mantle"):
+	case strings.HasPrefix(parts[0], "bedrock-mantle") && parts[2] == "api" && parts[3] == "aws":
 		class = "bedrock_mantle_openai_compat"
-		if len(parts) >= 4 {
-			region = strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
-		}
-	case strings.HasPrefix(parts[0], "bedrock"):
-		class = "bedrock_control_plane"
-		if len(parts) >= 4 {
-			region = strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
-		}
+		region = strings.TrimSpace(parts[1]) // swobu:io-string source=boundary
 	}
 	return class, region
 }

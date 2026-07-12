@@ -96,6 +96,7 @@ func buildWorkspaceAddModelDetailRows(
 	rows = appendCanonicalProviderConfigLayout(rows, "add-model", canonicalProviderConfigLayout{
 		Provider:   buildAddModelProviderRow(ctx, model, strings.TrimSpace(snapshot.Name), draft, panel), // swobu:io-string source=boundary
 		Credential: buildAddModelCredentialRow(model, strings.TrimSpace(snapshot.Name), draft, panel),    // swobu:io-string source=boundary
+		AuthHeader: addModelAuthHeaderRow(ctx, draft, panel),
 		Scope:      buildAddModelScopeRow(ctx, draft, panel),
 	})
 	effectiveCredentialRef := effectiveAddModelCredentialRef(model, draft)
@@ -170,7 +171,7 @@ func buildAddModelScopeRow(ctx *retained.Context[state.Model], draft state.Provi
 	if strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
 		return addModelBedrockAuthRegionEditor(ctx, draft, panel)
 	}
-	if strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "openai_compatible") { // swobu:io-string source=boundary
+	if profile.RequiresExplicitExecuteBaseURL(draft.ProviderSpec) { // swobu:io-string source=boundary
 		return backendURLEditorRow(ctx, "scope", selectors.EmptyOr(strings.TrimSpace(draft.BaseURL), "base url missing"), strings.TrimSpace(draft.BaseURL), "https://host/v1", func(value string) []update.Action { // swobu:io-string source=boundary
 			next := draft
 			next.BaseURL = strings.TrimSpace(value) // swobu:io-string source=boundary
@@ -218,10 +219,15 @@ func buildAddModelProviderRow(
 	draft state.ProviderConfigSnapshot,
 	panel addModelPanelState,
 ) retained.ViewSpec[state.Model] {
+	items := buildAddModelProviderItems(model, endpointName, draft, panel)
 	providerRow := views.RowActionWithCancel("provider", selectors.EmptyOr(providerDisplayName(strings.TrimSpace(draft.ProviderSpec)), views.ValueRequired), "change", func() []update.Action { // swobu:io-string source=boundary
 		panel.setProviderPickerOpen(true)
 		views.ResetFilterablePickerState(panel.setProviderPicker)
-		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
+		actions := []update.Action{state.SetInteractionMode{Mode: state.InteractionModePickOne}}
+		if focusKey := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "add-provider-option"}); focusKey != "" {
+			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+		}
+		return actions
 	}, func() []update.Action {
 		if !panel.providerPickerOpen {
 			return nil
@@ -236,7 +242,6 @@ func buildAddModelProviderRow(
 	if !panel.providerPickerOpen {
 		return providerRowNamed
 	}
-	items := buildAddModelProviderItems(model, endpointName, draft, panel)
 	return views.RenderFilterablePickerDisclosure(ctx, providerRowNamed, panel.providerPicker, panel.setProviderPicker, items, views.FilterablePickerConfig{
 		KeyPrefix:      "add-provider-option",
 		BuildOptionRow: views.ChoicePickerOptionRow(true),
@@ -280,8 +285,10 @@ func buildAddModelProviderItems(model state.Model, endpointName string, draft st
 			panel.setModelPickerOpen(false)
 			panel.setCredentialUI(closeAddModelCredentialUIState(panel.credentialUI))
 			focusKey := "add-model/model"
-			if state.ProviderCredentialSelectionRequired(strings.TrimSpace(next.ProviderSpec), strings.TrimSpace(next.BaseURL), strings.TrimSpace(next.CredentialRef)) { // swobu:io-string source=boundary
+			if state.ProviderCredentialSelectionRequired(strings.TrimSpace(next.ProviderSpec), strings.TrimSpace(next.BaseURL), strings.TrimSpace(next.CredentialRef)) && strings.TrimSpace(next.CredentialRef) == "" { // swobu:io-string source=boundary
 				focusKey = "add-model/credentials"
+			} else if state.ProviderRequiresExplicitExecuteBaseURL(strings.TrimSpace(next.ProviderSpec)) && strings.TrimSpace(next.BaseURL) == "" { // swobu:io-string source=boundary
+				focusKey = "add-model/scope"
 			}
 			actions := []update.Action{
 				state.SetInteractionMode{Mode: state.InteractionModeManageList},

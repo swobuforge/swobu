@@ -22,10 +22,9 @@ import (
 // Runner executes one exchange through a single event-first lifecycle.
 // It owns runtime codec lookup and transform application for the exchange.
 type Runner struct {
-	ResolveProviderIngress func(context.Context, ProviderRequest) (ProviderIngress, error)
-	Runtime                RuntimeResolver
-	Transforms             transform.Registry
-	EffectSink             effect.Sink
+	Runtime    ExecutionRuntime
+	Transforms transform.Registry
+	EffectSink effect.Sink
 }
 
 // ClientCodec translates client-family wire documents and client-facing responses.
@@ -93,12 +92,8 @@ func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (cano
 		effectSink = effect.NoopSink{}
 	}
 	pendingEffects := make([]effect.Effect, 0, 8)
-	resolveProviderIngress := r.ResolveProviderIngress
 	runtime := r.Runtime
 	providerDelivery := in.ProviderDelivery
-	if resolveProviderIngress == nil {
-		return nil, false, errors.New("exchange runner provider ingress resolver is required")
-	}
 	if runtime == nil {
 		return nil, false, errors.New("exchange runner runtime resolver is required")
 	}
@@ -125,9 +120,7 @@ func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (cano
 	if err != nil {
 		return nil, false, err
 	}
-	providerCarrier := providerDoc.Clone()
-	providerCarrier.Stage = carrier.StageProviderRequestOut
-	providerDocResult, err := applyDocumentTransform(
+	providerDocResult, err := applyDocumentMiddleware(
 		ctx,
 		r.Transforms,
 		in.ExchangeID,
@@ -135,7 +128,8 @@ func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (cano
 		in.Target.ProviderID(),
 		in.Request.Model(),
 		transform.StageRequestDocumentOut,
-		providerCarrier,
+		providerRequestWireOutPort(),
+		providerDoc,
 		providerDelivery,
 	)
 	if err != nil {
@@ -147,7 +141,7 @@ func (r Runner) runProviderEnvelope(ctx context.Context, in ExchangeInput) (cano
 	if strings.TrimSpace(in.Target.ProviderSpec) == "" { // swobu:io-string source=boundary
 		return nil, false, canonical.BadEndpoint("provider target is required")
 	}
-	providerIngress, err := resolveProviderIngress(ctx, NewProviderRequest(
+	providerIngress, err := runtime.ResolveProviderIngress(ctx, NewProviderRequest(
 		in.ExchangeID,
 		in.ClientFamily,
 		in.Request,
@@ -230,7 +224,7 @@ func (r Runner) decodeProviderEnvelope(ctx context.Context, in ExchangeInput, in
 		if in.ProviderDelivery.Mode != delivery.Buffered {
 			return nil, canonical.InternalError("provider wire document requires buffered delivery")
 		}
-		transformedDocResult, err := applyDocumentTransform(
+		transformedDocResult, err := applyDocumentMiddleware(
 			ctx,
 			r.Transforms,
 			in.ExchangeID,
@@ -238,6 +232,7 @@ func (r Runner) decodeProviderEnvelope(ctx context.Context, in ExchangeInput, in
 			in.Target.ProviderID(),
 			in.Request.Model(),
 			transform.StageRequestDocumentIn,
+			providerResponseWireInPort(),
 			resolved,
 			in.ProviderDelivery,
 		)
@@ -260,7 +255,6 @@ func encodeClientOutput(ctx context.Context, in ExchangeInput, clientCodec Clien
 		if err != nil {
 			return TransportResponse{}, err
 		}
-		stream.Stage = carrier.StageClientResponseOut
 		stream.Framing = toCarrierFraming(in.ClientDelivery.Framing)
 		return NewTransportResponseFromStream(stream, progressive), nil
 	}
@@ -342,11 +336,11 @@ func streamProgressive(clientDelivery delivery.Delivery, providerDelivery delive
 	return true
 }
 
-func applyDocumentTransform(ctx context.Context, registry transform.Registry, exchangeID string, routeID string, providerID string, modelID string, transformStage transform.Stage, doc carrier.WireDocument, d delivery.Delivery) (Result[carrier.WireDocument], error) {
+func applyDocumentMiddleware(ctx context.Context, registry transform.Registry, exchangeID string, routeID string, providerID string, modelID string, transformStage transform.Stage, port Port[carrier.WireDocument], doc carrier.WireDocument, d delivery.Delivery) (Result[carrier.WireDocument], error) {
 	link := NewLink(
-		LinkID(transformStage),
-		documentPortForStage(transformStage),
-		documentPortForStage(transformStage),
+		LinkID(port.ID()),
+		port,
+		port,
 		func(_ context.Context, in carrier.WireDocument) (Result[carrier.WireDocument], error) {
 			next, applied, err := registry.ApplyDocument(transformStage, transform.Context{
 				ExchangeID: exchangeID,

@@ -47,10 +47,11 @@ Rules:
   - `aws_profile` (default chain/profile; external authority)
   - `aws_env_session` (default chain via AWS env session keys)
   - `env:AWS_BEARER_TOKEN_BEDROCK` (bearer token env reference)
-- model catalog source depends on credential strategy:
-  - `aws_profile` / `aws_env_session` -> AWS SDK Bedrock `ListFoundationModels`
-  - `env:*` -> OpenAI-style `/models` endpoint with bearer auth
-- validation path must follow the same split; never probe `/models` for
-  `aws_profile`/`aws_env_session` modes.
+- model catalog source is always the Bedrock Mantle OpenAI-compatible
+  `/models` endpoint.
+- credential strategy changes how the request is authenticated, not which
+  catalog surface is used.
+- validation path must probe the same Mantle `/models` endpoint for all
+  Bedrock modes.
 - Bedrock region defaults are sourced from bundled opencore list assets under
   `internal/terminalui/apps/cockpit/app/views/routing/data/bedrock_regions.json`.

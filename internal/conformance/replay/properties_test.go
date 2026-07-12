@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/protocolsurface"
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
@@ -27,14 +26,14 @@ func TestStreamingClientOutputIsLazy(t *testing.T) {
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
 
-	runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, _ exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+	runner := withRuntimeRunner(func(_ context.Context, _ exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  protocolkind.Responses,
 			Framing: carrier.FramingSSE,
 			Frames:  carrier.FrameReaderFromReadCloser(providerRead),
 		}, nil
-	}})
+	})
 	out, err := runner.Run(context.Background(), exchange.ExchangeInput{
 		ExchangeID:       "lazy_stream_client",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -43,7 +42,7 @@ func TestStreamingClientOutputIsLazy(t *testing.T) {
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
-		Contract:         exchange.NewExecutionContract(protocolsurface.StreamingDelivery(protocolsurface.FramingSSE)),
+		Contract:         exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -96,9 +95,9 @@ func TestBufferedProjectionIsCollectionBoundary(t *testing.T) {
 	var runErr error
 	go func() {
 		defer close(done)
-		runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, _ exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+		runner := withRuntimeRunner(func(_ context.Context, _ exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 			return carrier.CanonicalEventStream{Events: blocking}, nil
-		}})
+		})
 		out, runErr = runner.Run(context.Background(), exchange.ExchangeInput{
 			ExchangeID:       "buffered_collection_boundary",
 			ClientFamily:     canonical.ClientFamilyResponses,
@@ -107,7 +106,7 @@ func TestBufferedProjectionIsCollectionBoundary(t *testing.T) {
 			ProviderProtocol: protocolkind.Responses,
 			ProviderDelivery: delivery.BufferedDelivery(),
 			Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
-			Contract:         exchange.NewExecutionContract(protocolsurface.BufferedDelivery()),
+			Contract:         exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		})
 	}()
 

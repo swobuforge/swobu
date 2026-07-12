@@ -46,7 +46,7 @@ func TestCreateDraftModelBinding_LoadCatalogDerivesBedrockBaseURLFromRegion(t *t
 	if !ok {
 		t.Fatalf("action type=%T want state.LoadRoutingModelCatalogRequestedAction", actions[0])
 	}
-	wantBaseURL := "https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1"
+	wantBaseURL := "https://bedrock-mantle.eu-west-2.api.aws/v1"
 	if load.BaseURL != wantBaseURL {
 		t.Fatalf("base URL=%q want %q", load.BaseURL, wantBaseURL)
 	}
@@ -128,6 +128,20 @@ func TestProviderModelCatalogLoadBlocked_ChatGPTLoginGate(t *testing.T) {
 	}
 }
 
+func TestProviderModelCatalogLoadBlocked_AzureRequiresBaseURL(t *testing.T) {
+	t.Parallel()
+
+	if !state.ProviderModelCatalogLoadBlocked("azure", "", "env:AZURE_OPENAI_API_KEY") {
+		t.Fatalf("expected missing azure base URL to block model catalog load")
+	}
+	if got := state.ProviderModelCatalogBlockedMessage("azure", "", "env:AZURE_OPENAI_API_KEY"); got != "set backend URL before loading models" {
+		t.Fatalf("blocked message=%q", got)
+	}
+	if state.ProviderModelCatalogLoadBlocked("azure", "https://contact-5464-resource.openai.azure.com/openai/v1", "env:AZURE_OPENAI_API_KEY") {
+		t.Fatalf("expected resolved azure base URL to allow model catalog load")
+	}
+}
+
 func TestProviderModelCatalogAuthFailed_RecognizesCredentialAndUnauthorizedErrors(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +174,7 @@ func TestEvaluateModelCatalogReadiness_AuthFailureNormalizesProbeError(t *testin
 	errText := "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK"
 	got := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
 		ProviderSpec:      "bedrock",
-		BaseURL:           "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		BaseURL:           "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:     "env:AWS_BEARER_TOKEN_BEDROCK",
 		ModelCatalogError: errText,
 	})

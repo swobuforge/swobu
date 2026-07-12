@@ -34,6 +34,10 @@ type SetCreateDraftBaseURL struct {
 	BaseURL string
 }
 
+type SetCreateDraftAuthHeader struct {
+	AuthHeader string
+}
+
 type SetCreateDraftTargetAlias struct {
 	TargetAlias string
 }
@@ -192,6 +196,7 @@ type LoadRoutingModelCatalogRequestedAction struct {
 	Scope            string
 	ProviderSpec     string
 	BaseURL          string
+	AuthHeader       string
 	CredentialRef    string
 	ProviderProtocol string
 }

@@ -243,37 +243,7 @@ func TestRoot_EscOnOpenRoutingSectionCollapsesSectionBeforeExit(t *testing.T) {
 	assertRootScenario(t, out, "routing_collapsed_by_esc")
 }
 
-func TestRoot_ClientActionPayloadDisclosure_CopyRevealsOnActivateOnly(t *testing.T) {
-	t.Parallel()
-
-	rt := newTestRuntime(state.Model{
-		HeaderStatus:    "ready",
-		DaemonState:     "up",
-		Endpoints:       []string{"acme"},
-		CurrentEndpoint: "acme",
-		EndpointSnapshots: []state.EndpointSnapshot{
-			{Name: "acme"},
-		},
-	})
-	viewport := geom.Rect{W: 120, H: 30}
-	rt.Rebuild(Root(), viewport)
-
-	selectClientFromChooser(t, rt, viewport, "Codex")
-	focusRowContaining(t, rt, viewport, "file config")
-	out := rt.Render(viewport).String()
-	if strings.Contains(out, `model_provider = "swobu"`) {
-		t.Fatalf("file-config payload should stay hidden on focus; render=%q", out)
-	}
-
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	out = rt.Render(viewport).String()
-	if !strings.Contains(out, `model_provider = "swobu"`) || !strings.Contains(out, `base_url = "http://127.0.0.1:7926/c/acme/v1"`) {
-		t.Fatalf("file-config payload should be visible after activate; render=%q", out)
-	}
-}
-
-func TestRoot_ClientActionPayloadDisclosure_OpenCodeFileConfigScrollsAndPreservesBodyNav(t *testing.T) {
+func TestRoot_ClientActionPayloadDisclosure_OpenCodeRunScrollsAndPreservesBodyNav(t *testing.T) {
 	t.Parallel()
 
 	rt := newTestRuntime(state.Model{
@@ -302,7 +272,7 @@ func TestRoot_ClientActionPayloadDisclosure_OpenCodeFileConfigScrollsAndPreserve
 	}
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "file config")
+	focusRowContaining(t, rt, viewport, "run")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
@@ -315,7 +285,7 @@ func TestRoot_ClientActionPayloadDisclosure_OpenCodeFileConfigScrollsAndPreserve
 		rt.Rebuild(Root(), viewport)
 	}
 	out = rt.Render(viewport).String()
-	if !strings.Contains(out, `"baseURL":`) || !strings.Contains(out, `"http://127.0.0.1:7926/c/acme/v1"`) {
+	if !strings.Contains(out, "baseURL") {
 		t.Fatalf("expected OpenCode baseURL visible after disclosure scrolling; render=%q", out)
 	}
 
@@ -339,7 +309,7 @@ func TestRoot_ClientActionPayloadDisclosure_OpenCodeFileConfigScrollsAndPreserve
 	}
 }
 
-func TestRoot_OpenCodePayloadKeepsFooterVisibleInCompactViewport(t *testing.T) {
+func TestRoot_OpenCodeRunPayloadKeepsFooterVisibleInCompactViewport(t *testing.T) {
 	t.Parallel()
 
 	rt := newTestRuntime(state.Model{
@@ -366,12 +336,12 @@ func TestRoot_OpenCodePayloadKeepsFooterVisibleInCompactViewport(t *testing.T) {
 	}
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "file config")
+	focusRowContaining(t, rt, viewport, "run")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, "↑↓ move") || !strings.Contains(out, "tab tabs") {
+	if !strings.Contains(out, "↑↓ move") || !strings.Contains(out, "? help") {
 		t.Fatalf("expected footer hints visible in compact viewport during long payload disclosure; render=%q", out)
 	}
 	if !strings.Contains(out, "⛉ SWOBU") {
@@ -568,7 +538,7 @@ func TestRoot_FirstRunBedrockShowsCredentialRowForStrategySelection(t *testing.T
 	}
 }
 
-func TestRoot_OpenCodePayloadShowsScrollAffordanceCues(t *testing.T) {
+func TestRoot_OpenCodeRunPayloadShowsScrollAffordanceCues(t *testing.T) {
 	t.Parallel()
 
 	rt := newTestRuntime(state.Model{
@@ -595,7 +565,7 @@ func TestRoot_OpenCodePayloadShowsScrollAffordanceCues(t *testing.T) {
 	}
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "file config")
+	focusRowContaining(t, rt, viewport, "run")
 	rt.DispatchEvent(updateKey(interaction.KeyEnter))
 	rt.Rebuild(Root(), viewport)
 
@@ -644,7 +614,7 @@ func TestRoot_ClientPickerKeepsFocusedChoiceVisibleInCompactViewport(t *testing.
 		rt.Rebuild(Root(), viewport)
 	}
 	out := rt.Render(viewport).String()
-	if !strings.Contains(out, ">     Other (Cline, Roo Code, OpenClaw, etc)") {
+	if !strings.Contains(out, ">     Pi") {
 		t.Fatalf("expected focused picker option to remain visible while navigating compact picker; render=%q", out)
 	}
 }
@@ -673,7 +643,7 @@ func TestRoot_ClientsSectionReachableFromLocalDisclosureFocusStates(t *testing.T
 			name: "client-action-disclosure-open",
 			seed: func(t *testing.T, rt *loop.AppLoop[state.Model], viewport geom.Rect) {
 				selectClientFromChooser(t, rt, viewport, "Codex")
-				focusRowContaining(t, rt, viewport, "file config")
+				focusRowContaining(t, rt, viewport, "run")
 				rt.DispatchEvent(updateKey(interaction.KeyEnter))
 				rt.Rebuild(Root(), viewport)
 			},
@@ -1317,12 +1287,12 @@ func TestRoot_FirstRunOpeningModelClosesCredentialChooserDisclosure(t *testing.T
 		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
 			Ref:           state.DraftProviderRef,
 			ProviderSpec:  "bedrock",
-			BaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+			BaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
 			CredentialRef: "profile:default",
 		},
 		CreateDraftModelIDs:           []string{"amazon.nova-pro-v1:0"},
 		CreateDraftModelProviderSpec:  "bedrock",
-		CreateDraftModelBaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		CreateDraftModelBaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CreateDraftModelCredentialRef: "profile:default",
 	})
 	viewport := geom.Rect{W: 110, H: 34}

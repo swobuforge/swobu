@@ -21,6 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
@@ -97,6 +98,69 @@ func TestMapKeyEvent_MapsReturnRuneToEnter(t *testing.T) {
 		if ev.Kind != interaction.EventKey || ev.Key != interaction.KeyEnter {
 			t.Fatalf("mapKeyEvent(%q) = (%v, %q), want (EventKey, KeyEnter)", evIn.Name(), ev.Kind, ev.Key)
 		}
+	}
+}
+
+func TestRunner_MouseButtonNoneDoesNotFocusOrActivate(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	screen.SetSize(20, 4)
+
+	activations := []string{}
+	root := retained.View[struct{}](func(ctx *retained.Context[struct{}]) layout.RenderNode {
+		first := toolkitviews.NewAction(8, true, false, func(bool, int) string {
+			return "first"
+		}, func(trigger string) []update.Action {
+			activations = append(activations, "first:"+trigger)
+			return nil
+		}, nil)
+		second := toolkitviews.NewAction(8, true, false, func(bool, int) string {
+			return "second"
+		}, func(trigger string) []update.Action {
+			activations = append(activations, "second:"+trigger)
+			return nil
+		}, nil)
+		return layout.NewColumn(
+			layout.FlowChild{RenderNode: first},
+			layout.FlowChild{RenderNode: second},
+		)
+	})
+
+	runner := New(screen, root, struct{}{}, func(*struct{}, update.Action) []update.Effect {
+		return nil
+	})
+	runner.Loop.Rebuild(root, geom.Rect{W: 20, H: 4})
+
+	tree := runner.Loop.Tree
+	kids := 0
+	if tree != nil {
+		kids = len(tree.Kids)
+	}
+	if tree == nil || kids != 2 {
+		t.Fatalf("tree kids = %d, want 2", kids)
+	}
+	first := tree.Kids[0]
+	second := tree.Kids[1]
+	if runner.Loop.Focused != first {
+		t.Fatalf("focused = %v, want first row", runner.Loop.Focused)
+	}
+
+	runner.handleEvent(tcell.NewEventMouse(0, 1, tcell.ButtonNone, 0))
+	if runner.Loop.Focused != first {
+		t.Fatalf("focused after hover-like mouse event = %v, want first row", runner.Loop.Focused)
+	}
+	if len(activations) != 0 {
+		t.Fatalf("activations after hover-like mouse event = %v, want none", activations)
+	}
+
+	runner.handleEvent(tcell.NewEventMouse(0, 1, tcell.Button1, 0))
+	if runner.Loop.Focused != second {
+		t.Fatalf("focused after click = %v, want second row", runner.Loop.Focused)
+	}
+	if got, want := len(activations), 1; got != want {
+		t.Fatalf("activation count after click = %d, want 1", got)
+	}
+	if got, want := activations[0], "second:mouse"; got != want {
+		t.Fatalf("activation after click = %q, want %q", got, want)
 	}
 }
 

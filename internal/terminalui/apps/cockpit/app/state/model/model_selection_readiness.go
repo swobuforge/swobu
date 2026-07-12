@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -10,13 +11,14 @@ import (
 type ModelSelectionBlockReason string
 
 const (
-	ModelSelectionBlockNone                   ModelSelectionBlockReason = ""
-	ModelSelectionBlockAuthProbeFailed        ModelSelectionBlockReason = "auth_probe_failed"
-	ModelSelectionBlockCreateFlowPrerequisite ModelSelectionBlockReason = "create_flow_prerequisite"
-	ModelSelectionBlockInteractiveAuthPending ModelSelectionBlockReason = "interactive_auth_pending"
-	ModelSelectionBlockBedrockProfileMissing  ModelSelectionBlockReason = "bedrock_profile_missing"
-	ModelSelectionBlockEnvVarMissing          ModelSelectionBlockReason = "env_var_missing"
-	ModelSelectionBlockGenericAuth            ModelSelectionBlockReason = "generic_auth"
+	ModelSelectionBlockNone                      ModelSelectionBlockReason = ""
+	ModelSelectionBlockAuthProbeFailed           ModelSelectionBlockReason = "auth_probe_failed"
+	ModelSelectionBlockCreateFlowPrerequisite    ModelSelectionBlockReason = "create_flow_prerequisite"
+	ModelSelectionBlockInteractiveAuthPending    ModelSelectionBlockReason = "interactive_auth_pending"
+	ModelSelectionBlockBedrockProfileMissing     ModelSelectionBlockReason = "bedrock_profile_missing"
+	ModelSelectionBlockBedrockProfileUnavailable ModelSelectionBlockReason = "bedrock_profile_unavailable"
+	ModelSelectionBlockEnvVarMissing             ModelSelectionBlockReason = "env_var_missing"
+	ModelSelectionBlockGenericAuth               ModelSelectionBlockReason = "generic_auth"
 )
 
 type ModelSelectionReadinessGateInput struct {
@@ -63,12 +65,27 @@ func EvaluateModelSelectionGateState(input ModelSelectionReadinessGateInput) Mod
 		}
 	}
 	if strings.EqualFold(provider, "bedrock") && isBedrockAWSProfileRef(credentialRef) {
-		if strings.TrimSpace(bedrockProfileFromCredentialRef(credentialRef)) == "" { // swobu:io-string source=boundary
+		profileRef := strings.TrimSpace(bedrockProfileFromCredentialRef(credentialRef)) // swobu:io-string source=boundary
+		if profileRef == "" {
 			return ModelSelectionGateState{
 				Blocked: true,
 				Reason:  ModelSelectionBlockBedrockProfileMissing,
 				Message: "select AWS profile before loading models",
 			}
+		}
+		if !bedrockAWSProfileAvailable(profileRef) {
+			return ModelSelectionGateState{
+				Blocked: true,
+				Reason:  ModelSelectionBlockBedrockProfileUnavailable,
+				Message: fmt.Sprintf("bedrock AWS profile %q is not available in the active AWS config", profileRef),
+			}
+		}
+	}
+	if profile.RequiresExplicitExecuteBaseURL(provider) && baseURL == "" { // swobu:io-string source=boundary
+		return ModelSelectionGateState{
+			Blocked: true,
+			Reason:  ModelSelectionBlockGenericAuth,
+			Message: "set backend URL before loading models",
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(credentialSource(credentialRef)), "env") { // swobu:io-string source=boundary

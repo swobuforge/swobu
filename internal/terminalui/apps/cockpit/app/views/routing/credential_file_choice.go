@@ -71,7 +71,7 @@ func initialCredentialFileBrowseState(currentPath string) credentialFileBrowseSt
 func credentialFilePickerItems(
 	browse credentialFileBrowseState,
 	setBrowse func(credentialFileBrowseState),
-	onChooseDir func() []update.Action,
+	onChooseDir func(credentialFileBrowseState) []update.Action,
 	currentPath string,
 	onChooseFile func(string) []update.Action,
 ) ([]views.FilterablePickerItem, error) {
@@ -93,6 +93,7 @@ func credentialFilePickerItems(
 		entryIsDir := entry.IsDir
 		label := entry.Label
 		items = append(items, views.FilterablePickerItem{
+			Key:   path,
 			Label: label,
 			OnChoose: func() []update.Action {
 				if entryIsDir {
@@ -100,7 +101,7 @@ func credentialFilePickerItems(
 					next.Dir = path
 					setBrowse(next)
 					if onChooseDir != nil {
-						return onChooseDir()
+						return onChooseDir(next)
 					}
 					return []update.Action{interaction.FocusKeyAction{Key: "credential-file"}}
 				}
@@ -112,6 +113,14 @@ func credentialFilePickerItems(
 		})
 	}
 	return items, nil
+}
+
+func credentialFilePickerFirstFocusKey(browse credentialFileBrowseState, currentPath string) string {
+	items, err := credentialFilePickerItems(browse, func(credentialFileBrowseState) {}, func(credentialFileBrowseState) []update.Action { return nil }, currentPath, nil)
+	if err != nil || len(items) == 0 {
+		return ""
+	}
+	return views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "credential-file-option"})
 }
 
 func credentialFileBrowserPath(dir string) string {

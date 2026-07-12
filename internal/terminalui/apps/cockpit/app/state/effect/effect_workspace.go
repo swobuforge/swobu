@@ -10,6 +10,8 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
+const workspaceCreateSaveTimeout = 60 * time.Second
+
 // SaveWorkspaceNameEffect renames an existing workspace through the daemon.
 type SaveWorkspaceNameEffect struct {
 	CurrentName string
@@ -70,7 +72,9 @@ func (cmd SaveNewWorkspaceEffect) Execute(ctx context.Context) []update.Action {
 	if err != nil {
 		return []update.Action{WorkspaceSaveFailed{Message: err.Error()}}
 	}
-	c := operatorClient()
+	// Create can include daemon-side model-aware protocol resolution and probe
+	// retries, so it uses a longer wait budget than the generic daemon GET path.
+	c := operatorClientWithTimeout(workspaceCreateSaveTimeout)
 	if _, err := c.Put(ctx, ep); err != nil {
 		return []update.Action{WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}}
 	}

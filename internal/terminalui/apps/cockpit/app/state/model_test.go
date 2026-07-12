@@ -1,9 +1,12 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/profile"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
@@ -91,6 +94,59 @@ func TestReduce_CreateDraftModelAndCredentialChanges_DoNotMutateProtocolFields(t
 
 	if got := model.CreateDraftProviderConfig.ProviderProtocol; got != "responses_stream" {
 		t.Fatalf("provider protocol mutated to %q; want responses_stream", got)
+	}
+}
+
+func TestReduce_SetCreateDraftAuthHeader_DefaultsAndResetsModelSelection(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			ProviderSpec:     "openai_compatible",
+			ModelID:          "gpt-4.1-mini",
+			AuthHeader:       "X-Custom-Auth",
+			ProviderProtocol: "responses_stream",
+		},
+		CreateDraftModelIDs:          []string{"gpt-4.1-mini"},
+		CreateDraftModelProbePending: true,
+		CreateDraftModelError:        "stale",
+	}
+
+	Reduce(&model, SetCreateDraftAuthHeader{AuthHeader: ""})
+
+	if got := model.CreateDraftProviderConfig.AuthHeader; got != "Authorization" {
+		t.Fatalf("auth header=%q want Authorization", got)
+	}
+	if got := model.CreateDraftProviderConfig.ModelID; got != "" {
+		t.Fatalf("model id=%q want cleared", got)
+	}
+	if model.CreateDraftModelProbePending {
+		t.Fatal("create draft model probe pending=true want false")
+	}
+	if model.CreateDraftModelError != "" {
+		t.Fatalf("create draft model error=%q want cleared", model.CreateDraftModelError)
+	}
+}
+
+func TestReduce_CreateDraftProtocolChangeClearsWorkspaceSaveError(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		WorkspaceSaveError: "provider protocol \"responses\" is unsupported for provider \"bedrock\"",
+		CreateDraftProviderConfig: ProviderConfigSnapshot{
+			Ref:              DraftProviderRef,
+			ProviderSpec:     "bedrock",
+			ProviderProtocol: "responses",
+		},
+	}
+
+	Reduce(&model, SetCreateDraftProviderProtocol{ProviderProtocol: "auto"})
+
+	if got := model.WorkspaceSaveError; got != "" {
+		t.Fatalf("workspace save error after protocol edit = %q, want cleared", got)
+	}
+	if got := model.CreateDraftProviderConfig.ProviderProtocol; got != "auto" {
+		t.Fatalf("provider protocol after edit = %q, want auto", got)
 	}
 }
 
@@ -367,6 +423,34 @@ func TestProviderConfigForSpec_DefaultsToAutoProtocolForAllProviders(t *testing.
 		t.Fatalf("chatgpt provider protocol=%q want auto", got)
 	}
 
+	azure := ProviderConfigForSpec("azure", ProviderConfigSnapshot{})
+	if got := azure.ProviderProtocol; got != "auto" {
+		t.Fatalf("azure provider protocol=%q want auto", got)
+	}
+	if got := azure.BaseURL; got != "" {
+		t.Fatalf("azure base URL=%q want empty", got)
+	}
+	openAICompatible := ProviderConfigForSpec("openai_compatible", ProviderConfigSnapshot{})
+	if got := openAICompatible.AuthHeader; got != "Authorization" {
+		t.Fatalf("openai-compatible auth header=%q want Authorization", got)
+	}
+	if got := stateModel.ProviderAuthHeaderOptions("openai_compatible"); len(got) != 3 || got[0] != "Authorization" || got[1] != "X-API-Key" || got[2] != "api-key" {
+		t.Fatalf("openai-compatible auth header options=%v", got)
+	}
+	customAuthHeader := ProviderConfigForSpec("openai_compatible", ProviderConfigSnapshot{AuthHeader: "X-Custom-Auth"})
+	if got := customAuthHeader.AuthHeader; got != "X-Custom-Auth" {
+		t.Fatalf("openai-compatible custom auth header=%q want X-Custom-Auth", got)
+	}
+	if got := ProviderConfigForSpec("openrouter", ProviderConfigSnapshot{AuthHeader: "Authorization"}); got.AuthHeader != "" {
+		t.Fatalf("openrouter auth header=%q want cleared", got.AuthHeader)
+	}
+	if got := profile.DefaultEnvKeyForSpec("azure"); got != "AZURE_OPENAI_API_KEY" {
+		t.Fatalf("azure default env key=%q want AZURE_OPENAI_API_KEY", got)
+	}
+	if !ProviderRequiresCredential("azure", azure.BaseURL) {
+		t.Fatal("azure should require a credential")
+	}
+
 	cleared := ProviderConfigForSpec("openrouter", ProviderConfigSnapshot{
 		CredentialRef: "env:OLD_KEY",
 	})
@@ -384,7 +468,7 @@ func TestProviderOptions_UsesCanonicalDisplayOrder(t *testing.T) {
 		order = append(order, option.Spec)
 	}
 
-	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "bedrock", "openai_compatible"}
+	wantPrefix := []string{"ollama", "openai", "chatgpt", "anthropic", "openrouter", "bedrock", "azure", "openai_compatible"}
 	if len(order) < len(wantPrefix) {
 		t.Fatalf("provider options=%v want at least %v", order, wantPrefix)
 	}
@@ -471,7 +555,17 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 }
 
 func TestReduce_LoadRoutingModelCatalogCreateDraft_AppliesMatchingResultAgainstRequestedTuple(t *testing.T) {
-	t.Parallel()
+	active := t.TempDir()
+	activeConfig := filepath.Join(active, "config")
+	activeCreds := filepath.Join(active, "credentials")
+	if err := os.WriteFile(activeConfig, []byte("[profile swobu-bedrock]\nregion = us-east-1\n"), 0o600); err != nil {
+		t.Fatalf("write active config: %v", err)
+	}
+	if err := os.WriteFile(activeCreds, []byte("[swobu-bedrock]\naws_access_key_id = active\naws_secret_access_key = active\n"), 0o600); err != nil {
+		t.Fatalf("write active credentials: %v", err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", activeConfig)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", activeCreds)
 
 	model := Model{
 		CreateDraftProviderConfig: ProviderConfigSnapshot{
@@ -485,7 +579,7 @@ func TestReduce_LoadRoutingModelCatalogCreateDraft_AppliesMatchingResultAgainstR
 		Scope:            RoutingModelCatalogScopeCreateDraft,
 		ProviderSpec:     "bedrock",
 		ProviderProtocol: "auto",
-		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:swobu-bedrock",
 	})
 	if len(effects) != 1 {
@@ -502,7 +596,7 @@ func TestReduce_LoadRoutingModelCatalogCreateDraft_AppliesMatchingResultAgainstR
 		Scope:            RoutingModelCatalogScopeCreateDraft,
 		ProviderSpec:     "bedrock",
 		ProviderProtocol: "auto",
-		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:swobu-bedrock",
 		ModelIDs:         []string{"anthropic.claude-sonnet-4-5-20250929-v1:0"},
 	})
@@ -572,16 +666,16 @@ func TestReduce_AddModelCatalogResult_AcceptsMismatchedProviderProtocol(t *testi
 	Reduce(&model, LoadRoutingModelCatalogRequestedAction{
 		Scope:            RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:     "bedrock",
-		ProviderProtocol: "converse",
-		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com",
+		ProviderProtocol: "responses",
+		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:default",
 	})
 
 	Reduce(&model, RoutingModelCatalogLoaded{
 		Scope:            RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:     "bedrock",
-		ProviderProtocol: "invoke_model",
-		BaseURL:          "https://bedrock-runtime.us-east-1.amazonaws.com",
+		ProviderProtocol: "messages",
+		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:default",
 		ModelIDs:         []string{"should-not-apply"},
 	})

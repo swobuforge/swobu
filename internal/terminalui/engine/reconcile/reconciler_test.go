@@ -3,15 +3,15 @@ package reconcile
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/terminalui/view"
+	"github.com/swobuforge/swobu/internal/terminalui/transcript"
 )
 
 func TestReconcile_Append_EmitsOnlyNewDurableLines(t *testing.T) {
 	t.Parallel()
 
-	prev := view.Group("root", view.DurableText("a"), view.DurableText("b"))
-	next := view.Group("root", view.DurableText("a"), view.DurableText("b"), view.DurableText("c"))
-	ops := Reconciler{}.Reconcile(prev, next, view.RenderModeAppend)
+	prev := transcript.Group("root", transcript.DurableText("a"), transcript.DurableText("b"))
+	next := transcript.Group("root", transcript.DurableText("a"), transcript.DurableText("b"), transcript.DurableText("c"))
+	ops := Reconciler{}.Reconcile(prev, next, transcript.RenderModeAppend)
 	if len(ops) != 1 || ops[0].Kind != RenderOpAppendDurableLine || ops[0].Text != "c" {
 		t.Fatalf("unexpected ops: %#v", ops)
 	}
@@ -20,16 +20,16 @@ func TestReconcile_Append_EmitsOnlyNewDurableLines(t *testing.T) {
 func TestReconcile_Live_AppendsDurableAndUpdatesEphemeral(t *testing.T) {
 	t.Parallel()
 
-	prev := view.Group("root",
-		view.DurableText("a"),
-		view.EphemeralText("waiting"),
+	prev := transcript.Group("root",
+		transcript.DurableText("a"),
+		transcript.EphemeralText("waiting"),
 	)
-	next := view.Group("root",
-		view.DurableText("a"),
-		view.DurableText("b"),
-		view.EphemeralText("ready"),
+	next := transcript.Group("root",
+		transcript.DurableText("a"),
+		transcript.DurableText("b"),
+		transcript.EphemeralText("ready"),
 	)
-	ops := Reconciler{}.Reconcile(prev, next, view.RenderModeLive)
+	ops := Reconciler{}.Reconcile(prev, next, transcript.RenderModeLive)
 	if len(ops) != 2 {
 		t.Fatalf("ops len=%d want 2 (%#v)", len(ops), ops)
 	}
@@ -44,9 +44,9 @@ func TestReconcile_Live_AppendsDurableAndUpdatesEphemeral(t *testing.T) {
 func TestReconcile_Fullscreen_EmitsFrameOnChange(t *testing.T) {
 	t.Parallel()
 
-	prev := view.Group("root", view.DurableText("a"))
-	next := view.Group("root", view.DurableText("a"), view.EphemeralText("status"))
-	ops := Reconciler{}.Reconcile(prev, next, view.RenderModeFullscreen)
+	prev := transcript.Group("root", transcript.DurableText("a"))
+	next := transcript.Group("root", transcript.DurableText("a"), transcript.EphemeralText("status"))
+	ops := Reconciler{}.Reconcile(prev, next, transcript.RenderModeFullscreen)
 	if len(ops) != 1 || ops[0].Kind != RenderOpPaintFrame {
 		t.Fatalf("unexpected ops: %#v", ops)
 	}
@@ -58,9 +58,9 @@ func TestReconcile_Fullscreen_EmitsFrameOnChange(t *testing.T) {
 func TestReconcileScene_Live_UsesProjectedSceneOnly(t *testing.T) {
 	t.Parallel()
 
-	prev := view.SceneSnapshot{Durable: []string{"a"}, Ephemeral: []string{"waiting"}}
-	next := view.SceneSnapshot{Durable: []string{"a", "b"}, Ephemeral: []string{"ready"}}
-	ops := Reconciler{}.ReconcileScene(prev, next, view.RenderModeLive)
+	prev := transcript.SceneSnapshot{Durable: []string{"a"}, Ephemeral: []string{"waiting"}}
+	next := transcript.SceneSnapshot{Durable: []string{"a", "b"}, Ephemeral: []string{"ready"}}
+	ops := Reconciler{}.ReconcileScene(prev, next, transcript.RenderModeLive)
 	if len(ops) != 2 {
 		t.Fatalf("ops len=%d want 2 (%#v)", len(ops), ops)
 	}

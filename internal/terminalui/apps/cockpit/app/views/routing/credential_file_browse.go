@@ -45,7 +45,9 @@ func buildProviderCredentialFileBrowseRow(ctx *retained.Context[state.Model], sp
 			nextBrowse := initialCredentialFileBrowseState(currentPath)
 			setBrowse(nextBrowse)
 			views.ResetFilterablePickerState(setPicker)
-			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("credential-file-option", 0)})
+			if focusKey := credentialFilePickerFirstFocusKey(nextBrowse, currentPath); focusKey != "" {
+				actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+			}
 		}
 		if nextOpen {
 			actions = append(actions, state.SetInteractionMode{Mode: state.InteractionModePickOne})
@@ -73,11 +75,13 @@ func buildProviderCredentialFileBrowseRow(ctx *retained.Context[state.Model], sp
 	out := parent
 	if !open {
 	} else {
-		items, err := credentialFilePickerItems(browse, setBrowse, func() []update.Action {
+		items, err := credentialFilePickerItems(browse, setBrowse, func(nextBrowse credentialFileBrowseState) []update.Action {
 			views.ResetFilterablePickerState(setPicker)
-			return []update.Action{
-				interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("credential-file-option", 0)},
+			focusKey := credentialFilePickerFirstFocusKey(nextBrowse, currentPath)
+			if focusKey == "" {
+				return nil
 			}
+			return []update.Action{interaction.FocusKeyAction{Key: focusKey}}
 		}, currentPath, func(path string) []update.Action {
 			setOpen(false)
 			return postCredentialFileSelectionActions(

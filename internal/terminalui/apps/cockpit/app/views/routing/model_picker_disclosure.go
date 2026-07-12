@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"strings"
+
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -9,6 +11,7 @@ import (
 )
 
 type modelPickerOption struct {
+	Key      string
 	Label    string
 	Selected bool
 	OnChoose func() []update.Action
@@ -42,11 +45,20 @@ func buildModelPickerItems(options []modelPickerOption) []views.FilterablePicker
 	items := make([]views.FilterablePickerItem, 0, len(options))
 	for _, opt := range options {
 		option := opt
+		key := strings.TrimSpace(option.Key)
+		if key == "" {
+			key = strings.TrimSpace(option.Label)
+		}
 		items = append(items, views.FilterablePickerItem{
+			Key:      key,
 			Label:    option.Label,
 			Selected: option.Selected,
 			OnChoose: option.OnChoose,
 		})
 	}
 	return items
+}
+
+func modelPickerFirstFocusKey(options []modelPickerOption, keyPrefix string) string {
+	return views.FilterablePickerFirstFocusKey(buildModelPickerItems(options), views.FilterablePickerConfig{KeyPrefix: keyPrefix})
 }

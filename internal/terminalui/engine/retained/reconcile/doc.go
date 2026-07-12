@@ -7,7 +7,8 @@
 //   - ViewRenderNode: the ephemeral declarative tree built from views and structural
 //     nodes during one rebuild
 //   - RetainedRenderNode: the durable runtime-owned identity tree that preserves local
-//     state, focus continuity, and mount/unmount ownership across rebuilds
+//     state, focus continuity, mount/unmount ownership, and hook cleanup bookkeeping
+//     across rebuilds
 //
 // Its core invariant is sibling-scoped continuity: explicit keys preserve
 // retained NodeID ownership across reorder within one parent, while fixed

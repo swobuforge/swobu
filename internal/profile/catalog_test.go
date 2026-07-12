@@ -19,6 +19,9 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("bedrock") {
 		t.Fatal("bedrock provider spec should be supported")
 	}
+	if !SupportsSpec("azure") {
+		t.Fatal("azure provider spec should be supported")
+	}
 }
 
 func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
@@ -45,7 +48,26 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if !RequiresCredential("openai_compatible", "https://lab.example/v1") {
 		t.Fatal("remote OpenAI-compatible URL should require credential")
 	}
-	if RequiresCredential("bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1") {
+	if !RequiresExplicitExecuteBaseURL("azure") {
+		t.Fatal("azure should require an explicit execute base URL")
+	}
+	if got := DefaultEnvKeyForSpec("azure"); got != "AZURE_OPENAI_API_KEY" {
+		t.Fatalf("azure default env key = %q", got)
+	}
+	if got := DefaultAuthHeaderForSpec("openai_compatible"); got != "Authorization" {
+		t.Fatalf("openai-compatible default auth header = %q", got)
+	}
+	authHeaders := SupportedAuthHeadersForSpec("openai_compatible")
+	if len(authHeaders) != 3 {
+		t.Fatalf("openai-compatible auth headers=%v want 3 common choices", authHeaders)
+	}
+	if authHeaders[0] != "Authorization" || authHeaders[1] != "X-API-Key" || authHeaders[2] != "api-key" {
+		t.Fatalf("openai-compatible auth headers=%v want [Authorization X-API-Key api-key]", authHeaders)
+	}
+	if !RequiresCredential("azure", "") {
+		t.Fatal("azure should require credential")
+	}
+	if RequiresCredential("bedrock", "https://bedrock-mantle.us-east-1.api.aws/v1") {
 		t.Fatal("bedrock should default to AWS profile mode without credential_ref requirement")
 	}
 
@@ -77,6 +99,34 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if bedrockModes[2].ID != AuthModeTokenEnv || bedrockModes[2].Variant != AuthVariantEnv {
 		t.Fatalf("bedrock mode[2]=%+v", bedrockModes[2])
+	}
+
+	bedrockProtocols := ConcreteProviderProtocolsForSpec("bedrock")
+	if len(bedrockProtocols) != 6 {
+		t.Fatalf("bedrock concrete protocols=%v want exactly 6", bedrockProtocols)
+	}
+	if bedrockProtocols[0] != "responses" || bedrockProtocols[1] != "responses_stream" {
+		t.Fatalf("bedrock concrete protocols=%v want responses first", bedrockProtocols)
+	}
+	if !SupportsProviderProtocolForSpec("bedrock", "chat_completions") || !SupportsProviderProtocolForSpec("bedrock", "messages") {
+		t.Fatal("bedrock should support chat_completions and messages")
+	}
+	if SupportsProviderProtocolForSpec("bedrock", "converse") || SupportsProviderProtocolForSpec("bedrock", "invoke_model") {
+		t.Fatal("bedrock must not advertise native runtime protocol names")
+	}
+	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("bedrock"); !ok || got != "responses" {
+		t.Fatalf("bedrock auto protocol=%q ok=%v want responses", got, ok)
+	}
+
+	azureModes := AllowedAuthModesForSpec("azure")
+	if len(azureModes) != 2 {
+		t.Fatalf("azure allowed auth modes=%v want exactly 2", azureModes)
+	}
+	if azureModes[0].ID != AuthModeTokenEnv || azureModes[1].ID != AuthModeTokenFile {
+		t.Fatalf("azure allowed auth modes=%v want env/file", azureModes)
+	}
+	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("azure"); !ok || got != "responses" {
+		t.Fatalf("azure auto protocol=%q ok=%v want responses", got, ok)
 	}
 }
 

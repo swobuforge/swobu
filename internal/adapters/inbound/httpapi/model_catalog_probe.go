@@ -49,14 +49,16 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 	}
+	authHeader := strings.TrimSpace(query.Get("auth_header")) // swobu:io-string source=boundary
 	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
 	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
-	models, resolvedVariant, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, credentialRef, providerProtocol)
+	models, resolvedVariant, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, providerProtocol)
 	result := modelCatalogProbeResult{}
 	if probeErr != nil {
 		slog.Warn("model catalog probe failed",
 			"provider_spec", providerSpec,
 			"base_url", baseURL,
+			"auth_header", authHeader,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
 			"provider_protocol", providerProtocol,
 			"error", probeErr.Error(),
@@ -66,6 +68,7 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 		slog.Debug("model catalog probe succeeded",
 			"provider_spec", providerSpec,
 			"base_url", baseURL,
+			"auth_header", authHeader,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
 			"provider_protocol", resolvedVariant,
 			"model_count", len(models),
@@ -86,6 +89,7 @@ func probeModelIDs(
 	providers ports.ProviderModelCatalog,
 	providerSpec string,
 	baseURL string,
+	authHeader string,
 	credentialRef string,
 	providerProtocol string,
 ) ([]string, string, error) {
@@ -111,6 +115,7 @@ func probeModelIDs(
 			frame,
 			variant,
 		)
+		target.AuthHeader = strings.TrimSpace(authHeader) // swobu:io-string source=boundary
 		models, err := providers.ListModels(ctx, target)
 		if err == nil {
 			return ports.CloneModelIDs(models), variant, nil

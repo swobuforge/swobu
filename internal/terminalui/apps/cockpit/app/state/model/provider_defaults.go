@@ -46,6 +46,14 @@ func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) Provider
 	if defaultBaseURL != "" {
 		next.BaseURL = defaultBaseURL
 	}
+	currentAuthHeader := trimModelInput(next.AuthHeader)
+	if strings.EqualFold(spec, "openai_compatible") {
+		if currentAuthHeader == "" {
+			next.AuthHeader = ProviderDefaultAuthHeader(spec)
+		}
+	} else {
+		next.AuthHeader = ""
+	}
 	if !strings.EqualFold(spec, "bedrock") {
 		next.Region = ""
 	}
@@ -58,6 +66,25 @@ func ProviderRequiresCredential(spec, baseURL string) bool {
 	spec = trimModelInput(spec)
 	baseURL = trimModelInput(baseURL)
 	return profile.RequiresCredential(spec, baseURL)
+}
+
+func ProviderRequiresExplicitExecuteBaseURL(spec string) bool {
+	spec = trimModelInput(spec)
+	return profile.RequiresExplicitExecuteBaseURL(spec)
+}
+
+// ProviderDefaultAuthHeader returns the canonical default auth header for a
+// provider spec, or empty if the provider does not expose header selection.
+func ProviderDefaultAuthHeader(spec string) string {
+	spec = trimModelInput(spec)
+	return profile.DefaultAuthHeaderForSpec(spec)
+}
+
+// ProviderAuthHeaderOptions returns the common auth-header picker options for a
+// provider spec. Manual entry remains a separate editable path.
+func ProviderAuthHeaderOptions(spec string) []string {
+	spec = trimModelInput(spec)
+	return profile.SupportedAuthHeadersForSpec(spec)
 }
 
 func ProviderSupportsCatalog(spec string) bool {

@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/terminalui/view"
+	"github.com/swobuforge/swobu/internal/terminalui/transcript"
 )
 
 func TestMessageBlock_ProjectsToPanelLines(t *testing.T) {
@@ -14,7 +14,7 @@ func TestMessageBlock_ProjectsToPanelLines(t *testing.T) {
 		"",
 		"Confidence: medium",
 	}, 50)
-	lines := view.DurableLines(node)
+	lines := transcript.DurableLines(node)
 	if lines[0] != "╭─ Analysis ─────────────────────────────────────────╮" {
 		t.Fatalf("top line mismatch: %q", lines[0])
 	}
@@ -27,7 +27,7 @@ func TestSplashBlock_ProjectsRows(t *testing.T) {
 	t.Parallel()
 
 	node := SplashBlock([]string{"a", "b"})
-	lines := view.DurableLines(node)
+	lines := transcript.DurableLines(node)
 	if len(lines) != 2 || lines[0] != "a" || lines[1] != "b" {
 		t.Fatalf("unexpected lines=%#v", lines)
 	}

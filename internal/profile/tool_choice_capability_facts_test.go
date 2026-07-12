@@ -41,8 +41,8 @@ func TestToolChoiceCapabilityFacts_IncludeResponsesDefaultsForResponsesProviders
 			t.Fatalf("missing responses wildcard tool-choice fact for provider %q", provider)
 		}
 	}
-	if SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecBedrock, protocolkind.ChatCompletions, "any") {
-		t.Fatal("bedrock should not inherit responses tool-choice retry facts")
+	if !SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecBedrock, protocolkind.Responses, "any") {
+		t.Fatal("bedrock responses should inherit tool-choice retry facts")
 	}
 }
 
@@ -82,7 +82,7 @@ func TestSupportsToolChoiceImmediateDowngradeRetry_ConservativeFacts(t *testing.
 	if SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecOpenRouter, protocolkind.ChatCompletions, "unknown/model") {
 		t.Fatal("unknown openrouter model should not inherit immediate tool-choice downgrade retry")
 	}
-	if SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecBedrock, protocolkind.ChatCompletions, "any") {
-		t.Fatal("bedrock should not support immediate tool-choice downgrade retry")
+	if !SupportsToolChoiceImmediateDowngradeRetry(ProviderSpecBedrock, protocolkind.Responses, "any") {
+		t.Fatal("bedrock responses should support immediate tool-choice downgrade retry")
 	}
 }

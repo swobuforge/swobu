@@ -54,14 +54,14 @@ func TestExchangeReplay_ResponsesStreamErrorPath(t *testing.T) {
 		``,
 	}, "\n")
 
-	runner := withRuntimeRunner(exchange.Runner{ResolveProviderIngress: func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
+	runner := withRuntimeRunner(func(_ context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 		return carrier.WireStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
 			Framing: carrier.FramingSSE,
 			Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(malformedUpstream))),
 		}, nil
-	}})
+	})
 
 	_, err = runner.Run(context.Background(), exchange.ExchangeInput{
 		ExchangeID:       "fixture_exchange_error",
@@ -71,7 +71,7 @@ func TestExchangeReplay_ResponsesStreamErrorPath(t *testing.T) {
 		ProviderProtocol: providerFamily,
 		ProviderDelivery: providerDelivery,
 		Target:           exchange.NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", providerFamily, "", "", ""),
-		Contract:         exchange.NewExecutionContract(toProtocolsurfaceDelivery(clientDelivery)).WithProviderDelivery(toProtocolsurfaceDelivery(providerDelivery)),
+		Contract:         exchange.NewExecutionContract(clientDelivery).WithProviderDelivery(providerDelivery),
 	})
 	if err == nil {
 		t.Fatal("expected runner to fail on malformed provider error frame")

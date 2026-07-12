@@ -51,6 +51,51 @@ func TestUseState_RetainsValuePerSlot(t *testing.T) {
 	}
 }
 
+func TestUseMemo_CachesByDependencyIdentity(t *testing.T) {
+	scope := mapScope{m: make(map[string]any)}
+	ctx := &Context[struct{}]{
+		Local:    scope,
+		Model:    func() struct{} { return struct{}{} },
+		building: true,
+	}
+	calls := 0
+
+	got := UseMemo(ctx, func() string {
+		calls++
+		return "first"
+	}, "dep")
+	if got != "first" {
+		t.Fatalf("first memo = %q, want first", got)
+	}
+	if calls != 1 {
+		t.Fatalf("compute calls = %d, want 1", calls)
+	}
+
+	ctx.hookSlot = 0
+	got = UseMemo(ctx, func() string {
+		calls++
+		return "second"
+	}, "dep")
+	if got != "first" {
+		t.Fatalf("cached memo = %q, want first", got)
+	}
+	if calls != 1 {
+		t.Fatalf("compute calls after cache hit = %d, want 1", calls)
+	}
+
+	ctx.hookSlot = 0
+	got = UseMemo(ctx, func() string {
+		calls++
+		return "third"
+	}, "next")
+	if got != "third" {
+		t.Fatalf("invalidated memo = %q, want third", got)
+	}
+	if calls != 2 {
+		t.Fatalf("compute calls after dep change = %d, want 2", calls)
+	}
+}
+
 func TestBuildRoot_PanicsOnDispatchDuringBuild(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -103,6 +148,7 @@ func TestApply_ComposesModifiersInDeclarationOrder(t *testing.T) {
 
 type hookBuilder struct{}
 type stubEffect struct{}
+type dispatchedAction string
 
 func (hookBuilder) BuildView(_ *Context[struct{}]) ViewSpec[struct{}] {
 	return View[struct{}](func(_ *Context[struct{}]) layout.RenderNode {
@@ -132,6 +178,45 @@ func TestBuildWithLifecycle_ForwardsLifecycleHooks(t *testing.T) {
 	effects := CaptureLifecycle(view)
 	if len(effects.OnMount) != 1 {
 		t.Fatalf("on mount effects = %d, want 1", len(effects.OnMount))
+	}
+}
+
+func TestBuild_AllowsEffectDispatchAfterCommit(t *testing.T) {
+	scope := mapScope{m: make(map[string]any)}
+	var dispatches []update.Action
+	root := Build[struct{}](func(ctx *Context[struct{}]) ViewSpec[struct{}] {
+		UseEffect(ctx, func() func() {
+			ctx.Dispatch(dispatchedAction("done"))
+			return nil
+		}, "dep")
+		return View[struct{}](func(_ *Context[struct{}]) layout.RenderNode {
+			return layout.NewText("ok")
+		})
+	})
+
+	node := BuildViewRootNode(root, scope, func(action update.Action) {
+		dispatches = append(dispatches, action)
+	}, func(update.Action) {}, func() struct{} { return struct{}{} })
+	hooks, ok := node.(interface{ PostCommitEffects() []update.Effect })
+	if !ok {
+		t.Fatalf("node type = %T, want PostCommitEffects provider", node)
+	}
+	effects := hooks.PostCommitEffects()
+	if len(effects) != 1 {
+		t.Fatalf("post-commit effects = %d, want 1", len(effects))
+	}
+	for _, eff := range effects {
+		eff.Execute(context.Background())
+	}
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatches = %d, want 1", len(dispatches))
+	}
+	got, ok := dispatches[0].(dispatchedAction)
+	if !ok {
+		t.Fatalf("dispatch[0]=%T want dispatchedAction", dispatches[0])
+	}
+	if got != "done" {
+		t.Fatalf("dispatch[0]=%q want done", got)
 	}
 }
 

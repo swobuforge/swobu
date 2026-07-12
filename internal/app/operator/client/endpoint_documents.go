@@ -16,6 +16,7 @@ type providerConfigDocument struct {
 	Ref              string `json:"ref"`
 	ProviderSpec     string `json:"provider_spec"`
 	BaseURL          string `json:"base_url,omitempty"`
+	AuthHeader       string `json:"auth_header,omitempty"`
 	CredentialRef    string `json:"credential_ref,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty"`
@@ -38,6 +39,7 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 			Ref:              pc.Ref().String(),
 			ProviderSpec:     pc.ProviderSpec().String(),
 			BaseURL:          pc.BaseURL(),
+			AuthHeader:       pc.AuthHeader(),
 			CredentialRef:    pc.CredentialRef(),
 			ModelID:          pc.ModelID(),
 			TargetAlias:      pc.TargetAlias(),
@@ -67,6 +69,10 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 			return endpointintent.Endpoint{}, err
 		}
 		config, err := endpointintent.NewProviderConfig(ref, spec, pc.BaseURL, pc.CredentialRef)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
+		}
+		config, err = config.WithAuthHeader(pc.AuthHeader)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}

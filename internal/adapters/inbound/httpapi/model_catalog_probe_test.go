@@ -40,7 +40,7 @@ func TestModelCatalogProbeHandler_LoadsModelIDsFromCatalogPath(t *testing.T) {
 
 	query := url.Values{}
 	query.Set("provider_spec", "bedrock")
-	query.Set("base_url", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1")
+	query.Set("base_url", "https://bedrock-mantle.us-east-1.api.aws/v1")
 	query.Set("credential_ref", "env:AWS_BEARER_TOKEN_BEDROCK")
 	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
 	rec := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestModelCatalogProbeHandler_ReturnsRawError(t *testing.T) {
 
 	query := url.Values{}
 	query.Set("provider_spec", "bedrock")
-	query.Set("base_url", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1")
+	query.Set("base_url", "https://bedrock-mantle.us-east-1.api.aws/v1")
 	query.Set("credential_ref", "env:AWS_BEARER_TOKEN_BEDROCK")
 	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
 	rec := httptest.NewRecorder()
@@ -137,5 +137,43 @@ func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirst
 	}
 	if attempts[0] != "responses/http_json_body" {
 		t.Fatalf("first auto attempt=%q want responses/http_json_body", attempts[0])
+	}
+}
+
+func TestModelCatalogProbeHandler_PassesAuthHeaderToProviderCatalog(t *testing.T) {
+	stub := &stubModelCatalog{
+		listFn: func(target exchange.RoutableTarget) ([]string, error) {
+			if target.AuthHeader != "X-Custom-Auth" {
+				t.Fatalf("auth header=%q want X-Custom-Auth", target.AuthHeader)
+			}
+			return []string{"gpt-4.1-mini"}, nil
+		},
+	}
+	h := NewModelCatalogProbeHandler(stub)
+
+	query := url.Values{}
+	query.Set("provider_spec", "openai_compatible")
+	query.Set("base_url", "https://example.test/v1")
+	query.Set("credential_ref", "env:OPENAI_API_KEY")
+	query.Set("auth_header", "X-Custom-Auth")
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200", rec.Code)
+	}
+	var out struct {
+		ModelIDs []string `json:"model_ids"`
+		Error    string   `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if out.Error != "" {
+		t.Fatalf("probe error=%q", out.Error)
+	}
+	if len(out.ModelIDs) != 1 || out.ModelIDs[0] != "gpt-4.1-mini" {
+		t.Fatalf("model ids=%v", out.ModelIDs)
 	}
 }

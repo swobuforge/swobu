@@ -8,7 +8,6 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
-	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
@@ -21,16 +20,14 @@ import (
 
 func buildDaemonServeMux(
 	daemon *Daemon,
-	runtime config.RuntimeConfig,
-	providers ports.ProviderIngressResolver,
-	modelCatalog ports.ProviderModelCatalog,
+	runtimeCfg config.RuntimeConfig,
+	runtime daemonRuntimeComposition,
 	continuation ports.ContinuationStore,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeIngress := exchange.NewIngress(
 		daemon.endpoints,
-		newExchangeProviderIngressResolverAdapter(providers),
-		exchangeruntime.NewResolver(),
+		runtime,
 		exchange.RuntimePoliciesSpec{
 			DeliverySelector:  exchange.FixedDeliverySelector{},
 			ContinuationStore: continuation,
@@ -57,10 +54,10 @@ func buildDaemonServeMux(
 		go func() { _ = daemon.Close(context.Background()) }()
 		return nil
 	}))
-	mux.Handle("/_swobu/model-catalog", httpapi.NewModelCatalogProbeHandler(modelCatalog))
+	mux.Handle("/_swobu/model-catalog", httpapi.NewModelCatalogProbeHandler(runtime))
 	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
-		PublicBaseURL: daemonPublicBaseURLFromBindAddr(runtime.BindAddr),
+		PublicBaseURL: daemonPublicBaseURLFromBindAddr(runtimeCfg.BindAddr),
 		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) (string, error) {
 			return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
 		}),

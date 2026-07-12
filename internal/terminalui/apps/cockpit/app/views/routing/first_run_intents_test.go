@@ -22,6 +22,7 @@ func TestFirstRunCredentialSummaryMatrix(t *testing.T) {
 		{name: "openrouter requires chooser", provider: "openrouter", baseURL: "https://openrouter.ai/api/v1", want: "required"},
 		{name: "ollama local defaults auto", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", want: "auto"},
 		{name: "openai-compatible remote requires chooser", provider: "openai_compatible", baseURL: "https://api.example.com/v1", want: "required"},
+		{name: "azure remote requires chooser", provider: "azure", baseURL: "https://contact-5464-resource.openai.azure.com/openai/v1", want: "required"},
 		{name: "openai-compatible local still requires explicit credential", provider: "openai_compatible", baseURL: "http://localhost:11434/v1", want: "required"},
 		{name: "existing credential without env is surfaced as required", provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", credentialRef: "env:OLLAMA_API_KEY", want: "required"},
 	}

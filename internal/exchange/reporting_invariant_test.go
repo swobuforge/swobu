@@ -45,7 +45,7 @@ func TestApplyDocumentTransform_FailsOnSilentMutation(t *testing.T) {
 		},
 	}, nil)
 
-	_, err := applyDocumentTransform(
+	_, err := applyDocumentMiddleware(
 		context.Background(),
 		reg,
 		"ex_invariant",
@@ -53,6 +53,7 @@ func TestApplyDocumentTransform_FailsOnSilentMutation(t *testing.T) {
 		"",
 		"",
 		transform.StageRequestDocumentOut,
+		providerRequestWireOutPort(),
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
 			Family: canonical.ClientFamilyResponses,
@@ -75,7 +76,7 @@ func TestApplyDocumentTransform_FailsOnReportedMutationWithoutChange(t *testing.
 		},
 	}, nil)
 
-	_, err := applyDocumentTransform(
+	_, err := applyDocumentMiddleware(
 		context.Background(),
 		reg,
 		"ex_invariant",
@@ -83,6 +84,7 @@ func TestApplyDocumentTransform_FailsOnReportedMutationWithoutChange(t *testing.
 		"",
 		"",
 		transform.StageRequestDocumentOut,
+		providerRequestWireOutPort(),
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
 			Family: canonical.ClientFamilyResponses,
@@ -111,7 +113,7 @@ func TestApplyDocumentTransform_RejectsUnsupportedProjectionLoss(t *testing.T) {
 		},
 	}, nil)
 
-	_, err := applyDocumentTransform(
+	_, err := applyDocumentMiddleware(
 		context.Background(),
 		reg,
 		"ex_invariant",
@@ -119,6 +121,7 @@ func TestApplyDocumentTransform_RejectsUnsupportedProjectionLoss(t *testing.T) {
 		"",
 		"",
 		transform.StageRequestDocumentOut,
+		providerRequestWireOutPort(),
 		carrier.WireDocument{
 			Stage:  carrier.StageProviderRequestOut,
 			Family: canonical.ClientFamilyResponses,

@@ -4,6 +4,7 @@ package routing
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -28,7 +29,7 @@ func buildProviderBackendURLRow(ctx *retained.Context[state.Model], spec provide
 	model := ctx.Model()
 	pc := selectedProvider(model, spec.ProviderConfig, spec.CreateMode)
 	var out retained.ViewSpec[state.Model]
-	if pc == nil || strings.TrimSpace(pc.ProviderSpec) != "openai_compatible" { // swobu:io-string source=boundary
+	if pc == nil || !profile.RequiresExplicitExecuteBaseURL(pc.ProviderSpec) { // swobu:io-string source=boundary
 		return nil
 	}
 	parent := backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(pc.BaseURL), "missing"), strings.TrimSpace(pc.BaseURL), "https://host/v1", func(value string) []update.Action { // swobu:io-string source=boundary

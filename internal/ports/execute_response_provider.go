@@ -10,19 +10,14 @@ import (
 
 type ProviderRequest = exchange.ProviderRequest
 
-// ExecutionContract aliases the exchange-owned adapter-edge delivery contract.
-// Field documentation lives on exchange.ExecutionContract so the seam has one
-// canonical definition.
-type ExecutionContract = exchange.ExecutionContract
 type ProviderIngress = exchange.ProviderIngress
 
-var NewExecutionContract = exchange.NewExecutionContract
-var NewExecutionContractForDeliveries = exchange.NewExecutionContractForDeliveries
-
-func NewProviderRequest(request canonical.CanonicalRequest, contract ExecutionContract, target exchange.RoutableTarget) ProviderRequest {
+// NewProviderRequest packages one canonical request with its already-realized
+// provider wire document for provider ingress.
+func NewProviderRequest(request canonical.CanonicalRequest, requestDocument carrier.WireDocument, contract exchange.ExecutionContract, target exchange.RoutableTarget) ProviderRequest {
 	return ProviderRequest{
 		Request:         canonical.CloneCanonicalRequest(request),
-		RequestDocument: carrier.WireDocument{},
+		RequestDocument: requestDocument.Clone(),
 		Contract:        contract,
 		Target:          target.Clone(),
 	}

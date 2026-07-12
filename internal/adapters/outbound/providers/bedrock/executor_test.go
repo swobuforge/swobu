@@ -2,7 +2,7 @@ package bedrock
 
 import (
 	"context"
-	"github.com/swobuforge/swobu/internal/delivery"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,15 +11,97 @@ import (
 	"strings"
 	"testing"
 
+	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
+
+func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolKind) exchange.RoutableTarget {
+	return exchange.NewRoutableTarget(
+		"backend-a",
+		"bedrock",
+		baseURL,
+		credentialRef,
+		kind,
+		"",
+		"",
+		string(kind),
+	)
+}
+
+func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) ports.ProviderRequest {
+	t.Helper()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:     "openai.gpt-4.1-mini",
+		InputText: "ping",
+	})
+	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(kind)
+	if codec == nil {
+		t.Fatalf("provider request encoder missing for protocol %s", kind)
+	}
+	wireRequest, err := codec.EncodeProviderRequestDocument(request, providerDelivery)
+	if err != nil {
+		t.Fatalf("encode provider request document: %v", err)
+	}
+	return ports.NewProviderRequest(
+		request,
+		wireRequest,
+		exchange.NewExecutionContract(providerDelivery),
+		newBedrockTarget(baseURL, credentialRef, kind),
+	)
+}
+
+func TestProviderRequestPathForProtocol_MantleFamiliesOnly(t *testing.T) {
+	t.Parallel()
+
+	cases := map[protocolkind.ProtocolKind]string{
+		protocolkind.Responses:       "/responses",
+		protocolkind.ChatCompletions: "/chat/completions",
+		protocolkind.Messages:        "/messages",
+	}
+	for kind, want := range cases {
+		t.Run(kind.String(), func(t *testing.T) {
+			got, err := exchangeruntime.ProviderRequestPath(string(profile.ProviderSpecBedrock), kind)
+			if err != nil {
+				t.Fatalf("ProviderRequestPath(%s) error: %v", kind, err)
+			}
+			if got != want {
+				t.Fatalf("ProviderRequestPath(%s) = %q want %q", kind, got, want)
+			}
+		})
+	}
+	if _, err := exchangeruntime.ProviderRequestPath(string(profile.ProviderSpecBedrock), protocolkind.Completions); err == nil {
+		t.Fatal("expected unsupported protocol to fail")
+	}
+}
+
+func TestValidateBedrockMantleEndpoint_AcceptsMantleAndLocalHosts(t *testing.T) {
+	t.Parallel()
+
+	if err := validateBedrockMantleEndpoint("https://bedrock-mantle.us-east-1.api.aws/v1"); err != nil {
+		t.Fatalf("mantle endpoint rejected: %v", err)
+	}
+	if err := validateBedrockMantleEndpoint("http://127.0.0.1:1234/v1"); err != nil {
+		t.Fatalf("local test endpoint rejected: %v", err)
+	}
+	if err := validateBedrockMantleEndpoint("https://bedrock.us-east-1.amazonaws.com/openai/v1"); err == nil {
+		t.Fatal("expected non-Mantle host to be rejected")
+	}
+	if err := validateBedrockMantleEndpoint("https://bedrock.us-east-1.amazonaws.com"); err == nil {
+		t.Fatal("expected control-plane host to be rejected")
+	}
+}
 
 func TestBedrockSigningRegion_FromEnv(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-west-2")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 
-	u, _ := url.Parse("https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1")
+	u, _ := url.Parse("https://bedrock-mantle.eu-central-1.api.aws/openai/v1")
 	got, err := bedrockSigningRegion(context.Background(), u, "")
 	if err != nil {
 		t.Fatalf("bedrockSigningRegion error: %v", err)
@@ -33,7 +115,7 @@ func TestBedrockSigningRegion_FromHost(t *testing.T) {
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 
-	u, _ := url.Parse("https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1")
+	u, _ := url.Parse("https://bedrock-mantle.eu-central-1.api.aws/openai/v1")
 	got, err := bedrockSigningRegion(context.Background(), u, "")
 	if err != nil {
 		t.Fatalf("bedrockSigningRegion error: %v", err)
@@ -55,22 +137,6 @@ func TestBedrockSigningRegion_RejectsUnknownHostWithoutEnv(t *testing.T) {
 	_, err := bedrockSigningRegion(context.Background(), u, "")
 	if err == nil {
 		t.Fatal("expected error")
-	}
-}
-
-func TestValidateBedrockOpenAIEndpoint_RejectsControlPlaneHost(t *testing.T) {
-	err := validateBedrockRuntimeEndpoint("https://bedrock.us-east-1.amazonaws.com")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestValidateBedrockOpenAIEndpoint_AcceptsRuntimeAndMantle(t *testing.T) {
-	if err := validateBedrockRuntimeEndpoint("https://bedrock-runtime.us-east-1.amazonaws.com"); err != nil {
-		t.Fatalf("runtime endpoint rejected: %v", err)
-	}
-	if err := validateBedrockRuntimeEndpoint("https://bedrock-mantle.us-east-1.api.aws"); err != nil {
-		t.Fatalf("mantle endpoint rejected: %v", err)
 	}
 }
 
@@ -97,7 +163,47 @@ func TestBedrockSigningRegion_FromSDKProfileConfig(t *testing.T) {
 	}
 }
 
+func TestApplyBedrockAuth_ProfileRefWithExplicitRegionUsesSigV4(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+	tmp := t.TempDir()
+	awsDir := filepath.Join(tmp, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir ~/.aws: %v", err)
+	}
+	configPath := filepath.Join(awsDir, "config")
+	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = us-east-1\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	credPath := filepath.Join(awsDir, "credentials")
+	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("AWS_CONFIG_FILE", configPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath)
+
+	req, err := http.NewRequest(http.MethodPost, "https://example.test/v1/responses", strings.NewReader(`{"inputText":"ping"}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if err := applyBedrockAuth(context.Background(), "profile:swobu-bedrock@eu-west-2", req, []byte(`{"inputText":"ping"}`)); err != nil {
+		t.Fatalf("applyBedrockAuth error: %v", err)
+	}
+	auth := req.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "AWS4-HMAC-SHA256 ") {
+		t.Fatalf("authorization=%q want SigV4 header", auth)
+	}
+	if !strings.Contains(auth, "/eu-west-2/bedrock/aws4_request") {
+		t.Fatalf("authorization=%q want eu-west-2 signing scope", auth)
+	}
+}
+
 func TestParseBedrockAuthMode_DefaultsToAWSProfile(t *testing.T) {
+	t.Parallel()
+
 	mode, value := parseBedrockAuthMode("")
 	if mode != "aws_profile" || value != "" {
 		t.Fatalf("mode=%q value=%q", mode, value)
@@ -105,6 +211,8 @@ func TestParseBedrockAuthMode_DefaultsToAWSProfile(t *testing.T) {
 }
 
 func TestParseBedrockAuthMode_ProfileRef(t *testing.T) {
+	t.Parallel()
+
 	mode, value := parseBedrockAuthMode("profile:work-prod")
 	if mode != "aws_profile" || value != "work-prod" {
 		t.Fatalf("mode=%q value=%q", mode, value)
@@ -112,6 +220,8 @@ func TestParseBedrockAuthMode_ProfileRef(t *testing.T) {
 }
 
 func TestParseBedrockAuthMode_APIKeyEnvRef(t *testing.T) {
+	t.Parallel()
+
 	mode, value := parseBedrockAuthMode("env:AWS_BEARER_TOKEN_BEDROCK")
 	if mode != "api_key_env" || value != "AWS_BEARER_TOKEN_BEDROCK" {
 		t.Fatalf("mode=%q value=%q", mode, value)
@@ -119,6 +229,8 @@ func TestParseBedrockAuthMode_APIKeyEnvRef(t *testing.T) {
 }
 
 func TestParseBedrockAuthMode_AWSEnvSessionRef(t *testing.T) {
+	t.Parallel()
+
 	mode, value := parseBedrockAuthMode("aws_env_session")
 	if mode != "aws_profile" || value != "" {
 		t.Fatalf("mode=%q value=%q", mode, value)
@@ -167,83 +279,117 @@ func TestLoadBedrockAWSConfig_ProfileFallbackToDefaultSharedFiles(t *testing.T) 
 	}
 }
 
-func TestListModels_AWSProfileMode_UsesControlPlaneHTTP(t *testing.T) {
-	t.Setenv("AWS_REGION", "eu-central-1")
+func TestListModels_AWSProfileMode_UsesMantleHTTP(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	t.Setenv("AWS_PROFILE", "")
 	t.Setenv("AWS_DEFAULT_PROFILE", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("AWS_ACCESS_KEY_ID", "ASIAFAKEACCESSKEY000")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "fake-secret-key")
-	t.Setenv("AWS_SESSION_TOKEN", "fake-session-token")
-	originalControlURL := bedrockControlPlaneBaseURL
-	t.Cleanup(func() { bedrockControlPlaneBaseURL = originalControlURL })
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+
+	tmp := t.TempDir()
+	awsDir := filepath.Join(tmp, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir ~/.aws: %v", err)
+	}
+	configPath := filepath.Join(awsDir, "config")
+	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = eu-central-1\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	credPath := filepath.Join(awsDir, "credentials")
+	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("AWS_CONFIG_FILE", configPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath)
 
 	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/foundation-models" {
-			t.Fatalf("path=%q want /foundation-models", r.URL.Path)
+		if r.URL.Path != "/models" {
+			t.Fatalf("path=%q want /models", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "AWS4-HMAC-SHA256 ") {
 			t.Fatalf("authorization=%q want SigV4 header", got)
 		}
-		if got := r.Header.Get("X-Amz-Security-Token"); got == "" {
-			t.Fatal("expected X-Amz-Security-Token")
-		}
-		_, _ = w.Write([]byte(`{"modelSummaries":[{"modelId":"amazon.nova-lite-v1"},{"modelId":"anthropic.claude-3-5-sonnet"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"anthropic.claude-3-5-sonnet"},{"id":"amazon.nova-lite-v1"}]}`))
 	}))
 	defer upstream.Close()
-	bedrockControlPlaneBaseURL = func(region string) string {
-		if region != "eu-central-1" {
-			t.Fatalf("region=%q want eu-central-1", region)
-		}
-		return upstream.URL
-	}
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
-		"backend-a", "bedrock", "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1", "", protocolkind.ChatCompletions, "", "", "",
-	))
+	models, err := exec.ListModels(context.Background(), newBedrockTarget(upstream.URL, "profile:swobu-bedrock@eu-central-1", protocolkind.Responses))
 	if err != nil {
 		t.Fatalf("ListModels error: %v", err)
 	}
 	if requests != 1 {
 		t.Fatalf("requests=%d want=1", requests)
 	}
-	if len(models) != 2 || models[0] != "amazon.nova-lite-v1" {
+	if len(models) != 2 || models[0] != "amazon.nova-lite-v1" || models[1] != "anthropic.claude-3-5-sonnet" {
 		t.Fatalf("models=%v", models)
 	}
 }
 
-func TestListModels_EnvMode_UsesControlPlaneHTTP(t *testing.T) {
+func TestListModels_AWSProfileMode_DoesNotSetAcceptEncodingHeader(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_DEFAULT_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+
+	tmp := t.TempDir()
+	awsDir := filepath.Join(tmp, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir ~/.aws: %v", err)
+	}
+	configPath := filepath.Join(awsDir, "config")
+	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = eu-central-1\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	credPath := filepath.Join(awsDir, "credentials")
+	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("AWS_CONFIG_FILE", configPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath)
+
+	capture := &captureRoundTripper{}
+	exec := NewExecutor(&http.Client{Transport: capture})
+	if _, err := exec.ListModels(context.Background(), newBedrockTarget("https://bedrock-mantle.eu-central-1.api.aws/v1", "profile:swobu-bedrock@eu-central-1", protocolkind.Responses)); err != nil {
+		t.Fatalf("ListModels error: %v", err)
+	}
+	if capture.request == nil {
+		t.Fatal("expected captured request")
+	}
+	if got := capture.request.Header.Get("Accept-Encoding"); got != "" {
+		t.Fatalf("accept-encoding=%q want empty", got)
+	}
+}
+
+func TestListModels_EnvMode_UsesMantleHTTP(t *testing.T) {
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
-	t.Setenv("AWS_REGION", "us-east-1")
-	originalControlURL := bedrockControlPlaneBaseURL
-	t.Cleanup(func() { bedrockControlPlaneBaseURL = originalControlURL })
 
 	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/foundation-models" {
-			t.Fatalf("path=%q want /foundation-models", r.URL.Path)
+		if r.URL.Path != "/models" {
+			t.Fatalf("path=%q want /models", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("authorization=%q want Bearer test-token", got)
 		}
-		_, _ = w.Write([]byte(`{"modelSummaries":[{"modelId":"m1"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}]}`))
 	}))
 	defer upstream.Close()
-	bedrockControlPlaneBaseURL = func(region string) string {
-		if region != "us-east-1" {
-			t.Fatalf("region=%q want us-east-1", region)
-		}
-		return upstream.URL
-	}
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
-		"backend-a", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "", "", "",
-	))
+	models, err := exec.ListModels(context.Background(), newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Responses))
 	if err != nil {
 		t.Fatalf("ListModels error: %v", err)
 	}
@@ -255,34 +401,156 @@ func TestListModels_EnvMode_UsesControlPlaneHTTP(t *testing.T) {
 	}
 }
 
-func TestListModels_EnvMode_MissingTokenFails(t *testing.T) {
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-	t.Setenv("AWS_REGION", "us-east-1")
+type captureRoundTripper struct {
+	request       *http.Request
+	statusCode    int
+	responseBody  string
+	responseError error
+}
 
-	exec := NewExecutor(nil)
-	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
-		"backend-a", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions, "", "", "",
-	))
-	if err == nil {
-		t.Fatal("expected error")
+func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if c.responseError != nil {
+		return nil, c.responseError
 	}
-	if got := err.Error(); got != "BAD_ENDPOINT: bedrock API key env var is missing: AWS_BEARER_TOKEN_BEDROCK" {
-		t.Fatalf("error=%q", got)
+	c.request = req.Clone(req.Context())
+	body := c.responseBody
+	if body == "" {
+		body = `{"data":[{"id":"m1"}]}`
+	}
+	status := c.statusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
+
+	var gotBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%q want POST", r.Method)
+		}
+		if r.URL.Path != "/responses" {
+			t.Fatalf("path=%q want /responses", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("content-type=%q want application/json", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("authorization=%q want Bearer test-token", got)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		_ = r.Body.Close()
+		gotBody = append([]byte(nil), body...)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	exec := NewExecutor(upstream.Client())
+	ingress, err := exec.ResolveProviderIngress(context.Background(), newBedrockProviderRequest(
+		t,
+		upstream.URL,
+		"env:AWS_BEARER_TOKEN_BEDROCK",
+		protocolkind.Responses,
+		delivery.BufferedDelivery(),
+	))
+	if err != nil {
+		t.Fatalf("ResolveProviderIngress error: %v", err)
+	}
+	doc, ok := ingress.(carrier.WireDocument)
+	if !ok {
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireDocument", ingress)
+	}
+	if string(gotBody) == "" {
+		t.Fatal("expected encoded request body")
+	}
+	if string(doc.RawBytes()) != `{"ok":true}` {
+		t.Fatalf("response body=%q want %q", string(doc.RawBytes()), `{"ok":true}`)
+	}
+	if doc.Family != protocolkind.Responses {
+		t.Fatalf("family=%q want responses", doc.Family)
+	}
+	if doc.Stage != carrier.StageProviderIngressIn {
+		t.Fatalf("stage=%q want provider ingress in", doc.Stage)
 	}
 }
 
-func TestBedrockEndpointClassAndRegion(t *testing.T) {
+func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%q want POST", r.Method)
+		}
+		if r.URL.Path != "/messages" {
+			t.Fatalf("path=%q want /messages", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("authorization=%q want Bearer test-token", got)
+		}
+		_, _ = w.Write([]byte("stream-chunk-1"))
+	}))
+	defer upstream.Close()
+
+	exec := NewExecutor(upstream.Client())
+	ingress, err := exec.ResolveProviderIngress(context.Background(), newBedrockProviderRequest(
+		t,
+		upstream.URL,
+		"env:AWS_BEARER_TOKEN_BEDROCK",
+		protocolkind.Messages,
+		delivery.StreamingDelivery(delivery.FramingSSE),
+	))
+	if err != nil {
+		t.Fatalf("ResolveProviderIngress error: %v", err)
+	}
+	stream, ok := ingress.(carrier.WireStream)
+	if !ok {
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireStream", ingress)
+	}
+	if stream.Family != protocolkind.Messages {
+		t.Fatalf("family=%q want messages", stream.Family)
+	}
+	if stream.Framing != carrier.FramingSSE {
+		t.Fatalf("framing=%q want sse", stream.Framing)
+	}
+	frame, err := stream.Frames.Next(context.Background())
+	if err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	if string(frame.Data) != "stream-chunk-1" {
+		t.Fatalf("frame data=%q want stream-chunk-1", string(frame.Data))
+	}
+	if err := stream.Frames.Close(); err != nil {
+		t.Fatalf("close stream: %v", err)
+	}
+}
+
+func TestBedrockEndpointClassAndRegion_MantleOnly(t *testing.T) {
+	t.Parallel()
+
 	class, region := bedrockEndpointClassAndRegion("https://bedrock-mantle.us-east-1.api.aws/v1")
 	if class != "bedrock_mantle_openai_compat" || region != "us-east-1" {
 		t.Fatalf("class=%q region=%q", class, region)
 	}
-	class, region = bedrockEndpointClassAndRegion("https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1")
-	if class != "bedrock_runtime_openai_compat" || region != "eu-west-2" {
-		t.Fatalf("class=%q region=%q", class, region)
+	class, region = bedrockEndpointClassAndRegion("https://bedrock.us-west-2.amazonaws.com/openai/v1")
+	if class != "unknown" || region != "" {
+		t.Fatalf("class=%q region=%q want unknown/empty for non-Mantle host", class, region)
 	}
 }
 
 func TestBedrockModelIDFromPayload(t *testing.T) {
+	t.Parallel()
+
 	raw := []byte(`{"model":"openai.gpt-oss-20b","messages":[{"role":"user","content":"ping"}]}`)
 	if got := bedrockModelIDFromPayload(raw); got != "openai.gpt-oss-20b" {
 		t.Fatalf("model id=%q", got)
@@ -293,50 +561,13 @@ func TestBedrockModelIDFromPayload(t *testing.T) {
 }
 
 func TestBedrockModelARNCandidates(t *testing.T) {
+	t.Parallel()
+
 	foundation, inference := bedrockModelARNCandidates("us-east-1", "amazon.nova-lite-v1:0")
 	if foundation != "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0" {
 		t.Fatalf("foundation=%q", foundation)
 	}
 	if inference != "arn:aws:bedrock:us-east-1::inference-profile/amazon.nova-lite-v1:0" {
 		t.Fatalf("inference=%q", inference)
-	}
-}
-
-func TestResolveBedrockOperation(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name             string
-		variant          string
-		wantInvoke       bool
-		wantDeliveryMode delivery.Mode
-		wantErr          bool
-	}{
-		{name: "converse", variant: "converse"},
-		{name: "converse stream", variant: "converse_stream", wantDeliveryMode: delivery.Streaming},
-		{name: "invoke model", variant: "invoke_model", wantInvoke: true},
-		{name: "invoke model stream", variant: "invoke_model_stream", wantInvoke: true, wantDeliveryMode: delivery.Streaming},
-		{name: "empty rejected", variant: "", wantErr: true},
-		{name: "protocol auto rejected", variant: "auto", wantErr: true},
-		{name: "unsupported rejected", variant: "responses", wantErr: true},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := resolveBedrockOperation(tc.variant)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("resolveBedrockOperation(%q) expected error", tc.variant)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("resolveBedrockOperation(%q) error: %v", tc.variant, err)
-			}
-			if got.invokeModel != tc.wantInvoke || got.deliveryMode != tc.wantDeliveryMode {
-				t.Fatalf("resolveBedrockOperation(%q)=%+v want invoke=%v deliveryMode=%v", tc.variant, got, tc.wantInvoke, tc.wantDeliveryMode)
-			}
-		})
 	}
 }

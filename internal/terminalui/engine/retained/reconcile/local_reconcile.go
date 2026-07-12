@@ -217,8 +217,11 @@ func (r *Reconciler[M]) Reconcile(
 
 	var unmounts []layout.NodeID
 	var lifecycle []update.Effect
+	var commitEffects []update.Effect
 	collectUnmounts(r.root, nil, reused, &unmounts, r.locals)
 	collectLifecycleFromRetained(rootView.Retained, r.root, reused, &lifecycle)
+	collectPostCommitEffects(rootView, &commitEffects)
+	lifecycle = append(lifecycle, commitEffects...)
 	r.root = rootView.Retained
 
 	return rootNode, mounts, unmounts, lifecycle
@@ -296,6 +299,21 @@ func collectUnmountLifecycle(root *RetainedRenderNode, reused map[layout.NodeID]
 	}
 	for _, child := range root.Children {
 		collectUnmountLifecycle(child, reused, out)
+	}
+}
+
+// collectPostCommitEffects walks the ephemeral tree after materialization so
+// post-commit hook work is scheduled from the current render, not from the
+// retained identity tree. Identity wrappers are stripped before hook lookup.
+func collectPostCommitEffects(root *ViewRenderNode, out *[]update.Effect) {
+	if root == nil {
+		return
+	}
+	if hooks, ok := layout.UnwrapIdentity(root.RenderNode).(interface{ PostCommitEffects() []update.Effect }); ok {
+		*out = append(*out, hooks.PostCommitEffects()...)
+	}
+	for _, child := range root.Children {
+		collectPostCommitEffects(child.Node, out)
 	}
 }
 

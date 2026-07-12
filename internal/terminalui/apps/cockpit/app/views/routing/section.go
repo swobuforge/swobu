@@ -46,12 +46,12 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 		setModelPickerOpen(false)
 	}
 
-	runOn := buildCreateRunOnRow(ctx, provider, providerProtocol, runPickerOpen, setRunPickerOpen, pickerState, setPickerState, closeCreateTransients)
+	runOn := buildCreateRunOnRow(ctx, provider, providerProtocol, strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader), runPickerOpen, setRunPickerOpen, pickerState, setPickerState, closeCreateTransients)
 	rows := []retained.ViewSpec[state.Model]{retained.Named[state.Model]("run_on", runOn)}
 
 	flow := state.EvaluateCreateDraftRouteSetup(model.CreateDraftProviderConfig)
 	if flow.CredentialVisible {
-		useKeyFrom := buildCreateUseKeyFromRow(ctx, provider, providerProtocol, credSummary, baseURL, cred, keyPickerState, setKeyPickerState, pickerState, setPickerState, closeCreateTransients)
+		useKeyFrom := buildCreateUseKeyFromRow(ctx, provider, providerProtocol, strings.TrimSpace(model.CreateDraftProviderConfig.AuthHeader), credSummary, baseURL, cred, keyPickerState, setKeyPickerState, pickerState, setPickerState, closeCreateTransients)
 		rows = append(rows, retained.Named[state.Model]("use_key_from", useKeyFrom))
 	}
 	if strings.EqualFold(strings.TrimSpace(provider), "bedrock") { // swobu:io-string source=boundary
@@ -70,6 +70,12 @@ func createSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.M
 	// Dependency actions (for example auth start/continue) must render before
 	// model so operators see and satisfy prerequisites in-order.
 	rows = append(rows, buildCreateInteractiveAuthRows(model)...)
+	if authHeaderRow := providerAuthHeaderRow(providerAuthHeaderRowSpec{
+		ProviderConfig: &model.CreateDraftProviderConfig,
+		CreateMode:     true,
+	}); authHeaderRow != nil {
+		rows = append(rows, retained.Named[state.Model]("auth-header", authHeaderRow))
+	}
 	modelRow := buildCreateModelRow(ctx, modelPickerOpen, setModelPickerOpen, pickerState, setPickerState, closeCreateTransients)
 	rows = append(rows, retained.Named[state.Model]("model", modelRow))
 	if strings.TrimSpace(provider) != "" && strings.TrimSpace(modelID) != "" { // swobu:io-string source=boundary
@@ -104,12 +110,22 @@ func buildCreateRunOnRow(
 	ctx *retained.Context[state.Model],
 	provider string,
 	providerProtocol string,
+	authHeader string,
 	runPickerOpen bool,
 	setRunPickerOpen func(bool),
 	pickerState views.FilterablePickerState,
 	setPickerState func(views.FilterablePickerState),
 	closeCreateTransients func(),
 ) retained.ViewSpec[state.Model] {
+	onCancel := func() []update.Action {
+		setRunPickerOpen(false)
+		return []update.Action{
+			state.SetInteractionMode{Mode: state.InteractionModeNAV},
+			interaction.FocusKeyAction{Key: "run_on"},
+		}
+	}
+	items := createRunOnChoiceItems(ctx.Model(), onCancel)
+	useDeferredFocusOnOpen(ctx, runPickerOpen, views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "run-on-provider-option"}))
 	runOn := views.RowChoiceWithHooks(views.RowRunOn, firstRunRunOnSummary(provider), func() []update.Action {
 		nextOpen := !runPickerOpen
 		if nextOpen {
@@ -124,9 +140,6 @@ func buildCreateRunOnRow(
 			mode = state.InteractionModePickOne
 		}
 		actions := []update.Action{state.SetInteractionMode{Mode: mode}}
-		if nextOpen {
-			actions = append(actions, interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("run-on-provider-option", 0)})
-		}
 		return actions
 	}, nil, views.FocusAffordance("choose", false))
 	if !runPickerOpen {
@@ -134,7 +147,7 @@ func buildCreateRunOnRow(
 	}
 
 	options := state.ProviderOptions()
-	items := make([]views.FilterablePickerItem, 0, len(options))
+	providerItems := make([]views.FilterablePickerItem, 0, len(options))
 	for _, option := range options {
 		specChoice := strings.TrimSpace(option.Spec) // swobu:io-string source=boundary
 		if specChoice == "" {
@@ -144,7 +157,7 @@ func buildCreateRunOnRow(
 		if label == "" || strings.EqualFold(label, "Provider") {
 			label = selectors.EmptyOr(strings.TrimSpace(option.Label), specChoice) // swobu:io-string source=boundary
 		}
-		items = append(items, views.FilterablePickerItem{
+		providerItems = append(providerItems, views.FilterablePickerItem{
 			Label:  label,
 			Search: specChoice + " " + label,
 			OnChoose: func() []update.Action {
@@ -163,6 +176,7 @@ func buildCreateRunOnRow(
 					state.LoadRoutingModelCatalogRequestedAction{
 						Scope:            state.RoutingModelCatalogScopeCreateDraft,
 						ProviderSpec:     specChoice,
+						AuthHeader:       strings.TrimSpace(authHeader),  // swobu:io-string source=boundary
 						ProviderProtocol: strings.TrimSpace(nextVariant), // swobu:io-string source=boundary
 						BaseURL:          nextBaseURL,
 						CredentialRef:    "",
@@ -173,19 +187,13 @@ func buildCreateRunOnRow(
 			},
 		})
 	}
-	return views.RenderFilterablePickerDisclosure(ctx, runOn, pickerState, setPickerState, items, views.FilterablePickerConfig{
+	return views.RenderFilterablePickerDisclosure(ctx, runOn, pickerState, setPickerState, providerItems, views.FilterablePickerConfig{
 		KeyPrefix:      "run-on-provider-option",
 		BuildOptionRow: views.ChoicePickerOptionRow(false),
 		WindowSize:     6,
 		FindLabel:      "find",
 		OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: "run_on"}} },
-		OnCancel: func() []update.Action {
-			setRunPickerOpen(false)
-			return []update.Action{
-				state.SetInteractionMode{Mode: state.InteractionModeNAV},
-				interaction.FocusKeyAction{Key: "run_on"},
-			}
-		},
+		OnCancel:       onCancel,
 	})
 }
 
@@ -193,6 +201,7 @@ func buildCreateUseKeyFromRow(
 	ctx *retained.Context[state.Model],
 	provider string,
 	providerProtocol string,
+	authHeader string,
 	credSummary string,
 	baseURL string,
 	credentialRef string,
@@ -207,21 +216,6 @@ func buildCreateUseKeyFromRow(
 	}
 	if !state.CreateDraftCredentialStrategySelectable(provider) {
 		return views.RowStatic(views.RowUseKeyFrom, credSummary)
-	}
-	useKeyFrom := views.RowChoiceWithHooks(views.RowUseKeyFrom, credSummary, func() []update.Action {
-		if provider == "" {
-			return nil
-		}
-		closeCreateTransients()
-		setKeyPickerState("source-open")
-		views.ResetFilterablePickerState(setPickerState)
-		return []update.Action{
-			state.SetInteractionMode{Mode: state.InteractionModePickOne},
-			interaction.FocusKeyAction{Key: views.FilterablePickerFocusKey("create-credential-source-option", 0)},
-		}
-	}, nil, views.FocusAffordance("choose", false))
-	if strings.TrimSpace(keyPickerState) != "source-open" { // swobu:io-string source=boundary
-		return useKeyFrom
 	}
 	items := credentialOptionItems(credentialSource(credentialRef), func(choice string) []update.Action {
 		actions := applyProviderCredentialSelection(choice, provider, nil, "", true)
@@ -242,6 +236,7 @@ func buildCreateUseKeyFromRow(
 			state.LoadRoutingModelCatalogRequestedAction{
 				Scope:            state.RoutingModelCatalogScopeCreateDraft,
 				ProviderSpec:     provider,
+				AuthHeader:       strings.TrimSpace(authHeader),       // swobu:io-string source=boundary
 				ProviderProtocol: strings.TrimSpace(providerProtocol), // swobu:io-string source=boundary
 				BaseURL:          baseURL,
 				CredentialRef:    nextRef,
@@ -251,6 +246,24 @@ func buildCreateUseKeyFromRow(
 		)
 		return actions
 	}, provider)
+	useKeyFrom := views.RowChoiceWithHooks(views.RowUseKeyFrom, credSummary, func() []update.Action {
+		if provider == "" {
+			return nil
+		}
+		closeCreateTransients()
+		setKeyPickerState("source-open")
+		views.ResetFilterablePickerState(setPickerState)
+		actions := []update.Action{
+			state.SetInteractionMode{Mode: state.InteractionModePickOne},
+		}
+		if focusKey := views.FilterablePickerFirstFocusKey(items, views.FilterablePickerConfig{KeyPrefix: "create-credential-source-option"}); focusKey != "" {
+			actions = append(actions, interaction.FocusKeyAction{Key: focusKey})
+		}
+		return actions
+	}, nil, views.FocusAffordance("choose", false))
+	if strings.TrimSpace(keyPickerState) != "source-open" { // swobu:io-string source=boundary
+		return useKeyFrom
+	}
 	return views.RenderFilterablePickerDisclosure(ctx, useKeyFrom, pickerState, setPickerState, items, views.FilterablePickerConfig{
 		KeyPrefix:      "create-credential-source-option",
 		BuildOptionRow: views.ChoicePickerOptionRow(true),

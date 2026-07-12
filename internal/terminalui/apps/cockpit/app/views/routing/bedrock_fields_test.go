@@ -23,7 +23,7 @@ func TestBedrockResolvedRegion_ExplicitRegionTakesPrecedence(t *testing.T) {
 	t.Setenv("AWS_REGION", "eu-west-1")
 	t.Setenv("AWS_DEFAULT_REGION", "eu-west-2")
 
-	got := bedrockResolvedRegion("ap-south-1", "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1")
+	got := bedrockResolvedRegion("ap-south-1", "https://bedrock-mantle.us-east-1.api.aws/v1")
 	if got != "ap-south-1" {
 		t.Fatalf("bedrockResolvedRegion=%q want ap-south-1", got)
 	}
@@ -61,35 +61,6 @@ func TestBedrockCredentialRefHelpers_AWSChainRefs(t *testing.T) {
 	}
 }
 
-func TestParseAWSINIProfiles_ConfigAndCredentials_AreStrict(t *testing.T) {
-	configRaw := `
-# comment
-; comment
-[default]
-[profile prod]
-[profile dev]
-[profile   qa]
-[profile ]
-[not-a-profile]
-`
-	credentialsRaw := `
-[default]
-[prod]
-[dev]
-[ ]
-`
-	gotConfig := parseAWSINIProfiles(configRaw, true)
-	wantConfig := []string{"default", "prod", "dev", "qa"}
-	if !reflect.DeepEqual(gotConfig, wantConfig) {
-		t.Fatalf("parseAWSINIProfiles(config)=%v want %v", gotConfig, wantConfig)
-	}
-	gotCreds := parseAWSINIProfiles(credentialsRaw, false)
-	wantCreds := []string{"default", "prod", "dev"}
-	if !reflect.DeepEqual(gotCreds, wantCreds) {
-		t.Fatalf("parseAWSINIProfiles(credentials)=%v want %v", gotCreds, wantCreds)
-	}
-}
-
 func TestBedrockDefaultProfileFromEnvOrList_EnvWins(t *testing.T) {
 	t.Setenv("AWS_PROFILE", "from-env")
 	got := bedrockDefaultProfileFromEnvOrList([]string{"first", "second"})
@@ -102,6 +73,8 @@ func TestBedrockDiscoveredAWSProfiles_DedupesAndKeepsOrder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", "")
+	t.Setenv("AWS_CONFIG_FILE", "")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 	awsDir := filepath.Join(home, ".aws")
 	if err := os.MkdirAll(awsDir, 0o755); err != nil {
 		t.Fatalf("mkdir .aws: %v", err)
@@ -130,10 +103,47 @@ func TestBedrockDiscoveredAWSProfiles_DedupesAndKeepsOrder(t *testing.T) {
 	}
 }
 
+func TestBedrockDiscoveredAWSProfiles_UsesActiveAWSFiles(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", "")
+	homeAWS := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(homeAWS, 0o755); err != nil {
+		t.Fatalf("mkdir home .aws: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeAWS, "config"), []byte("[profile home-bedrock]\nregion = us-west-2\n"), 0o600); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeAWS, "credentials"), []byte("[home-bedrock]\naws_access_key_id = home\naws_secret_access_key = home\n"), 0o600); err != nil {
+		t.Fatalf("write home credentials: %v", err)
+	}
+
+	active := t.TempDir()
+	activeConfig := filepath.Join(active, "config")
+	if err := os.WriteFile(activeConfig, []byte("[profile swobu-bedrock]\nregion = us-east-1\n"), 0o600); err != nil {
+		t.Fatalf("write active config: %v", err)
+	}
+	activeCreds := filepath.Join(active, "credentials")
+	if err := os.WriteFile(activeCreds, []byte("[swobu-bedrock]\naws_access_key_id = active\naws_secret_access_key = active\n"), 0o600); err != nil {
+		t.Fatalf("write active credentials: %v", err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", activeConfig)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", activeCreds)
+
+	got := bedrockDiscoveredAWSProfiles()
+	want := []string{"swobu-bedrock"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bedrockDiscoveredAWSProfiles=%v want %v", got, want)
+	}
+}
+
 func TestBedrockDiscoveredAWSProfiles_NoAWSDir_ReturnsEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", "")
+	t.Setenv("AWS_CONFIG_FILE", "")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 
 	got := bedrockDiscoveredAWSProfiles()
 	if len(got) != 0 {
@@ -145,6 +155,8 @@ func TestBedrockDiscoveredAWSProfiles_EmptyAndInvalidFiles_ReturnsEmpty(t *testi
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", "")
+	t.Setenv("AWS_CONFIG_FILE", "")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 	awsDir := filepath.Join(home, ".aws")
 	if err := os.MkdirAll(awsDir, 0o755); err != nil {
 		t.Fatalf("mkdir .aws: %v", err)

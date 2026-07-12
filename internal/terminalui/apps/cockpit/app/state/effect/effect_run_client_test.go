@@ -96,7 +96,7 @@ func TestRunClientOnceMessage_Success(t *testing.T) {
 		runForegroundClient = origRun
 	})
 
-	for _, clientID := range []string{"aider", "codex", "claude", "opencode", "continue"} {
+	for _, clientID := range []string{"aider", "codex", "claude", "opencode", "continue", "pi"} {
 		got := runClientOnceMessage(context.Background(), "http://127.0.0.1:7926/c/acme/", clientID, "")
 		want := clientID + " exited with code 0"
 		if clientID == "continue" {
@@ -130,7 +130,7 @@ func TestClientRunSpecForID(t *testing.T) {
 	if !ok || codex.binary != "codex" {
 		t.Fatalf("codex spec=%+v ok=%v", codex, ok)
 	}
-	if got := strings.Join(codex.args, " "); got != `--dangerously-bypass-approvals-and-sandbox --disable apps -c model="gpt-5.5" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
+	if got := strings.Join(codex.args, " "); got != `--dangerously-bypass-approvals-and-sandbox -c model="gpt-5.5" -c model_provider="swobu" -c model_providers.swobu.name="Swobu" -c model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"` {
 		t.Fatalf("codex args=%q", got)
 	}
 	if got := codex.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
@@ -176,6 +176,26 @@ func TestClientRunSpecForID(t *testing.T) {
 	if got := strings.Join(opencode.args, " "); got != "" {
 		t.Fatalf("opencode args=%q want empty for interactive launch", got)
 	}
+	pi, ok := clientRunSpecForID("pi", "http://127.0.0.1:7926/c/acme/", "")
+	if !ok || pi.binary != "pi" {
+		t.Fatalf("pi spec=%+v ok=%v", pi, ok)
+	}
+	if got := pi.env["OPENAI_API_KEY"]; got != "swobu-placeholder" {
+		t.Fatalf("pi env OPENAI_API_KEY=%q", got)
+	}
+	piConfigPath := filepath.Join(cwd, ".pi", "agent")
+	if got := pi.env["PI_CODING_AGENT_DIR"]; got != piConfigPath {
+		t.Fatalf("pi env PI_CODING_AGENT_DIR=%q", got)
+	}
+	if got := pi.env["PI_OFFLINE"]; got != "1" {
+		t.Fatalf("pi env PI_OFFLINE=%q", got)
+	}
+	if pi.prepare == nil {
+		t.Fatal("pi prepare missing")
+	}
+	if got := strings.Join(pi.args, " "); got != "--no-context-files --no-skills --provider swobu --model gpt-4.1-mini" {
+		t.Fatalf("pi args=%q", got)
+	}
 	continueSpec, ok := clientRunSpecForID("continue", "http://127.0.0.1:7926/c/acme/", "")
 	if !ok || continueSpec.binary != "cn" {
 		t.Fatalf("continue spec=%+v ok=%v", continueSpec, ok)
@@ -198,7 +218,7 @@ func TestRunClientDisplayCommand(t *testing.T) {
 	if !ok {
 		t.Fatal("codex command missing")
 	}
-	if want := `OPENAI_API_KEY=swobu-placeholder codex --dangerously-bypass-approvals-and-sandbox --disable apps -c 'model="gpt-5.5"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
+	if want := `OPENAI_API_KEY=swobu-placeholder codex --dangerously-bypass-approvals-and-sandbox -c 'model="gpt-5.5"' -c 'model_provider="swobu"' -c 'model_providers.swobu.name="Swobu"' -c 'model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"'`; codex != want {
 		t.Fatalf("codex command=%q want=%q", codex, want)
 	}
 	assertNoTestHarnessArtifacts(t, codex)
@@ -226,6 +246,15 @@ func TestRunClientDisplayCommand(t *testing.T) {
 		t.Fatalf("opencode command=%q", opencode)
 	}
 	assertNoTestHarnessArtifacts(t, opencode)
+	pi, ok := RunClientDisplayCommand("pi", "http://127.0.0.1:7926/c/acme/", "")
+	if !ok {
+		t.Fatal("pi command missing")
+	}
+	piConfigPath := filepath.Join(cwd, ".pi", "agent")
+	if want := `OPENAI_API_KEY=swobu-placeholder PI_CODING_AGENT_DIR=` + piConfigPath + ` PI_OFFLINE=1 pi --no-context-files --no-skills --provider swobu --model gpt-4.1-mini`; pi != want {
+		t.Fatalf("pi command=%q want=%q", pi, want)
+	}
+	assertNoTestHarnessArtifacts(t, pi)
 	continueCmd, ok := RunClientDisplayCommand("continue", "http://127.0.0.1:7926/c/acme/", "")
 	if !ok {
 		t.Fatal("continue command missing")

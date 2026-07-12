@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -137,6 +138,10 @@ func ensurePreparedRunFile(prepare clientprofile.RunPrepareFileSpec) error {
 	mode := prepare.Mode
 	if mode == 0 {
 		mode = 0o600
+	}
+	// Nested config directories are valid for client-specific bootstrap files.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create run preparation dir %s: %w", filepath.Dir(path), err)
 	}
 	return os.WriteFile(path, []byte(prepare.Content), mode)
 }

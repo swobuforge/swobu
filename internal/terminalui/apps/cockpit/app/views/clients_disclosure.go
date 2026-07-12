@@ -1,7 +1,6 @@
 package views
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
@@ -121,9 +120,16 @@ func actionStableID(action clientprofile.Action) string {
 	return "action"
 }
 
-func clientPickerFocusKey(index int) string {
-	if index < 0 {
-		index = 0
+func clientPickerFocusKey(profile clientprofile.Profile) string {
+	id := ""
+	if profile != nil {
+		id = strings.TrimSpace(profile.Identity().ID)
+		if id == "" {
+			id = strings.TrimSpace(profile.Identity().Label)
+		}
 	}
-	return "client-option/" + strconv.Itoa(index)
+	if id == "" {
+		id = "client"
+	}
+	return "client-option/" + id
 }

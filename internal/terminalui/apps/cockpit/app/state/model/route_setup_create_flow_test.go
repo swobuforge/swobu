@@ -38,8 +38,49 @@ func TestEvaluateCreateDraftRouteSetup_BedrockReadyWhenScopeAndModelSet(t *testi
 	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
 		ProviderSpec:  "bedrock",
 		CredentialRef: "profile:default",
-		BaseURL:       "https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1",
+		BaseURL:       "https://bedrock-mantle.eu-west-2.api.aws/v1",
 		ModelID:       "anthropic.claude-3-5-sonnet-20241022-v2:0",
+	})
+	if got.ScopeState != RouteSetupSlotReady {
+		t.Fatalf("scope state = %q, want %q", got.ScopeState, RouteSetupSlotReady)
+	}
+	if got.ModelState != RouteSetupSlotReady {
+		t.Fatalf("model state = %q, want %q", got.ModelState, RouteSetupSlotReady)
+	}
+	if !got.Ready {
+		t.Fatalf("ready = false, want true")
+	}
+}
+
+func TestEvaluateCreateDraftRouteSetup_AzureMissingScopeBlocksModel(t *testing.T) {
+	t.Setenv("AZURE_OPENAI_API_KEY", "azure-test-key")
+	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
+		ProviderSpec:  "azure",
+		CredentialRef: "env:AZURE_OPENAI_API_KEY",
+		BaseURL:       "",
+		ModelID:       "",
+	})
+	if !got.ScopeVisible {
+		t.Fatalf("scope visible = false, want true")
+	}
+	if got.ScopeState != RouteSetupSlotMissing {
+		t.Fatalf("scope state = %q, want %q", got.ScopeState, RouteSetupSlotMissing)
+	}
+	if got.ModelState != RouteSetupSlotBlocked {
+		t.Fatalf("model state = %q, want %q", got.ModelState, RouteSetupSlotBlocked)
+	}
+	if got.ModelBlocker != "choose scope before loading models" {
+		t.Fatalf("model blocker = %q, want scope blocker", got.ModelBlocker)
+	}
+}
+
+func TestEvaluateCreateDraftRouteSetup_AzureReadyWhenScopeAndModelSet(t *testing.T) {
+	t.Setenv("AZURE_OPENAI_API_KEY", "azure-test-key")
+	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
+		ProviderSpec:  "azure",
+		CredentialRef: "env:AZURE_OPENAI_API_KEY",
+		BaseURL:       "https://contact-5464-resource.openai.azure.com/openai/v1",
+		ModelID:       "gpt-4.1-mini",
 	})
 	if got.ScopeState != RouteSetupSlotReady {
 		t.Fatalf("scope state = %q, want %q", got.ScopeState, RouteSetupSlotReady)
@@ -56,7 +97,7 @@ func TestEvaluateCreateDraftRouteSetup_BedrockExplicitAWSProfileIsExternal(t *te
 	got := EvaluateCreateDraftRouteSetup(ProviderConfigSnapshot{
 		ProviderSpec:  "bedrock",
 		CredentialRef: "aws_profile",
-		BaseURL:       "https://bedrock-runtime.eu-west-2.amazonaws.com/openai/v1",
+		BaseURL:       "https://bedrock-mantle.eu-west-2.api.aws/v1",
 		ModelID:       "anthropic.claude-3-5-sonnet-20241022-v2:0",
 	})
 	if got.Credential != RouteSetupSlotExternal {

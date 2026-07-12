@@ -31,6 +31,18 @@ func TestAddModelCreateReady_OpenRouterStillRequiresCredentialRef(t *testing.T) 
 	}
 }
 
+func TestAddModelCreateReady_AzureRequiresBaseURL(t *testing.T) {
+	t.Parallel()
+	draft := state.ProviderConfigSnapshot{
+		ProviderSpec:  "azure",
+		CredentialRef: "env:AZURE_OPENAI_API_KEY",
+		ModelID:       "gpt-4.1-mini",
+	}
+	if addModelCreateReady(draft) {
+		t.Fatal("azure add-model draft should require a backend URL")
+	}
+}
+
 func TestEffectiveAddModelCredentialRef_UsesResolvedDraftCredential(t *testing.T) {
 	t.Parallel()
 	model := state.Model{

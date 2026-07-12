@@ -2,6 +2,7 @@ package effect
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -21,14 +22,30 @@ func argsToProviderConfig(pc stateModel.ProviderConfigSnapshot) (endpointintent.
 	if strings.EqualFold(strings.TrimSpace(pc.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
 		if derived := stateModel.BedrockBaseURLForRegion(pc.Region); strings.TrimSpace(derived) != "" { // swobu:io-string source=boundary
 			baseURL = derived
+		} else if strings.TrimSpace(baseURL) == "" {
+			region := strings.TrimSpace(os.Getenv("AWS_REGION")) // swobu:io-string source=boundary
+			if region == "" {
+				region = strings.TrimSpace(os.Getenv("AWS_DEFAULT_REGION")) // swobu:io-string source=boundary
+			}
+			if region != "" {
+				baseURL = stateModel.BedrockBaseURLForRegion(region)
+			}
 		}
 	}
 	config, err := endpointintent.NewProviderConfig(ref, spec, baseURL, pc.CredentialRef)
 	if err != nil {
 		return endpointintent.ProviderConfig{}, err
 	}
+	config, err = config.WithAuthHeader(pc.AuthHeader)
+	if err != nil {
+		return endpointintent.ProviderConfig{}, err
+	}
 	providerProtocol := strings.TrimSpace(pc.ProviderProtocol) // swobu:io-string source=boundary
-	if providerProtocol != "" && providerProtocol != "auto" {
+	if providerProtocol == "" || providerProtocol == "auto" {
+		// Preserve unresolved auto at the save boundary so the daemon-owned
+		// model probe can choose the concrete protocol from live catalog data.
+		config = config.WithProviderProtocolAuto()
+	} else {
 		config, err = config.WithProviderProtocol(providerProtocol)
 		if err != nil {
 			return endpointintent.ProviderConfig{}, err
@@ -58,6 +75,7 @@ func endpointToSnapshot(ep endpointintent.Endpoint) stateModel.EndpointSnapshot 
 			ProviderSpec:     pc.ProviderSpec().String(),
 			Region:           stateModel.BedrockRegionFromBaseURL(pc.BaseURL()),
 			BaseURL:          pc.BaseURL(),
+			AuthHeader:       pc.AuthHeader(),
 			CredentialRef:    pc.CredentialRef(),
 			ModelID:          pc.ModelID(),
 			TargetAlias:      pc.TargetAlias(),
