@@ -68,6 +68,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canon
 	}), resolvedDelivery, nil
 }
 
+// swobu:lint ignore string-switch because=protocol boundary decodes wire tool-call kinds.
 func decodeChatCompletionsItems(
 	role string,
 	content json.RawMessage,

@@ -1,3 +1,4 @@
+// swobu:lint ignore file-length because=provider profile catalog keeps static capability facts together.
 package profile
 
 import (

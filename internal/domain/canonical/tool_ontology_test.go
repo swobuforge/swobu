@@ -33,7 +33,7 @@ func TestToolPolicyClone_PreservesSpecificToolID(t *testing.T) {
 func TestSemanticToolID_RoundTripsCanonicalString(t *testing.T) {
 	t.Parallel()
 
-	id := NewSemanticToolIDFor(ToolOriginProvider, ToolKindCapability, "web_search")
+	id := NewSemanticToolIDFor(ToolOrigin("provider"), ToolKindCapability, "web_search")
 	if got, want := id.String(), "tool:v1/provider/capability/web_search"; got != want {
 		t.Fatalf("canonical id string = %q, want %q", got, want)
 	}

@@ -32,6 +32,7 @@ func ProjectedToolName(tool ToolDecl) (string, error) {
 
 // projectedToolNameForID renders one canonical function/custom tool identity as
 // a deterministic wire-safe flat name.
+// swobu:lint ignore string-switch because=projection accepts boundary tool-kind text.
 func projectedToolNameForID(id SemanticToolID, kind string) (string, error) {
 	normalizedKind := strings.ToLower(strings.TrimSpace(kind))
 	switch normalizedKind {
@@ -57,6 +58,7 @@ func projectedToolNameForID(id SemanticToolID, kind string) (string, error) {
 
 // ParseProjectedToolName resolves one projected wire name back to canonical
 // structured tool identity.
+// swobu:lint ignore string-switch because=projection parses boundary tool-kind text.
 func ParseProjectedToolName(raw string, kind ToolKind) (SemanticToolID, string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

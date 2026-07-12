@@ -187,6 +187,7 @@ func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsRes
 	return message, nil
 }
 
+// swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
 func chatToolCallFromOutputItem(item canonical.OutputItem) (chatCompletionsResponseToolCallDTO, error) {
 	toolUseID := strings.TrimSpace(item.ToolUseID) // swobu:io-string source=boundary
 	if toolUseID == "" {

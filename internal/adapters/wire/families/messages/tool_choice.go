@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
+// swobu:lint ignore string-switch because=protocol boundary decodes Messages tool_choice variants.
 func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {

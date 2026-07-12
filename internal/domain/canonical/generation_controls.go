@@ -181,30 +181,6 @@ type generationControlsMetadataDTO struct {
 	TopP            *float64 `json:"top_p,omitempty"`
 }
 
-func encodeGenerationControlsMetadata(controls GenerationControls) (string, error) {
-	if controls.IsZero() {
-		return "", nil
-	}
-	dto := generationControlsMetadataDTO{}
-	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
-		dto.MaxOutputTokens = &value
-	}
-	if len(controls.Limits.StopSequences) > 0 {
-		dto.StopSequences = cloneStrings(controls.Limits.StopSequences)
-	}
-	if value, ok := controls.Sampling.Temperature.Value(); ok {
-		dto.Temperature = &value
-	}
-	if value, ok := controls.Sampling.TopP.Value(); ok {
-		dto.TopP = &value
-	}
-	raw, err := json.Marshal(dto)
-	if err != nil {
-		return "", InternalError("canonical request generation controls could not be encoded")
-	}
-	return string(raw), nil
-}
-
 func decodeGenerationControlsMetadata(raw string) (GenerationControls, error) {
 	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {

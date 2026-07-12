@@ -99,6 +99,7 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 	), nil
 }
 
+// swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
 func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 	out := make([]messageBody, 0, len(items))
 	for i := 0; i < len(items); {

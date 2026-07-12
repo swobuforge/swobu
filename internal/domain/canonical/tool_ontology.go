@@ -1,3 +1,4 @@
+// swobu:lint ignore file-length because=tool ontology keeps related request tool invariants together.
 package canonical
 
 import "strings"
@@ -11,10 +12,7 @@ const (
 type ToolOrigin string
 
 const (
-	ToolOriginRequest  ToolOrigin = "request"
-	ToolOriginProvider ToolOrigin = "provider"
-	ToolOriginMCP      ToolOrigin = "mcp"
-	ToolOriginSwobu    ToolOrigin = "swobu"
+	ToolOriginRequest ToolOrigin = "request"
 )
 
 // ToolKind identifies the semantic kind of one tool.

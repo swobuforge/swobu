@@ -46,20 +46,6 @@ type requestToolCallBatchMetadataDTO struct {
 	Mode string `json:"mode"`
 }
 
-func encodeToolCallBatchMetadata(policy ToolCallBatchPolicy) (string, error) {
-	if policy.IsZero() {
-		return "", nil
-	}
-	if err := policy.Validate(); err != nil {
-		return "", err
-	}
-	raw, err := json.Marshal(requestToolCallBatchMetadataDTO{Mode: string(policy.Mode)})
-	if err != nil {
-		return "", InternalError("canonical request tool call batch policy could not be encoded")
-	}
-	return string(raw), nil
-}
-
 func decodeToolCallBatchMetadata(raw string) (ToolCallBatchPolicy, error) {
 	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {

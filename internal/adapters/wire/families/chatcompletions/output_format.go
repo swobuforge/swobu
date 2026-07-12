@@ -19,6 +19,7 @@ type chatCompletionsJSONSchemaFormatDTO struct {
 	Strict      *bool           `json:"strict,omitempty"`
 }
 
+// swobu:lint ignore string-switch because=protocol boundary decodes response_format variants.
 func decodeChatCompletionsOutputFormat(raw json.RawMessage) (canonical.OutputFormat, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" || trimmed == "null" {

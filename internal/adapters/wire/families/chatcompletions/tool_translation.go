@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
+// swobu:lint ignore string-switch because=protocol boundary decodes tool declaration variants.
 func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO) ([]canonical.ToolDecl, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -295,6 +296,7 @@ func hasChatCompletionsCustomTools(tools []canonical.ToolDecl) bool {
 	return false
 }
 
+// swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
 func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err

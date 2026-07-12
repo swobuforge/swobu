@@ -1,3 +1,4 @@
+// swobu:lint ignore file-length because=responses request codec owns nested tool lowering fanout.
 package responses
 
 import (
@@ -377,6 +378,7 @@ func decodeResponsesTools(tools []responsesToolDefinitionDTO) ([]canonical.ToolD
 	return out, nil
 }
 
+// swobu:lint ignore string-switch because=protocol boundary decodes Responses tool variants.
 func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext) ([]canonical.ToolDecl, error) {
 	kind := strings.ToLower(strings.TrimSpace(tool.Type))
 	if kind == "" {
