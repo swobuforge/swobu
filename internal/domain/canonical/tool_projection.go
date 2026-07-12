@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	toolProjectionKey             = "swobu-canonical-tool-projection-v1"
-	toolProjectionDigestLength     = 10
-	toolProjectionSeparator        = "__"
-	toolProjectionKindFunction     = ToolTypeFunction
-	toolProjectionKindCustom       = ToolTypeCustom
+	toolProjectionKey          = "swobu-canonical-tool-projection-v1"
+	toolProjectionDigestLength = 10
+	toolProjectionSeparator    = "__"
+	toolProjectionKindFunction = ToolTypeFunction
+	toolProjectionKindCustom   = ToolTypeCustom
 )
 
 var toolProjectionEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
@@ -144,4 +144,3 @@ func buildProjectedToolPath(namespace, leaf string) string {
 	}
 	return trimmedNamespace + "/" + trimmedLeaf
 }
-

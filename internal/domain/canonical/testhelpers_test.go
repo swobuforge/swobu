@@ -247,16 +247,16 @@ func encodeRequestToolDeclsMetadata(tools []ToolDecl) (string, error) {
 		return "", nil
 	}
 	type requestToolDeclMetadataDTO struct {
-		Kind             string                       `json:"kind,omitempty"`
-		ID               string                       `json:"id,omitempty"`
-		Name             string                       `json:"name,omitempty"`
-		Description      string                       `json:"description,omitempty"`
-		InputSchema      json.RawMessage              `json:"input_schema,omitempty"`
-		Strict           *bool                        `json:"strict,omitempty"`
-		Format           json.RawMessage              `json:"format,omitempty"`
-		Capability       string                       `json:"capability,omitempty"`
-		CapabilityConfig json.RawMessage              `json:"capability_config,omitempty"`
-		Execution        string                       `json:"execution,omitempty"`
+		Kind             string          `json:"kind,omitempty"`
+		ID               string          `json:"id,omitempty"`
+		Name             string          `json:"name,omitempty"`
+		Description      string          `json:"description,omitempty"`
+		InputSchema      json.RawMessage `json:"input_schema,omitempty"`
+		Strict           *bool           `json:"strict,omitempty"`
+		Format           json.RawMessage `json:"format,omitempty"`
+		Capability       string          `json:"capability,omitempty"`
+		CapabilityConfig json.RawMessage `json:"capability_config,omitempty"`
+		Execution        string          `json:"execution,omitempty"`
 	}
 	var encodeDecls func([]ToolDecl) ([]requestToolDeclMetadataDTO, error)
 	encodeDecls = func(tools []ToolDecl) ([]requestToolDeclMetadataDTO, error) {

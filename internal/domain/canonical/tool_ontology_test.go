@@ -152,11 +152,11 @@ func TestProjectedToolName_RoundTripsStructuredFunctionAndCustomDeclarations(t *
 	)
 
 	tests := []struct {
-		name       string
-		tool       ToolDecl
-		wantKind   ToolKind
-		wantName   string
-		wantID     SemanticToolID
+		name     string
+		tool     ToolDecl
+		wantKind ToolKind
+		wantName string
+		wantID   SemanticToolID
 	}{
 		{
 			name:     "function",
