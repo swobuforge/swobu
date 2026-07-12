@@ -21,7 +21,7 @@ func TestReduce_ExchangeDiagnosticsCopyRequested_IncludesStageContextWhenPresent
 			StageReports: []stateModel.StageReport{{
 				Stage:   "provider.wire.out",
 				Carrier: "wire_document",
-				Applied: []string{"openaifamily.CacheAffinityWirePatch"},
+				Applied: []string{"p.encode"},
 				Mutated: true,
 			}},
 		}},
@@ -41,7 +41,7 @@ func TestReduce_ExchangeDiagnosticsCopyRequested_IncludesStageContextWhenPresent
 	if !strings.Contains(copyEff.Text, "exchange stages:") {
 		t.Fatalf("copy text missing stage section: %q", copyEff.Text)
 	}
-	if !strings.Contains(copyEff.Text, "- provider.wire.out [wire_document] mutated (openaifamily.CacheAffinityWirePatch)") {
+	if !strings.Contains(copyEff.Text, "- provider.wire.out [wire_document] mutated (p.encode)") {
 		t.Fatalf("copy text missing stage line: %q", copyEff.Text)
 	}
 }

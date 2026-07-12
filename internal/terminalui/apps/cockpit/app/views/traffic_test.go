@@ -126,13 +126,13 @@ func TestTrafficPatchDetailLines(t *testing.T) {
 		Mutations: []stateModel.Mutation{
 			{
 				Stage:         "encode",
-				PatchID:       "openaifamily.CacheAffinityWirePatch",
+				PatchID:       "p.encode",
 				Changed:       true,
 				ChangedFields: []string{"prompt_cache_key"},
 			},
 			{
 				Stage:   "decode",
-				PatchID: "openaifamily.DecodeWirePatch",
+				PatchID: "p.decode",
 				Changed: false,
 			},
 		},
@@ -181,7 +181,7 @@ func TestTrafficStageReportSummary(t *testing.T) {
 func TestTrafficStageReportDetailLines(t *testing.T) {
 	row := state.TrafficRow{
 		StageReports: []stateModel.StageReport{
-			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"openaifamily.CacheAffinityWirePatch"}, Mutated: true},
+			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"p.encode"}, Mutated: true},
 			{Stage: "provider.wire.in", Carrier: "wire_document", Mutated: false},
 		},
 	}

@@ -289,7 +289,7 @@ func TestRefreshStatusProjectionEffect_MapsMutations(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","wire_patch_mutations":[{"leg":"encode","patch_id":"openaifamily.CacheAffinityWirePatch","changed":true,"changed_fields":["prompt_cache_key"]},{"leg":"decode","patch_id":"openaifamily.DecodeWirePatch","changed":false,"changed_fields":[]}],"exchange_diagnostics":["high_patch_noop_ratio:4/5"],"exchange_stage_reports":[{"stage":"provider.wire.out","carrier":"wire_document","applied":["openaifamily.CacheAffinityWirePatch"],"mutated":true}]}]}`))
+		_, _ = w.Write([]byte(`{"scope":{"kind":"all"},"recent_traffic":[{"request_id":"req_1","route":"primary","ingress_family":"responses","result":"success","status_code":200,"observed_at":"12:00:00","wire_patch_mutations":[{"leg":"encode","patch_id":"p.encode","changed":true,"changed_fields":["prompt_cache_key"]},{"leg":"decode","patch_id":"p.decode","changed":false,"changed_fields":[]}],"exchange_diagnostics":["high_patch_noop_ratio:4/5"],"exchange_stage_reports":[{"stage":"provider.wire.out","carrier":"wire_document","applied":["p.encode"],"mutated":true}]}]}`))
 	}))
 	defer srv.Close()
 

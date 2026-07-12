@@ -32,7 +32,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	chain := []string{"bridge", "responses"}
 	mutations := []Mutation{{
 		Stage:         "encode",
-		PatchID:       "openaifamily.CacheAffinityWirePatch",
+		PatchID:       "p.encode",
 		Changed:       true,
 		ChangedFields: []string{"prompt_cache_key"},
 	}}
@@ -40,7 +40,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	stageReports := []StageReport{{
 		Stage:   "provider.wire.out",
 		Carrier: "wire_document",
-		Applied: []string{"openaifamily.CacheAffinityWirePatch"},
+		Applied: []string{"p.encode"},
 		Mutated: true,
 	}}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
@@ -115,7 +115,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	}
 	stageReports[0].Applied[0] = "mutated"
 	gotStageReports := event.StageReports()
-	if len(gotStageReports) != 1 || gotStageReports[0].Applied[0] != "openaifamily.CacheAffinityWirePatch" {
+	if len(gotStageReports) != 1 || gotStageReports[0].Applied[0] != "p.encode" {
 		t.Fatalf("exchange stage reports = %#v", gotStageReports)
 	}
 }

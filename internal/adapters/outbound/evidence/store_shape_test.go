@@ -42,7 +42,7 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 		ClientFamily: evidence.ClientFamily("responses"),
 		Mutations: []evidence.Mutation{{
 			Stage:         "encode",
-			PatchID:       "openaifamily.CacheAffinityWirePatch",
+			PatchID:       "p.encode",
 			Changed:       true,
 			ChangedFields: []string{"prompt_cache_key"},
 		}},
@@ -50,7 +50,7 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 		StageReports: []evidence.StageReport{{
 			Stage:   "provider.wire.out",
 			Carrier: "wire_document",
-			Applied: []string{"openaifamily.CacheAffinityWirePatch"},
+			Applied: []string{"p.encode"},
 			Mutated: true,
 		}},
 	})
@@ -101,8 +101,8 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if got, _ := mutation["leg"].(string); got != "encode" {
 		t.Fatalf("wire_patch_mutations entry leg = %#v, want encode", mutation["leg"])
 	}
-	if got, _ := mutation["patch_id"].(string); got != "openaifamily.CacheAffinityWirePatch" {
-		t.Fatalf("wire_patch_mutations entry patch_id = %#v, want openaifamily.CacheAffinityWirePatch", mutation["patch_id"])
+	if got, _ := mutation["patch_id"].(string); got != "p.encode" {
+		t.Fatalf("wire_patch_mutations entry patch_id = %#v, want p.encode", mutation["patch_id"])
 	}
 	if got, _ := mutation["changed"].(bool); !got {
 		t.Fatalf("wire_patch_mutations entry changed = %#v, want true", mutation["changed"])
@@ -138,8 +138,8 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if !ok || len(appliedRaw) != 1 {
 		t.Fatalf("stage report applied = %#v, want one id", stageReport["applied"])
 	}
-	if got, _ := appliedRaw[0].(string); got != "openaifamily.CacheAffinityWirePatch" {
-		t.Fatalf("stage report applied[0] = %#v, want openaifamily.CacheAffinityWirePatch", appliedRaw[0])
+	if got, _ := appliedRaw[0].(string); got != "p.encode" {
+		t.Fatalf("stage report applied[0] = %#v, want p.encode", appliedRaw[0])
 	}
 	for _, forbidden := range []string{"ttfb_millis", "dur_millis", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"} {
 		if _, ok := row[forbidden]; ok {
