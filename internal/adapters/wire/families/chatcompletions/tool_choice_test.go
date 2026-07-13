@@ -173,6 +173,38 @@ func TestEncodeChatCompletionsToolChoice_RejectsRequiredWithoutTools(t *testing.
 	}
 }
 
+func TestEncodeChatCompletionsToolChoice_OmitsEmptySurfaceChoices(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		policy canonical.ToolPolicy
+	}{
+		{
+			name:   "none",
+			policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil),
+		},
+		{
+			name:   "auto",
+			policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := encodeChatCompletionsToolChoice(tc.policy, nil, nil, "")
+			if err != nil {
+				t.Fatalf("encodeChatCompletionsToolChoice returned error: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("tool_choice = %#v, want omitted on empty tool surface", got)
+			}
+		})
+	}
+}
+
 func mustJSONString(t *testing.T, v any) string {
 	t.Helper()
 	raw, err := json.Marshal(v)

@@ -3,6 +3,8 @@ package exchange
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/effect"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/observation"
@@ -25,8 +28,9 @@ const (
 
 // RequestIngress runs one client request lifecycle at the exchange boundary.
 type RequestIngress struct {
-	endpoints EndpointReader
-	graph     exchangeGraph
+	endpoints       EndpointReader
+	graph           exchangeGraph
+	trafficEvidence TrafficEventSink
 }
 
 type RuntimePoliciesSpec struct {
@@ -35,6 +39,13 @@ type RuntimePoliciesSpec struct {
 	ContinuationStore canonical.ContinuationStore
 	TurnStateStore    turnstate.TurnStateStore
 	EffectSink        effect.Sink
+	TrafficEventSink  TrafficEventSink
+}
+
+// TrafficEventSink records immutable traffic events at the exchange
+// boundary without creating a dependency back onto the broader ports layer.
+type TrafficEventSink interface {
+	Append(context.Context, trafficevidence.TrafficEvent)
 }
 
 // RuntimeResolver provides client codec lookup and provider protocol-bundle lookup for request ingress and the exchange runner.
@@ -69,7 +80,8 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 		}
 	}
 	return RequestIngress{
-		endpoints: endpoints,
+		endpoints:       endpoints,
+		trafficEvidence: policies.TrafficEventSink,
 		graph: exchangeGraph{
 			DeliverySelector: selector,
 			Observations:     policies.ObservationStore,
@@ -179,10 +191,112 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		Request:        request,
 		Endpoint:       endpoint,
 	})
+	h.appendTrafficEvidence(ctx, endpoint, exchangeID, clientFamily, request, target, response, err)
 	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return response, target, err
 	}
 	return response, target, nil
+}
+
+func (h RequestIngress) appendTrafficEvidence(ctx context.Context, endpoint endpointintent.Endpoint, exchangeID string, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error) {
+	if h.trafficEvidence == nil {
+		return
+	}
+	event, buildErr := buildTerminalTrafficEvent(endpoint, exchangeID, clientFamily, request, target, response, err)
+	if buildErr != nil {
+		return
+	}
+	h.trafficEvidence.Append(ctx, event)
+}
+
+func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID string, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error) (trafficevidence.TrafficEvent, error) {
+	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(exchangeID))
+	if parseErr != nil {
+		return trafficevidence.TrafficEvent{}, parseErr
+	}
+	if strings.TrimSpace(target.BackendRef) == "" { // swobu:io-string source=boundary
+		return trafficevidence.TrafficEvent{}, fmt.Errorf("traffic evidence target is required")
+	}
+	route, routeErr := trafficevidence.NewRoute(target.BackendRef, request.Model())
+	if routeErr != nil {
+		return trafficevidence.TrafficEvent{}, routeErr
+	}
+
+	result, statusCode := requestOutcomeEvidence(err, response)
+	input := trafficevidence.TrafficEventInput{
+		RequestID:           requestID,
+		Endpoint:            endpoint.Name().String(),
+		ClientFamily:        trafficevidence.ClientFamily(clientFamily),
+		Route:               route,
+		Result:              result,
+		StatusCode:          statusCode,
+		AttemptCount:        1,
+		ModelRequested:      request.Model(),
+		ModelResolved:       request.Model(),
+		ExchangeDiagnostics: requestOutcomeDiagnostics(err),
+	}
+	return trafficevidence.NewTerminalTrafficEvent(input)
+}
+
+func requestOutcomeEvidence(err error, response TransportResponse) (trafficevidence.ResultClass, int) {
+	if err == nil {
+		statusCode := response.Transport.Status
+		if statusCode <= 0 {
+			statusCode = http.StatusOK
+		}
+		return trafficevidence.ResultClassSuccess, statusCode
+	}
+
+	var backendErr canonical.BackendError
+	if errors.As(err, &backendErr) {
+		statusCode := backendErr.StatusCode
+		if statusCode <= 0 {
+			statusCode = http.StatusBadGateway
+		}
+		return trafficevidence.ResultClassBackendError, statusCode
+	}
+
+	var swobuErr canonical.Error
+	if errors.As(err, &swobuErr) {
+		return requestOutcomeFromSwobuError(swobuErr.Code), requestOutcomeStatusForSwobuError(swobuErr.Code)
+	}
+
+	return trafficevidence.ResultClassSwobuError, http.StatusInternalServerError
+}
+
+func requestOutcomeFromSwobuError(code canonical.ErrorCode) trafficevidence.ResultClass {
+	switch code {
+	case canonical.ErrorCodeUnsupportedOperation:
+		return trafficevidence.ResultClassUnsupportedOperation
+	case canonical.ErrorCodeUnsupportedDelivery:
+		return trafficevidence.ResultClassUnsupportedDeliveryVariant
+	case canonical.ErrorCodeBadEndpoint, canonical.ErrorCodeUnsupportedEndpoint, canonical.ErrorCodeUnknownTarget:
+		return trafficevidence.ResultClassSwobuError
+	case canonical.ErrorCodeBadRequest, canonical.ErrorCodeInternal:
+		return trafficevidence.ResultClassSwobuError
+	default:
+		return trafficevidence.ResultClassSwobuError
+	}
+}
+
+func requestOutcomeStatusForSwobuError(code canonical.ErrorCode) int {
+	switch code {
+	case canonical.ErrorCodeBadRequest:
+		return http.StatusBadRequest
+	case canonical.ErrorCodeBadEndpoint, canonical.ErrorCodeUnsupportedEndpoint, canonical.ErrorCodeUnknownTarget:
+		return http.StatusNotFound
+	case canonical.ErrorCodeUnsupportedOperation, canonical.ErrorCodeUnsupportedDelivery:
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func requestOutcomeDiagnostics(err error) []string {
+	if err == nil {
+		return nil
+	}
+	return []string{strings.TrimSpace(err.Error())} // swobu:io-string source=boundary
 }
 
 func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.WireDocument, error) {

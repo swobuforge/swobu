@@ -2,8 +2,6 @@ package ports
 
 import (
 	"context"
-	"slices"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/exchange"
 )
@@ -12,19 +10,5 @@ import (
 // provider target. It is separate from protocol-path semantic execution.
 type ProviderModelCatalog interface {
 	ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error
-	ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error)
-}
-
-// CloneModelIDs protects operator read models from accidental mutation by
-// callers or transport renderers.
-func CloneModelIDs(ids []string) []string {
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id) // swobu:io-string source=boundary
-		if id == "" {
-			continue
-		}
-		out = append(out, id)
-	}
-	return slices.Clone(out)
+	ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ProviderDeploymentRecord, error)
 }

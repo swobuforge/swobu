@@ -98,7 +98,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 
 	openAIReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -138,9 +138,9 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 
-	openAIModels, err := composition.ListModels(context.Background(), exchange.NewRoutableTarget(
+	openAIModels, err := composition.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err != nil {
@@ -150,7 +150,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai model catalog len=%d want 2", len(openAIModels))
 	}
 
-	_, err = composition.ListModels(context.Background(), exchange.NewRoutableTarget(
+	_, err = composition.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"backend-b", "chatgpt", upstream.URL+"/v1", "keychain:chatgpt/default", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
@@ -161,7 +161,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderIngressResolverComposition(http.DefaultClient, testCredentialResolver{}, "")
+	composition := NewProviderRegistry(http.DefaultClient, testCredentialResolver{}, "")
 	_, err := composition.ResolveProviderIngress(context.Background(), mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     "m",
@@ -188,7 +188,7 @@ func TestServices_ValidateCredentialsDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	err := composition.ValidateCredentials(context.Background(), exchange.NewRoutableTarget(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", "",
 	))
@@ -217,7 +217,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	sink := &recordingEffectSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
@@ -266,7 +266,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	sink := &recordingEffectSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
@@ -327,7 +327,7 @@ func TestServices_OpenAIFamilyEmitsStructuredOutputCompatibilityDecisions(t *tes
 		Tools:        []canonical.ToolDecl{tool},
 		OutputFormat: outputFormat,
 	})
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	sink := &recordingEffectSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
@@ -372,7 +372,7 @@ func TestServices_BedrockEmitsToolSchemaStrictDropCompatibilityDecision(t *testi
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		Tools: []canonical.ToolDecl{tool},
 	})
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	sink := &recordingEffectSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
@@ -413,7 +413,7 @@ func TestServices_AnthropicEmitsToolSchemaStrictDropCompatibilityDecision(t *tes
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		Tools: []canonical.ToolDecl{tool},
 	})
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	sink := &recordingEffectSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
@@ -447,7 +447,7 @@ func TestServices_OpenAIFamilyEmitsBackendErrorClassCompatibilityDecision(t *tes
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderIngressResolverComposition(upstream.Client(), testCredentialResolver{}, "")
+	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{}, "")
 	sink := &recordingEffectSink{}
 	req := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -485,7 +485,7 @@ func TestServices_OpenAIFamilyEmitsBackendErrorClassCompatibilityDecision(t *tes
 func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderIngressResolverComposition(http.DefaultClient, testCredentialResolver{}, "")
+	composition := NewProviderRegistry(http.DefaultClient, testCredentialResolver{}, "")
 	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind:        canonical.OutputFormatJSONSchema,
 		Name:        "reply_shape",

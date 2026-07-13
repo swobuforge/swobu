@@ -203,6 +203,9 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	if !strings.Contains(body, `"id":"openai_compatible:gpt-4o"`) {
 		t.Fatalf("body = %q, want model id", body)
 	}
+	if !strings.Contains(body, `"name":"openai_compatible:gpt-4o"`) {
+		t.Fatalf("body = %q, want model name", body)
+	}
 	if strings.Contains(body, `"swobu_model"`) || strings.Contains(body, `"swobu_default"`) || strings.Contains(body, `"swobu_backend"`) || strings.Contains(body, `"swobu_provider"`) {
 		t.Fatalf("body = %q, want OpenAI-shaped model entries without swobu_* fields", body)
 	}
@@ -224,6 +227,9 @@ func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	if !strings.Contains(rec.Body.String(), `"id":"openai_compatible:gpt-4o"`) {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"name":"openai_compatible:gpt-4o"`) {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
 }

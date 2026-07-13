@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
@@ -107,7 +108,7 @@ func TestReduce_SetCreateDraftAuthHeader_DefaultsAndResetsModelSelection(t *test
 			AuthHeader:       "X-Custom-Auth",
 			ProviderProtocol: "responses_stream",
 		},
-		CreateDraftModelIDs:          []string{"gpt-4.1-mini"},
+		CreateDraftModelDeployments:  []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
 		CreateDraftModelProbePending: true,
 		CreateDraftModelError:        "stale",
 	}
@@ -495,6 +496,10 @@ func TestProviderConfigForSpec_DefaultsToAutoProtocolForAllProviders(t *testing.
 	if got := azure.BaseURL; got != "" {
 		t.Fatalf("azure base URL=%q want empty", got)
 	}
+	azureHost := ProviderConfigForSpec("azure", ProviderConfigSnapshot{BaseURL: "swobu-useast-resource.services.ai.azure.com"})
+	if got := azureHost.BaseURL; got != "https://swobu-useast-resource.services.ai.azure.com" {
+		t.Fatalf("azure normalized base URL=%q want single canonical suffix", got)
+	}
 	openAICompatible := ProviderConfigForSpec("openai_compatible", ProviderConfigSnapshot{})
 	if got := openAICompatible.AuthHeader; got != "Authorization" {
 		t.Fatalf("openai-compatible auth header=%q want Authorization", got)
@@ -597,10 +602,10 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 		ProviderProtocol: "auto",
 		BaseURL:          "https://openrouter.ai/api/v1",
 		CredentialRef:    "env:OPENROUTER_API_KEY",
-		ModelIDs:         []string{"openai/gpt-4.1"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "openai/gpt-4.1"}},
 	})
-	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "openai/gpt-4.1" {
-		t.Fatalf("model ids=%v", model.AddModelDraftModelIDs)
+	if len(model.AddModelDraftModelDeployments) != 1 || model.AddModelDraftModelDeployments[0].Name != "openai/gpt-4.1" {
+		t.Fatalf("model deployments=%v", model.AddModelDraftModelDeployments)
 	}
 	if model.AddModelDraftModelProbePending {
 		t.Fatal("add-model catalog probe pending should clear after load result")
@@ -612,10 +617,10 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 		ProviderProtocol: "auto",
 		BaseURL:          "https://api.anthropic.com",
 		CredentialRef:    "env:ANTHROPIC_API_KEY",
-		ModelIDs:         []string{"claude-sonnet-4"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "claude-sonnet-4"}},
 	})
-	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "openai/gpt-4.1" {
-		t.Fatalf("mismatched tuple should be ignored; model ids=%v", model.AddModelDraftModelIDs)
+	if len(model.AddModelDraftModelDeployments) != 1 || model.AddModelDraftModelDeployments[0].Name != "openai/gpt-4.1" {
+		t.Fatalf("mismatched tuple should be ignored; model deployments=%v", model.AddModelDraftModelDeployments)
 	}
 }
 
@@ -663,10 +668,10 @@ func TestReduce_LoadRoutingModelCatalogCreateDraft_AppliesMatchingResultAgainstR
 		ProviderProtocol: "auto",
 		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:swobu-bedrock",
-		ModelIDs:         []string{"anthropic.claude-sonnet-4-5-20250929-v1:0"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "anthropic.claude-sonnet-4-5-20250929-v1:0"}},
 	})
-	if len(model.CreateDraftModelIDs) != 1 {
-		t.Fatalf("model ids=%v", model.CreateDraftModelIDs)
+	if len(model.CreateDraftModelDeployments) != 1 {
+		t.Fatalf("model deployments=%v", model.CreateDraftModelDeployments)
 	}
 	if model.CreateDraftModelProbePending {
 		t.Fatal("create-draft catalog probe pending should clear after load result")
@@ -742,11 +747,11 @@ func TestReduce_AddModelCatalogResult_AcceptsMismatchedProviderProtocol(t *testi
 		ProviderProtocol: "messages",
 		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:default",
-		ModelIDs:         []string{"should-not-apply"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "should-not-apply"}},
 	})
 
-	if len(model.AddModelDraftModelIDs) != 1 || model.AddModelDraftModelIDs[0] != "should-not-apply" {
-		t.Fatalf("model ids=%v", model.AddModelDraftModelIDs)
+	if len(model.AddModelDraftModelDeployments) != 1 || model.AddModelDraftModelDeployments[0].Name != "should-not-apply" {
+		t.Fatalf("model deployments=%v", model.AddModelDraftModelDeployments)
 	}
 	if model.AddModelDraftModelProbePending {
 		t.Fatal("pending flag should clear after catalog load is accepted")

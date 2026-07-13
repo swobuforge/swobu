@@ -3,7 +3,6 @@ package messages
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
@@ -107,13 +106,13 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			}
 			decoded = append(decoded, canonical.NewTextItem(author, part.Text))
 		case "tool_use":
-			name := strings.TrimSpace(part.Name) // swobu:io-string source=boundary
-			if name == "" {
-				return canonical.BadRequest("messages request tool_use parts require a name")
-			}
 			input, err := sse.DecodeJSONObject(part.Input, "messages request tool_use input is invalid")
 			if err != nil {
 				return err
+			}
+			name := strings.TrimSpace(part.Name) // swobu:io-string source=boundary
+			if name == "" {
+				return canonical.BadRequest("messages request tool_use parts require a name")
 			}
 			args, err := json.Marshal(input)
 			if err != nil {
@@ -128,19 +127,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 		case "tool_result":
 			toolUseID := strings.TrimSpace(part.ToolUseID) // swobu:io-string source=boundary
 			if toolUseID == "" {
-				if len(pending) != 1 {
-					slog.Debug("messages tool_result missing tool_use_id",
-						"component", "protocol.messages",
-						"event", "tool_result_missing_tool_use_id",
-						"message_index", msgIdx,
-						"part_index", partIdx,
-						"role", role,
-						"pending_count", len(pending),
-						"pending_tool_use_ids", append([]string(nil), pending...),
-					)
-					return canonical.BadRequest("messages request tool_result parts require tool_use_id")
-				}
-				toolUseID = pending[0]
+				return canonical.BadRequest("messages request tool_result parts require tool_use_id")
 			}
 			text, err := decodeToolResultText(part.Content)
 			if err != nil {

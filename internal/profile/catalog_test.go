@@ -136,8 +136,8 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if azureModes[2].Mode != AuthModeKeychain {
 		t.Fatalf("azure allowed auth modes=%v want keychain third", azureModes)
 	}
-	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("azure"); !ok || got != "responses" {
-		t.Fatalf("azure auto protocol=%q ok=%v want responses", got, ok)
+	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("azure"); ok || got != "" {
+		t.Fatalf("azure auto protocol=%q ok=%v want unresolved", got, ok)
 	}
 }
 

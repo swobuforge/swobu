@@ -4,8 +4,10 @@ package openaifamily
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -24,42 +26,36 @@ import (
 )
 
 type ProviderIngressResolverAdapter struct {
-	client               *http.Client
-	credentials          providersruntime.CredentialProvider
-	profile              ProviderRoutePolicy
-	azureProjectEndpoint string
+	client      *http.Client
+	credentials providersruntime.CredentialProvider
+	profile     ProviderRoutePolicy
 }
 
 const swobuCallerUAHeaderValue = "swobu/dev"
 
 // NewExecutor builds the OpenAI-family provider wiring adapter around commodity HTTP transport.
-func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy, azureProjectEndpoint ...string) ProviderIngressResolverAdapter {
+func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy) ProviderIngressResolverAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	if profile == nil {
 		panic("openaifamily: route profile is required")
 	}
-	endpoint := ""
-	if len(azureProjectEndpoint) > 0 {
-		endpoint = azureProjectEndpoint[0]
-	}
 	return ProviderIngressResolverAdapter{
-		client:               client,
-		credentials:          credentials,
-		profile:              profile,
-		azureProjectEndpoint: endpoint,
+		client:      client,
+		credentials: credentials,
+		profile:     profile,
 	}
 }
 
 // NewRuntime builds a complete OpenAI-family provider runtime for one provider policy.
-func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy, azureProjectEndpoint ...string) providersruntime.ProviderRuntimeBundle {
-	executor := NewExecutor(client, credentials, profile, azureProjectEndpoint...)
+func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy) providersruntime.ProviderRuntimeBundle {
+	executor := NewExecutor(client, credentials, profile)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderID(),
-		IngressResolver:    executor,
+		ProviderExecutor:   executor,
 		CredentialProvider: credentials,
-		ModelCatalogClient: executor,
+		Discovery:          executor,
 	}
 }
 
@@ -101,6 +97,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		return nil, err
 	}
 	wireReqBody := wireReqCarrier.RawBytes()
+	logOpenAIFamilyOutboundRequest(req.ExchangeID, req.Target.ProviderID(), req.Target.ProviderProtocol, path, wireReqBody)
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -177,8 +174,8 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 // applyCredential keeps auth resolution at the provider edge so canonicals and
 // app orchestration never need to know provider token mechanics.
 func (e ProviderIngressResolverAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string, authHeader string) error {
-	auth := authStrategyForHeader(authHeader, e.profile.AuthStrategy())
-	if auth.Style == authStyleNone {
+	auth := AuthStrategyForHeader(authHeader, e.profile.AuthStrategy())
+	if auth.Style == AuthStyleNone {
 		return nil
 	}
 	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
@@ -194,7 +191,7 @@ func (e ProviderIngressResolverAdapter) applyCredential(ctx context.Context, req
 	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
-	auth.apply(req, token)
+	auth.Apply(req, token)
 	return nil
 }
 
@@ -223,6 +220,37 @@ func detailErrorMessage(err error) string {
 		}
 	}
 	return strings.TrimSpace(err.Error()) // swobu:io-string source=boundary
+}
+
+func logOpenAIFamilyOutboundRequest(exchangeID string, providerSpec string, providerProtocol string, path string, body []byte) {
+	normalized, truncated := compactAndTruncateJSON(body, 4096)
+	slog.Debug("openaifamily outbound request",
+		"component", "provider",
+		"event", "outbound_request_shape",
+		"exchange_id", strings.TrimSpace(exchangeID), // swobu:io-string source=boundary
+		"provider_spec", strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
+		"provider_protocol", strings.TrimSpace(providerProtocol), // swobu:io-string source=boundary
+		"path", strings.TrimSpace(path), // swobu:io-string source=boundary
+		"body_bytes", len(body),
+		"body_truncated", truncated,
+		"body_json", normalized,
+	)
+}
+
+func compactAndTruncateJSON(raw []byte, maxBytes int) (string, bool) {
+	text := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
+	if text == "" {
+		return "null", false
+	}
+	normalized := text
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(text)); err == nil {
+		normalized = compact.String()
+	}
+	if maxBytes <= 0 || len(normalized) <= maxBytes {
+		return normalized, false
+	}
+	return normalized[:maxBytes], true
 }
 
 func emitBackendErrorClassDecision(ctx context.Context, sink effect.Sink, exchangeID string, providerID string, protocol protocolkind.ProtocolKind, classifiedErr error) {

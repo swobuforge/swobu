@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -45,6 +46,11 @@ func ProviderConfigForSpec(spec string, current ProviderConfigSnapshot) Provider
 	defaultBaseURL := trimModelInput(profile.DefaultExecuteBaseURL(spec))
 	if defaultBaseURL != "" {
 		next.BaseURL = defaultBaseURL
+	}
+	if strings.EqualFold(spec, "azure") && trimModelInput(next.BaseURL) != "" {
+		if normalized, err := endpointintent.NormalizeAzureResourceLocator(next.BaseURL); err == nil {
+			next.BaseURL = normalized
+		}
 	}
 	currentAuthHeader := trimModelInput(next.AuthHeader)
 	if strings.EqualFold(spec, "openai_compatible") {

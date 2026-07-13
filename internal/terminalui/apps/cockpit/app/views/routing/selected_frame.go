@@ -30,11 +30,25 @@ func buildProviderProtocolChoiceRow(model state.Model, spec providerProtocolChoi
 		return views.RowStatic(providerProtocolRowLabel, views.ValueRequired)
 	}
 	protocols := profile.SupportedProviderProtocolsForSpec(spec.ProviderConfig.ProviderSpec)
+	if strings.EqualFold(strings.TrimSpace(spec.ProviderConfig.ProviderSpec), "azure") { // swobu:io-string source=domain
+		protocols = supportedConcreteProviderProtocolsForSpec(spec.ProviderConfig.ProviderSpec)
+	}
 	if len(protocols) == 0 {
 		return views.RowStatic(providerProtocolRowLabel, views.ValueRequired)
 	}
 	current := strings.TrimSpace(spec.ProviderConfig.ProviderProtocol) // swobu:io-string source=boundary
-	if current == "" {
+	if strings.EqualFold(strings.TrimSpace(spec.ProviderConfig.ProviderSpec), "azure") {
+		allowed := false
+		for _, protocol := range protocols {
+			if protocol == current {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			current = views.ValueRequired
+		}
+	} else if current == "" {
 		current = defaultProviderProtocolForProvider(spec.ProviderConfig.ProviderSpec)
 	}
 	return views.RowActionWithHooks(providerProtocolRowLabel, current, "next", func() []update.Action {

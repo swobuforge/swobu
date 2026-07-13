@@ -32,7 +32,8 @@ func (s *messagesEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Even
 }
 
 // event-to-frame fanout over blocks, tool calls, and terminal envelopes.
-// and lifecycle event shapes defined by the wire contract.
+// swobu:lint ignore function-length because=messages stream encoder keeps SSE event kind dispatch in one wire seam.
+// swobu:lint ignore function-complexity because=messages stream encoder keeps SSE event kind dispatch in one wire seam.
 func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte, error) {
 	if s.blockIndexByID == nil {
 		s.blockIndexByID = map[string]int{}
@@ -52,9 +53,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			},
 			Usage: messagesUsageDTO{},
 		})
-		return [][]byte{
-			sse.SSEEventFrame("message_start", raw),
-		}, nil
+		frames := [][]byte{sse.SSEEventFrame("message_start", raw)}
+		for _, frame := range frames {
+			logMessagesEgressStreamFrame(frame)
+		}
+		return frames, nil
 	case sse.StreamEventItemStarted:
 		if !s.started {
 			frames, _ := s.Encode(sse.StreamEvent{Kind: sse.StreamEventStarted, ResultID: event.ResultID, Model: event.Model})
@@ -76,7 +79,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 					Text: "",
 				},
 			})
-			return [][]byte{sse.SSEEventFrame("content_block_start", raw)}, nil
+			frames := [][]byte{sse.SSEEventFrame("content_block_start", raw)}
+			for _, frame := range frames {
+				logMessagesEgressStreamFrame(frame)
+			}
+			return frames, nil
 		case canonical.ItemKindToolUse:
 			s.sawToolUse = true
 			raw, _ := json.Marshal(messagesContentBlockStartDTO{
@@ -89,7 +96,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 					Input: map[string]any{},
 				},
 			})
-			return [][]byte{sse.SSEEventFrame("content_block_start", raw)}, nil
+			frames := [][]byte{sse.SSEEventFrame("content_block_start", raw)}
+			for _, frame := range frames {
+				logMessagesEgressStreamFrame(frame)
+			}
+			return frames, nil
 		default:
 			return nil, canonical.UnsupportedOperation("messages streaming output item kind is not implemented")
 		}
@@ -114,7 +125,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 				Text: event.TextDelta,
 			},
 		})
-		return [][]byte{sse.SSEEventFrame("content_block_delta", raw)}, nil
+		frames := [][]byte{sse.SSEEventFrame("content_block_delta", raw)}
+		for _, frame := range frames {
+			logMessagesEgressStreamFrame(frame)
+		}
+		return frames, nil
 	case sse.StreamEventToolUseArgumentsDelta:
 		index, ok := s.blockIndexByID[event.ItemID]
 		if !ok {
@@ -138,7 +153,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 				PartialJSON: event.ArgumentsDelta,
 			},
 		})
-		return [][]byte{sse.SSEEventFrame("content_block_delta", raw)}, nil
+		frames := [][]byte{sse.SSEEventFrame("content_block_delta", raw)}
+		for _, frame := range frames {
+			logMessagesEgressStreamFrame(frame)
+		}
+		return frames, nil
 	case sse.StreamEventItemCompleted:
 		index, ok := s.blockIndexByID[event.ItemID]
 		if !ok {
@@ -149,7 +168,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			s.activeTextID = ""
 		}
 		raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
-		return [][]byte{sse.SSEEventFrame("content_block_stop", raw)}, nil
+		frames := [][]byte{sse.SSEEventFrame("content_block_stop", raw)}
+		for _, frame := range frames {
+			logMessagesEgressStreamFrame(frame)
+		}
+		return frames, nil
 	case sse.StreamEventCompleted:
 		if !s.started {
 			frames, _ := s.Encode(sse.StreamEvent{Kind: sse.StreamEventStarted, ResultID: event.ResultID, Model: event.Model})
@@ -184,6 +207,9 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		frames = append(frames, sse.SSEEventFrame("message_stop", raw))
 		s.blockIndexByID = map[string]int{}
 		s.sawToolUse = false
+		for _, frame := range frames {
+			logMessagesEgressStreamFrame(frame)
+		}
 		return frames, nil
 	default:
 		return nil, canonical.UnsupportedOperation("messages streaming event is not implemented")

@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 )
 
-type statusProjectionReadFunc func(context.Context, evidencestore.ProjectionScope) (evidencestore.StatusProjection, error)
+type statusProjectionReadFunc func(context.Context, trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error)
 
 // StatusProjectionHandler renders the daemon-owned recent-traffic and counter
 // projection for operator surfaces. It stays on the internal `_swobu/*` family
@@ -46,24 +46,24 @@ func (h StatusProjectionHandler) ServeHTTP(w http.ResponseWriter, req *http.Requ
 	_ = json.NewEncoder(w).Encode(projection)
 }
 
-func parseProjectionScope(req *http.Request) (evidencestore.ProjectionScope, error) {
+func parseProjectionScope(req *http.Request) (trafficevidencestore.ProjectionScope, error) {
 	raw := strings.TrimSpace(req.URL.Query().Get("scope")) // swobu:io-string source=boundary
 	if raw == "" {
-		return evidencestore.ProjectionScope{}, fmt.Errorf("status projection scope is required")
+		return trafficevidencestore.ProjectionScope{}, fmt.Errorf("status projection scope is required")
 	}
-	if raw == string(evidencestore.ProjectionScopeAll) {
-		return evidencestore.ProjectionScope{Kind: evidencestore.ProjectionScopeAll}, nil
+	if raw == string(trafficevidencestore.ProjectionScopeAll) {
+		return trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll}, nil
 	}
 	const endpointPrefix = "endpoint:"
 	if strings.HasPrefix(raw, endpointPrefix) {
 		endpoint := strings.TrimSpace(strings.TrimPrefix(raw, endpointPrefix)) // swobu:io-string source=boundary
 		if endpoint == "" {
-			return evidencestore.ProjectionScope{}, fmt.Errorf("status projection endpoint scope requires endpoint name")
+			return trafficevidencestore.ProjectionScope{}, fmt.Errorf("status projection endpoint scope requires endpoint name")
 		}
-		return evidencestore.ProjectionScope{
-			Kind:     evidencestore.ProjectionScopeEndpoint,
+		return trafficevidencestore.ProjectionScope{
+			Kind:     trafficevidencestore.ProjectionScopeEndpoint,
 			Endpoint: endpoint,
 		}, nil
 	}
-	return evidencestore.ProjectionScope{}, fmt.Errorf("status projection scope %q is invalid", raw)
+	return trafficevidencestore.ProjectionScope{}, fmt.Errorf("status projection scope %q is invalid", raw)
 }

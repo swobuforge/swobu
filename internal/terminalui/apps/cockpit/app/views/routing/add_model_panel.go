@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -130,30 +131,31 @@ func buildWorkspaceAddModelDetailRows(
 			return nil
 		})))
 	}
-	rows = append(rows, retained.Named[state.Model]("add-model/protocol", buildAddModelProtocolRow(draft, panel)))
+	rows = append(rows, retained.Named[state.Model]("add-model/protocol", buildAddModelProtocolRow(model, draft, panel)))
 	if createRow := buildAddModelCreateRow(model, snapshot, draft, panel); createRow != nil {
 		rows = append(rows, createRow)
 	}
 	return rows
 }
 
-func buildAddModelProtocolRow(draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
+func buildAddModelProtocolRow(model state.Model, draft state.ProviderConfigSnapshot, panel addModelPanelState) retained.ViewSpec[state.Model] {
 	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 		_ = ctx
-		protocols := profile.SupportedProviderProtocolsForSpec(draft.ProviderSpec)
+		deployment, _ := deploymentForModelID(model.AddModelDraftModelDeployments, draft.ModelID)
+		protocols := deploymentProtocolOptions(deployment, draft.ProviderSpec)
 		if len(protocols) == 0 {
 			return views.RowStatic("protocol", views.ValueRequired)
 		}
-		current := strings.TrimSpace(draft.ProviderProtocol) // swobu:io-string source=boundary
+		current := deploymentSelectedProtocol(deployment, draft.ProviderSpec, draft.ProviderProtocol)
 		if current == "" {
-			current = defaultProviderProtocolForProvider(draft.ProviderSpec)
+			current = views.ValueRequired
 		}
 		return views.RowActionWithCancel(
 			"protocol",
 			current,
 			"next",
 			func() []update.Action {
-				next := nextProviderProtocolSelection(protocols, strings.TrimSpace(draft.ProviderProtocol)) // swobu:io-string source=boundary
+				next := nextProviderProtocolSelection(protocols, current)
 				if next == "" {
 					return nil
 				}
@@ -172,9 +174,19 @@ func buildAddModelScopeRow(ctx *retained.Context[state.Model], draft state.Provi
 		return addModelBedrockAuthRegionEditor(ctx, draft, panel)
 	}
 	if profile.RequiresExplicitExecuteBaseURL(draft.ProviderSpec) { // swobu:io-string source=boundary
-		return backendURLEditorRow(ctx, "scope", selectors.EmptyOr(strings.TrimSpace(draft.BaseURL), "base url missing"), strings.TrimSpace(draft.BaseURL), "https://host/v1", func(value string) []update.Action { // swobu:io-string source=boundary
+		placeholder := "https://host/v1"
+		if strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "azure") { // swobu:io-string source=boundary
+			placeholder = "https://resource.services.ai.azure.com"
+		}
+		return backendURLEditorRow(ctx, "scope", selectors.EmptyOr(strings.TrimSpace(draft.BaseURL), "base url missing"), strings.TrimSpace(draft.BaseURL), placeholder, func(value string) []update.Action { // swobu:io-string source=boundary
 			next := draft
-			next.BaseURL = strings.TrimSpace(value) // swobu:io-string source=boundary
+			baseURL := strings.TrimSpace(value) // swobu:io-string source=boundary
+			if strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), "azure") && baseURL != "" {
+				if normalized, err := endpointintent.NormalizeAzureResourceLocator(baseURL); err == nil {
+					baseURL = normalized
+				}
+			}
+			next.BaseURL = baseURL // swobu:io-string source=boundary
 			panel.setDraft(next)
 			return nil
 		})

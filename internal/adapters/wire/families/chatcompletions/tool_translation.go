@@ -335,15 +335,24 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
+	if len(tools) == 0 {
+		switch policy.Mode {
+		case canonical.ToolPolicyRequired:
+			return nil, canonical.BadRequest("chat completions request tool_choice required requires at least one tool")
+		case canonical.ToolPolicySpecific:
+			return nil, canonical.BadRequest("chat completions request tool_choice specific requires a tool id")
+		default:
+			// Empty tool surfaces are inert here. Omit the backend-visible
+			// field rather than emitting a no-op choice some backends reject.
+			return nil, nil
+		}
+	}
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
 		return "none", nil
 	case canonical.ToolPolicyAuto:
 		return "auto", nil
 	case canonical.ToolPolicyRequired:
-		if len(tools) == 0 {
-			return nil, canonical.BadRequest("chat completions request tool_choice required requires at least one tool")
-		}
 		return "required", nil
 	case canonical.ToolPolicySpecific:
 		specific, ok := policy.SpecificID()

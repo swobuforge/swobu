@@ -4,6 +4,7 @@ package routing
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -32,11 +33,15 @@ func buildProviderBackendURLRow(ctx *retained.Context[state.Model], spec provide
 	if pc == nil || !profile.RequiresExplicitExecuteBaseURL(pc.ProviderSpec) { // swobu:io-string source=boundary
 		return nil
 	}
-	parent := backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(pc.BaseURL), "missing"), strings.TrimSpace(pc.BaseURL), "https://host/v1", func(value string) []update.Action { // swobu:io-string source=boundary
+	parent := backendURLEditorRow(ctx, views.RowBackendURL, selectors.EmptyOr(strings.TrimSpace(pc.BaseURL), "missing"), strings.TrimSpace(pc.BaseURL), "https://resource.services.ai.azure.com", func(value string) []update.Action { // swobu:io-string source=boundary
 		return applyProviderBackendURL(value, spec.ProviderConfig, spec.EndpointName, spec.CreateMode)
 	})
 	if strings.TrimSpace(pc.BaseURL) == "" { // swobu:io-string source=boundary
-		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("OpenAI-style backend URL is required (https://host/v1)")...)
+		if strings.EqualFold(strings.TrimSpace(pc.ProviderSpec), "azure") {
+			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("Azure resource locator or portal link is required (resource name or https://<resource>.services.ai.azure.com)")...)
+		} else {
+			out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows("OpenAI-style backend URL is required (https://host/v1)")...)
+		}
 	} else if message := views.ScopedError(model, "routing", "provider/backend-url"); message != "" {
 		out = toolkitviews.NewAnchoredDisclosure(parent, views.DisclosureNoteRows(message)...)
 	} else {
@@ -79,6 +84,11 @@ func backendURLEditorRow(ctx *retained.Context[state.Model], label, summary, cur
 
 func applyProviderBackendURL(baseURL string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
 	baseURL = strings.TrimSpace(baseURL) // swobu:io-string source=boundary
+	if providerConfig != nil && strings.EqualFold(strings.TrimSpace(providerConfig.ProviderSpec), "azure") && baseURL != "" {
+		if normalized, err := endpointintent.NormalizeAzureResourceLocator(baseURL); err == nil {
+			baseURL = normalized
+		}
+	}
 	if createMode {
 		return []update.Action{state.SetCreateDraftBaseURL{BaseURL: baseURL}}
 	}

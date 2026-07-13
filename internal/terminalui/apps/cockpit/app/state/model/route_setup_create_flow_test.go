@@ -69,8 +69,8 @@ func TestEvaluateCreateDraftRouteSetup_AzureMissingScopeBlocksModel(t *testing.T
 	if got.ModelState != RouteSetupSlotBlocked {
 		t.Fatalf("model state = %q, want %q", got.ModelState, RouteSetupSlotBlocked)
 	}
-	if got.ModelBlocker != "choose scope before loading models" {
-		t.Fatalf("model blocker = %q, want scope blocker", got.ModelBlocker)
+	if got.ModelBlocker != "set Azure resource locator before loading deployments" {
+		t.Fatalf("model blocker = %q, want Azure resource locator blocker", got.ModelBlocker)
 	}
 }
 

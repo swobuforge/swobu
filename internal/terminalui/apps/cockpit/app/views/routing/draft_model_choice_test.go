@@ -134,7 +134,7 @@ func TestProviderModelCatalogLoadBlocked_AzureRequiresBaseURL(t *testing.T) {
 	if !state.ProviderModelCatalogLoadBlocked("azure", "", "env:AZURE_OPENAI_API_KEY") {
 		t.Fatalf("expected missing azure base URL to block model catalog load")
 	}
-	if got := state.ProviderModelCatalogBlockedMessage("azure", "", "env:AZURE_OPENAI_API_KEY"); got != "set backend URL before loading models" {
+	if got := state.ProviderModelCatalogBlockedMessage("azure", "", "env:AZURE_OPENAI_API_KEY"); got != "set Azure resource locator before loading deployments" {
 		t.Fatalf("blocked message=%q", got)
 	}
 	if state.ProviderModelCatalogLoadBlocked("azure", "https://contact-5464-resource.openai.azure.com/openai/v1", "env:AZURE_OPENAI_API_KEY") {

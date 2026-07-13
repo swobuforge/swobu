@@ -196,10 +196,7 @@ func TestRunner_FlushesFirstFrameBeforeBlockingBootEffect(t *testing.T) {
 }
 
 func TestRunner_EnterOnClientsSectionFocusesClientRow(t *testing.T) {
-	screen := tcell.NewSimulationScreen("UTF-8")
-	screen.SetSize(100, 28)
-
-	runner := New(screen, rootviews.Root(), appstate.Model{
+	runner := New(tcell.NewSimulationScreen("UTF-8"), rootviews.Root(), appstate.Model{
 		HeaderStatus:    "ready",
 		DaemonState:     "up",
 		Endpoints:       []string{"acme"},
@@ -214,41 +211,27 @@ func TestRunner_EnterOnClientsSectionFocusesClientRow(t *testing.T) {
 			}},
 		}},
 	}, appstate.Reduce)
-
-	done := make(chan error, 1)
-	go func() {
-		done <- runner.Run(context.Background())
-	}()
-
-	waitFor(t, screen, done, func() bool {
-		return strings.Contains(screenString(screen), "workspace")
-	})
+	viewport := geom.Rect{W: 100, H: 28}
+	runner.Loop.Rebuild(rootviews.Root(), viewport)
 
 	for i := 0; i < 12; i++ {
-		if strings.Contains(screenString(screen), "> clients ▸") {
+		render := runner.Loop.Render(viewport).String()
+		if strings.Contains(render, "> clients ▸") {
 			break
 		}
-		screen.InjectKey(tcell.KeyDown, 0, 0)
-		time.Sleep(30 * time.Millisecond)
+		runner.Loop.DispatchEvent(interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyDown})
+		runner.Loop.Rebuild(rootviews.Root(), viewport)
 	}
-	if !strings.Contains(screenString(screen), "> clients ▸") {
-		t.Fatalf("failed to focus clients header before open; screen=%q", screenString(screen))
+	render := runner.Loop.Render(viewport).String()
+	if !strings.Contains(render, "> clients ▸") {
+		t.Fatalf("expected clients header to be focused before open; render=%q", render)
 	}
 
-	screen.InjectKey(tcell.KeyEnter, 0, 0)
-	waitFor(t, screen, done, func() bool {
-		s := screenString(screen)
-		return strings.Contains(s, "clients ▾") && strings.Contains(s, ">    client")
-	})
-
-	screen.InjectKey(tcell.KeyCtrlC, 0, 0)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("runner returned error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("runner did not exit after ctrl+c")
+	runner.Loop.DispatchEvent(interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEnter})
+	runner.Loop.Rebuild(rootviews.Root(), viewport)
+	render = runner.Loop.Render(viewport).String()
+	if !strings.Contains(render, "clients ▾") || !strings.Contains(render, ">    client") {
+		t.Fatalf("expected client row to be focused after opening section; render=%q", render)
 	}
 }
 

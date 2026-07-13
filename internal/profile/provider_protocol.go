@@ -52,6 +52,9 @@ func SupportsProviderProtocolForSpec(spec string, providerProtocol string) bool 
 // ResolveConcreteProtocolForAutoAtBoundary chooses one concrete protocol for a
 // provider when callers require a concrete fallback value.
 func ResolveConcreteProtocolForAutoAtBoundary(spec string) (string, bool) {
+	if strings.EqualFold(strings.TrimSpace(spec), string(ProviderSpecAzure)) { // swobu:io-string source=domain
+		return "", false
+	}
 	concrete := ConcreteProviderProtocolsForSpec(spec)
 	if len(concrete) == 0 {
 		return "", false

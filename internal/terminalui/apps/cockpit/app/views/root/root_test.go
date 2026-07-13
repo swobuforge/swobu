@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
@@ -1289,7 +1290,7 @@ func TestRoot_FirstRunOpeningModelClosesCredentialChooserDisclosure(t *testing.T
 			BaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
 			CredentialRef: "profile:default",
 		},
-		CreateDraftModelIDs:           []string{"amazon.nova-pro-v1:0"},
+		CreateDraftModelDeployments:   []ports.ProviderDeploymentRecord{{Name: "amazon.nova-pro-v1:0"}},
 		CreateDraftModelProviderSpec:  "bedrock",
 		CreateDraftModelBaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CreateDraftModelCredentialRef: "profile:default",

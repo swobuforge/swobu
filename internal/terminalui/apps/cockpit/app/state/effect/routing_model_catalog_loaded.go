@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 // RoutingModelCatalogLoaded carries routing model catalog choices for one scope.
@@ -14,7 +15,7 @@ type RoutingModelCatalogLoaded struct {
 	AuthHeader               string
 	CredentialRef            string
 	ProviderProtocol         string
-	ModelIDs                 []string
+	Deployments              []ports.ProviderDeploymentRecord
 	Error                    string
 	ResolvedProviderProtocol string
 }

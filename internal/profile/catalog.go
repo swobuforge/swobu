@@ -42,6 +42,8 @@ var (
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
 		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
 		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
 )
 
@@ -134,8 +136,8 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:              ProviderSpecAzure,
-			ProviderDisplayName:     "Azure OpenAI",
-			SetupHint:               string(ProviderSpecAzure) + "   Azure OpenAI v1 endpoint (https://resource.openai.azure.com/openai/v1)",
+			ProviderDisplayName:     "Azure AI Foundry",
+			SetupHint:               string(ProviderSpecAzure) + "   Azure resource locator or portal link (resource name or https://<resource>.services.ai.azure.com)",
 			DefaultBaseURL:          "",
 			DefaultCredentialEnvVar: "AZURE_OPENAI_API_KEY",
 			VisibleInOperatorUI:     true,

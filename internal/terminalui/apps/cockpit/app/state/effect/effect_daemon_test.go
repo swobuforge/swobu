@@ -76,7 +76,7 @@ func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) 
 		}
 		time.Sleep(500 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"model_ids":["openrouter/m1"]}`))
+		_, _ = w.Write([]byte(`{"deployments":[{"name":"openrouter/m1","family":"openai","supported_provider_protocols":["responses"],"default_provider_protocol":"responses"}]}`))
 	}))
 	defer srv.Close()
 
@@ -101,8 +101,8 @@ func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) 
 	if loaded.Error != want {
 		t.Fatalf("error = %q, want %q", loaded.Error, want)
 	}
-	if len(loaded.ModelIDs) != 0 {
-		t.Fatalf("model ids = %#v, want empty on timeout", loaded.ModelIDs)
+	if len(loaded.Deployments) != 0 {
+		t.Fatalf("deployments = %#v, want empty on timeout", loaded.Deployments)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestLoadRoutingModelCatalogEffect_OpenAICompatibleDefaultsAuthHeaderQueryPa
 		}
 		sawAuthHeader = r.URL.Query().Get("auth_header")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"model_ids":["gpt-4.1-mini"]}`))
+		_, _ = w.Write([]byte(`{"deployments":[{"name":"gpt-4.1-mini","family":"openai","supported_provider_protocols":["responses"],"default_provider_protocol":"responses"}]}`))
 	}))
 	defer srv.Close()
 
@@ -173,8 +173,8 @@ func TestLoadRoutingModelCatalogEffect_OpenAICompatibleDefaultsAuthHeaderQueryPa
 	if loaded.AuthHeader != "Authorization" {
 		t.Fatalf("loaded auth header=%q want Authorization", loaded.AuthHeader)
 	}
-	if len(loaded.ModelIDs) != 1 || loaded.ModelIDs[0] != "gpt-4.1-mini" {
-		t.Fatalf("loaded model ids=%v", loaded.ModelIDs)
+	if len(loaded.Deployments) != 1 || loaded.Deployments[0].Name != "gpt-4.1-mini" {
+		t.Fatalf("loaded deployments=%v", loaded.Deployments)
 	}
 }
 

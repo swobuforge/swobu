@@ -340,15 +340,15 @@ func TestListModels_AWSProfileMode_UsesMantleHTTP(t *testing.T) {
 	defer upstream.Close()
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), newBedrockTarget(upstream.URL, "profile:swobu-bedrock@eu-central-1", protocolkind.Responses))
+	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "profile:swobu-bedrock@eu-central-1", protocolkind.Responses))
 	if err != nil {
-		t.Fatalf("ListModels error: %v", err)
+		t.Fatalf("ListDeployments error: %v", err)
 	}
 	if requests != 1 {
 		t.Fatalf("requests=%d want=1", requests)
 	}
-	if len(models) != 2 || models[0] != "amazon.nova-lite-v1" || models[1] != "anthropic.claude-3-5-sonnet" {
-		t.Fatalf("models=%v", models)
+	if len(models) != 2 || models[0].Name != "amazon.nova-lite-v1" || models[1].Name != "anthropic.claude-3-5-sonnet" {
+		t.Fatalf("deployments=%v", models)
 	}
 }
 
@@ -381,8 +381,8 @@ func TestListModels_AWSProfileMode_DoesNotSetAcceptEncodingHeader(t *testing.T) 
 
 	capture := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: capture})
-	if _, err := exec.ListModels(context.Background(), newBedrockTarget("https://bedrock-mantle.eu-central-1.api.aws/v1", "profile:swobu-bedrock@eu-central-1", protocolkind.Responses)); err != nil {
-		t.Fatalf("ListModels error: %v", err)
+	if _, err := exec.ListDeployments(context.Background(), newBedrockTarget("https://bedrock-mantle.eu-central-1.api.aws/v1", "profile:swobu-bedrock@eu-central-1", protocolkind.Responses)); err != nil {
+		t.Fatalf("ListDeployments error: %v", err)
 	}
 	if capture.request == nil {
 		t.Fatal("expected captured request")
@@ -409,12 +409,12 @@ func TestListModels_EnvMode_UsesMantleHTTP(t *testing.T) {
 	defer upstream.Close()
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListModels(context.Background(), newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Responses))
+	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Responses))
 	if err != nil {
-		t.Fatalf("ListModels error: %v", err)
+		t.Fatalf("ListDeployments error: %v", err)
 	}
-	if len(models) != 1 || models[0] != "m1" {
-		t.Fatalf("models=%v", models)
+	if len(models) != 1 || models[0].Name != "m1" {
+		t.Fatalf("deployments=%v", models)
 	}
 	if requests != 1 {
 		t.Fatalf("requests=%d want=1", requests)

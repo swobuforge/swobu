@@ -2,7 +2,6 @@ package routing
 
 import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -14,22 +13,17 @@ func createDraftProtocolModeRow(model state.Model) retained.ViewSpec[state.Model
 	if spec == "" {
 		return views.RowStatic("protocol", views.ValueRequired)
 	}
-	protocols := profile.SupportedProviderProtocolsForSpec(spec)
+	deployment, _ := deploymentForModelID(model.CreateDraftModelDeployments, model.CreateDraftProviderConfig.ModelID)
+	protocols := deploymentProtocolOptions(deployment, spec)
 	if len(protocols) == 0 {
 		return views.RowStatic("protocol", views.ValueRequired)
 	}
-	current := model.CreateDraftProviderConfig.ProviderProtocol
+	current := deploymentSelectedProtocol(deployment, spec, model.CreateDraftProviderConfig.ProviderProtocol)
 	if current == "" {
-		current = defaultProviderProtocolForProvider(spec)
+		current = views.ValueRequired
 	}
 	return views.RowActionWithHooks("protocol", current, "next", func() []update.Action {
-		next := current
-		for i, candidate := range protocols {
-			if candidate == current {
-				next = protocols[(i+1)%len(protocols)]
-				break
-			}
-		}
+		next := nextProviderProtocolSelection(protocols, current)
 		return []update.Action{
 			state.SetCreateDraftProviderProtocol{ProviderProtocol: next},
 		}

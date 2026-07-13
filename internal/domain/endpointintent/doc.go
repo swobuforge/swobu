@@ -6,5 +6,5 @@
 // validation. Canonical protocol-family vocabulary is owned by
 // domain/protocolkind and referenced from provider configuration here.
 //
-// Request-time protocol realization and runtime evidence do not belong here.
+// Request-time protocol realization and traffic evidence do not belong here.
 package endpointintent

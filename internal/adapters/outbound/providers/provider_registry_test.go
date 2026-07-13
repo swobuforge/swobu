@@ -1,45 +1,50 @@
 package providers
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-func TestProviderIngressResolverComposition_BuildsRuntimeBundlesForSupportedSpecs(t *testing.T) {
+func TestProviderRegistry_BuildsFacetRegistriesForSupportedSpecs(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderIngressResolverComposition(http.DefaultClient, testCredentialResolver{}, "")
+	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{}, "")
 	for _, spec := range profile.SupportedSpecs() {
 		providerID, ok := profile.ParseProviderID(spec)
 		if !ok {
 			t.Fatalf("supported spec %q did not parse as provider id", spec)
 		}
-		runtime, err := composition.runtimeForTargetProvider(spec)
-		if err != nil {
-			t.Fatalf("runtimeForTargetProvider(%q): %v", spec, err)
+		manifest, ok := registry.Manifest(providerID)
+		if !ok || manifest.ProviderID != providerID {
+			t.Fatalf("manifest lookup failed for %q", spec)
 		}
-		if runtime.ProviderID != providerID {
-			t.Fatalf("runtime provider id = %q, want %q", runtime.ProviderID, providerID)
+		if ingress, ok := registry.Ingress(providerID); !ok || ingress == nil {
+			t.Fatalf("ingress lookup failed for %q", spec)
 		}
-		if runtime.IngressResolver == nil {
-			t.Fatalf("runtime ingress resolver missing for %q", spec)
-		}
-		if runtime.CredentialProvider == nil {
-			t.Fatalf("runtime credential provider missing for %q", spec)
-		}
-		if profile.SupportsCapability(spec, profile.CapabilityModelCatalog) && runtime.ModelCatalogClient == nil {
-			t.Fatalf("runtime model catalog client missing for %q", spec)
+		if discovery, ok := registry.Discovery(providerID); !ok || discovery == nil {
+			t.Fatalf("discovery lookup failed for %q", spec)
 		}
 	}
 }
 
-func TestProviderIngressResolverComposition_RejectsUnknownProviderID(t *testing.T) {
+func TestProviderRegistry_RejectsUnknownProviderID(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderIngressResolverComposition(http.DefaultClient, testCredentialResolver{}, "")
-	if _, err := composition.runtimeForTargetProvider("unknown-provider"); err == nil {
+	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{}, "")
+	if _, ok := registry.Manifest("unknown-provider"); ok {
+		t.Fatal("unknown provider manifest must be absent")
+	}
+	if _, ok := registry.Ingress("unknown-provider"); ok {
+		t.Fatal("unknown provider ingress must be absent")
+	}
+	if _, ok := registry.Discovery("unknown-provider"); ok {
+		t.Fatal("unknown provider discovery must be absent")
+	}
+	if _, err := registry.ListDeployments(context.Background(), exchange.RoutableTarget{}); err == nil {
 		t.Fatal("unknown provider id must fail")
 	}
 }

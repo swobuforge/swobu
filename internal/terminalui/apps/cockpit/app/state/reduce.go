@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -45,6 +46,7 @@ func Reduce(model *Model, action update.Action) []update.Effect {
 	return nil
 }
 
+// swobu:lint ignore function-complexity because=endpoint-selection reducer keeps all transition branches at one state boundary.
 func reduceEndpointSelection(model *Model, action update.Action) bool {
 	switch value := action.(type) {
 	case SelectEndpoint:
@@ -86,7 +88,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 			model.CreateDraftProviderConfig.Region = ""
 		}
 		model.WorkspaceSaveError = ""
-		model.CreateDraftModelIDs = nil
+		model.CreateDraftModelDeployments = nil
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""
@@ -105,7 +107,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 	case SetCreateDraftCredentialRef:
 		model.CreateDraftProviderConfig.CredentialRef = strings.TrimSpace(value.CredentialRef) // swobu:io-string source=boundary
 		model.WorkspaceSaveError = ""
-		model.CreateDraftModelIDs = nil
+		model.CreateDraftModelDeployments = nil
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""
@@ -117,12 +119,18 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		refreshFirstRunFooterAffordance(model)
 		return true
 	case SetCreateDraftBaseURL:
-		model.CreateDraftProviderConfig.BaseURL = strings.TrimSpace(value.BaseURL)                         // swobu:io-string source=boundary
+		baseURL := strings.TrimSpace(value.BaseURL) // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "azure") && baseURL != "" {
+			if normalized, err := endpointintent.NormalizeAzureResourceLocator(baseURL); err == nil {
+				baseURL = normalized
+			}
+		}
+		model.CreateDraftProviderConfig.BaseURL = baseURL                                                  // swobu:io-string source=boundary
 		if strings.EqualFold(strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec), "bedrock") { // swobu:io-string source=boundary
 			model.CreateDraftProviderConfig.Region = stateModel.BedrockRegionFromBaseURL(model.CreateDraftProviderConfig.BaseURL)
 		}
 		model.WorkspaceSaveError = ""
-		model.CreateDraftModelIDs = nil
+		model.CreateDraftModelDeployments = nil
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""
@@ -141,7 +149,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.CreateDraftProviderConfig.AuthHeader = authHeader
 		model.CreateDraftProviderConfig.ModelID = ""
 		model.WorkspaceSaveError = ""
-		model.CreateDraftModelIDs = nil
+		model.CreateDraftModelDeployments = nil
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = false
 		model.CreateDraftModelProviderSpec = ""

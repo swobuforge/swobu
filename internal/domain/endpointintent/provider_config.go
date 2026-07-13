@@ -120,14 +120,26 @@ func NewProviderConfig(
 	if spec.value == "openai_compatible" && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=domain
 		return ProviderConfig{}, fmt.Errorf("%w: OpenAI-style provider configs require a base URL", ErrInvalidProviderConfig)
 	}
-	providerProtocol, ok := profile.ResolveConcreteProtocolForAutoAtBoundary(spec.value)
-	if !ok {
-		return ProviderConfig{}, fmt.Errorf("%w: provider spec has no default provider protocol", ErrInvalidProviderConfig)
+	normalizedBaseURL := strings.TrimSpace(baseURL) // swobu:io-string source=boundary
+	if spec.value == "azure" && normalizedBaseURL != "" {
+		normalizedLocator, err := NormalizeAzureResourceLocator(normalizedBaseURL)
+		if err != nil {
+			return ProviderConfig{}, fmt.Errorf("%w: %v", ErrInvalidProviderConfig, err)
+		}
+		normalizedBaseURL = normalizedLocator
+	}
+	providerProtocol := profile.ProviderProtocolAuto
+	if spec.value != "azure" {
+		concrete, ok := profile.ResolveConcreteProtocolForAutoAtBoundary(spec.value)
+		if !ok {
+			return ProviderConfig{}, fmt.Errorf("%w: provider spec has no default provider protocol", ErrInvalidProviderConfig)
+		}
+		providerProtocol = concrete
 	}
 	config := ProviderConfig{
 		ref:              ref,
 		providerSpec:     spec,
-		baseURL:          baseURL,
+		baseURL:          normalizedBaseURL,
 		credentialRef:    credentialRef,
 		authHeader:       "",
 		providerProtocol: providerProtocol,

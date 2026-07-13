@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/testharness"
@@ -48,29 +49,29 @@ func TestAppendCreateCredentialRows_KeychainShowsRawPasteEditor(t *testing.T) {
 	}
 }
 
-func TestCreateDraftProtocolModeRow_DefaultsAndResolvesProviderProtocol(t *testing.T) {
+func TestCreateDraftProtocolModeRow_RequiresExplicitSelectionWithoutDeploymentDefault(t *testing.T) {
 	t.Parallel()
 
-	t.Run("openai-default-resolves-auto", func(t *testing.T) {
+	t.Run("openai-requires-choice", func(t *testing.T) {
 		t.Parallel()
 		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "openai", ProviderProtocol: ""}}
 		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-		if !strings.Contains(out, "protocol") || !strings.Contains(out, "auto") {
-			t.Fatalf("expected protocol row with default auto; render=%q", out)
+		if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
+			t.Fatalf("expected protocol row to require explicit selection; render=%q", out)
 		}
 	})
 
-	t.Run("anthropic-default-resolves-auto", func(t *testing.T) {
+	t.Run("anthropic-requires-choice", func(t *testing.T) {
 		t.Parallel()
 		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "anthropic", ProviderProtocol: ""}}
 		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-		if !strings.Contains(out, "protocol") || !strings.Contains(out, "auto") {
-			t.Fatalf("expected protocol row with default auto; render=%q", out)
+		if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
+			t.Fatalf("expected protocol row to require explicit selection; render=%q", out)
 		}
 	})
 }
 
-func TestCreateDraftProtocolModeRow_DefaultsToAuto_Regression(t *testing.T) {
+func TestCreateDraftProtocolModeRow_NoHiddenDefault_Regression(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -80,8 +81,89 @@ func TestCreateDraftProtocolModeRow_DefaultsToAuto_Regression(t *testing.T) {
 		},
 	}
 	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(out, "protocol") || !strings.Contains(out, "auto") {
-		t.Fatalf("expected protocol row with auto default; render=%q", out)
+	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
+		t.Fatalf("expected protocol row to require explicit selection; render=%q", out)
+	}
+}
+
+func TestCreateDraftProtocolModeRow_AzureExplicitDefaultWins(t *testing.T) {
+	t.Parallel()
+
+	model := state.Model{
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec: "azure",
+			ModelID:      "gpt-4.1-mini",
+		},
+		CreateDraftModelDeployments: []ports.ProviderDeploymentRecord{
+			ports.NewProviderDeployment(
+				"gpt-4.1-mini",
+				"gpt-4.1-mini",
+				"openai",
+				"",
+				"openai",
+				[]string{"responses"},
+				"responses",
+			),
+		},
+	}
+	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+	if !strings.Contains(out, "protocol") || !strings.Contains(out, "responses") {
+		t.Fatalf("expected protocol row to use explicit azure deployment default; render=%q", out)
+	}
+}
+
+func TestCreateDraftProtocolModeRow_AzureSingleProtocolWithoutDefaultRequiresChoice(t *testing.T) {
+	t.Parallel()
+
+	model := state.Model{
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec: "azure",
+			ModelID:      "gpt-4.1-mini",
+		},
+		CreateDraftModelDeployments: []ports.ProviderDeploymentRecord{
+			ports.NewProviderDeployment(
+				"gpt-4.1-mini",
+				"gpt-4.1-mini",
+				"openai",
+				"",
+				"openai",
+				[]string{"responses"},
+				"",
+			),
+		},
+	}
+	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
+		t.Fatalf("expected azure deployment without an explicit default to require explicit protocol choice; render=%q", out)
+	}
+}
+
+func TestCreateDraftProtocolModeRow_AzureAmbiguousProtocolMetadataFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	model := state.Model{
+		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
+			ProviderSpec: "azure",
+			ModelID:      "gpt-4.1-mini",
+		},
+		CreateDraftModelDeployments: []ports.ProviderDeploymentRecord{
+			ports.NewProviderDeployment(
+				"gpt-4.1-mini",
+				"gpt-4.1-mini",
+				"openai",
+				"",
+				"openai",
+				[]string{"responses", "chat_completions"},
+				"",
+			),
+		},
+	}
+	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
+		t.Fatalf("expected ambiguous azure deployment to require explicit protocol choice; render=%q", out)
+	}
+	if strings.Contains(out, "responses") && !strings.Contains(out, "required") {
+		t.Fatalf("expected ambiguous azure deployment not to auto-default; render=%q", out)
 	}
 }
 

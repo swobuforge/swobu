@@ -3,6 +3,7 @@ package state
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -50,14 +51,14 @@ func handleRoutingModelCatalogLoaded(model *Model, value stateeffect.RoutingMode
 		return nil
 	}
 	if scope == RoutingModelCatalogScopeCreateDraft {
-		model.CreateDraftModelIDs = append([]string(nil), value.ModelIDs...)
+		model.CreateDraftModelDeployments = ports.CloneProviderDeployments(value.Deployments)
 		model.CreateDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
 		model.CreateDraftModelProbePending = false
 		resolvedVariant := strings.TrimSpace(value.ResolvedProviderProtocol) // swobu:io-string source=boundary
 		model.CreateDraftModelTestProtocol = resolvedVariant
 		model.CreateDraftModelTestPassed = model.CreateDraftModelError == ""
 	} else if scope == RoutingModelCatalogScopeAddModelDraft {
-		model.AddModelDraftModelIDs = append([]string(nil), value.ModelIDs...)
+		model.AddModelDraftModelDeployments = ports.CloneProviderDeployments(value.Deployments)
 		model.AddModelDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
 		model.AddModelDraftModelProbePending = false
 	}

@@ -15,12 +15,12 @@ import (
 )
 
 type modelCatalogProbeResult struct {
-	ModelIDs                 []string `json:"model_ids,omitempty"`
-	Error                    string   `json:"error,omitempty"`
-	ResolvedProviderProtocol string   `json:"resolved_provider_protocol,omitempty"`
+	Deployments              []ports.ProviderDeploymentRecord `json:"deployments,omitempty"`
+	Error                    string                           `json:"error,omitempty"`
+	ResolvedProviderProtocol string                           `json:"resolved_provider_protocol,omitempty"`
 }
 
-// ModelCatalogProbeHandler probes provider-backed model ids for one draft route.
+// ModelCatalogProbeHandler probes provider-backed deployments for one draft route.
 type ModelCatalogProbeHandler struct {
 	providers ports.ProviderModelCatalog
 }
@@ -52,7 +52,7 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	authHeader := strings.TrimSpace(query.Get("auth_header"))             // swobu:io-string source=boundary
 	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
 	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
-	models, resolvedVariant, probeErr := probeModelIDs(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, providerProtocol)
+	deployments, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, providerProtocol)
 	result := modelCatalogProbeResult{}
 	if probeErr != nil {
 		slog.Warn("model catalog probe failed",
@@ -71,9 +71,9 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 			"auth_header", authHeader,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
 			"provider_protocol", resolvedVariant,
-			"model_count", len(models),
+			"deployment_count", len(deployments),
 		)
-		result.ModelIDs = models
+		result.Deployments = deployments
 		result.ResolvedProviderProtocol = resolvedVariant
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -84,7 +84,7 @@ func credentialRefKindForProbe(credentialRef string) string {
 	return string(credentialref.Parse(credentialRef).Kind())
 }
 
-func probeModelIDs(
+func probeDeployments(
 	ctx context.Context,
 	providers ports.ProviderModelCatalog,
 	providerSpec string,
@@ -92,7 +92,7 @@ func probeModelIDs(
 	authHeader string,
 	credentialRef string,
 	providerProtocol string,
-) ([]string, string, error) {
+) ([]ports.ProviderDeploymentRecord, string, error) {
 	routeProfile, ok := profile.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
 	if !ok {
 		return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
@@ -116,9 +116,9 @@ func probeModelIDs(
 			variant,
 		)
 		target.AuthHeader = strings.TrimSpace(authHeader) // swobu:io-string source=boundary
-		models, err := providers.ListModels(ctx, target)
+		deployments, err := providers.ListDeployments(ctx, target)
 		if err == nil {
-			return ports.CloneModelIDs(models), variant, nil
+			return ports.CloneProviderDeployments(deployments), variant, nil
 		}
 		lastErr = err
 	}

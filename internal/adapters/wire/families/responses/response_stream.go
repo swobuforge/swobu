@@ -34,20 +34,21 @@ func decodeResponseStream(stream carrier.WireStream, exchangeID string, sink eff
 }
 
 type responsesEventReader struct {
-	exchangeID  string
-	responseID  canonical.EnvelopeID
-	sink        effect.Sink
-	recording   *effect.RecordingSink
-	reader      *core.SSEReaderCloser
-	pending     canonical.EventSequence
-	toolStates  map[string]responsesToolState
-	toolInputs  map[string]string
-	textOpen    bool
-	textEnvID   canonical.EnvelopeID
-	started     bool
-	completed   bool
-	latestUsage canonical.TokenUsage
-	seq         int64
+	exchangeID    string
+	responseID    canonical.EnvelopeID
+	sink          effect.Sink
+	recording     *effect.RecordingSink
+	reader        *core.SSEReaderCloser
+	pending       canonical.EventSequence
+	toolStates    map[string]responsesToolState
+	toolInputs    map[string]string
+	textOpen      bool
+	textEnvID     canonical.EnvelopeID
+	emittedOutput bool
+	started       bool
+	completed     bool
+	latestUsage   canonical.TokenUsage
+	seq           int64
 }
 
 func (s *responsesEventReader) Effects() []effect.Effect {
@@ -58,8 +59,11 @@ func (s *responsesEventReader) Effects() []effect.Effect {
 }
 
 type responsesToolState struct {
-	envID    canonical.EnvelopeID
-	toolType string
+	envID         canonical.EnvelopeID
+	toolType      string
+	argumentsDone bool
+	outputDone    bool
+	closed        bool
 }
 
 // ordered state machine over text, tool calls, and terminal frames.
@@ -114,12 +118,15 @@ func (s *responsesEventReader) Next(ctx context.Context) (canonical.Event, error
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {
 			return canonical.Event{}, canonical.InternalError("responses stream event is invalid JSON")
 		}
-		handled, nextEvent, nextErr := s.handleFrame(ctx, frame)
+		handled, _, nextErr := s.handleFrame(ctx, frame)
 		if nextErr != nil {
 			return canonical.Event{}, nextErr
 		}
 		if handled {
-			return nextEvent, nil
+			if len(s.pending) > 0 {
+				return s.shiftPendingEvent(), nil
+			}
+			continue
 		}
 	}
 }
@@ -213,7 +220,9 @@ func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
 
 func (s *responsesEventReader) closeOpenTools(status canonical.EnvelopeStatus) {
 	for itemID, state := range s.toolStates {
-		s.enqueueEnvelopeEnd(state.envID, canonical.EnvToolCall, status)
+		if !state.closed {
+			s.enqueueEnvelopeEnd(state.envID, canonical.EnvToolCall, status)
+		}
 		delete(s.toolStates, itemID)
 		delete(s.toolInputs, itemID)
 	}
@@ -243,6 +252,18 @@ func (s *responsesEventReader) ensureToolState(itemID string, toolType string, c
 	return state
 }
 
+func (s *responsesEventReader) markToolStateArgumentsDone(itemID string, state responsesToolState) responsesToolState {
+	state.argumentsDone = true
+	s.toolStates[itemID] = state
+	return state
+}
+
+func (s *responsesEventReader) markToolStateOutputDone(itemID string, state responsesToolState) responsesToolState {
+	state.outputDone = true
+	s.toolStates[itemID] = state
+	return state
+}
+
 func (s *responsesEventReader) enqueueToolArgs(itemID string, args string) {
 	if args == "" { // swobu:io-string source=boundary
 		return
@@ -255,7 +276,10 @@ func (s *responsesEventReader) enqueueToolArgs(itemID string, args string) {
 	s.enqueueArgsDelta(state.envID, args)
 }
 
-func fallbackItemID(itemID string, callID string) string {
+func fallbackItemID(itemID string, callID string, outputIndex *int) string {
+	if outputIndex != nil {
+		return fmt.Sprintf("tool_%d", *outputIndex)
+	}
 	if strings.TrimSpace(itemID) != "" { // swobu:io-string source=boundary
 		return strings.TrimSpace(itemID) // swobu:io-string source=boundary
 	}

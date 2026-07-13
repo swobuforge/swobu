@@ -28,7 +28,7 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
-	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	_, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"openrouter",
 		srv.URL+"/v1",
@@ -54,7 +54,7 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAIPolicy())
-	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	_, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"openai",
 		srv.URL+"/v1",
@@ -87,7 +87,7 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
-	_, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	_, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"openrouter",
 		srv.URL+"/v1",
@@ -150,58 +150,13 @@ func TestListModels_OpenAICompatibleUsesSelectedAuthHeader(t *testing.T) {
 				"",
 			)
 			target.AuthHeader = tt.authHeader
-			models, err := exec.ListModels(context.Background(), target)
+			models, err := exec.ListDeployments(context.Background(), target)
 			if err != nil {
-				t.Fatalf("ListModels returned error: %v", err)
+				t.Fatalf("ListDeployments returned error: %v", err)
 			}
-			if len(models) != 1 || models[0] != "openai/gpt-4.1-mini" {
-				t.Fatalf("model ids=%v", models)
+			if len(models) != 1 || models[0].Name != "openai/gpt-4.1-mini" {
+				t.Fatalf("deployments=%v", models)
 			}
 		})
-	}
-}
-
-func TestListModels_OpenAICompatibleUsesAzureProjectDeploymentsWhenConfigured(t *testing.T) {
-	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
-		if r.Method != http.MethodGet {
-			t.Fatalf("request method = %s want GET", r.Method)
-		}
-		if r.URL.Path != "/api/projects/contact-5464/deployments" {
-			t.Fatalf("request path = %s want /api/projects/contact-5464/deployments", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("api-version"); got != "v1" {
-			t.Fatalf("api-version = %q want v1", got)
-		}
-		if got := r.Header.Get("api-key"); got != "token_test" {
-			t.Fatalf("api-key header = %q want token_test", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"value":[{"name":"Kimi-K2.6"},{"name":"gpt-4.1-mini"}]}`))
-	}))
-	defer srv.Close()
-
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAICompatiblePolicy(), srv.URL+"/api/projects/contact-5464")
-	target := exchange.NewRoutableTarget(
-		"draft",
-		"openai_compatible",
-		"https://contact-5464-resource.openai.azure.com/openai/v1",
-		"env:AZURE_OPENAI_API_KEY",
-		protocolkind.ChatCompletions,
-		"credential_ref",
-		"",
-		"",
-	)
-	target.AuthHeader = "api-key"
-	models, err := exec.ListModels(context.Background(), target)
-	if err != nil {
-		t.Fatalf("ListModels returned error: %v", err)
-	}
-	if hits != 1 {
-		t.Fatalf("project deployment hits = %d want 1", hits)
-	}
-	if len(models) != 2 || models[0] != "Kimi-K2.6" || models[1] != "gpt-4.1-mini" {
-		t.Fatalf("model ids=%v", models)
 	}
 }

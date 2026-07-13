@@ -11,10 +11,10 @@ import (
 	"time"
 
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
-	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
+	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
-	"github.com/swobuforge/swobu/internal/evidence"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/telemetry"
@@ -38,16 +38,16 @@ type Status struct {
 // Daemon is the live process boundary produced by bootstrap. It owns listener
 // lifetime, runtime health, and graceful shutdown for the local daemon.
 type Daemon struct {
-	endpoints  *endpointReaderCatalog
-	server     *http.Server
-	listener   net.Listener
-	logger     *slog.Logger
-	done       chan struct{}
-	closeOnce  sync.Once
-	serveErr   error
-	serveErrMu sync.Mutex
-	evidence   *evidencestore.RequestEvidenceSinkStore
-	telemetry  embeddedTelemetryRuntimeState
+	endpoints         *endpointReaderCatalog
+	server            *http.Server
+	listener          net.Listener
+	logger            *slog.Logger
+	done              chan struct{}
+	closeOnce         sync.Once
+	serveErr          error
+	serveErrMu        sync.Mutex
+	trafficEventStore *trafficevidencestore.InMemoryTrafficEventSink
+	telemetry         embeddedTelemetryRuntimeState
 }
 
 var daemonReadHeaderTimeout = 10 * time.Second
@@ -58,12 +58,12 @@ var daemonIdleTimeout = 60 * time.Second
 // StartInput collects the one runtime config path plus the dependencies
 // bootstrap must wire into the live request path.
 type StartInput struct {
-	ConfigPath   string
-	Providers    ports.ProviderIngressResolver
-	ModelCatalog ports.ProviderModelCatalog
-	Evidence     ports.RequestEvidenceSink
-	Continuation ports.ContinuationStore
-	Logger       *slog.Logger
+	ConfigPath       string
+	Providers        ports.ProviderIngressResolver
+	ModelCatalog     ports.ProviderModelCatalog
+	TrafficEventSink ports.TrafficEventSink
+	Continuation     ports.ContinuationStore
+	Logger           *slog.Logger
 }
 
 // operator routes, and request-path dependencies in one bootstrap flow.
@@ -92,11 +92,11 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	}
 
 	if (in.Providers == nil) != (in.ModelCatalog == nil) {
-		return nil, fmt.Errorf("provider services must be wired together: providers and model catalog must both be set or both be nil")
+		return nil, fmt.Errorf("provider services must be wired together: providers and discovery must both be set or both be nil")
 	}
 
 	providers := in.Providers
-	modelCatalog := in.ModelCatalog
+	discovery := in.ModelCatalog
 	authCredentialWritePolicy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
 	logger.Info("auth credential policy resolved",
 		"component", "daemon",
@@ -105,24 +105,24 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		composition := providersadapter.NewProviderIngressResolverComposition(
+		composition := providersadapter.NewProviderRegistry(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
 			config.ReadEnvTrim(config.EnvAzureOpenAIProjectEndpoint),
 		)
 		providers = composition
-		modelCatalog = composition
+		discovery = composition
 	}
-	runtimeRoot := newDaemonProviderModelCatalogComposition(exchangeruntime.NewResolver(), providers, modelCatalog)
-	evidence := in.Evidence
-	if evidence == nil {
-		daemon.evidence = evidencestore.NewStore(evidencestore.StoreConfig{})
-		evidence = daemon.evidence
-	} else if store, ok := evidence.(*evidencestore.RequestEvidenceSinkStore); ok {
-		daemon.evidence = store
+	runtimeRoot := newDaemonProviderModelCatalogComposition(exchangeruntime.NewResolver(), providers, discovery)
+	trafficEventSink := in.TrafficEventSink
+	if trafficEventSink == nil {
+		daemon.trafficEventStore = trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})
+		trafficEventSink = daemon.trafficEventStore
+	} else if store, ok := trafficEventSink.(*trafficevidencestore.InMemoryTrafficEventSink); ok {
+		daemon.trafficEventStore = store
 	}
-	evidence = newTelemetryObservedEvidenceSink(evidence, daemon.observeTelemetryEvent)
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, in.Continuation, authCredentialWritePolicy)
+	trafficEventSink = newTelemetryObservedTrafficEventSink(trafficEventSink, daemon.observeTelemetryEvent)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, in.Continuation, trafficEventSink, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -227,42 +227,42 @@ func (d *Daemon) Status() (Status, error) {
 }
 
 func (d *Daemon) isRequestPathDegraded() bool {
-	if d == nil || d.evidence == nil {
+	if d == nil || d.trafficEventStore == nil {
 		return false
 	}
-	projection := d.evidence.ProjectStatus(evidencestore.ProjectionInput{
+	projection := d.trafficEventStore.ProjectStatus(trafficevidencestore.ProjectionInput{
 		State:         string(HealthStateHealthy),
 		EndpointCount: d.endpoints.Count(),
-		Scope:         evidencestore.ProjectionScope{Kind: evidencestore.ProjectionScopeAll},
+		Scope:         trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll},
 	})
 	for _, row := range projection.RecentTraffic {
-		resultClass, err := evidence.ParseResultClass(row.Result)
+		resultClass, err := trafficevidence.ParseResultClass(row.Result)
 		if err != nil || !resultClass.IsTerminal() {
 			continue
 		}
-		if resultClass != evidence.ResultClassSuccess && resultClass != evidence.ResultClassCancelled {
+		if resultClass != trafficevidence.ResultClassSuccess && resultClass != trafficevidence.ResultClassCancelled {
 			return true
 		}
 	}
 	return false
 }
 
-func (d *Daemon) StatusProjectionForScope(scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
+func (d *Daemon) StatusProjectionForScope(scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 	status, err := d.Status()
 	if err != nil {
-		return evidencestore.StatusProjection{}, err
+		return trafficevidencestore.StatusProjection{}, err
 	}
-	if d.evidence == nil {
-		return evidencestore.StatusProjection{
+	if d.trafficEventStore == nil {
+		return trafficevidencestore.StatusProjection{
 			State:         string(status.State),
 			EndpointCount: status.EndpointCount,
 			Scope:         scope,
-			Counters: evidencestore.StatusCounters{
+			Counters: trafficevidencestore.StatusCounters{
 				PerModel: map[string]int{},
 			},
 		}, nil
 	}
-	return d.evidence.ProjectStatus(evidencestore.ProjectionInput{
+	return d.trafficEventStore.ProjectStatus(trafficevidencestore.ProjectionInput{
 		State:         string(status.State),
 		EndpointCount: status.EndpointCount,
 		Scope:         scope,

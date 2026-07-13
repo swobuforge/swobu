@@ -6,13 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 )
 
 func TestStatusProjectionHandler_RejectsMissingScope(t *testing.T) {
-	handler := NewStatusProjectionHandler(func(context.Context, evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
+	handler := NewStatusProjectionHandler(func(context.Context, trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		t.Fatal("read should not be called when scope is missing")
-		return evidencestore.StatusProjection{}, nil
+		return trafficevidencestore.StatusProjection{}, nil
 	})
 	req := httptest.NewRequest(http.MethodGet, "/_swobu/status-projection", nil)
 	w := httptest.NewRecorder()
@@ -25,9 +25,9 @@ func TestStatusProjectionHandler_RejectsMissingScope(t *testing.T) {
 }
 
 func TestStatusProjectionHandler_RejectsInvalidScope(t *testing.T) {
-	handler := NewStatusProjectionHandler(func(context.Context, evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
+	handler := NewStatusProjectionHandler(func(context.Context, trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		t.Fatal("read should not be called when scope is invalid")
-		return evidencestore.StatusProjection{}, nil
+		return trafficevidencestore.StatusProjection{}, nil
 	})
 	req := httptest.NewRequest(http.MethodGet, "/_swobu/status-projection?scope=workspace:acme", nil)
 	w := httptest.NewRecorder()
@@ -41,14 +41,14 @@ func TestStatusProjectionHandler_RejectsInvalidScope(t *testing.T) {
 
 func TestStatusProjectionHandler_PassesAllScope(t *testing.T) {
 	called := false
-	handler := NewStatusProjectionHandler(func(_ context.Context, scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
+	handler := NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		called = true
-		if scope.Kind != evidencestore.ProjectionScopeAll {
-			t.Fatalf("scope kind = %q, want %q", scope.Kind, evidencestore.ProjectionScopeAll)
+		if scope.Kind != trafficevidencestore.ProjectionScopeAll {
+			t.Fatalf("scope kind = %q, want %q", scope.Kind, trafficevidencestore.ProjectionScopeAll)
 		}
-		return evidencestore.StatusProjection{
+		return trafficevidencestore.StatusProjection{
 			Scope: scope,
-			Counters: evidencestore.StatusCounters{
+			Counters: trafficevidencestore.StatusCounters{
 				PerModel: map[string]int{},
 			},
 		}, nil
@@ -68,17 +68,17 @@ func TestStatusProjectionHandler_PassesAllScope(t *testing.T) {
 
 func TestStatusProjectionHandler_PassesEndpointScope(t *testing.T) {
 	called := false
-	handler := NewStatusProjectionHandler(func(_ context.Context, scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
+	handler := NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		called = true
-		if scope.Kind != evidencestore.ProjectionScopeEndpoint {
-			t.Fatalf("scope kind = %q, want %q", scope.Kind, evidencestore.ProjectionScopeEndpoint)
+		if scope.Kind != trafficevidencestore.ProjectionScopeEndpoint {
+			t.Fatalf("scope kind = %q, want %q", scope.Kind, trafficevidencestore.ProjectionScopeEndpoint)
 		}
 		if scope.Endpoint != "acme" {
 			t.Fatalf("scope endpoint = %q, want %q", scope.Endpoint, "acme")
 		}
-		return evidencestore.StatusProjection{
+		return trafficevidencestore.StatusProjection{
 			Scope: scope,
-			Counters: evidencestore.StatusCounters{
+			Counters: trafficevidencestore.StatusCounters{
 				PerModel: map[string]int{},
 			},
 		}, nil

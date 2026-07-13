@@ -110,7 +110,7 @@ func TestEvaluateModelSelectionReadiness_AzureMissingBaseURLBlocksBeforeEnvLooku
 	if !got.Blocked {
 		t.Fatal("expected blocked when azure base URL is missing")
 	}
-	if got.Message != "set backend URL before loading models" {
+	if got.Message != "set Azure resource locator before loading deployments" {
 		t.Fatalf("message=%q", got.Message)
 	}
 }

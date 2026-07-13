@@ -3,6 +3,7 @@ package state
 import (
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 )
 
@@ -43,14 +44,14 @@ func TestReduce_ProbeOrchestration_CreateDraftCatalogAndProbeFlow(t *testing.T) 
 		BaseURL:                  loadEff.BaseURL,
 		CredentialRef:            loadEff.CredentialRef,
 		ProviderProtocol:         loadEff.ProviderProtocol,
-		ModelIDs:                 []string{"gpt-5.4-mini", "gpt-5.5"},
+		Deployments:              []ports.ProviderDeploymentRecord{{Name: "gpt-5.4-mini"}, {Name: "gpt-5.5"}},
 		ResolvedProviderProtocol: "responses_stream",
 	})
 	if model.CreateDraftModelProbePending {
 		t.Fatal("create draft probe pending=true want false")
 	}
-	if len(model.CreateDraftModelIDs) != 2 {
-		t.Fatalf("create draft model ids=%v", model.CreateDraftModelIDs)
+	if len(model.CreateDraftModelDeployments) != 2 {
+		t.Fatalf("create draft model deployments=%v", model.CreateDraftModelDeployments)
 	}
 	if got := model.CreateDraftProviderConfig.ProviderProtocol; got != "auto" {
 		t.Fatalf("provider protocol=%q want auto", got)
@@ -101,13 +102,13 @@ func TestReduce_ProbeOrchestration_CreateDraftCatalogTracksAuthHeaderTuple(t *te
 		AuthHeader:       loadEff.AuthHeader,
 		CredentialRef:    loadEff.CredentialRef,
 		ProviderProtocol: loadEff.ProviderProtocol,
-		ModelIDs:         []string{"gpt-4.1-mini"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
 	})
 	if model.CreateDraftModelProbePending {
 		t.Fatal("create draft probe pending=true want false after loaded auth-header tuple")
 	}
-	if len(model.CreateDraftModelIDs) != 1 || model.CreateDraftModelIDs[0] != "gpt-4.1-mini" {
-		t.Fatalf("create draft model ids=%v", model.CreateDraftModelIDs)
+	if len(model.CreateDraftModelDeployments) != 1 || model.CreateDraftModelDeployments[0].Name != "gpt-4.1-mini" {
+		t.Fatalf("create draft model deployments=%v", model.CreateDraftModelDeployments)
 	}
 	if got := model.CreateDraftModelAuthHeader; got != "X-API-Key" {
 		t.Fatalf("create draft auth header=%q want X-API-Key", got)
@@ -166,10 +167,10 @@ func TestReduce_ProbeOrchestration_AddModelCatalogStaleResultIgnoredThenAccepted
 		BaseURL:          "https://api.openai.com/v1",
 		CredentialRef:    "env:OPENAI_API_KEY",
 		ProviderProtocol: loadEff.ProviderProtocol,
-		ModelIDs:         []string{"should-not-apply"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "should-not-apply"}},
 	})
-	if len(model.AddModelDraftModelIDs) != 0 {
-		t.Fatalf("stale completion applied model ids=%v", model.AddModelDraftModelIDs)
+	if len(model.AddModelDraftModelDeployments) != 0 {
+		t.Fatalf("stale completion applied model deployments=%v", model.AddModelDraftModelDeployments)
 	}
 	if !model.AddModelDraftModelProbePending {
 		t.Fatal("pending should remain true after stale completion")
@@ -181,12 +182,12 @@ func TestReduce_ProbeOrchestration_AddModelCatalogStaleResultIgnoredThenAccepted
 		BaseURL:          loadEff.BaseURL,
 		CredentialRef:    loadEff.CredentialRef,
 		ProviderProtocol: loadEff.ProviderProtocol,
-		ModelIDs:         []string{"llama3.1", "gemma3:4b"},
+		Deployments:      []ports.ProviderDeploymentRecord{{Name: "llama3.1"}, {Name: "gemma3:4b"}},
 	})
 	if model.AddModelDraftModelProbePending {
 		t.Fatal("pending should clear after matching completion")
 	}
-	if len(model.AddModelDraftModelIDs) != 2 {
-		t.Fatalf("add-model ids=%v", model.AddModelDraftModelIDs)
+	if len(model.AddModelDraftModelDeployments) != 2 {
+		t.Fatalf("add-model deployments=%v", model.AddModelDraftModelDeployments)
 	}
 }

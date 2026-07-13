@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 const responsesDebugJSONMaxBytes = 4096
@@ -39,6 +41,35 @@ func logResponsesEgressStreamFrame(raw []byte) {
 		"frame_type", strings.TrimSpace(frameType), // swobu:io-string source=boundary
 		"frame_truncated", truncated,
 		"frame_json", normalized,
+	)
+}
+
+func logResponsesCompletedProjection(usedFallback bool, status string, rawOutputCount int, rawOutputTextPresent bool, items []canonical.OutputItem) {
+	textCount := 0
+	toolUseCount := 0
+	textPreview := ""
+	for _, item := range items {
+		switch item.Kind {
+		case canonical.ItemKindText:
+			textCount++
+			if textPreview == "" {
+				textPreview = strings.TrimSpace(item.Text) // swobu:io-string source=log-formatting
+			}
+		case canonical.ItemKindToolUse:
+			toolUseCount++
+		}
+	}
+	slog.Debug("responses completed projection",
+		"component", "httpapi",
+		"event", "responses_completed_projection",
+		"used_fallback", usedFallback,
+		"status", strings.TrimSpace(status), // swobu:io-string source=log-formatting
+		"raw_output_count", rawOutputCount,
+		"raw_output_text_present", rawOutputTextPresent,
+		"item_count", len(items),
+		"text_count", textCount,
+		"tool_use_count", toolUseCount,
+		"text_preview", textPreview,
 	)
 }
 

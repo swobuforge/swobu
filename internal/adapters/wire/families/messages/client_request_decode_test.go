@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestClientRequestDecoder_InfersSinglePendingToolResultID(t *testing.T) {
+func TestClientRequestDecoder_DecodesExplicitToolUseAndToolResultID(t *testing.T) {
 	t.Parallel()
 
 	functionTool := canonical.NewFunctionToolDecl("workspace/Read", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`))
@@ -30,10 +30,10 @@ func TestClientRequestDecoder_InfersSinglePendingToolResultID(t *testing.T) {
 		"messages":[
 			{"role":"assistant","content":[
 				{"type":"text","text":"working"},
-				{"type":"tool_use","name":"Read","input":{"path":"workspace/file.txt"}}
+				{"type":"tool_use","id":"toolu_swobu_0_1","name":"Read","input":{"path":"workspace/file.txt"}}
 			]},
 			{"role":"user","content":[
-				{"type":"tool_result","content":"Hello, World!"}
+				{"type":"tool_result","tool_use_id":"toolu_swobu_0_1","content":"Hello, World!"}
 			]}
 		]
 	}`)
@@ -81,5 +81,72 @@ func TestClientRequestDecoder_InfersSinglePendingToolResultID(t *testing.T) {
 	}
 	if got := tools[0].ToolInputSchema().RawObject(); !strings.Contains(got, `"type":"object"`) || !strings.Contains(got, `"path":{"type":"string"}`) {
 		t.Fatalf("tool schema = %q, want schema object", got)
+	}
+}
+
+func TestClientRequestDecoder_RejectsMissingToolUseName(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"model":"m",
+		"tools":[
+			{
+				"name":"Bash",
+				"description":"execute shell commands",
+				"input_schema":{"type":"object","properties":{"command":{"type":"string"}}}
+			}
+		],
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"tool_use","input":{"command":"cat workspace/file.txt"}}
+			]}
+		]
+	}`)
+
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewWireDocument(
+		carrier.StageClientRequestIn,
+		protocolkind.Messages,
+		"application/json",
+		nil,
+		raw,
+		carrier.Meta{},
+	))
+	if err == nil {
+		t.Fatal("expected DecodeClientRequest to reject missing tool_use name")
+	}
+}
+
+func TestClientRequestDecoder_RejectsMissingToolResultID(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"model":"m",
+		"tools":[
+			{
+				"name":"Bash",
+				"description":"execute shell commands",
+				"input_schema":{"type":"object","properties":{"command":{"type":"string"}}}
+			}
+		],
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"first"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","content":"ok"}
+			]}
+		]
+	}`)
+
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewWireDocument(
+		carrier.StageClientRequestIn,
+		protocolkind.Messages,
+		"application/json",
+		nil,
+		raw,
+		carrier.Meta{},
+	))
+	if err == nil {
+		t.Fatal("expected DecodeClientRequest to reject missing tool_result tool_use_id")
 	}
 }

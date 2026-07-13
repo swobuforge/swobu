@@ -4,6 +4,7 @@ package routing
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -73,13 +74,13 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 	if w.CreateMode {
 		closeMode = state.InteractionModeNAV
 	}
-	previewOptions := make([]modelPickerOption, 0, len(model.AddModelDraftModelIDs))
-	for _, modelID := range model.AddModelDraftModelIDs {
-		id := strings.TrimSpace(modelID) // swobu:io-string source=domain
+	previewOptions := make([]modelPickerOption, 0, len(model.AddModelDraftModelDeployments))
+	for _, deployment := range model.AddModelDraftModelDeployments {
+		id := strings.TrimSpace(deployment.Name) // swobu:io-string source=domain
 		if id == "" {
 			continue
 		}
-		previewOptions = append(previewOptions, modelPickerOption{Key: id, Label: id})
+		previewOptions = append(previewOptions, modelPickerOption{Key: id, Label: deploymentOptionLabel(deployment), Deployment: deployment})
 	}
 	previewFocusKey := modelPickerFirstFocusKey(previewOptions, "provider-model-option")
 	parent := views.RowChoiceWithCancel(views.RowModel, current, func() []update.Action {
@@ -124,17 +125,22 @@ func buildProviderModelCatalogChoiceRow(ctx *retained.Context[state.Model], w pr
 	if !workspaceModelCatalogTupleMatches(model, w.ProviderConfig) {
 		return toolkitviews.NewAnchoredDisclosure(parent, views.RowStatic("", "loading models…"))
 	}
-	options := make([]modelPickerOption, 0, len(model.AddModelDraftModelIDs))
-	for _, modelID := range model.AddModelDraftModelIDs {
-		selected := selectedModelID(ctx.Model(), w.ProviderConfig, w.CreateMode) == modelID
-		choice := modelID
+	options := make([]modelPickerOption, 0, len(model.AddModelDraftModelDeployments))
+	for _, deployment := range model.AddModelDraftModelDeployments {
+		choice := strings.TrimSpace(deployment.Name) // swobu:io-string source=boundary
+		if choice == "" {
+			continue
+		}
+		deployment := deployment
+		selected := selectedModelID(ctx.Model(), w.ProviderConfig, w.CreateMode) == choice
 		options = append(options, modelPickerOption{
-			Key:      choice,
-			Label:    choice,
-			Selected: selected,
+			Key:        choice,
+			Label:      deploymentOptionLabel(deployment),
+			Selected:   selected,
+			Deployment: deployment,
 			OnChoose: func() []update.Action {
 				setOpen(false)
-				actions := applyProviderModelSelection(choice, w.ProviderConfig, w.EndpointName, w.CreateMode)
+				actions := applyProviderModelSelection(deployment, w.ProviderConfig, w.EndpointName, w.CreateMode)
 				actions = append(actions, []update.Action{
 					state.SetInteractionMode{Mode: closeMode},
 					interaction.FocusKeyAction{Key: "model"},
@@ -185,22 +191,30 @@ func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.
 	if model.AddModelDraftCredentialRef != providerConfig.CredentialRef {
 		return false
 	}
-	if model.AddModelDraftProviderProtocol != providerConfig.ProviderProtocol {
-		return false
-	}
 	return true
 }
 
-func applyProviderModelSelection(modelID string, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
-	modelID = strings.TrimSpace(modelID) // swobu:io-string source=boundary
+func applyProviderModelSelection(deployment ports.ProviderDeploymentRecord, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
+	modelID := strings.TrimSpace(deployment.Name) // swobu:io-string source=boundary
+	providerSpec := ""
+	if providerConfig != nil {
+		providerSpec = providerConfig.ProviderSpec
+	}
 	if createMode {
-		return []update.Action{state.SetCreateDraftModelIDAction{ModelID: modelID}}
+		actions := []update.Action{state.SetCreateDraftModelIDAction{ModelID: modelID}}
+		if providerConfig != nil {
+			if protocol := deploymentSelectedProtocol(deployment, providerSpec, providerConfig.ProviderProtocol); protocol != strings.TrimSpace(providerConfig.ProviderProtocol) { // swobu:io-string source=domain
+				actions = append(actions, state.SetCreateDraftProviderProtocol{ProviderProtocol: protocol})
+			}
+		}
+		return actions
 	}
 	if providerConfig == nil || strings.TrimSpace(endpointName) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	next := *providerConfig
 	next.ModelID = modelID
+	next.ProviderProtocol = deploymentSelectedProtocol(deployment, next.ProviderSpec, next.ProviderProtocol)
 	return routingSaveProviderConfigActions(strings.TrimSpace(endpointName), next, "provider/model") // swobu:io-string source=boundary
 }
 

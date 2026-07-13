@@ -55,6 +55,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	if err != nil {
 		return exchange.Result[carrier.WireDocument]{}, err
 	}
+	logMessagesEgressBuffered(raw)
 	return exchange.NewResult(carrier.NewWireDocument("", protocolkind.Messages, "application/json", nil, raw, carrier.Meta{})), nil
 }
 

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/evidence"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
@@ -14,20 +14,20 @@ func TestStatus_ReportsDegradedWhenRecentTerminalTrafficHasFailure(t *testing.T)
 	t.Parallel()
 
 	endpoint := mustEndpoint(t, "alpha", "backend-a")
-	store := evidencestore.NewStore(evidencestore.StoreConfig{})
-	route, err := evidence.NewRoute("backend-a", "")
+	store := trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})
+	route, err := trafficevidence.NewRoute("backend-a", "")
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	requestID, err := evidence.ParseRequestID("req_degraded")
+	requestID, err := trafficevidence.ParseRequestID("req_degraded")
 	if err != nil {
 		t.Fatalf("ParseRequestID returned error: %v", err)
 	}
-	event, err := evidence.NewTerminalTrafficEvent(evidence.TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
 		Route:        route,
-		Result:       evidence.ResultClassBackendError,
+		Result:       trafficevidence.ResultClassBackendError,
 		StatusCode:   503,
-		Timing:       evidence.NewUnknownTiming(),
+		Timing:       trafficevidence.NewUnknownTiming(),
 		AttemptCount: 1,
 	})
 	if err != nil {
@@ -36,8 +36,8 @@ func TestStatus_ReportsDegradedWhenRecentTerminalTrafficHasFailure(t *testing.T)
 	store.Append(context.Background(), event)
 
 	daemon := &Daemon{
-		endpoints: newEndpointCatalog("unused.yaml", config.RuntimeConfig{BindAddr: "127.0.0.1:0"}, []endpointintent.Endpoint{endpoint}),
-		evidence:  store,
+		endpoints:         newEndpointCatalog("unused.yaml", config.RuntimeConfig{BindAddr: "127.0.0.1:0"}, []endpointintent.Endpoint{endpoint}),
+		trafficEventStore: store,
 	}
 	status, err := daemon.Status()
 	if err != nil {

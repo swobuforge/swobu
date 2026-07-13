@@ -38,9 +38,9 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 	executor := NewExecutor(client)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
-		IngressResolver:    executor,
+		ProviderExecutor:   executor,
 		CredentialProvider: credentials,
-		ModelCatalogClient: executor,
+		Discovery:          executor,
 	}
 }
 
@@ -136,7 +136,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	), nil
 }
 
-func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
 	}
@@ -173,10 +173,23 @@ func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target e
 	if err != nil {
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
-	return models, nil
+	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecBedrock))
+	out := make([]ports.ProviderDeploymentRecord, 0, len(models))
+	for _, modelID := range models {
+		out = append(out, ports.NewProviderDeployment(
+			modelID,
+			modelID,
+			string(profile.ProviderSpecBedrock),
+			"",
+			string(profile.ProviderSpecBedrock),
+			supportedProtocols,
+			"",
+		))
+	}
+	return out, nil
 }
 
 func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	_, err := e.ListModels(ctx, target)
+	_, err := e.ListDeployments(ctx, target)
 	return err
 }

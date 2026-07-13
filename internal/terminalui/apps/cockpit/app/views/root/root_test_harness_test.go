@@ -73,7 +73,7 @@ func assertRootScenario(t *testing.T, out, scenario string) {
 		must(
 			screenassert.Text("provider           AWS Bedrock").Exists(),
 			screenassert.Text("region             eu-west-2").Exists(),
-			screenassert.Text("protocol           auto").Exists(),
+			screenassert.Text("protocol           required").Exists(),
 		)
 	case "bedrock_no_aws_profiles_found":
 		must(

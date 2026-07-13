@@ -79,10 +79,23 @@ func buildRouteFeatureMatrix() map[routeKey][]Feature {
 
 // SupportsFeature reports the support level for one feature on one route.
 func SupportsFeature(provider string, protocol string, model string, feature Feature) Support {
+	provider = strings.TrimSpace(provider) // swobu:io-string source=boundary
+	protocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary
+	model = strings.TrimSpace(model)       // swobu:io-string source=boundary
+	if provider == "azure" && isAzureClaudeDeployment(model) {
+		switch protocol {
+		case "messages", "messages_stream":
+			for _, supported := range featureSetMessages {
+				if supported == feature {
+					return Supported
+				}
+			}
+		}
+	}
 	features, ok := routeFeatures(routeKey{
-		Provider: strings.TrimSpace(provider), // swobu:io-string source=boundary
-		Protocol: strings.TrimSpace(protocol), // swobu:io-string source=boundary
-		Model:    strings.TrimSpace(model),    // swobu:io-string source=boundary
+		Provider: provider,
+		Protocol: protocol,
+		Model:    model,
 	})
 	if !ok {
 		return Unknown
@@ -93,6 +106,11 @@ func SupportsFeature(provider string, protocol string, model string, feature Fea
 		}
 	}
 	return Unsupported
+}
+
+func isAzureClaudeDeployment(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "claude-")
 }
 
 func routeFeatures(key routeKey) ([]Feature, bool) {

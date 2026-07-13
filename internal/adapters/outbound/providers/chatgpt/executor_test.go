@@ -105,7 +105,7 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 		t.Fatalf("store secretfile bundle: %v", err)
 	}
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -129,7 +129,7 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 	t.Setenv("USERPROFILE", "")
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -170,7 +170,7 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 	}
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		srv.URL+"/v1",
@@ -207,7 +207,7 @@ func TestListModels_ResolvesTierFromStoredSecretBundleWhenRefHasNoTierSegment(t 
 	}
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListModels(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",

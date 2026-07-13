@@ -7,6 +7,9 @@
 // Route capability facts for request features now live in internal/compat so
 // provider dispatch can consult one shared vocabulary.
 //
+// Static manifest truth still lives here until the provider namespace registry
+// fully rehomes those declarations.
+//
 // Runtime adapter dispatch is owned by outbound provider composition, not by
 // this catalog.
 package profile

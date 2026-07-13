@@ -5,68 +5,77 @@ import (
 	"strings"
 )
 
-type authHeaderName string
+// AuthHeaderName identifies the wire header that carries a provider token.
+type AuthHeaderName string
 
 const (
-	authHeaderAuthorization authHeaderName = "Authorization"
-	authHeaderXAPIKey       authHeaderName = "X-API-Key"
-	authHeaderAPIKey        authHeaderName = "api-key"
+	AuthHeaderAuthorization AuthHeaderName = "Authorization"
+	AuthHeaderXAPIKey       AuthHeaderName = "X-API-Key"
+	AuthHeaderAPIKey        AuthHeaderName = "api-key"
 )
 
-type authHeaderStyle string
+// AuthStyle describes how a token is rendered into the request header.
+type AuthStyle string
 
 const (
-	authStyleNone   authHeaderStyle = "none"
-	authStyleBearer authHeaderStyle = "bearer"
-	authStyleValue  authHeaderStyle = "value"
+	AuthStyleNone   AuthStyle = "none"
+	AuthStyleBearer AuthStyle = "bearer"
+	AuthStyleValue  AuthStyle = "value"
 )
 
-type authStrategy struct {
-	Header authHeaderName
-	Style  authHeaderStyle
+// AuthStrategy owns the provider-specific token header contract.
+type AuthStrategy struct {
+	Header AuthHeaderName
+	Style  AuthStyle
 }
 
-func noAuthStrategy() authStrategy {
-	return authStrategy{Style: authStyleNone}
+// NoAuthStrategy returns a provider policy that sends no auth header.
+func NoAuthStrategy() AuthStrategy {
+	return AuthStrategy{Style: AuthStyleNone}
 }
 
-func bearerAuthStrategy() authStrategy {
-	return authStrategy{Header: authHeaderAuthorization, Style: authStyleBearer}
+// BearerAuthStrategy returns a bearer-token auth policy.
+func BearerAuthStrategy() AuthStrategy {
+	return AuthStrategy{Header: AuthHeaderAuthorization, Style: AuthStyleBearer}
 }
 
-func xAPIKeyAuthStrategy() authStrategy {
-	return authStrategy{Header: authHeaderXAPIKey, Style: authStyleValue}
+// XAPIKeyAuthStrategy returns an X-API-Key auth policy.
+func XAPIKeyAuthStrategy() AuthStrategy {
+	return AuthStrategy{Header: AuthHeaderXAPIKey, Style: AuthStyleValue}
 }
 
-func apiKeyAuthStrategy() authStrategy {
-	return authStrategy{Header: authHeaderAPIKey, Style: authStyleValue}
+// APIKeyAuthStrategy returns an api-key auth policy.
+func APIKeyAuthStrategy() AuthStrategy {
+	return AuthStrategy{Header: AuthHeaderAPIKey, Style: AuthStyleValue}
 }
 
-func authStrategyForHeader(header string, fallback authStrategy) authStrategy {
+// AuthStrategyForHeader resolves a selected or default header contract.
+func AuthStrategyForHeader(header string, fallback AuthStrategy) AuthStrategy {
 	header = strings.TrimSpace(header) // swobu:io-string source=boundary
 	switch {
 	case header == "":
 		return fallback
-	case strings.EqualFold(header, string(authHeaderAuthorization)):
-		return bearerAuthStrategy()
-	case strings.EqualFold(header, string(authHeaderXAPIKey)):
-		return xAPIKeyAuthStrategy()
-	case strings.EqualFold(header, string(authHeaderAPIKey)):
-		return apiKeyAuthStrategy()
+	case strings.EqualFold(header, string(AuthHeaderAuthorization)):
+		return BearerAuthStrategy()
+	case strings.EqualFold(header, string(AuthHeaderXAPIKey)):
+		return XAPIKeyAuthStrategy()
+	case strings.EqualFold(header, string(AuthHeaderAPIKey)):
+		return APIKeyAuthStrategy()
 	default:
-		return authStrategy{Header: authHeaderName(header), Style: authStyleValue}
+		return AuthStrategy{Header: AuthHeaderName(header), Style: AuthStyleValue}
 	}
 }
 
-func (s authStrategy) apply(req *http.Request, token string) {
-	if req == nil || s.Style == authStyleNone {
+// Apply writes the token into the provider-selected header when missing.
+func (s AuthStrategy) Apply(req *http.Request, token string) {
+	if req == nil || s.Style == AuthStyleNone {
 		return
 	}
 	if got := req.Header.Get(string(s.Header)); got != "" {
 		return
 	}
 	switch s.Style {
-	case authStyleBearer:
+	case AuthStyleBearer:
 		req.Header.Set(string(s.Header), "Bearer "+token)
 	default:
 		req.Header.Set(string(s.Header), token)

@@ -159,6 +159,20 @@ func TestFilterablePickerRows_ShowsFindAtMinThreshold(t *testing.T) {
 	}
 }
 
+func TestFilterablePickerRows_ShowsFindAtOneItemThreshold(t *testing.T) {
+	rows, _, _ := filterablePickerRows(FilterablePickerState{}, []FilterablePickerItem{
+		{Label: "grok-4.3"},
+		{Label: "DeepSeek-V4-Pro"},
+	}, FilterablePickerConfig{
+		WindowSize:        6,
+		FindLabel:         "find",
+		MinOptionsForFind: 1,
+	})
+	if len(rows) != 3 {
+		t.Fatalf("rows len=%d want 3 (find + 2 options)", len(rows))
+	}
+}
+
 func TestFilterablePickerItemFocusKey_PrefersExplicitItemKey(t *testing.T) {
 	items := []FilterablePickerItem{
 		{Key: "stable-a", Label: "alpha"},

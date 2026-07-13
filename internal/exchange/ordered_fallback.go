@@ -38,7 +38,7 @@ func (e orderedFallbackExecutor) Execute(ctx context.Context, in exchangeGraphIn
 		if i < len(paths)-1 && canAdvanceToNextPath(runErr) {
 			continue
 		}
-		return TransportResponse{}, RoutableTarget{}, runErr
+		return response, path.Target, runErr
 	}
 
 	return TransportResponse{}, RoutableTarget{}, canonical.InternalError("no viable exchange path")

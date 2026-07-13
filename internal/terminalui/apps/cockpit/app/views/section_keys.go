@@ -16,7 +16,7 @@ const (
 	RowProviders    = "models"
 	RowModel        = "model"
 	RowUseKeyFrom   = "credential"
-	RowBackendURL   = "backend url"
+	RowBackendURL   = "resource locator"
 	RowTargetAlias  = "alias"
 	RowBaseURL      = "base url"
 	RowLaunchClient = "launch client"

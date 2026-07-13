@@ -1,5 +1,7 @@
 package model
 
+import "github.com/swobuforge/swobu/internal/ports"
+
 type Model struct {
 	HeaderStatus     string
 	DaemonState      string
@@ -21,7 +23,7 @@ type Model struct {
 	StreamEnabled                  bool
 	CreateDraftName                string
 	CreateDraftProviderConfig      ProviderConfigSnapshot
-	CreateDraftModelIDs            []string
+	CreateDraftModelDeployments    []ports.ProviderDeploymentRecord
 	CreateDraftModelError          string
 	CreateDraftModelProbePending   bool
 	CreateDraftModelProviderSpec   string
@@ -30,7 +32,7 @@ type Model struct {
 	CreateDraftModelCredentialRef  string
 	CreateDraftModelTestProtocol   string
 	CreateDraftModelTestPassed     bool
-	AddModelDraftModelIDs          []string
+	AddModelDraftModelDeployments  []ports.ProviderDeploymentRecord
 	AddModelDraftModelError        string
 	AddModelDraftModelProbePending bool
 	AddModelDraftProviderSpec      string

@@ -3,6 +3,7 @@ package state
 import (
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
@@ -244,15 +245,15 @@ func TestReduce_ProviderAuthSessionCredentialResolved_CreateDraft_AllowsLoadedRe
 		BaseURL:                  load.BaseURL,
 		CredentialRef:            load.CredentialRef,
 		ProviderProtocol:         load.ProviderProtocol,
-		ModelIDs:                 []string{"gpt-4.1-mini"},
+		Deployments:              []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
 		Error:                    "",
 		ResolvedProviderProtocol: "responses_stream",
 	})
 	if model.CreateDraftModelError != "" {
 		t.Fatalf("create draft model error=%q want empty", model.CreateDraftModelError)
 	}
-	if len(model.CreateDraftModelIDs) != 1 || model.CreateDraftModelIDs[0] != "gpt-4.1-mini" {
-		t.Fatalf("model ids=%v", model.CreateDraftModelIDs)
+	if len(model.CreateDraftModelDeployments) != 1 || model.CreateDraftModelDeployments[0].Name != "gpt-4.1-mini" {
+		t.Fatalf("model deployments=%v", model.CreateDraftModelDeployments)
 	}
 }
 

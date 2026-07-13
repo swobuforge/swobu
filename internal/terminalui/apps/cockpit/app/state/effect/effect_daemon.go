@@ -10,6 +10,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/ports"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
@@ -322,9 +323,9 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 		query.Set("provider_protocol", providerProtocol)
 	}
 	type probeResult struct {
-		ModelIDs                 []string `json:"model_ids,omitempty"`
-		Error                    string   `json:"error,omitempty"`
-		ResolvedProviderProtocol string   `json:"resolved_provider_protocol,omitempty"`
+		Deployments              []ports.ProviderDeploymentRecord `json:"deployments,omitempty"`
+		Error                    string                           `json:"error,omitempty"`
+		ResolvedProviderProtocol string                           `json:"resolved_provider_protocol,omitempty"`
 	}
 	result, err := loadJSONWithTimeout[probeResult](ctx, platformconfig.DefaultDaemonURL()+"/_swobu/model-catalog?"+query.Encode(), modelCatalogProbeLoadTimeout)
 	if err != nil {
@@ -346,7 +347,7 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 		AuthHeader:               authHeader,
 		CredentialRef:            strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 		ProviderProtocol:         strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
-		ModelIDs:                 append([]string(nil), result.ModelIDs...),
+		Deployments:              ports.CloneProviderDeployments(result.Deployments),
 		Error:                    strings.TrimSpace(result.Error),                    // swobu:io-string source=boundary
 		ResolvedProviderProtocol: strings.TrimSpace(result.ResolvedProviderProtocol), // swobu:io-string source=boundary
 	}}

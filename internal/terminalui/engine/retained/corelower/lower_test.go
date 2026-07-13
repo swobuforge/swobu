@@ -42,15 +42,36 @@ func TestLowerStackLowersChildrenInOrder(t *testing.T) {
 	}
 }
 
-func TestLowerRejectsDuplicateSiblingKeys(t *testing.T) {
+func TestLowerAssertRejectsInvalidNode(t *testing.T) {
 	t.Parallel()
 
-	_, err := Lower(core.Box(
+	node := core.Action("open", core.SignalEvent{Kind: "opened"}).
+		Interaction(core.InteractionSpec{
+			Focus:  core.FocusSpec{Mode: core.Focusable},
+			Keymap: []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
+		})
+
+	_, err := LowerAssert(node, EnvConfig{})
+	if err == nil {
+		t.Fatal("expected LowerAssert to reject action without signal")
+	}
+	if !strings.Contains(err.Error(), "action without emitted event") {
+		t.Fatalf("error = %q, want action without emitted event", err.Error())
+	}
+}
+
+func TestLowerAllowsInvalidNodeAtRuntime(t *testing.T) {
+	t.Parallel()
+
+	renderNode, err := Lower(core.Box(
 		core.Text("a").Key(core.K("dup")),
 		core.Text("b").Key(core.K("dup")),
 	), EnvConfig{})
-	if err == nil {
-		t.Fatal("expected duplicate-key lowering failure")
+	if err != nil {
+		t.Fatalf("unexpected lowering failure: %v", err)
+	}
+	if renderNode == nil {
+		t.Fatal("expected lowered render node")
 	}
 }
 

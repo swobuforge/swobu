@@ -196,6 +196,49 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 	}
 }
 
+func TestEncodeCarrier_OmitsToolChoiceWhenToolSurfaceIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		policy canonical.ToolPolicy
+	}{
+		{
+			name:   "none",
+			policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil),
+		},
+		{
+			name:   "auto",
+			policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: "claude-haiku",
+				Items: []canonical.CanonicalItem{
+					canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+				},
+				ToolPolicy: tc.policy,
+			})
+			wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
+			if err != nil {
+				t.Fatalf("EncodeCarrier returned error: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(wire.Raw, &payload); err != nil {
+				t.Fatalf("json.Unmarshal returned error: %v", err)
+			}
+			if _, ok := payload["tool_choice"]; ok {
+				t.Fatalf("tool_choice = %#v, want omitted on empty tool surface", payload["tool_choice"])
+			}
+		})
+	}
+}
+
 func messagesToolChoiceRequestJSON(t *testing.T, toolChoice any, includeTools bool, tool map[string]any) []byte {
 	t.Helper()
 	payload := map[string]any{

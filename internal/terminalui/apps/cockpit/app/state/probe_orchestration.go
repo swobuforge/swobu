@@ -39,7 +39,7 @@ func primeCreateDraftModelCatalogProbe(model *Model, id routingProbeIdentity) {
 	model.CreateDraftModelBaseURL = id.BaseURL
 	model.CreateDraftModelAuthHeader = id.AuthHeader
 	model.CreateDraftModelCredentialRef = id.CredentialRef
-	model.CreateDraftModelIDs = nil
+	model.CreateDraftModelDeployments = nil
 	model.CreateDraftModelError = ""
 	model.CreateDraftModelProbePending = true
 	model.CreateDraftModelTestProtocol = ""
@@ -47,7 +47,7 @@ func primeCreateDraftModelCatalogProbe(model *Model, id routingProbeIdentity) {
 }
 
 func clearCreateDraftModelCatalogProbe(model *Model) {
-	model.CreateDraftModelIDs = nil
+	model.CreateDraftModelDeployments = nil
 	model.CreateDraftModelError = ""
 	model.CreateDraftModelProbePending = false
 	model.CreateDraftModelProviderSpec = ""
@@ -64,13 +64,13 @@ func primeAddModelCatalogProbe(model *Model, id routingProbeIdentity, providerPr
 	model.AddModelDraftBaseURL = id.BaseURL
 	model.AddModelDraftAuthHeader = id.AuthHeader
 	model.AddModelDraftCredentialRef = id.CredentialRef
-	model.AddModelDraftModelIDs = nil
+	model.AddModelDraftModelDeployments = nil
 	model.AddModelDraftModelError = ""
 	model.AddModelDraftModelProbePending = true
 }
 
 func clearAddModelCatalogProbe(model *Model) {
-	model.AddModelDraftModelIDs = nil
+	model.AddModelDraftModelDeployments = nil
 	model.AddModelDraftModelError = ""
 	model.AddModelDraftModelProbePending = false
 	model.AddModelDraftProviderSpec = ""

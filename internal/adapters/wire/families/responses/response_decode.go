@@ -130,7 +130,7 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 			}
 			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			if itemID == "" {
-				itemID = fallbackItemID("", item.CallID)
+				itemID = fallbackItemID("", item.CallID, nil)
 			}
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
@@ -146,7 +146,7 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 		case "custom_tool_call":
 			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			if itemID == "" {
-				itemID = fallbackItemID("", item.CallID)
+				itemID = fallbackItemID("", item.CallID, nil)
 			}
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary

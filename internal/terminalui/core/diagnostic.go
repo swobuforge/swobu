@@ -6,9 +6,25 @@ import "fmt"
 type Severity uint8
 
 const (
+	// DiagnosticWarning indicates a behavioral concern that does not halt
+	// compilation. Used for migration-phase diagnostics that will become
+	// errors once callers are fixed.
 	DiagnosticWarning Severity = iota
+	// DiagnosticError indicates a structural contract violation that
+	// prevents safe compilation.
 	DiagnosticError
 )
+
+func (s Severity) String() string {
+	switch s {
+	case DiagnosticWarning:
+		return "warning"
+	case DiagnosticError:
+		return "error"
+	default:
+		return fmt.Sprintf("severity(%d)", s)
+	}
+}
 
 // Diagnostic captures one semantic validation result.
 type Diagnostic struct {
@@ -17,8 +33,32 @@ type Diagnostic struct {
 	Message  string
 }
 
-// Validate performs semantic integrity checks over keys, stateful nodes, and
-// dynamic collections.
+// Diagnostics aggregates validation results.
+type Diagnostics []Diagnostic
+
+// HasErrors reports whether any diagnostic is an error.
+func (ds Diagnostics) HasErrors() bool {
+	for _, d := range ds {
+		if d.Severity == DiagnosticError {
+			return true
+		}
+	}
+	return false
+}
+
+// Errors returns only the error-level diagnostics.
+func (ds Diagnostics) Errors() Diagnostics {
+	var out Diagnostics
+	for _, d := range ds {
+		if d.Severity == DiagnosticError {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// Validate performs semantic integrity checks over keys, stateful nodes,
+// focusable nodes, actions, and dynamic collections.
 func Validate(root Node) []Diagnostic {
 	var out []Diagnostic
 	validateNode("root", root, &out, false)
@@ -38,6 +78,29 @@ func validateNode(path string, node Node, out *[]Diagnostic, requireInteractiveK
 			Severity: DiagnosticError,
 			Path:     path,
 			Message:  "interactive child without key inside dynamic collection",
+		})
+	}
+
+	// A focusable node should accept at least one intent.
+	// KindInput is exempt: it receives built-in edit intents from the lowerer.
+	if node.interaction.Focus.Mode == Focusable &&
+		node.kind != KindInput &&
+		len(node.interaction.Keymap) == 0 {
+		*out = append(*out, Diagnostic{
+			Severity: DiagnosticWarning,
+			Path:     path,
+			Message:  "focusable node without accepted intent",
+		})
+	}
+
+	// An action node should emit at least one signal when activated
+	// or on focus. Actions that only emit focus signals are currently
+	// valid (migration-phase leniency).
+	if node.kind == KindAction && len(node.interaction.Signals) == 0 {
+		*out = append(*out, Diagnostic{
+			Severity: DiagnosticWarning,
+			Path:     path,
+			Message:  "action without emitted event",
 		})
 	}
 

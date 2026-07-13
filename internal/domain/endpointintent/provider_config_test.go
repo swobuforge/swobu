@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestProviderConfig_RequiresExplicitRef(t *testing.T) {
@@ -103,6 +104,47 @@ func TestProviderConfig_DerivesProtocolFromProviderSpec(t *testing.T) {
 	}
 	if got := cfg.ProtocolKind(); got != protocolkind.Messages {
 		t.Fatalf("protocol kind = %q, want %q", got, protocolkind.Messages)
+	}
+}
+
+func TestNormalizeAzureResourceLocator(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"contact-8837-resource":                               "https://contact-8837-resource.services.ai.azure.com",
+		"contact-8837-resource.services.ai.azure.com":         "https://contact-8837-resource.services.ai.azure.com",
+		"https://contact-8837-resource.services.ai.azure.com": "https://contact-8837-resource.services.ai.azure.com",
+		"https://portal.azure.com/#@tenant/resource/subscriptions/123/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/contact-8837-resource": "https://contact-8837-resource.services.ai.azure.com",
+	}
+	for raw, want := range cases {
+		got, err := NormalizeAzureResourceLocator(raw)
+		if err != nil {
+			t.Fatalf("NormalizeAzureResourceLocator(%q) returned error: %v", raw, err)
+		}
+		if got != want {
+			t.Fatalf("NormalizeAzureResourceLocator(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestProviderConfig_NormalizesAzureResourceLocator(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-azure")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("azure")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "contact-8837-resource", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if got := cfg.BaseURL(); got != "https://contact-8837-resource.services.ai.azure.com" {
+		t.Fatalf("base URL = %q, want normalized resource locator", got)
+	}
+	if got := cfg.ProviderProtocol(); got != profile.ProviderProtocolAuto {
+		t.Fatalf("provider protocol = %q, want auto", got)
 	}
 }
 

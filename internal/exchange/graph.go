@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -186,6 +187,20 @@ func (g exchangeGraph) buildPath(ctx context.Context, exchangeID string, endpoin
 	if err != nil {
 		return exchangePathRecord{}, err
 	}
+	slog.Debug("exchange route resolved",
+		"component", "exchange",
+		"event", "route_resolved",
+		"exchange_id", strings.TrimSpace(exchangeID), // swobu:io-string source=boundary
+		"endpoint", strings.TrimSpace(endpointName.String()), // swobu:io-string source=boundary
+		"backend_ref", strings.TrimSpace(state.Value.target.BackendRef), // swobu:io-string source=boundary
+		"provider_spec", strings.TrimSpace(state.Value.target.ProviderID()), // swobu:io-string source=boundary
+		"provider_protocol", strings.TrimSpace(state.Value.target.ProviderProtocol), // swobu:io-string source=boundary
+		"protocol_kind", string(state.Value.protocolKind),
+		"client_delivery", state.Value.clientDelivery.Mode.String(),
+		"provider_delivery", state.Value.providerDelivery.Mode.String(),
+		"provider_framing", string(state.Value.providerDelivery.Framing),
+		"model_id", strings.TrimSpace(state.Value.request.Model()), // swobu:io-string source=boundary
+	)
 	return exchangePathRecord{
 		Request:          state.Value.request,
 		Target:           state.Value.target,

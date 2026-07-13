@@ -3,6 +3,7 @@ package routing
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -11,10 +12,11 @@ import (
 )
 
 type modelPickerOption struct {
-	Key      string
-	Label    string
-	Selected bool
-	OnChoose func() []update.Action
+	Key        string
+	Label      string
+	Selected   bool
+	Deployment ports.ProviderDeploymentRecord
+	OnChoose   func() []update.Action
 }
 
 type modelPickerRenderSpec struct {
@@ -31,13 +33,14 @@ type modelPickerRenderSpec struct {
 func renderModelPickerDisclosure(ctx *retained.Context[state.Model], spec modelPickerRenderSpec) retained.ViewSpec[state.Model] {
 	items := buildModelPickerItems(spec.Options)
 	return views.RenderFilterablePickerDisclosure(ctx, spec.Parent, spec.Picker, spec.SetPicker, items, views.FilterablePickerConfig{
-		KeyPrefix:      spec.KeyPrefix,
-		BuildOptionRow: views.ChoicePickerOptionRow(false),
-		WindowSize:     6,
-		FindLabel:      "find",
-		HeaderRows:     append([]retained.ViewSpec[state.Model](nil), spec.HeaderRows...),
-		OnNoMatchFocus: func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: spec.FocusKey}} },
-		OnCancel:       spec.CloseDisclosure,
+		KeyPrefix:         spec.KeyPrefix,
+		BuildOptionRow:    views.ChoicePickerOptionRow(false),
+		WindowSize:        6,
+		MinOptionsForFind: 1,
+		FindLabel:         "find",
+		HeaderRows:        append([]retained.ViewSpec[state.Model](nil), spec.HeaderRows...),
+		OnNoMatchFocus:    func() []update.Action { return []update.Action{interaction.FocusKeyAction{Key: spec.FocusKey}} },
+		OnCancel:          spec.CloseDisclosure,
 	})
 }
 

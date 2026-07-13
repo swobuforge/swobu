@@ -126,3 +126,32 @@ func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
 		t.Fatalf("captured effect[1] = %#v, want delivery.terminal_event exact wire:/event/terminal", terminalEffect)
 	}
 }
+
+func TestDecodeResponseStream_UsesCompletedOutputFallbackWhenNoDeltas(t *testing.T) {
+	t.Parallel()
+
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+
+	sink := &recordingEffectSink{}
+	reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_fallback", sink)
+
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	if err != nil {
+		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
+	}
+	out, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatalf("ProjectResponse returned error: %v", err)
+	}
+	items := out.Items()
+	if len(items) != 1 {
+		t.Fatalf("output items len=%d want=1", len(items))
+	}
+	if items[0].Kind != canonical.ItemKindText {
+		t.Fatalf("output item kind=%s want=text", items[0].Kind)
+	}
+	if items[0].Text != "ok" {
+		t.Fatalf("output text=%q want ok", items[0].Text)
+	}
+}

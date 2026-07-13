@@ -7,7 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
-	evidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/evidence"
+	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
@@ -23,6 +23,7 @@ func buildDaemonServeMux(
 	runtimeCfg config.RuntimeConfig,
 	runtime daemonProviderModelCatalogComposition,
 	continuation ports.ContinuationStore,
+	trafficEventSink ports.TrafficEventSink,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeIngress := exchange.NewIngress(
@@ -31,6 +32,7 @@ func buildDaemonServeMux(
 		exchange.RuntimePoliciesSpec{
 			DeliverySelector:  exchange.FixedDeliverySelector{},
 			ContinuationStore: continuation,
+			TrafficEventSink:  trafficEventSink,
 		},
 	)
 	mux := http.NewServeMux()
@@ -47,7 +49,7 @@ func buildDaemonServeMux(
 			SwobuVersion:         controlplane.SwobuVersion(),
 		}, nil
 	}))
-	mux.Handle("/_swobu/status-projection", httpapi.NewStatusProjectionHandler(func(_ context.Context, scope evidencestore.ProjectionScope) (evidencestore.StatusProjection, error) {
+	mux.Handle("/_swobu/status-projection", httpapi.NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		return daemon.StatusProjectionForScope(scope)
 	}))
 	mux.Handle("/_swobu/down", httpapi.NewShutdownHandler(func(context.Context) error {

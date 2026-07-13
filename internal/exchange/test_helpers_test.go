@@ -110,7 +110,12 @@ type testClientCodec struct{}
 
 func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error) {
 	_ = doc
-	return Result[ClientRequestResult]{}, nil
+	return Result[ClientRequestResult]{
+		Value: ClientRequestResult{
+			Request:  testCanonicalRequest("m"),
+			Delivery: delivery.BufferedDelivery(),
+		},
+	}, nil
 }
 
 func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.WireDocument], error) {

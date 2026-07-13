@@ -3,6 +3,7 @@ package routing
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -17,7 +18,7 @@ type draftModelBinding interface {
 	Snapshot(model state.Model) state.ProviderConfigSnapshot
 	SetSnapshot(next state.ProviderConfigSnapshot) []update.Action
 	LoadCatalog(next state.ProviderConfigSnapshot) []update.Action
-	Catalog(model state.Model) ([]string, string)
+	Catalog(model state.Model) ([]ports.ProviderDeploymentRecord, string)
 	ProbePending(model state.Model) bool
 	CloseMode() string
 }
@@ -29,9 +30,11 @@ func (createDraftModelBinding) Snapshot(model state.Model) state.ProviderConfigS
 }
 
 func (createDraftModelBinding) SetSnapshot(next state.ProviderConfigSnapshot) []update.Action {
-	return []update.Action{
+	actions := []update.Action{
 		state.SetCreateDraftModelIDAction{ModelID: strings.TrimSpace(next.ModelID)}, // swobu:io-string source=boundary
+		state.SetCreateDraftProviderProtocol{ProviderProtocol: strings.TrimSpace(next.ProviderProtocol)},
 	}
+	return actions
 }
 
 func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []update.Action {
@@ -49,8 +52,8 @@ func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []
 	}
 }
 
-func (createDraftModelBinding) Catalog(model state.Model) ([]string, string) {
-	return model.CreateDraftModelIDs, model.CreateDraftModelError
+func (createDraftModelBinding) Catalog(model state.Model) ([]ports.ProviderDeploymentRecord, string) {
+	return model.CreateDraftModelDeployments, model.CreateDraftModelError
 }
 
 func (createDraftModelBinding) ProbePending(model state.Model) bool {
@@ -90,8 +93,8 @@ func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []u
 	}
 }
 
-func (addDraftModelBinding) Catalog(model state.Model) ([]string, string) {
-	return model.AddModelDraftModelIDs, model.AddModelDraftModelError
+func (addDraftModelBinding) Catalog(model state.Model) ([]ports.ProviderDeploymentRecord, string) {
+	return model.AddModelDraftModelDeployments, model.AddModelDraftModelError
 }
 
 func (addDraftModelBinding) ProbePending(model state.Model) bool {
@@ -111,6 +114,7 @@ type draftModelRowSpec struct {
 	OnOpen         func()
 }
 
+// swobu:lint ignore function-complexity because=draft-model picker keeps all branchy UI flow in one routing boundary.
 func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftModelRowSpec) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	draft := spec.Binding.Snapshot(model)
@@ -121,7 +125,7 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		cred = effectiveAddModelCredentialRef(addBinding.model, draft)
 	}
 	modelID := strings.TrimSpace(draft.ModelID) // swobu:io-string source=boundary
-	modelIDs, modelErr := spec.Binding.Catalog(model)
+	modelDeployments, modelErr := spec.Binding.Catalog(model)
 	pending := spec.Binding.ProbePending(model)
 	readiness := state.EvaluateModelSelectionGateState(state.ModelSelectionReadinessGateInput{
 		ProviderSpec:      provider,
@@ -146,13 +150,13 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 			CreateDraft:       &draft,
 		})
 	}
-	previewOptions := make([]modelPickerOption, 0, len(modelIDs))
-	for _, modelID := range modelIDs {
-		id := strings.TrimSpace(modelID) // swobu:io-string source=domain
+	previewOptions := make([]modelPickerOption, 0, len(modelDeployments))
+	for _, deployment := range modelDeployments {
+		id := strings.TrimSpace(deployment.Name) // swobu:io-string source=domain
 		if id == "" {
 			continue
 		}
-		previewOptions = append(previewOptions, modelPickerOption{Key: id, Label: id})
+		previewOptions = append(previewOptions, modelPickerOption{Key: id, Label: deploymentOptionLabel(deployment), Deployment: deployment})
 	}
 	previewFocusKey := modelPickerFirstFocusKey(previewOptions, spec.KeyPrefix)
 	modelRow := views.RowChoiceWithHooks(views.RowModel, modelSummary, func() []update.Action {
@@ -199,20 +203,26 @@ func buildDraftModelChoiceRow(ctx *retained.Context[state.Model], spec draftMode
 		rows = append(rows, views.DisclosureNoteRows("loading models…")...)
 		return retained.VStack(ctx, rows...)
 	}
-	if len(modelIDs) == 0 {
+	if len(modelDeployments) == 0 {
 		rows := []retained.ViewSpec[state.Model]{modelRow}
 		rows = append(rows, views.DisclosureNoteRows("no models returned by provider catalog for current auth/provider configuration")...)
 		return retained.VStack(ctx, rows...)
 	}
-	options := make([]modelPickerOption, 0, len(modelIDs))
-	for _, choice := range modelIDs {
-		modelChoice := choice
+	options := make([]modelPickerOption, 0, len(modelDeployments))
+	for _, deployment := range modelDeployments {
+		modelChoice := strings.TrimSpace(deployment.Name) // swobu:io-string source=boundary
+		if modelChoice == "" {
+			continue
+		}
+		deployment := deployment
 		options = append(options, modelPickerOption{
-			Key:   modelChoice,
-			Label: modelChoice,
+			Key:        modelChoice,
+			Label:      deploymentOptionLabel(deployment),
+			Deployment: deployment,
 			OnChoose: func() []update.Action {
 				next := draft
 				next.ModelID = modelChoice
+				next.ProviderProtocol = deploymentSelectedProtocol(deployment, draft.ProviderSpec, draft.ProviderProtocol)
 				actions := spec.Binding.SetSnapshot(next)
 				spec.SetPickerOpen(false)
 				actions = append(actions,
@@ -252,7 +262,7 @@ func manualCreateDraftModelEditor(
 		views.RowModel,
 		modelSummary,
 		strings.TrimSpace(draft.ModelID), // swobu:io-string source=boundary
-		"provider model id",
+		"deployment name",
 		func(value string) []update.Action {
 			next := draft
 			next.ModelID = strings.TrimSpace(value) // swobu:io-string source=boundary

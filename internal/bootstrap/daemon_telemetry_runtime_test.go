@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/evidence"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
@@ -53,7 +53,7 @@ func TestEmitEventTelemetryBestEffort_UsesTerminalEventAndDeduplicatesByRequestI
 		},
 	}
 
-	event := mustTerminalTrafficEvent(t, "req_1", evidence.ResultClassSuccess, 200)
+	event := mustTerminalTrafficEvent(t, "req_1", trafficevidence.ResultClassSuccess, 200)
 	daemon.emitEventTelemetryBestEffort(context.Background(), event)
 	daemon.emitEventTelemetryBestEffort(context.Background(), event)
 
@@ -77,8 +77,8 @@ func TestEmitEventTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStackByDef
 			seenTerminalRequestID: make(map[string]struct{}),
 		},
 	}
-	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_a", evidence.ResultClassBackendError, 500))
-	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_b", evidence.ResultClassBackendError, 500))
+	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_a", trafficevidence.ResultClassBackendError, 500))
+	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_b", trafficevidence.ResultClassBackendError, 500))
 
 	if got := len(emitter.errorTraces); got != 1 {
 		t.Fatalf("error traces=%d, want 1 (capped)", got)
@@ -101,7 +101,7 @@ func TestEmitEventTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *testi
 			seenTerminalRequestID: make(map[string]struct{}),
 		},
 	}
-	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_1", evidence.ResultClassBackendError, 500))
+	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_1", trafficevidence.ResultClassBackendError, 500))
 	if len(emitter.errorTraces) != 1 {
 		t.Fatalf("error traces=%d, want 1", len(emitter.errorTraces))
 	}
@@ -110,21 +110,21 @@ func TestEmitEventTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *testi
 	}
 }
 
-func mustTerminalTrafficEvent(t *testing.T, requestID string, result evidence.ResultClass, statusCode int) evidence.TrafficEvent {
+func mustTerminalTrafficEvent(t *testing.T, requestID string, result trafficevidence.ResultClass, statusCode int) trafficevidence.TrafficEvent {
 	t.Helper()
-	id, err := evidence.ParseRequestID(requestID)
+	id, err := trafficevidence.ParseRequestID(requestID)
 	if err != nil {
 		t.Fatalf("ParseRequestID returned error: %v", err)
 	}
-	route, err := evidence.NewRoute("openai", "gpt-4.1")
+	route, err := trafficevidence.NewRoute("openai", "gpt-4.1")
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	event, err := evidence.NewTerminalTrafficEvent(evidence.TrafficEventInput{RequestID: id, Endpoint: "default",
-		ClientProtocol: evidence.ClientProtocol("responses"),
-		ClientHandler:  evidence.ClientHandler("http"),
-		ClientFamily:   evidence.ClientFamily("openai"),
-		NormalizedOp:   evidence.NormalizedOp("responses.create"),
+	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{RequestID: id, Endpoint: "default",
+		ClientProtocol: trafficevidence.ClientProtocol("responses"),
+		ClientHandler:  trafficevidence.ClientHandler("http"),
+		ClientFamily:   trafficevidence.ClientFamily("openai"),
+		NormalizedOp:   trafficevidence.NormalizedOp("responses.create"),
 		Route:          route,
 		Result:         result,
 		StatusCode:     statusCode,

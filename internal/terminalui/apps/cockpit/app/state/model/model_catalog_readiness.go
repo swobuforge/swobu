@@ -87,6 +87,9 @@ func ProviderModelCatalogBlockedMessage(provider, baseURL, credentialRef string)
 		return ""
 	}
 	if profile.RequiresExplicitExecuteBaseURL(provider) && strings.TrimSpace(baseURL) == "" { // swobu:io-string source=boundary
+		if strings.EqualFold(strings.TrimSpace(provider), "azure") {
+			return "set Azure resource locator before loading deployments"
+		}
 		return "set backend URL before loading models"
 	}
 	for _, mode := range profile.SupportedAuthModesForSpec(strings.TrimSpace(provider)) { // swobu:io-string source=boundary

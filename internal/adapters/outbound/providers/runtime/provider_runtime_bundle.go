@@ -1,35 +1,22 @@
 package runtime
 
 import (
-	"context"
-
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-// CredentialProvider resolves credential references into provider tokens.
-type CredentialProvider interface {
-	ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error)
-}
+// ProviderExecutor is the provider-edge execution facet. It turns one resolved
+// provider request into provider ingress without owning exchange orchestration.
+type ProviderExecutor = ports.ProviderIngressResolver
 
-// IngressResolver dispatches one canonical request to a backend provider and
-// returns the first truthful ingress carrier for the downstream exchange
-// pipeline.
-type IngressResolver interface {
-	ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error)
-}
+// Discovery is the provider-target discovery facet. It validates credentials
+// and lists deployments for one provider target.
+type Discovery = ports.ProviderModelCatalog
 
-// ModelCatalogClient lists backend model IDs for one provider target.
-type ModelCatalogClient interface {
-	ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error
-	ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error)
-}
-
-// ProviderRuntimeBundle groups one provider's runtime roles.
+// ProviderRuntimeBundle groups one provider's runtime facets.
 type ProviderRuntimeBundle struct {
 	ProviderID         profile.ProviderID
-	IngressResolver    IngressResolver
+	ProviderExecutor   ProviderExecutor
 	CredentialProvider CredentialProvider
-	ModelCatalogClient ModelCatalogClient
+	Discovery          Discovery
 }

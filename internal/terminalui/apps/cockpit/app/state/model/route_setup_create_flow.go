@@ -122,6 +122,9 @@ func evaluateModelState(provider, modelID string, credentialState RouteSetupSlot
 		if strings.EqualFold(provider, "bedrock") {
 			return RouteSetupSlotBlocked, "choose region before loading models"
 		}
+		if strings.EqualFold(provider, "azure") {
+			return RouteSetupSlotBlocked, "set Azure resource locator before loading deployments"
+		}
 		return RouteSetupSlotBlocked, "choose scope before loading models"
 	}
 	if modelID == "" {

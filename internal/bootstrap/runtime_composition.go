@@ -12,8 +12,8 @@ import (
 )
 
 type providerIngressResolverAdapter struct {
-	ingress ports.ProviderIngressResolver
-	catalog ports.ProviderModelCatalog
+	ingress   ports.ProviderIngressResolver
+	discovery ports.ProviderModelCatalog
 }
 
 func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
@@ -31,27 +31,27 @@ func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 }
 
 func (a providerIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	return a.catalog.ValidateCredentials(ctx, target)
+	return a.discovery.ValidateCredentials(ctx, target)
 }
 
-func (a providerIngressResolverAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
-	return a.catalog.ListModels(ctx, target)
+func (a providerIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+	return a.discovery.ListDeployments(ctx, target)
 }
 
-// daemonProviderModelCatalogComposition is the explicit runtime composition root for the
-// daemon live path. It owns the one codec lookup surface and the one provider
-// lookup surface without introducing a registry layer.
+// daemonProviderModelCatalogComposition is the explicit runtime composition root for
+// the daemon live path. It owns the one codec lookup surface and the one
+// provider lookup surface without introducing a registry layer.
 type daemonProviderModelCatalogComposition struct {
 	wire      exchangeruntime.RuntimeResolver
 	providers providerIngressResolverAdapter
 }
 
-func newDaemonProviderModelCatalogComposition(wire exchangeruntime.RuntimeResolver, ingress ports.ProviderIngressResolver, catalog ports.ProviderModelCatalog) daemonProviderModelCatalogComposition {
+func newDaemonProviderModelCatalogComposition(wire exchangeruntime.RuntimeResolver, ingress ports.ProviderIngressResolver, discovery ports.ProviderModelCatalog) daemonProviderModelCatalogComposition {
 	return daemonProviderModelCatalogComposition{
 		wire: wire,
 		providers: providerIngressResolverAdapter{
-			ingress: ingress,
-			catalog: catalog,
+			ingress:   ingress,
+			discovery: discovery,
 		},
 	}
 }
@@ -80,6 +80,6 @@ func (r daemonProviderModelCatalogComposition) ValidateCredentials(ctx context.C
 	return r.providers.ValidateCredentials(ctx, target)
 }
 
-func (r daemonProviderModelCatalogComposition) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
-	return r.providers.ListModels(ctx, target)
+func (r daemonProviderModelCatalogComposition) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+	return r.providers.ListDeployments(ctx, target)
 }

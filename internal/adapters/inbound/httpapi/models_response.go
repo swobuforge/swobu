@@ -13,6 +13,7 @@ type modelsListResponseDTO struct {
 }
 
 type modelsEntryDTO struct {
+	Name    string `json:"name"`
 	ID      string `json:"id"`
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
@@ -23,6 +24,7 @@ func writeModelsSuccess(w http.ResponseWriter, out exchange.ListModelsOutput) {
 	data := make([]modelsEntryDTO, 0, len(out.Models))
 	for _, model := range out.Models {
 		data = append(data, modelsEntryDTO{
+			Name:    model.ID,
 			ID:      model.ID,
 			Object:  "model",
 			Created: 0,

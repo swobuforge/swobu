@@ -1,6 +1,6 @@
 package delta
 
-import "github.com/swobuforge/swobu/internal/evidence"
+import trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 
-// MutationRecord reuses the canonical runtime-evidence mutation shape.
-type MutationRecord = evidence.Mutation
+// MutationRecord reuses the canonical traffic-evidence mutation shape.
+type MutationRecord = trafficevidence.Mutation

@@ -73,6 +73,9 @@ func TestSupportsFeature(t *testing.T) {
 	if got := SupportsFeature("anthropic", "messages", "", RequestStructuredOutput); got != Unsupported {
 		t.Fatalf("anthropic messages structured output support = %q want %q", got, Unsupported)
 	}
+	if got := SupportsFeature("azure", "messages", "claude-haiku-4-5-20251001", ToolDeclaration); got != Supported {
+		t.Fatalf("azure claude messages tool declaration support = %q want %q", got, Supported)
+	}
 	if got := SupportsFeature("missing", "responses", "", ToolDeclaration); got != Unknown {
 		t.Fatalf("unknown route support = %q want %q", got, Unknown)
 	}

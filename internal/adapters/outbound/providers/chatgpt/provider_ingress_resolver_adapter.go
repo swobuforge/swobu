@@ -58,9 +58,9 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 	executor := NewExecutor(client, credentials)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
-		IngressResolver:    executor,
+		ProviderExecutor:   executor,
 		CredentialProvider: credentials,
-		ModelCatalogClient: executor,
+		Discovery:          executor,
 	}
 }
 
@@ -267,7 +267,7 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 	return out, nil
 }
 
-func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
 	tier, ok := e.resolveChatGPTSubscriptionTier(ctx, target.ProviderID(), target.CredentialRef)
 	if !ok {
 		return nil, canonical.BadEndpoint("chatgpt subscription tier could not be resolved from credential")
@@ -281,7 +281,20 @@ func (e ProviderIngressResolverAdapter) ListModels(ctx context.Context, target e
 		"tier", tier,
 		"model_count", len(models),
 	)
-	return models, nil
+	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(target.ProviderID())
+	out := make([]ports.ProviderDeploymentRecord, 0, len(models))
+	for _, modelID := range models {
+		out = append(out, ports.NewProviderDeployment(
+			modelID,
+			modelID,
+			target.ProviderID(),
+			"",
+			target.ProviderID(),
+			supportedProtocols,
+			"",
+		))
+	}
+	return out, nil
 }
 
 func (e ProviderIngressResolverAdapter) resolveChatGPTSubscriptionTier(_ context.Context, providerSpec string, credentialRef string) (string, bool) {

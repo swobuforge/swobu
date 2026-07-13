@@ -304,7 +304,7 @@ func TrafficSummary(model state.Model) string {
 		return "refresh failed"
 	}
 	if len(model.TrafficRows) == 0 {
-		return "no runtime evidence yet"
+		return "no traffic evidence yet"
 	}
 	return fmt.Sprintf("%d recent", len(model.TrafficRows))
 }

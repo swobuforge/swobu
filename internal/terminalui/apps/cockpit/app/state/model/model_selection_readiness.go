@@ -82,6 +82,13 @@ func EvaluateModelSelectionGateState(input ModelSelectionReadinessGateInput) Mod
 		}
 	}
 	if profile.RequiresExplicitExecuteBaseURL(provider) && baseURL == "" { // swobu:io-string source=boundary
+		if strings.EqualFold(provider, "azure") {
+			return ModelSelectionGateState{
+				Blocked: true,
+				Reason:  ModelSelectionBlockGenericAuth,
+				Message: "set Azure resource locator before loading deployments",
+			}
+		}
 		return ModelSelectionGateState{
 			Blocked: true,
 			Reason:  ModelSelectionBlockGenericAuth,

@@ -22,23 +22,17 @@ func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
 	if got := NewOpenAICompatiblePolicy().ProviderID(); got != profile.ProviderSpecOpenAICompatible {
 		t.Fatalf("openaicompat policy provider=%s", got)
 	}
-	if got := NewAzurePolicy().ProviderID(); got != profile.ProviderSpecAzure {
-		t.Fatalf("azure policy provider=%s", got)
-	}
 	if got := NewOpenRouterPolicy().ProviderID(); got != profile.ProviderSpecOpenRouter {
 		t.Fatalf("openrouter policy provider=%s", got)
 	}
-	if got := NewOpenAIPolicy().AuthStrategy().Style; got != authStyleBearer {
+	if got := NewOpenAIPolicy().AuthStrategy().Style; got != AuthStyleBearer {
 		t.Fatalf("openai auth style=%s", got)
 	}
-	if got := NewOllamaPolicy().AuthStrategy().Style; got != authStyleNone {
+	if got := NewOllamaPolicy().AuthStrategy().Style; got != AuthStyleNone {
 		t.Fatalf("ollama auth style=%s", got)
 	}
-	if got := NewOpenAICompatiblePolicy().AuthStrategy().Header; got != authHeaderAuthorization {
+	if got := NewOpenAICompatiblePolicy().AuthStrategy().Header; got != AuthHeaderAuthorization {
 		t.Fatalf("openai-compatible auth header=%s", got)
-	}
-	if got := NewAzurePolicy().AuthStrategy().Header; got != authHeaderAPIKey {
-		t.Fatalf("azure auth header=%s", got)
 	}
 }
 

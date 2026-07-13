@@ -10,23 +10,24 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type stubModelCatalog struct {
-	models       []string
+	deployments  []ports.ProviderDeploymentRecord
 	err          error
 	validateUsed bool
-	listFn       func(target exchange.RoutableTarget) ([]string, error)
+	listFn       func(target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error)
 }
 
-func (s *stubModelCatalog) ListModels(_ context.Context, target exchange.RoutableTarget) ([]string, error) {
+func (s *stubModelCatalog) ListDeployments(_ context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
 	if s.listFn != nil {
 		return s.listFn(target)
 	}
 	if s.err != nil {
 		return nil, s.err
 	}
-	return append([]string(nil), s.models...), nil
+	return ports.CloneProviderDeployments(s.deployments), nil
 }
 
 func (s *stubModelCatalog) ValidateCredentials(context.Context, exchange.RoutableTarget) error {
@@ -35,7 +36,10 @@ func (s *stubModelCatalog) ValidateCredentials(context.Context, exchange.Routabl
 }
 
 func TestModelCatalogProbeHandler_LoadsModelIDsFromCatalogPath(t *testing.T) {
-	stub := &stubModelCatalog{models: []string{"m1", "m2"}}
+	stub := &stubModelCatalog{deployments: []ports.ProviderDeploymentRecord{
+		{Name: "m1", Family: "openai", SupportedProviderProtocols: []string{"responses"}, DefaultProviderProtocol: "responses"},
+		{Name: "m2", Family: "openai", SupportedProviderProtocols: []string{"responses_stream"}, DefaultProviderProtocol: "responses_stream"},
+	}}
 	h := NewModelCatalogProbeHandler(stub)
 
 	query := url.Values{}
@@ -50,8 +54,8 @@ func TestModelCatalogProbeHandler_LoadsModelIDsFromCatalogPath(t *testing.T) {
 		t.Fatalf("status=%d want 200", rec.Code)
 	}
 	var out struct {
-		ModelIDs []string `json:"model_ids"`
-		Error    string   `json:"error"`
+		Deployments []ports.ProviderDeploymentRecord `json:"deployments"`
+		Error       string                           `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -59,8 +63,8 @@ func TestModelCatalogProbeHandler_LoadsModelIDsFromCatalogPath(t *testing.T) {
 	if out.Error != "" {
 		t.Fatalf("probe error=%q", out.Error)
 	}
-	if len(out.ModelIDs) != 2 {
-		t.Fatalf("model ids len=%d want 2", len(out.ModelIDs))
+	if len(out.Deployments) != 2 {
+		t.Fatalf("deployments len=%d want 2", len(out.Deployments))
 	}
 	if stub.validateUsed {
 		t.Fatal("probe should not call ValidateCredentials")
@@ -96,11 +100,11 @@ func TestModelCatalogProbeHandler_ReturnsRawError(t *testing.T) {
 func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirstSuccess(t *testing.T) {
 	attempts := make([]string, 0, 4)
 	stub := &stubModelCatalog{
-		listFn: func(target exchange.RoutableTarget) ([]string, error) {
+		listFn: func(target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
 			key := target.ProtocolKind.String() + "/" + target.SelectedFrame
 			attempts = append(attempts, key)
 			if key == "responses/sse_event" {
-				return []string{"gpt-4.1-mini"}, nil
+				return []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini", Family: "openai", SupportedProviderProtocols: []string{"responses_stream"}, DefaultProviderProtocol: "responses_stream"}}, nil
 			}
 			return nil, errors.New("probe failed for " + key)
 		},
@@ -119,9 +123,9 @@ func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirst
 		t.Fatalf("status=%d want 200", rec.Code)
 	}
 	var out struct {
-		ModelIDs                 []string `json:"model_ids"`
-		Error                    string   `json:"error"`
-		ResolvedProviderProtocol string   `json:"resolved_provider_protocol"`
+		Deployments              []ports.ProviderDeploymentRecord `json:"deployments"`
+		Error                    string                           `json:"error"`
+		ResolvedProviderProtocol string                           `json:"resolved_provider_protocol"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -138,15 +142,18 @@ func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirst
 	if attempts[0] != "responses/http_json_body" {
 		t.Fatalf("first auto attempt=%q want responses/http_json_body", attempts[0])
 	}
+	if len(out.Deployments) != 1 || out.Deployments[0].Name != "gpt-4.1-mini" {
+		t.Fatalf("deployments=%v", out.Deployments)
+	}
 }
 
 func TestModelCatalogProbeHandler_PassesAuthHeaderToProviderCatalog(t *testing.T) {
 	stub := &stubModelCatalog{
-		listFn: func(target exchange.RoutableTarget) ([]string, error) {
+		listFn: func(target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
 			if target.AuthHeader != "X-Custom-Auth" {
 				t.Fatalf("auth header=%q want X-Custom-Auth", target.AuthHeader)
 			}
-			return []string{"gpt-4.1-mini"}, nil
+			return []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini", Family: "openai", SupportedProviderProtocols: []string{"responses"}, DefaultProviderProtocol: "responses"}}, nil
 		},
 	}
 	h := NewModelCatalogProbeHandler(stub)
@@ -164,8 +171,8 @@ func TestModelCatalogProbeHandler_PassesAuthHeaderToProviderCatalog(t *testing.T
 		t.Fatalf("status=%d want 200", rec.Code)
 	}
 	var out struct {
-		ModelIDs []string `json:"model_ids"`
-		Error    string   `json:"error"`
+		Deployments []ports.ProviderDeploymentRecord `json:"deployments"`
+		Error       string                           `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -173,7 +180,7 @@ func TestModelCatalogProbeHandler_PassesAuthHeaderToProviderCatalog(t *testing.T
 	if out.Error != "" {
 		t.Fatalf("probe error=%q", out.Error)
 	}
-	if len(out.ModelIDs) != 1 || out.ModelIDs[0] != "gpt-4.1-mini" {
-		t.Fatalf("model ids=%v", out.ModelIDs)
+	if len(out.Deployments) != 1 || out.Deployments[0].Name != "gpt-4.1-mini" {
+		t.Fatalf("deployments=%v", out.Deployments)
 	}
 }
