@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {

@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
-	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
+	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	completions "github.com/swobuforge/swobu/internal/wire/completions"
+	messages "github.com/swobuforge/swobu/internal/wire/messages"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 type blockingEnvelopeReader struct {

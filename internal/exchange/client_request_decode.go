@@ -1,13 +1,4 @@
 package exchange
 
-import (
-	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
-)
-
-// ClientRequestResult carries the canonical request plus resolved delivery
-// returned by client-family request decoders.
-type ClientRequestResult struct {
-	Request  canonical.CanonicalRequest
-	Delivery delivery.Delivery
-}
+// Client-request decode implementations live in adapters/wire/families/*.
+// The result type they return is codecs.ClientRequestResult.

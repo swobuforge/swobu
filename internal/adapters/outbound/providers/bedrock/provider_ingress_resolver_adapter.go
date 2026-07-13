@@ -11,7 +11,6 @@ import (
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -60,7 +59,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		return nil, canonical.UnsupportedDelivery("bedrock provider does not implement the requested delivery framing")
 	}
 
-	path, err := exchangeruntime.ProviderRequestPath(req.Target.ProviderID(), req.Target.ProtocolKind)
+	path, err := profile.ProviderRequestPath(req.Target.ProviderID(), req.Target.ProtocolKind)
 	if err != nil {
 		return nil, err
 	}

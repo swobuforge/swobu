@@ -1,11 +1,11 @@
 package codexwire
 
 import (
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func EncodeProviderRequestDocument(request canonical.CanonicalRequest, _ delivery.Delivery, exchangeID string) (exchange.Result[carrier.WireDocument], error) {

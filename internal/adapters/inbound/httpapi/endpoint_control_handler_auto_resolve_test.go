@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"testing"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirstSuccess(t *testing.T) {

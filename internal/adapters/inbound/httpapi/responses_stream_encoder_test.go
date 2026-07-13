@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
-	sse "github.com/swobuforge/swobu/internal/adapters/wire/framing/sse"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 // Reference lifecycle: https://developers.openai.com/api/reference/resources/responses/methods/create

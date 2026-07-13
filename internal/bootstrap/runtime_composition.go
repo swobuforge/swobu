@@ -3,11 +3,11 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -42,11 +42,11 @@ func (a providerIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 // the daemon live path. It owns the one codec lookup surface and the one
 // provider lookup surface without introducing a registry layer.
 type daemonProviderModelCatalogComposition struct {
-	wire      exchangeruntime.RuntimeResolver
+	wire      codecresolver.RuntimeCodecResolver
 	providers providerIngressResolverAdapter
 }
 
-func newDaemonProviderModelCatalogComposition(wire exchangeruntime.RuntimeResolver, ingress exchange.ProviderIngressResolver, discovery exchange.ProviderModelCatalog) daemonProviderModelCatalogComposition {
+func newDaemonProviderModelCatalogComposition(wire codecresolver.RuntimeCodecResolver, ingress exchange.ProviderIngressResolver, discovery exchange.ProviderModelCatalog) daemonProviderModelCatalogComposition {
 	return daemonProviderModelCatalogComposition{
 		wire: wire,
 		providers: providerIngressResolverAdapter{

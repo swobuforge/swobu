@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -19,31 +18,10 @@ import (
 // Runner executes one exchange through a single event-first lifecycle.
 // It owns runtime codec lookup and wrapper application for the exchange.
 type Runner struct {
-	Runtime        ExecutionRuntime
-	StageMechanics stage.StageMechanics
-	EffectSink     effect.Sink
-}
-
-// ClientCodec translates client-family wire documents and client-facing responses.
-type ClientCodec interface {
-	DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error)
-	EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.WireDocument], error)
-	EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.WireStream], error)
-}
-
-// ProviderRequestDocumentEncoder translates canonical requests into provider wire documents.
-type ProviderRequestDocumentEncoder interface {
-	EncodeProviderRequestDocument(request canonical.CanonicalRequest, d delivery.Delivery, exchangeID string) (Result[carrier.WireDocument], error)
-}
-
-// ProviderEnvelopeDecoder translates provider streams into canonical events.
-type ProviderEnvelopeDecoder interface {
-	DecodeProviderEnvelope(stream carrier.WireStream, exchangeID string) (Result[canonical.EventReader], error)
-}
-
-// ProviderDocumentDecoder translates provider documents into canonical events.
-type ProviderDocumentDecoder interface {
-	DecodeProviderDocument(ctx context.Context, doc carrier.WireDocument, exchangeID string) (Result[canonical.EventReader], error)
+	Runtime           ExecutionRuntime
+	StageMechanics    stage.StageMechanics
+	EffectSink        effect.Sink
+	ContinuationStore canonical.ContinuationStore
 }
 
 // ExchangeInput contains the factual inputs for one request/response exchange.
@@ -79,6 +57,7 @@ func (r Runner) Run(ctx context.Context, in ExchangeInput) (TransportResponse, e
 	reg.Register(requestEncodedReduce)
 	reg.Register(ingressReceivedReduce)
 	reg.Register(envelopeDecodedReduce)
+	reg.Register(continuationCapturedReduce)
 	reg.Register(pipelineCompletedReduce)
 
 	eng := machine.NewEngine(reg)
@@ -92,6 +71,7 @@ func (r Runner) Run(ctx context.Context, in ExchangeInput) (TransportResponse, e
 		machine.StateCell{Value: reflect.ValueOf(encodedRequest{})},
 		machine.StateCell{Value: reflect.ValueOf(providerResponse{})},
 		machine.StateCell{Value: reflect.ValueOf(decodedEnvelope{})},
+		machine.StateCell{Value: reflect.ValueOf(continuationContext{})},
 		machine.StateCell{Value: reflect.ValueOf(pipelineOutcome{})},
 	)
 

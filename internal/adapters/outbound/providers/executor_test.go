@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -17,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 )
 
 type testCredentialResolver struct{}
@@ -45,7 +45,7 @@ func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
 
 func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target exchange.RoutableTarget) exchange.ProviderRequest {
 	t.Helper()
-	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(target.ProtocolKind)
+	codec := codecresolver.NewRuntimeCodecResolver().ProviderRequestDocumentEncoder(target.ProtocolKind)
 	if codec == nil {
 		t.Fatalf("provider request encoder missing for protocol %s", target.ProtocolKind)
 	}

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -18,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 type recordingEffectSink struct {

@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"testing"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
+	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {

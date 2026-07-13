@@ -15,15 +15,15 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/adapters/wire/families/completions"
-	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
+	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	completions "github.com/swobuforge/swobu/internal/wire/completions"
+	messages "github.com/swobuforge/swobu/internal/wire/messages"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func TestHandler_ForwardsCanonicalRequest(t *testing.T) {

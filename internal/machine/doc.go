@@ -18,5 +18,6 @@
 //
 // Reflection lives inside the engine. Reducer authors do not see it.
 //
-// The canonical design lives in docs/00-inbox/reducerexchangemachine.md.
+// The canonical design lives in
+// docs/03-architecture/system-shape-and-request-flow/exchange-machine-design-and-invariants.md.
 package machine

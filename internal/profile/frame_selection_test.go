@@ -56,17 +56,3 @@ func TestDefaultFrameForSpecProtocol_UnsupportedSpecProtocol(t *testing.T) {
 		t.Fatalf("default frame=%q want empty", def)
 	}
 }
-
-func TestStreamingForFrame(t *testing.T) {
-	t.Parallel()
-
-	if streaming, ok := StreamingForFrame(FrameSSEEvent); !ok || !streaming {
-		t.Fatalf("sse frame streaming=%v ok=%v", streaming, ok)
-	}
-	if streaming, ok := StreamingForFrame(FrameHTTPJSONBody); !ok || streaming {
-		t.Fatalf("http-json frame streaming=%v ok=%v", streaming, ok)
-	}
-	if _, ok := StreamingForFrame("unknown"); ok {
-		t.Fatal("unknown frame should be unsupported")
-	}
-}

@@ -46,13 +46,14 @@ func runExchangeWithMachine(
 	reg.Register(requestEncodedReduce)
 	reg.Register(ingressReceivedReduce)
 	reg.Register(envelopeDecodedReduce)
+	reg.Register(continuationCapturedReduce)
 	reg.Register(pipelineCompletedReduce)
 
 	eng := machine.NewEngine(reg)
 	eng.RegisterInterpreter(func(c context.Context, store *machine.Store, cmd machine.Command) ([]machine.Event, error) {
 		switch cmd.(type) {
 		case sendProvider:
-			return handleSendProvider(ctx, store)
+			return handleSendProvider(ctx, store, runner)
 		case resolveCodecs:
 			return runRunnerInterpret(c, store, cmd, runner)
 		case encodeProviderRequest:
@@ -60,6 +61,8 @@ func runExchangeWithMachine(
 		case resolveProviderIngress:
 			return runRunnerInterpret(c, store, cmd, runner)
 		case decodeProviderEnvelope:
+			return runRunnerInterpret(c, store, cmd, runner)
+		case captureContinuation:
 			return runRunnerInterpret(c, store, cmd, runner)
 		case encodeClientOutputCmd:
 			return runRunnerInterpret(c, store, cmd, runner)
@@ -87,6 +90,7 @@ func runExchangeWithMachine(
 		machine.StateCell{Value: reflect.ValueOf(encodedRequest{})},
 		machine.StateCell{Value: reflect.ValueOf(providerResponse{})},
 		machine.StateCell{Value: reflect.ValueOf(decodedEnvelope{})},
+		machine.StateCell{Value: reflect.ValueOf(continuationContext{})},
 		machine.StateCell{Value: reflect.ValueOf(pipelineOutcome{})},
 	)
 
@@ -235,7 +239,9 @@ func terminalSuccess(s struct {
 // handleSendProvider seeds the runner pipeline: it reads routing state,
 // builds the ExchangeInput and outcome.Target, and emits pipelineStarted.
 // On path-build failure it emits providerFailed directly.
-func handleSendProvider(ctx context.Context, store *machine.Store) ([]machine.Event, error) {
+// It also prepares continuation (materializes stored history) when the
+// selected target requires it.
+func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner) ([]machine.Event, error) {
 	var exchange exchangeState
 	if err := store.Get(&exchange); err != nil {
 		return nil, err
@@ -271,11 +277,31 @@ func handleSendProvider(ctx context.Context, store *machine.Store) ([]machine.Ev
 		return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: err})}, nil
 	}
 
+	// Prepare continuation: materialize stored history for non-native targets,
+	// or validate native continuation safety for Responses targets.
+	request := pathRecord.Request
+	if runner.ContinuationStore != nil {
+		runtime := canonical.NewContinuationRuntime(runner.ContinuationStore)
+		namespace := canonical.NewContinuationNamespace(exchange.Endpoint.Name().String())
+		preparedRequest, prepErr := runtime.PrepareRequest(ctx, namespace, pathRecord.ProtocolKind, exchange.Request)
+		if prepErr != nil {
+			var outcome outcomeState
+			_ = store.Get(&outcome)
+			outcome.Err = prepErr
+			store.Put(reflect.TypeOf(outcome), reflect.ValueOf(outcome))
+			return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: prepErr})}, nil
+		}
+		request = preparedRequest
+		store.Put(reflect.TypeOf(continuationContext{}), reflect.ValueOf(continuationContext{
+			Namespace: namespace,
+		}))
+	}
+
 	input := ExchangeInput{
 		ExchangeID:       exchange.ExchangeID,
 		ClientFamily:     exchange.ClientFamily,
 		ClientDelivery:   exchange.ClientDelivery,
-		Request:          pathRecord.Request,
+		Request:          request,
 		Target:           pathRecord.Target,
 		Contract:         NewExecutionContract(exchange.ClientDelivery).WithProviderDelivery(pathRecord.ProviderDelivery),
 		ProviderProtocol: pathRecord.ProtocolKind,

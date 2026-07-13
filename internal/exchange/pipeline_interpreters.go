@@ -31,6 +31,9 @@ func runRunnerInterpret(ctx context.Context, store *machine.Store, cmd machine.C
 	case decodeProviderEnvelope:
 		_ = c
 		return interpDecodeProviderEnvelope(ctx, runner, store)
+	case captureContinuation:
+		_ = c
+		return interpCaptureContinuation(ctx, runner, store)
 	case encodeClientOutputCmd:
 		_ = c
 		return interpEncodeClientOutput(ctx, runner, store)
@@ -167,6 +170,42 @@ func interpDecodeProviderEnvelope(ctx context.Context, runner Runner, store *mac
 		Progressive: progressive,
 	}))
 	return []machine.Event{machine.Event(envelopeDecoded{})}, nil
+}
+
+func interpCaptureContinuation(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
+	if runner.ContinuationStore == nil {
+		return []machine.Event{machine.Event(continuationCaptured{})}, nil
+	}
+	var in ExchangeInput
+	if err := store.Get(&in); err != nil {
+		storePutError(store, err)
+		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+	}
+	var dec decodedEnvelope
+	if err := store.Get(&dec); err != nil {
+		storePutError(store, err)
+		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+	}
+	var contCtx continuationContext
+	if err := store.Get(&contCtx); err != nil {
+		// No namespace seeded means this pipeline was not wired for continuation.
+		return []machine.Event{machine.Event(continuationCaptured{})}, nil
+	}
+	if contCtx.Namespace.IsZero() || dec.Events == nil {
+		return []machine.Event{machine.Event(continuationCaptured{})}, nil
+	}
+	runtime := canonical.NewContinuationRuntime(runner.ContinuationStore)
+	wrapped, err := runtime.WrapResponseEnvelope(ctx, contCtx.Namespace, in.Request, dec.Events)
+	if err != nil {
+		storePutError(store, err)
+		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+	}
+	store.Put(reflect.TypeOf(decodedEnvelope{}), reflect.ValueOf(decodedEnvelope{
+		Events:      wrapped,
+		Effects:     dec.Effects,
+		Progressive: dec.Progressive,
+	}))
+	return []machine.Event{machine.Event(continuationCaptured{})}, nil
 }
 
 func interpEncodeClientOutput(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {

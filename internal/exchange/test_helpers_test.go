@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
+	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 type recordingEffectSink struct {
@@ -51,11 +53,27 @@ func streamingProviderIngressResolver(stream io.ReadCloser) func(context.Context
 	}
 }
 
+func newTransportRequestWithTurn(method, url string, turn string, body map[string]any) transportpkg.TransportRequest {
+	if body == nil {
+		body = make(map[string]any)
+	}
+	if turn != "" {
+		body["previous_response_id"] = turn
+	}
+	raw, _ := json.Marshal(body)
+	return NewTransportRequest(method, url, nil, raw)
+}
+
 func withRuntime(providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)) Runner {
 	return Runner{Runtime: testExecutionRuntime{
 		testRuntimeResolver: testRuntimeResolver{},
 		providerIngress:     providerIngress,
 	}}
+}
+
+func (r Runner) WithContinuationStore(store canonical.ContinuationStore) Runner {
+	r.ContinuationStore = store
+	return r
 }
 
 func testCanonicalRequest(model string) canonical.CanonicalRequest {
@@ -109,10 +127,46 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 type testClientCodec struct{}
 
 func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error) {
-	_ = doc
+	model := "m"
+	var turn canonical.TurnRef
+	var items []canonical.CanonicalItem
+	if len(doc.Raw) > 0 {
+		var parsed map[string]any
+		if err := json.Unmarshal(doc.Raw, &parsed); err == nil {
+			if v, ok := parsed["model"].(string); ok && v != "" {
+				model = v
+			}
+			if v, ok := parsed["previous_response_id"].(string); ok && v != "" {
+				turn = canonical.NewTurnRef(v)
+			}
+			if msgs, ok := parsed["messages"].([]any); ok {
+				for _, m := range msgs {
+					if msg, ok := m.(map[string]any); ok {
+						content, _ := msg["content"].(string)
+						role, _ := msg["role"].(string)
+						var author canonical.ItemAuthor
+						switch role {
+						case "assistant":
+							author = canonical.ItemAuthorAssistant
+						default:
+							author = canonical.ItemAuthorUser
+						}
+						items = append(items, canonical.NewTextItem(author, content))
+					}
+				}
+			}
+		}
+	}
+	if len(items) == 0 {
+		items = []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}
+	}
 	return Result[ClientRequestResult]{
 		Value: ClientRequestResult{
-			Request:  testCanonicalRequest("m"),
+			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: model,
+				Items: items,
+				Turn:  turn,
+			}),
 			Delivery: delivery.BufferedDelivery(),
 		},
 	}, nil
@@ -174,6 +228,8 @@ func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, d
 
 func stubResponseEventReader(exchangeID string) canonical.EventReader {
 	now := time.Now().UTC()
+	// Produce a completed response envelope with metadata carrying a
+	// result_id so continuation capture can project and persist it.
 	events := []canonical.Event{
 		{
 			ExchangeID: exchangeID,
@@ -187,6 +243,14 @@ func stubResponseEventReader(exchangeID string) canonical.EventReader {
 			ExchangeID: exchangeID,
 			Seq:        2,
 			Time:       now,
+			Kind:       canonical.EventMetadata,
+			EnvID:      "r1",
+			Payload:    canonical.MetadataPayload{Values: map[string]string{"result_id": exchangeID + "_result", "model": "m"}},
+		},
+		{
+			ExchangeID: exchangeID,
+			Seq:        3,
+			Time:       now,
 			Kind:       canonical.EventEnvelopeStart,
 			EnvID:      "m1",
 			ParentID:   "r1",
@@ -194,7 +258,7 @@ func stubResponseEventReader(exchangeID string) canonical.EventReader {
 		},
 		{
 			ExchangeID: exchangeID,
-			Seq:        3,
+			Seq:        4,
 			Time:       now,
 			Kind:       canonical.EventTextDelta,
 			EnvID:      "m1",
@@ -202,7 +266,7 @@ func stubResponseEventReader(exchangeID string) canonical.EventReader {
 		},
 		{
 			ExchangeID: exchangeID,
-			Seq:        4,
+			Seq:        5,
 			Time:       now,
 			Kind:       canonical.EventEnvelopeEnd,
 			EnvID:      "m1",
@@ -211,7 +275,7 @@ func stubResponseEventReader(exchangeID string) canonical.EventReader {
 		},
 		{
 			ExchangeID: exchangeID,
-			Seq:        5,
+			Seq:        6,
 			Time:       now,
 			Kind:       canonical.EventEnvelopeEnd,
 			EnvID:      "r1",

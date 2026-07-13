@@ -58,6 +58,11 @@ type decodedEnvelope struct {
 	Progressive bool
 }
 
+// continuationContext carries the namespace for response capture.
+type continuationContext struct {
+	Namespace canonical.ContinuationNamespace
+}
+
 // pipelineOutcome holds the final client-facing response or error.
 type pipelineOutcome struct {
 	Response TransportResponse
@@ -84,6 +89,9 @@ type envelopeDecoded struct{}
 // pipelineCompleted: client output encoded; result is in pipelineOutcome.
 type pipelineCompleted struct{}
 
+// continuationCaptured: envelope wrapped with continuation persistence.
+type continuationCaptured struct{}
+
 // ---- commands (imperatives: what to do next) ----
 
 // resolveCodecs looks up client and provider codecs for the current protocol.
@@ -97,6 +105,9 @@ type resolveProviderIngress struct{}
 
 // decodeProviderEnvelope translates provider response to canonical events.
 type decodeProviderEnvelope struct{}
+
+// captureContinuation wraps the decoded envelope with WrapResponseEnvelope.
+type captureContinuation struct{}
 
 // encodeClientOutput translates canonical events to client-family wire format.
 type encodeClientOutputCmd struct{}

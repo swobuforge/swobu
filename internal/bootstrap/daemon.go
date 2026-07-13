@@ -13,9 +13,10 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
-	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/telemetry"
@@ -59,11 +60,12 @@ var daemonIdleTimeout = 60 * time.Second
 // StartInput collects the one runtime config path plus the dependencies
 // bootstrap must wire into the live request path.
 type StartInput struct {
-	ConfigPath       string
-	Providers        exchange.ProviderIngressResolver
-	ModelCatalog     exchange.ProviderModelCatalog
-	TrafficEventSink observation.TrafficEventSink
-	Logger           *slog.Logger
+	ConfigPath        string
+	Providers         exchange.ProviderIngressResolver
+	ModelCatalog      exchange.ProviderModelCatalog
+	TrafficEventSink  observation.TrafficEventSink
+	ContinuationStore canonical.ContinuationStore
+	Logger            *slog.Logger
 }
 
 // operator routes, and request-path dependencies in one bootstrap flow.
@@ -113,7 +115,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		providers = composition
 		discovery = composition
 	}
-	runtimeRoot := newDaemonProviderModelCatalogComposition(exchangeruntime.NewResolver(), providers, discovery)
+	runtimeRoot := newDaemonProviderModelCatalogComposition(codecresolver.NewRuntimeCodecResolver(), providers, discovery)
 	trafficEventSink := in.TrafficEventSink
 	if trafficEventSink == nil {
 		daemon.trafficEventStore = trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})
@@ -122,7 +124,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.trafficEventStore = store
 	}
 	trafficEventSink = newTelemetryObservedTrafficEventSink(trafficEventSink, daemon.observeTelemetryEvent)
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, trafficEventSink, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, trafficEventSink, in.ContinuationStore, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}

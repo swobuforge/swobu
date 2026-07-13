@@ -12,13 +12,13 @@ import (
 	"strings"
 	"testing"
 
-	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -41,7 +41,7 @@ func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind
 		Model:     "openai.gpt-4.1-mini",
 		InputText: "ping",
 	})
-	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(kind)
+	codec := codecresolver.NewRuntimeCodecResolver().ProviderRequestDocumentEncoder(kind)
 	if codec == nil {
 		t.Fatalf("provider request encoder missing for protocol %s", kind)
 	}
@@ -85,7 +85,7 @@ func TestProviderRequestPathForProtocol_MantleFamiliesOnly(t *testing.T) {
 	}
 	for kind, want := range cases {
 		t.Run(kind.String(), func(t *testing.T) {
-			got, err := exchangeruntime.ProviderRequestPath(string(profile.ProviderSpecBedrock), kind)
+			got, err := profile.ProviderRequestPath(string(profile.ProviderSpecBedrock), kind)
 			if err != nil {
 				t.Fatalf("ProviderRequestPath(%s) error: %v", kind, err)
 			}
@@ -94,7 +94,7 @@ func TestProviderRequestPathForProtocol_MantleFamiliesOnly(t *testing.T) {
 			}
 		})
 	}
-	if _, err := exchangeruntime.ProviderRequestPath(string(profile.ProviderSpecBedrock), protocolkind.Completions); err == nil {
+	if _, err := profile.ProviderRequestPath(string(profile.ProviderSpecBedrock), protocolkind.Completions); err == nil {
 		t.Fatal("expected unsupported protocol to fail")
 	}
 }
@@ -585,7 +585,7 @@ func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *t
 			canonical.NewTextItem(canonical.ItemAuthorUser, "ping"),
 		},
 	})
-	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(protocolkind.Messages)
+	codec := codecresolver.NewRuntimeCodecResolver().ProviderRequestDocumentEncoder(protocolkind.Messages)
 	if codec == nil {
 		t.Fatal("provider request encoder missing for messages")
 	}

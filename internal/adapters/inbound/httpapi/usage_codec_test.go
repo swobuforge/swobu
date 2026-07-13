@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	chatcompletions "github.com/swobuforge/swobu/internal/adapters/wire/families/chatcompletions"
-	messages "github.com/swobuforge/swobu/internal/adapters/wire/families/messages"
-	responses "github.com/swobuforge/swobu/internal/adapters/wire/families/responses"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	messages "github.com/swobuforge/swobu/internal/wire/messages"
+	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {

@@ -33,9 +33,10 @@ type RequestIngress struct {
 }
 
 type RuntimePoliciesSpec struct {
-	ObservationStore observation.Store
-	EffectSink       effect.Sink
-	TrafficEventSink TrafficEventSink
+	ObservationStore  observation.Store
+	EffectSink        effect.Sink
+	TrafficEventSink  TrafficEventSink
+	ContinuationStore canonical.ContinuationStore
 }
 
 // TrafficEventSink records immutable traffic events at the exchange
@@ -72,7 +73,12 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 	return RequestIngress{
 		endpoints:       endpoints,
 		trafficEvidence: policies.TrafficEventSink,
-		runner:          Runner{Runtime: runtime, StageMechanics: stage.StageMechanics{}, EffectSink: sink},
+		runner: Runner{
+			Runtime:           runtime,
+			StageMechanics:    stage.StageMechanics{},
+			EffectSink:        sink,
+			ContinuationStore: policies.ContinuationStore,
+		},
 	}
 }
 

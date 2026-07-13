@@ -9,6 +9,11 @@ import (
 
 const ProviderProtocolAuto = "auto"
 
+const (
+	FrameHTTPJSONBody = "http_json_body"
+	FrameSSEEvent     = "sse_event"
+)
+
 type ProviderProtocol string
 
 // ConcreteProviderProtocolsForSpec returns provider-native concrete protocols in
