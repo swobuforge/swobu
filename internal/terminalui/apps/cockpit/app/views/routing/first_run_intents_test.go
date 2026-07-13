@@ -1,7 +1,6 @@
 package routing
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/profile"
@@ -49,29 +48,17 @@ func TestAppendCreateCredentialRows_KeychainShowsRawPasteEditor(t *testing.T) {
 	}
 }
 
-func TestCreateDraftProtocolModeRow_RequiresExplicitSelectionWithoutDeploymentDefault(t *testing.T) {
+func TestCreateDraftProtocolModeRow_AnthropicRequiresChoice_Visual(t *testing.T) {
 	t.Parallel()
 
-	t.Run("openai-requires-choice", func(t *testing.T) {
-		t.Parallel()
-		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "openai", ProviderProtocol: ""}}
-		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-		if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
-			t.Fatalf("expected protocol row to require explicit selection; render=%q", out)
-		}
-	})
-
-	t.Run("anthropic-requires-choice", func(t *testing.T) {
-		t.Parallel()
-		model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "anthropic", ProviderProtocol: ""}}
-		out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-		if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
-			t.Fatalf("expected protocol row to require explicit selection; render=%q", out)
-		}
-	})
+	model := state.Model{CreateDraftProviderConfig: state.ProviderConfigSnapshot{ProviderSpec: "anthropic", ProviderProtocol: ""}}
+	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
+	if err := testharness.AssertVisual("protocol_required").Viewport(100, 2).Now(out); err != nil {
+		t.Fatalf("expected protocol row to require explicit selection: %v\nrender=%q", err, out)
+	}
 }
 
-func TestCreateDraftProtocolModeRow_NoHiddenDefault_Regression(t *testing.T) {
+func TestCreateDraftProtocolModeRow_NoHiddenDefault_Visual(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -81,12 +68,12 @@ func TestCreateDraftProtocolModeRow_NoHiddenDefault_Regression(t *testing.T) {
 		},
 	}
 	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
-		t.Fatalf("expected protocol row to require explicit selection; render=%q", out)
+	if err := testharness.AssertVisual("protocol_required").Viewport(100, 2).Now(out); err != nil {
+		t.Fatalf("expected protocol row to require explicit selection: %v\nrender=%q", err, out)
 	}
 }
 
-func TestCreateDraftProtocolModeRow_AzureExplicitDefaultWins(t *testing.T) {
+func TestCreateDraftProtocolModeRow_AzureExplicitDefaultWins_Visual(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -107,12 +94,12 @@ func TestCreateDraftProtocolModeRow_AzureExplicitDefaultWins(t *testing.T) {
 		},
 	}
 	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(out, "protocol") || !strings.Contains(out, "responses") {
-		t.Fatalf("expected protocol row to use explicit azure deployment default; render=%q", out)
+	if err := testharness.AssertVisual("azure_protocol_default").Viewport(100, 2).Now(out); err != nil {
+		t.Fatalf("expected protocol row to use explicit azure deployment default: %v\nrender=%q", err, out)
 	}
 }
 
-func TestCreateDraftProtocolModeRow_AzureSingleProtocolWithoutDefaultRequiresChoice(t *testing.T) {
+func TestCreateDraftProtocolModeRow_AzureSingleProtocolRequiresChoice_Visual(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -133,12 +120,12 @@ func TestCreateDraftProtocolModeRow_AzureSingleProtocolWithoutDefaultRequiresCho
 		},
 	}
 	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
-		t.Fatalf("expected azure deployment without an explicit default to require explicit protocol choice; render=%q", out)
+	if err := testharness.AssertVisual("protocol_required").Viewport(100, 2).Now(out); err != nil {
+		t.Fatalf("expected azure deployment without an explicit default to require explicit protocol choice: %v\nrender=%q", err, out)
 	}
 }
 
-func TestCreateDraftProtocolModeRow_AzureAmbiguousProtocolMetadataFailsClosed(t *testing.T) {
+func TestCreateDraftProtocolModeRow_AzureAmbiguousRequiresChoice_Visual(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -159,15 +146,12 @@ func TestCreateDraftProtocolModeRow_AzureAmbiguousProtocolMetadataFailsClosed(t 
 		},
 	}
 	out := testharness.RenderSpec(model, createDraftProtocolModeRow(model), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
-		t.Fatalf("expected ambiguous azure deployment to require explicit protocol choice; render=%q", out)
-	}
-	if strings.Contains(out, "responses") && !strings.Contains(out, "required") {
-		t.Fatalf("expected ambiguous azure deployment not to auto-default; render=%q", out)
+	if err := testharness.AssertVisual("protocol_required").Viewport(100, 2).Now(out); err != nil {
+		t.Fatalf("expected ambiguous azure deployment to require explicit protocol choice: %v\nrender=%q", err, out)
 	}
 }
 
-func TestCreateDraftTestOrCreateRow_ReadyWithoutProbeGate(t *testing.T) {
+func TestCreateDraftTestOrCreateRow_ReadyWithoutProbeGate_Visual(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{
@@ -182,7 +166,7 @@ func TestCreateDraftTestOrCreateRow_ReadyWithoutProbeGate(t *testing.T) {
 	}
 
 	ready := testharness.RenderSpec(model, createDraftTestOrCreateRow(model), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(ready, "ready") || !strings.Contains(ready, "create") {
-		t.Fatalf("expected ready create row state; render=%q", ready)
+	if err := testharness.AssertVisual("ready_without_probe").Viewport(100, 2).Now(ready); err != nil {
+		t.Fatalf("expected ready create row state: %v\nrender=%q", err, ready)
 	}
 }

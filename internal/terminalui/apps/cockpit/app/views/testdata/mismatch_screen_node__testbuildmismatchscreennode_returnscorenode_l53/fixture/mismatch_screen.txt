@@ -1,0 +1,12 @@
+    mismatch ▾
+  status  TUI and daemon are incompatible  view ↵
+tui version  1.0.0
+daemon version  0.9.0
+protocol  expected 7, got 6
+    recover ▾
+  restart daemon  run ↵
+
+  copy diagnostics  copy ↵
+      swobu 1.0.0
+      daemon 0.9.0
+      protocol mismatch: expected 7, got 6

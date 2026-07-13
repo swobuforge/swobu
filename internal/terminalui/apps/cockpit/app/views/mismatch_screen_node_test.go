@@ -1,7 +1,6 @@
 package views
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -11,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/testharness"
 )
 
 func TestBuildMismatchScreenNode_ReturnsCoreNode(t *testing.T) {
@@ -48,18 +48,9 @@ func TestBuildMismatchScreenNode_ReturnsCoreNode(t *testing.T) {
 	tree := (&layout.TreeBuilder{}).Build(renderNode, geom.Rect{W: 80, H: 24})
 	buf := paint.NewBuffer(geom.Rect{W: 80, H: 24})
 	paintLayoutTree(tree, buf, &layout.PaintContext{}, geom.Point{})
-	out := strings.TrimSpace(buf.String())
+	out := buf.String()
 
-	if !strings.Contains(out, "TUI and daemon are incompatible") {
-		t.Fatalf("render = %q, want status row", out)
-	}
-	if !strings.Contains(out, "swobu 1.0.0") {
-		t.Fatalf("render = %q, want tui version", out)
-	}
-	if !strings.Contains(out, "restart daemon") {
-		t.Fatalf("render = %q, want restart action", out)
-	}
-	if !strings.Contains(out, "copy diagnostics") {
-		t.Fatalf("render = %q, want copy diagnostics action", out)
+	if err := testharness.AssertVisual("mismatch_screen").Viewport(80, 24).Now(out); err != nil {
+		t.Fatalf("expected mismatch screen: %v\nrender=%q", err, out)
 	}
 }

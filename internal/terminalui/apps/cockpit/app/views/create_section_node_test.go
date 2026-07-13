@@ -1,7 +1,6 @@
 package views
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
@@ -11,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
+	"github.com/swobuforge/swobu/internal/terminalui/testharness"
 )
 
 func TestBuildCreateSectionNode_ReturnsCoreNode(t *testing.T) {
@@ -47,12 +47,9 @@ func TestBuildCreateSectionNode_ReturnsCoreNode(t *testing.T) {
 	tree := (&layout.TreeBuilder{}).Build(renderNode, geom.Rect{W: 80, H: 24})
 	buf := paint.NewBuffer(geom.Rect{W: 80, H: 24})
 	paintLayoutTree(tree, buf, &layout.PaintContext{}, geom.Point{})
-	out := strings.TrimSpace(buf.String())
+	out := buf.String()
 
-	if !strings.Contains(out, "create") {
-		t.Fatalf("render = %q, want create section", out)
-	}
-	if !strings.Contains(out, "ready") {
-		t.Fatalf("render = %q, want ready status", out)
+	if err := testharness.AssertVisual("create_section_ready").Viewport(80, 24).Now(out); err != nil {
+		t.Fatalf("expected create section with ready status: %v\nrender=%q", err, out)
 	}
 }

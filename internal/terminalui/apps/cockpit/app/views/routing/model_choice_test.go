@@ -1,7 +1,6 @@
 package routing
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/profile"
@@ -66,7 +65,7 @@ func TestProviderModelCatalogChoicesAvailable_AzureUsesPicker(t *testing.T) {
 	}
 }
 
-func TestProviderProtocolChoiceRow_AzureUnsetFailsClosed(t *testing.T) {
+func TestProviderProtocolChoiceRow_AzureUnsetFailsClosed_Visual(t *testing.T) {
 	t.Parallel()
 
 	model := state.Model{}
@@ -76,11 +75,8 @@ func TestProviderProtocolChoiceRow_AzureUnsetFailsClosed(t *testing.T) {
 		},
 	}
 	out := testharness.RenderSpec(model, buildProviderProtocolChoiceRow(model, spec), geom.Rect{W: 100, H: 2}).String()
-	if !strings.Contains(out, "protocol") || !strings.Contains(out, "required") {
-		t.Fatalf("expected Azure protocol row to fail closed when unset; render=%q", out)
-	}
-	if strings.Contains(out, "auto") {
-		t.Fatalf("expected Azure protocol row not to auto-default; render=%q", out)
+	if err := testharness.AssertVisual("azure_protocol_unset").Viewport(100, 2).Now(out); err != nil {
+		t.Fatalf("expected Azure protocol row to fail closed when unset: %v\nrender=%q", err, out)
 	}
 }
 
