@@ -13,11 +13,11 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
+	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	completions "github.com/swobuforge/swobu/internal/wire/completions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
-	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type blockingEnvelopeReader struct {
