@@ -3,7 +3,6 @@ package compiler
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
@@ -281,8 +280,8 @@ func (lt LayoutTree) Find(key core.Key) LayoutNode {
 func resolveLayout[E any](n normalized[E], bounds core.Size) LayoutTree {
 	var lt LayoutTree
 	var offset int
-	var walk func(normalized[E], Rect) int
-	walk = func(cur normalized[E], parentRect Rect) int {
+	var walk func(normalized[E], core.Rect) int
+	walk = func(cur normalized[E], parentRect core.Rect) int {
 		if cur.node.Kind() == "empty" {
 			return offset
 		}
@@ -314,10 +313,6 @@ func resolveLayout[E any](n normalized[E], bounds core.Size) LayoutTree {
 	}
 	walk(n, core.Rect{X: 0, Y: 0, W: bounds.W, H: bounds.H})
 	return lt
-}
-
-func coreRect(r Rect) core.Rect {
-	return core.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}
 }
 
 // computeNodeRect resolves a node's rectangle within its parent's rectangle.
@@ -635,7 +630,7 @@ func paintFrame(lt LayoutTree, st StyleTable, bounds core.Size) core.Frame {
 	cells := make([]core.Cell, bounds.W*bounds.H)
 	for i := range lt.Nodes {
 		n := &lt.Nodes[i]
-		if n.Rect.empty() {
+		if n.Rect.Empty() {
 			continue
 		}
 		// Clip to frame bounds.
