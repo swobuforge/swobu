@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type recordingEffectSink struct {
@@ -126,7 +127,7 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct{}
 
-func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error) {
+func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[wire.ClientRequestResult], error) {
 	model := "m"
 	var turn canonical.TurnRef
 	var items []canonical.CanonicalItem
@@ -160,8 +161,8 @@ func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[Cli
 	if len(items) == 0 {
 		items = []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}
 	}
-	return Result[ClientRequestResult]{
-		Value: ClientRequestResult{
+	return Result[wire.ClientRequestResult]{
+		Value: wire.ClientRequestResult{
 			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model: model,
 				Items: items,

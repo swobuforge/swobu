@@ -17,6 +17,7 @@ import (
 	completions "github.com/swobuforge/swobu/internal/wire/completions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type blockingEnvelopeReader struct {
@@ -449,7 +450,7 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct {
 	req interface {
-		DecodeClientRequest(carrier.WireDocument) (Result[ClientRequestResult], error)
+		DecodeClientRequest(carrier.WireDocument) (Result[wire.ClientRequestResult], error)
 	}
 	doc interface {
 		EncodeResponseDocument(canonical.CanonicalOutput) (Result[carrier.WireDocument], error)
@@ -459,7 +460,7 @@ type testClientCodec struct {
 	}
 }
 
-func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error) {
+func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[wire.ClientRequestResult], error) {
 	return c.req.DecodeClientRequest(doc)
 }
 

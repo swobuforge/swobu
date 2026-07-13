@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := help
+MAKEFLAGS += --no-print-directory
 
 GO ?= go
 MODULE_PATH := $(shell $(GO) list -m -f '{{.Path}}')
@@ -6,6 +7,7 @@ BUILD_OUT_DIR := $(CURDIR)/.out
 SWOBU_VERSION ?= dev
 SWOBU_LDFLAGS := -s -w -X $(MODULE_PATH)/internal/app/operator/controlplane.swobuVersion=$(SWOBU_VERSION)
 GO_TEST_FLAGS ?= -failfast -timeout=5m
+COMPACTRUN := cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/compactrun --cwd "$(CURDIR)"
 
 .PHONY: help check check-fmt check-test test build artifacts clean fmt-check lint
 
@@ -31,7 +33,7 @@ artifacts: ## Build release archives + checksums into dist/release/v<SWOBU_VERSI
 	./scripts/release.sh "$(SWOBU_VERSION)"
 
 test:
-	CGO_ENABLED=0 $(GO) test $(GO_TEST_FLAGS) ./...
+	@$(COMPACTRUN) --label "opencore:test" -- sh -c 'CGO_ENABLED=0 $(GO) test $(GO_TEST_FLAGS) ./...'
 
 fmt-check:
 	@set -eu; \
@@ -42,9 +44,9 @@ fmt-check:
 	fi
 
 lint:
-	CGO_ENABLED=0 $(GO) build ./...
-	CGO_ENABLED=0 $(GO) vet ./...
-	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/check-opencore-lint
+	@$(COMPACTRUN) --label "opencore:build" -- sh -c 'CGO_ENABLED=0 $(GO) build ./...'
+	@$(COMPACTRUN) --label "opencore:vet" -- sh -c 'CGO_ENABLED=0 $(GO) vet ./...'
+	@$(COMPACTRUN) --label "opencore:check-opencore-lint" -- sh -c 'cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/check-opencore-lint'
 
 clean:
 	rm -rf .out dist

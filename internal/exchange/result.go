@@ -17,10 +17,6 @@ func NewResult[T any](value T, effects ...effect.Effect) Result[T] {
 // ClientCodec translates client-family wire documents and client-facing responses.
 type ClientCodec = wire.ClientCodec
 
-// ClientRequestResult carries the canonical request plus resolved delivery
-// returned by client-family request decoders.
-type ClientRequestResult = wire.ClientRequestResult
-
 // ProviderRequestDocumentEncoder translates canonical requests into provider wire documents.
 type ProviderRequestDocumentEncoder = wire.ProviderRequestDocumentEncoder
 
