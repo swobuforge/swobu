@@ -6,8 +6,6 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/components/compound"
 	"github.com/swobuforge/swobu/internal/terminalui/core"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/corelower"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
@@ -31,17 +29,7 @@ func BuildHelpSectionNode(model state.Model) core.Node[state.Action] {
 // It lowers the canonical core node into a retained ViewSpec for composition
 // during the migration period.  New code should prefer BuildHelpSectionNode.
 func BuildHelpSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
-	return retained.View[state.Model](func(ctx *retained.Context[state.Model]) retained.RenderNode {
-		model := ctx.Model()
-		node := BuildHelpSectionNode(model)
-		renderNode, err := corelower.Lower(node, corelower.EnvConfig{DevMode: true}, func(a state.Action) update.Action {
-			return a
-		})
-		if err != nil {
-			return nil
-		}
-		return renderNode
-	})
+	return CoreNodeAsRetained(BuildHelpSectionNode(ctx.Model()))
 }
 
 func helpActionNode(label string, url string, note string) core.Node[state.Action] {

@@ -50,7 +50,7 @@ func TestLowerStackLowersChildrenInOrder(t *testing.T) {
 	}
 }
 
-func TestLowerAssertRejectsInvalidNode(t *testing.T) {
+func TestLowerRejectsInvalidNode(t *testing.T) {
 	t.Parallel()
 
 	node := core.Action("open", core.SignalEvent[struct{}]{Kind: "opened"}).
@@ -59,34 +59,34 @@ func TestLowerAssertRejectsInvalidNode(t *testing.T) {
 			Keymap: []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
 		})
 
-	_, err := LowerAssert(node, EnvConfig{}, testCaster)
+	_, err := Lower(node, EnvConfig{}, testCaster)
 	if err == nil {
-		t.Fatal("expected LowerAssert to reject action without signal")
+		t.Fatal("expected Lower to reject action without signal")
 	}
 	if !strings.Contains(err.Error(), "action without emitted event") {
 		t.Fatalf("error = %q, want action without emitted event", err.Error())
 	}
 }
 
-func TestLowerAllowsInvalidNodeAtRuntime(t *testing.T) {
+func TestLowerAlwaysRejectsInvalidNode(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Box[struct{}](
+	_, err := Lower(core.Box[struct{}](
 		core.Text[struct{}]("a").Key(core.K("dup")),
 		core.Text[struct{}]("b").Key(core.K("dup")),
 	), EnvConfig{}, testCaster)
-	if err != nil {
-		t.Fatalf("unexpected lowering failure: %v", err)
+	if err == nil {
+		t.Fatal("expected Lower to reject invalid node")
 	}
-	if renderNode == nil {
-		t.Fatal("expected lowered render node")
+	if !strings.Contains(err.Error(), "duplicate sibling key") {
+		t.Fatalf("error = %q, want duplicate sibling key", err.Error())
 	}
 }
 
 func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Action("open", core.SignalEvent[struct{}]{Kind: "opened"}), EnvConfig{}, testCaster)
+	renderNode, err := Lower(core.Action("open", core.SignalEvent[struct{}]{Kind: "opened"}).Key(core.K("test")), EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -113,25 +113,21 @@ func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 	t.Parallel()
 
-	node := core.Action("delete", core.SignalEvent[struct{}]{}).
+	node := core.Action("delete", core.SignalEvent[struct{}]{Kind: "delete"}).
 		Key(core.K("workspace/delete")).
 		Interaction(core.InteractionSpec[struct{}]{
 			Focus:  core.FocusSpec{Mode: core.Focusable},
 			Keymap: []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
 			Help:   []core.HelpBindingSpec{{Key: "enter", Label: "delete"}},
+			Signals: []core.SignalEvent[struct{}]{
+				{Kind: "delete", Event: struct{}{}},
+			},
 			FocusSignals: []core.SignalEvent[struct{}]{
 				{
 					Kind:  "cockpit.row.focus",
 					Event: struct{}{},
 				},
 			},
-		}).
-		Contract(core.Contract[struct{}]{
-			Name:    "Action",
-			Purpose: "Focusable semantic action.",
-			Help:    []core.HelpBindingSpec{{Key: "enter", Label: "delete"}},
-			Focus:   core.FocusPolicy{FocusableWhenEnabled: true},
-			Layout:  core.LayoutPolicy{Width: core.Fill(1), Height: core.Fit()},
 		})
 
 	renderNode, err := Lower(node, EnvConfig{}, testCaster)
@@ -153,8 +149,8 @@ func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 		t.Fatalf("type = %T, want interaction.EventHandler", tree.RenderNode)
 	}
 	enterActions := handler.HandleEvent(interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEnter}, tree)
-	if len(enterActions) != 0 {
-		t.Fatalf("enter action count = %d, want 0", len(enterActions))
+	if len(enterActions) != 1 {
+		t.Fatalf("enter action count = %d, want 1", len(enterActions))
 	}
 }
 

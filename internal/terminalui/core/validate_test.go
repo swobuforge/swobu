@@ -261,6 +261,91 @@ func TestValidateRejectsActionWithoutKey(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsContractNameMissing(t *testing.T) {
+	t.Parallel()
+
+	root := Text[struct{}]("x").Contract(Contract[struct{}]{
+		Signals: []SignalSpec[struct{}]{{Kind: "click"}},
+	})
+	diags := Validate[struct{}](root)
+	wantMsg := "contract with fields set but no name"
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, wantMsg) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %#v, want one with %q", diags, wantMsg)
+	}
+}
+
+func TestValidateRejectsContractSignalCountMismatch(t *testing.T) {
+	t.Parallel()
+
+	root := Text[struct{}]("x").Contract(Contract[struct{}]{
+		Name:    "Widget",
+		Signals: []SignalSpec[struct{}]{{Kind: "a"}},
+	}).Interaction(InteractionSpec[struct{}]{})
+	diags := Validate[struct{}](root)
+	wantMsg := "contract signals count 1 does not match interaction signals 0"
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, wantMsg) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %#v, want one with %q", diags, wantMsg)
+	}
+}
+
+func TestValidateRejectsContractFocusMismatch(t *testing.T) {
+	t.Parallel()
+
+	root := Text[struct{}]("x").Contract(Contract[struct{}]{
+		Name:  "Widget",
+		Focus: FocusPolicy{FocusableWhenEnabled: true},
+	})
+	diags := Validate[struct{}](root)
+	wantMsg := "contract claims focusable but node is not focusable"
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, wantMsg) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %#v, want one with %q", diags, wantMsg)
+	}
+}
+
+func TestValidateRejectsContractDuplicateSignalKind(t *testing.T) {
+	t.Parallel()
+
+	root := Text[struct{}]("x").Contract(Contract[struct{}]{
+		Name:    "Widget",
+		Signals: []SignalSpec[struct{}]{{Kind: "dup"}, {Kind: "dup"}},
+	}).Interaction(InteractionSpec[struct{}]{
+		Signals: []SignalEvent[struct{}]{{Kind: "dup"}, {Kind: "dup"}},
+	})
+	diags := Validate[struct{}](root)
+	wantMsg := `contract duplicate signal kind "dup"`
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, wantMsg) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %#v, want one with %q", diags, wantMsg)
+	}
+}
+
 func TestMinMaxRejectsDimFitMax(t *testing.T) {
 	t.Parallel()
 

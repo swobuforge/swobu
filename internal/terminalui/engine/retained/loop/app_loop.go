@@ -5,6 +5,7 @@ package loop
 import (
 	"context"
 
+	"github.com/swobuforge/swobu/internal/terminalui/core"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/reconcile"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -23,11 +24,16 @@ type AppLoop[M any] struct {
 	Focused         *layout.LayoutNode
 	focusedID       string // stable semantic focus identity from core.FocusSpec
 	pendingFocusKey string
-	locals          *reconcile.LocalStore
-	reconciler      *reconcile.Reconciler[M]
-	invalidated     bool
-	followUp        chan []update.Action
-	ctx             context.Context
+	// Semantic focus graph compiled from the last core.Node view tree.
+	// Used instead of render-tree traversal when non-empty for stable
+	// focus identity and order.
+	focusGraph core.FocusGraph
+
+	locals      *reconcile.LocalStore
+	reconciler  *reconcile.Reconciler[M]
+	invalidated bool
+	followUp    chan []update.Action
+	ctx         context.Context
 }
 
 func New[M any](model M, reduce Reducer[M]) *AppLoop[M] {

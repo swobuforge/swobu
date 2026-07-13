@@ -83,19 +83,16 @@ func TestLoadRoutingModelCatalogEffect_SlowProbeMapsToTimeoutHint(t *testing.T) 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	actions := (LoadRoutingModelCatalogEffect{
+	action := (LoadRoutingModelCatalogEffect{
 		Scope:         "add_model_draft",
 		ProviderSpec:  "openrouter",
 		BaseURL:       "https://openrouter.ai/api/v1",
 		CredentialRef: "file:/tmp/openrouter.key",
-	}).Execute(ctx)
+	}).Run(ctx)
 
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	loaded, ok := actions[0].(RoutingModelCatalogLoaded)
+	loaded, ok := action.(RoutingModelCatalogLoaded)
 	if !ok {
-		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
+		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", action)
 	}
 	want := "model probe timed out at " + srv.URL + " (retry)"
 	if loaded.Error != want {
@@ -118,19 +115,16 @@ func TestLoadRoutingModelCatalogEffect_ChatGPTTierlessCredentialErrorSurfaced(t 
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (LoadRoutingModelCatalogEffect{
+	action := (LoadRoutingModelCatalogEffect{
 		Scope:         "add_model_draft",
 		ProviderSpec:  "chatgpt",
 		BaseURL:       "https://api.openai.com/v1",
 		CredentialRef: "keychain:chatgpt/sess_abc",
-	}).Execute(context.Background())
+	}).Run(context.Background())
 
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	loaded, ok := actions[0].(RoutingModelCatalogLoaded)
+	loaded, ok := action.(RoutingModelCatalogLoaded)
 	if !ok {
-		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
+		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", action)
 	}
 	want := "BAD_ENDPOINT: chatgpt subscription tier could not be resolved from credential"
 	if loaded.Error != want {
@@ -152,23 +146,20 @@ func TestLoadRoutingModelCatalogEffect_OpenAICompatibleDefaultsAuthHeaderQueryPa
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (LoadRoutingModelCatalogEffect{
+	action := (LoadRoutingModelCatalogEffect{
 		Scope:            "create_draft",
 		ProviderSpec:     "openai_compatible",
 		BaseURL:          "https://example.test/v1",
 		CredentialRef:    "env:OPENAI_API_KEY",
 		ProviderProtocol: "auto",
-	}).Execute(context.Background())
+	}).Run(context.Background())
 
 	if sawAuthHeader != "Authorization" {
 		t.Fatalf("auth header query=%q want Authorization", sawAuthHeader)
 	}
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	loaded, ok := actions[0].(RoutingModelCatalogLoaded)
+	loaded, ok := action.(RoutingModelCatalogLoaded)
 	if !ok {
-		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", actions[0])
+		t.Fatalf("action type = %T, want RoutingModelCatalogLoaded", action)
 	}
 	if loaded.AuthHeader != "Authorization" {
 		t.Fatalf("loaded auth header=%q want Authorization", loaded.AuthHeader)
@@ -194,13 +185,10 @@ func TestRefreshStatusProjectionEffect_MissingObservedAt_FailsFast(t *testing.T)
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	failed, ok := actions[0].(TrafficLoadFailed)
+	action := (RefreshStatusProjectionEffect{}).Run(context.Background())
+	failed, ok := action.(TrafficLoadFailed)
 	if !ok {
-		t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
+		t.Fatalf("action type = %T, want TrafficLoadFailed", action)
 	}
 	if !strings.Contains(strings.ToLower(failed.Message), "missing observed_at") { // swobu:io-string source=domain
 		t.Fatalf("failure message = %q, want missing observed_at", failed.Message)
@@ -223,13 +211,10 @@ func TestRefreshStatusProjectionEffect_EndpointScopeMismatch_FailsFast(t *testin
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshStatusProjectionEffect{EndpointName: "acme"}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	failed, ok := actions[0].(TrafficLoadFailed)
+	action := (RefreshStatusProjectionEffect{EndpointName: "acme"}).Run(context.Background())
+	failed, ok := action.(TrafficLoadFailed)
 	if !ok {
-		t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
+		t.Fatalf("action type = %T, want TrafficLoadFailed", action)
 	}
 	if !strings.Contains(strings.ToLower(failed.Message), "scope endpoint mismatch") { // swobu:io-string source=domain
 		t.Fatalf("failure message = %q, want scope endpoint mismatch", failed.Message)
@@ -252,13 +237,10 @@ func TestRefreshStatusProjectionEffect_MapsTokenAndCacheUsageFields(t *testing.T
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	replaced, ok := actions[0].(ReplaceStatusProjection)
+	action := (RefreshStatusProjectionEffect{}).Run(context.Background())
+	replaced, ok := action.(ReplaceStatusProjection)
 	if !ok {
-		t.Fatalf("action type = %T, want ReplaceStatusProjection", actions[0])
+		t.Fatalf("action type = %T, want ReplaceStatusProjection", action)
 	}
 	if len(replaced.Rows) != 1 {
 		t.Fatalf("rows length = %d, want 1", len(replaced.Rows))
@@ -294,13 +276,10 @@ func TestRefreshStatusProjectionEffect_MapsMutations(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	replaced, ok := actions[0].(ReplaceStatusProjection)
+	action := (RefreshStatusProjectionEffect{}).Run(context.Background())
+	replaced, ok := action.(ReplaceStatusProjection)
 	if !ok {
-		t.Fatalf("action type = %T, want ReplaceStatusProjection", actions[0])
+		t.Fatalf("action type = %T, want ReplaceStatusProjection", action)
 	}
 	if len(replaced.Rows) != 1 {
 		t.Fatalf("rows length = %d, want 1", len(replaced.Rows))
@@ -333,13 +312,10 @@ func TestRefreshStatusProjectionEffect_InvalidStageReports_FailsFast(t *testing.
 		defer srv.Close()
 
 		t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-		actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
-		if len(actions) != 1 {
-			t.Fatalf("actions length = %d, want 1", len(actions))
-		}
-		failed, ok := actions[0].(TrafficLoadFailed)
+		action := (RefreshStatusProjectionEffect{}).Run(context.Background())
+		failed, ok := action.(TrafficLoadFailed)
 		if !ok {
-			t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
+			t.Fatalf("action type = %T, want TrafficLoadFailed", action)
 		}
 		if !strings.Contains(strings.ToLower(failed.Message), "duplicate stage/carrier") { // swobu:io-string source=domain
 			t.Fatalf("failure message = %q, want duplicate stage/carrier", failed.Message)
@@ -358,13 +334,10 @@ func TestRefreshStatusProjectionEffect_InvalidStageReports_FailsFast(t *testing.
 		defer srv.Close()
 
 		t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-		actions := (RefreshStatusProjectionEffect{}).Execute(context.Background())
-		if len(actions) != 1 {
-			t.Fatalf("actions length = %d, want 1", len(actions))
-		}
-		failed, ok := actions[0].(TrafficLoadFailed)
+		action := (RefreshStatusProjectionEffect{}).Run(context.Background())
+		failed, ok := action.(TrafficLoadFailed)
 		if !ok {
-			t.Fatalf("action type = %T, want TrafficLoadFailed", actions[0])
+			t.Fatalf("action type = %T, want TrafficLoadFailed", action)
 		}
 		if !strings.Contains(strings.ToLower(failed.Message), "mutated without applied") { // swobu:io-string source=domain
 			t.Fatalf("failure message = %q, want mutated without applied", failed.Message)
@@ -384,13 +357,10 @@ func TestRefreshDaemonStatusEffect_MissingControlPlaneProtocolFailsFast(t *testi
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshDaemonStatusEffect{}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	incompatible, ok := actions[0].(ControlPlaneIncompatibleDetected)
+	action := (RefreshDaemonStatusEffect{}).Run(context.Background())
+	incompatible, ok := action.(ControlPlaneIncompatibleDetected)
 	if !ok {
-		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", actions[0])
+		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", action)
 	}
 	if incompatible.HasDaemonProtocol {
 		t.Fatal("HasDaemonProtocol = true, want false")
@@ -409,13 +379,10 @@ func TestRefreshDaemonStatusEffect_ProtocolMismatchFailsFast(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshDaemonStatusEffect{}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	incompatible, ok := actions[0].(ControlPlaneIncompatibleDetected)
+	action := (RefreshDaemonStatusEffect{}).Run(context.Background())
+	incompatible, ok := action.(ControlPlaneIncompatibleDetected)
 	if !ok {
-		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", actions[0])
+		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", action)
 	}
 	if !incompatible.HasDaemonProtocol {
 		t.Fatal("HasDaemonProtocol = false, want true")
@@ -440,13 +407,10 @@ func TestRefreshDaemonStatusEffect_MissingSwobuVersionFailsFast(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (RefreshDaemonStatusEffect{}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length = %d, want 1", len(actions))
-	}
-	incompatible, ok := actions[0].(ControlPlaneIncompatibleDetected)
+	action := (RefreshDaemonStatusEffect{}).Run(context.Background())
+	incompatible, ok := action.(ControlPlaneIncompatibleDetected)
 	if !ok {
-		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", actions[0])
+		t.Fatalf("action type = %T, want ControlPlaneIncompatibleDetected", action)
 	}
 	if !strings.Contains(strings.ToLower(incompatible.Reason), "missing required swobu_version") { // swobu:io-string source=domain
 		t.Fatalf("reason = %q, want missing swobu_version", incompatible.Reason)

@@ -17,6 +17,17 @@ func testCaster(e struct{}) update.Action {
 	return update.TypedAction[struct{}]{Event: e}
 }
 
+func paintTree(t *testing.T, node *layout.LayoutNode, p paint.Painter, ctx *layout.PaintContext) {
+	if node == nil || node.BorderRect.Empty() {
+		return
+	}
+	scoped := p.WithClip(node.ClipRect).WithOrigin(geom.Point{X: node.BorderRect.X, Y: node.BorderRect.Y})
+	node.RenderNode.Paint(scoped, node, ctx)
+	for _, child := range node.Kids {
+		paintTree(t, child, scoped, ctx)
+	}
+}
+
 func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 	t.Parallel()
 
@@ -52,9 +63,12 @@ func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 	}
 	_ = typedAction
 
-	buf := paint.NewBuffer(geom.Rect{W: 48, H: 1})
-	lowered.Paint(buf, &layout.LayoutNode{BorderRect: geom.Rect{W: 48, H: 1}}, &layout.PaintContext{})
+	bounds := geom.Rect{W: 48, H: 1}
+	tree := (&layout.TreeBuilder{}).Build(lowered, bounds)
+	buf := paint.NewBuffer(bounds)
+	paintTree(t, tree, buf, &layout.PaintContext{})
 	out := strings.TrimSpace(buf.String()) // swobu:io-string source=domain
+	t.Logf("Output: %q", out)
 	if !strings.Contains(out, "ask question") {
 		t.Fatalf("render = %q, want label text", out)
 	}

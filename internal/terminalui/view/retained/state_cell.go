@@ -1,6 +1,6 @@
 package retained
 
-// UseState is a temporary compatibility shim for local hook state during
+// TODO: UseState is a temporary compatibility shim for local hook state during
 // migration to semantic core. Do not add new uses.
 //
 // TODO remove after all callers migrated (slice 9+). 61 uses across 15 files.

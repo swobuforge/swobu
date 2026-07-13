@@ -29,9 +29,11 @@ func (f focusIDNode) CanFocus(*layout.LayoutNode) bool { return true }
 // containerNode is a non-focusable RenderNode used as a layout shell.
 type containerNode struct{}
 
-func (containerNode) Measure(geom.Constraints, *layout.LayoutContext) geom.Size        { return geom.Size{} }
-func (containerNode) Arrange(*layout.LayoutNode, *layout.LayoutContext) layout.NodeLayout { return layout.NodeLayout{} }
-func (containerNode) Paint(paint.Painter, *layout.LayoutNode, *layout.PaintContext)      {}
+func (containerNode) Measure(geom.Constraints, *layout.LayoutContext) geom.Size { return geom.Size{} }
+func (containerNode) Arrange(*layout.LayoutNode, *layout.LayoutContext) layout.NodeLayout {
+	return layout.NodeLayout{}
+}
+func (containerNode) Paint(paint.Painter, *layout.LayoutNode, *layout.PaintContext) {}
 
 func TestRepairFocus_UsesSemanticID(t *testing.T) {
 	noopReduce := func(m *struct{}, a update.Action) []update.Effect { return nil }

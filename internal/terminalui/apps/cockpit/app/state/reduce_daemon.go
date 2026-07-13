@@ -5,10 +5,9 @@ import (
 
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/shared/daemonstate"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-func allowWhileControlPlaneIncompatible(action update.Action) bool {
+func allowWhileControlPlaneIncompatible(action Action) bool {
 	switch action.(type) {
 	case stateeffect.ControlPlaneIncompatibleDetected,
 		stateeffect.ReplaceDaemonStatus,
@@ -28,7 +27,7 @@ func allowWhileControlPlaneIncompatible(action update.Action) bool {
 	}
 }
 
-func reduceDaemonState(model *Model, action update.Action) bool {
+func reduceDaemonState(model *Model, action Action) bool {
 	switch value := action.(type) {
 	case stateeffect.ControlPlaneIncompatibleDetected:
 		reason := strings.TrimSpace(value.Reason) // swobu:io-string source=boundary

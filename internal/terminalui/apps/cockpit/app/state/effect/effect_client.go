@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // CheckClientAccessEffect probes the daemon's endpoint canonical.
@@ -14,19 +13,19 @@ type CheckClientAccessEffect struct {
 	ProviderConfig stateModel.ProviderConfigSnapshot
 }
 
-func (cmd CheckClientAccessEffect) Execute(ctx context.Context) []update.Action {
+func (cmd CheckClientAccessEffect) Run(ctx context.Context) any {
 	endpointName := strings.TrimSpace(cmd.EndpointName) // swobu:io-string source=boundary
 	if endpointName == "" {
-		return []update.Action{ClientAccessCheckFailed{Message: "workspace is not selected"}}
+		return ClientAccessCheckFailed{Message: "workspace is not selected"}
 	}
 	outcome, err := operatorClient().CheckClientAccess(ctx, endpointName, cmd.ProviderConfig.ModelID)
 	if err != nil {
-		return []update.Action{ClientAccessCheckFailed{Message: "client access check could not reach the daemon"}}
+		return ClientAccessCheckFailed{Message: "client access check could not reach the daemon"}
 	}
-	return []update.Action{ClientAccessChecked{
+	return ClientAccessChecked{
 		Status:  outcome.Status,
 		Message: outcome.Message,
-	}}
+	}
 }
 
 // ClientAccessCheckFailed reports that a client access check failed.

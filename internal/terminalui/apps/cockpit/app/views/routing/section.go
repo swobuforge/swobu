@@ -356,11 +356,11 @@ func workspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec[stat
 	model := ctx.Model()
 	snapshot := selectors.CurrentEndpointSnapshot(model)
 	if snapshot == nil {
-		return views.Section[state.Model](views.SectionRouting, views.RowStatic("", "not selected"))
+		return views.Section(views.SectionRouting, views.RowStatic("", "not selected"))
 	}
 	provider := selectors.SelectedProviderConfig(model, snapshot)
 	if provider == nil {
-		return views.Section[state.Model](views.SectionRouting, views.RowStatic("", "not selected"))
+		return views.Section(views.SectionRouting, views.RowStatic("", "not selected"))
 	}
 	summary := workspaceRoutingSummary(*provider)
 	if model.HeaderStatus == "saved" {

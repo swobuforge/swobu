@@ -3,13 +3,12 @@ package state
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModelCatalogRequestedAction) []update.Effect {
+func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModelCatalogRequestedAction) []EffectOnce {
 	scope := strings.TrimSpace(value.Scope)           // swobu:io-string source=boundary
 	authHeader := strings.TrimSpace(value.AuthHeader) // swobu:io-string source=boundary
 	if authHeader == "" {
@@ -35,7 +34,7 @@ func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModel
 	} else {
 		return nil
 	}
-	return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+	return []EffectOnce{stateeffect.LoadRoutingModelCatalogEffect{
 		Scope:            scope,
 		ProviderSpec:     id.ProviderSpec,
 		BaseURL:          id.BaseURL,
@@ -45,20 +44,20 @@ func handleLoadRoutingModelCatalogRequested(model *Model, value LoadRoutingModel
 	}}
 }
 
-func handleRoutingModelCatalogLoaded(model *Model, value stateeffect.RoutingModelCatalogLoaded) []update.Effect {
+func handleRoutingModelCatalogLoaded(model *Model, value stateeffect.RoutingModelCatalogLoaded) []EffectOnce {
 	scope := strings.TrimSpace(value.Scope)                                                                                                                                                                                                             // swobu:io-string source=boundary
 	if !matchesRoutingModelCatalogLoad(model, scope, strings.TrimSpace(value.ProviderSpec), strings.TrimSpace(value.BaseURL), strings.TrimSpace(value.AuthHeader), strings.TrimSpace(value.CredentialRef), strings.TrimSpace(value.ProviderProtocol)) { // swobu:io-string source=domain
 		return nil
 	}
 	if scope == RoutingModelCatalogScopeCreateDraft {
-		model.CreateDraftModelDeployments = ports.CloneProviderDeployments(value.Deployments)
+		model.CreateDraftModelDeployments = profile.CloneProviderDeployments(value.Deployments)
 		model.CreateDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
 		model.CreateDraftModelProbePending = false
 		resolvedVariant := strings.TrimSpace(value.ResolvedProviderProtocol) // swobu:io-string source=boundary
 		model.CreateDraftModelTestProtocol = resolvedVariant
 		model.CreateDraftModelTestPassed = model.CreateDraftModelError == ""
 	} else if scope == RoutingModelCatalogScopeAddModelDraft {
-		model.AddModelDraftModelDeployments = ports.CloneProviderDeployments(value.Deployments)
+		model.AddModelDraftModelDeployments = profile.CloneProviderDeployments(value.Deployments)
 		model.AddModelDraftModelError = strings.TrimSpace(value.Error) // swobu:io-string source=boundary
 		model.AddModelDraftModelProbePending = false
 	}

@@ -1,6 +1,7 @@
 package root
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,12 +10,33 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/loop"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	"github.com/swobuforge/swobu/internal/terminalui/testharness"
 	screenassert "github.com/swobuforge/swobu/testscreen/assert"
 )
 
 func newTestRuntime(model state.Model) *loop.AppLoop[state.Model] {
-	return loop.New(model, state.Reduce)
+	return loop.New(model, func(m *state.Model, a update.Action) []update.Effect {
+		effects := state.Reduce(m, a)
+		if len(effects) == 0 {
+			return nil
+		}
+		out := make([]update.Effect, 0, len(effects))
+		for _, e := range effects {
+			out = append(out, effectBridge{e})
+		}
+		return out
+	})
+}
+
+type effectBridge struct{ once state.EffectOnce }
+
+func (b effectBridge) Execute(ctx context.Context) []update.Action {
+	action := b.once.Run(ctx)
+	if action == nil {
+		return nil
+	}
+	return []update.Action{action}
 }
 
 func updateKey(key interaction.Key) interaction.Event {

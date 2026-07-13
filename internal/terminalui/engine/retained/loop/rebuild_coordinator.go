@@ -33,7 +33,7 @@ func (loop *AppLoop[M]) RebuildPending(root retained.ViewSpec[M], bounds geom.Re
 		return nil
 	}
 	previous := loop.Tree
-	previousFocusOrder := focusOrder(previous)
+	previousFocusOrder := loop.focusOrder()
 	previousFocusedIndex := focusIndex(previousFocusOrder, loop.Focused)
 	previousByID := make(map[layout.NodeID]*layout.LayoutNode)
 	collectByID(previous, previousByID)
@@ -56,28 +56,6 @@ func (loop *AppLoop[M]) RebuildPending(root retained.ViewSpec[M], bounds geom.Re
 
 	loop.invalidated = false
 	return lifecycle
-}
-
-func focusIndex(nodes []*layout.LayoutNode, target *layout.LayoutNode) int {
-	if target == nil {
-		return -1
-	}
-	for i, node := range nodes {
-		if node != nil && node.ID == target.ID {
-			return i
-		}
-	}
-	return -1
-}
-
-func collectByID(node *layout.LayoutNode, out map[layout.NodeID]*layout.LayoutNode) {
-	if node == nil {
-		return
-	}
-	out[node.ID] = node
-	for _, child := range node.Kids {
-		collectByID(child, out)
-	}
 }
 
 func (loop *AppLoop[M]) applyPendingFocusKey() {

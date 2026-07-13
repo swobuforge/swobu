@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 var startProcess = func(command *exec.Cmd) error {
@@ -19,24 +17,24 @@ type OpenSupportLinkEffect struct {
 	URL   string
 }
 
-func (cmd OpenSupportLinkEffect) Execute(ctx context.Context) []update.Action {
+func (cmd OpenSupportLinkEffect) Run(ctx context.Context) any {
 	label := strings.TrimSpace(cmd.Label) // swobu:io-string source=boundary
 	if label == "" {
 		label = "support"
 	}
 	rawURL := strings.TrimSpace(cmd.URL) // swobu:io-string source=boundary
 	if rawURL == "" {
-		return []update.Action{SupportLinkNoted{Message: "support link is missing"}}
+		return SupportLinkNoted{Message: "support link is missing"}
 	}
 	err := openURL(ctx, rawURL)
 	if err != nil {
-		return []update.Action{SupportLinkNoted{
+		return SupportLinkNoted{
 			Message: fmt.Sprintf("%s open failed; fallback %s", label, rawURL),
-		}}
+		}
 	}
-	return []update.Action{SupportLinkNoted{
+	return SupportLinkNoted{
 		Message: fmt.Sprintf("%s opened; fallback %s", label, rawURL),
-	}}
+	}
 }
 
 type SupportLinkNoted struct{ Message string }

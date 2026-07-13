@@ -36,7 +36,7 @@ func lowerAction[E any](n core.Node[E], env EnvConfig, caster EventCaster[E]) (l
 	}
 	resolver := env.Resolver
 	if resolver == nil {
-		resolver = &StyleResolver{Palette: DefaultPalette}
+		resolver = &StyleResolver{ColorConfig: DefaultColorConfig}
 	}
 	sizing := layout.Sizing{W: layout.SizeFit, H: layout.SizeFit}
 	sz := n.LayoutValue().Size

@@ -65,11 +65,8 @@ func TestReduce_ClientLaunchRequested_EndToEndLaunchFlow(t *testing.T) {
 				t.Fatalf("effect type = %T, want LaunchClientEffect", effects[0])
 			}
 
-			actions := launch.Execute(context.Background())
-			if len(actions) != 1 {
-				t.Fatalf("actions len = %d, want 1", len(actions))
-			}
-			Reduce(&model, actions[0])
+			action := launch.Run(context.Background())
+			Reduce(&model, action)
 			if got := model.HeaderStatus; got != "ready" {
 				t.Fatalf("header status after launch execute = %q, want %q", got, "ready")
 			}

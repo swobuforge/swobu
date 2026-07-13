@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
@@ -15,7 +15,7 @@ type modelPickerOption struct {
 	Key        string
 	Label      string
 	Selected   bool
-	Deployment ports.ProviderDeploymentRecord
+	Deployment profile.ProviderDeploymentRecord
 	OnChoose   func() []update.Action
 }
 

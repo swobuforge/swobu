@@ -140,7 +140,7 @@ func Action[E any](label string, signal SignalEvent[E]) Node[E] {
 		Purpose: "Focusable semantic action.",
 		Signals: []SignalSpec[E]{{Kind: signal.Kind}},
 		Layout: LayoutPolicy{
-			Width:  Fill(1),
+			Width:  Fit(),
 			Height: Fit(),
 		},
 		Focus: FocusPolicy{FocusableWhenEnabled: true},

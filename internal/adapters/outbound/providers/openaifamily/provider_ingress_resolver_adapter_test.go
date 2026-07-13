@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -28,7 +27,7 @@ func TestResolveProviderIngress_PreservesTransportErrorDetail(t *testing.T) {
 
 	transportErr := errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")
 	exec := NewExecutor(&http.Client{Transport: failingRoundTripper{err: transportErr}}, nil, NewOllamaPolicy())
-	req := ports.ProviderRequest{
+	req := exchange.ProviderRequest{
 		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-4o-mini",
 		}),

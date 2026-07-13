@@ -3,7 +3,7 @@ package state
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
@@ -245,7 +245,7 @@ func TestReduce_ProviderAuthSessionCredentialResolved_CreateDraft_AllowsLoadedRe
 		BaseURL:                  load.BaseURL,
 		CredentialRef:            load.CredentialRef,
 		ProviderProtocol:         load.ProviderProtocol,
-		Deployments:              []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
+		Deployments:              []profile.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
 		Error:                    "",
 		ResolvedProviderProtocol: "responses_stream",
 	})

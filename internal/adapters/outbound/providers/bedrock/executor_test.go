@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -36,7 +35,7 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 	)
 }
 
-func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) ports.ProviderRequest {
+func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) exchange.ProviderRequest {
 	t.Helper()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:     "openai.gpt-4.1-mini",
@@ -50,8 +49,8 @@ func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}
-	return ports.NewProviderRequest(
-		request,
+	return exchange.NewProviderRequest(
+		"test-ex", protocolkind.Responses, request,
 		wireRequestResult.Value,
 		exchange.NewExecutionContract(providerDelivery),
 		newBedrockTarget(baseURL, credentialRef, kind),
@@ -596,8 +595,8 @@ func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *t
 	}
 	exec := NewExecutor(upstream.Client())
 	sink := &recordingEffectSink{}
-	req := ports.NewProviderRequest(
-		request,
+	req := exchange.NewProviderRequest(
+		"test-ex", protocolkind.Responses, request,
 		wireRequestResult.Value,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages),

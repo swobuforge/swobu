@@ -7,14 +7,13 @@ import (
 
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type endpointRepoStub struct {
 	endpoints []endpointintent.Endpoint
 }
 
-var _ ports.EndpointIntentRepository = (*endpointRepoStub)(nil)
+var _ endpointintent.EndpointIntentRepository = (*endpointRepoStub)(nil)
 
 func (s *endpointRepoStub) ListEndpoints(_ context.Context) ([]endpointintent.Endpoint, error) {
 	return append([]endpointintent.Endpoint(nil), s.endpoints...), nil

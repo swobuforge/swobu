@@ -15,8 +15,9 @@ import (
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	exchangeruntime "github.com/swobuforge/swobu/internal/adapters/wire/exchangeruntime"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/config"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
@@ -59,10 +60,9 @@ var daemonIdleTimeout = 60 * time.Second
 // bootstrap must wire into the live request path.
 type StartInput struct {
 	ConfigPath       string
-	Providers        ports.ProviderIngressResolver
-	ModelCatalog     ports.ProviderModelCatalog
-	TrafficEventSink ports.TrafficEventSink
-	Continuation     ports.ContinuationStore
+	Providers        exchange.ProviderIngressResolver
+	ModelCatalog     exchange.ProviderModelCatalog
+	TrafficEventSink observation.TrafficEventSink
 	Logger           *slog.Logger
 }
 
@@ -122,7 +122,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.trafficEventStore = store
 	}
 	trafficEventSink = newTelemetryObservedTrafficEventSink(trafficEventSink, daemon.observeTelemetryEvent)
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, in.Continuation, trafficEventSink, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, trafficEventSink, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}

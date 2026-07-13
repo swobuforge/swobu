@@ -3,7 +3,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -18,7 +18,7 @@ type draftModelBinding interface {
 	Snapshot(model state.Model) state.ProviderConfigSnapshot
 	SetSnapshot(next state.ProviderConfigSnapshot) []update.Action
 	LoadCatalog(next state.ProviderConfigSnapshot) []update.Action
-	Catalog(model state.Model) ([]ports.ProviderDeploymentRecord, string)
+	Catalog(model state.Model) ([]profile.ProviderDeploymentRecord, string)
 	ProbePending(model state.Model) bool
 	CloseMode() string
 }
@@ -52,7 +52,7 @@ func (createDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []
 	}
 }
 
-func (createDraftModelBinding) Catalog(model state.Model) ([]ports.ProviderDeploymentRecord, string) {
+func (createDraftModelBinding) Catalog(model state.Model) ([]profile.ProviderDeploymentRecord, string) {
 	return model.CreateDraftModelDeployments, model.CreateDraftModelError
 }
 
@@ -93,7 +93,7 @@ func (b addDraftModelBinding) LoadCatalog(next state.ProviderConfigSnapshot) []u
 	}
 }
 
-func (addDraftModelBinding) Catalog(model state.Model) ([]ports.ProviderDeploymentRecord, string) {
+func (addDraftModelBinding) Catalog(model state.Model) ([]profile.ProviderDeploymentRecord, string) {
 	return model.AddModelDraftModelDeployments, model.AddModelDraftModelError
 }
 

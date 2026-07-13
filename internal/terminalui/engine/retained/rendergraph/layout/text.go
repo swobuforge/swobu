@@ -12,6 +12,7 @@ import (
 type TextRenderNode struct {
 	Sized
 	Value string
+	Style paint.Style
 }
 
 func NewText(s string) *TextRenderNode {
@@ -42,6 +43,9 @@ func (t *TextRenderNode) Arrange(node *LayoutNode, _ *LayoutContext) NodeLayout 
 }
 
 func (t *TextRenderNode) Paint(p paint.Painter, node *LayoutNode, _ *PaintContext) {
+	if !t.Style.IsZero() {
+		p = p.WithStyle(t.Style)
+	}
 	lines := strings.Split(t.Value, "\n")
 	for i, line := range lines {
 		p.Text(0, i, line)

@@ -20,7 +20,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -230,7 +229,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 
 	rt := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
@@ -285,7 +284,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	rt := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
 	sink := &recordingEffectSink{}
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
@@ -340,7 +339,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
@@ -374,7 +373,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), failingCredentialResolver{})
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
@@ -446,7 +445,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
@@ -499,7 +498,7 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},

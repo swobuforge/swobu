@@ -20,11 +20,12 @@ const (
 
 // DimSize is one dimension of semantic layout.
 type DimSize struct {
-	Mode   DimMode
-	Value  int
-	Min    int
-	Max    int
-	Weight int
+	Mode       DimMode
+	Value      int
+	Min        int
+	Max        int
+	Weight     int
+	UBoundMode DimMode // upper-bound mode preserved from MinMax(max)
 }
 
 // Fit resolves to content size.
@@ -43,13 +44,15 @@ func Fill(weight int) DimSize {
 
 // MinMax resolves within a bounded range.
 //
-// Invariant: max mode must not be DimFit. Use Fit() for unbounded sizing;
-// MinMax requires a meaningful upper bound.
+// The returned DimSize preserves the max mode as part of the upper-bound
+// contract so the layout pass can distinguish Fixed, Fill, and Weighted
+// ceilings.  The upper-bound DimSize must not itself be DimFit; use
+// Fit() for unbounded sizing.
 func MinMax(min int, max DimSize) DimSize {
 	if max.Mode == DimFit {
 		panic("core.MinMax: max mode cannot be DimFit; use Fit() for unbounded sizing")
 	}
-	return DimSize{Mode: DimMinMax, Min: min, Max: max.Value, Weight: max.Weight}
+	return DimSize{Mode: DimMinMax, Min: min, Max: max.Value, Weight: max.Weight, UBoundMode: max.Mode}
 }
 
 // Size carries semantic width and height dimensions.

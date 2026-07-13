@@ -6,7 +6,6 @@ import (
 	"io/fs"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type CommandErrorCode string
@@ -44,10 +43,10 @@ func (e CommandError) Unwrap() error { return e.Err }
 // CLI, and future WebUI should depend on this seam via the daemon control plane
 // rather than talking to endpoint storage directly.
 type OperatorEndpointStore struct {
-	repo ports.EndpointIntentRepository
+	repo endpointintent.EndpointIntentRepository
 }
 
-func NewOperatorEndpointStore(repo ports.EndpointIntentRepository) OperatorEndpointStore {
+func NewOperatorEndpointStore(repo endpointintent.EndpointIntentRepository) OperatorEndpointStore {
 	return OperatorEndpointStore{repo: repo}
 }
 

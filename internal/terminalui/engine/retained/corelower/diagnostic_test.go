@@ -10,10 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
 )
 
-// TestLowerDevModeRendersDiagnostics proves that Lower in dev mode turns an
-// invalid node tree into visible diagnostic text (red error nodes) instead of
-// returning nil.
-func TestLowerDevModeRendersDiagnostics(t *testing.T) {
+// TestLowerRejectsInvalidTree proves that Lower always validates and returns
+// an error for invalid input.
+func TestLowerRejectsInvalidTree(t *testing.T) {
 	t.Parallel()
 
 	// Duplicate keys trigger a validation error.
@@ -22,27 +21,17 @@ func TestLowerDevModeRendersDiagnostics(t *testing.T) {
 		core.Text[struct{}]("b").Key(core.K("dup")),
 	)
 
-	renderNode, err := Lower(node, EnvConfig{DevMode: true}, testCaster)
-	if err != nil {
-		t.Fatalf("lower with DevMode: unexpected error %v", err)
+	_, err := Lower(node, EnvConfig{}, testCaster)
+	if err == nil {
+		t.Fatal("expected Lower to reject invalid node")
 	}
-	if renderNode == nil {
-		t.Fatal("expected a diagnostic render node, got nil")
-	}
-
-	tree := (&layout.TreeBuilder{}).Build(renderNode, geom.Rect{W: 80, H: 4})
-	buf := paint.NewBuffer(geom.Rect{W: 80, H: 4})
-	paintNode(tree, buf, &layout.PaintContext{})
-	got := buf.String()
-
-	if !strings.Contains(got, "duplicate sibling key") {
-		t.Fatalf("diagnostic text missing 'duplicate sibling key'; got:\n%s", got)
+	if !strings.Contains(err.Error(), "duplicate sibling key") {
+		t.Fatalf("error = %q, want duplicate sibling key", err.Error())
 	}
 }
 
-// TestLowerDevModeSkipsValidationForValidTree proves that DevMode does not
-// break lowering when the tree is valid.
-func TestLowerDevModeSkipsValidationForValidTree(t *testing.T) {
+// TestLowerAllowsValidTree proves that lowering succeeds when the tree is valid.
+func TestLowerAllowsValidTree(t *testing.T) {
 	t.Parallel()
 
 	node := core.Stack[struct{}](core.AxisVertical,
@@ -50,9 +39,9 @@ func TestLowerDevModeSkipsValidationForValidTree(t *testing.T) {
 		core.Text[struct{}]("b").Key(core.K("b")),
 	)
 
-	renderNode, err := Lower(node, EnvConfig{DevMode: true}, testCaster)
+	renderNode, err := Lower(node, EnvConfig{}, testCaster)
 	if err != nil {
-		t.Fatalf("lower valid tree with DevMode: %v", err)
+		t.Fatalf("lower valid tree: %v", err)
 	}
 	if renderNode == nil {
 		t.Fatal("expected render node")
@@ -63,45 +52,6 @@ func TestLowerDevModeSkipsValidationForValidTree(t *testing.T) {
 	paintNode(tree, buf, &layout.PaintContext{})
 	if got := buf.String(); got != "a\nb" {
 		t.Fatalf("paint = %q, want a\\nb", got)
-	}
-}
-
-// TestLowerProductionModeSkipsValidation proves that production mode (DevMode
-// false) does NOT validate and returns the lowered tree even for invalid
-// input.
-func TestLowerProductionModeSkipsValidation(t *testing.T) {
-	t.Parallel()
-
-	node := core.Box[struct{}](
-		core.Text[struct{}]("a").Key(core.K("dup")),
-		core.Text[struct{}]("b").Key(core.K("dup")),
-	)
-
-	renderNode, err := Lower(node, EnvConfig{DevMode: false}, testCaster)
-	if err != nil {
-		t.Fatalf("lower with DevMode=false: unexpected error %v", err)
-	}
-	if renderNode == nil {
-		t.Fatal("expected lowered render node in production mode")
-	}
-}
-
-// TestLowerAssertRemainsStrict proves that LowerAssert still rejects invalid
-// inputs and returns an error (test-only path).
-func TestLowerAssertRemainsStrict(t *testing.T) {
-	t.Parallel()
-
-	node := core.Box[struct{}](
-		core.Text[struct{}]("a").Key(core.K("dup")),
-		core.Text[struct{}]("b").Key(core.K("dup")),
-	)
-
-	_, err := LowerAssert(node, EnvConfig{DevMode: true}, testCaster)
-	if err == nil {
-		t.Fatal("expected LowerAssert to reject invalid node")
-	}
-	if !strings.Contains(err.Error(), "duplicate sibling key") {
-		t.Fatalf("error = %q, want duplicate sibling key", err.Error())
 	}
 }
 
@@ -116,7 +66,7 @@ func TestDiagnosticNodePaintsWithDangerStyle(t *testing.T) {
 	}
 	node := core.NewDiagnosticNode[struct{}](diags)
 
-	renderNode, err := Lower(node, EnvConfig{Resolver: &StyleResolver{Palette: DefaultPalette}}, testCaster)
+	renderNode, err := Lower(node, EnvConfig{Resolver: &StyleResolver{ColorConfig: DefaultColorConfig}}, testCaster)
 	if err != nil {
 		t.Fatalf("lower diagnostic node: %v", err)
 	}

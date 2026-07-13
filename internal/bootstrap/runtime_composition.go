@@ -8,16 +8,16 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type providerIngressResolverAdapter struct {
-	ingress   ports.ProviderIngressResolver
-	discovery ports.ProviderModelCatalog
+	ingress   exchange.ProviderIngressResolver
+	discovery exchange.ProviderModelCatalog
 }
 
 func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
-	portsReq := ports.ProviderRequest{
+	portsReq := exchange.ProviderRequest{
 		Request:         req.Request,
 		RequestDocument: req.RequestDocument,
 		Contract:        req.Contract,
@@ -34,7 +34,7 @@ func (a providerIngressResolverAdapter) ValidateCredentials(ctx context.Context,
 	return a.discovery.ValidateCredentials(ctx, target)
 }
 
-func (a providerIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+func (a providerIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	return a.discovery.ListDeployments(ctx, target)
 }
 
@@ -46,7 +46,7 @@ type daemonProviderModelCatalogComposition struct {
 	providers providerIngressResolverAdapter
 }
 
-func newDaemonProviderModelCatalogComposition(wire exchangeruntime.RuntimeResolver, ingress ports.ProviderIngressResolver, discovery ports.ProviderModelCatalog) daemonProviderModelCatalogComposition {
+func newDaemonProviderModelCatalogComposition(wire exchangeruntime.RuntimeResolver, ingress exchange.ProviderIngressResolver, discovery exchange.ProviderModelCatalog) daemonProviderModelCatalogComposition {
 	return daemonProviderModelCatalogComposition{
 		wire: wire,
 		providers: providerIngressResolverAdapter{
@@ -80,6 +80,6 @@ func (r daemonProviderModelCatalogComposition) ValidateCredentials(ctx context.C
 	return r.providers.ValidateCredentials(ctx, target)
 }
 
-func (r daemonProviderModelCatalogComposition) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+func (r daemonProviderModelCatalogComposition) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	return r.providers.ListDeployments(ctx, target)
 }

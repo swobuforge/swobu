@@ -56,11 +56,46 @@ type SetInteractionMode struct {
 	Mode string
 }
 
+// SetSelectedClientID promotes the operator's client choice into durable state.
+type SetSelectedClientID struct {
+	ID string
+}
+
 // SetFocusedRowAffordance updates footer-derivation context from focused row.
 type SetFocusedRowAffordance struct {
 	Verb       string
 	AllowSpace bool
 }
+
+// SetTrafficSectionOffset updates the traffic section scroll offset.
+type SetTrafficSectionOffset struct{ Offset int }
+
+// ToggleTrafficRowOpen toggles the detail disclosure for one traffic row.
+type ToggleTrafficRowOpen struct{ RequestID string }
+
+// ToggleSectionOpen toggles the open/close state of a collapsible section.
+type ToggleSectionOpen struct{ Title string }
+
+// SetWorkspaceEditing sets whether the workspace name editor is active.
+type SetWorkspaceEditing struct{ Editing bool }
+
+// SetWorkspaceDraft updates the workspace name editor draft value.
+type SetWorkspaceDraft struct{ Draft string }
+
+// SetWorkspaceErrMsg updates the workspace name validation error.
+type SetWorkspaceErrMsg struct{ Message string }
+
+// SetClientPickerOpen sets whether the client preset picker is visible.
+type SetClientPickerOpen struct{ Open bool }
+
+// SetClientPickerCursor sets the selected index in the client picker.
+type SetClientPickerCursor struct{ Cursor int }
+
+// ToggleExpandedActionID toggles detail disclosure for one client action row.
+type ToggleExpandedActionID struct{ ActionID string }
+
+// SetPayloadScrollOffset updates the client payload detail scroll offset.
+type SetPayloadScrollOffset struct{ Offset int }
 
 // FocusNextAfterRebuildRequested asks reducer to emit one focus-next hop
 // after rebuild, so newly opened section children exist.

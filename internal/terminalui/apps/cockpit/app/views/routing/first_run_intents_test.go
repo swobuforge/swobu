@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/testharness"
@@ -94,8 +94,8 @@ func TestCreateDraftProtocolModeRow_AzureExplicitDefaultWins(t *testing.T) {
 			ProviderSpec: "azure",
 			ModelID:      "gpt-4.1-mini",
 		},
-		CreateDraftModelDeployments: []ports.ProviderDeploymentRecord{
-			ports.NewProviderDeployment(
+		CreateDraftModelDeployments: []profile.ProviderDeploymentRecord{
+			profile.NewProviderDeployment(
 				"gpt-4.1-mini",
 				"gpt-4.1-mini",
 				"openai",
@@ -120,8 +120,8 @@ func TestCreateDraftProtocolModeRow_AzureSingleProtocolWithoutDefaultRequiresCho
 			ProviderSpec: "azure",
 			ModelID:      "gpt-4.1-mini",
 		},
-		CreateDraftModelDeployments: []ports.ProviderDeploymentRecord{
-			ports.NewProviderDeployment(
+		CreateDraftModelDeployments: []profile.ProviderDeploymentRecord{
+			profile.NewProviderDeployment(
 				"gpt-4.1-mini",
 				"gpt-4.1-mini",
 				"openai",
@@ -146,8 +146,8 @@ func TestCreateDraftProtocolModeRow_AzureAmbiguousProtocolMetadataFailsClosed(t 
 			ProviderSpec: "azure",
 			ModelID:      "gpt-4.1-mini",
 		},
-		CreateDraftModelDeployments: []ports.ProviderDeploymentRecord{
-			ports.NewProviderDeployment(
+		CreateDraftModelDeployments: []profile.ProviderDeploymentRecord{
+			profile.NewProviderDeployment(
 				"gpt-4.1-mini",
 				"gpt-4.1-mini",
 				"openai",

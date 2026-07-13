@@ -17,12 +17,14 @@ func TestLowerActionIntentRoutingSpace(t *testing.T) {
 	t.Parallel()
 
 	renderNode, err := Lower(
-		core.Action("action", core.SignalEvent[struct{}]{Kind: "opened"}).
+		core.Action("action", core.SignalEvent[struct{}]{Kind: "opened"}).Key(core.K("test")).
 			Interaction(core.InteractionSpec[struct{}]{
 				Focus: core.FocusSpec{Mode: core.Focusable},
 				Keymap: []core.KeyBindingSpec{
 					{Pattern: core.KeyMatch{Name: "space"}, Intent: core.IntentActivate},
 				},
+				Signals: []core.SignalEvent[struct{}]{{Kind: "opened"}},
+				Help:    []core.HelpBindingSpec{{Key: "enter", Label: "activate"}},
 			}),
 		EnvConfig{},
 		testCaster,
@@ -53,7 +55,7 @@ func TestLowerActionStylePaint(t *testing.T) {
 	t.Parallel()
 
 	renderNode, err := Lower(
-		core.Action("styled", core.SignalEvent[struct{}]{Kind: "k"}).
+		core.Action("styled", core.SignalEvent[struct{}]{Kind: "k"}).Key(core.K("styled")).
 			Style(core.Style{Token: core.TokenTextDanger}),
 		EnvConfig{},
 		testCaster,

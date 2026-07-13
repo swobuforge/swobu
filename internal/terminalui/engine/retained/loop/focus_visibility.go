@@ -80,28 +80,13 @@ func extractScrollYRenderNode(node layout.RenderNode) *layout.ScrollYRenderNode 
 	if scroll, ok := node.(*layout.ScrollYRenderNode); ok {
 		return scroll
 	}
-	v := reflect.ValueOf(node)
-	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
-		if v.IsNil() {
-			return nil
-		}
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
+	// UnwrapIdentity strips identityRenderNode and focusIDRenderNode
+	// wrappers.  We use reflect.Type for a safe comparison since concrete
+	// RenderNode implementations may contain slices and therefore be
+	// uncomparable.
+	unwrapped := layout.UnwrapIdentity(node)
+	if reflect.TypeOf(unwrapped) == reflect.TypeOf(node) {
 		return nil
 	}
-	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-		if !field.IsValid() || !field.CanInterface() {
-			continue
-		}
-		child, ok := field.Interface().(layout.RenderNode)
-		if !ok {
-			continue
-		}
-		if scroll := extractScrollYRenderNode(child); scroll != nil {
-			return scroll
-		}
-	}
-	return nil
+	return extractScrollYRenderNode(unwrapped)
 }

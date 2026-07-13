@@ -77,6 +77,15 @@ func SettingStaticRow(label, value string) retained.ViewSpec[state.Model] {
 	return CoreNodeAsRetained(node)
 }
 
+// settingStaticRowNode returns the semantic core node for one static (non-interactive) row.
+func settingStaticRowNode(label, value string) core.Node[state.Action] {
+	key := "static/" + label
+	if value != "" {
+		key += "/" + value
+	}
+	return settingRowNode(core.K(key), label, value, "", core.SignalEvent[state.Action]{Kind: cockpitStaticRowSignalKind}, core.SignalEvent[state.Action]{}, true)
+}
+
 func settingRowNode(
 	key core.Key,
 	label, value, actionLabel string,

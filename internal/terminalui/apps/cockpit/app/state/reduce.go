@@ -8,11 +8,10 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // Reduce owns the first design-conforming cockpit's durable app-state updates.
-func Reduce(model *Model, action update.Action) []update.Effect {
+func Reduce(model *Model, action Action) []EffectOnce {
 	if model.ControlPlane != nil && !allowWhileControlPlaneIncompatible(action) {
 		return nil
 	}
@@ -41,7 +40,7 @@ func Reduce(model *Model, action update.Action) []update.Effect {
 }
 
 // swobu:lint ignore function-complexity because=endpoint-selection reducer keeps all transition branches at one state boundary.
-func reduceEndpointSelection(model *Model, action update.Action) bool {
+func reduceEndpointSelection(model *Model, action Action) bool {
 	switch value := action.(type) {
 	case SelectEndpoint:
 		model.CurrentEndpoint = strings.TrimSpace(value.Name) // swobu:io-string source=boundary
@@ -51,6 +50,8 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 		model.ClientCopyNote = ""
 		model.ClientLaunchNote = ""
 		model.ClientAccessNote = ""
+		// Preserve the workspace-switch reset contract while moving selection truth into the model.
+		model.SelectedClientID = ""
 		model.HelpTabOpen = false
 		model.HelpNote = ""
 		return true
@@ -180,7 +181,7 @@ func reduceEndpointSelection(model *Model, action update.Action) bool {
 	}
 }
 
-func reduceCatalogState(model *Model, action update.Action) bool {
+func reduceCatalogState(model *Model, action Action) bool {
 	switch value := action.(type) {
 	case stateeffect.ReplaceEndpoints:
 		hadEndpoints := len(model.Endpoints) > 0
@@ -200,7 +201,7 @@ func reduceCatalogState(model *Model, action update.Action) bool {
 	}
 }
 
-func reduceClientAndTrafficState(model *Model, action update.Action) []update.Effect {
+func reduceClientAndTrafficState(model *Model, action Action) []EffectOnce {
 	switch value := action.(type) {
 	case stateeffect.ReplaceStatusProjection:
 		model.TrafficRows = cloneTrafficRows(value.Rows)
@@ -233,7 +234,7 @@ func reduceClientAndTrafficState(model *Model, action update.Action) []update.Ef
 		if strings.TrimSpace(ep) == "" || sp == nil { // swobu:io-string source=boundary
 			return nil
 		}
-		return []update.Effect{stateeffect.CheckClientAccessEffect{
+		return []EffectOnce{stateeffect.CheckClientAccessEffect{
 			EndpointName:   ep,
 			ProviderConfig: *sp,
 		}}
@@ -242,7 +243,7 @@ func reduceClientAndTrafficState(model *Model, action update.Action) []update.Ef
 		model.InteractionMode = InteractionModeNAV
 		model.ClientAccessStatus = strings.TrimSpace(value.Status) // swobu:io-string source=boundary
 		model.ClientAccessNote = strings.TrimSpace(value.Message)  // swobu:io-string source=boundary
-		return []update.Effect{refreshStatusProjectionEffectFor(model)}
+		return []EffectOnce{refreshStatusProjectionEffectFor(model)}
 	case stateeffect.ClientAccessCheckFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
@@ -254,7 +255,7 @@ func reduceClientAndTrafficState(model *Model, action update.Action) []update.Ef
 	}
 }
 
-func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effect {
+func reduceWorkspaceSaveState(model *Model, action Action) []EffectOnce {
 	switch value := action.(type) {
 	case WorkspaceCreateRequested:
 		model.HeaderStatus = "saving…"
@@ -263,7 +264,7 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		model.WorkspaceCopyNote = ""
 		clearSaveErrors(model)
 		model.ClientAccessNote = ""
-		return []update.Effect{stateeffect.SaveNewWorkspaceEffect{
+		return []EffectOnce{stateeffect.SaveNewWorkspaceEffect{
 			Name:           strings.TrimSpace(value.Name), // swobu:io-string source=boundary
 			ProviderConfig: model.CreateDraftProviderConfig,
 		}}
@@ -274,7 +275,7 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		model.WorkspaceCopyNote = ""
 		clearSaveErrors(model)
 		model.ClientAccessNote = ""
-		return []update.Effect{stateeffect.SaveWorkspaceNameEffect{
+		return []EffectOnce{stateeffect.SaveWorkspaceNameEffect{
 			CurrentName: strings.TrimSpace(value.CurrentName), // swobu:io-string source=boundary
 			Name:        strings.TrimSpace(value.Name),        // swobu:io-string source=boundary
 		}}
@@ -293,7 +294,7 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		}
 		model.CreateDraftName = ""
 		model.CreateDraftProviderConfig = ProviderConfigSnapshot{}
-		return []update.Effect{
+		return []EffectOnce{
 			stateeffect.RefreshEndpointsEffect{},
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: 350 * time.Millisecond},
 		}
@@ -308,14 +309,14 @@ func reduceWorkspaceSaveState(model *Model, action update.Action) []update.Effec
 		model.WorkspaceCopyNote = ""
 		clearSaveErrors(model)
 		model.ClientAccessNote = ""
-		return []update.Effect{stateeffect.DeleteWorkspaceEffect{Name: name}}
+		return []EffectOnce{stateeffect.DeleteWorkspaceEffect{Name: name}}
 	case stateeffect.WorkspaceDeleteSucceeded:
 		model.HeaderStatus = "saved"
 		model.InteractionMode = InteractionModeNAV
 		model.WorkspaceSaveError = ""
 		model.WorkspaceCopyNote = ""
 		applyWorkspaceDelete(model, strings.TrimSpace(value.Name)) // swobu:io-string source=boundary
-		return []update.Effect{
+		return []EffectOnce{
 			stateeffect.RefreshEndpointsEffect{},
 			stateeffect.ScheduleDaemonRefreshEffect{Delay: 350 * time.Millisecond},
 		}

@@ -17,7 +17,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type testCredentialResolver struct{}
@@ -44,7 +43,7 @@ func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
 	return body
 }
 
-func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target exchange.RoutableTarget) ports.ProviderRequest {
+func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target exchange.RoutableTarget) exchange.ProviderRequest {
 	t.Helper()
 	codec := exchangeruntime.NewResolver().ProviderRequestDocumentEncoder(target.ProtocolKind)
 	if codec == nil {
@@ -54,7 +53,7 @@ func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRe
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}
-	return ports.NewProviderRequest(request, wireRequestResult.Value, contract, target)
+	return exchange.NewProviderRequest("test-ex", protocolkind.Responses, request, wireRequestResult.Value, contract, target)
 }
 
 type compatExpectation struct {
@@ -501,8 +500,8 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		OutputFormat: outputFormat,
 	})
-	req := ports.NewProviderRequest(
-		request,
+	req := exchange.NewProviderRequest(
+		"test-ex", protocolkind.Responses, request,
 		carrier.WireDocument{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-b", "anthropic", "https://example.test/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),

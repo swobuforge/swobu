@@ -72,7 +72,7 @@ func Action[E any](p ActionProps[E]) core.Node[E] {
 				FocusableWhenEnabled: !p.Disabled,
 			},
 			Layout: core.LayoutPolicy{
-				Width:  core.Fill(1),
+				Width:  core.Fit(),
 				Height: core.Fit(),
 			},
 		})

@@ -7,7 +7,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 const workspaceCreateSaveTimeout = 60 * time.Second
@@ -18,35 +17,35 @@ type SaveWorkspaceNameEffect struct {
 	Name        string
 }
 
-func (cmd SaveWorkspaceNameEffect) Execute(ctx context.Context) []update.Action {
+func (cmd SaveWorkspaceNameEffect) Run(ctx context.Context) any {
 	currentName := strings.TrimSpace(cmd.CurrentName) // swobu:io-string source=boundary
 	nextName := strings.TrimSpace(cmd.Name)           // swobu:io-string source=boundary
 	if currentName == "" || nextName == "" {
-		return []update.Action{WorkspaceSaveFailed{Message: "endpoint rename requires current and next names"}}
+		return WorkspaceSaveFailed{Message: "endpoint rename requires current and next names"}
 	}
 	if currentName == nextName {
-		return []update.Action{WorkspaceSaveSucceeded{PreviousName: currentName, Name: nextName}}
+		return WorkspaceSaveSucceeded{PreviousName: currentName, Name: nextName}
 	}
 	c := operatorClient()
 	ep, err := c.Get(ctx, currentName)
 	if err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
 	newName, err := endpointintent.ParseEndpointName(nextName)
 	if err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: err.Error()}}
+		return WorkspaceSaveFailed{Message: err.Error()}
 	}
 	newEp, err := endpointintent.NewEndpoint(newName, ep.ProviderConfigs(), ep.SelectedProviderConfigRef())
 	if err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: err.Error()}}
+		return WorkspaceSaveFailed{Message: err.Error()}
 	}
 	if _, err := c.Put(ctx, newEp); err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
 	if err := c.Delete(ctx, currentName); err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
-	return []update.Action{WorkspaceSaveSucceeded{PreviousName: currentName, Name: nextName}}
+	return WorkspaceSaveSucceeded{PreviousName: currentName, Name: nextName}
 }
 
 // SaveNewWorkspaceEffect creates a new workspace through the daemon.
@@ -55,32 +54,32 @@ type SaveNewWorkspaceEffect struct {
 	ProviderConfig stateModel.ProviderConfigSnapshot
 }
 
-func (cmd SaveNewWorkspaceEffect) Execute(ctx context.Context) []update.Action {
+func (cmd SaveNewWorkspaceEffect) Run(ctx context.Context) any {
 	name := strings.TrimSpace(cmd.Name) // swobu:io-string source=boundary
 	if name == "" {
-		return []update.Action{WorkspaceSaveFailed{Message: "workspace create requires name"}}
+		return WorkspaceSaveFailed{Message: "workspace create requires name"}
 	}
 	parsedName, err := endpointintent.ParseEndpointName(name)
 	if err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: err.Error()}}
+		return WorkspaceSaveFailed{Message: err.Error()}
 	}
 	pc, err := argsToProviderConfig(cmd.ProviderConfig)
 	if err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: err.Error()}}
+		return WorkspaceSaveFailed{Message: err.Error()}
 	}
 	ep, err := endpointintent.NewEndpoint(parsedName, []endpointintent.ProviderConfig{pc}, pc.Ref())
 	if err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: err.Error()}}
+		return WorkspaceSaveFailed{Message: err.Error()}
 	}
 	// Create can include daemon-side model-aware protocol resolution and probe
 	// retries, so it uses a longer wait budget than the generic daemon GET path.
 	c := operatorClientWithTimeout(workspaceCreateSaveTimeout)
 	if _, err := c.Put(ctx, ep); err != nil {
-		return []update.Action{WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return WorkspaceSaveFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
 	// Keep busy-save visible for one render so the transition screen is observable.
 	time.Sleep(150 * time.Millisecond)
-	return []update.Action{WorkspaceSaveSucceeded{PreviousName: "", Name: name}}
+	return WorkspaceSaveSucceeded{PreviousName: "", Name: name}
 }
 
 // WorkspaceSaveFailed reports that a workspace save operation failed.
@@ -97,16 +96,16 @@ type DeleteWorkspaceEffect struct {
 	Name string
 }
 
-func (cmd DeleteWorkspaceEffect) Execute(ctx context.Context) []update.Action {
+func (cmd DeleteWorkspaceEffect) Run(ctx context.Context) any {
 	name := strings.TrimSpace(cmd.Name) // swobu:io-string source=boundary
 	if name == "" {
-		return []update.Action{WorkspaceDeleteFailed{Message: "workspace delete requires name"}}
+		return WorkspaceDeleteFailed{Message: "workspace delete requires name"}
 	}
 	c := operatorClient()
 	if err := c.Delete(ctx, name); err != nil {
-		return []update.Action{WorkspaceDeleteFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return WorkspaceDeleteFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
-	return []update.Action{WorkspaceDeleteSucceeded{Name: name}}
+	return WorkspaceDeleteSucceeded{Name: name}
 }
 
 // WorkspaceDeleteFailed reports that workspace deletion failed.

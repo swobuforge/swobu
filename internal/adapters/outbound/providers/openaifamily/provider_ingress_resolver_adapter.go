@@ -21,7 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -62,7 +62,7 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 // Execute performs provider HTTP transport only. Exchange orchestration and
 // semantic decode live in exchange while provider-edge wire patchers live in
 // provider-owned helper packages.
-func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
+func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadRequest("canonical request is required")
 	}

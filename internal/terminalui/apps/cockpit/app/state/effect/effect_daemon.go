@@ -10,9 +10,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 const modelCatalogProbeLoadTimeout = 8 * time.Second
@@ -62,7 +61,7 @@ type ScheduleDaemonRefreshEffect struct {
 	Delay time.Duration
 }
 
-func (eff ScheduleDaemonRefreshEffect) Execute(ctx context.Context) []update.Action {
+func (eff ScheduleDaemonRefreshEffect) Run(ctx context.Context) any {
 	if eff.Delay > 0 {
 		timer := time.NewTimer(eff.Delay)
 		defer timer.Stop()
@@ -72,7 +71,7 @@ func (eff ScheduleDaemonRefreshEffect) Execute(ctx context.Context) []update.Act
 		case <-timer.C:
 		}
 	}
-	return []update.Action{DaemonRefreshTick{}}
+	return DaemonRefreshTick{}
 }
 
 // DaemonRefreshTick asks the reducer to run one full daemon control-plane sync
@@ -82,7 +81,7 @@ type DaemonRefreshTick struct{}
 // RefreshDaemonStatusEffect queries daemon health and reports status back to the UI.
 type RefreshDaemonStatusEffect struct{}
 
-func (RefreshDaemonStatusEffect) Execute(ctx context.Context) []update.Action {
+func (RefreshDaemonStatusEffect) Run(ctx context.Context) any {
 	type daemonStatus struct {
 		State                string `json:"state"`
 		EndpointCount        int    `json:"endpoint_count"`
@@ -91,56 +90,56 @@ func (RefreshDaemonStatusEffect) Execute(ctx context.Context) []update.Action {
 	}
 	status, err := loadJSON[daemonStatus](ctx, platformconfig.DefaultDaemonURL()+"/_swobu/status")
 	if err != nil {
-		return []update.Action{DaemonStatusLoadFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return DaemonStatusLoadFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
 	if strings.TrimSpace(status.SwobuVersion) == "" { // swobu:io-string source=boundary
-		return []update.Action{ControlPlaneIncompatibleDetected{
+		return ControlPlaneIncompatibleDetected{
 			ExpectedProtocol:  controlplane.Protocol,
 			TUIVersion:        controlplane.SwobuVersion(),
 			DaemonVersion:     "missing required swobu_version",
 			HasDaemonProtocol: false,
 			Reason:            "status payload is missing required swobu_version",
-		}}
+		}
 	}
 	if status.ControlPlaneProtocol == nil {
-		return []update.Action{ControlPlaneIncompatibleDetected{
+		return ControlPlaneIncompatibleDetected{
 			ExpectedProtocol:  controlplane.Protocol,
 			TUIVersion:        controlplane.SwobuVersion(),
 			DaemonVersion:     strings.TrimSpace(status.SwobuVersion), // swobu:io-string source=boundary
 			HasDaemonProtocol: false,
 			Reason:            "status payload is missing required control_plane_protocol",
-		}}
+		}
 	}
 	if *status.ControlPlaneProtocol != controlplane.Protocol {
-		return []update.Action{ControlPlaneIncompatibleDetected{
+		return ControlPlaneIncompatibleDetected{
 			ExpectedProtocol:  controlplane.Protocol,
 			DaemonProtocol:    *status.ControlPlaneProtocol,
 			TUIVersion:        controlplane.SwobuVersion(),
 			DaemonVersion:     strings.TrimSpace(status.SwobuVersion), // swobu:io-string source=boundary
 			HasDaemonProtocol: true,
 			Reason:            "control-plane protocol mismatch",
-		}}
+		}
 	}
-	return []update.Action{ReplaceDaemonStatus{
+	return ReplaceDaemonStatus{
 		State:         status.State,
 		EndpointCount: status.EndpointCount,
-	}}
+	}
 }
 
 // RefreshEndpointsEffect queries endpoint list and reports it back to the UI.
 type RefreshEndpointsEffect struct{}
 
-func (RefreshEndpointsEffect) Execute(ctx context.Context) []update.Action {
+func (RefreshEndpointsEffect) Run(ctx context.Context) any {
 	c := operatorClient()
 	endpoints, err := c.List(ctx)
 	if err != nil {
-		return []update.Action{EndpointsLoadFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return EndpointsLoadFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
 	snapshots := make([]stateModel.EndpointSnapshot, 0, len(endpoints))
 	for _, ep := range endpoints {
 		snapshots = append(snapshots, endpointToSnapshot(ep))
 	}
-	return []update.Action{ReplaceEndpoints{Snapshots: snapshots}}
+	return ReplaceEndpoints{Snapshots: snapshots}
 }
 
 // RefreshStatusProjectionEffect queries recent traffic and reports it back to the UI.
@@ -148,7 +147,7 @@ type RefreshStatusProjectionEffect struct {
 	EndpointName string
 }
 
-func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.Action {
+func (eff RefreshStatusProjectionEffect) Run(ctx context.Context) any {
 	requestedScope := statusProjectionScope{Kind: "all"}
 	if endpoint := strings.TrimSpace(eff.EndpointName); endpoint != "" { // swobu:io-string source=boundary
 		requestedScope = statusProjectionScope{
@@ -166,7 +165,7 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 		return validateStatusProjectionDoc(d, requestedScope)
 	})
 	if err != nil {
-		return []update.Action{TrafficLoadFailed{Message: normalizeOperatorSurfaceError(err)}}
+		return TrafficLoadFailed{Message: normalizeOperatorSurfaceError(err)}
 	}
 	rows := make([]stateModel.TrafficRow, 0, len(result.RecentTraffic))
 	for _, r := range result.RecentTraffic {
@@ -202,7 +201,7 @@ func (eff RefreshStatusProjectionEffect) Execute(ctx context.Context) []update.A
 			StageReports:        append([]stateModel.StageReport(nil), r.StageReports...),
 		})
 	}
-	return []update.Action{ReplaceStatusProjection{Rows: rows}}
+	return ReplaceStatusProjection{Rows: rows}
 }
 
 func validateStatusProjectionDoc(d statusProjectionDoc, requestedScope statusProjectionScope) error {
@@ -303,7 +302,7 @@ type LoadRoutingModelCatalogEffect struct {
 	ProviderProtocol string
 }
 
-func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.Action {
+func (eff LoadRoutingModelCatalogEffect) Run(ctx context.Context) any {
 	query := url.Values{}
 	query.Set("provider_spec", strings.TrimSpace(eff.ProviderSpec)) // swobu:io-string source=boundary
 	if baseURL := strings.TrimSpace(eff.BaseURL); baseURL != "" {   // swobu:io-string source=boundary
@@ -323,14 +322,14 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 		query.Set("provider_protocol", providerProtocol)
 	}
 	type probeResult struct {
-		Deployments              []ports.ProviderDeploymentRecord `json:"deployments,omitempty"`
-		Error                    string                           `json:"error,omitempty"`
-		ResolvedProviderProtocol string                           `json:"resolved_provider_protocol,omitempty"`
+		Deployments              []profile.ProviderDeploymentRecord `json:"deployments,omitempty"`
+		Error                    string                             `json:"error,omitempty"`
+		ResolvedProviderProtocol string                             `json:"resolved_provider_protocol,omitempty"`
 	}
 	result, err := loadJSONWithTimeout[probeResult](ctx, platformconfig.DefaultDaemonURL()+"/_swobu/model-catalog?"+query.Encode(), modelCatalogProbeLoadTimeout)
 	if err != nil {
 		normalized := normalizeModelCatalogProbeLoadError(err)
-		return []update.Action{RoutingModelCatalogLoaded{
+		return RoutingModelCatalogLoaded{
 			Scope:            strings.TrimSpace(eff.Scope),        // swobu:io-string source=boundary
 			ProviderSpec:     strings.TrimSpace(eff.ProviderSpec), // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(eff.BaseURL),      // swobu:io-string source=boundary
@@ -338,17 +337,17 @@ func (eff LoadRoutingModelCatalogEffect) Execute(ctx context.Context) []update.A
 			CredentialRef:    strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 			ProviderProtocol: strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
 			Error:            normalized,
-		}}
+		}
 	}
-	return []update.Action{RoutingModelCatalogLoaded{
+	return RoutingModelCatalogLoaded{
 		Scope:                    strings.TrimSpace(eff.Scope),        // swobu:io-string source=boundary
 		ProviderSpec:             strings.TrimSpace(eff.ProviderSpec), // swobu:io-string source=boundary
 		BaseURL:                  strings.TrimSpace(eff.BaseURL),      // swobu:io-string source=boundary
 		AuthHeader:               authHeader,
 		CredentialRef:            strings.TrimSpace(eff.CredentialRef),    // swobu:io-string source=boundary
 		ProviderProtocol:         strings.TrimSpace(eff.ProviderProtocol), // swobu:io-string source=boundary
-		Deployments:              ports.CloneProviderDeployments(result.Deployments),
+		Deployments:              profile.CloneProviderDeployments(result.Deployments),
 		Error:                    strings.TrimSpace(result.Error),                    // swobu:io-string source=boundary
 		ResolvedProviderProtocol: strings.TrimSpace(result.ResolvedProviderProtocol), // swobu:io-string source=boundary
-	}}
+	}
 }

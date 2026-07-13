@@ -11,17 +11,17 @@ import (
 // palettes are limited; a direct mapping is sufficient for the current 16
 // semantic tokens.
 type StyleResolver struct {
-	Palette Palette
+	ColorConfig ColorConfig
 }
 
-// Palette defines the concrete terminal colors for one theme.
-type Palette struct {
+// ColorConfig defines the concrete terminal colors for one theme.
+type ColorConfig struct {
 	// Foreground colors (ANSI16)
-	FgDefault  paint.Color
-	FgMuted    paint.Color
-	FgDanger   paint.Color
-	FgSuccess  paint.Color
-	FgPrimary  paint.Color
+	FgDefault paint.Color
+	FgMuted   paint.Color
+	FgDanger  paint.Color
+	FgSuccess paint.Color
+	FgPrimary paint.Color
 
 	// Background colors (ANSI16)
 	BgDefault  paint.Color
@@ -32,9 +32,9 @@ type Palette struct {
 	BorderFocused paint.Color
 }
 
-// DefaultPalette is the default 16-color ANSI palette used by the
+// DefaultColorConfig is the default 16-color ANSI palette used by the
 // corelower bridge when no custom palette is supplied.
-var DefaultPalette = Palette{
+var DefaultColorConfig = ColorConfig{
 	FgDefault:     paint.ColorWhite,
 	FgMuted:       paint.ColorWhite,
 	FgDanger:      paint.ColorRed,
@@ -54,24 +54,24 @@ func (r StyleResolver) Resolve(style core.Style) paint.Style {
 	// Base token color.
 	switch style.Token {
 	case core.TokenTextDefault:
-		ps.Fg = r.Palette.FgDefault
+		ps.Fg = r.ColorConfig.FgDefault
 	case core.TokenTextMuted:
-		ps.Fg = r.Palette.FgMuted
+		ps.Fg = r.ColorConfig.FgMuted
 		ps.Dim = true
 	case core.TokenTextDanger:
-		ps.Fg = r.Palette.FgDanger
+		ps.Fg = r.ColorConfig.FgDanger
 	case core.TokenTextSuccess:
-		ps.Fg = r.Palette.FgSuccess
+		ps.Fg = r.ColorConfig.FgSuccess
 	case core.TokenAccentPrimary:
-		ps.Fg = r.Palette.FgPrimary
+		ps.Fg = r.ColorConfig.FgPrimary
 	case core.TokenSurfaceSelected:
-		ps.Bg = r.Palette.BgSelected
+		ps.Bg = r.ColorConfig.BgSelected
 	case core.TokenSurfaceDefault:
-		ps.Bg = r.Palette.BgDefault
+		ps.Bg = r.ColorConfig.BgDefault
 	case core.TokenBorderDefault:
-		ps.Fg = r.Palette.BorderDefault
+		ps.Fg = r.ColorConfig.BorderDefault
 	case core.TokenBorderFocused:
-		ps.Fg = r.Palette.BorderFocused
+		ps.Fg = r.ColorConfig.BorderFocused
 	}
 
 	// State overrides.
@@ -79,17 +79,17 @@ func (r StyleResolver) Resolve(style core.Style) paint.Style {
 	case core.StateFocused:
 		ps.Bold = true
 		if style.Token == core.TokenBorderDefault || style.Token == "" {
-			ps.Fg = r.Palette.BorderFocused
+			ps.Fg = r.ColorConfig.BorderFocused
 		}
 	case core.StateSelected:
-		ps.Bg = r.Palette.BgSelected
+		ps.Bg = r.ColorConfig.BgSelected
 		ps.Bold = true
 	case core.StateDisabled:
 		ps.Dim = true
 	case core.StateDanger:
-		ps.Fg = r.Palette.FgDanger
+		ps.Fg = r.ColorConfig.FgDanger
 	case core.StateSuccess:
-		ps.Fg = r.Palette.FgSuccess
+		ps.Fg = r.ColorConfig.FgSuccess
 	}
 
 	// Explicit modifiers win over derived state.

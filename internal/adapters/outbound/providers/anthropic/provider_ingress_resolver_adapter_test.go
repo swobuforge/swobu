@@ -15,7 +15,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 type staticCredentialProvider struct {
@@ -63,7 +62,7 @@ func TestResolveProviderIngress_UsesContractDeliveryForStreamingRequests(t *test
 	defer server.Close()
 
 	adapter := NewExecutor(server.Client(), staticCredentialProvider{token: "test-token"})
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "claude-sonnet-4-20250514",
 			Items: []canonical.CanonicalItem{
@@ -141,7 +140,7 @@ func TestResolveProviderIngress_DoesNotEmitCacheBreakpoints(t *testing.T) {
 
 	adapter := NewExecutor(server.Client(), staticCredentialProvider{token: "test-token"})
 	sink := &recordingEffectSink{}
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "claude-sonnet-4-20250514",
 			Items: []canonical.CanonicalItem{

@@ -26,7 +26,7 @@ func TestBuildHelpSectionNode_ReturnsCoreNode(t *testing.T) {
 		t.Fatalf("validation failed: %v", diags)
 	}
 
-	renderNode, err := corelower.Lower(node, corelower.EnvConfig{DevMode: true}, func(a state.Action) update.Action {
+	renderNode, err := corelower.Lower(node, corelower.EnvConfig{}, func(a state.Action) update.Action {
 		return a
 	})
 	if err != nil {

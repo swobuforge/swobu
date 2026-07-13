@@ -6,7 +6,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
-	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	appviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
@@ -48,15 +47,6 @@ func workspaceBodyKey(model state.Model) string {
 		return "__create__"
 	}
 	return current
-}
-
-func rootOnMountEffects() []update.Effect {
-	return []update.Effect{
-		stateeffect.RefreshDaemonStatusEffect{},
-		stateeffect.RefreshEndpointsEffect{},
-		stateeffect.RefreshStatusProjectionEffect{},
-		state.ScheduleDaemonRefreshEffect{},
-	}
 }
 
 func workspaceRailKeyHandler(ctx *retained.Context[state.Model], ev interaction.Event) (bool, []update.Action) {

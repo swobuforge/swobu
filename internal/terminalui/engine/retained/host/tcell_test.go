@@ -50,7 +50,7 @@ func TestRunner_RendersCockpitAndIgnoresEscThenQuitsOnCtrlC(t *testing.T) {
 	runner := New(screen, rootviews.Root(), appstate.Model{
 		HeaderStatus: "ready",
 		DaemonState:  "up",
-	}, appstate.Reduce)
+	}, retainedReducer)
 
 	done := make(chan error, 1)
 	go func() {
@@ -210,7 +210,7 @@ func TestRunner_EnterOnClientsSectionFocusesClientRow(t *testing.T) {
 				ModelID:      "gpt-4.1-mini",
 			}},
 		}},
-	}, appstate.Reduce)
+	}, retainedReducer)
 	viewport := geom.Rect{W: 100, H: 28}
 	runner.Loop.Rebuild(rootviews.Root(), viewport)
 
@@ -230,9 +230,30 @@ func TestRunner_EnterOnClientsSectionFocusesClientRow(t *testing.T) {
 	runner.Loop.DispatchEvent(interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEnter})
 	runner.Loop.Rebuild(rootviews.Root(), viewport)
 	render = runner.Loop.Render(viewport).String()
-	if !strings.Contains(render, "clients ▾") || !strings.Contains(render, ">    client") {
+	if !strings.Contains(render, "clients ▾") || !strings.Contains(render, "> client") {
 		t.Fatalf("expected client row to be focused after opening section; render=%q", render)
 	}
+}
+
+func retainedReducer(model *appstate.Model, action update.Action) []update.Effect {
+	onceEffs := appstate.Reduce(model, action)
+	var legacy []update.Effect
+	for _, eff := range onceEffs {
+		legacy = append(legacy, legacyEffectBridge{eff: eff})
+	}
+	return legacy
+}
+
+type legacyEffectBridge struct {
+	eff interface{ Run(ctx context.Context) any }
+}
+
+func (b legacyEffectBridge) Execute(ctx context.Context) []update.Action {
+	result := b.eff.Run(ctx)
+	if result == nil {
+		return nil
+	}
+	return []update.Action{result}
 }
 
 type bootEffectTrigger struct{}

@@ -1,6 +1,8 @@
 package corelower
 
 import (
+	"fmt"
+
 	"github.com/swobuforge/swobu/internal/terminalui/core"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
@@ -9,6 +11,9 @@ func lowerScroll[E any](n core.Node[E], env EnvConfig, caster EventCaster[E]) (l
 	children := n.ChildrenValue()
 	if len(children) == 0 {
 		return layout.NewText(""), nil
+	}
+	if len(children) > 1 {
+		return nil, fmt.Errorf("scroll node accepts exactly one child; got %d", len(children))
 	}
 	child, err := lowerNode(children[0], env, caster)
 	if err != nil {

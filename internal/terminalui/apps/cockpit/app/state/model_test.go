@@ -6,11 +6,25 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
 )
+
+func TestReduce_SetSelectedClientID_UpdatesModelField(t *testing.T) {
+	t.Parallel()
+
+	model := Model{SelectedClientID: ""}
+	Reduce(&model, SetSelectedClientID{ID: "claude"})
+	if got := model.SelectedClientID; got != "claude" {
+		t.Fatalf("selected client id = %q, want claude", got)
+	}
+
+	Reduce(&model, SetSelectedClientID{ID: " claude-code "})
+	if got := model.SelectedClientID; got != "claude-code" {
+		t.Fatalf("selected client id after trim = %q, want claude-code", got)
+	}
+}
 
 func TestReduce_CreateAndRenameEndpointUpdatesCurrentSelectionAndCatalog(t *testing.T) {
 	t.Parallel()
@@ -108,7 +122,7 @@ func TestReduce_SetCreateDraftAuthHeader_DefaultsAndResetsModelSelection(t *test
 			AuthHeader:       "X-Custom-Auth",
 			ProviderProtocol: "responses_stream",
 		},
-		CreateDraftModelDeployments:  []ports.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
+		CreateDraftModelDeployments:  []profile.ProviderDeploymentRecord{{Name: "gpt-4.1-mini"}},
 		CreateDraftModelProbePending: true,
 		CreateDraftModelError:        "stale",
 	}
@@ -602,7 +616,7 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 		ProviderProtocol: "auto",
 		BaseURL:          "https://openrouter.ai/api/v1",
 		CredentialRef:    "env:OPENROUTER_API_KEY",
-		Deployments:      []ports.ProviderDeploymentRecord{{Name: "openai/gpt-4.1"}},
+		Deployments:      []profile.ProviderDeploymentRecord{{Name: "openai/gpt-4.1"}},
 	})
 	if len(model.AddModelDraftModelDeployments) != 1 || model.AddModelDraftModelDeployments[0].Name != "openai/gpt-4.1" {
 		t.Fatalf("model deployments=%v", model.AddModelDraftModelDeployments)
@@ -617,7 +631,7 @@ func TestReduce_LoadRoutingModelCatalogTracksTupleAndAppliesMatchingResult(t *te
 		ProviderProtocol: "auto",
 		BaseURL:          "https://api.anthropic.com",
 		CredentialRef:    "env:ANTHROPIC_API_KEY",
-		Deployments:      []ports.ProviderDeploymentRecord{{Name: "claude-sonnet-4"}},
+		Deployments:      []profile.ProviderDeploymentRecord{{Name: "claude-sonnet-4"}},
 	})
 	if len(model.AddModelDraftModelDeployments) != 1 || model.AddModelDraftModelDeployments[0].Name != "openai/gpt-4.1" {
 		t.Fatalf("mismatched tuple should be ignored; model deployments=%v", model.AddModelDraftModelDeployments)
@@ -668,7 +682,7 @@ func TestReduce_LoadRoutingModelCatalogCreateDraft_AppliesMatchingResultAgainstR
 		ProviderProtocol: "auto",
 		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 		CredentialRef:    "profile:swobu-bedrock",
-		Deployments:      []ports.ProviderDeploymentRecord{{Name: "anthropic.claude-sonnet-4-5-20250929-v1:0"}},
+		Deployments:      []profile.ProviderDeploymentRecord{{Name: "anthropic.claude-sonnet-4-5-20250929-v1:0"}},
 	})
 	if len(model.CreateDraftModelDeployments) != 1 {
 		t.Fatalf("model deployments=%v", model.CreateDraftModelDeployments)
@@ -747,7 +761,7 @@ func TestReduce_AddModelCatalogResult_AcceptsMismatchedProviderProtocol(t *testi
 		ProviderProtocol: "completions",
 		BaseURL:          "https://openrouter.ai/api/v1",
 		CredentialRef:    "env:OPENROUTER_API_KEY",
-		Deployments:      []ports.ProviderDeploymentRecord{{Name: "should-not-apply"}},
+		Deployments:      []profile.ProviderDeploymentRecord{{Name: "should-not-apply"}},
 	})
 
 	if len(model.AddModelDraftModelDeployments) != 1 || model.AddModelDraftModelDeployments[0].Name != "should-not-apply" {

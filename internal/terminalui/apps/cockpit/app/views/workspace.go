@@ -8,96 +8,35 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/components/compound"
 	"github.com/swobuforge/swobu/internal/terminalui/core"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
-// BuildWorkspaceSection composes the workspace section rows.
+// BuildWorkspaceSection composes the workspace section rows (retained bridge).
+// TODO(v2-migration): full migration of inline editor to core.Node once
+// core.Input supports commit/cancel intent routing.
 func BuildWorkspaceSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	name := model.CurrentEndpoint
-	isCreate := name == ""
-	endpoint := ""
-	if isCreate {
-		endpoint = selectors.CreateDraftEndpointValue(model)
-	} else if name != "" {
-		endpoint = selectors.ClientBaseURL(model)
+	if model.WorkspaceEditing {
+		return buildWorkspaceEditorRetained(ctx)
 	}
-	var out retained.ViewSpec[state.Model]
-	if !isCreate {
-		endpointSummary := selectors.EmptyOr(endpoint, "none")
-		if strings.TrimSpace(endpointSummary) == "" { // swobu:io-string source=boundary
-			endpointSummary = "none"
-		}
-		nameRow := retained.Named[state.Model]("name", retained.Build[state.Model](buildWorkspaceNameRow))
-		if model.HeaderStatus == "saved" {
-			nameRow = retained.Named[state.Model]("name", SettingActionRow(
-				core.K("workspace/name"),
-				RowName,
-				name,
-				"edit",
-				nil,
-				true,
-			))
-		}
-		endpointCopyDisabled := endpoint == "" || endpoint == "not set" || endpoint == "invalid"
-		endpointRow := SettingActionRow(
-			core.K("workspace/endpoint"),
-			RowEndpoint,
-			endpointSummary,
-			"copy",
-			state.EndpointCopyRequested{Value: endpoint},
-			endpointCopyDisabled,
-		)
-		if model.WorkspaceCopyNote != "" {
-			endpointRow = toolkitviews.NewAnchoredDisclosure(endpointRow, SettingStaticRow("", "-> "+model.WorkspaceCopyNote))
-		}
-
-		rows := []retained.ViewSpec[state.Model]{
-			nameRow,
-			retained.Named[state.Model]("endpoint", endpointRow),
-		}
-		if model.HeaderStatus == "saved" {
-			rows = append(rows, retained.Named[state.Model]("delete", SettingStaticRow("delete workspace", "")))
-		} else {
-			rows = append(rows, retained.Named[state.Model]("delete", workspaceDeleteRow(name)))
-		}
-		out = NewCollapsibleSection(
-			SectionWorkspace,
-			true,
-			"edit",
-			SummaryRow(name+" · "+endpointSummary),
-			rows...,
-		)
-	} else {
-		rows := []retained.ViewSpec[state.Model]{
-			retained.Named[state.Model]("name", retained.Build[state.Model](buildWorkspaceNameRow)),
-			SettingStaticRow(RowEndpoint, selectors.EmptyOr(endpoint, "none")),
-		}
-		if selectors.InteractionMode(model) == state.InteractionModeBusySave {
-			rows = []retained.ViewSpec[state.Model]{
-				SettingStaticRow(RowName, selectors.EmptyOr(currentCreateName(model), "choose a workspace name")),
-				SettingStaticRow(RowEndpoint, selectors.EmptyOr(endpoint, "none")),
-			}
-		}
-		out = retained.Named[state.Model](
-			"workspace-create",
-			NewCollapsibleSection(
-				SectionWorkspace,
-				true,
-				"edit",
-				nil,
-				rows...,
-			),
-		)
-	}
-	return out
+	return CoreNodeAsRetained(BuildWorkspaceSectionNode(model))
 }
 
-// buildWorkspaceNameRow owns the workspace name editing interaction.
-func buildWorkspaceNameRow(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
+// BuildWorkspaceSectionNode returns the canonical core.Node workspace section
+// for the non-editing path.
+func BuildWorkspaceSectionNode(model state.Model) core.Node[state.Action] {
+	current := strings.TrimSpace(model.CurrentEndpoint) // swobu:io-string source=boundary
+	if current == "" {
+		return buildWorkspaceCreateNode(model)
+	}
+	return buildWorkspaceCurrentNode(model, current)
+}
+
+func buildWorkspaceEditorRetained(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
 	current := model.CurrentEndpoint
 	isCreate := current == ""
@@ -105,87 +44,168 @@ func buildWorkspaceNameRow(ctx *retained.Context[state.Model]) retained.ViewSpec
 	if isCreate {
 		currentValue = selectors.CreateDraftName(model)
 	}
-
-	editing, setEditing := retained.UseState(ctx, func() bool { return false })
-	draft, setDraft := retained.UseState(ctx, func() string { return currentValue })
-	errMsg, setErrMsg := retained.UseState(ctx, func() string { return "" })
-
-	parent := RowEditWithHooks(RowName, selectors.EmptyOr(currentValue, "choose a workspace name"), func() []update.Action {
-		seed := currentValue
-		if isCreate {
-			// In first-run/create mode, edit always starts from a blank input.
-			// The prompt text is a placeholder, not an editable default value.
-			seed = ""
-		}
-		setDraft(seed)
-		setEditing(true)
-		setErrMsg("")
-		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeEditText}}
-	}, func() []update.Action {
-		if !editing {
-			return nil
-		}
-		setErrMsg("")
-		setDraft(currentValue)
-		setEditing(false)
-		return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
-	}, focusAffordance("edit", false))
-	var out retained.ViewSpec[state.Model]
-	if !editing {
-		if message := selectors.EmptyOr(model.WorkspaceSaveError, ""); message != "" {
-			out = toolkitviews.NewAnchoredDisclosure(parent, SettingStaticRow("", "-> "+message))
-		} else {
-			out = parent
-		}
-	} else {
-		editor := retained.Named[state.Model]("name-editor", InlineEditor(
-			RowName, draft, "choose a workspace name",
-			func(value string) []update.Action {
-				setDraft(value)
-				setErrMsg("")
-				return nil
-			},
-			func(value string) []update.Action {
-				if isCreate {
-					parsed, message := validateCreateDraftWorkspaceName(value, model.Endpoints)
-					if message != "" {
-						setErrMsg(message)
-						return nil
-					}
-					setDraft(parsed)
-					setErrMsg("")
-					setEditing(false)
-					return []update.Action{
-						state.SetCreateDraftName{Name: parsed},
-						state.SetInteractionMode{Mode: state.InteractionModeNAV},
-					}
-				}
-				parsed, message := validateWorkspaceName(value, model.Endpoints, current)
-				if message != "" {
-					setErrMsg(message)
-					return nil
-				}
-				setDraft(parsed)
-				setErrMsg("")
-				setEditing(false)
-				return []update.Action{
-					state.WorkspaceRenameRequested{CurrentName: current, Name: parsed},
-				}
-			},
-			func() []update.Action {
-				setErrMsg("")
-				setDraft(currentValue)
-				setEditing(false)
-				return []update.Action{state.SetInteractionMode{Mode: state.InteractionModeNAV}}
-			},
-		))
-		if errMsg != "" {
-			out = toolkitviews.NewAnchoredDisclosure(editor, retained.Named[state.Model]("name-error", SettingStaticRow("", "-> "+errMsg)))
-		} else {
-			out = editor
-		}
+	draft := model.WorkspaceDraft
+	if draft == "" {
+		draft = currentValue
 	}
-	return out
+
+	editor := InlineEditor(
+		RowName, draft, "choose a workspace name",
+		func(_ string) []update.Action { return nil }, // onChange — controlled by key events; draft updated on commit
+		func(value string) []update.Action {
+			if isCreate {
+				parsed, message := validateCreateDraftWorkspaceName(value, model.Endpoints)
+				if message != "" {
+					return []update.Action{state.SetWorkspaceErrMsg{Message: message}}
+				}
+				return []update.Action{
+					state.SetWorkspaceEditing{Editing: false},
+					state.SetCreateDraftName{Name: parsed},
+					state.SetInteractionMode{Mode: state.InteractionModeNAV},
+				}
+			}
+			parsed, message := validateWorkspaceName(value, model.Endpoints, current)
+			if message != "" {
+				return []update.Action{state.SetWorkspaceErrMsg{Message: message}}
+			}
+			return []update.Action{
+				state.SetWorkspaceEditing{Editing: false},
+				state.WorkspaceRenameRequested{CurrentName: current, Name: parsed},
+			}
+		},
+		func() []update.Action {
+			return []update.Action{
+				state.SetWorkspaceEditing{Editing: false},
+				state.SetWorkspaceDraft{Draft: currentValue},
+				state.SetInteractionMode{Mode: state.InteractionModeNAV},
+			}
+		},
+	)
+	if model.WorkspaceErrMsg != "" {
+		return toolkitviews.NewAnchoredDisclosure(editor, retained.Named[state.Model]("name-error", SettingStaticRow("", "-> "+model.WorkspaceErrMsg)))
+	}
+	return editor
+}
+
+func buildWorkspaceCurrentNode(model state.Model, current string) core.Node[state.Action] {
+	endpoint := selectors.ClientBaseURL(model)
+	endpointSummary := selectors.EmptyOr(endpoint, "none")
+	if strings.TrimSpace(endpointSummary) == "" { // swobu:io-string source=boundary
+		endpointSummary = "none"
+	}
+	nameValue := current
+	nameRow := workspaceEditRowNode(nameValue, model.HeaderStatus == "saved")
+	if message := strings.TrimSpace(model.WorkspaceSaveError); message != "" {
+		nameRow = workspaceDetailNode("save-error", nameRow, message)
+	}
+
+	endpointRow := SettingActionRowNode(
+		core.K("workspace/endpoint"),
+		RowEndpoint,
+		endpointSummary,
+		"copy",
+		state.EndpointCopyRequested{Value: endpoint},
+		endpoint == "" || endpoint == "not set" || endpoint == "invalid",
+	)
+	if message := strings.TrimSpace(model.WorkspaceCopyNote); message != "" {
+		endpointRow = workspaceDetailNode("copy", endpointRow, message)
+	}
+
+	rows := []core.Node[state.Action]{
+		nameRow,
+		endpointRow,
+	}
+	if model.HeaderStatus == "saved" {
+		rows = append(rows, settingStaticRowNode("delete workspace", ""))
+	} else {
+		rows = append(rows, workspaceDeleteRowNode(current))
+	}
+	return compound.SectionNode[state.Action]("workspace", rows...)
+}
+
+func buildWorkspaceCreateNode(model state.Model) core.Node[state.Action] {
+	endpoint := selectors.CreateDraftEndpointValue(model)
+	nameValue := selectors.EmptyOr(currentCreateName(model), "choose a workspace name")
+	nameRow := workspaceEditRowNode(nameValue, false)
+	if message := strings.TrimSpace(model.WorkspaceSaveError); message != "" && selectors.InteractionMode(model) != state.InteractionModeBusySave {
+		nameRow = workspaceDetailNode("save-error", nameRow, message)
+	}
+
+	rows := []core.Node[state.Action]{
+		nameRow,
+		settingStaticRowNode(RowEndpoint, selectors.EmptyOr(endpoint, "none")),
+	}
+	if selectors.InteractionMode(model) == state.InteractionModeBusySave {
+		rows[0] = settingStaticRowNode(RowName, selectors.EmptyOr(currentCreateName(model), "choose a workspace name"))
+	}
+	return compound.SectionNode[state.Action]("workspace", rows...)
+}
+
+func workspaceEditRowNode(value string, disabled bool) core.Node[state.Action] {
+	if disabled {
+		return SettingActionRowNode(
+			core.K("workspace/name"),
+			RowName,
+			value,
+			"edit",
+			state.SetInteractionMode{Mode: state.InteractionModeNAV},
+			true,
+		)
+	}
+	return SettingActionRowNode(
+		core.K("workspace/name"),
+		RowName,
+		value,
+		"edit",
+		state.SetWorkspaceEditing{Editing: true},
+		false,
+	)
+}
+
+func workspaceDetailNode(kind string, primary core.Node[state.Action], message string) core.Node[state.Action] {
+	message = strings.TrimSpace(message) // swobu:io-string source=boundary
+	if message == "" {
+		return primary
+	}
+	return core.Box[state.Action](
+		primary,
+		workspaceNoteNode(kind, message),
+	)
+}
+
+func workspaceNoteNode(kind, message string) core.Node[state.Action] {
+	noteKey := core.K("workspace/note/" + strings.TrimSpace(kind))
+	if strings.TrimSpace(kind) == "" {
+		noteKey = core.K("workspace/note")
+	}
+	return settingRowNode(
+		noteKey,
+		"",
+		"-> "+strings.TrimSpace(message),
+		"",
+		core.SignalEvent[state.Action]{Kind: cockpitStaticRowSignalKind},
+		core.SignalEvent[state.Action]{},
+		true,
+	)
+}
+
+func workspaceDeleteRowNode(endpoint string) core.Node[state.Action] {
+	endpoint = strings.TrimSpace(endpoint) // swobu:io-string source=boundary
+	var action state.Action
+	if endpoint != "" {
+		action = state.WorkspaceDeleteRequested{Name: endpoint}
+	}
+	if action == nil {
+		action = state.SetInteractionMode{Mode: state.InteractionModeNAV}
+	}
+	return SettingActionRowNode(
+		core.K("workspace/delete"),
+		"delete workspace",
+		"",
+		"delete",
+		action,
+		false,
+	)
 }
 
 func validateCreateDraftWorkspaceName(value string, existing []string) (string, string) {
@@ -224,23 +244,7 @@ func currentCreateName(model state.Model) string {
 	return strings.TrimSpace(selectors.CreateDraftName(model)) // swobu:io-string source=boundary
 }
 
-func workspaceDeleteRow(endpoint string) retained.ViewSpec[state.Model] {
-	endpoint = strings.TrimSpace(endpoint) // swobu:io-string source=boundary
-	var action update.Action
-	if endpoint != "" {
-		action = state.WorkspaceDeleteRequested{Name: endpoint}
-	}
-	return SettingActionRow(
-		core.K("workspace/delete"),
-		"delete workspace",
-		"",
-		"delete",
-		action,
-		false,
-	)
-}
-
-func createWorkspaceActions(model state.Model) []update.Action {
+func createWorkspaceActions(model state.Model) []state.Action {
 	name := selectors.CreateDraftName(model)
 	if strings.TrimSpace(name) == "" { // swobu:io-string source=boundary
 		return nil
@@ -273,7 +277,7 @@ func createWorkspaceActions(model state.Model) []update.Action {
 	if parsedCredentialRef.IsEmptyFileSelection() {
 		return nil
 	}
-	return []update.Action{
+	return []state.Action{
 		state.SetCreateDraftName{Name: parsed},
 		state.WorkspaceCreateRequested{Name: parsed},
 	}

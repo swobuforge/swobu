@@ -9,13 +9,12 @@ import (
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // ListDeployments reads the OpenAI-style deployment catalog for one selected
 // provider target. This is an operator-support path.
-func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("OpenAI-family provider base URL is required")
 	}
@@ -52,9 +51,9 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
 	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(target.ProviderID())
-	out := make([]ports.ProviderDeploymentRecord, 0, len(models))
+	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
 	for _, modelID := range models {
-		out = append(out, ports.NewProviderDeployment(
+		out = append(out, profile.NewProviderDeployment(
 			modelID,
 			modelID,
 			target.ProviderID(),

@@ -1,18 +1,21 @@
-// Package exchange owns orchestration contracts for one request/response
-// exchange.
+// Package exchange is the request-path bounded context: ingress, orchestration,
+// and execution contract.
 //
-// It composes typed ports, links, predicates, stage mechanics, runtime codec lookup,
-// graph-path selection, replay buffering, commit gating, effect commit, and
-// error boundaries. Ordered fallback advances across candidate-local
-// non-internal failures, but internal failures stay terminal. Tool policy and
-// declaration semantics are consumed here but owned by canonical request
-// state; exchange may materialize safe native continuation or fail closed on
-// unsafe replay selection, but it does not redefine the tool ontology or embed
-// provider-specific tool behavior.
-// It also owns the typed boundary result carrier and client request decode
-// bundle used by wire codecs and exchange orchestration.
-// The canonical architecture overview lives in
-// `docs/03-architecture/system-shape-and-request-flow/exchange-algebra-and-boundaries.md`,
-// and the required exchange conformance cases live in
-// `docs/05-engineering/testing-and-quality-gates/domain-contract-integration-and-end-to-end-tests.md`.
+// This package owns:
+//   - Client request ingress (wire decode, endpoint resolution)
+//   - Routing orchestration (one machine-driven lifecycle per request)
+//   - Provider execution contract (ProviderRequest, RoutableTarget, ExecutionContract)
+//   - The codec bridge surface (ClientCodec, ProviderRequestDocumentEncoder, etc.)
+//
+// It does NOT own:
+//   - Routing policy (internal/routing)
+//   - Provider adapters (internal/adapters/outbound/providers)
+//   - Machine engine (internal/machine)
+//
+// Sub-packages:
+//   - stage: pipeline stage constants
+//
+// Import rules:
+//   - exchange → routing, machine, profile, observation, domain
+//   - Nothing may import exchange except adapters and bootstrap.
 package exchange

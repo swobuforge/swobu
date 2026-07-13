@@ -1,4 +1,4 @@
-// Traffic section retained.
+// Traffic section. The retained path is phased out; core.Node builders are canonical.
 package views
 
 import (
@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/core"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/interaction"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
@@ -14,26 +15,27 @@ import (
 
 const trafficVisibleWindow = 5
 
-// BuildTrafficSection composes the traffic section rows.
+// BuildTrafficSection composes the traffic section rows (retained bridge).
+// TODO(v2-migration): remove once callers migrated to BuildTrafficSectionNode.
 func BuildTrafficSection(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
 	model := ctx.Model()
-	offset, setOffset := retained.UseState(ctx, func() int { return 0 })
+	offset := model.TrafficSectionOffset
 	var section retained.ViewSpec[state.Model]
 	if model.CurrentEndpoint == "" {
+		summary := trafficSummaryText(model)
 		if model.InteractionMode == state.InteractionModeBusySave {
-			section = staticSectionSummary(ctx, SectionTraffic, "empty")
+			section = staticSectionSummary(ctx, SectionTraffic, summary)
 		} else {
 			section = NewCollapsibleSection(
 				SectionTraffic,
 				false,
 				"open",
-				SummaryRow("empty"),
+				CoreNodeAsRetained(BuildTrafficSummaryNode(model)),
 			)
 		}
 	} else {
-		summary := collapsedTrafficSummary(model)
+		summary := trafficSummaryText(model)
 		if model.HeaderStatus == "saved" {
-			summary = "no traffic yet"
 			section = staticSectionSummary(ctx, SectionTraffic, summary)
 		} else {
 			body := make([]retained.ViewSpec[state.Model], 0, len(model.TrafficRows)+3)
@@ -78,8 +80,10 @@ func BuildTrafficSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 								if nextOffset == offset {
 									return true, nil
 								}
-								setOffset(nextOffset)
-								return true, []update.Action{state.FocusNextAfterRebuildRequested{}}
+								return true, []update.Action{
+									state.SetTrafficSectionOffset{Offset: nextOffset},
+									state.FocusNextAfterRebuildRequested{},
+								}
 							case interaction.KeyUp:
 								if !isFirstVisible || start == 0 {
 									return false, nil
@@ -91,8 +95,7 @@ func BuildTrafficSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 								if prevOffset == offset {
 									return true, nil
 								}
-								setOffset(prevOffset)
-								return true, nil
+								return true, []update.Action{state.SetTrafficSectionOffset{Offset: prevOffset}}
 							default:
 								return false, nil
 							}
@@ -106,7 +109,7 @@ func BuildTrafficSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 				SectionTraffic,
 				false,
 				"open",
-				SummaryRow(summary),
+				CoreNodeAsRetained(BuildTrafficSummaryNode(model)),
 				body...,
 			)
 		}
@@ -114,31 +117,36 @@ func BuildTrafficSection(ctx *retained.Context[state.Model]) retained.ViewSpec[s
 	return section
 }
 
+// BuildTrafficSectionNode returns the traffic section as a core.Node.
+// TODO(v2-migration): full migration of interactive rows from retained.
+func BuildTrafficSectionNode(model state.Model) core.Node[state.Action] {
+	return BuildTrafficSummaryNode(model)
+}
+
+func BuildTrafficSummaryNode(model state.Model) core.Node[state.Action] {
+	return trafficSummaryLineNode(trafficSummaryText(model))
+}
+
 func trafficRow(ctx *retained.Context[state.Model], row state.TrafficRow, onFocus func() []update.Action) retained.ViewSpec[state.Model] {
-	open, setOpen := retained.UseState(ctx, func() bool { return false })
+	toggleAction := state.ToggleTrafficRowOpen{RequestID: row.RequestID}
 	parent := toolkitviews.NewAction(64, true, false, func(focused bool, width int) string {
-		return renderTrafficListRow(width, focused, row, open)
+		return renderTrafficListRow(width, focused, row, ctx.Model().OpenTrafficRowIDs[row.RequestID])
 	}, func(string) []update.Action {
-		nextOpen := !open
-		setOpen(nextOpen)
-		verb := "open"
-		if nextOpen {
-			verb = "close"
-		}
-		return []update.Action{state.SetFocusedRowAffordance{Verb: verb}}
+		return []update.Action{toggleAction}
 	}, func() []update.Action {
-		if !open {
+		if !ctx.Model().OpenTrafficRowIDs[row.RequestID] {
 			return nil
 		}
-		setOpen(false)
-		return []update.Action{state.SetFocusedRowAffordance{Verb: "open"}}
+		return []update.Action{toggleAction}
 	})
 	parent.OnFocusAction = onFocus
-	var out retained.ViewSpec[state.Model] = retained.FromRenderNode[state.Model](parent)
-	if open {
-		out = toolkitviews.NewAnchoredDisclosure(out, trafficOpenDetailRows(row)...)
-	}
-	return out
+	base := retained.FromRenderNode[state.Model](parent)
+	return retained.Build[state.Model](func(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
+		if ctx.Model().OpenTrafficRowIDs[row.RequestID] {
+			return toolkitviews.NewAnchoredDisclosure(base, trafficOpenDetailRows(row)...)
+		}
+		return base
+	})
 }
 
 func renderTrafficListRow(width int, focused bool, row state.TrafficRow, open bool) string {
@@ -188,7 +196,7 @@ func trafficOpenDetailRows(row state.TrafficRow) []retained.ViewSpec[state.Model
 
 func trafficDetailLine(label string, value string) retained.ViewSpec[state.Model] {
 	line := toolkitviews.FormatKeyValueTextLine(strings.TrimSpace(label), strings.TrimSpace(value), 24) // swobu:io-string source=boundary
-	return IndentLeft[state.Model](StaticTextLine[state.Model](line), InsetDetail)
+	return IndentLeft[state.Model](StaticTextLine(line), InsetDetail)
 }
 
 func previewDuration(row state.TrafficRow) string {
@@ -355,4 +363,18 @@ func trafficDiagnosticDetailLines(row state.TrafficRow) []retained.ViewSpec[stat
 		out = append(out, trafficDetailLine("diag detail", strings.TrimSpace(d))) // swobu:io-string source=boundary
 	}
 	return out
+}
+
+func trafficSummaryText(model state.Model) string {
+	if strings.TrimSpace(model.CurrentEndpoint) == "" {
+		return "empty"
+	}
+	if model.HeaderStatus == "saved" {
+		return "no traffic yet"
+	}
+	return collapsedTrafficSummary(model)
+}
+
+func trafficSummaryLineNode(summary string) core.Node[state.Action] {
+	return core.Text[state.Action](strings.Repeat(" ", InsetDetail) + strings.TrimSpace(summary))
 }

@@ -4,16 +4,14 @@ import (
 	"context"
 	"strings"
 	"unicode"
-
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // CopyEndpointValueEffect copies an endpoint value to the clipboard.
 type CopyEndpointValueEffect struct{ Value string }
 
-func (cmd CopyEndpointValueEffect) Execute(ctx context.Context) []update.Action {
+func (cmd CopyEndpointValueEffect) Run(ctx context.Context) any {
 	msg := copyValueNote(cmd.Value)
-	return []update.Action{EndpointCopyNoted{Message: msg}}
+	return EndpointCopyNoted{Message: msg}
 }
 
 // CopyAuthSessionURLEffect copies auth session URL and reports auth-local note.
@@ -22,9 +20,9 @@ type CopyAuthSessionURLEffect struct {
 	Value    string
 }
 
-func (cmd CopyAuthSessionURLEffect) Execute(ctx context.Context) []update.Action {
+func (cmd CopyAuthSessionURLEffect) Run(ctx context.Context) any {
 	msg := copyValueNote(normalizeAuthSessionCopyValue(cmd.Value))
-	return []update.Action{AuthSessionCopyNoted{OwnerKey: cmd.OwnerKey, Message: msg}}
+	return AuthSessionCopyNoted{OwnerKey: cmd.OwnerKey, Message: msg}
 }
 
 func normalizeAuthSessionCopyValue(value string) string {
@@ -40,9 +38,9 @@ func normalizeAuthSessionCopyValue(value string) string {
 // CopyClientBaseURLEffect copies a client base URL to the clipboard.
 type CopyClientBaseURLEffect struct{ Value string }
 
-func (cmd CopyClientBaseURLEffect) Execute(ctx context.Context) []update.Action {
+func (cmd CopyClientBaseURLEffect) Run(ctx context.Context) any {
 	msg := copyValueNote(cmd.Value)
-	return []update.Action{ClientCopyNoted{Message: msg}}
+	return ClientCopyNoted{Message: msg}
 }
 
 // LaunchClientEffect attempts to launch the selected local client preset.
@@ -52,9 +50,9 @@ type LaunchClientEffect struct {
 	ModelID string
 }
 
-func (cmd LaunchClientEffect) Execute(ctx context.Context) []update.Action {
+func (cmd LaunchClientEffect) Run(ctx context.Context) any {
 	msg := runClientOnceMessage(ctx, cmd.BaseURL, cmd.Preset, cmd.ModelID)
-	return []update.Action{ClientLaunchNoted{Message: msg}}
+	return ClientLaunchNoted{Message: msg}
 }
 
 // EndpointCopyNoted reports the result of an endpoint copy operation.
@@ -75,9 +73,9 @@ type ClientLaunchNoted struct{ Message string }
 // CopyHelpDiagnosticsEffect copies help diagnostics text for operator support.
 type CopyHelpDiagnosticsEffect struct{ Text string }
 
-func (cmd CopyHelpDiagnosticsEffect) Execute(ctx context.Context) []update.Action {
+func (cmd CopyHelpDiagnosticsEffect) Run(ctx context.Context) any {
 	msg := copyValueNote(cmd.Text)
-	return []update.Action{HelpDiagnosticsCopyNoted{Message: msg}}
+	return HelpDiagnosticsCopyNoted{Message: msg}
 }
 
 // HelpDiagnosticsCopyNoted reports help diagnostics copy result.

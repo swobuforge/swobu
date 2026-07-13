@@ -26,3 +26,8 @@ type Style struct {
 	Dim       bool
 	Underline bool
 }
+
+// IsZero returns true when no style attributes are set.
+func (s Style) IsZero() bool {
+	return s == Style{}
+}

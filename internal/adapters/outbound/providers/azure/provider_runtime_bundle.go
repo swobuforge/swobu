@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -131,7 +130,7 @@ func (rt authHeaderMappingRoundTripper) RoundTrip(req *http.Request) (*http.Resp
 	return base.RoundTrip(clone)
 }
 
-func (r azureProviderIngressResolver) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
+func (r azureProviderIngressResolver) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 	baseURL, err := resolveAzureResourceRoot(req.Target.BaseURL, r.projectEndpoint)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure resource locator is required")
@@ -152,7 +151,7 @@ func (c azureProviderModelCatalogClient) ValidateCredentials(ctx context.Context
 	return err
 }
 
-func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	projectEndpoint, err := resolveAzureProjectEndpoint(c.projectEndpoint, target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure project endpoint is required")
@@ -161,7 +160,7 @@ func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, ta
 	// /api/projects/<project> prefix intact instead of collapsing to the
 	// resource root here.
 	nextURL := strings.TrimRight(projectEndpoint, "/") + azureDeploymentListPath
-	out := make([]ports.ProviderDeploymentRecord, 0, 16)
+	out := make([]profile.ProviderDeploymentRecord, 0, 16)
 	for nextURL != "" {
 		deployments, nextLink, err := c.listDeploymentsPage(ctx, target, nextURL)
 		if err != nil {
@@ -176,7 +175,7 @@ func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, ta
 	return out, nil
 }
 
-func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target exchange.RoutableTarget, requestURL string) ([]ports.ProviderDeploymentRecord, string, error) {
+func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target exchange.RoutableTarget, requestURL string) ([]profile.ProviderDeploymentRecord, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, "", canonical.BadEndpoint("azure provider deployment inventory request could not be built")
@@ -203,7 +202,7 @@ func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context
 	if err != nil {
 		return nil, "", canonical.InternalError("backend deployment inventory could not be decoded")
 	}
-	deployments := make([]ports.ProviderDeploymentRecord, 0, len(documents))
+	deployments := make([]profile.ProviderDeploymentRecord, 0, len(documents))
 	for _, doc := range documents {
 		if dep, ok := azureDeploymentDocumentToDeployment(doc); ok {
 			deployments = append(deployments, dep)
@@ -253,10 +252,10 @@ func decodeAzureDeploymentDocuments(raw []byte) ([]azureDeploymentDocument, stri
 	return nil, "", fmt.Errorf("azure deployment inventory payload was not a deployment array or page")
 }
 
-func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (ports.ProviderDeploymentRecord, bool) {
+func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (profile.ProviderDeploymentRecord, bool) {
 	name := azureDeploymentName(doc)
 	if name == "" {
-		return ports.ProviderDeploymentRecord{}, false
+		return profile.ProviderDeploymentRecord{}, false
 	}
 	modelName := strings.TrimSpace(doc.ModelName) // swobu:io-string source=boundary
 	if modelName == "" {
@@ -269,7 +268,7 @@ func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (ports.Pro
 	if defaultProtocol == "" && len(supportedProtocols) > 0 {
 		defaultProtocol = supportedProtocols[0]
 	}
-	return ports.NewProviderDeployment(
+	return profile.NewProviderDeployment(
 		name,
 		modelName,
 		doc.ModelPublisher,

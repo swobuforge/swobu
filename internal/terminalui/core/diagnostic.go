@@ -2,16 +2,20 @@ package core
 
 import "fmt"
 
-// Severity identifies diagnostic seriousness.
+// Severity identifies diagnostic seriousness. All diagnostics produced by
+// core.Validate are errors; there is no warning mode.
 type Severity uint8
 
 const (
-	// DiagnosticWarning indicates a behavioral concern that does not halt
-	// compilation. Used for migration-phase diagnostics that will become
-	// errors once callers are fixed.
+	// DiagnosticWarning is preserved for backward compatibility but is not used
+	// by core.Validate. All structural contract violations are reported as
+	// DiagnosticError. Callers may remove this constant once they stop
+	// referencing it.
 	DiagnosticWarning Severity = iota
+
 	// DiagnosticError indicates a structural contract violation that
-	// prevents safe compilation.
+	// prevents safe compilation.  All diagnostics emitted by core.Validate are
+	// errors; there is no warning mode. Callers must fix violations.
 	DiagnosticError
 )
 
@@ -79,6 +83,14 @@ var knownTokens = map[StyleToken]struct{}{
 }
 
 func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireInteractiveKeys bool) {
+	validateNodeIdentity(path, node, out, requireInteractiveKeys)
+	validateNodeLayout(path, node, out)
+	validateContract(path, node, out)
+	validateNodeEventIntegrity(path, node, out)
+	validateNodeChildren(path, node, out, requireInteractiveKeys)
+}
+
+func validateNodeIdentity[E any](path string, node Node[E], out *[]Diagnostic, requireInteractiveKeys bool) {
 	if node.stateful && node.key.Empty() {
 		*out = append(*out, Diagnostic{
 			Severity: DiagnosticError,
@@ -93,7 +105,6 @@ func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireIn
 			Message:  "interactive child without key inside dynamic collection",
 		})
 	}
-
 	// An action node must have a key for stable focus identity.
 	if node.kind == KindAction && node.key.Empty() {
 		*out = append(*out, Diagnostic{
@@ -102,7 +113,9 @@ func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireIn
 			Message:  "action requires key for focusable identity",
 		})
 	}
+}
 
+func validateNodeLayout[E any](path string, node Node[E], out *[]Diagnostic) {
 	// Style token must be known if set.
 	if node.style.Token != "" {
 		if _, ok := knownTokens[node.style.Token]; !ok {
@@ -117,6 +130,8 @@ func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireIn
 	// Layout dimensions must be non-negative where meaningful.
 	for _, dim := range []DimSize{node.layout.Size.Width, node.layout.Size.Height} {
 		switch dim.Mode {
+		case DimFit, DimFill:
+			// No constraints to validate for fit/fill modes.
 		case DimFixed:
 			if dim.Value < 0 {
 				*out = append(*out, Diagnostic{
@@ -151,7 +166,9 @@ func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireIn
 			Message:  "focusable disabled mismatch: node is disabled but marked focusable",
 		})
 	}
+}
 
+func validateNodeEventIntegrity[E any](path string, node Node[E], out *[]Diagnostic) {
 	// An action node must emit at least one signal when activated.
 	if node.kind == KindAction && len(node.interaction.Signals) == 0 {
 		*out = append(*out, Diagnostic{
@@ -172,7 +189,9 @@ func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireIn
 			Message:  "focusable node without accepted intent",
 		})
 	}
+}
 
+func validateNodeChildren[E any](path string, node Node[E], out *[]Diagnostic, requireInteractiveKeys bool) {
 	seenKeys := make(map[Key]struct{}, len(node.children))
 	seenFocusIDs := make(map[FocusID]struct{}, len(node.children))
 	for i, child := range node.children {
@@ -202,23 +221,6 @@ func validateNode[E any](path string, node Node[E], out *[]Diagnostic, requireIn
 		}
 		validateNode(childPath, child, out, requireInteractiveKeys || node.stateful || node.kind == KindList || node.kind == KindTable)
 	}
-}
-
-// NewDiagnosticNode builds one error-node tree that renders validation
-// failures inline.  Used by the lowering bridge in dev mode so an invalid
-// node tree is visible as red text instead of a silent blank surface.
-func NewDiagnosticNode[E any](diags []Diagnostic) Node[E] {
-	children := make([]Node[E], 0, len(diags))
-	for _, d := range diags {
-		line := d.Path + ": " + d.Message
-		children = append(children, Text[E](line).
-			Style(Style{Token: TokenTextDanger, State: StateDanger}))
-	}
-	return Box[E](children...).
-		Style(Style{Token: TokenSurfaceDefault, State: StateDanger}).
-		Layout(Layout{
-			Size: Size{Width: Fill(1), Height: Fit()},
-		})
 }
 
 func isInteractive[E any](node Node[E]) bool {

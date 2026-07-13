@@ -14,25 +14,22 @@ import (
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/config"
-	"github.com/swobuforge/swobu/internal/ports"
 )
 
 func buildDaemonServeMux(
 	daemon *Daemon,
 	runtimeCfg config.RuntimeConfig,
 	runtime daemonProviderModelCatalogComposition,
-	continuation ports.ContinuationStore,
-	trafficEventSink ports.TrafficEventSink,
+	trafficEventSink observation.TrafficEventSink,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeIngress := exchange.NewIngress(
 		daemon.endpoints,
 		runtime,
 		exchange.RuntimePoliciesSpec{
-			DeliverySelector:  exchange.FixedDeliverySelector{},
-			ContinuationStore: continuation,
-			TrafficEventSink:  trafficEventSink,
+			TrafficEventSink: trafficEventSink,
 		},
 	)
 	mux := http.NewServeMux()

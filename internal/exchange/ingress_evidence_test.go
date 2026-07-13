@@ -25,11 +25,7 @@ func TestRequestIngress_RecordsTerminalTrafficEvidenceOnSuccess(t *testing.T) {
 	sink := &recordingEvidenceSink{}
 	ingress := RequestIngress{
 		trafficEvidence: sink,
-		graph: exchangeGraph{
-			DeliverySelector: FixedDeliverySelector{},
-			Continuation:     canonical.NewContinuationRuntime(nil),
-			Runner:           withRuntime(bufferedProviderIngressResolver(nil)),
-		},
+		runner:          withRuntime(bufferedProviderIngressResolver(nil)),
 	}
 
 	out, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
@@ -73,13 +69,9 @@ func TestRequestIngress_RecordsTerminalTrafficEvidenceOnBackendError(t *testing.
 	sink := &recordingEvidenceSink{}
 	ingress := RequestIngress{
 		trafficEvidence: sink,
-		graph: exchangeGraph{
-			DeliverySelector: FixedDeliverySelector{},
-			Continuation:     canonical.NewContinuationRuntime(nil),
-			Runner: withRuntime(func(context.Context, ProviderRequest) (ProviderIngress, error) {
-				return nil, canonical.NewBackendError("backend-a", http.StatusServiceUnavailable, "backend-a unavailable", "")
-			}),
-		},
+		runner: withRuntime(func(context.Context, ProviderRequest) (ProviderIngress, error) {
+			return nil, canonical.NewBackendError("backend-a", http.StatusServiceUnavailable, "backend-a unavailable", "")
+		}),
 	}
 
 	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{

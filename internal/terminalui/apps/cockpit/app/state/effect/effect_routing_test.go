@@ -22,23 +22,17 @@ func TestPollProviderAuthSessionEffect_FailedStatusSurfacesCredentialStoreError(
 	defer srv.Close()
 
 	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
-	actions := (PollProviderAuthSessionEffect{
+	action := (PollProviderAuthSessionEffect{
 		EndpointName:   "acme",
 		ProviderConfig: stateModel.ProviderConfigSnapshot{Ref: "cfg-a", ProviderSpec: "chatgpt"},
 		AuthScope:      stateModel.AuthScopeEndpointProvider,
 		SessionID:      "sess-1",
 		AttemptsLeft:   5,
-	}).Execute(context.Background())
+	}).Run(context.Background())
 
-	if len(actions) != 2 {
-		t.Fatalf("actions length=%d want 2", len(actions))
-	}
-	if _, ok := actions[0].(ProviderAuthSessionPolledAction); !ok {
-		t.Fatalf("action[0]=%T want ProviderAuthSessionPolledAction", actions[0])
-	}
-	failed, ok := actions[1].(ProviderAuthSessionFailedAction)
+	failed, ok := action.(ProviderAuthSessionFailedAction)
 	if !ok {
-		t.Fatalf("action[1]=%T want ProviderAuthSessionFailedAction", actions[1])
+		t.Fatalf("action=%T want ProviderAuthSessionFailedAction", action)
 	}
 	if got := strings.TrimSpace(failed.Message); got != "credential store failed" { // swobu:io-string source=domain
 		t.Fatalf("failed message=%q", got)

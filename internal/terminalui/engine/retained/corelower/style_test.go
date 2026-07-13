@@ -8,7 +8,7 @@ import (
 )
 
 func TestStyleResolverDefaultTokenTextDefault(t *testing.T) {
-	r := StyleResolver{Palette: DefaultPalette}
+	r := StyleResolver{ColorConfig: DefaultColorConfig}
 	got := r.Resolve(core.Style{Token: core.TokenTextDefault})
 	want := paint.Style{Fg: paint.ColorWhite}
 	if got != want {
@@ -17,7 +17,7 @@ func TestStyleResolverDefaultTokenTextDefault(t *testing.T) {
 }
 
 func TestStyleResolverMutedIsDim(t *testing.T) {
-	r := StyleResolver{Palette: DefaultPalette}
+	r := StyleResolver{ColorConfig: DefaultColorConfig}
 	got := r.Resolve(core.Style{Token: core.TokenTextMuted})
 	if !got.Dim {
 		t.Fatal("text.muted should be dim")
@@ -28,7 +28,7 @@ func TestStyleResolverMutedIsDim(t *testing.T) {
 }
 
 func TestStyleResolverDangerToken(t *testing.T) {
-	r := StyleResolver{Palette: DefaultPalette}
+	r := StyleResolver{ColorConfig: DefaultColorConfig}
 	got := r.Resolve(core.Style{Token: core.TokenTextDanger})
 	if got.Fg != paint.ColorRed {
 		t.Fatalf("text.danger fg = %v, want red", got.Fg)
@@ -36,7 +36,7 @@ func TestStyleResolverDangerToken(t *testing.T) {
 }
 
 func TestStyleResolverStateOverrides(t *testing.T) {
-	r := StyleResolver{Palette: DefaultPalette}
+	r := StyleResolver{ColorConfig: DefaultColorConfig}
 
 	got := r.Resolve(core.Style{Token: core.TokenSurfaceDefault, State: core.StateSelected})
 	if got.Bg != paint.ColorBlue {
@@ -56,7 +56,7 @@ func TestStyleResolverStateOverrides(t *testing.T) {
 }
 
 func TestStyleResolverModsOverride(t *testing.T) {
-	r := StyleResolver{Palette: DefaultPalette}
+	r := StyleResolver{ColorConfig: DefaultColorConfig}
 	got := r.Resolve(core.Style{
 		Token: core.TokenTextDefault,
 		Mods:  core.StyleOptions{Bold: core.TriTrue, Dim: core.TriFalse},
@@ -70,7 +70,7 @@ func TestStyleResolverModsOverride(t *testing.T) {
 }
 
 func TestStyleResolverExplicitModsOverrideState(t *testing.T) {
-	r := StyleResolver{Palette: DefaultPalette}
+	r := StyleResolver{ColorConfig: DefaultColorConfig}
 	// focused normally sets bold=true; explicit bold=false should win
 	got := r.Resolve(core.Style{
 		Token: core.TokenTextDefault,

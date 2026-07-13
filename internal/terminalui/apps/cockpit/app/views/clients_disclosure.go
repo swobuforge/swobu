@@ -1,3 +1,4 @@
+// Production disclosure helpers for clients section (retained bridge).
 package views
 
 import (
@@ -10,18 +11,6 @@ import (
 	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
-
-func contentRows(content string) []retained.ViewSpec[state.Model] {
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	rows := make([]retained.ViewSpec[state.Model], 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" { // swobu:io-string source=boundary
-			continue
-		}
-		rows = append(rows, wrappedPayloadTextRows(line)...)
-	}
-	return rows
-}
 
 func anchoredDisclosureWithScrollableDetails(
 	parent retained.ViewSpec[state.Model],
@@ -76,7 +65,7 @@ func disclosureScrollCue(showMoreAbove bool, showMoreBelow bool) string {
 
 func keyScopeForDisclosureScroll(
 	disclosure retained.ViewSpec[state.Model],
-	local clientsSectionState,
+	model state.Model,
 	maxOffset int,
 ) retained.ViewSpec[state.Model] {
 	if maxOffset == 0 {
@@ -88,24 +77,22 @@ func keyScopeForDisclosureScroll(
 		}
 		switch ev.Key {
 		case interaction.KeyDown:
-			if local.payloadScrollOffset >= maxOffset {
+			if model.PayloadScrollOffset >= maxOffset {
 				return false, nil
 			}
-			local.setPayloadScrollOffset(local.payloadScrollOffset + 1)
-			return true, nil
+			return true, []update.Action{state.SetPayloadScrollOffset{Offset: model.PayloadScrollOffset + 1}}
 		case interaction.KeyUp:
-			if local.payloadScrollOffset <= 0 {
+			if model.PayloadScrollOffset <= 0 {
 				return false, nil
 			}
-			local.setPayloadScrollOffset(local.payloadScrollOffset - 1)
-			return true, nil
+			return true, []update.Action{state.SetPayloadScrollOffset{Offset: model.PayloadScrollOffset - 1}}
 		default:
 			return false, nil
 		}
 	})
 }
 
-func payloadMaxOffset(rowCount int, maxHeight int) int {
+func payloadMaxOffsetDisclosure(rowCount int, maxHeight int) int {
 	maxOffset := rowCount - maxHeight
 	if maxOffset < 0 {
 		return 0
@@ -113,7 +100,7 @@ func payloadMaxOffset(rowCount int, maxHeight int) int {
 	return maxOffset
 }
 
-func actionStableID(action clientprofile.Action) string {
+func actionStableIDDisclosure(action clientprofile.Action) string {
 	id := strings.TrimSpace(action.ID) // swobu:io-string source=boundary
 	if id != "" {
 		return id
@@ -124,7 +111,7 @@ func actionStableID(action clientprofile.Action) string {
 	return "action"
 }
 
-func clientPickerFocusKey(profile clientprofile.Profile) string {
+func clientPickerFocusKeyOld(profile clientprofile.Profile) string {
 	id := ""
 	if profile != nil {
 		identity := profile.Identity()

@@ -23,7 +23,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -64,7 +63,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 	}
 }
 
-func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
+func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 	if strings.TrimSpace(req.Request.Model()) == "" { // swobu:io-string source=domain
 		return nil, canonical.BadRequest("canonical request is required")
 	}
@@ -267,7 +266,7 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 	return out, nil
 }
 
-func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	tier, ok := e.resolveChatGPTSubscriptionTier(ctx, target.ProviderID(), target.CredentialRef)
 	if !ok {
 		return nil, canonical.BadEndpoint("chatgpt subscription tier could not be resolved from credential")
@@ -282,9 +281,9 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 		"model_count", len(models),
 	)
 	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(target.ProviderID())
-	out := make([]ports.ProviderDeploymentRecord, 0, len(models))
+	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
 	for _, modelID := range models {
-		out = append(out, ports.NewProviderDeployment(
+		out = append(out, profile.NewProviderDeployment(
 			modelID,
 			modelID,
 			target.ProviderID(),

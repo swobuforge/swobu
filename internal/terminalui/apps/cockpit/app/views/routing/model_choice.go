@@ -4,7 +4,7 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/selectors"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views"
@@ -194,7 +194,7 @@ func workspaceModelCatalogTupleMatches(model state.Model, providerConfig *state.
 	return true
 }
 
-func applyProviderModelSelection(deployment ports.ProviderDeploymentRecord, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
+func applyProviderModelSelection(deployment profile.ProviderDeploymentRecord, providerConfig *state.ProviderConfigSnapshot, endpointName string, createMode bool) []update.Action {
 	modelID := strings.TrimSpace(deployment.Name) // swobu:io-string source=boundary
 	providerSpec := ""
 	if providerConfig != nil {

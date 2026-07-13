@@ -1,6 +1,6 @@
 package model
 
-import "github.com/swobuforge/swobu/internal/ports"
+import "github.com/swobuforge/swobu/internal/profile"
 
 type Model struct {
 	HeaderStatus     string
@@ -23,7 +23,7 @@ type Model struct {
 	StreamEnabled                  bool
 	CreateDraftName                string
 	CreateDraftProviderConfig      ProviderConfigSnapshot
-	CreateDraftModelDeployments    []ports.ProviderDeploymentRecord
+	CreateDraftModelDeployments    []profile.ProviderDeploymentRecord
 	CreateDraftModelError          string
 	CreateDraftModelProbePending   bool
 	CreateDraftModelProviderSpec   string
@@ -32,7 +32,7 @@ type Model struct {
 	CreateDraftModelCredentialRef  string
 	CreateDraftModelTestProtocol   string
 	CreateDraftModelTestPassed     bool
-	AddModelDraftModelDeployments  []ports.ProviderDeploymentRecord
+	AddModelDraftModelDeployments  []profile.ProviderDeploymentRecord
 	AddModelDraftModelError        string
 	AddModelDraftModelProbePending bool
 	AddModelDraftProviderSpec      string
@@ -46,15 +46,39 @@ type Model struct {
 	ClientLaunchNote               string
 	ClientAccessStatus             string
 	ClientAccessNote               string
-	SaveErrors                     map[string]string
-	LastStoredKeyProviderSpec      string
-	LastStoredKeySlotName          string
+	// SelectedClientID is the operator-chosen client preset for the current workspace.
+	// Empty means no explicit selection; the view shows a picker.
+	SelectedClientID          string
+	SaveErrors                map[string]string
+	LastStoredKeyProviderSpec string
+	LastStoredKeySlotName     string
 	// Invariant: AuthSessions payloads are canonicalized at write seams.
 	// UI readers must not re-trim session fields.
 	AuthSessions map[string]AuthSessionViewState
 	TrafficRows  []TrafficRow
 	TrafficError string
-	HelpNote     string
+	// TrafficSectionOffset is the scroll offset for the traffic row viewport.
+	TrafficSectionOffset int
+	// OpenTrafficRowIDs tracks which traffic rows have their detail disclosure
+	// expanded. Key is request_id; value is always true.
+	OpenTrafficRowIDs map[string]bool
+	// SectionOpen tracks collapsible section open state per section title.
+	SectionOpen map[string]bool
+	// WorkspaceEditing controls whether the workspace name editor is active.
+	WorkspaceEditing bool
+	// WorkspaceDraft is the current draft value in the workspace name editor.
+	WorkspaceDraft string
+	// WorkspaceErrMsg is the validation error for workspace name editing.
+	WorkspaceErrMsg string
+	// ClientPickerOpen controls whether the client preset picker is visible.
+	ClientPickerOpen bool
+	// ClientPickerCursor is the selected index in the client picker.
+	ClientPickerCursor int
+	// ExpandedActionID tracks which client action row has its detail open.
+	ExpandedActionID string
+	// PayloadScrollOffset is the scroll offset for client payload details.
+	PayloadScrollOffset int
+	HelpNote            string
 }
 
 type AuthSessionViewState struct {

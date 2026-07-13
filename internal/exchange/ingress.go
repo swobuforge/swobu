@@ -19,7 +19,6 @@ import (
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/observation"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
-	"github.com/swobuforge/swobu/internal/turnstate"
 )
 
 const (
@@ -29,17 +28,14 @@ const (
 // RequestIngress runs one client request lifecycle at the exchange boundary.
 type RequestIngress struct {
 	endpoints       EndpointReader
-	graph           exchangeGraph
+	runner          Runner
 	trafficEvidence TrafficEventSink
 }
 
 type RuntimePoliciesSpec struct {
-	DeliverySelector  DeliverySelector
-	ObservationStore  observation.Store
-	ContinuationStore canonical.ContinuationStore
-	TurnStateStore    turnstate.TurnStateStore
-	EffectSink        effect.Sink
-	TrafficEventSink  TrafficEventSink
+	ObservationStore observation.Store
+	EffectSink       effect.Sink
+	TrafficEventSink TrafficEventSink
 }
 
 // TrafficEventSink records immutable traffic events at the exchange
@@ -63,17 +59,11 @@ type ExecutionRuntime interface {
 }
 
 func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
-	selector := policies.DeliverySelector
-	if selector == nil {
-		selector = FixedDeliverySelector{}
-	}
-	continuation := canonical.NewContinuationRuntime(policies.ContinuationStore)
 	sink := policies.EffectSink
 	if sink == nil {
-		if policies.ObservationStore != nil || policies.TurnStateStore != nil {
+		if policies.ObservationStore != nil {
 			sink = effect.StoreBackedSink{
 				Observations: policies.ObservationStore,
-				TurnState:    policies.TurnStateStore,
 			}
 		} else {
 			sink = effect.NoopSink{}
@@ -82,12 +72,7 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 	return RequestIngress{
 		endpoints:       endpoints,
 		trafficEvidence: policies.TrafficEventSink,
-		graph: exchangeGraph{
-			DeliverySelector: selector,
-			Observations:     policies.ObservationStore,
-			Continuation:     continuation,
-			Runner:           Runner{Runtime: runtime, StageMechanics: stage.StageMechanics{}, EffectSink: sink},
-		},
+		runner:          Runner{Runtime: runtime, StageMechanics: stage.StageMechanics{}, EffectSink: sink},
 	}
 }
 
@@ -140,14 +125,14 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 	if err := canonical.ValidateClientTransport(in.Request.Method, normalizedPath, false); err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
-	if h.graph.Runner.Runtime == nil {
+	if h.runner.Runtime == nil {
 		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange runtime resolver is not configured")
 	}
 	clientFamily := in.ClientFamily
 	if clientFamily == "" {
 		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("client family is not configured")
 	}
-	clientCodec := h.graph.Runner.Runtime.ClientCodec(clientFamily)
+	clientCodec := h.runner.Runtime.ClientCodec(clientFamily)
 	if clientCodec == nil {
 		return TransportResponse{}, RoutableTarget{}, canonical.UnsupportedOperation("client family is not implemented")
 	}
@@ -172,9 +157,9 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		return TransportResponse{}, RoutableTarget{}, err
 	}
 	requestDoc = requestDocResult.Value
-	commitEffectsBestEffort(ctx, h.graph.Runner.EffectSink, exchangeID, requestDocResult.Effects)
+	commitEffectsBestEffort(ctx, h.runner.EffectSink, exchangeID, requestDocResult.Effects)
 	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc)
-	commitEffectsBestEffort(ctx, h.graph.Runner.EffectSink, exchangeID, decodeResult.Effects)
+	commitEffectsBestEffort(ctx, h.runner.EffectSink, exchangeID, decodeResult.Effects)
 	if err != nil {
 		return TransportResponse{}, RoutableTarget{}, err
 	}
@@ -184,32 +169,14 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		return TransportResponse{}, RoutableTarget{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	response, target, err := h.graph.Execute(ctx, exchangeGraphInput{
-		ExchangeID:     exchangeID,
-		ClientFamily:   clientFamily,
-		ClientDelivery: clientDelivery,
-		Request:        request,
-		Endpoint:       endpoint,
-	})
-	h.appendTrafficEvidence(ctx, endpoint, exchangeID, clientFamily, request, target, response, err)
+	response, target, err := runExchangeWithMachine(ctx, h.runner, h.trafficEvidence, exchangeID, clientFamily, clientDelivery, request, endpoint)
 	if err != nil {
 		return response, target, err
 	}
 	return response, target, nil
 }
 
-func (h RequestIngress) appendTrafficEvidence(ctx context.Context, endpoint endpointintent.Endpoint, exchangeID string, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error) {
-	if h.trafficEvidence == nil {
-		return
-	}
-	event, buildErr := buildTerminalTrafficEvent(endpoint, exchangeID, clientFamily, request, target, response, err)
-	if buildErr != nil {
-		return
-	}
-	h.trafficEvidence.Append(ctx, event)
-}
-
-func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID string, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error) (trafficevidence.TrafficEvent, error) {
+func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID string, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error, attemptCount int) (trafficevidence.TrafficEvent, error) {
 	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(exchangeID))
 	if parseErr != nil {
 		return trafficevidence.TrafficEvent{}, parseErr
@@ -230,7 +197,7 @@ func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID stri
 		Route:               route,
 		Result:              result,
 		StatusCode:          statusCode,
-		AttemptCount:        1,
+		AttemptCount:        max(attemptCount, 1),
 		ModelRequested:      request.Model(),
 		ModelResolved:       request.Model(),
 		ExchangeDiagnostics: requestOutcomeDiagnostics(err),

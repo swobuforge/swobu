@@ -38,7 +38,7 @@ func (loop *AppLoop[M]) SetFocus(next *layout.LayoutNode) {
 }
 
 func (loop *AppLoop[M]) FocusNext() {
-	focusables := focusOrder(loop.Tree)
+	focusables := loop.focusOrder()
 	if len(focusables) == 0 {
 		loop.SetFocus(nil)
 		return
@@ -58,7 +58,7 @@ func (loop *AppLoop[M]) FocusNext() {
 }
 
 func (loop *AppLoop[M]) FocusPrev() {
-	focusables := focusOrder(loop.Tree)
+	focusables := loop.focusOrder()
 	if len(focusables) == 0 {
 		loop.SetFocus(nil)
 		return
@@ -77,58 +77,71 @@ func (loop *AppLoop[M]) FocusPrev() {
 	loop.SetFocus(focusables[len(focusables)-1])
 }
 
-func (loop *AppLoop[M]) repairFocus(nodes map[layout.NodeID]*layout.LayoutNode, previousFocusedIndex int) {
-	// Semantic focus repair: if we have a stable focusedID, try to find the
-	// node with that identity in the new tree before falling back to positional
-	// index-based repair.
-	if loop.focusedID != "" {
-		for _, node := range nodes {
-			if node.FocusID == loop.focusedID && canFocus(node) {
-				loop.Focused = node
+// focusOrder returns focusable nodes in order.
+//
+// The semantic FocusGraph is the sole source of focus identity and
+// traversal order. When no graph is compiled (legacy retained.ViewSpec
+// path without core.Node migration), we derive order from the render tree
+// as a compatibility fallback.
+//
+// TODO(v2-migration): delete renderTreeFocusOrder once all views use
+// core.Node, which guarantees FocusGraph compilation. Tracked in
+// `migrationTracker` (52 files remaining as of 2026-06-15).
+func (loop *AppLoop[M]) focusOrder() []*layout.LayoutNode {
+	if loop.focusGraph.Empty() {
+		return renderTreeFocusOrder(loop.Tree)
+	}
+	return loop.semanticFocusOrder()
+}
+
+func (loop *AppLoop[M]) semanticFocusOrder() []*layout.LayoutNode {
+	var nodes []*layout.LayoutNode
+	for _, fid := range loop.focusGraph.Order {
+		if node := loop.findByFocusID(string(fid)); node != nil && canFocus(node) {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes
+}
+
+func (loop *AppLoop[M]) findByFocusID(fid string) *layout.LayoutNode {
+	var result *layout.LayoutNode
+	var walk func(*layout.LayoutNode)
+	walk = func(node *layout.LayoutNode) {
+		if node == nil {
+			return
+		}
+		if node.FocusID == fid {
+			result = node
+			return
+		}
+		for _, child := range stableKids(node.Kids) {
+			walk(child)
+			if result != nil {
 				return
 			}
 		}
 	}
-	if loop.Focused == nil {
-		focusables := focusOrder(loop.Tree)
-		if len(focusables) > 0 {
-			loop.Focused = focusables[0]
-			loop.focusedID = focusables[0].FocusID
-			if hooks, ok := loop.Focused.RenderNode.(interaction.FocusEvents); ok {
-				if actions := hooks.OnFocus(loop.Focused); len(actions) > 0 {
-					loop.Dispatch(actions)
-				}
-			}
+	walk(loop.Tree)
+	return result
+}
+
+func renderTreeFocusOrder(root *layout.LayoutNode) []*layout.LayoutNode {
+	var nodes []*layout.LayoutNode
+	var walk func(*layout.LayoutNode)
+	walk = func(node *layout.LayoutNode) {
+		if node == nil {
+			return
 		}
-		return
+		if canFocus(node) {
+			nodes = append(nodes, node)
+		}
+		for _, child := range stableKids(node.Kids) {
+			walk(child)
+		}
 	}
-	next := nodes[loop.Focused.ID]
-	if next == nil || !canFocus(next) {
-		if lineage := survivingFocusableFromLineage(loop.Focused, nodes); lineage != nil {
-			loop.Focused = lineage
-			loop.focusedID = lineage.FocusID
-			return
-		}
-		focusables := focusOrder(loop.Tree)
-		if len(focusables) == 0 {
-			loop.Focused = nil
-			loop.focusedID = ""
-			return
-		}
-		if previousFocusedIndex < 0 {
-			loop.Focused = focusables[0]
-			loop.focusedID = focusables[0].FocusID
-			return
-		}
-		if previousFocusedIndex >= len(focusables) {
-			previousFocusedIndex = len(focusables) - 1
-		}
-		loop.Focused = focusables[previousFocusedIndex]
-		loop.focusedID = focusables[previousFocusedIndex].FocusID
-		return
-	}
-	loop.Focused = next
-	loop.focusedID = next.FocusID
+	walk(root)
+	return nodes
 }
 
 func survivingFocusableFromLineage(previous *layout.LayoutNode, nodes map[layout.NodeID]*layout.LayoutNode) *layout.LayoutNode {
@@ -176,20 +189,75 @@ func canFocus(node *layout.LayoutNode) bool {
 	return ok && focusable.CanFocus(node)
 }
 
-func focusOrder(root *layout.LayoutNode) []*layout.LayoutNode {
-	var nodes []*layout.LayoutNode
-	var walk func(*layout.LayoutNode)
-	walk = func(node *layout.LayoutNode) {
-		if node == nil {
-			return
-		}
-		if canFocus(node) {
-			nodes = append(nodes, node)
-		}
-		for _, child := range stableKids(node.Kids) {
-			walk(child)
+func (loop *AppLoop[M]) repairFocus(nodes map[layout.NodeID]*layout.LayoutNode, previousFocusedIndex int) {
+	if loop.focusedID != "" {
+		for _, node := range nodes {
+			if node.FocusID == loop.focusedID && canFocus(node) {
+				loop.Focused = node
+				return
+			}
 		}
 	}
-	walk(root)
-	return nodes
+	if loop.Focused == nil {
+		focusables := loop.focusOrder()
+		if len(focusables) > 0 {
+			loop.Focused = focusables[0]
+			loop.focusedID = focusables[0].FocusID
+			if hooks, ok := loop.Focused.RenderNode.(interaction.FocusEvents); ok {
+				if actions := hooks.OnFocus(loop.Focused); len(actions) > 0 {
+					loop.Dispatch(actions)
+				}
+			}
+		}
+		return
+	}
+	next := nodes[loop.Focused.ID]
+	if next == nil || !canFocus(next) {
+		if lineage := survivingFocusableFromLineage(loop.Focused, nodes); lineage != nil {
+			loop.Focused = lineage
+			loop.focusedID = lineage.FocusID
+			return
+		}
+		focusables := loop.focusOrder()
+		if len(focusables) == 0 {
+			loop.Focused = nil
+			loop.focusedID = ""
+			return
+		}
+		if previousFocusedIndex < 0 {
+			loop.Focused = focusables[0]
+			loop.focusedID = focusables[0].FocusID
+			return
+		}
+		if previousFocusedIndex >= len(focusables) {
+			previousFocusedIndex = len(focusables) - 1
+		}
+		loop.Focused = focusables[previousFocusedIndex]
+		loop.focusedID = focusables[previousFocusedIndex].FocusID
+		return
+	}
+	loop.Focused = next
+	loop.focusedID = next.FocusID
+}
+
+func focusIndex(nodes []*layout.LayoutNode, target *layout.LayoutNode) int {
+	if target == nil {
+		return -1
+	}
+	for i, node := range nodes {
+		if node != nil && node.ID == target.ID {
+			return i
+		}
+	}
+	return -1
+}
+
+func collectByID(node *layout.LayoutNode, out map[layout.NodeID]*layout.LayoutNode) {
+	if node == nil {
+		return
+	}
+	out[node.ID] = node
+	for _, child := range node.Kids {
+		collectByID(child, out)
+	}
 }

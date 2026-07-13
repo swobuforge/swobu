@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -124,7 +123,7 @@ func TestResolveProviderIngress_UsesAnthropicPathForMessages(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{}, "https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837")
-	req := ports.NewProviderRequest(
+	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "claude-sonnet-4",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},

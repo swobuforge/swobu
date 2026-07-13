@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 var restartDaemon = startDaemonRestart
@@ -16,13 +15,13 @@ type MismatchRestartHintEffect struct {
 	Command string
 }
 
-func (eff MismatchRestartHintEffect) Execute(ctx context.Context) []update.Action {
+func (eff MismatchRestartHintEffect) Run(ctx context.Context) any {
 	_ = strings.TrimSpace(eff.Command) // swobu:io-string source=boundary
 	message := restartDaemonMismatchMessage(ctx)
-	return []update.Action{MismatchRecoveryNoted{
+	return MismatchRecoveryNoted{
 		Message: message,
 		Action:  "run",
-	}}
+	}
 }
 
 // CopyExchangeDiagnosticsEffect copies mismatch diagnostics text.
@@ -30,11 +29,11 @@ type CopyExchangeDiagnosticsEffect struct {
 	Text string
 }
 
-func (eff CopyExchangeDiagnosticsEffect) Execute(context.Context) []update.Action {
-	return []update.Action{MismatchRecoveryNoted{
+func (eff CopyExchangeDiagnosticsEffect) Run(context.Context) any {
+	return MismatchRecoveryNoted{
 		Message: copyValueNote(strings.TrimSpace(eff.Text)), // swobu:io-string source=boundary
 		Action:  "copy",
-	}}
+	}
 }
 
 // ControlPlaneIncompatibleDetected marks daemon/TUI protocol mismatch.

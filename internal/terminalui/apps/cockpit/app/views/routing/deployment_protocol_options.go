@@ -3,13 +3,13 @@ package routing
 import (
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
-func deploymentForModelID(deployments []ports.ProviderDeploymentRecord, modelID string) (ports.ProviderDeploymentRecord, bool) {
+func deploymentForModelID(deployments []profile.ProviderDeploymentRecord, modelID string) (profile.ProviderDeploymentRecord, bool) {
 	modelID = strings.TrimSpace(modelID) // swobu:io-string source=boundary
 	if modelID == "" {
-		return ports.ProviderDeploymentRecord{}, false
+		return profile.ProviderDeploymentRecord{}, false
 	}
 	for _, deployment := range deployments {
 		name := strings.TrimSpace(deployment.Name) // swobu:io-string source=boundary
@@ -20,10 +20,10 @@ func deploymentForModelID(deployments []ports.ProviderDeploymentRecord, modelID 
 			return deployment, true
 		}
 	}
-	return ports.ProviderDeploymentRecord{}, false
+	return profile.ProviderDeploymentRecord{}, false
 }
 
-func deploymentOptionLabel(deployment ports.ProviderDeploymentRecord) string {
+func deploymentOptionLabel(deployment profile.ProviderDeploymentRecord) string {
 	name := strings.TrimSpace(deployment.Name) // swobu:io-string source=boundary
 	if name == "" {
 		name = strings.TrimSpace(deployment.ModelName) // swobu:io-string source=boundary
@@ -50,12 +50,12 @@ func deploymentOptionLabel(deployment ports.ProviderDeploymentRecord) string {
 	return name + " (" + strings.Join(meta, " · ") + ")"
 }
 
-func deploymentProtocolOptions(deployment ports.ProviderDeploymentRecord, providerSpec string) []string {
-	return ports.ResolveProviderDeployment(providerSpec, deployment).ProtocolOptions()
+func deploymentProtocolOptions(deployment profile.ProviderDeploymentRecord, providerSpec string) []string {
+	return profile.ResolveProviderDeployment(providerSpec, deployment).ProtocolOptions()
 }
 
-func deploymentSelectedProtocol(deployment ports.ProviderDeploymentRecord, providerSpec string, current string) string {
-	resolution := ports.ResolveProviderDeployment(providerSpec, deployment)
+func deploymentSelectedProtocol(deployment profile.ProviderDeploymentRecord, providerSpec string, current string) string {
+	resolution := profile.ResolveProviderDeployment(providerSpec, deployment)
 	current = strings.TrimSpace(current) // swobu:io-string source=boundary
 	if current != "" && resolution.SupportsProtocol(current) {
 		return current

@@ -16,7 +16,6 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -99,7 +98,7 @@ func (b *providerRegistryBuilder) Build() providersruntime.Registry {
 	}
 }
 
-func (r ProviderRegistry) ResolveProviderIngress(ctx context.Context, req ports.ProviderRequest) (ports.ProviderIngress, error) {
+func (r ProviderRegistry) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
 	providerID, err := providerIDFromTarget(req.Target.ProviderID())
 	if err != nil {
 		return nil, err
@@ -114,7 +113,7 @@ func (r ProviderRegistry) ResolveProviderIngress(ctx context.Context, req ports.
 	return ingress.ResolveProviderIngress(ctx, req)
 }
 
-func (r ProviderRegistry) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]ports.ProviderDeploymentRecord, error) {
+func (r ProviderRegistry) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	providerID, err := providerIDFromTarget(target.ProviderID())
 	if err != nil {
 		return nil, err
@@ -209,6 +208,6 @@ func cloneIngressRegistry(src map[profile.ProviderID]providersruntime.ProviderEx
 	return out
 }
 
-var _ ports.ProviderIngressResolver = ProviderRegistry{}
-var _ ports.ProviderModelCatalog = ProviderRegistry{}
+var _ exchange.ProviderIngressResolver = ProviderRegistry{}
+var _ exchange.ProviderModelCatalog = ProviderRegistry{}
 var _ providersruntime.Registry = ProviderRegistry{}

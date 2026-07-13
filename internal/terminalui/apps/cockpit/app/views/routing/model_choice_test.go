@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/ports"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/testharness"
@@ -88,7 +88,7 @@ func TestApplyProviderModelSelection_ClearsAutoWhenDeploymentHasNoDefault(t *tes
 	t.Parallel()
 
 	actions := applyProviderModelSelection(
-		ports.ProviderDeploymentRecord{
+		profile.ProviderDeploymentRecord{
 			Name:                       "gpt-4.1-mini",
 			SupportedProviderProtocols: []string{"responses"},
 		},
@@ -118,7 +118,7 @@ func TestApplyProviderModelSelection_UsesExplicitDeploymentDefault(t *testing.T)
 	t.Parallel()
 
 	actions := applyProviderModelSelection(
-		ports.ProviderDeploymentRecord{
+		profile.ProviderDeploymentRecord{
 			Name:                       "gpt-4.1-mini",
 			SupportedProviderProtocols: []string{"responses"},
 			DefaultProviderProtocol:    "responses",

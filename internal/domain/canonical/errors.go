@@ -67,6 +67,10 @@ func UnsupportedOperation(message string) Error {
 	return NewSwobuError(ErrorCodeUnsupportedOperation, message)
 }
 
+func UnknownTarget(message string) Error {
+	return NewSwobuError(ErrorCodeUnknownTarget, message)
+}
+
 func UnsupportedDelivery(message string) Error {
 	return NewSwobuError(ErrorCodeUnsupportedDelivery, message)
 }

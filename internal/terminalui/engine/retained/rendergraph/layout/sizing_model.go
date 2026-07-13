@@ -1,3 +1,5 @@
+// swobu:lint ignore test-only-dead-cluster because=focus-ID wrapping is a bridge seam used by corelower until the cockpit runtime migration is complete.
+// TODO(batch2): remove this suppression once the production runner consumes the semantic focus bridge directly.
 package layout
 
 import (
@@ -124,6 +126,7 @@ type focusIDRenderNode struct {
 func (e focusIDRenderNode) focusID() string    { return e.fid }
 func (e focusIDRenderNode) unwrap() RenderNode { return e.RenderNode }
 
+// swobu:lint ignore test-only-dead-cluster because=focus-ID wrapping is a bridge seam used by corelower until the cockpit runtime migration is complete.
 // WithFocusID annotates one structural node with a stable semantic focus
 // identity supplied by the author-facing core algebra.
 func WithFocusID(focusID string, node RenderNode) RenderNode {
@@ -139,6 +142,7 @@ func FocusIDOf(node RenderNode) (string, bool) {
 	}
 	return identified.focusID(), true
 }
+
 // WithIdentity annotates one structural node with a stable retained node ID
 // supplied by the reconciler.
 func WithIdentity(id NodeID, node RenderNode) RenderNode {
@@ -155,11 +159,14 @@ func IdentityOf(node RenderNode) (NodeID, bool) {
 	return identified.nodeID(), true
 }
 
-// UnwrapIdentity returns the inner node wrapped by WithIdentity, or the
-// node itself if no identity wrapper is present.
+// UnwrapIdentity returns the inner node wrapped by WithIdentity or
+// WithFocusID, or the node itself if no wrapper is present.
 func UnwrapIdentity(node RenderNode) RenderNode {
 	if ie, ok := node.(identityRenderNode); ok {
 		return ie.RenderNode
+	}
+	if fe, ok := node.(focusIDRenderNode); ok {
+		return fe.RenderNode
 	}
 	return node
 }

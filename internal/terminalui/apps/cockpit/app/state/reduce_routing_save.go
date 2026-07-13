@@ -5,10 +5,9 @@ import (
 
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
-func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect {
+func reduceRoutingSaveState(model *Model, action Action) []EffectOnce {
 	if effects, handled := reduceRoutingSaveMutationState(model, action); handled {
 		return effects
 	}
@@ -21,7 +20,7 @@ func reduceRoutingSaveState(model *Model, action update.Action) []update.Effect 
 	return nil
 }
 
-func reduceRoutingSaveMutationState(model *Model, action update.Action) ([]update.Effect, bool) {
+func reduceRoutingSaveMutationState(model *Model, action Action) ([]EffectOnce, bool) {
 	switch value := action.(type) {
 	case RoutingSaveStartedAction:
 		model.HeaderStatus = "saving…"
@@ -33,43 +32,43 @@ func reduceRoutingSaveMutationState(model *Model, action update.Action) ([]updat
 		model.InteractionMode = InteractionModeNAV
 		clearSaveErrors(model)
 		applyRoutingSelection(model, strings.TrimSpace(value.EndpointName), strings.TrimSpace(value.ProviderRef)) // swobu:io-string source=boundary
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}, true
+		return []EffectOnce{stateeffect.RefreshEndpointsEffect{}}, true
 	case stateeffect.RoutingMutationSaved, stateeffect.ProviderConfigAddedSaved:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
 		clearSaveErrors(model)
-		return []update.Effect{stateeffect.RefreshEndpointsEffect{}}, true
+		return []EffectOnce{stateeffect.RefreshEndpointsEffect{}}, true
 	case stateeffect.RoutingSaveFailed:
 		model.HeaderStatus = "ready"
 		model.InteractionMode = InteractionModeNAV
 		setSaveError(model, strings.TrimSpace(value.ErrorAnchor), strings.TrimSpace(value.Message)) // swobu:io-string source=boundary
 		return nil, true
 	case SaveSelectedTargetRequested:
-		return []update.Effect{stateeffect.SaveSelectedTargetEffect(value)}, true
+		return []EffectOnce{stateeffect.SaveSelectedTargetEffect(value)}, true
 	case SaveProviderConfigRequested:
-		return []update.Effect{stateeffect.SaveProviderConfigEffect(value)}, true
+		return []EffectOnce{stateeffect.SaveProviderConfigEffect(value)}, true
 	case AddProviderConfigRequested:
-		return []update.Effect{stateeffect.AddProviderConfigEffect(value)}, true
+		return []EffectOnce{stateeffect.AddProviderConfigEffect(value)}, true
 	case DeleteProviderConfigRequested:
-		return []update.Effect{stateeffect.DeleteProviderConfigEffect(value)}, true
+		return []EffectOnce{stateeffect.DeleteProviderConfigEffect(value)}, true
 	case StoreKeychainCredentialRequested:
 		model.HeaderStatus = "saving…"
 		model.InteractionMode = InteractionModeBusySave
 		clearSaveErrors(model)
-		return []update.Effect{stateeffect.StoreKeychainCredentialEffect(value)}, true
+		return []EffectOnce{stateeffect.StoreKeychainCredentialEffect(value)}, true
 	default:
 		return nil, false
 	}
 }
 
-func reduceRoutingAuthSessionState(model *Model, action update.Action) ([]update.Effect, bool) {
+func reduceRoutingAuthSessionState(model *Model, action Action) ([]EffectOnce, bool) {
 	switch value := action.(type) {
 	case StartProviderAuthSessionRequested:
 		model.HeaderStatus = "waiting for login…"
 		model.InteractionMode = InteractionModeBusySave
 		clearSaveErrors(model)
 		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
-		return []update.Effect{stateeffect.StartProviderAuthSessionEffect{
+		return []EffectOnce{stateeffect.StartProviderAuthSessionEffect{
 			EndpointName:   strings.TrimSpace(value.EndpointName), // swobu:io-string source=boundary
 			ProviderConfig: value.ProviderConfig,
 			OwnerKey:       strings.TrimSpace(value.OwnerKey),  // swobu:io-string source=boundary
@@ -93,7 +92,7 @@ func reduceRoutingAuthSessionState(model *Model, action update.Action) ([]update
 		reduceAuthSessionCopyNoted(model, value)
 		return nil, true
 	case stateeffect.PollProviderAuthSessionRequestedAction:
-		return []update.Effect{stateeffect.PollProviderAuthSessionEffect{
+		return []EffectOnce{stateeffect.PollProviderAuthSessionEffect{
 			EndpointName:   strings.TrimSpace(value.EndpointName), // swobu:io-string source=boundary
 			ProviderConfig: value.ProviderConfig,
 			OwnerKey:       strings.TrimSpace(value.OwnerKey),  // swobu:io-string source=boundary
@@ -106,7 +105,7 @@ func reduceRoutingAuthSessionState(model *Model, action update.Action) ([]update
 	}
 }
 
-func reduceRoutingCredentialState(model *Model, action update.Action) ([]update.Effect, bool) {
+func reduceRoutingCredentialState(model *Model, action Action) ([]EffectOnce, bool) {
 	switch value := action.(type) {
 	case stateeffect.ProviderAuthSessionCredentialResolvedAction:
 		return reduceProviderAuthSessionCredentialResolved(model, value), true
@@ -125,7 +124,7 @@ func reduceRoutingCredentialState(model *Model, action update.Action) ([]update.
 	}
 }
 
-func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec string) []update.Effect {
+func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec string) []EffectOnce {
 	providerSpec = strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
 	if providerSpec == "" {
 		return nil
@@ -143,7 +142,7 @@ func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec stri
 		if !strings.EqualFold(strings.TrimSpace(draft.ProviderSpec), providerSpec) || !isKeychainRef(draft.CredentialRef) { // swobu:io-string source=domain
 			return nil
 		}
-		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+		return []EffectOnce{stateeffect.LoadRoutingModelCatalogEffect{
 			Scope:            RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:     strings.TrimSpace(draft.ProviderSpec),     // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(draft.BaseURL),          // swobu:io-string source=boundary
@@ -155,7 +154,7 @@ func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec stri
 	if !strings.EqualFold(strings.TrimSpace(model.AddModelDraftProviderSpec), providerSpec) || !isKeychainRef(model.AddModelDraftCredentialRef) { // swobu:io-string source=domain
 		return nil
 	}
-	return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+	return []EffectOnce{stateeffect.LoadRoutingModelCatalogEffect{
 		Scope:            RoutingModelCatalogScopeAddModelDraft,
 		ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),     // swobu:io-string source=boundary
 		BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),          // swobu:io-string source=boundary
@@ -165,7 +164,7 @@ func reloadRoutingModelCatalogAfterKeychainStore(model *Model, providerSpec stri
 	}}
 }
 
-func reduceProviderAuthSessionStarted(model *Model, value stateeffect.ProviderAuthSessionStarted) []update.Effect {
+func reduceProviderAuthSessionStarted(model *Model, value stateeffect.ProviderAuthSessionStarted) []EffectOnce {
 	model.HeaderStatus = "waiting for login…"
 	model.InteractionMode = InteractionModeManageList
 	setAuthSession(model, strings.TrimSpace(value.OwnerKey), stateModel.AuthSessionViewState{ // swobu:io-string source=boundary
@@ -180,7 +179,7 @@ func reduceProviderAuthSessionStarted(model *Model, value stateeffect.ProviderAu
 	if loginURL == "" {
 		return nil
 	}
-	return []update.Effect{stateeffect.OpenSupportLinkEffect{Label: "login", URL: loginURL}}
+	return []EffectOnce{stateeffect.OpenSupportLinkEffect{Label: "login", URL: loginURL}}
 }
 
 func reduceProviderAuthSessionFailed(model *Model, value stateeffect.ProviderAuthSessionFailedAction) {
@@ -224,7 +223,7 @@ func reduceAuthSessionCopyNoted(model *Model, value stateeffect.AuthSessionCopyN
 	setAuthSession(model, ownerKey, session)
 }
 
-func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect.ProviderAuthSessionCredentialResolvedAction) []update.Effect {
+func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect.ProviderAuthSessionCredentialResolvedAction) []EffectOnce {
 	if strings.TrimSpace(value.AuthScope) == stateModel.AuthScopeCreateDraft { // swobu:io-string source=boundary
 		model.HeaderStatus = "login complete"
 		model.InteractionMode = InteractionModeManageList
@@ -238,7 +237,7 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 		model.CreateDraftModelError = ""
 		model.CreateDraftModelProbePending = true
 		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
-		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+		return []EffectOnce{stateeffect.LoadRoutingModelCatalogEffect{
 			Scope:            RoutingModelCatalogScopeCreateDraft,
 			ProviderSpec:     strings.TrimSpace(model.CreateDraftProviderConfig.ProviderSpec),     // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(model.CreateDraftProviderConfig.BaseURL),          // swobu:io-string source=boundary
@@ -257,7 +256,7 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 		model.AddModelDraftModelError = ""
 		model.AddModelDraftModelProbePending = true
 		clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
-		return []update.Effect{stateeffect.LoadRoutingModelCatalogEffect{
+		return []EffectOnce{stateeffect.LoadRoutingModelCatalogEffect{
 			Scope:            RoutingModelCatalogScopeAddModelDraft,
 			ProviderSpec:     strings.TrimSpace(model.AddModelDraftProviderSpec),     // swobu:io-string source=boundary
 			BaseURL:          strings.TrimSpace(model.AddModelDraftBaseURL),          // swobu:io-string source=boundary
@@ -272,7 +271,7 @@ func reduceProviderAuthSessionCredentialResolved(model *Model, value stateeffect
 	model.InteractionMode = InteractionModeBusySave
 	clearSaveErrors(model)
 	clearAuthSession(model, strings.TrimSpace(value.OwnerKey)) // swobu:io-string source=boundary
-	return []update.Effect{stateeffect.SaveProviderConfigEffect(SaveProviderConfigRequested{
+	return []EffectOnce{stateeffect.SaveProviderConfigEffect(SaveProviderConfigRequested{
 		EndpointName:   strings.TrimSpace(value.EndpointName), // swobu:io-string source=boundary
 		ProviderConfig: next,
 		ErrorAnchor:    "",

@@ -25,6 +25,7 @@ import (
 	rootviews "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/views/root"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/shared/daemonstate"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/host"
+	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 // Run is the interactive cockpit entry seam.
@@ -36,7 +37,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, _ io.Writer) er
 		return err
 	}
 	model := bootstrapModelFromDaemon(ctx)
-	runner := host.New(screen, rootviews.Root(), model, state.Reduce)
+	runner := host.New(screen, rootviews.Root(), model, retainedReducer)
 	restoreForegroundRunner := stateeffect.SetForegroundClientRunner(func(ctx context.Context, executable string, args []string, env map[string]string) (int, error) {
 		exitCode, err := host.RunForegroundClient(ctx, executable, args, env)
 		if err == nil {
@@ -52,6 +53,31 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, _ io.Writer) er
 	})
 	defer restoreForegroundRunner()
 	return runner.Run(ctx)
+}
+
+// retainedReducer bridges state.Reduce (EffectOnce) into loop.Reducer.
+func retainedReducer(model *state.Model, action update.Action) []update.Effect {
+	var evt state.Action
+	evt = action
+	effects := state.Reduce(model, evt)
+	if len(effects) == 0 {
+		return nil
+	}
+	out := make([]update.Effect, 0, len(effects))
+	for _, eff := range effects {
+		out = append(out, effectOnceBridge{eff})
+	}
+	return out
+}
+
+type effectOnceBridge struct{ once state.EffectOnce }
+
+func (b effectOnceBridge) Execute(ctx context.Context) []update.Action {
+	result := b.once.Run(ctx)
+	if result == nil {
+		return nil
+	}
+	return []update.Action{result}
 }
 
 func bootstrapModelFromDaemon(ctx context.Context) state.Model {

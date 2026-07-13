@@ -7,24 +7,23 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 const daemonRefreshInterval = 2 * time.Second
 
-func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
+func reduceBehaviorState(model *Model, action Action) []EffectOnce {
 	if effects, handled := reduceSupportActions(model, action); handled {
 		return effects
 	}
 	switch value := action.(type) {
 	case stateeffect.DaemonRefreshTick:
 		if model.ControlPlane != nil {
-			return []update.Effect{
+			return []EffectOnce{
 				stateeffect.RefreshDaemonStatusEffect{},
 				stateeffect.ScheduleDaemonRefreshEffect{Delay: daemonRefreshInterval},
 			}
 		}
-		return []update.Effect{
+		return []EffectOnce{
 			stateeffect.RefreshDaemonStatusEffect{},
 			stateeffect.RefreshEndpointsEffect{},
 			refreshStatusProjectionEffectFor(model),
@@ -40,38 +39,106 @@ func reduceBehaviorState(model *Model, action update.Action) []update.Effect {
 		}
 		model.InteractionMode = mode
 		return nil
+	case SetSelectedClientID:
+		model.SelectedClientID = strings.TrimSpace(value.ID) // swobu:io-string source=boundary
+		return nil
 	case SetFocusedRowAffordance:
 		applyFocusedRowFooterAffordance(model, value)
+		return nil
+	case SetTrafficSectionOffset:
+		model.TrafficSectionOffset = value.Offset
+		if model.TrafficSectionOffset < 0 {
+			model.TrafficSectionOffset = 0
+		}
+		return nil
+	case ToggleTrafficRowOpen:
+		if model.OpenTrafficRowIDs == nil {
+			model.OpenTrafficRowIDs = map[string]bool{}
+		}
+		if model.OpenTrafficRowIDs[value.RequestID] {
+			delete(model.OpenTrafficRowIDs, value.RequestID)
+		} else {
+			model.OpenTrafficRowIDs[value.RequestID] = true
+		}
+		return nil
+	case ToggleSectionOpen:
+		if model.SectionOpen == nil {
+			model.SectionOpen = map[string]bool{}
+		}
+		if model.SectionOpen[value.Title] {
+			delete(model.SectionOpen, value.Title)
+		} else {
+			model.SectionOpen[value.Title] = true
+		}
+		return nil
+	case SetWorkspaceEditing:
+		model.WorkspaceEditing = value.Editing
+		if !value.Editing {
+			model.WorkspaceDraft = ""
+			model.WorkspaceErrMsg = ""
+		}
+		return nil
+	case SetWorkspaceDraft:
+		model.WorkspaceDraft = strings.TrimSpace(value.Draft) // swobu:io-string source=boundary
+		model.WorkspaceErrMsg = ""
+		return nil
+	case SetWorkspaceErrMsg:
+		model.WorkspaceErrMsg = strings.TrimSpace(value.Message) // swobu:io-string source=boundary
+		return nil
+	case SetClientPickerOpen:
+		model.ClientPickerOpen = value.Open
+		if !value.Open {
+			model.ClientPickerCursor = 0
+		}
+		return nil
+	case SetClientPickerCursor:
+		model.ClientPickerCursor = value.Cursor
+		if model.ClientPickerCursor < 0 {
+			model.ClientPickerCursor = 0
+		}
+		return nil
+	case ToggleExpandedActionID:
+		if model.ExpandedActionID == value.ActionID {
+			model.ExpandedActionID = ""
+		} else {
+			model.ExpandedActionID = value.ActionID
+		}
+		return nil
+	case SetPayloadScrollOffset:
+		model.PayloadScrollOffset = value.Offset
+		if model.PayloadScrollOffset < 0 {
+			model.PayloadScrollOffset = 0
+		}
 		return nil
 	case LoadRoutingModelCatalogRequestedAction:
 		return handleLoadRoutingModelCatalogRequested(model, value)
 	case stateeffect.RoutingModelCatalogLoaded:
 		return handleRoutingModelCatalogLoaded(model, value)
 	case FocusNextAfterRebuildRequested:
-		return []update.Effect{stateeffect.FocusNextAfterRebuildEffect{}}
+		return []EffectOnce{stateeffect.FocusNextAfterRebuildEffect{}}
 	case EndpointCopyRequested:
-		return []update.Effect{stateeffect.CopyEndpointValueEffect(value)}
+		return []EffectOnce{stateeffect.CopyEndpointValueEffect(value)}
 	case AuthSessionURLCopyRequested:
-		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{Value: strings.TrimSpace(value.Value)}} // swobu:io-string source=boundary
+		return []EffectOnce{stateeffect.CopyAuthSessionURLEffect{Value: strings.TrimSpace(value.Value)}} // swobu:io-string source=boundary
 	case AuthSessionURLCopyScopedRequested:
-		return []update.Effect{stateeffect.CopyAuthSessionURLEffect{
+		return []EffectOnce{stateeffect.CopyAuthSessionURLEffect{
 			OwnerKey: strings.TrimSpace(value.OwnerKey), // swobu:io-string source=boundary
 			Value:    strings.TrimSpace(value.Value),    // swobu:io-string source=boundary
 		}}
 	case ClientBaseURLCopyRequestedAction:
-		return []update.Effect{stateeffect.CopyClientBaseURLEffect(value)}
+		return []EffectOnce{stateeffect.CopyClientBaseURLEffect(value)}
 	case ClientLaunchRequestedAction:
 		model.HeaderStatus = "running…"
 		model.InteractionMode = InteractionModeBusyLaunch
-		return []update.Effect{stateeffect.LaunchClientEffect(value)}
+		return []EffectOnce{stateeffect.LaunchClientEffect(value)}
 	case RefreshStatusProjectionRequested:
-		return []update.Effect{refreshStatusProjectionEffectFor(model)}
+		return []EffectOnce{refreshStatusProjectionEffectFor(model)}
 	default:
 		return nil
 	}
 }
 
-func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, bool) {
+func reduceSupportActions(model *Model, action Action) ([]EffectOnce, bool) {
 	switch value := action.(type) {
 	case SetHelpTabOpenAction:
 		model.HelpTabOpen = value.Open
@@ -80,24 +147,24 @@ func reduceSupportActions(model *Model, action update.Action) ([]update.Effect, 
 		}
 		return nil, true
 	case OpenSupportLinkRequested:
-		return []update.Effect{stateeffect.OpenSupportLinkEffect{
+		return []EffectOnce{stateeffect.OpenSupportLinkEffect{
 			Label: strings.TrimSpace(value.Label), // swobu:io-string source=boundary
 			URL:   strings.TrimSpace(value.URL),   // swobu:io-string source=boundary
 		}}, true
 	case HelpDiagnosticsCopyRequested:
-		return []update.Effect{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true // swobu:io-string source=boundary
+		return []EffectOnce{stateeffect.CopyHelpDiagnosticsEffect{Text: strings.TrimSpace(value.Text)}}, true // swobu:io-string source=boundary
 	case MismatchRestartRequested:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
-		return []update.Effect{stateeffect.MismatchRestartHintEffect{
+		return []EffectOnce{stateeffect.MismatchRestartHintEffect{
 			Command: strings.TrimSpace(model.ControlPlane.RecoveryCommand), // swobu:io-string source=boundary
 		}}, true
 	case ExchangeDiagnosticsCopyRequested:
 		if model.ControlPlane == nil {
 			return nil, true
 		}
-		return []update.Effect{stateeffect.CopyExchangeDiagnosticsEffect{
+		return []EffectOnce{stateeffect.CopyExchangeDiagnosticsEffect{
 			Text: mismatchDiagnostics(*model.ControlPlane, model.TrafficRows),
 		}}, true
 	case stateeffect.MismatchRecoveryNoted:

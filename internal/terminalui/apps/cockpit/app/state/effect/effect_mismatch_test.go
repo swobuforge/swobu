@@ -35,13 +35,10 @@ func TestMismatchRestartHintEffect_ExecutesRestart(t *testing.T) {
 	restartDaemon = func(context.Context, daemonlifecycle.RestartInput) error { return nil }
 	t.Cleanup(func() { restartDaemon = orig })
 
-	actions := (MismatchRestartHintEffect{Command: "restart daemon"}).Execute(context.Background())
-	if len(actions) != 1 {
-		t.Fatalf("actions length=%d", len(actions))
-	}
-	noted, ok := actions[0].(MismatchRecoveryNoted)
+	action := (MismatchRestartHintEffect{Command: "restart daemon"}).Run(context.Background())
+	noted, ok := action.(MismatchRecoveryNoted)
 	if !ok {
-		t.Fatalf("action type=%T", actions[0])
+		t.Fatalf("action type=%T", action)
 	}
 	if noted.Message != "daemon restart started" {
 		t.Fatalf("message=%q", noted.Message)

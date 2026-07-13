@@ -1,3 +1,5 @@
+// swobu:lint ignore test-only-dead-cluster because=typed core.App bridge is staged until batch-2 cockpit runtime wiring makes it production-rooted.
+// TODO(batch2): route the production cockpit runner through core.App and delete this bridge suppression.
 // CoreAppLoop wires a typed core.App into the retained engine.
 //
 // This adapter translates between:
@@ -20,15 +22,7 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
-// CoreAppLoop wires one core.App into the retained event loop. It is the
-// migration bridge: once cockpit runs through this, the retained
-// update.Action any-path becomes engine-internal only.
-type CoreAppLoop[Model any, Event any] struct {
-	*AppLoop[Model]
-	app    core.App[Model, Event]
-	caster corelower.EventCaster[Event]
-}
-
+// swobu:lint ignore test-only-dead-cluster because=typed core.App bridge is staged until batch-2 cockpit runtime wiring makes it production-rooted.
 // CoreAppReducer bridges a typed core.App into the retained Reducer[M]
 // contract. The engine dispatches update.Action; this adapter asserts to
 // Event safely because every action was emitted by a typed signal or effect.
@@ -87,6 +81,7 @@ func (b coreEffectBridge[E]) Execute(ctx context.Context) []update.Action {
 	return []update.Action{result}
 }
 
+// swobu:lint ignore test-only-dead-cluster because=typed core.App bridge is staged until batch-2 cockpit runtime wiring makes it production-rooted.
 // LowerCoreNode is the engine-side bridge that turns one semantic node tree
 // into a retained rendergraph. Exported so the runtime can call it on the
 // top-level view node.

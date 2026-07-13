@@ -9,7 +9,6 @@ import (
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 const authSessionStartTimeout = 20 * time.Second
@@ -23,27 +22,27 @@ type SaveSelectedTargetEffect struct {
 	ErrorAnchor  string
 }
 
-func (cmd SaveSelectedTargetEffect) Execute(ctx context.Context) []update.Action {
+func (cmd SaveSelectedTargetEffect) Run(ctx context.Context) any {
 	c := operatorClientWithTimeout(authSessionStartTimeout)
 	ep, err := c.Get(ctx, cmd.EndpointName)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	ref, err := endpointintent.ParseProviderConfigRef(cmd.ProviderRef)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	newEp, err := endpointintent.NewEndpoint(ep.Name(), ep.ProviderConfigs(), ref)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	if _, err := c.Put(ctx, newEp); err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
-	return []update.Action{RoutingSaveSucceeded{
+	return RoutingSaveSucceeded{
 		EndpointName: cmd.EndpointName,
 		ProviderRef:  cmd.ProviderRef,
-	}}
+	}
 }
 
 // SaveProviderConfigEffect saves a provider config mutation for an endpoint.
@@ -53,15 +52,15 @@ type SaveProviderConfigEffect struct {
 	ErrorAnchor    string
 }
 
-func (cmd SaveProviderConfigEffect) Execute(ctx context.Context) []update.Action {
+func (cmd SaveProviderConfigEffect) Run(ctx context.Context) any {
 	c := operatorClientWithTimeout(authSessionPollTimeout)
 	ep, err := c.Get(ctx, cmd.EndpointName)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	pc, err := argsToProviderConfig(cmd.ProviderConfig)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	configs := ep.ProviderConfigs()
 	for i := range configs {
@@ -72,12 +71,12 @@ func (cmd SaveProviderConfigEffect) Execute(ctx context.Context) []update.Action
 	}
 	newEp, err := endpointintent.NewEndpoint(ep.Name(), configs, ep.SelectedProviderConfigRef())
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	if _, err := c.Put(ctx, newEp); err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
-	return []update.Action{RoutingMutationSaved{}}
+	return RoutingMutationSaved{}
 }
 
 // AddProviderConfigEffect appends a new provider config and makes it primary.
@@ -87,42 +86,44 @@ type AddProviderConfigEffect struct {
 	ErrorAnchor    string
 }
 
-func (cmd AddProviderConfigEffect) Execute(ctx context.Context) []update.Action {
+// TODO(v2-effect-split): AddProviderConfigEffect currently returns two actions
+// (RoutingMutationSaved + ProviderConfigAddedSaved). core.Effect[E] is single-return.
+// For now, we return the first action; the second action must be emitted by a
+// sub-effect or the reducer must derive it from state. This is a known gap
+// tracked in the migration backlog.
+func (cmd AddProviderConfigEffect) Run(ctx context.Context) any {
 	c := operatorClient()
 	ep, err := c.Get(ctx, cmd.EndpointName)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	allocatedRef, err := endpointintent.NewOpaqueProviderConfigRef(ep.ProviderConfigs())
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	draft := cmd.ProviderConfig
 	draft.Ref = allocatedRef.String()
 	pc, err := argsToProviderConfig(draft)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	configs := ep.ProviderConfigs()
 	for i := range configs {
 		if configs[i].Ref() == pc.Ref() {
-			return []update.Action{RoutingSaveFailed{Message: fmt.Sprintf("provider config %q already exists", pc.Ref().String()), ErrorAnchor: cmd.ErrorAnchor}}
+			return RoutingSaveFailed{Message: fmt.Sprintf("provider config %q already exists", pc.Ref().String()), ErrorAnchor: cmd.ErrorAnchor}
 		}
 	}
 	configs = append(configs, pc)
 	newEp, err := endpointintent.NewEndpoint(ep.Name(), configs, pc.Ref())
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	if _, err := c.Put(ctx, newEp); err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
-	return []update.Action{
-		RoutingMutationSaved{},
-		ProviderConfigAddedSaved{
-			EndpointName:   cmd.EndpointName,
-			ProviderConfig: draft,
-		},
+	return ProviderConfigAddedSaved{
+		EndpointName:   cmd.EndpointName,
+		ProviderConfig: draft,
 	}
 }
 
@@ -134,16 +135,16 @@ type DeleteProviderConfigEffect struct {
 	ErrorAnchor  string
 }
 
-func (cmd DeleteProviderConfigEffect) Execute(ctx context.Context) []update.Action {
+func (cmd DeleteProviderConfigEffect) Run(ctx context.Context) any {
 	c := operatorClient()
 	ep, err := c.Get(ctx, cmd.EndpointName)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	removeRef := strings.TrimSpace(cmd.ProviderRef) // swobu:io-string source=boundary
 	configs := ep.ProviderConfigs()
 	if len(configs) <= 1 {
-		return []update.Action{RoutingSaveFailed{Message: "at least one model is required", ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: "at least one model is required", ErrorAnchor: cmd.ErrorAnchor}
 	}
 	next := make([]endpointintent.ProviderConfig, 0, len(configs)-1)
 	removed := false
@@ -155,7 +156,7 @@ func (cmd DeleteProviderConfigEffect) Execute(ctx context.Context) []update.Acti
 		next = append(next, cfg)
 	}
 	if !removed {
-		return []update.Action{RoutingSaveFailed{Message: "model not found", ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: "model not found", ErrorAnchor: cmd.ErrorAnchor}
 	}
 	selectedRef := ep.SelectedProviderConfigRef()
 	if strings.TrimSpace(selectedRef.String()) == removeRef { // swobu:io-string source=boundary
@@ -163,12 +164,12 @@ func (cmd DeleteProviderConfigEffect) Execute(ctx context.Context) []update.Acti
 	}
 	newEp, err := endpointintent.NewEndpoint(ep.Name(), next, selectedRef)
 	if err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
 	if _, err := c.Put(ctx, newEp); err != nil {
-		return []update.Action{RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: normalizeOperatorSurfaceError(err), ErrorAnchor: cmd.ErrorAnchor}
 	}
-	return []update.Action{RoutingMutationSaved{}}
+	return RoutingMutationSaved{}
 }
 
 // StoreKeychainCredentialEffect persists a keychain secret for provider-scoped use.
@@ -179,18 +180,18 @@ type StoreKeychainCredentialEffect struct {
 	ErrorAnchor  string
 }
 
-func (cmd StoreKeychainCredentialEffect) Execute(ctx context.Context) []update.Action {
+func (cmd StoreKeychainCredentialEffect) Run(ctx context.Context) any {
 	_ = ctx
 	providerSpec := strings.TrimSpace(cmd.ProviderSpec) // swobu:io-string source=boundary
 	keyName := strings.TrimSpace(cmd.KeyName)           // swobu:io-string source=boundary
 	secret := strings.TrimSpace(cmd.Secret)             // swobu:io-string source=boundary
 	if providerSpec == "" || keyName == "" || secret == "" {
-		return []update.Action{RoutingSaveFailed{Message: "provider, key name, and key value are required", ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: "provider, key name, and key value are required", ErrorAnchor: cmd.ErrorAnchor}
 	}
 	if err := outboundcredentials.StoreKeychainCredential(providerSpec, keyName, secret); err != nil {
-		return []update.Action{RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}}
+		return RoutingSaveFailed{Message: err.Error(), ErrorAnchor: cmd.ErrorAnchor}
 	}
-	return []update.Action{KeychainCredentialStored{ProviderSpec: providerSpec, KeyName: keyName}}
+	return KeychainCredentialStored{ProviderSpec: providerSpec, KeyName: keyName}
 }
 
 // RoutingSaveFailed reports that a routing save operation failed.
@@ -229,48 +230,54 @@ type StartProviderAuthSessionEffect struct {
 	AuthScope      string
 }
 
-func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.Action {
+// TODO(v2-effect-split): StartProviderAuthSessionEffect currently returns two
+// actions (ProviderAuthSessionStarted + PollProviderAuthSessionRequestedAction).
+// core.Effect[E] is single-return. For now, we return the first action; the
+// reducer must emit the poll effect as a follow-up when it sees
+// ProviderAuthSessionStarted. This is a known gap tracked in the migration
+// backlog.
+func (eff StartProviderAuthSessionEffect) Run(ctx context.Context) any {
 	endpointName := strings.TrimSpace(eff.EndpointName)                // swobu:io-string source=boundary
 	providerSpec := strings.TrimSpace(eff.ProviderConfig.ProviderSpec) // swobu:io-string source=boundary
 	ownerKey := strings.TrimSpace(eff.OwnerKey)                        // swobu:io-string source=boundary
 	authScope := strings.TrimSpace(eff.AuthScope)                      // swobu:io-string source=boundary
 	if providerSpec == "" {
-		return []update.Action{ProviderAuthSessionFailedAction{
+		return ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			Message:        "provider is required for login",
-		}}
+		}
 	}
 	if authScope == "" {
-		return []update.Action{ProviderAuthSessionFailedAction{
+		return ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			Message:        "auth scope is required for login",
-		}}
+		}
 	}
 	if authScope == stateModel.AuthScopeEndpointProvider && endpointName == "" {
-		return []update.Action{ProviderAuthSessionFailedAction{
+		return ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			Message:        "endpoint is required for provider login",
-		}}
+		}
 	}
 	c := operatorClient()
 	authSubject, err := authSubjectForOwnerKey(ownerKey, authScope)
 	if err != nil {
-		return []update.Action{ProviderAuthSessionFailedAction{
+		return ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			Message:        err.Error(),
-		}}
+		}
 	}
 	start, err := c.StartAuthSession(
 		ctx,
@@ -279,34 +286,24 @@ func (eff StartProviderAuthSessionEffect) Execute(ctx context.Context) []update.
 		authModeForCredentialRef(strings.TrimSpace(eff.ProviderConfig.CredentialRef)), // swobu:io-string source=boundary
 	)
 	if err != nil {
-		return []update.Action{ProviderAuthSessionFailedAction{
+		return ProviderAuthSessionFailedAction{
 			EndpointName:   endpointName,
 			ProviderConfig: eff.ProviderConfig,
 			OwnerKey:       ownerKey,
 			AuthScope:      authScope,
 			Message:        normalizeAuthSessionSurfaceError(err),
-		}}
+		}
 	}
 	sessionID := strings.TrimSpace(start.SessionID) // swobu:io-string source=boundary
-	return []update.Action{
-		ProviderAuthSessionStarted{
-			EndpointName:   endpointName,
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       ownerKey,
-			AuthScope:      authScope,
-			SessionID:      sessionID,
-			AuthorizeURL:   strings.TrimSpace(start.AuthorizeURL), // swobu:io-string source=boundary
-			UserCode:       strings.TrimSpace(start.UserCode),     // swobu:io-string source=boundary
-			State:          "pending",
-		},
-		PollProviderAuthSessionRequestedAction{
-			EndpointName:   endpointName,
-			ProviderConfig: eff.ProviderConfig,
-			OwnerKey:       ownerKey,
-			AuthScope:      authScope,
-			SessionID:      sessionID,
-			AttemptsLeft:   providerAuthSessionPollAttempts,
-		},
+	return ProviderAuthSessionStarted{
+		EndpointName:   endpointName,
+		ProviderConfig: eff.ProviderConfig,
+		OwnerKey:       ownerKey,
+		AuthScope:      authScope,
+		SessionID:      sessionID,
+		AuthorizeURL:   strings.TrimSpace(start.AuthorizeURL), // swobu:io-string source=boundary
+		UserCode:       strings.TrimSpace(start.UserCode),     // swobu:io-string source=boundary
+		State:          "pending",
 	}
 }
 

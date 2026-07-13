@@ -3,16 +3,36 @@ package views
 import (
 	"strings"
 
-	toolkitviews "github.com/swobuforge/swobu/internal/terminalui/toolkit/views"
+	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
+	"github.com/swobuforge/swobu/internal/terminalui/core"
 	"github.com/swobuforge/swobu/internal/terminalui/view/retained"
 )
 
-// StaticTextLine renders one non-focusable line.
-func StaticTextLine[M any](text string) retained.ViewSpec[M] {
+// StaticTextLineNode returns a semantic core node for one non-focusable line.
+func StaticTextLineNode(text string) core.Node[state.Action] {
 	text = strings.TrimSpace(text) // swobu:io-string source=boundary
-	return retained.FromRenderNode[M](toolkitviews.NewAction(toolkitviews.RuneLen(text), false, false, func(_ bool, width int) string {
-		return toolkitviews.PadRight(toolkitviews.TrimToWidth(text, width), width)
-	}, nil, nil))
+	return core.Text[state.Action](text)
+}
+
+// StaticTextLine renders one non-focusable line.
+func StaticTextLine(text string) retained.ViewSpec[state.Model] {
+	return CoreNodeAsRetained(StaticTextLineNode(text))
+}
+
+// IndentLeftNode composes a node under a parent-owned left inset.
+func IndentLeftNode(cols int) func(core.Node[state.Action]) core.Node[state.Action] {
+	return func(child core.Node[state.Action]) core.Node[state.Action] {
+		if cols <= 0 {
+			return child
+		}
+		return child.Layout(core.Layout{
+			Size: core.Size{
+				Width:  core.Fit(),
+				Height: core.Fit(),
+			},
+			Inset: core.Insets{Left: cols},
+		})
+	}
 }
 
 // IndentLeft composes a view under a parent-owned left inset.

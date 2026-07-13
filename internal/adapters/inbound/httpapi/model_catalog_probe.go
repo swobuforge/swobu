@@ -10,22 +10,21 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type modelCatalogProbeResult struct {
-	Deployments              []ports.ProviderDeploymentRecord `json:"deployments,omitempty"`
-	Error                    string                           `json:"error,omitempty"`
-	ResolvedProviderProtocol string                           `json:"resolved_provider_protocol,omitempty"`
+	Deployments              []profile.ProviderDeploymentRecord `json:"deployments,omitempty"`
+	Error                    string                             `json:"error,omitempty"`
+	ResolvedProviderProtocol string                             `json:"resolved_provider_protocol,omitempty"`
 }
 
 // ModelCatalogProbeHandler probes provider-backed deployments for one draft route.
 type ModelCatalogProbeHandler struct {
-	providers ports.ProviderModelCatalog
+	providers exchange.ProviderModelCatalog
 }
 
-func NewModelCatalogProbeHandler(providers ports.ProviderModelCatalog) ModelCatalogProbeHandler {
+func NewModelCatalogProbeHandler(providers exchange.ProviderModelCatalog) ModelCatalogProbeHandler {
 	return ModelCatalogProbeHandler{providers: providers}
 }
 
@@ -86,13 +85,13 @@ func credentialRefKindForProbe(credentialRef string) string {
 
 func probeDeployments(
 	ctx context.Context,
-	providers ports.ProviderModelCatalog,
+	providers exchange.ProviderModelCatalog,
 	providerSpec string,
 	baseURL string,
 	authHeader string,
 	credentialRef string,
 	providerProtocol string,
-) ([]ports.ProviderDeploymentRecord, string, error) {
+) ([]profile.ProviderDeploymentRecord, string, error) {
 	routeProfile, ok := profile.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
 	if !ok {
 		return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
@@ -118,7 +117,7 @@ func probeDeployments(
 		target.AuthHeader = strings.TrimSpace(authHeader) // swobu:io-string source=boundary
 		deployments, err := providers.ListDeployments(ctx, target)
 		if err == nil {
-			return ports.CloneProviderDeployments(deployments), variant, nil
+			return profile.CloneProviderDeployments(deployments), variant, nil
 		}
 		lastErr = err
 	}
