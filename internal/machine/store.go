@@ -58,7 +58,7 @@ func (s *Store) Put(t reflect.Type, v reflect.Value) {
 // Get reads one typed value from the store.
 // The target must be a non-nil pointer. On success the pointed-to value
 // is overwritten with a deep copy.
-func (s *Store) Get(target interface{}) error {
+func (s *Store) Get(target any) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -106,7 +106,7 @@ func (s *Store) Snapshot() map[reflect.Type]reflect.Value {
 }
 
 // MustGet panics with a descriptive message if the state is absent.
-func (s *Store) MustGet(target interface{}) {
+func (s *Store) MustGet(target any) {
 	if err := s.Get(target); err != nil {
 		panic(fmt.Sprintf("machine store MustGet: %v", err))
 	}

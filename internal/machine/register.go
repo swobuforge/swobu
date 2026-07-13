@@ -33,7 +33,7 @@ func NewRegistry() *Registry {
 //	func(state struct { A StateA; B StateB }, event SomeEvent) (StateC, []Event, []Command, error)
 //
 // Registration is idempotent for the same function value.
-func (r *Registry) Register(fn interface{}) error {
+func (r *Registry) Register(fn any) error {
 	v := reflect.ValueOf(fn)
 	if v.Kind() != reflect.Func {
 		return errors.New("machine.Register: argument must be a function")
