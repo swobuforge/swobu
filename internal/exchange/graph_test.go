@@ -35,7 +35,7 @@ func TestPortLinkAndResultCarryTypedValueAndEffects(t *testing.T) {
 		func(_ context.Context, input string) (Result[string], error) {
 			return NewResult(
 				input+"-done",
-				effect.Compatibility{
+				effect.CompatibilityEffect{
 					Feature: compat.ToolCallID,
 					Outcome: compat.Approx,
 					Subject: compat.Subject("graph_link"),
@@ -131,9 +131,9 @@ func TestExchangeGraph_BuildPathRejectsUnsafeNativeReplaySelection(t *testing.T)
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.WireNativePayload || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want wire.native_payload reject", compatEffect)

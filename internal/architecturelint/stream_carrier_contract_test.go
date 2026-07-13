@@ -19,8 +19,8 @@ func TestStreamDecodeHelpers_UseWireStreamCarrier(t *testing.T) {
 	}{
 		{name: "chatcompletions", rel: filepath.Join("..", "adapters", "wire", "families", "chatcompletions", "response_decode.go")},
 		{name: "completions", rel: filepath.Join("..", "adapters", "wire", "families", "completions", "response_decode.go")},
-		{name: "messages", rel: filepath.Join("..", "adapters", "wire", "families", "messages", "response_decode.go")},
-		{name: "responses", rel: filepath.Join("..", "adapters", "wire", "families", "responses", "response_decode.go")},
+		{name: "messages", rel: filepath.Join("..", "adapters", "wire", "families", "messages", "response_stream.go")},
+		{name: "responses", rel: filepath.Join("..", "adapters", "wire", "families", "responses", "response_stream.go")},
 	}
 
 	for _, tc := range cases {

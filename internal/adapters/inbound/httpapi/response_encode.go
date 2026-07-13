@@ -39,6 +39,7 @@ func writeBufferedResponse(w http.ResponseWriter, response transportpkg.Transpor
 	return err
 }
 
+// swobu:lint ignore function-complexity because=streaming success encoding keeps transport branching local to one HTTP seam.
 func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID string, family canonical.ClientFamily, response transportpkg.TransportResponse) error {
 	_ = requestID
 	_ = family

@@ -34,10 +34,6 @@ type toolCustomBody struct {
 	Input string `json:"input"`
 }
 
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	return EncodeCarrierWithEffects(req, d, nil, "")
-}
-
 func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.WireDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:

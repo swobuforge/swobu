@@ -1,6 +1,0 @@
-data: {"type":"response.created"}
-
-data: {"type":"response.output_text.delta","delta":"ok"}
-
-data: {"type":"response.completed"}
-

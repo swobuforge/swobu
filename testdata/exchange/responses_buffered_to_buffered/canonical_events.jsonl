@@ -1,6 +1,0 @@
-{"seq":1,"kind":"envelope_start","env_kind":"response","env_id":"res_1"}
-{"seq":2,"kind":"metadata","env_id":"res_1","result_id":"resp_1","model":"m"}
-{"seq":3,"kind":"envelope_start","env_kind":"tool_call","env_id":"tool_1","parent":"res_1","name":"Read","tool_use_id":"call_1"}
-{"seq":4,"kind":"args_delta","env_id":"tool_1","parent":"res_1","args":"{\"path\":\"workspace/file.txt\"}"}
-{"seq":5,"kind":"envelope_end","env_kind":"tool_call","env_id":"tool_1","parent":"res_1","status":"completed"}
-{"seq":6,"kind":"envelope_end","env_kind":"response","env_id":"res_1","status":"completed"}

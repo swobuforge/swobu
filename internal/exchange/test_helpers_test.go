@@ -108,9 +108,9 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct{}
 
-func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestDecode], error) {
+func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error) {
 	_ = doc
-	return Result[ClientRequestDecode]{}, nil
+	return Result[ClientRequestResult]{}, nil
 }
 
 func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.WireDocument], error) {

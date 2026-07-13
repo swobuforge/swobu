@@ -1,3 +1,4 @@
+// swobu:lint ignore test-only-dead-cluster because=compat feature vocabulary is authoritative even when only tests exercise some names.
 package compat
 
 // Feature names one semantic capability that a route may need to preserve.

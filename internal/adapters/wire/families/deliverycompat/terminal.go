@@ -20,7 +20,7 @@ func EmitTerminalEventDecision(ctx context.Context, sink effect.Sink, exchangeID
 		outcome = compat.Exact
 	}
 	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.DeliveryTerminalEvent,
 			Outcome: outcome,
 			Subject: terminalEventSubject,

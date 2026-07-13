@@ -12,6 +12,7 @@ import (
 
 	deliverycompat "github.com/swobuforge/swobu/internal/adapters/wire/families/deliverycompat"
 	core "github.com/swobuforge/swobu/internal/adapters/wire/primitives"
+	openaicompat "github.com/swobuforge/swobu/internal/adapters/wire/shared/openaicompat"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -91,11 +92,16 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	}
 	choice := dto.Choices[0]
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
-	emitUsageInputTokensDecision(ctx, sink, exchangeID, usage)
-	emitUsageOutputTokensDecision(ctx, sink, exchangeID, usage)
-	emitUsageReasoningTokensDecision(ctx, sink, exchangeID, usage)
-	emitUsageCacheReadTokensDecision(ctx, sink, exchangeID, usage)
-	emitUsageCacheWriteTokensDecision(ctx, sink, exchangeID, usage)
+	_, inputPresent := usage.InputTokens()
+	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+	_, outputPresent := usage.OutputTokens()
+	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+	_, reasoningPresent := usage.ReasoningTokens()
+	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
+	_, cacheReadPresent := usage.CacheReadTokens()
+	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+	_, cacheWritePresent := usage.CacheWriteTokens()
+	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
 	if err != nil {
 		return nil, err
@@ -108,86 +114,6 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 		choice.FinishReason,
 		usage,
 	)), nil
-}
-
-func emitUsageInputTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
-	if sink == nil {
-		return
-	}
-	if _, ok := usage.InputTokens(); !ok {
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
-			Feature: compat.UsageInputTokens,
-			Outcome: compat.Exact,
-			Subject: compat.Subject("wire:/usage/input_tokens"),
-		},
-	})
-}
-
-func emitUsageOutputTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
-	if sink == nil {
-		return
-	}
-	if _, ok := usage.OutputTokens(); !ok {
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
-			Feature: compat.UsageOutputTokens,
-			Outcome: compat.Exact,
-			Subject: compat.Subject("wire:/usage/output_tokens"),
-		},
-	})
-}
-
-func emitUsageReasoningTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
-	if sink == nil {
-		return
-	}
-	if _, ok := usage.ReasoningTokens(); !ok {
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
-			Feature: compat.UsageReasoningTokens,
-			Outcome: compat.Exact,
-			Subject: compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"),
-		},
-	})
-}
-
-func emitUsageCacheReadTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
-	if sink == nil {
-		return
-	}
-	if _, ok := usage.CacheReadTokens(); !ok {
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
-			Feature: compat.UsageCacheReadTokens,
-			Outcome: compat.Exact,
-			Subject: compat.Subject("wire:/usage/cache_read_tokens"),
-		},
-	})
-}
-
-func emitUsageCacheWriteTokensDecision(ctx context.Context, sink effect.Sink, exchangeID string, usage canonical.TokenUsage) {
-	if sink == nil {
-		return
-	}
-	if _, ok := usage.CacheWriteTokens(); !ok {
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
-			Feature: compat.UsageCacheWriteTokens,
-			Outcome: compat.Exact,
-			Subject: compat.Subject("wire:/usage/cache_write_tokens"),
-		},
-	})
 }
 
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
@@ -270,11 +196,16 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		chunkUsage := core.ExtractTokenUsage(rawChunk, tokenUsagePathSpec)
 		if !chunkUsage.IsZero() {
 			s.latestUsage = chunkUsage
-			emitUsageInputTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
-			emitUsageOutputTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
-			emitUsageReasoningTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
-			emitUsageCacheReadTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
-			emitUsageCacheWriteTokensDecision(ctx, s.sink, s.exchangeID, chunkUsage)
+			_, inputPresent := chunkUsage.InputTokens()
+			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+			_, outputPresent := chunkUsage.OutputTokens()
+			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+			_, reasoningPresent := chunkUsage.ReasoningTokens()
+			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
+			_, cacheReadPresent := chunkUsage.CacheReadTokens()
+			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+			_, cacheWritePresent := chunkUsage.CacheWriteTokens()
+			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {

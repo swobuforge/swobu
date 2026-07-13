@@ -449,7 +449,7 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct {
 	req interface {
-		DecodeClientRequest(carrier.WireDocument) (Result[ClientRequestDecode], error)
+		DecodeClientRequest(carrier.WireDocument) (Result[ClientRequestResult], error)
 	}
 	doc interface {
 		EncodeResponseDocument(canonical.CanonicalOutput) (Result[carrier.WireDocument], error)
@@ -459,7 +459,7 @@ type testClientCodec struct {
 	}
 }
 
-func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestDecode], error) {
+func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[ClientRequestResult], error) {
 	return c.req.DecodeClientRequest(doc)
 }
 

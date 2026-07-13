@@ -199,20 +199,20 @@ func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder,
 	t.Helper()
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {
-			frames, err := encoder.Encode(sse.StreamEvent{
-				Kind:           event.Kind,
-				ResultID:       event.ResultID,
-				Model:          event.Model,
-				ItemKind:       event.ItemKind,
-				ItemID:         event.ItemID,
-				TextDelta:      event.TextDelta,
-				ToolUseID:      event.ToolUseID,
-				Name:           event.Name,
-				ToolType:       event.ToolType,
-				ArgumentsDelta: event.ArgumentsDelta,
-				FinishReason:   event.FinishReason,
-				Usage:          event.Usage,
-			})
+		frames, err := encoder.Encode(sse.StreamEvent{
+			Kind:           event.Kind,
+			ResultID:       event.ResultID,
+			Model:          event.Model,
+			ItemKind:       event.ItemKind,
+			ItemID:         event.ItemID,
+			TextDelta:      event.TextDelta,
+			ToolUseID:      event.ToolUseID,
+			Name:           event.Name,
+			ToolType:       event.ToolType,
+			ArgumentsDelta: event.ArgumentsDelta,
+			FinishReason:   event.FinishReason,
+			Usage:          event.Usage,
+		})
 		if err != nil {
 			t.Fatalf("Encode(%s) returned error: %v", event.Kind, err)
 		}

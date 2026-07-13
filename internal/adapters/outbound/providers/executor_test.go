@@ -68,9 +68,9 @@ func assertCompatibilityEffects(t *testing.T, sink *recordingEffectSink, want []
 		t.Fatalf("captured effects len=%d want=%d", len(sink.effects), len(want))
 	}
 	for i, effectItem := range sink.effects {
-		compatEffect, ok := effectItem.(effect.Compatibility)
+		compatEffect, ok := effectItem.(effect.CompatibilityEffect)
 		if !ok {
-			t.Fatalf("effect[%d] type = %T, want effect.Compatibility", i, effectItem)
+			t.Fatalf("effect[%d] type = %T, want effect.CompatibilityEffect", i, effectItem)
 		}
 		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome {
 			t.Fatalf("effect[%d] = %#v, want %s %s", i, compatEffect, want[i].feature, want[i].outcome)
@@ -470,9 +470,9 @@ func TestServices_OpenAIFamilyEmitsBackendErrorClassCompatibilityDecision(t *tes
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.ErrorClass || compatEffect.Outcome != compat.Approx {
 		t.Fatalf("captured effect = %#v, want error.class approx", compatEffect)
@@ -518,9 +518,9 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effect len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.RequestStructuredOutput || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want request.structured_output reject", compatEffect)

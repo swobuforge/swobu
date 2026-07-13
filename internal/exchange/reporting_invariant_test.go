@@ -94,7 +94,7 @@ func TestApplyDocumentPatch_FailsOnReportedMutationWithoutChange(t *testing.T) {
 }
 
 func TestApplyDocumentPatch_PreservesRejectEffectOnError(t *testing.T) {
-	rejectEffect := effect.Compatibility{
+	rejectEffect := effect.CompatibilityEffect{
 		Feature: compat.RequestStructuredOutput,
 		Outcome: compat.Reject,
 		Subject: compat.Subject("/input"),
@@ -134,9 +134,9 @@ func TestApplyDocumentPatch_PreservesRejectEffectOnError(t *testing.T) {
 	if len(result.Effects) != 1 {
 		t.Fatalf("result effects len=%d want=1", len(result.Effects))
 	}
-	gotReject, ok := result.Effects[0].(effect.Compatibility)
+	gotReject, ok := result.Effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("result effect type = %T, want effect.Compatibility", result.Effects[0])
+		t.Fatalf("result effect type = %T, want effect.CompatibilityEffect", result.Effects[0])
 	}
 	if gotReject.Feature != compat.RequestStructuredOutput || gotReject.Outcome != compat.Reject || gotReject.Subject != compat.Subject("/input") {
 		t.Fatalf("result reject effect = %#v, want structured_output/reject//input", gotReject)

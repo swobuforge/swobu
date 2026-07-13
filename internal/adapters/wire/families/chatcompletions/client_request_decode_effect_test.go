@@ -50,9 +50,9 @@ func TestDecodeClientRequestWithEffects_RecordsToolCallIDAndKindScars(t *testing
 		{feature: compat.ToolCallKind, outcome: compat.Reject, subject: compat.Subject("wire:/messages/1/tool_calls/0/type")},
 	}
 	for i, effectItem := range sink.effects {
-		compatEffect, ok := effectItem.(effect.Compatibility)
+		compatEffect, ok := effectItem.(effect.CompatibilityEffect)
 		if !ok {
-			t.Fatalf("effect[%d] type = %T, want effect.Compatibility", i, effectItem)
+			t.Fatalf("effect[%d] type = %T, want effect.CompatibilityEffect", i, effectItem)
 		}
 		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome || compatEffect.Subject != want[i].subject {
 			t.Fatalf("effect[%d] = %#v, want %s %s %q", i, compatEffect, want[i].feature, want[i].outcome, want[i].subject)
@@ -88,9 +88,9 @@ func TestDecodeClientRequestWithEffects_RecordsToolCallArgumentsScar(t *testing.
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.ToolCallArguments || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want tool.call_arguments reject", compatEffect)

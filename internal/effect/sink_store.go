@@ -21,14 +21,14 @@ type StoreBackedSink struct {
 func (s StoreBackedSink) Commit(ctx context.Context, _ string, effects []Effect) error {
 	for _, applied := range effects {
 		switch e := applied.(type) {
-		case Compatibility:
+		case CompatibilityEffect:
 			if s.Observations != nil {
 				obs := compatibilityObservationRecord(e)
 				if err := s.Observations.Put(ctx, stampObservationRecord(obs)); err != nil {
 					return err
 				}
 			}
-		case TurnState:
+		case TurnStateEffect:
 			if s.TurnState != nil {
 				key := turnstate.TurnStateKey{
 					Subject: e.Key,
@@ -43,9 +43,9 @@ func (s StoreBackedSink) Commit(ctx context.Context, _ string, effects []Effect)
 	return nil
 }
 
-func compatibilityObservationRecord(decision Compatibility) observation.ObservationRecord {
-	code := strings.TrimSpace(string(decision.Feature)) // swobu:io-string source=boundary
-	reason := strings.TrimSpace(string(decision.Outcome)) // swobu:io-string source=boundary
+func compatibilityObservationRecord(decision CompatibilityEffect) observation.ObservationRecord {
+	code := strings.TrimSpace(string(decision.Feature))    // swobu:io-string source=boundary
+	reason := strings.TrimSpace(string(decision.Outcome))  // swobu:io-string source=boundary
 	subject := strings.TrimSpace(string(decision.Subject)) // swobu:io-string source=boundary
 	if subject != "" {
 		if reason != "" {

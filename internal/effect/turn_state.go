@@ -4,17 +4,16 @@ package effect
 type TurnStateOp string
 
 const (
-	TurnStateCapture   TurnStateOp = "capture"
-	TurnStateReplay    TurnStateOp = "replay"
+	TurnStateCapture    TurnStateOp = "capture"
+	TurnStateReplay     TurnStateOp = "replay"
 	TurnStateInvalidate TurnStateOp = "invalidate"
 )
 
-// TurnState records one operational state change or replay action.
-type TurnState struct {
+// TurnStateEffect records one operational state change or replay action.
+type TurnStateEffect struct {
 	Op    TurnStateOp `json:"op"`
 	Key   string      `json:"key"`
 	Value []byte      `json:"value,omitempty"`
 }
 
-func (TurnState) Kind() Kind { return KindTurnState }
-
+func (TurnStateEffect) Kind() Kind { return KindTurnState }

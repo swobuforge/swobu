@@ -18,10 +18,10 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestDecode, error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestResult], error) {
+	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestResult, error) {
 		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
-		return exchange.ClientRequestDecode{
+		return exchange.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
 		}, err
@@ -179,7 +179,8 @@ func decodeChatCompletionsFunctionArguments(raw json.RawMessage) (map[string]any
 	if err := json.Unmarshal(raw, &stringified); err != nil {
 		return nil, canonical.BadRequest("chat completions tool call arguments are invalid")
 	}
-	return sse.DecodeJSONObject(json.RawMessage(strings.TrimSpace(stringified)), "chat completions tool call arguments are invalid")
+	trimmedStringified := strings.TrimSpace(stringified) // swobu:io-string source=boundary
+	return sse.DecodeJSONObject(json.RawMessage(trimmedStringified), "chat completions tool call arguments are invalid")
 }
 
 func emitChatCompletionsCompatibilityDecision(sink effect.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
@@ -190,7 +191,7 @@ func emitChatCompletionsCompatibilityDecision(sink effect.Sink, exchangeID strin
 		return nil
 	}
 	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: feature,
 			Outcome: outcome,
 			Subject: subject,

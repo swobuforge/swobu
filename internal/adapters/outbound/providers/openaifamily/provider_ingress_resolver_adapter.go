@@ -238,7 +238,7 @@ func emitBackendErrorClassDecision(ctx context.Context, sink effect.Sink, exchan
 		return
 	}
 	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.ErrorClass,
 			Outcome: compat.Approx,
 			Subject: subject,
@@ -247,8 +247,7 @@ func emitBackendErrorClassDecision(ctx context.Context, sink effect.Sink, exchan
 }
 
 func routeDecisionSubject(providerID string, protocol string) compat.Subject {
-	providerID = strings.TrimSpace(providerID) // swobu:io-string source=boundary
-	protocol = strings.TrimSpace(protocol)     // swobu:io-string source=boundary
+	protocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary
 	if providerID == "" || protocol == "" {
 		return ""
 	}

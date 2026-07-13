@@ -22,8 +22,7 @@ func CommitEffects(ctx context.Context, sink effect.Sink, exchangeID string, eff
 // RouteSubject returns the canonical route subject used by provider-edge
 // compatibility decisions.
 func RouteSubject(providerID string, protocol string) compat.Subject {
-	providerID = strings.TrimSpace(providerID) // swobu:io-string source=boundary
-	protocol = strings.TrimSpace(protocol)     // swobu:io-string source=boundary
+	protocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary
 	if providerID == "" || protocol == "" {
 		return ""
 	}
@@ -42,17 +41,17 @@ func EmitStructuredOutputDecisions(ctx context.Context, sink effect.Sink, exchan
 		return nil
 	}
 	return sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.OutputFormat,
 			Outcome: compat.Exact,
 			Subject: subject,
 		},
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.OutputJSONSchema,
 			Outcome: compat.Exact,
 			Subject: subject,
 		},
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.WireJSONMode,
 			Outcome: compat.Exact,
 			Subject: subject,
@@ -75,7 +74,7 @@ func EmitToolSchemaStrictDecision(ctx context.Context, sink effect.Sink, exchang
 		outcome = compat.Exact
 	}
 	return sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.ToolSchemaStrict,
 			Outcome: outcome,
 			Subject: subject,

@@ -212,11 +212,11 @@ func emitResponsesToolNameNamespaceDecision(sink effect.Sink, exchangeID string,
 	if sink == nil || subject == "" {
 		return nil
 	}
-	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
+	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") { // swobu:io-string source=boundary
 		return nil
 	}
 	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.ToolNameNamespace,
 			Outcome: outcome,
 			Subject: subject,

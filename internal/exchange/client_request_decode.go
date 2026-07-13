@@ -5,9 +5,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// ClientRequestDecode carries the canonical request plus resolved delivery
+// ClientRequestResult carries the canonical request plus resolved delivery
 // returned by client-family request decoders.
-type ClientRequestDecode struct {
+type ClientRequestResult struct {
 	Request  canonical.CanonicalRequest
 	Delivery delivery.Delivery
 }

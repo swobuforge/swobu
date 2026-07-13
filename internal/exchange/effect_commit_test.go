@@ -56,9 +56,9 @@ func (t invariantDocPatch) Apply(_ stage.Context, in carrier.WireDocument) (stag
 
 func assertCompatibilityEffect(t *testing.T, got effect.Effect, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) {
 	t.Helper()
-	compatEffect, ok := got.(effect.Compatibility)
+	compatEffect, ok := got.(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("effect type = %T, want effect.Compatibility", got)
+		t.Fatalf("effect type = %T, want effect.CompatibilityEffect", got)
 	}
 	if compatEffect.Feature != feature || compatEffect.Outcome != outcome || compatEffect.Subject != subject {
 		t.Fatalf("compatibility effect = %#v, want %s/%s/%s", compatEffect, feature, outcome, subject)
@@ -85,12 +85,12 @@ func (compatibilityEmittingStreamWrapper) Wrap(_ stage.Context, reader canonical
 	return stage.Result[canonical.EventReader]{
 		Value: reader,
 		Effects: []effect.Effect{
-			effect.Compatibility{
+			effect.CompatibilityEffect{
 				Feature: compat.ToolCallID,
 				Outcome: compat.Approx,
 				Subject: compat.Subject("wire:/response/0/tool_calls/0/id"),
 			},
-			effect.TurnState{
+			effect.TurnStateEffect{
 				Op:    effect.TurnStateReplay,
 				Key:   "turn.request.raw",
 				Value: []byte("cached-raw"),
@@ -122,17 +122,17 @@ func TestRunnerRun_PassesThroughCompatibilityAndTurnStateEffects(t *testing.T) {
 		t.Fatalf("captured effects len=%d want=2", len(sink.effects))
 	}
 
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("effect[0] type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("effect[0] type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.ToolCallID || compatEffect.Outcome != compat.Approx || compatEffect.Subject != compat.Subject("wire:/response/0/tool_calls/0/id") {
 		t.Fatalf("compatibility effect = %#v, want tool_call_id/approx/wire:/response/0/tool_calls/0/id", compatEffect)
 	}
 
-	turnStateEffect, ok := sink.effects[1].(effect.TurnState)
+	turnStateEffect, ok := sink.effects[1].(effect.TurnStateEffect)
 	if !ok {
-		t.Fatalf("effect[1] type = %T, want effect.TurnState", sink.effects[1])
+		t.Fatalf("effect[1] type = %T, want effect.TurnStateEffect", sink.effects[1])
 	}
 	if turnStateEffect.Op != effect.TurnStateReplay || turnStateEffect.Key != "turn.request.raw" || !bytes.Equal(turnStateEffect.Value, []byte("cached-raw")) {
 		t.Fatalf("turn-state effect = %#v, want replay/turn.request.raw/cached-raw", turnStateEffect)
@@ -147,7 +147,7 @@ func TestRunnerRun_CommitsCompatibilityEffectBeforeRejectError(t *testing.T) {
 			id:      "rejecting",
 			mutated: false,
 			effects: []effect.Effect{
-				effect.Compatibility{
+				effect.CompatibilityEffect{
 					Feature: compat.RequestStructuredOutput,
 					Outcome: compat.Reject,
 					Subject: compat.Subject("/input"),
@@ -178,9 +178,9 @@ func TestRunnerRun_CommitsCompatibilityEffectBeforeRejectError(t *testing.T) {
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	gotReject, ok := sink.effects[0].(effect.Compatibility)
+	gotReject, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if gotReject.Outcome != compat.Reject || gotReject.Subject != compat.Subject("/input") {
 		t.Fatalf("captured reject effect = %#v, want reject /input", gotReject)
@@ -345,9 +345,9 @@ func TestRunnerRun_RecordsWireNativePayloadAndTurnStateReplay(t *testing.T) {
 		t.Fatalf("captured effects len=%d want=2", len(sink.effects))
 	}
 
-	turnStateEffect, ok := sink.effects[0].(effect.TurnState)
+	turnStateEffect, ok := sink.effects[0].(effect.TurnStateEffect)
 	if !ok {
-		t.Fatalf("effect[0] type = %T, want effect.TurnState", sink.effects[0])
+		t.Fatalf("effect[0] type = %T, want effect.TurnStateEffect", sink.effects[0])
 	}
 	if turnStateEffect.Op != effect.TurnStateReplay || turnStateEffect.Key != "turn.request.raw" {
 		t.Fatalf("turn-state effect = %#v, want replay/turn.request.raw", turnStateEffect)
@@ -356,9 +356,9 @@ func TestRunnerRun_RecordsWireNativePayloadAndTurnStateReplay(t *testing.T) {
 		t.Fatalf("turn-state value = %q, want provider request raw payload", turnStateEffect.Value)
 	}
 
-	compatEffect, ok := sink.effects[1].(effect.Compatibility)
+	compatEffect, ok := sink.effects[1].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("effect[1] type = %T, want effect.Compatibility", sink.effects[1])
+		t.Fatalf("effect[1] type = %T, want effect.CompatibilityEffect", sink.effects[1])
 	}
 	if compatEffect.Feature != compat.WireNativePayload || compatEffect.Outcome != compat.Exact {
 		t.Fatalf("compatibility effect = %#v, want wire.native_payload exact", compatEffect)
@@ -395,9 +395,9 @@ func TestRunnerRun_RecordsErrorShapeDropOnBackendError(t *testing.T) {
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.ErrorShape || compatEffect.Outcome != compat.Drop {
 		t.Fatalf("compatibility effect = %#v, want error.shape drop", compatEffect)

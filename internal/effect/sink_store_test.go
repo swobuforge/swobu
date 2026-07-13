@@ -43,12 +43,12 @@ func TestStoreBackedSink_CommitPersistsCompatibilityAndTurnState(t *testing.T) {
 	sink := StoreBackedSink{Observations: store, TurnState: turnStore}
 
 	err := sink.Commit(context.Background(), "ex-1", []Effect{
-		Compatibility{
+		CompatibilityEffect{
 			Feature: compat.ToolCallID,
 			Outcome: compat.Approx,
 			Subject: compat.Subject("wire:/input/0/call_id"),
 		},
-		TurnState{
+		TurnStateEffect{
 			Op:    TurnStateReplay,
 			Key:   "turn.request.raw",
 			Value: []byte("raw-bytes"),

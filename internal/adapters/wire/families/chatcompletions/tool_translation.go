@@ -1,7 +1,6 @@
 package chatcompletions
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -218,6 +217,7 @@ func chatCompletionsUnsupportedToolKind(tool canonical.ToolDecl) string {
 	return "unknown"
 }
 
+// swobu:lint ignore function-complexity because=chat completions tool-choice decoding keeps all protocol variants in one boundary helper.
 func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
@@ -316,25 +316,6 @@ func cloneBoolPointer(ptr *bool) *bool {
 	}
 	value := *ptr
 	return &value
-}
-
-func emitChatCompletionsToolNameNamespaceDecision(sink effect.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
-	if sink == nil || subject == "" {
-		return nil
-	}
-	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
-		return nil
-	}
-	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.Compatibility{
-			Feature: compat.ToolNameNamespace,
-			Outcome: outcome,
-			Subject: subject,
-		},
-	}); err != nil {
-		return canonical.InternalError("compatibility effect sink commit failed")
-	}
-	return nil
 }
 
 func hasChatCompletionsCustomTools(tools []canonical.ToolDecl) bool {

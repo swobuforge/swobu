@@ -47,9 +47,9 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.Compatibility)
+	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
 	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.Compatibility", sink.effects[0])
+		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
 	}
 	if compatEffect.Feature != compat.ResponseReasoning || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want response.reasoning reject", compatEffect)

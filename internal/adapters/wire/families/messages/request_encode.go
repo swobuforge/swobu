@@ -31,10 +31,6 @@ type contentID struct {
 	Content   string         `json:"content,omitempty"`
 }
 
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
-	return EncodeCarrierWithEffects(req, d, nil, "")
-}
-
 func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.WireDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
@@ -240,14 +236,14 @@ func emitMessagesToolNameNamespaceDecision(sink effect.Sink, exchangeID string, 
 	if subject == "" {
 		return nil
 	}
-	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") {
+	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") { // swobu:io-string source=boundary
 		return nil
 	}
 	if tool == nil && outcome == compat.Approx {
 		return nil
 	}
 	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.ToolNameNamespace,
 			Outcome: outcome,
 			Subject: subject,

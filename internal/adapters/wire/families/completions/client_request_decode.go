@@ -12,10 +12,10 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestResult], error) {
 	var effects []effect.Effect
 	request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, effect.AccumulatorSink{Effects: &effects}, "")
-	return exchange.NewResult(exchange.ClientRequestDecode{
+	return exchange.NewResult(exchange.ClientRequestResult{
 		Request:  request,
 		Delivery: delivery,
 	}, effects...), err

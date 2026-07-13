@@ -127,7 +127,7 @@ func (r RuntimeResolver) providerBundle(kind protocolkind.ProtocolKind) protocol
 
 type ClientCodecBundle struct {
 	request interface {
-		DecodeClientRequest(carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error)
+		DecodeClientRequest(carrier.WireDocument) (exchange.Result[exchange.ClientRequestResult], error)
 	}
 	document interface {
 		EncodeResponseDocument(canonical.CanonicalOutput) (exchange.Result[carrier.WireDocument], error)
@@ -137,7 +137,7 @@ type ClientCodecBundle struct {
 	}
 }
 
-func (b ClientCodecBundle) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
+func (b ClientCodecBundle) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestResult], error) {
 	return b.request.DecodeClientRequest(doc)
 }
 

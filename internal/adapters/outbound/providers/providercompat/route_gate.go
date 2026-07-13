@@ -89,7 +89,7 @@ func recordRouteFeatureSupportDecision(ctx context.Context, sink effect.Sink, ex
 	if sink == nil {
 		return nil
 	}
-	decision := effect.Compatibility{
+	decision := effect.CompatibilityEffect{
 		Feature: feature,
 		Outcome: compatibilityOutcomeForSupport(support),
 		Subject: subject,

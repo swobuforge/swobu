@@ -18,10 +18,10 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestDecode, error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestResult], error) {
+	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestResult, error) {
 		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
-		return exchange.ClientRequestDecode{
+		return exchange.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
 		}, err
@@ -149,7 +149,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			decoded = append(decoded, canonical.NewToolResultItem(author, toolUseID, text)) // swobu:io-string source=boundary
 			pending = removePendingToolUseID(pending, toolUseID)
 		case "":
-			if len(strings.TrimSpace(string(part.CacheControl))) > 0 || len(strings.TrimSpace(string(part.CachePoint))) > 0 {
+			if len(strings.TrimSpace(string(part.CacheControl))) > 0 || len(strings.TrimSpace(string(part.CachePoint))) > 0 { // swobu:io-string source=boundary
 				return nil
 			}
 			return canonical.BadRequest("messages request content contains an unsupported part type")

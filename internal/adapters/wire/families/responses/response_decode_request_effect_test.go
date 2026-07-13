@@ -53,9 +53,9 @@ func TestDecodeClientRequestWithEffects_RecordsResponsesRequestScars(t *testing.
 		{feature: compat.ToolResultID, outcome: compat.Reject, subject: compat.Subject("wire:/input/2/call_id")},
 	}
 	for i, effectItem := range sink.effects {
-		compatEffect, ok := effectItem.(effect.Compatibility)
+		compatEffect, ok := effectItem.(effect.CompatibilityEffect)
 		if !ok {
-			t.Fatalf("effect[%d] type = %T, want effect.Compatibility", i, effectItem)
+			t.Fatalf("effect[%d] type = %T, want effect.CompatibilityEffect", i, effectItem)
 		}
 		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome || compatEffect.Subject != want[i].subject {
 			t.Fatalf("effect[%d] = %#v, want %s %s %q", i, compatEffect, want[i].feature, want[i].outcome, want[i].subject)

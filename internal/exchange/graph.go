@@ -247,7 +247,7 @@ func recordUnsafeNativeReplayDecision(ctx context.Context, sink effect.Sink, exc
 		return
 	}
 	commitEffectsBestEffort(ctx, sink, exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: compat.WireNativePayload,
 			Outcome: compat.Reject,
 			Subject: compat.Subject("state:turn.request.raw"),

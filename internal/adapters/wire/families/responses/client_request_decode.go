@@ -20,10 +20,10 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestDecode], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestDecode, error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (exchange.Result[exchange.ClientRequestResult], error) {
+	return shared.WithAccumulatedEffects(func(sink effect.Sink) (exchange.ClientRequestResult, error) {
 		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
-		return exchange.ClientRequestDecode{
+		return exchange.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
 		}, err
@@ -116,6 +116,7 @@ func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
 	)
 }
 
+// swobu:lint ignore function-complexity because=responses input decoding keeps all acceptance branches in one protocol boundary helper.
 func decodeResponsesInput(raw json.RawMessage, sink effect.Sink, exchangeID string) (string, []canonical.CanonicalItem, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
@@ -162,7 +163,7 @@ func decodeResponsesInput(raw json.RawMessage, sink effect.Sink, exchangeID stri
 					return "", nil, err
 				}
 				callID = openaicompat.GeneratedToolUseID(idx, 0)
-			} else if strings.TrimSpace(item.CallID) == "" {
+			} else if strings.TrimSpace(item.CallID) == "" { // swobu:io-string source=boundary
 				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
 					return "", nil, err
 				}
@@ -215,7 +216,8 @@ func decodeResponsesFunctionCallArguments(raw json.RawMessage) (map[string]any, 
 	if err := json.Unmarshal(raw, &stringified); err != nil {
 		return nil, canonical.BadRequest("responses request function_call arguments are invalid")
 	}
-	return sse.DecodeJSONObject(json.RawMessage(strings.TrimSpace(stringified)), "responses request function_call arguments are invalid")
+	trimmedStringified := strings.TrimSpace(stringified) // swobu:io-string source=boundary
+	return sse.DecodeJSONObject(json.RawMessage(trimmedStringified), "responses request function_call arguments are invalid")
 }
 
 func emitResponsesCompatibilityDecision(sink effect.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
@@ -226,7 +228,7 @@ func emitResponsesCompatibilityDecision(sink effect.Sink, exchangeID string, fea
 		return nil
 	}
 	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.Compatibility{
+		effect.CompatibilityEffect{
 			Feature: feature,
 			Outcome: outcome,
 			Subject: subject,
