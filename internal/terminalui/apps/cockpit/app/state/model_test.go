@@ -735,18 +735,18 @@ func TestReduce_AddModelCatalogResult_AcceptsMismatchedProviderProtocol(t *testi
 	model := Model{}
 	Reduce(&model, LoadRoutingModelCatalogRequestedAction{
 		Scope:            RoutingModelCatalogScopeAddModelDraft,
-		ProviderSpec:     "bedrock",
-		ProviderProtocol: "responses",
-		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
-		CredentialRef:    "profile:default",
+		ProviderSpec:     "openrouter",
+		ProviderProtocol: "chat_completions",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		CredentialRef:    "env:OPENROUTER_API_KEY",
 	})
 
 	Reduce(&model, RoutingModelCatalogLoaded{
 		Scope:            RoutingModelCatalogScopeAddModelDraft,
-		ProviderSpec:     "bedrock",
-		ProviderProtocol: "messages",
-		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
-		CredentialRef:    "profile:default",
+		ProviderSpec:     "openrouter",
+		ProviderProtocol: "completions",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		CredentialRef:    "env:OPENROUTER_API_KEY",
 		Deployments:      []ports.ProviderDeploymentRecord{{Name: "should-not-apply"}},
 	})
 

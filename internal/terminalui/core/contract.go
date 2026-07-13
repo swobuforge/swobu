@@ -7,8 +7,8 @@ type PropSpec struct {
 	Summary  string
 }
 
-// SignalSpec describes one contract-emitted signal kind.
-type SignalSpec struct {
+// SignalSpec[E] describes one contract-emitted signal kind.
+type SignalSpec[E any] struct {
 	Kind string
 }
 
@@ -31,12 +31,12 @@ type LayoutPolicy struct {
 	Width  DimSize
 }
 
-// Contract is the runtime-readable semantic contract for one node.
-type Contract struct {
+// Contract[E] is the runtime-readable semantic contract for one node.
+type Contract[E any] struct {
 	Name     string
 	Purpose  string
 	Props    []PropSpec
-	Signals  []SignalSpec
+	Signals  []SignalSpec[E]
 	Requires []Capability
 	Slots    []SlotSpec
 	Layout   LayoutPolicy

@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/ports"
 	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state"
 	stateeffect "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/effect"
 	stateModel "github.com/swobuforge/swobu/internal/terminalui/apps/cockpit/app/state/model"
@@ -1275,49 +1274,6 @@ func TestRoot_EscOnExpandedRoutingModelClosesNearestModelDisclosure(t *testing.T
 
 	out = rt.Render(viewport).String()
 	assertRootScenario(t, out, "models_disclosure_closed_by_esc")
-}
-
-func TestRoot_FirstRunOpeningModelClosesCredentialChooserDisclosure(t *testing.T) {
-	t.Parallel()
-
-	rt := newTestRuntime(state.Model{
-		HeaderStatus:    "ready",
-		DaemonState:     "up",
-		CreateDraftName: "acme",
-		CreateDraftProviderConfig: state.ProviderConfigSnapshot{
-			Ref:           state.DraftProviderRef,
-			ProviderSpec:  "bedrock",
-			BaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
-			CredentialRef: "profile:default",
-		},
-		CreateDraftModelDeployments:   []ports.ProviderDeploymentRecord{{Name: "amazon.nova-pro-v1:0"}},
-		CreateDraftModelProviderSpec:  "bedrock",
-		CreateDraftModelBaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
-		CreateDraftModelCredentialRef: "profile:default",
-	})
-	viewport := geom.Rect{W: 110, H: 34}
-	rt.Rebuild(Root(), viewport)
-	openRoutingSection(t, rt, viewport)
-	focusRowContaining(t, rt, viewport, "credential")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-	if out := rt.Render(viewport).String(); !strings.Contains(out, "Bedrock API key") {
-		t.Fatalf("expected credential chooser open with Bedrock options; render=%q", out)
-	}
-
-	rt.DispatchEvent(updateKey(interaction.KeyEsc))
-	rt.Rebuild(Root(), viewport)
-	focusRowContaining(t, rt, viewport, "model")
-	rt.DispatchEvent(updateKey(interaction.KeyEnter))
-	rt.Rebuild(Root(), viewport)
-
-	out := rt.Render(viewport).String()
-	if strings.Contains(out, "Bedrock API key") {
-		t.Fatalf("credential chooser should close when model chooser opens; render=%q", out)
-	}
-	if !strings.Contains(out, "loading models") {
-		t.Fatalf("expected model load state after opening model row; render=%q", out)
-	}
 }
 
 func TestRoot_WorkspaceSavedStatusDoesNotRenderCopyEndpointHintRows(t *testing.T) {

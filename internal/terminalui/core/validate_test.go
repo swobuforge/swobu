@@ -8,11 +8,11 @@ import (
 func TestValidateCatchesDuplicateSiblingKeys(t *testing.T) {
 	t.Parallel()
 
-	root := Box(
-		Text("a").Key(K("dup")),
-		Text("b").Key(K("dup")),
+	root := Box[struct{}](
+		Text[struct{}]("a").Key(K("dup")),
+		Text[struct{}]("b").Key(K("dup")),
 	)
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 1 {
 		t.Fatalf("diagnostic count = %d, want 1", len(diags))
 	}
@@ -27,11 +27,11 @@ func TestValidateCatchesDuplicateSiblingKeys(t *testing.T) {
 func TestValidatePermitsSameKeyUnderDifferentParents(t *testing.T) {
 	t.Parallel()
 
-	root := Box(
-		Box(Text("a").Key(K("same"))),
-		Box(Text("b").Key(K("same"))),
+	root := Box[struct{}](
+		Box[struct{}](Text[struct{}]("a").Key(K("same"))),
+		Box[struct{}](Text[struct{}]("b").Key(K("same"))),
 	)
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", diags)
 	}
@@ -40,7 +40,7 @@ func TestValidatePermitsSameKeyUnderDifferentParents(t *testing.T) {
 func TestValidateRejectsUnkeyedStatefulNode(t *testing.T) {
 	t.Parallel()
 
-	diags := Validate(Text("draft").Stateful())
+	diags := Validate[struct{}](Text[struct{}]("draft").Stateful())
 	if len(diags) != 1 {
 		t.Fatalf("diagnostic count = %d, want 1", len(diags))
 	}
@@ -52,13 +52,16 @@ func TestValidateRejectsUnkeyedStatefulNode(t *testing.T) {
 func TestValidateRejectsInteractiveChildWithoutKeyInsideDynamicCollection(t *testing.T) {
 	t.Parallel()
 
-	root := Node{
+	root := Node[struct{}]{
 		kind: KindList,
-		children: []Node{
-			Action("open", SignalEvent{Kind: "opened"}),
+		children: []Node[struct{}]{
+			Text[struct{}]("interactive child").Interaction(InteractionSpec[struct{}]{
+				Focus:  FocusSpec{Mode: Focusable},
+				Keymap: []KeyBindingSpec{{Pattern: KeyEnter(), Intent: IntentActivate}},
+			}),
 		},
 	}
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 1 {
 		t.Fatalf("diagnostic count = %d, want 1", len(diags))
 	}
@@ -70,13 +73,13 @@ func TestValidateRejectsInteractiveChildWithoutKeyInsideDynamicCollection(t *tes
 func TestValidatePermitsStaticUnkeyedChildrenInsideDynamicCollection(t *testing.T) {
 	t.Parallel()
 
-	root := Node{
+	root := Node[struct{}]{
 		kind: KindList,
-		children: []Node{
-			Text("… 3 more"),
+		children: []Node[struct{}]{
+			Text[struct{}]("… 3 more"),
 		},
 	}
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", diags)
 	}
@@ -85,13 +88,13 @@ func TestValidatePermitsStaticUnkeyedChildrenInsideDynamicCollection(t *testing.
 func TestValidatePermitsKeyedInteractiveChildrenInsideDynamicCollection(t *testing.T) {
 	t.Parallel()
 
-	root := Node{
+	root := Node[struct{}]{
 		kind: KindList,
-		children: []Node{
-			Action("open", SignalEvent{Kind: "opened"}).Key(K("open")),
+		children: []Node[struct{}]{
+			Action[struct{}]("open", SignalEvent[struct{}]{Kind: "opened"}).Key(K("open")),
 		},
 	}
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", diags)
 	}
@@ -100,14 +103,14 @@ func TestValidatePermitsKeyedInteractiveChildrenInsideDynamicCollection(t *testi
 func TestValidateRejectsFocusableWithoutIntent(t *testing.T) {
 	t.Parallel()
 
-	root := Box(Text("x").Key(K("bad-focus")).Interaction(InteractionSpec{Focus: FocusSpec{Mode: Focusable}}))
+	root := Box[struct{}](Text[struct{}]("x").Key(K("bad-focus")).Interaction(InteractionSpec[struct{}]{Focus: FocusSpec{Mode: Focusable}}))
 
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 1 {
 		t.Fatalf("diagnostic count = %d, want 1", len(diags))
 	}
-	if diags[0].Severity != DiagnosticWarning {
-		t.Fatalf("severity = %v, want DiagnosticWarning", diags[0].Severity)
+	if diags[0].Severity != DiagnosticError {
+		t.Fatalf("severity = %v, want DiagnosticError", diags[0].Severity)
 	}
 	if !strings.Contains(diags[0].Message, "focusable node without accepted intent") {
 		t.Fatalf("message = %q, want focusable without intent", diags[0].Message)
@@ -117,10 +120,10 @@ func TestValidateRejectsFocusableWithoutIntent(t *testing.T) {
 func TestValidateRejectsActionWithoutSignal(t *testing.T) {
 	t.Parallel()
 
-	root := Box(Node{
+	root := Box[struct{}](Node[struct{}]{
 		kind:    KindAction,
 		content: ContentPayload{Text: "no-op"},
-		interaction: InteractionSpec{
+		interaction: InteractionSpec[struct{}]{
 			Focus: FocusSpec{Mode: Focusable},
 			Keymap: []KeyBindingSpec{
 				{Pattern: KeyEnter(), Intent: IntentActivate},
@@ -128,24 +131,143 @@ func TestValidateRejectsActionWithoutSignal(t *testing.T) {
 		},
 	}.Key(K("no-signal")))
 
-	diags := Validate(root)
+	diags := Validate[struct{}](root)
 	if len(diags) != 1 {
 		t.Fatalf("diagnostic count = %d, want 1", len(diags))
 	}
-	if diags[0].Severity != DiagnosticWarning {
-		t.Fatalf("severity = %v, want DiagnosticWarning", diags[0].Severity)
+	if diags[0].Severity != DiagnosticError {
+		t.Fatalf("severity = %v, want DiagnosticError", diags[0].Severity)
 	}
 	if !strings.Contains(diags[0].Message, "action without emitted event") {
 		t.Fatalf("message = %q, want action without signal", diags[0].Message)
 	}
 }
 
-func TestValidatePermitsValidAction(t *testing.T) {
+func TestValidateRejectsDuplicateFocusID(t *testing.T) {
 	t.Parallel()
 
-	root := Box(Action("open", SignalEvent{Kind: "opened"}).Key(K("open")))
-	diags := Validate(root)
+	root := Box[struct{}](
+		Text[struct{}]("a").Interaction(InteractionSpec[struct{}]{
+			Focus:  FocusSpec{Mode: Focusable, ID: FocusID("dup")},
+			Keymap: []KeyBindingSpec{{Pattern: KeyEnter(), Intent: IntentActivate}},
+		}),
+		Text[struct{}]("b").Interaction(InteractionSpec[struct{}]{
+			Focus:  FocusSpec{Mode: Focusable, ID: FocusID("dup")},
+			Keymap: []KeyBindingSpec{{Pattern: KeyEnter(), Intent: IntentActivate}},
+		}),
+	)
+
+	diags := Validate[struct{}](root)
+	var focusIDDupDiags []Diagnostic
+	for _, d := range diags {
+		if strings.Contains(d.Message, `duplicate sibling focus ID "dup"`) {
+			focusIDDupDiags = append(focusIDDupDiags, d)
+		}
+	}
+	if len(focusIDDupDiags) != 1 {
+		t.Fatalf("duplicate focus ID diagnostic count = %d, want 1; all diags = %#v", len(focusIDDupDiags), diags)
+	}
+	if focusIDDupDiags[0].Severity != DiagnosticError {
+		t.Fatalf("severity = %v, want DiagnosticError", focusIDDupDiags[0].Severity)
+	}
+}
+
+func TestValidateRejectsDuplicateFocusIDOnlyForFocusable(t *testing.T) {
+	t.Parallel()
+
+	root := Box[struct{}](
+		Text[struct{}]("a").Interaction(InteractionSpec[struct{}]{
+			Focus:  FocusSpec{Mode: Focusable, ID: FocusID("dup")},
+			Keymap: []KeyBindingSpec{{Pattern: KeyEnter(), Intent: IntentActivate}},
+		}),
+		Text[struct{}]("b").Interaction(InteractionSpec[struct{}]{Focus: FocusSpec{Mode: FocusNone, ID: FocusID("dup")}}),
+	)
+
+	diags := Validate[struct{}](root)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", diags)
 	}
+}
+
+func TestValidatePermitsValidAction(t *testing.T) {
+	t.Parallel()
+
+	root := Box[struct{}](Action[struct{}]("open", SignalEvent[struct{}]{Kind: "opened"}).Key(K("open")))
+	diags := Validate[struct{}](root)
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", diags)
+	}
+}
+
+func TestValidateRejectsUnresolvedStyleToken(t *testing.T) {
+	t.Parallel()
+
+	root := Box[struct{}](Text[struct{}]("x").Key(K("bad-token")).Style(Style{Token: StyleToken("unknown.token")}))
+	diags := Validate[struct{}](root)
+	if len(diags) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1", len(diags))
+	}
+	if !strings.Contains(diags[0].Message, `unresolved style token "unknown.token"`) {
+		t.Fatalf("message = %q, want unresolved style token", diags[0].Message)
+	}
+}
+
+func TestValidateRejectsInvalidLayoutDimensions(t *testing.T) {
+	t.Parallel()
+
+	root := Box[struct{}](Text[struct{}]("x").Key(K("neg-dim")).Layout(Layout{
+		Size: Size{Width: Fixed(-3), Height: Fit()},
+	}))
+	diags := Validate[struct{}](root)
+	if len(diags) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1", len(diags))
+	}
+	if !strings.Contains(diags[0].Message, "invalid layout dimension") {
+		t.Fatalf("message = %q, want invalid layout dimension", diags[0].Message)
+	}
+}
+
+func TestValidateRejectsFocusableDisabledMismatch(t *testing.T) {
+	t.Parallel()
+
+	root := Box[struct{}](
+		Text[struct{}]("x").
+			Key(K("bad-focus")).
+			Style(Style{State: StateDisabled}).
+			Interaction(InteractionSpec[struct{}]{
+				Focus:  FocusSpec{Mode: Focusable},
+				Keymap: []KeyBindingSpec{{Pattern: KeyEnter(), Intent: IntentActivate}},
+			}),
+	)
+	diags := Validate[struct{}](root)
+	if len(diags) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1", len(diags))
+	}
+	if !strings.Contains(diags[0].Message, "focusable disabled mismatch") {
+		t.Fatalf("message = %q, want focusable disabled mismatch", diags[0].Message)
+	}
+}
+
+func TestValidateRejectsActionWithoutKey(t *testing.T) {
+	t.Parallel()
+
+	root := Box[struct{}](Action[struct{}]("open", SignalEvent[struct{}]{Kind: "opened"}))
+	diags := Validate[struct{}](root)
+	if len(diags) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1; diags=%#v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "action requires key") {
+		t.Fatalf("message = %q, want action requires key", diags[0].Message)
+	}
+}
+
+func TestMinMaxRejectsDimFitMax(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("MinMax with DimFit max should panic")
+		}
+	}()
+	_ = MinMax(5, Fit())
 }

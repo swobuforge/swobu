@@ -5,12 +5,12 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerStack(n core.Node, env EnvConfig) (layout.RenderNode, error) {
+func lowerStack[E any](n core.Node[E], env EnvConfig, caster EventCaster[E]) (layout.RenderNode, error) {
 	axis := n.LayoutValue().Flow.Axis
 	if n.LayoutValue().Flow.Mode != core.FlowStack {
 		axis = core.AxisVertical
 	}
-	children, err := lowerChildren(n.ChildrenValue(), axis, env)
+	children, err := lowerChildren(n.ChildrenValue(), axis, env, caster)
 	if err != nil {
 		return nil, err
 	}

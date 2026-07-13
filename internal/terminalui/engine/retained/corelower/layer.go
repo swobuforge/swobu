@@ -5,22 +5,22 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 )
 
-func lowerLayer(n core.Node, env EnvConfig) (layout.RenderNode, error) {
+func lowerLayer[E any](n core.Node[E], env EnvConfig, caster EventCaster[E]) (layout.RenderNode, error) {
 	children := n.ChildrenValue()
 	switch len(children) {
 	case 0:
 		return layout.NewText(""), nil
 	case 1:
-		return lowerNode(children[0], env)
+		return lowerNode(children[0], env, caster)
 	}
 
-	base, err := lowerNode(children[0], env)
+	base, err := lowerNode(children[0], env, caster)
 	if err != nil {
 		return nil, err
 	}
 	extras := make([]layout.OverlayChild, 0, len(children)-1)
 	for i, child := range children[1:] {
-		renderNode, err := lowerNode(child, env)
+		renderNode, err := lowerNode(child, env, caster)
 		if err != nil {
 			return nil, err
 		}

@@ -1,33 +1,23 @@
 package retained
 
-import "github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
-
-// UseState loads or initializes one retained local state value by hook order.
-// State identity is scoped to the current view instance and call position.
-func UseState[M any, T any](ctx *Context[M], init func() T) (T, func(T)) {
+// UseState is a temporary compatibility shim for local hook state during
+// migration to semantic core. Do not add new uses.
+//
+// TODO remove after all callers migrated (slice 9+). 61 uses across 15 files.
+func UseState[T any, M any](ctx *Context[M], init func() T) (T, func(T)) {
 	if !ctx.building {
 		panic("UseState called outside build")
 	}
 	slot := ctx.hookSlot
 	ctx.hookSlot++
 	if raw, ok := ctx.Local.Get(slot); ok {
-		typed, typeOK := raw.(T)
+		value, typeOK := raw.(T)
 		if !typeOK {
-			panic("state type mismatch")
+			panic("state cell type mismatch")
 		}
-		return typed, func(v T) {
-			ctx.Local.Set(slot, v)
-			if ctx.dispatch != nil {
-				ctx.dispatch(update.LocalStateChangedAction{})
-			}
-		}
+		return value, func(v T) { ctx.Local.Set(slot, v) }
 	}
-	initial := init()
-	ctx.Local.Set(slot, initial)
-	return initial, func(v T) {
-		ctx.Local.Set(slot, v)
-		if ctx.dispatch != nil {
-			ctx.dispatch(update.LocalStateChangedAction{})
-		}
-	}
+	value := init()
+	ctx.Local.Set(slot, value)
+	return value, func(v T) { ctx.Local.Set(slot, v) }
 }

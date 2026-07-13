@@ -21,6 +21,11 @@ func (loop *AppLoop[M]) SetFocus(next *layout.LayoutNode) {
 		}
 	}
 	loop.Focused = next
+	if next != nil {
+		loop.focusedID = next.FocusID
+	} else {
+		loop.focusedID = ""
+	}
 	loop.Invalidate()
 	if next != nil {
 		if hooks, ok := next.RenderNode.(interaction.FocusEvents); ok {
@@ -73,10 +78,22 @@ func (loop *AppLoop[M]) FocusPrev() {
 }
 
 func (loop *AppLoop[M]) repairFocus(nodes map[layout.NodeID]*layout.LayoutNode, previousFocusedIndex int) {
+	// Semantic focus repair: if we have a stable focusedID, try to find the
+	// node with that identity in the new tree before falling back to positional
+	// index-based repair.
+	if loop.focusedID != "" {
+		for _, node := range nodes {
+			if node.FocusID == loop.focusedID && canFocus(node) {
+				loop.Focused = node
+				return
+			}
+		}
+	}
 	if loop.Focused == nil {
 		focusables := focusOrder(loop.Tree)
 		if len(focusables) > 0 {
 			loop.Focused = focusables[0]
+			loop.focusedID = focusables[0].FocusID
 			if hooks, ok := loop.Focused.RenderNode.(interaction.FocusEvents); ok {
 				if actions := hooks.OnFocus(loop.Focused); len(actions) > 0 {
 					loop.Dispatch(actions)
@@ -89,24 +106,29 @@ func (loop *AppLoop[M]) repairFocus(nodes map[layout.NodeID]*layout.LayoutNode, 
 	if next == nil || !canFocus(next) {
 		if lineage := survivingFocusableFromLineage(loop.Focused, nodes); lineage != nil {
 			loop.Focused = lineage
+			loop.focusedID = lineage.FocusID
 			return
 		}
 		focusables := focusOrder(loop.Tree)
 		if len(focusables) == 0 {
 			loop.Focused = nil
+			loop.focusedID = ""
 			return
 		}
 		if previousFocusedIndex < 0 {
 			loop.Focused = focusables[0]
+			loop.focusedID = focusables[0].FocusID
 			return
 		}
 		if previousFocusedIndex >= len(focusables) {
 			previousFocusedIndex = len(focusables) - 1
 		}
 		loop.Focused = focusables[previousFocusedIndex]
+		loop.focusedID = focusables[previousFocusedIndex].FocusID
 		return
 	}
 	loop.Focused = next
+	loop.focusedID = next.FocusID
 }
 
 func survivingFocusableFromLineage(previous *layout.LayoutNode, nodes map[layout.NodeID]*layout.LayoutNode) *layout.LayoutNode {

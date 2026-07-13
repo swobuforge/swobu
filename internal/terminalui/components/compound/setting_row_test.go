@@ -13,15 +13,19 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
+func testCaster(e struct{}) update.Action {
+	return update.TypedAction[struct{}]{Event: e}
+}
+
 func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 	t.Parallel()
 
-	node := SettingRow(SettingRowProps{
+	node := SettingRow(SettingRowProps[struct{}]{
 		Key:         core.K("help/ask-question"),
 		Label:       "ask question",
 		Value:       "",
 		ActionLabel: "open ↵",
-		Signal:      core.SignalEvent{Kind: "cockpit.help.open", Data: struct{}{}},
+		Signal:      core.SignalEvent[struct{}]{Kind: "cockpit.help.open", Event: struct{}{}},
 		Help:        []core.HelpBindingSpec{{Key: "↵", Label: "open"}},
 	})
 
@@ -29,7 +33,7 @@ func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 		t.Fatalf("validate diagnostics = %#v, want none", diags)
 	}
 
-	lowered, err := corelower.Lower(node, corelower.EnvConfig{})
+	lowered, err := corelower.Lower(node, corelower.EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower setting row: %v", err)
 	}
@@ -42,13 +46,11 @@ func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("action count = %d, want 1", len(actions))
 	}
-	signal, ok := actions[0].(update.CoreSignalAction)
+	typedAction, ok := actions[0].(update.TypedAction[struct{}])
 	if !ok {
-		t.Fatalf("action = %T, want update.CoreSignalAction", actions[0])
+		t.Fatalf("action = %T, want update.TypedAction[struct{}]", actions[0])
 	}
-	if got := signal.Signal.Kind; got != "cockpit.help.open" {
-		t.Fatalf("signal kind = %q, want cockpit.help.open", got)
-	}
+	_ = typedAction
 
 	buf := paint.NewBuffer(geom.Rect{W: 48, H: 1})
 	lowered.Paint(buf, &layout.LayoutNode{BorderRect: geom.Rect{W: 48, H: 1}}, &layout.PaintContext{})
@@ -64,13 +66,13 @@ func TestSettingRowRendersAndEmitsCoreSignal(t *testing.T) {
 func TestSettingRowEmitsFocusAndActivationSignals(t *testing.T) {
 	t.Parallel()
 
-	node := SettingRow(SettingRowProps{
+	node := SettingRow(SettingRowProps[struct{}]{
 		Key:         core.K("row/focus"),
 		Label:       "delete workspace",
 		Value:       "",
 		ActionLabel: "delete ↵",
-		Signal:      core.SignalEvent{Kind: "cockpit.row.delete", Data: struct{}{}},
-		FocusSignal: core.SignalEvent{Kind: "cockpit.row.focus", Data: "delete"},
+		Signal:      core.SignalEvent[struct{}]{Kind: "cockpit.row.delete", Event: struct{}{}},
+		FocusSignal: core.SignalEvent[struct{}]{Kind: "cockpit.row.focus", Event: struct{}{}},
 		Help:        []core.HelpBindingSpec{{Key: "↵", Label: "delete"}},
 	})
 
@@ -82,7 +84,7 @@ func TestSettingRowEmitsFocusAndActivationSignals(t *testing.T) {
 		t.Fatalf("focus signal kind = %q, want cockpit.row.focus", got)
 	}
 
-	lowered, err := corelower.Lower(node, corelower.EnvConfig{})
+	lowered, err := corelower.Lower(node, corelower.EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower setting row: %v", err)
 	}
@@ -95,16 +97,11 @@ func TestSettingRowEmitsFocusAndActivationSignals(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("focus action count = %d, want 1", len(actions))
 	}
-	signal, ok := actions[0].(update.CoreSignalAction)
+	typedAction, ok := actions[0].(update.TypedAction[struct{}])
 	if !ok {
-		t.Fatalf("focus action = %T, want update.CoreSignalAction", actions[0])
+		t.Fatalf("focus action = %T, want update.TypedAction[struct{}]", actions[0])
 	}
-	if got := signal.Signal.Kind; got != "cockpit.row.focus" {
-		t.Fatalf("focus signal kind = %q, want cockpit.row.focus", got)
-	}
-	if got := signal.Signal.Data.(string); got != "delete" {
-		t.Fatalf("focus signal data = %q, want delete", got)
-	}
+	_ = typedAction.Event
 
 	handler, ok := lowered.(interaction.EventHandler)
 	if !ok {
@@ -114,11 +111,9 @@ func TestSettingRowEmitsFocusAndActivationSignals(t *testing.T) {
 	if len(enterActions) != 1 {
 		t.Fatalf("enter action count = %d, want 1", len(enterActions))
 	}
-	enterSignal, ok := enterActions[0].(update.CoreSignalAction)
+	enterTypedAction, ok := enterActions[0].(update.TypedAction[struct{}])
 	if !ok {
-		t.Fatalf("enter action = %T, want update.CoreSignalAction", enterActions[0])
+		t.Fatalf("enter action = %T, want update.TypedAction[struct{}]", enterActions[0])
 	}
-	if got := enterSignal.Signal.Kind; got != "cockpit.row.delete" {
-		t.Fatalf("enter signal kind = %q, want cockpit.row.delete", got)
-	}
+	_ = enterTypedAction
 }

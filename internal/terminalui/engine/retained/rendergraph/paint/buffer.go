@@ -10,7 +10,8 @@ import (
 
 // Cell is one logical terminal cell in the engine backbuffer.
 type Cell struct {
-	Rune rune
+	Rune  rune
+	Style Style
 }
 
 // Painter is the scoped output contract exposed to nodes during paint.
@@ -18,6 +19,7 @@ type Cell struct {
 type Painter interface {
 	WithOrigin(p geom.Point) Painter
 	WithClip(r geom.Rect) Painter
+	WithStyle(s Style) Painter
 
 	Put(x, y int, ch rune)
 	Text(x, y int, s string)
@@ -32,6 +34,7 @@ type BufferPainter struct {
 	cells  [][]Cell
 	origin geom.Point
 	clip   geom.Rect
+	style  Style
 }
 
 func NewBuffer(bounds geom.Rect) *BufferPainter {
@@ -58,6 +61,7 @@ func (b *BufferPainter) Reset() {
 	}
 	b.origin = geom.Point{}
 	b.clip = b.bounds
+	b.style = Style{}
 }
 
 func (b *BufferPainter) Bounds() geom.Rect { return b.bounds }
@@ -75,6 +79,7 @@ func (b *BufferPainter) WithOrigin(p geom.Point) Painter {
 		cells:  b.cells,
 		origin: geom.Point{X: b.origin.X + p.X, Y: b.origin.Y + p.Y},
 		clip:   b.clip,
+		style:  b.style,
 	}
 }
 
@@ -84,6 +89,17 @@ func (b *BufferPainter) WithClip(r geom.Rect) Painter {
 		cells:  b.cells,
 		origin: b.origin,
 		clip:   b.clip.Intersect(r),
+		style:  b.style,
+	}
+}
+
+func (b *BufferPainter) WithStyle(s Style) Painter {
+	return &BufferPainter{
+		bounds: b.bounds,
+		cells:  b.cells,
+		origin: b.origin,
+		clip:   b.clip,
+		style:  s,
 	}
 }
 
@@ -96,7 +112,7 @@ func (b *BufferPainter) Put(x, y int, ch rune) {
 	if ay < 0 || ay >= len(b.cells) || ax < 0 || ax >= len(b.cells[ay]) {
 		return
 	}
-	b.cells[ay][ax] = Cell{Rune: ch}
+	b.cells[ay][ax] = Cell{Rune: ch, Style: b.style}
 }
 
 func (b *BufferPainter) Text(x, y int, s string) {

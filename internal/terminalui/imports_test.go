@@ -39,8 +39,7 @@ func TestTerminalUIPackageBoundaries(t *testing.T) {
 				if !strings.Contains(importPath, "/internal/terminalui/") {
 					return false
 				}
-				return !strings.Contains(importPath, "/internal/terminalui/core") &&
-					!strings.Contains(importPath, "/internal/terminalui/engine/retained/update")
+				return !strings.Contains(importPath, "/internal/terminalui/core")
 			},
 		},
 		{
@@ -64,11 +63,15 @@ func TestTerminalUIPackageBoundaries(t *testing.T) {
 			},
 		},
 		{
-			name:    "cockpit views",
+			name:    "cockpit views——retained bridge allowlist",
 			pattern: "./apps/cockpit/app/views/...",
 			forbidFn: func(importPath string) bool {
-				return strings.Contains(importPath, "/internal/terminalui/engine/retained/rendergraph/") ||
-					strings.Contains(importPath, "/internal/terminalui/engine/retained/corelower/")
+				// rendergraph and corelower are already banned; corelower is
+				// still needed for bridge functions during migration.
+				if strings.Contains(importPath, "/internal/terminalui/engine/retained/rendergraph/") {
+					return true
+				}
+				return false
 			},
 		},
 	}

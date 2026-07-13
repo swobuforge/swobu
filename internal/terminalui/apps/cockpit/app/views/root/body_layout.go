@@ -35,8 +35,8 @@ func buildBodyCanvas(ctx *retained.Context[state.Model]) retained.ViewSpec[state
 	preset := activeLayoutPreset(model)
 	wide, narrow := BuildBody(ctx, preset)
 	if preset.ContentMaxWidth > 0 {
-		wide = retained.WithMaxWidth[state.Model](preset.ContentMaxWidth)(wide)
-		narrow = retained.WithMaxWidth[state.Model](preset.ContentMaxWidth)(narrow)
+		wide = retained.Constrain[state.Model](wide, retained.ConstrainSpec{MaxW: preset.ContentMaxWidth})
+		narrow = retained.Constrain[state.Model](narrow, retained.ConstrainSpec{MaxW: preset.ContentMaxWidth})
 	}
 	return retained.ResponsiveView[state.Model]{
 		Threshold: splitViewportWidth - shellHorizontalPadding,

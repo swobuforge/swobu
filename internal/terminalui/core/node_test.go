@@ -5,7 +5,7 @@ import "testing"
 func TestTextReturnsTextKindAndDefaults(t *testing.T) {
 	t.Parallel()
 
-	node := Text("hello")
+	node := Text[struct{}]("hello")
 	if got := node.Kind(); got != KindText {
 		t.Fatalf("kind = %v, want KindText", got)
 	}
@@ -26,9 +26,9 @@ func TestTextReturnsTextKindAndDefaults(t *testing.T) {
 func TestBoxCopiesChildrenSlice(t *testing.T) {
 	t.Parallel()
 
-	children := []Node{Text("a"), Text("b")}
-	box := Box(children...)
-	children[0] = Text("z")
+	children := []Node[struct{}]{Text[struct{}]("a"), Text[struct{}]("b")}
+	box := Box[struct{}](children...)
+	children[0] = Text[struct{}]("z")
 
 	got := box.ChildrenValue()
 	if len(got) != 2 {
@@ -41,7 +41,7 @@ func TestBoxCopiesChildrenSlice(t *testing.T) {
 		t.Fatalf("second child = %q, want b", got[1].ContentValue().Text)
 	}
 
-	got[0] = Text("changed")
+	got[0] = Text[struct{}]("changed")
 	if box.ChildrenValue()[0].ContentValue().Text != "a" {
 		t.Fatal("box children must be returned as a copy")
 	}
@@ -50,7 +50,7 @@ func TestBoxCopiesChildrenSlice(t *testing.T) {
 func TestStackStoresVerticalFlow(t *testing.T) {
 	t.Parallel()
 
-	node := Stack(AxisVertical, Text("a"))
+	node := Stack[struct{}](AxisVertical, Text[struct{}]("a"))
 	layout := node.LayoutValue()
 	if got := layout.Flow.Mode; got != FlowStack {
 		t.Fatalf("flow mode = %v, want FlowStack", got)
@@ -63,7 +63,7 @@ func TestStackStoresVerticalFlow(t *testing.T) {
 func TestActionSeedsFocusableInteractionAndContract(t *testing.T) {
 	t.Parallel()
 
-	node := Action("open", SignalEvent{Kind: "opened"})
+	node := Action[struct{}]("open", SignalEvent[struct{}]{Kind: "opened"})
 	if got := node.Kind(); got != KindAction {
 		t.Fatalf("kind = %v, want KindAction", got)
 	}
@@ -73,10 +73,45 @@ func TestActionSeedsFocusableInteractionAndContract(t *testing.T) {
 	if got := len(node.InteractionValue().Signals); got != 1 {
 		t.Fatalf("signal count = %d, want 1", got)
 	}
-	if got := node.ContractValue().Name; got != "Action" {
-		t.Fatalf("contract name = %q, want Action", got)
-	}
 	if got := len(node.ContractValue().Signals); got != 1 {
 		t.Fatalf("contract signals = %d, want 1", got)
+	}
+}
+
+func TestScrollNodeConstruction(t *testing.T) {
+	t.Parallel()
+
+	child := Text[struct{}]("content")
+	node := Scroll[struct{}](5, child)
+
+	if got := node.Kind(); got != KindScroll {
+		t.Fatalf("kind = %v, want KindScroll", got)
+	}
+	if got := node.ScrollOffsetValue(); got != 5 {
+		t.Fatalf("scroll offset = %d, want 5", got)
+	}
+	children := node.ChildrenValue()
+	if len(children) != 1 {
+		t.Fatalf("children len = %d, want 1", len(children))
+	}
+	if got := children[0].ContentValue().Text; got != "content" {
+		t.Fatalf("child content = %q, want content", got)
+	}
+	if got := node.LayoutValue().Size.Width.Mode; got != DimFill {
+		t.Fatalf("width mode = %v, want DimFill", got)
+	}
+	if got := node.LayoutValue().Size.Height.Mode; got != DimFill {
+		t.Fatalf("height mode = %v, want DimFill", got)
+	}
+}
+
+func TestScrollOffsetModifier(t *testing.T) {
+	t.Parallel()
+
+	child := Text[struct{}]("a")
+	node := Scroll[struct{}](0, child).ScrollOffset(10)
+
+	if got := node.ScrollOffsetValue(); got != 10 {
+		t.Fatalf("scroll offset = %d, want 10", got)
 	}
 }

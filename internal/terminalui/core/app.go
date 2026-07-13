@@ -4,7 +4,6 @@ package core
 import "context"
 
 // EffectKey is the stable identity token for one declared effect.
-// It enables deduplication and policy-based lifecycle.
 type EffectKey string
 
 // EffectPolicy selects how the runtime should handle duplicate or concurrent
@@ -56,7 +55,7 @@ type App[S any, E any] interface {
 	// View builds the semantic UI tree from the current state.
 	// The returned node is an intent tree; the framework compiles it to
 	// terminal frames.
-	View(S) Node
+	View(S) Node[E]
 }
 
 // MutableApp[S, E] is an optional performance-oriented variant for Go
@@ -73,7 +72,7 @@ type MutableApp[S any, E any] interface {
 	Update(tx *Tx[S, E], event E)
 
 	// View builds the semantic UI tree from the current state.
-	View(*S) Node
+	View(*S) Node[E]
 }
 
 // Tx[S, E] is the transaction handle used by MutableApp.
@@ -103,7 +102,7 @@ func (tx *Tx[S, E]) Effects() []Effect[E] {
 // events at the event boundary.
 type RuntimeEvent[E any] struct {
 	// App holds an application-typed event when Kind is AppEvent.
-	App *E
+	App E
 
 	// Runtime holds a framework-typed event when Kind is RuntimeEvent.
 	Runtime RuntimeKind

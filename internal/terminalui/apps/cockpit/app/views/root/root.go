@@ -17,7 +17,7 @@ import (
 // Root assembles the current Swobu cockpit page from app state, app-owned
 // views, and generic toolkit batteries.
 func Root() retained.ViewSpec[state.Model] {
-	return retained.BuildWithLifecycle[state.Model](buildRoot, rootOnMountEffects, nil)
+	return retained.Build[state.Model](buildRoot)
 }
 
 func buildRoot(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model] {
@@ -25,7 +25,7 @@ func buildRoot(ctx *retained.Context[state.Model]) retained.ViewSpec[state.Model
 	bodyContent := retained.Named[state.Model]("workspace/"+workspaceBodyKey(model), retained.Build[state.Model](buildBodyCanvas))
 	// Keep shell rails pinned: header/footer remain visible while only body
 	// content scrolls.
-	body := retained.WithGrow[state.Model]()(retained.Named[state.Model]("body", retained.WithScrollY[state.Model](0)(bodyContent)))
+	body := retained.Grow[state.Model](retained.Named[state.Model]("body", retained.ScrollY[state.Model](bodyContent, 0)))
 	chrome := retained.VStack(ctx,
 		appviews.HeaderBar("⛉ SWOBU", selectors.HeaderShell(model)),
 		appviews.HorizontalRule(),

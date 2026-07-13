@@ -20,5 +20,5 @@ func IndentLeft[M any](child retained.ViewSpec[M], cols int) retained.ViewSpec[M
 	if cols <= 0 {
 		return child
 	}
-	return retained.WithPadLeft[M](cols)(child)
+	return retained.Padded[M](child, 0, 0, 0, cols)
 }

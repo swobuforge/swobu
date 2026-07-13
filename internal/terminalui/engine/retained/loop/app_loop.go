@@ -21,6 +21,7 @@ type AppLoop[M any] struct {
 	Reduce          Reducer[M]
 	Tree            *layout.LayoutNode
 	Focused         *layout.LayoutNode
+	focusedID       string // stable semantic focus identity from core.FocusSpec
 	pendingFocusKey string
 	locals          *reconcile.LocalStore
 	reconciler      *reconcile.Reconciler[M]

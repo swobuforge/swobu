@@ -25,10 +25,8 @@ type statelessBuilderAdapter struct {
 	builder renderNodeBuilder
 }
 
-func (s statelessBuilderAdapter) BuildView(ctx *retained.Context[struct{}]) retained.ViewSpec[struct{}] {
-	return retained.View[struct{}](func(ctx *retained.Context[struct{}]) layout.RenderNode {
-		return s.builder.BuildRenderNode(ctx)
-	})
+func (s statelessBuilderAdapter) BuildRenderNode(ctx *retained.Context[struct{}]) retained.RenderNode {
+	return s.builder.BuildRenderNode(ctx)
 }
 
 func (s statelessBuilderAdapter) OnMountEffects() []update.Effect {
@@ -46,8 +44,7 @@ func (s statelessBuilderAdapter) OnUnmountEffects() []update.Effect {
 }
 
 func asView(builder renderNodeBuilder) retained.ViewSpec[struct{}] {
-	adapter := statelessBuilderAdapter{builder: builder}
-	return retained.BuildWithLifecycle[struct{}](adapter.BuildView, adapter.OnMountEffects, adapter.OnUnmountEffects)
+	return statelessBuilderAdapter{builder: builder}
 }
 
 func (e testEffect) Execute(ctx context.Context) []update.Action {

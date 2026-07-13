@@ -106,47 +106,6 @@ func Build[M any](buildView func(ctx *Context[M]) ViewSpec[M]) ViewSpec[M] {
 	}
 }
 
-// BuildWithLifecycle is Build plus optional lifecycle effect hooks.
-func BuildWithLifecycle[M any](
-	buildView func(ctx *Context[M]) ViewSpec[M],
-	onMount func() []update.Effect,
-	onUnmount func() []update.Effect,
-) ViewSpec[M] {
-	if buildView == nil {
-		return nil
-	}
-	return viewSpecClosure[M]{
-		render: func(ctx *Context[M]) RenderNode {
-			slot := ctx.childSlot
-			ctx.childSlot++
-			local := ctx.Local.WithPrefix("build/" + strconv.Itoa(slot))
-			childCtx := &Context[M]{
-				Local:       local,
-				Model:       ctx.Model,
-				dispatch:    ctx.dispatch,
-				emit:        ctx.emit,
-				building:    ctx.building,
-				hookSlot:    0,
-				childSlot:   0,
-				effectHooks: nil,
-				eventHooks:  nil,
-			}
-			child := buildView(childCtx)
-			if child == nil {
-				childCtx.building = false
-				return nil
-			}
-			// Finalize the child scope here so nested hooks survive even though
-			// the parent build pass never sees this childCtx directly.
-			node := child.BuildRenderNode(childCtx)
-			childCtx.building = false
-			return wrapEventHooks(wrapEffectHooks(node, childCtx.effectHooks), childCtx.eventHooks)
-		},
-		onMount:   onMount,
-		onUnmount: onUnmount,
-	}
-}
-
 type viewSpecClosure[M any] struct {
 	render    func(ctx *Context[M]) RenderNode
 	onMount   func() []update.Effect

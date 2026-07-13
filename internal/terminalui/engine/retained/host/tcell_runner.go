@@ -169,15 +169,62 @@ func flushBuffer(screen tcell.Screen, previous, next *paint.BufferPainter) {
 	for y := 0; y < bounds.H; y++ {
 		for x := 0; x < bounds.W; x++ {
 			cell := next.Cell(x, y)
-			if previous != nil && previous.Cell(x, y) == cell {
-				continue
+			if previous != nil {
+				prevCell := previous.Cell(x, y)
+				if prevCell.Rune == cell.Rune && prevCell.Style == cell.Style {
+					continue
+				}
 			}
 			r := cell.Rune
 			if r == 0 {
 				r = ' '
 			}
-			screen.SetContent(x, y, r, nil, tcell.StyleDefault)
+			screen.SetContent(x, y, r, nil, paintStyleToTcell(cell.Style))
 		}
+	}
+}
+
+func paintStyleToTcell(s paint.Style) tcell.Style {
+	var st tcell.Style
+	if s.Bold {
+		st = st.Bold(true)
+	}
+	if s.Dim {
+		st = st.Dim(true)
+	}
+	if s.Underline {
+		st = st.Underline(true)
+	}
+	// Convert basic ANSI16 colors when set.
+	if s.Fg != paint.ColorDefault {
+		st = st.Foreground(tcellColor(s.Fg))
+	}
+	if s.Bg != paint.ColorDefault {
+		st = st.Background(tcellColor(s.Bg))
+	}
+	return st
+}
+
+func tcellColor(c paint.Color) tcell.Color {
+	switch c {
+	case paint.ColorBlack:
+		return tcell.ColorBlack
+	case paint.ColorRed:
+		return tcell.ColorMaroon
+	case paint.ColorGreen:
+		return tcell.ColorGreen
+	case paint.ColorYellow:
+		return tcell.ColorOlive
+	case paint.ColorBlue:
+		return tcell.ColorNavy
+	case paint.ColorMagenta:
+		return tcell.ColorPurple
+	case paint.ColorCyan:
+		return tcell.ColorTeal
+	case paint.ColorWhite:
+		return tcell.ColorSilver
+	default:
+		return tcell.ColorDefault
 	}
 }
 

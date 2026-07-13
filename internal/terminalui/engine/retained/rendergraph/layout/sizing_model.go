@@ -36,6 +36,7 @@ type Composite interface {
 // LayoutNode is the retained computed artifact for one resolved node.
 type LayoutNode struct {
 	ID           NodeID
+	FocusID      string // stable semantic focus identity from core.FocusSpec
 	RenderNode   RenderNode
 	Parent       *LayoutNode
 	Kids         []*LayoutNode
@@ -115,6 +116,29 @@ type identityRenderNode struct {
 func (e identityRenderNode) nodeID() NodeID     { return e.id }
 func (e identityRenderNode) unwrap() RenderNode { return e.RenderNode }
 
+type focusIDRenderNode struct {
+	RenderNode
+	fid string
+}
+
+func (e focusIDRenderNode) focusID() string    { return e.fid }
+func (e focusIDRenderNode) unwrap() RenderNode { return e.RenderNode }
+
+// WithFocusID annotates one structural node with a stable semantic focus
+// identity supplied by the author-facing core algebra.
+func WithFocusID(focusID string, node RenderNode) RenderNode {
+	return focusIDRenderNode{RenderNode: node, fid: focusID}
+}
+
+// FocusIDOf reports the semantic focus identity attached to one structural
+// node, if present.
+func FocusIDOf(node RenderNode) (string, bool) {
+	identified, ok := node.(interface{ focusID() string })
+	if !ok {
+		return "", false
+	}
+	return identified.focusID(), true
+}
 // WithIdentity annotates one structural node with a stable retained node ID
 // supplied by the reconciler.
 func WithIdentity(id NodeID, node RenderNode) RenderNode {

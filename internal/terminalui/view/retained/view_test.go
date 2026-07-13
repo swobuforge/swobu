@@ -81,7 +81,7 @@ func TestApply_ComposesModifiersInDeclarationOrder(t *testing.T) {
 	root := View[struct{}](func(_ *Context[struct{}]) layout.RenderNode {
 		return layout.NewText("x")
 	})
-	composed := WithConstrain[struct{}](ConstrainSpec{MaxW: 17})(WithPadLeft[struct{}](2)(root))
+	composed := Constrain[struct{}](Padded[struct{}](root, 0, 0, 0, 2), ConstrainSpec{MaxW: 17})
 	out := BuildViewRootNode(composed, mapScope{}, func(update.Action) {}, func(update.Action) {}, func() struct{} { return struct{}{} })
 
 	outer, ok := out.(*layout.BoxRenderNode)
@@ -111,10 +111,6 @@ func (hookBuilder) BuildView(_ *Context[struct{}]) ViewSpec[struct{}] {
 	})
 }
 
-func (hookBuilder) OnMountEffects() []update.Effect {
-	return []update.Effect{stubEffect{}}
-}
-
 func (stubEffect) Execute(_ context.Context) []update.Action { return nil }
 
 func TestBuildViewRootNode_MaterializesBuildFunction(t *testing.T) {
@@ -128,11 +124,11 @@ func TestBuildViewRootNode_MaterializesBuildFunction(t *testing.T) {
 	}
 }
 
-func TestBuildWithLifecycle_ForwardsLifecycleHooks(t *testing.T) {
-	view := BuildWithLifecycle[struct{}](hookBuilder{}.BuildView, hookBuilder{}.OnMountEffects, nil)
+func TestBuild_DoesNotForwardLifecycleHooks(t *testing.T) {
+	view := Build[struct{}](hookBuilder{}.BuildView)
 	effects := CaptureLifecycle(view)
-	if len(effects.OnMount) != 1 {
-		t.Fatalf("on mount effects = %d, want 1", len(effects.OnMount))
+	if len(effects.OnMount) != 0 {
+		t.Fatalf("on mount effects = %d, want 0 (Build does not forward lifecycle)", len(effects.OnMount))
 	}
 }
 

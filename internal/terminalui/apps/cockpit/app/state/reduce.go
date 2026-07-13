@@ -13,12 +13,6 @@ import (
 
 // Reduce owns the first design-conforming cockpit's durable app-state updates.
 func Reduce(model *Model, action update.Action) []update.Effect {
-	if coreAction, ok := action.(update.CoreSignalAction); ok {
-		if next, ok := coreAction.Signal.Data.(update.Action); ok {
-			return Reduce(model, next)
-		}
-		return nil
-	}
 	if model.ControlPlane != nil && !allowWhileControlPlaneIncompatible(action) {
 		return nil
 	}

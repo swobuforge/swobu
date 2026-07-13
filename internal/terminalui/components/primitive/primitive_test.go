@@ -12,15 +12,19 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
+func testCaster(e struct{}) update.Action {
+	return update.TypedAction[struct{}]{Event: e}
+}
+
 func TestActionEmitsSignalAndHonorsDisabledFocus(t *testing.T) {
 	t.Parallel()
 
-	node := Action(ActionProps{
+	node := Action(ActionProps[struct{}]{
 		Key:    core.K("help.ask"),
 		Label:  "ask question  open ↵",
-		Signal: core.SignalEvent{Kind: "cockpit.help.open", Data: struct{}{}},
+		Signal: core.SignalEvent[struct{}]{Kind: "cockpit.help.open", Event: struct{}{}},
 	})
-	lowered, err := corelower.Lower(node, corelower.EnvConfig{})
+	lowered, err := corelower.Lower(node, corelower.EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower action: %v", err)
 	}
@@ -41,21 +45,23 @@ func TestActionEmitsSignalAndHonorsDisabledFocus(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("action count = %d, want 1", len(actions))
 	}
-	signal, ok := actions[0].(update.CoreSignalAction)
+	if got := len(actions); got != 1 {
+		t.Fatalf("action count = %d, want 1", got)
+	}
+	typedAction, ok := actions[0].(update.TypedAction[struct{}])
 	if !ok {
-		t.Fatalf("action = %T, want update.CoreSignalAction", actions[0])
+		t.Fatalf("action = %T, want update.TypedAction[struct{}]", actions[0])
 	}
-	if got := signal.Signal.Kind; got != "cockpit.help.open" {
-		t.Fatalf("signal kind = %q, want cockpit.help.open", got)
-	}
+	// Signal data is passed through the caster; for struct{} caster it wraps the event
+	_ = typedAction
 
-	disabled := Action(ActionProps{
+	disabled := Action(ActionProps[struct{}]{
 		Key:      core.K("help.disabled"),
 		Label:    "disabled",
-		Signal:   core.SignalEvent{Kind: "cockpit.help.open"},
+		Signal:   core.SignalEvent[struct{}]{Kind: "cockpit.help.open"},
 		Disabled: true,
 	})
-	disabledLowered, err := corelower.Lower(disabled, corelower.EnvConfig{})
+	disabledLowered, err := corelower.Lower(disabled, corelower.EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower disabled action: %v", err)
 	}

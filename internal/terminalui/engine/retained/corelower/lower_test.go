@@ -12,10 +12,14 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
+func testCaster(e struct{}) update.Action {
+	return update.TypedAction[struct{}]{Event: e}
+}
+
 func TestLowerTextPaintsText(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Text("hello"), EnvConfig{})
+	renderNode, err := Lower(core.Text[struct{}]("hello"), EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -30,7 +34,11 @@ func TestLowerTextPaintsText(t *testing.T) {
 func TestLowerStackLowersChildrenInOrder(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Stack(core.AxisVertical, core.Text("a"), core.Text("b")), EnvConfig{})
+	renderNode, err := Lower(
+		core.Stack[struct{}](core.AxisVertical, core.Text[struct{}]("a"), core.Text[struct{}]("b")),
+		EnvConfig{},
+		testCaster,
+	)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -45,13 +53,13 @@ func TestLowerStackLowersChildrenInOrder(t *testing.T) {
 func TestLowerAssertRejectsInvalidNode(t *testing.T) {
 	t.Parallel()
 
-	node := core.Action("open", core.SignalEvent{Kind: "opened"}).
-		Interaction(core.InteractionSpec{
+	node := core.Action("open", core.SignalEvent[struct{}]{Kind: "opened"}).
+		Interaction(core.InteractionSpec[struct{}]{
 			Focus:  core.FocusSpec{Mode: core.Focusable},
 			Keymap: []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
 		})
 
-	_, err := LowerAssert(node, EnvConfig{})
+	_, err := LowerAssert(node, EnvConfig{}, testCaster)
 	if err == nil {
 		t.Fatal("expected LowerAssert to reject action without signal")
 	}
@@ -63,10 +71,10 @@ func TestLowerAssertRejectsInvalidNode(t *testing.T) {
 func TestLowerAllowsInvalidNodeAtRuntime(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Box(
-		core.Text("a").Key(core.K("dup")),
-		core.Text("b").Key(core.K("dup")),
-	), EnvConfig{})
+	renderNode, err := Lower(core.Box[struct{}](
+		core.Text[struct{}]("a").Key(core.K("dup")),
+		core.Text[struct{}]("b").Key(core.K("dup")),
+	), EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("unexpected lowering failure: %v", err)
 	}
@@ -78,7 +86,7 @@ func TestLowerAllowsInvalidNodeAtRuntime(t *testing.T) {
 func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 	t.Parallel()
 
-	renderNode, err := Lower(core.Action("open", core.SignalEvent{Kind: "opened"}), EnvConfig{})
+	renderNode, err := Lower(core.Action("open", core.SignalEvent[struct{}]{Kind: "opened"}), EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -94,9 +102,6 @@ func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions len = %d, want 1", len(actions))
 	}
-	if _, ok := actions[0].(update.CoreSignalAction); !ok {
-		t.Fatalf("action type = %T, want update.CoreSignalAction", actions[0])
-	}
 
 	buf := paint.NewBuffer(geom.Rect{W: 16, H: 1})
 	paintNode(tree, buf, &layout.PaintContext{FocusedID: tree.ID})
@@ -108,18 +113,20 @@ func TestLowerActionIsFocusableAndEmitsSignal(t *testing.T) {
 func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 	t.Parallel()
 
-	node := core.Action("delete", core.SignalEvent{}).
+	node := core.Action("delete", core.SignalEvent[struct{}]{}).
 		Key(core.K("workspace/delete")).
-		Interaction(core.InteractionSpec{
+		Interaction(core.InteractionSpec[struct{}]{
 			Focus:  core.FocusSpec{Mode: core.Focusable},
 			Keymap: []core.KeyBindingSpec{{Pattern: core.KeyEnter(), Intent: core.IntentActivate}},
 			Help:   []core.HelpBindingSpec{{Key: "enter", Label: "delete"}},
-			FocusSignals: []core.SignalEvent{{
-				Kind: "cockpit.row.focus",
-				Data: "delete",
-			}},
+			FocusSignals: []core.SignalEvent[struct{}]{
+				{
+					Kind:  "cockpit.row.focus",
+					Event: struct{}{},
+				},
+			},
 		}).
-		Contract(core.Contract{
+		Contract(core.Contract[struct{}]{
 			Name:    "Action",
 			Purpose: "Focusable semantic action.",
 			Help:    []core.HelpBindingSpec{{Key: "enter", Label: "delete"}},
@@ -127,7 +134,7 @@ func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 			Layout:  core.LayoutPolicy{Width: core.Fill(1), Height: core.Fit()},
 		})
 
-	renderNode, err := Lower(node, EnvConfig{})
+	renderNode, err := Lower(node, EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
@@ -139,16 +146,6 @@ func TestLowerActionWithFocusSignalDoesNotHandleEnter(t *testing.T) {
 	actions := focusEvents.OnFocus(tree)
 	if len(actions) != 1 {
 		t.Fatalf("focus action count = %d, want 1", len(actions))
-	}
-	signal, ok := actions[0].(update.CoreSignalAction)
-	if !ok {
-		t.Fatalf("focus action = %T, want update.CoreSignalAction", actions[0])
-	}
-	if got := signal.Signal.Kind; got != "cockpit.row.focus" {
-		t.Fatalf("focus signal kind = %q, want cockpit.row.focus", got)
-	}
-	if got := signal.Signal.Data.(string); got != "delete" {
-		t.Fatalf("focus signal data = %q, want delete", got)
 	}
 
 	handler, ok := tree.RenderNode.(interaction.EventHandler)

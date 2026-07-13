@@ -4,29 +4,15 @@ package core
 type Intent string
 
 const (
-	IntentActivate Intent = "activate"
-	IntentCancel   Intent = "cancel"
-	IntentCopy     Intent = "copy"
-	IntentEdit     Intent = "edit"
-	IntentMoveNext Intent = "move.next"
-	IntentMovePrev Intent = "move.prev"
+	IntentActivate   Intent = "activate"
+	IntentCancel     Intent = "cancel"
+	IntentCopy       Intent = "copy"
+	IntentEdit       Intent = "edit"
+	IntentMoveNext   Intent = "move.next"
+	IntentMovePrev   Intent = "move.prev"
+	IntentBackspace  Intent = "backspace"
+	IntentInsertRune Intent = "insert.rune"
 )
-
-// FocusMode describes how a node participates in focus.
-type FocusMode uint8
-
-const (
-	FocusNone FocusMode = iota
-	Focusable
-	FocusGroup
-	FocusScope
-)
-
-// FocusSpec is one node's focus contract.
-type FocusSpec struct {
-	Mode FocusMode
-	Trap bool
-}
 
 // KeyMatch is a semantic match token for keyboard input.
 type KeyMatch struct {
@@ -54,12 +40,11 @@ type HelpBindingSpec struct {
 	Label string
 }
 
-// InteractionSpec is the semantic interaction envelope for one node.
-type InteractionSpec struct {
-	Focus   FocusSpec
-	Keymap  []KeyBindingSpec
-	Help    []HelpBindingSpec
-	Signals []SignalEvent
-	// FocusSignals are emitted when the lowered node gains focus.
-	FocusSignals []SignalEvent
+// InteractionSpec[E] is the semantic interaction envelope for one node.
+type InteractionSpec[E any] struct {
+	Focus        FocusSpec
+	Keymap       []KeyBindingSpec
+	Help         []HelpBindingSpec
+	Signals      []SignalEvent[E]
+	FocusSignals []SignalEvent[E]
 }

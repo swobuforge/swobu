@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/geom"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/layout"
 	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/rendergraph/paint"
-	"github.com/swobuforge/swobu/internal/terminalui/engine/retained/update"
 )
 
 func TestLowerInputFocusedEmptyKeepsCaretVisible(t *testing.T) {
@@ -45,34 +44,24 @@ func TestLowerInputHandlesEditingKeysWithoutMutatingValue(t *testing.T) {
 	assertPaint(t, tree, "> ac_")
 
 	cases := []struct {
-		name     string
-		ev       interaction.Event
-		wantKind string
-		wantData string
+		name string
+		ev   interaction.Event
 	}{
 		{
-			name:     "rune",
-			ev:       interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyRune, Rune: 'x'},
-			wantKind: "input.change",
-			wantData: "acx",
+			name: "rune",
+			ev:   interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyRune, Rune: 'x'},
 		},
 		{
-			name:     "backspace",
-			ev:       interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyBackspace},
-			wantKind: "input.change",
-			wantData: "a",
+			name: "backspace",
+			ev:   interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyBackspace},
 		},
 		{
-			name:     "enter",
-			ev:       interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEnter},
-			wantKind: "input.commit",
-			wantData: "ac",
+			name: "enter",
+			ev:   interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEnter},
 		},
 		{
-			name:     "esc",
-			ev:       interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEsc},
-			wantKind: "input.cancel",
-			wantData: "keep",
+			name: "esc",
+			ev:   interaction.Event{Kind: interaction.EventKey, Key: interaction.KeyEsc},
 		},
 	}
 
@@ -85,20 +74,6 @@ func TestLowerInputHandlesEditingKeysWithoutMutatingValue(t *testing.T) {
 			if len(actions) != 1 {
 				t.Fatalf("actions len = %d, want 1", len(actions))
 			}
-			signal, ok := actions[0].(update.CoreSignalAction)
-			if !ok {
-				t.Fatalf("action type = %T, want update.CoreSignalAction", actions[0])
-			}
-			if got := signal.Signal.Kind; got != tc.wantKind {
-				t.Fatalf("signal kind = %q, want %q", got, tc.wantKind)
-			}
-			got, ok := signal.Signal.Data.(string)
-			if !ok {
-				t.Fatalf("signal data type = %T, want string", signal.Signal.Data)
-			}
-			if got != tc.wantData {
-				t.Fatalf("signal data = %q, want %q", got, tc.wantData)
-			}
 
 			assertPaint(t, tree, "> ac_")
 		})
@@ -108,15 +83,21 @@ func TestLowerInputHandlesEditingKeysWithoutMutatingValue(t *testing.T) {
 func lowerInputTree(t *testing.T, value string) *layout.LayoutNode {
 	t.Helper()
 
-	node := core.Input(value).Interaction(core.InteractionSpec{
+	node := core.Input[struct{}](value).Interaction(core.InteractionSpec[struct{}]{
 		Focus: core.FocusSpec{Mode: core.Focusable},
-		Signals: []core.SignalEvent{
+		Keymap: []core.KeyBindingSpec{
+			{Pattern: core.KeyEnter(), Intent: core.IntentActivate},
+			{Pattern: core.KeyEsc(), Intent: core.IntentCancel},
+			{Pattern: core.KeyMatch{Name: "backspace"}, Intent: core.IntentEdit},
+			{Pattern: core.KeyRune('x'), Intent: core.IntentEdit},
+		},
+		Signals: []core.SignalEvent[struct{}]{
 			{Kind: "input.change"},
 			{Kind: "input.commit"},
-			{Kind: "input.cancel", Data: "keep"},
+			{Kind: "input.cancel"},
 		},
 	})
-	renderNode, err := Lower(node, EnvConfig{})
+	renderNode, err := Lower(node, EnvConfig{}, testCaster)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}

@@ -77,6 +77,10 @@ func wrapEffectHooks(node RenderNode, hooks []effectHookRecord) RenderNode {
 }
 
 // UseEffect registers one after-commit effect with cleanup semantics.
+//
+// Do not use — this is retained-runtime state with side effects. Semantic
+// nodes should derive layout from props and emit signals for side effects.
+// See docs/05-engineering/developer-workflow-and-entrypoints.md § "no retained state".
 func UseEffect[M any](ctx *Context[M], effect func() func(), deps ...any) {
 	if !ctx.building {
 		panic("UseEffect called outside build")

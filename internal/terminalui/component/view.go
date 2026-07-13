@@ -2,18 +2,18 @@ package component
 
 import "github.com/swobuforge/swobu/internal/terminalui/core"
 
-// View is the author-facing semantic component contract.
-type View[M any] interface {
-	BuildCoreNode(ctx *Context[M]) core.Node
+// View[E] is the author-facing semantic component contract.
+type View[E any, M any] interface {
+	BuildCoreNode(ctx *Context[E, M]) core.Node[E]
 }
 
-// ViewFunc adapts a build function into a View.
-type ViewFunc[M any] func(ctx *Context[M]) core.Node
+// ViewFunc[E, M] adapts a build function into a View.
+type ViewFunc[E any, M any] func(ctx *Context[E, M]) core.Node[E]
 
 // BuildCoreNode implements View.
-func (f ViewFunc[M]) BuildCoreNode(ctx *Context[M]) (node core.Node) {
+func (f ViewFunc[E, M]) BuildCoreNode(ctx *Context[E, M]) (node core.Node[E]) {
 	if f == nil {
-		return core.Box()
+		return core.Box[E]()
 	}
 	if ctx == nil {
 		return f(nil)

@@ -9,6 +9,10 @@ type identityProvider interface {
 	nodeID() NodeID
 }
 
+type focusIDProvider interface {
+	focusID() string
+}
+
 type unwrapIdentity interface {
 	unwrap() RenderNode
 }
@@ -18,6 +22,9 @@ func (b *TreeBuilder) Build(root RenderNode, bounds geom.Rect) *LayoutNode {
 	rootNode := &LayoutNode{RenderNode: root, Slot: bounds}
 	if identified, ok := root.(identityProvider); ok {
 		rootNode.ID = identified.nodeID()
+	}
+	if focused, ok := root.(focusIDProvider); ok {
+		rootNode.FocusID = focused.focusID()
 	}
 	if wrapped, ok := root.(unwrapIdentity); ok {
 		rootNode.RenderNode = wrapped.unwrap()
@@ -58,6 +65,9 @@ func (b *TreeBuilder) layoutNode(node *LayoutNode, slot geom.Rect, inheritedClip
 		}
 		if identified, ok := child.Spec.RenderNode.(identityProvider); ok {
 			childNode.ID = identified.nodeID()
+		}
+		if focused, ok := child.Spec.RenderNode.(focusIDProvider); ok {
+			childNode.FocusID = focused.focusID()
 		}
 		if wrapped, ok := child.Spec.RenderNode.(unwrapIdentity); ok {
 			childNode.RenderNode = wrapped.unwrap()

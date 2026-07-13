@@ -53,8 +53,8 @@ func (testApp) Update(s appState, e appEvent) (appState, []Effect[appEvent]) {
 	return s, nil
 }
 
-func (testApp) View(s appState) Node {
-	return Text("hello")
+func (testApp) View(s appState) Node[appEvent] {
+	return Text[appEvent]("hello")
 }
 
 func TestMutableAppInterfaceCompiles(t *testing.T) {
@@ -73,8 +73,8 @@ func (testMutableApp) Update(tx *Tx[appState, appEvent], e appEvent) {
 	tx.State.Count++
 }
 
-func (testMutableApp) View(s *appState) Node {
-	return Text("mutable")
+func (testMutableApp) View(s *appState) Node[appEvent] {
+	return Text[appEvent]("mutable")
 }
 
 func TestTxAccumulatesEffects(t *testing.T) {

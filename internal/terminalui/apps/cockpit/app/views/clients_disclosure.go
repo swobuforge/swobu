@@ -45,11 +45,14 @@ func anchoredDisclosureWithScrollableDetails(
 		return parent
 	}
 	detailStack := retained.VStack[state.Model](nil, filtered...)
-	detailViewport := retained.WithConstrain[state.Model](retained.ConstrainSpec{
-		GrowW: true,
-		MaxW:  ContentMaxWidth,
-		MaxH:  maxHeight,
-	})(retained.WithScrollY[state.Model](offset)(detailStack))
+	detailViewport := retained.Constrain[state.Model](
+		retained.ScrollY[state.Model](detailStack, offset),
+		retained.ConstrainSpec{
+			GrowW: true,
+			MaxW:  ContentMaxWidth,
+			MaxH:  maxHeight,
+		},
+	)
 	out := make([]retained.ViewSpec[state.Model], 0, 2)
 	if cue := disclosureScrollCue(showMoreAbove, showMoreBelow); cue != "" {
 		out = append(out, payloadTextRow(cue))

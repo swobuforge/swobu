@@ -42,7 +42,13 @@ func Fill(weight int) DimSize {
 }
 
 // MinMax resolves within a bounded range.
+//
+// Invariant: max mode must not be DimFit. Use Fit() for unbounded sizing;
+// MinMax requires a meaningful upper bound.
 func MinMax(min int, max DimSize) DimSize {
+	if max.Mode == DimFit {
+		panic("core.MinMax: max mode cannot be DimFit; use Fit() for unbounded sizing")
+	}
 	return DimSize{Mode: DimMinMax, Min: min, Max: max.Value, Weight: max.Weight}
 }
 

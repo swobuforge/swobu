@@ -15,7 +15,7 @@ func buildAnchoredDisclosure[M any](ctx *retained.Context[M], parent retained.Vi
 		}
 		for _, detail := range details {
 			if detail != nil {
-				children = append(children, retained.WithPadLeft[M](2)(detail))
+				children = append(children, retained.Padded[M](detail, 0, 0, 0, 2))
 			}
 		}
 	} else {
@@ -24,7 +24,7 @@ func buildAnchoredDisclosure[M any](ctx *retained.Context[M], parent retained.Vi
 		}
 		for i, detail := range details {
 			if detail != nil {
-				children = append(children, retained.Named[M](fmt.Sprintf("detail/%d", i), retained.WithPadLeft[M](2)(detail)))
+				children = append(children, retained.Named[M](fmt.Sprintf("detail/%d", i), retained.Padded[M](detail, 0, 0, 0, 2)))
 			}
 		}
 	}

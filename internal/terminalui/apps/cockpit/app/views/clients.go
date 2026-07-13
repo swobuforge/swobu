@@ -159,11 +159,14 @@ func buildClientRow(profiles []clientprofile.Profile, summary string, local clie
 	}
 	options := buildClientPickerRows(profiles, local, selected)
 	optionStack := retained.VStack[state.Model](nil, options...)
-	optionViewport := retained.WithConstrain[state.Model](retained.ConstrainSpec{
-		GrowW: true,
-		MaxW:  ContentMaxWidth,
-		MaxH:  ListMaxHeight,
-	})(retained.WithScrollY[state.Model](0)(optionStack))
+	optionViewport := retained.Constrain[state.Model](
+		retained.ScrollY[state.Model](optionStack, 0),
+		retained.ConstrainSpec{
+			GrowW: true,
+			MaxW:  ContentMaxWidth,
+			MaxH:  ListMaxHeight,
+		},
+	)
 	disclosure := toolkitviews.NewAnchoredDisclosure(clientRow, optionViewport)
 	return toolkitviews.KeyScope(disclosure, clientPickerKeyHandler(profiles, local))
 }
