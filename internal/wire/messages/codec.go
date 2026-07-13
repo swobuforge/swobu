@@ -184,10 +184,6 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
 			frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
 		}
-		stopReason := "end_turn"
-		if s.sawToolUse {
-			stopReason = "tool_use"
-		}
 		outputTokens := 0
 		if usageTokens, ok := event.Usage.OutputTokens(); ok {
 			outputTokens = usageTokens
@@ -195,7 +191,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		raw, _ := json.Marshal(messagesDeltaEventDTO{
 			Type: "message_delta",
 			Delta: messagesDeltaBodyDTO{
-				StopReason:   stopReason,
+				StopReason:   messagesStopReasonForFinishReason(event.FinishReason, s.sawToolUse),
 				StopSequence: nil,
 			},
 			Usage: messagesDeltaUsageDTO{OutputTokens: outputTokens},
@@ -211,6 +207,18 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			logMessagesEgressStreamFrame(frame)
 		}
 		return frames, nil
+	case sse.StreamEventFailed:
+		raw, _ := json.Marshal(map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"message": sse.FallbackID(event.ErrorMessage, "output stream failed"),
+				"type":    "swobu_stream_error",
+				"code":    sse.FallbackID(event.ErrorCode, "stream_error"),
+			},
+		})
+		frame := sse.SSEEventFrame("error", raw)
+		logMessagesEgressStreamFrame(frame)
+		return [][]byte{frame}, nil
 	default:
 		return nil, canonical.UnsupportedOperation("messages streaming event is not implemented")
 	}

@@ -36,7 +36,13 @@ type streamChoiceBody struct {
 		Content   string               `json:"content"`
 		ToolCalls []streamToolCallBody `json:"tool_calls"`
 	} `json:"delta"`
-	FinishReason string `json:"finish_reason"`
+	FinishReason        string `json:"finish_reason"`
+	ContentFilterResult struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	} `json:"content_filter_result"`
 }
 
 type streamToolCallBody struct {
@@ -102,6 +108,20 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
 	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	if openaicompat.IsContentFilterFinishReason(choice.FinishReason) {
+		items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
+		if err != nil {
+			return nil, err
+		}
+		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+			exchangeID,
+			dto.ID,
+			dto.Model,
+			items,
+			choice.FinishReason,
+			usage,
+		)), nil
+	}
 	items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
 	if err != nil {
 		return nil, err
@@ -176,7 +196,7 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		event, err := s.reader.Next()
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
-				deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, false)
+				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
 				s.closeOpenChildren(canonical.EnvelopeStatusError)
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
@@ -229,10 +249,14 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 			continue
 		}
 		choice := chunk.Choices[0]
-		if err := s.applyChoiceDelta(choice); err != nil {
-			return canonical.Event{}, err
+		if openaicompat.IsContentFilterFinishReason(choice.FinishReason) {
+			s.handleChoiceContentFilter(ctx, choice)
+		} else {
+			if err := s.applyChoiceDelta(choice); err != nil {
+				return canonical.Event{}, err
+			}
+			s.applyChoiceFinish(ctx, choice)
 		}
-		s.applyChoiceFinish(ctx, choice)
 		if len(s.pending) > 0 {
 			return s.shiftPending(), nil
 		}
@@ -272,7 +296,19 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		delete(s.toolEnvIDs, idx)
 	}
 	s.completed = true
-	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
+	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+}
+
+func (s *chatCompletionsEventReader) handleChoiceContentFilter(ctx context.Context, choice streamChoiceBody) {
+	if s.completed {
+		return
+	}
+	s.completed = true
+	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+	s.closeOpenChildren(canonical.EnvelopeStatusError)
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
@@ -344,6 +380,17 @@ func (s *chatCompletionsEventReader) enqueueEnvelopeStart(id canonical.EnvelopeI
 
 func (s *chatCompletionsEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
+}
+
+func (s *chatCompletionsEventReader) enqueueError(code string, message string) {
+	s.enqueue(canonical.Event{
+		Kind:  canonical.EventError,
+		EnvID: s.responseID,
+		Payload: canonical.ErrorPayload{
+			Code:    code,
+			Message: message,
+		},
+	})
 }
 
 func (s *chatCompletionsEventReader) closeOpenChildren(status canonical.EnvelopeStatus) {

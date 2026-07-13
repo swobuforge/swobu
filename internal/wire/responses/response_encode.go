@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -13,6 +14,7 @@ import (
 func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.WireDocument], error) {
 	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
+	status, incompleteReason := responsesWireStatusForFinishReason(output.FinishReason())
 	for _, item := range output.Items() {
 		switch item.Kind {
 		case canonical.ItemKindText:
@@ -20,7 +22,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 			outputText += text
 			encoded = append(encoded, responsesOutputItemDTO{
 				Type:   "message",
-				Status: "completed",
+				Status: status,
 				Role:   "assistant",
 				Content: []responsesOutputTextItemDTO{{
 					Type: "output_text",
@@ -33,25 +35,49 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 				item.ToolUseID,
 				item.Name,
 				item.ToolType,
-				"completed",
+				status,
 				item.Input.RawObject(),
 			))
 		}
 	}
 	encodedBody, err := json.Marshal(responsesResponseDTO{
-		ID:         sse.FallbackID(output.ResultID(), "resp_swobu"),
-		Object:     "response",
-		Model:      output.Model(),
-		Status:     "completed",
-		OutputText: outputText,
-		Output:     encoded,
-		Usage:      responsesUsageFromCanonical(output.Usage()),
+		ID:                sse.FallbackID(output.ResultID(), "resp_swobu"),
+		Object:            "response",
+		Model:             output.Model(),
+		Status:            status,
+		IncompleteDetails: responsesIncompleteDetailsForStatus(status, incompleteReason),
+		OutputText:        outputText,
+		Output:            encoded,
+		Usage:             responsesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
 		return effect.Result[carrier.WireDocument]{}, err
 	}
 	logResponsesEgressBuffered(encodedBody)
 	return effect.NewResult(carrier.NewWireDocument("", protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})), nil
+}
+
+func responsesWireStatusForFinishReason(finishReason string) (string, string) {
+	normalized := strings.ToLower(strings.TrimSpace(finishReason)) // swobu:io-string source=boundary
+	switch normalized {
+	case "", "completed", "incomplete", "stop", "end_turn", "tool_calls":
+		return "completed", ""
+	case "content_filter", "max_output_tokens", "length", "refusal", "safety", "guardrail_intervened", "content_filtered":
+		return "incomplete", normalized
+	default:
+		return "completed", ""
+	}
+}
+
+func responsesIncompleteDetailsForStatus(status string, incompleteReason string) *responsesIncompleteDetailsDTO {
+	if strings.TrimSpace(status) != "incomplete" {
+		return nil
+	}
+	reason := strings.TrimSpace(incompleteReason)
+	if reason == "" {
+		return nil
+	}
+	return &responsesIncompleteDetailsDTO{Reason: reason}
 }
 
 func responsesUsageFromCanonical(usage canonical.TokenUsage) *responsesUsageDTO {

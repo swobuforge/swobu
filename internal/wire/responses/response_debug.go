@@ -44,7 +44,7 @@ func logResponsesEgressStreamFrame(raw []byte) {
 	)
 }
 
-func logResponsesCompletedProjection(usedFallback bool, status string, rawOutputCount int, rawOutputTextPresent bool, items []canonical.OutputItem) {
+func logResponsesTerminalProjection(usedFallback bool, status string, rawOutputCount int, rawOutputTextPresent bool, items []canonical.OutputItem) {
 	textCount := 0
 	toolUseCount := 0
 	textPreview := ""
@@ -59,9 +59,9 @@ func logResponsesCompletedProjection(usedFallback bool, status string, rawOutput
 			toolUseCount++
 		}
 	}
-	slog.Debug("responses completed projection",
+	slog.Debug("responses terminal projection",
 		"component", "httpapi",
-		"event", "responses_completed_projection",
+		"event", "responses_terminal_projection",
 		"used_fallback", usedFallback,
 		"status", strings.TrimSpace(status), // swobu:io-string source=log-formatting
 		"raw_output_count", rawOutputCount,

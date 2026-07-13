@@ -9,9 +9,9 @@ import (
 
 const terminalEventSubject = compat.Subject("wire:/event/terminal")
 
-// EmitTerminalEventDecision records whether the stream reached a terminal
-// completion with terminal usage present.
-func EmitTerminalEventDecision(ctx context.Context, sink effect.Sink, exchangeID string, exact bool) {
+// EmitTerminalUsagePresence records whether the terminal completion carried
+// usage. It is an observability signal, not a lifecycle transition.
+func EmitTerminalUsagePresence(ctx context.Context, sink effect.Sink, exchangeID string, exact bool) {
 	if sink == nil {
 		return
 	}

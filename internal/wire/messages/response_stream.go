@@ -110,7 +110,7 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		frame, err := s.reader.Next()
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
-				deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, false)
+				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
 				for idx, block := range s.blocks {
 					s.enqueueEnvelopeEnd(s.blockEnvID(idx), s.blockKind(block), canonical.EnvelopeStatusError)
@@ -278,7 +278,7 @@ func (s *messagesEventReader) handleMessageStop(ctx context.Context) {
 	if finishReason == "" {
 		finishReason = "completed"
 	}
-	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: finishReason}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)

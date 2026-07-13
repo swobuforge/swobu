@@ -22,11 +22,13 @@ type streamFrame struct {
 	OutputIndex *int   `json:"output_index"`
 	Arguments   string `json:"arguments"`
 	Response    struct {
-		ID         string                       `json:"id"`
-		Model      string                       `json:"model"`
-		Status     string                       `json:"status"`
-		Output     []responsesWireOutputItemDTO `json:"output,omitempty"`
-		OutputText string                       `json:"output_text,omitempty"`
+		ID                string                         `json:"id"`
+		Model             string                         `json:"model"`
+		Status            string                         `json:"status"`
+		IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
+		ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
+		Output            []responsesWireOutputItemDTO   `json:"output,omitempty"`
+		OutputText        string                         `json:"output_text,omitempty"`
 	} `json:"response"`
 	Item struct {
 		ID          string `json:"id"`
@@ -77,7 +79,12 @@ func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFram
 		}
 		return true, canonical.Event{}, nil
 	case "response.completed":
-		if err := s.handleResponseCompleted(ctx, frame); err != nil {
+		if err := s.handleResponseTerminal(ctx, frame); err != nil {
+			return false, canonical.Event{}, err
+		}
+		return true, canonical.Event{}, nil
+	case "response.incomplete":
+		if err := s.handleResponseTerminal(ctx, frame); err != nil {
 			return false, canonical.Event{}, err
 		}
 		return true, canonical.Event{}, nil
@@ -219,37 +226,43 @@ func (s *responsesEventReader) completeToolState(frame streamFrame, toolType str
 	return emitted
 }
 
-func (s *responsesEventReader) handleResponseCompleted(ctx context.Context, frame streamFrame) error {
+func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame streamFrame) error {
 	if !s.started {
 		s.handleResponseCreated(frame)
 	}
-	usedFallback := false
-	fallbackItems := []canonical.OutputItem(nil)
-	if !s.emittedOutput {
-		items, err := decodeOutputItems(ctx, frame.Response.Output, frame.Response.OutputText, s.exchangeID, s.sink)
-		if err != nil {
-			return err
+	if terminalReason, promptBlocked := responsesTerminalReason(frame.Type, frame.Status, frame.Response.Status, frame.Response.ContentFilters, responseIncompleteReason(frame.Response.IncompleteDetails)); promptBlocked {
+		s.completed = true
+		deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+		s.closeOpenText(canonical.EnvelopeStatusError)
+		s.closeOpenTools(canonical.EnvelopeStatusError)
+		s.enqueueError("content_filter", responsesContentFilterMessage(responsesBlockedContentFilterSource(frame.Response.ContentFilters)))
+		s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+		return nil
+	} else {
+		usedFallback := false
+		fallbackItems := []canonical.OutputItem(nil)
+		if !s.emittedOutput {
+			items, err := decodeOutputItems(ctx, frame.Response.Output, frame.Response.OutputText, s.exchangeID, s.sink)
+			if err != nil {
+				return err
+			}
+			if len(items) > 0 {
+				s.enqueueCompletedOutputItems(items)
+				s.emittedOutput = true
+				usedFallback = true
+				fallbackItems = items
+			}
 		}
-		if len(items) > 0 {
-			s.enqueueCompletedOutputItems(items)
-			s.emittedOutput = true
-			usedFallback = true
-			fallbackItems = items
-		}
+		s.completed = true
+		deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+		s.closeOpenText(canonical.EnvelopeStatusCompleted)
+		s.closeOpenTools(canonical.EnvelopeStatusCompleted)
+		s.enqueueUsage(s.latestUsage)
+		s.enqueueFinish(terminalReason)
+		s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+		logResponsesTerminalProjection(usedFallback, terminalReason, len(frame.Response.Output), strings.TrimSpace(frame.Response.OutputText) != "", fallbackItems) // swobu:io-string source=provider-wire
+		return nil
 	}
-	s.completed = true
-	status := strings.TrimSpace(frame.Status) // swobu:io-string source=boundary
-	if status == "" {
-		status = strings.TrimSpace(frame.Response.Status) // swobu:io-string source=boundary
-	}
-	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
-	s.closeOpenText(canonical.EnvelopeStatusCompleted)
-	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
-	s.enqueueUsage(s.latestUsage)
-	s.enqueueFinish(status)
-	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
-	logResponsesCompletedProjection(usedFallback, status, len(frame.Response.Output), strings.TrimSpace(frame.Response.OutputText) != "", fallbackItems) // swobu:io-string source=provider-wire
-	return nil
 }
 
 func (s *responsesEventReader) shiftPendingEvent() canonical.Event {

@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -34,6 +35,47 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	}
 	if got := items[0].Input.RawObject(); got != `{"query":"hello"}` {
 		t.Fatalf("items[0].Input.RawObject() = %q, want normalized object JSON", got)
+	}
+}
+
+func TestDecodeClientRequest_AcceptsMultilineToolOutputTranscript(t *testing.T) {
+	t.Parallel()
+
+	toolOutput := strings.Join([]string{
+		`0017200   e   x   p   e   c   t   e   d       n   o   n   -   e   m   p`,
+		`0017220   t   y       F   o   c   u   s   M   e   m   o   r   y`,
+		`0017240  \n  \t   }  \n   }  \n  \n   /   /       -   -   -       S   i`,
+		`0017760   r   y   .  \n  \t   /   /       T   h   i   s       t   e   s`,
+		`0020140   r   i   n   g   s   .   T   o   U   p   p   e   r   (   "   "`,
+	}, "\n")
+	raw, err := json.Marshal(map[string]any{
+		"model": "gpt-4o-mini",
+		"input": []map[string]any{{
+			"type":    "function_call_output",
+			"call_id": "call_1",
+			"output":  toolOutput,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: raw})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	items := got.Items()
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	if items[0].Kind != canonical.ItemKindToolResult {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind, canonical.ItemKindToolResult)
+	}
+	if items[0].ToolUseID != "call_1" {
+		t.Fatalf("items[0].ToolUseID = %q, want call_1", items[0].ToolUseID)
+	}
+	if items[0].Text != toolOutput {
+		t.Fatalf("tool output changed during decode:\ngot:\n%s\nwant:\n%s", items[0].Text, toolOutput)
 	}
 }
 

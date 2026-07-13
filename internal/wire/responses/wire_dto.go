@@ -62,13 +62,26 @@ type responsesOutputTextPartDTO struct {
 }
 
 type responsesResponseDTO struct {
-	ID         string             `json:"id"`
-	Object     string             `json:"object"`
-	Model      string             `json:"model"`
-	Status     string             `json:"status"`
-	OutputText string             `json:"output_text"`
-	Output     []any              `json:"output"`
-	Usage      *responsesUsageDTO `json:"usage,omitempty"`
+	ID                string                         `json:"id"`
+	Object            string                         `json:"object"`
+	Model             string                         `json:"model"`
+	Status            string                         `json:"status"`
+	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
+	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
+	OutputText        string                         `json:"output_text"`
+	Output            []any                          `json:"output"`
+	Usage             *responsesUsageDTO             `json:"usage,omitempty"`
+}
+
+type responsesIncompleteDetailsDTO struct {
+	Reason string `json:"reason"`
+}
+
+type responsesContentFilterDTO struct {
+	SourceType           string          `json:"source_type"`
+	Blocked              bool            `json:"blocked"`
+	ContentFilterResults json.RawMessage `json:"content_filter_results,omitempty"`
+	ContentFilterOffsets json.RawMessage `json:"content_filter_offsets,omitempty"`
 }
 
 type responsesUsageDTO struct {
@@ -119,12 +132,20 @@ type responsesCreatedEventDTO struct {
 }
 
 type responsesStreamingResponseDTO struct {
-	ID     string             `json:"id"`
-	Object string             `json:"object"`
-	Model  string             `json:"model"`
-	Status string             `json:"status"`
-	Output any                `json:"output,omitempty"`
-	Usage  *responsesUsageDTO `json:"usage,omitempty"`
+	ID                string                         `json:"id"`
+	Object            string                         `json:"object"`
+	Model             string                         `json:"model"`
+	Status            string                         `json:"status"`
+	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
+	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
+	Output            any                            `json:"output,omitempty"`
+	Error             *responsesErrorDTO             `json:"error,omitempty"`
+	Usage             *responsesUsageDTO             `json:"usage,omitempty"`
+}
+
+type responsesErrorDTO struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message"`
 }
 
 type responsesOutputItemEventDTO struct {

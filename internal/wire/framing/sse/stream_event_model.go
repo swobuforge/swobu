@@ -11,6 +11,7 @@ const (
 	StreamEventToolUseArgumentsDelta StreamEventKind = "tool_use_arguments_delta"
 	StreamEventItemCompleted         StreamEventKind = "item_completed"
 	StreamEventCompleted             StreamEventKind = "completed"
+	StreamEventFailed                StreamEventKind = "failed"
 )
 
 type StreamEvent struct {
@@ -31,4 +32,7 @@ type StreamEvent struct {
 
 	FinishReason string
 	Usage        canonical.TokenUsage
+
+	ErrorCode    string
+	ErrorMessage string
 }

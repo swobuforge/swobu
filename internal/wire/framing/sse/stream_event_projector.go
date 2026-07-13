@@ -12,6 +12,8 @@ type EnvelopeEventAdapter struct {
 	itemIDs   map[canonical.EnvelopeID]string
 	finish    string
 	usage     canonical.TokenUsage
+	errorCode string
+	errorText string
 	completed bool
 }
 
@@ -36,11 +38,11 @@ func (a *EnvelopeEventAdapter) Translate(ev canonical.Event) []StreamEvent {
 	case canonical.EventEnvelopeEnd:
 		a.translateEnvelopeEnd(ev, &emitted)
 	case canonical.EventUsage:
-		a.translateUsage(ev, &emitted)
+		a.translateUsage(ev)
 	case canonical.EventFinish:
 		a.translateFinish(ev, &emitted)
 	case canonical.EventError:
-		a.translateError(&emitted)
+		a.translateError(ev, &emitted)
 	}
 	return emitted
 }
@@ -99,18 +101,19 @@ func (a *EnvelopeEventAdapter) translateEnvelopeEnd(ev canonical.Event, emitted 
 		delete(a.itemIDs, ev.EnvID)
 	}
 	if payload.Kind == canonical.EnvResponse && !a.completed {
+		if payload.Status == canonical.EnvelopeStatusError {
+			*emitted = append(*emitted, a.failedEvent())
+			a.completed = true
+			return
+		}
 		*emitted = append(*emitted, StreamEvent{Kind: StreamEventCompleted, ResultID: a.resultID, Model: a.model, FinishReason: a.finish, Usage: a.usage})
 		a.completed = true
 	}
 }
 
-func (a *EnvelopeEventAdapter) translateUsage(ev canonical.Event, emitted *[]StreamEvent) {
+func (a *EnvelopeEventAdapter) translateUsage(ev canonical.Event) {
 	payload, _ := ev.Payload.(canonical.UsagePayload)
 	a.usage = payload.Usage
-	if !a.completed {
-		*emitted = append(*emitted, StreamEvent{Kind: StreamEventCompleted, ResultID: a.resultID, Model: a.model, FinishReason: a.finish, Usage: a.usage})
-		a.completed = true
-	}
 }
 
 func (a *EnvelopeEventAdapter) translateFinish(ev canonical.Event, emitted *[]StreamEvent) {
@@ -123,10 +126,32 @@ func (a *EnvelopeEventAdapter) translateFinish(ev canonical.Event, emitted *[]St
 	}
 }
 
-func (a *EnvelopeEventAdapter) translateError(emitted *[]StreamEvent) {
+func (a *EnvelopeEventAdapter) translateError(ev canonical.Event, emitted *[]StreamEvent) {
+	if payload, ok := ev.Payload.(canonical.ErrorPayload); ok {
+		a.errorCode = payload.Code
+		a.errorText = payload.Message
+	}
 	if !a.completed {
-		*emitted = append(*emitted, StreamEvent{Kind: StreamEventCompleted, ResultID: a.resultID, Model: a.model})
+		*emitted = append(*emitted, a.failedEvent())
 		a.completed = true
+	}
+}
+
+func (a *EnvelopeEventAdapter) failedEvent() StreamEvent {
+	code := a.errorCode
+	if code == "" {
+		code = "stream_error"
+	}
+	message := a.errorText
+	if message == "" {
+		message = "output stream failed"
+	}
+	return StreamEvent{
+		Kind:         StreamEventFailed,
+		ResultID:     a.resultID,
+		Model:        a.model,
+		ErrorCode:    code,
+		ErrorMessage: message,
 	}
 }
 

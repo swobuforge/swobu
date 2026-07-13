@@ -17,9 +17,9 @@ func (s *recordingSink) Commit(_ context.Context, _ string, effects []effect.Eff
 	return nil
 }
 
-func TestEmitTerminalEventDecision(t *testing.T) {
+func TestEmitTerminalUsagePresence(t *testing.T) {
 	exactSink := &recordingSink{}
-	EmitTerminalEventDecision(context.Background(), exactSink, "ex_terminal_exact", true)
+	EmitTerminalUsagePresence(context.Background(), exactSink, "ex_terminal_exact", true)
 	if len(exactSink.effects) != 1 {
 		t.Fatalf("exact captured effects len=%d want=1", len(exactSink.effects))
 	}
@@ -32,7 +32,7 @@ func TestEmitTerminalEventDecision(t *testing.T) {
 	}
 
 	dropSink := &recordingSink{}
-	EmitTerminalEventDecision(context.Background(), dropSink, "ex_terminal_drop", false)
+	EmitTerminalUsagePresence(context.Background(), dropSink, "ex_terminal_drop", false)
 	if len(dropSink.effects) != 1 {
 		t.Fatalf("drop captured effects len=%d want=1", len(dropSink.effects))
 	}

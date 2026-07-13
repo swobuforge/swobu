@@ -70,6 +70,76 @@ func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.
 	}
 }
 
+func TestResponsesWireEventEncoder_CompletedWithNoItemsFailsClosed(t *testing.T) {
+	encoder := responses.NewResponseStreamWireEncoder()
+
+	frames := encodeAllFrames(t, &encoder, []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "resp_empty", Model: "m"},
+		{Kind: sse.StreamEventCompleted, ResultID: "resp_empty", Model: "m"},
+	})
+
+	if completed := frameOfType(frames, "response.completed"); completed != nil {
+		t.Fatalf("unexpected successful completion frame: %#v", completed)
+	}
+	failed := frameOfType(frames, "response.failed")
+	if failed == nil {
+		t.Fatal("missing response.failed frame")
+	}
+	response := objectAt(failed, "response")
+	if got := response["status"]; got != "failed" {
+		t.Fatalf("response.failed status = %#v, want failed", got)
+	}
+	output, ok := response["output"].([]any)
+	if !ok {
+		t.Fatalf("response.failed output = %#v, want empty array", response["output"])
+	}
+	if len(output) != 0 {
+		t.Fatalf("response.failed output len = %d, want 0", len(output))
+	}
+	errObj := objectAt(response, "error")
+	if got := errObj["code"]; got != "stream_completed_without_output_items" {
+		t.Fatalf("response.failed error code = %#v, want stream_completed_without_output_items", got)
+	}
+}
+
+func TestResponsesWireEventEncoder_FailedDoesNotLookLikeSuccessfulCompletion(t *testing.T) {
+	encoder := responses.NewResponseStreamWireEncoder()
+
+	frames := encodeAllFrames(t, &encoder, []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "resp_failed", Model: "m"},
+		{
+			Kind:         sse.StreamEventFailed,
+			ResultID:     "resp_failed",
+			Model:        "m",
+			ErrorCode:    "stream_unexpected_eof",
+			ErrorMessage: "output stream ended before completed",
+		},
+	})
+
+	if completed := frameOfType(frames, "response.completed"); completed != nil {
+		t.Fatalf("unexpected successful completion frame: %#v", completed)
+	}
+	failed := frameOfType(frames, "response.failed")
+	if failed == nil {
+		t.Fatal("missing response.failed frame")
+	}
+	response := objectAt(failed, "response")
+	if got := response["status"]; got != "failed" {
+		t.Fatalf("response.failed status = %#v, want failed", got)
+	}
+	output, ok := response["output"].([]any)
+	if !ok || len(output) != 0 {
+		t.Fatalf("response.failed output = %#v, want empty array", response["output"])
+	}
+	errObj := objectAt(response, "error")
+	if got := errObj["code"]; got != "stream_unexpected_eof" {
+		t.Fatalf("response.failed error code = %#v", got)
+	}
+	if got := errObj["message"]; got != "output stream ended before completed" {
+		t.Fatalf("response.failed error message = %#v", got)
+	}
+}
+
 func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T) {
 	encoder := responses.NewResponseStreamWireEncoder()
 	events := []sse.StreamEvent{
@@ -212,6 +282,8 @@ func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder,
 			ArgumentsDelta: event.ArgumentsDelta,
 			FinishReason:   event.FinishReason,
 			Usage:          event.Usage,
+			ErrorCode:      event.ErrorCode,
+			ErrorMessage:   event.ErrorMessage,
 		})
 		if err != nil {
 			t.Fatalf("Encode(%s) returned error: %v", event.Kind, err)

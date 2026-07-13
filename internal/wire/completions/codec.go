@@ -51,6 +51,18 @@ func (s *completionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]by
 			sse.SSEData(raw),
 			[]byte("data: [DONE]\n\n"),
 		}, nil
+	case sse.StreamEventFailed:
+		raw, _ := json.Marshal(map[string]any{
+			"error": map[string]any{
+				"message": sse.FallbackID(event.ErrorMessage, "output stream failed"),
+				"type":    "swobu_stream_error",
+				"code":    sse.FallbackID(event.ErrorCode, "stream_error"),
+			},
+		})
+		return [][]byte{
+			sse.SSEData(raw),
+			[]byte("data: [DONE]\n\n"),
+		}, nil
 	default:
 		return nil, canonical.UnsupportedOperation("completions streaming event is not implemented")
 	}

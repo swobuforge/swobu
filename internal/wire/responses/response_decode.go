@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -15,10 +16,13 @@ import (
 )
 
 type responseEnvelope struct {
-	ID         string                       `json:"id"`
-	Model      string                       `json:"model"`
-	OutputText string                       `json:"output_text"`
-	Output     []responsesWireOutputItemDTO `json:"output"`
+	ID                string                         `json:"id"`
+	Model             string                         `json:"model"`
+	Status            string                         `json:"status"`
+	OutputText        string                         `json:"output_text"`
+	Output            []responsesWireOutputItemDTO   `json:"output"`
+	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
+	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 }
 
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
@@ -83,18 +87,23 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
 	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
-	items, err := decodeOutputItems(ctx, dto.Output, dto.OutputText, exchangeID, sink)
-	if err != nil {
-		return nil, err
+	if terminalReason, promptBlocked := responsesTerminalReason("", dto.Status, "", dto.ContentFilters, responseIncompleteReason(dto.IncompleteDetails)); promptBlocked {
+		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
+		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
+	} else {
+		items, err := decodeOutputItems(ctx, dto.Output, dto.OutputText, exchangeID, sink)
+		if err != nil {
+			return nil, err
+		}
+		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+			exchangeID,
+			dto.ID,
+			dto.Model,
+			items,
+			terminalReason,
+			usage,
+		)), nil
 	}
-	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		exchangeID,
-		dto.ID,
-		dto.Model,
-		items,
-		"completed",
-		usage,
-	)), nil
 }
 
 func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink effect.Sink) ([]canonical.OutputItem, error) {

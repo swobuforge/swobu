@@ -39,17 +39,13 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 			return effect.Result[carrier.WireDocument]{}, canonical.UnsupportedOperation("messages protocol does not support this output item kind")
 		}
 	}
-	stopReason := "end_turn"
-	if sse.ContainsToolUseOutput(items) {
-		stopReason = "tool_use"
-	}
 	raw, err := json.Marshal(messagesResponseDTO{
 		ID:         sse.FallbackID(output.ResultID(), "msg_swobu"),
 		Type:       "message",
 		Role:       "assistant",
 		Model:      output.Model(),
 		Content:    content,
-		StopReason: stopReason,
+		StopReason: messagesStopReasonForFinishReason(output.FinishReason(), sse.ContainsToolUseOutput(items)),
 		Usage:      messagesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {

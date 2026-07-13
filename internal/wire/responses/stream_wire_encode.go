@@ -18,6 +18,11 @@ type ResponseStreamWireEncoder struct {
 	outputItems     []any
 }
 
+const (
+	responsesStreamCompletedWithoutOutputItemsCode    = "stream_completed_without_output_items"
+	responsesStreamCompletedWithoutOutputItemsMessage = "provider stream completed without output items"
+)
+
 type responsesTextItemState struct {
 	itemID      string
 	outputIndex int
@@ -71,21 +76,41 @@ func (e *ResponseStreamWireEncoder) Encode(event sse.StreamEvent) ([][]byte, err
 		if err != nil {
 			return nil, err
 		}
+		status, incompleteReason := responsesWireStatusForFinishReason(event.FinishReason)
+		if len(e.outputItems) == 0 && strings.TrimSpace(event.FinishReason) == "" {
+			failed, err := e.encodeFailed(event, responsesStreamCompletedWithoutOutputItemsCode, responsesStreamCompletedWithoutOutputItemsMessage)
+			if err != nil {
+				return nil, err
+			}
+			return append(frames, failed...), nil
+		}
+		eventType := "response.completed"
+		responseStatus := status
+		if status == "incomplete" {
+			eventType = "response.incomplete"
+		}
 		done, err := json.Marshal(responsesCompletedEventDTO{
-			Type: "response.completed",
+			Type: eventType,
 			Response: responsesStreamingResponseDTO{
-				ID:     sse.FallbackID(e.responseID, "resp_swobu"),
-				Object: "response",
-				Model:  e.model,
-				Status: "completed",
-				Output: e.outputItems,
-				Usage:  responsesUsageFromCanonical(event.Usage),
+				ID:                sse.FallbackID(e.responseID, "resp_swobu"),
+				Object:            "response",
+				Model:             e.model,
+				Status:            responseStatus,
+				IncompleteDetails: responsesIncompleteDetailsForStatus(responseStatus, incompleteReason),
+				Output:            e.output(),
+				Usage:             responsesUsageFromCanonical(event.Usage),
 			},
 		})
 		if err != nil {
 			return nil, canonical.InternalError("responses event encoding failed")
 		}
 		return append(frames, done), nil
+	case sse.StreamEventFailed:
+		failed, err := e.encodeFailed(event, "stream_error", "output stream failed")
+		if err != nil {
+			return nil, err
+		}
+		return failed, nil
 	default:
 		return nil, nil
 	}
@@ -99,6 +124,34 @@ func (e *ResponseStreamWireEncoder) Finish() ([][]byte, error) {
 		return nil, nil
 	}
 	return e.flushOpenItems()
+}
+
+func (e *ResponseStreamWireEncoder) output() []any {
+	if len(e.outputItems) == 0 {
+		return []any{}
+	}
+	return e.outputItems
+}
+
+func (e *ResponseStreamWireEncoder) encodeFailed(event sse.StreamEvent, defaultCode string, defaultMessage string) ([][]byte, error) {
+	failed, err := json.Marshal(responsesCompletedEventDTO{
+		Type: "response.failed",
+		Response: responsesStreamingResponseDTO{
+			ID:     sse.FallbackID(e.responseID, "resp_swobu"),
+			Object: "response",
+			Model:  e.model,
+			Status: "failed",
+			Output: e.output(),
+			Error: &responsesErrorDTO{
+				Code:    sse.FallbackID(event.ErrorCode, defaultCode),
+				Message: sse.FallbackID(event.ErrorMessage, defaultMessage),
+			},
+		},
+	})
+	if err != nil {
+		return nil, canonical.InternalError("responses event encoding failed")
+	}
+	return [][]byte{failed}, nil
 }
 
 func (e *ResponseStreamWireEncoder) encodeItemStarted(event sse.StreamEvent) ([][]byte, error) {

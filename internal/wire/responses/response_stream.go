@@ -184,7 +184,7 @@ func (s *responsesEventReader) enqueueError(code string, message string) {
 }
 
 func (s *responsesEventReader) handleUnexpectedEOF(ctx context.Context) {
-	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, false)
+	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 	s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
 	s.closeOpenText(canonical.EnvelopeStatusError)
 	s.closeOpenTools(canonical.EnvelopeStatusError)
@@ -202,7 +202,7 @@ func (s *responsesEventReader) handleTerminalCompletion(ctx context.Context, sta
 		normalizedStatus = "completed"
 	}
 	s.completed = true
-	deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
+	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.closeOpenText(canonical.EnvelopeStatusCompleted)
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)

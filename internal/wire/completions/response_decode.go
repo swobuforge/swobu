@@ -79,6 +79,9 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
 	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	if openaicompat.IsContentFilterFinishReason(choice.FinishReason) {
+		return canonical.NewSliceEventReader(buildBufferedResponseEvents(exchangeID, dto.ID, dto.Model, choice.Text, choice.FinishReason, usage)), nil
+	}
 	return canonical.NewSliceEventReader(buildBufferedResponseEvents(exchangeID, dto.ID, dto.Model, choice.Text, choice.FinishReason, usage)), nil
 }
 
@@ -129,7 +132,7 @@ func (s *completionsEventReader) Next(ctx context.Context) (canonical.Event, err
 		event, err := s.reader.Next()
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
-				deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, false)
+				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
 				s.closeOpenTextWithStatus(canonical.EnvelopeStatusError)
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
@@ -174,15 +177,14 @@ func (s *completionsEventReader) Next(ctx context.Context) (canonical.Event, err
 			if !chunkUsage.IsZero() {
 				s.usage = chunkUsage
 			}
-			out := s.pending[0]
-			s.pending = s.pending[1:]
-			return out, nil
 		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
 		choice := chunk.Choices[0]
-		if choice.Text != "" {
+		if openaicompat.IsContentFilterFinishReason(choice.FinishReason) {
+			s.handleChoiceContentFilter(ctx, choice.FinishReason)
+		} else if choice.Text != "" {
 			if !s.textOpen {
 				s.textOpen = true
 				s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
@@ -192,22 +194,33 @@ func (s *completionsEventReader) Next(ctx context.Context) (canonical.Event, err
 				}, canonical.EventMetadataFields{NativeID: "text_0"})
 			}
 			s.enqueueTextDelta(s.textEnvID, choice.Text)
-			event := s.pending[0]
-			s.pending = s.pending[1:]
-			return event, nil
 		}
 		if strings.TrimSpace(choice.FinishReason) != "" && !s.completed { // swobu:io-string source=boundary
 			s.completed = true
-			deliverycompat.EmitTerminalEventDecision(ctx, s.sink, s.exchangeID, !s.usage.IsZero())
+			deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.usage.IsZero())
 			s.closeOpenTextWithStatus(canonical.EnvelopeStatusCompleted)
 			s.enqueueUsage(s.usage)
 			s.enqueueFinish(choice.FinishReason)
 			s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+		}
+		if len(s.pending) > 0 {
 			event := s.pending[0]
 			s.pending = s.pending[1:]
 			return event, nil
 		}
 	}
+}
+
+func (s *completionsEventReader) handleChoiceContentFilter(ctx context.Context, finishReason string) {
+	if s.completed {
+		return
+	}
+	s.completed = true
+	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.usage.IsZero())
+	s.closeOpenTextWithStatus(canonical.EnvelopeStatusError)
+	s.enqueueUsage(s.usage)
+	s.enqueueFinish(finishReason)
+	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 
 func (s *completionsEventReader) Close(context.Context) error {
