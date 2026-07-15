@@ -21,8 +21,7 @@
 //   - action_kind_catalog.go (run capability source of truth)
 //   - run_command_spec.go (template expansion + display payload rendering)
 //   - run_command_test.go (profile command contract proofs)
-//   - ../../terminalui/apps/cockpit/app/state/effect/foreground_client_runner.go
-//     (launcher consumption path)
-//   - ../../terminalui/apps/cockpit/app/state/effect/effect_run_client_test.go
-//     (effect-level run contract proofs)
+//   - internal/cockpit/features/run_once and internal/cockpit/adapters once
+//     the active cockpit exists (launcher consumption path and effect-level
+//     run contract proofs)
 package clientprofile

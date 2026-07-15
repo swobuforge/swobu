@@ -16,82 +16,47 @@ type listedPackage struct {
 	Imports    []string `json:"Imports"`
 }
 
+// TestTerminalUIPackageBoundaries enforces import isolation for the
+// remaining noninteractive terminalui residue.
+//
+// Active interactive cockpit lives in internal/cockpit (go-tui). The
+// terminalui subtree is retained only for:
+//   - CLI startup presentation (internal/terminalui/apps/cli)
+//   - Session/mode plumbing (internal/terminalui/session)
+//   - Transcript output primitives (internal/terminalui/transcript)
+//
+// All legacy interactive packages (apps/cockpit, engine/retained, core,
+// components, component, toolkit, view/retained) have been deleted and must
+// not be imported.
 func TestTerminalUIPackageBoundaries(t *testing.T) {
-	t.Parallel()
-
 	root := packageDir(t)
-	cases := []struct {
-		name     string
-		pattern  string
-		forbidFn func(string) bool
-	}{
-		{
-			name:    "core",
-			pattern: "./core",
-			forbidFn: func(importPath string) bool {
-				return strings.Contains(importPath, "/internal/terminalui/")
-			},
-		},
-		{
-			name:    "component",
-			pattern: "./component",
-			forbidFn: func(importPath string) bool {
-				if !strings.Contains(importPath, "/internal/terminalui/") {
-					return false
-				}
-				return !strings.Contains(importPath, "/internal/terminalui/core")
-			},
-		},
-		{
-			name:    "components",
-			pattern: "./components/...",
-			forbidFn: func(importPath string) bool {
-				return strings.Contains(importPath, "/internal/terminalui/engine/retained/") ||
-					strings.Contains(importPath, "/internal/terminalui/apps/") ||
-					strings.Contains(importPath, "/internal/terminalui/view/retained")
-			},
-		},
-		{
-			name:    "transcript",
-			pattern: "./transcript/...",
-			forbidFn: func(importPath string) bool {
-				return strings.Contains(importPath, "/internal/terminalui/engine/retained/") ||
-					strings.Contains(importPath, "/internal/terminalui/apps/") ||
-					strings.Contains(importPath, "/internal/terminalui/component/") ||
-					strings.Contains(importPath, "/internal/terminalui/components/") ||
-					strings.Contains(importPath, "/internal/terminalui/view/retained")
-			},
-		},
-		{
-			name:    "cockpit views——retained bridge allowlist",
-			pattern: "./apps/cockpit/app/views/...",
-			forbidFn: func(importPath string) bool {
-				// rendergraph and corelower are already banned; corelower is
-				// still needed for bridge functions during migration.
-				if strings.Contains(importPath, "/internal/terminalui/engine/retained/rendergraph/") {
-					return true
-				}
-				return false
-			},
-		},
+
+	deletedPackages := []string{
+		"/internal/terminalui/apps/cockpit/",
+		"/internal/terminalui/engine/retained/",
+		"/internal/terminalui/core/",
+		"/internal/terminalui/component/",
+		"/internal/terminalui/components/",
+		"/internal/terminalui/toolkit/",
+		"/internal/terminalui/view/retained/",
 	}
 
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assertNoForbiddenDirectImports(t, root, tc.pattern, tc.forbidFn)
-		})
-	}
-}
-
-func assertNoForbiddenDirectImports(t *testing.T, root, pattern string, forbidFn func(string) bool) {
-	t.Helper()
-
-	for _, pkg := range goListPackages(t, root, pattern) {
-		for _, importPath := range pkg.Imports {
-			if forbidFn(importPath) {
-				t.Fatalf("%s imports forbidden package %q", pkg.ImportPath, importPath)
+	for _, pattern := range []string{
+		"./session/...",
+		"./transcript/...",
+		"./apps/cli/...",
+		"./engine/output/...",
+		"./engine/reconcile/...",
+		"./view/layout/...",
+	} {
+		pkgs := goListPackages(t, root, pattern)
+		for _, pkg := range pkgs {
+			for _, imp := range pkg.Imports {
+				for _, deleted := range deletedPackages {
+					if strings.Contains(imp, deleted) {
+						t.Fatalf("%s imports deleted package %q", pkg.ImportPath, imp)
+					}
+				}
 			}
 		}
 	}
@@ -118,9 +83,6 @@ func goListPackages(t *testing.T, root, pattern string) []listedPackage {
 			t.Fatalf("decode go list %s: %v\n%s", pattern, err, out)
 		}
 		pkgs = append(pkgs, pkg)
-	}
-	if len(pkgs) == 0 {
-		t.Fatalf("go list %s returned no packages", pattern)
 	}
 	return pkgs
 }

@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/smithy-go v1.25.1
 	github.com/gdamore/tcell/v2 v2.8.1
+	github.com/grindlemire/go-tui v0.17.0
 	github.com/klauspost/compress v1.17.11
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.8.1
@@ -19,8 +20,8 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.24.0
 	go.opentelemetry.io/otel/trace v1.24.0
 	golang.design/x/clipboard v0.6.3
-	golang.org/x/sys v0.29.0
-	golang.org/x/term v0.28.0
+	golang.org/x/sys v0.40.0
+	golang.org/x/term v0.39.0
 )
 
 require (
@@ -37,6 +38,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.21 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/danieljoos/wincred v1.2.0 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
@@ -63,8 +65,8 @@ require (
 	cuelang.org/go v0.10.1
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	golang.org/x/mod v0.20.0 // indirect
-	golang.org/x/net v0.28.0
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/mod v0.32.0 // indirect
+	golang.org/x/net v0.49.0
+	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1
 )

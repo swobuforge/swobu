@@ -8,3 +8,5 @@ dist
 
 # Generated cockpit wireframe artifacts; source wireframes live outside .artifacts.
 internal/terminalui/apps/cockpit/app/views/root/testdata/wireframes/.artifacts/
+
+**/*_gsx.go

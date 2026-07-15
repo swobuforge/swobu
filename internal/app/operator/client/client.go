@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
@@ -195,6 +196,77 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 		Status:  fmt.Sprintf("backend %d", resp.StatusCode),
 		Message: message,
 	}, nil
+}
+
+// TODO who is depending on it? How was legacy UI living without it?
+type StatusProjection struct {
+	State         string             `json:"state"`
+	RecentTraffic []RecentTrafficRow `json:"recent_traffic"`
+}
+
+type RecentTrafficRow struct {
+	RequestID      string                 `json:"request_id"`
+	Endpoint       string                 `json:"endpoint"`
+	ClientHandler  string                 `json:"client_handler,omitempty"`
+	ClientProtocol string                 `json:"client_protocol,omitempty"`
+	ClientFamily   string                 `json:"client_family,omitempty"`
+	NormalizedOp   string                 `json:"normalized_op,omitempty"`
+	Route          string                 `json:"route"`
+	Result         string                 `json:"result"`
+	StatusCode     int                    `json:"status_code"`
+	ObservedAt     string                 `json:"observed_at,omitempty"`
+	Timing         *RecentTrafficTiming   `json:"timing,omitempty"`
+	TokenUsage     *RecentTrafficTokenUse `json:"token_usage,omitempty"`
+
+	ModelRequested      string                `json:"model_requested,omitempty"`
+	ModelResolved       string                `json:"model_resolved,omitempty"`
+	ModelResolutionMode string                `json:"model_resolution_mode,omitempty"`
+	ExchangeDiagnostics []string              `json:"exchange_diagnostics,omitempty"`
+	StageReports        []ExchangeStageReport `json:"exchange_stage_reports,omitempty"`
+}
+
+type RecentTrafficTiming struct {
+	TTFBMillis *int `json:"ttfb_millis,omitempty"`
+	DurMillis  *int `json:"dur_millis,omitempty"`
+}
+
+type RecentTrafficTokenUse struct {
+	InputTokens      *int `json:"input_tokens,omitempty"`
+	OutputTokens     *int `json:"output_tokens,omitempty"`
+	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
+}
+
+type ExchangeStageReport struct {
+	Stage   string   `json:"stage"`
+	Carrier string   `json:"carrier"`
+	Applied []string `json:"applied,omitempty"`
+	Mutated bool     `json:"mutated"`
+}
+
+// Status returns the daemon-owned traffic projection for an operator scope.
+func (c *Client) Status(ctx context.Context, scope string) (StatusProjection, error) {
+	scope = strings.TrimSpace(scope) // swobu:io-string source=boundary
+	if scope == "" {
+		return StatusProjection{}, fmt.Errorf("operator client: status projection scope is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/status-projection?scope="+url.QueryEscape(scope), nil)
+	if err != nil {
+		return StatusProjection{}, fmt.Errorf("operator client: status projection request could not be built")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return StatusProjection{}, fmt.Errorf("operator client: status projection is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return StatusProjection{}, errorFromResponse(resp, "operator client: status projection failed")
+	}
+	var projection StatusProjection
+	if err := json.NewDecoder(resp.Body).Decode(&projection); err != nil {
+		return StatusProjection{}, fmt.Errorf("operator client: status projection could not be decoded")
+	}
+	return projection, nil
 }
 
 func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endpointRef string, authMode string) (AuthSessionStartResult, error) {

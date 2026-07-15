@@ -14,6 +14,17 @@ import (
 	"strings"
 
 	testscreendiff "github.com/swobuforge/swobu/testscreen/diff"
+	"github.com/swobuforge/swobu/testscreen/testpath"
+)
+
+const (
+	// UpdateEnv is the single promotion knob for text terminal visual fixtures.
+	UpdateEnv = "SWOBU_UPDATE_FIXTURES"
+
+	DefaultBaseDir   = "testdata"
+	DefaultAssertion = "default"
+	DefaultMinCols   = 60
+	DefaultMinRows   = 18
 )
 
 // Config holds one fixture-backed comparison configuration.
@@ -24,6 +35,84 @@ type Config struct {
 	MinRows   int
 }
 
+// Path builds the canonical visual fixture path:
+// testdata/<testid>/fixture/<assertion>.txt.
+func Path(testID, assertion string) string {
+	return PathIn(DefaultBaseDir, testID, assertion)
+}
+
+// PathIn builds the canonical visual fixture path under a caller-selected
+// base directory.
+func PathIn(baseDir, testID, assertion string) string {
+	base := strings.TrimSpace(baseDir)
+	if base == "" {
+		base = DefaultBaseDir
+	}
+	name := strings.TrimSpace(assertion)
+	if name == "" {
+		name = DefaultAssertion
+	}
+	return filepath.Join(base, testpath.TestIDToken(testID), "fixture", testpath.Token(name)+".txt")
+}
+
+// ConfigFor builds a fixture config for the canonical visual fixture path.
+func ConfigFor(testID, assertion string) Config {
+	return Config{Path: Path(testID, assertion)}
+}
+
+// Builder carries the shared fixture configuration chain used by surface
+// testkits. Surfaces add only their own terminal operation, such as Now or
+// Eventually.
+type Builder struct {
+	config Config
+}
+
+// BuilderFor builds a visual fixture builder with the shared default viewport.
+func BuilderFor(testID, assertion string) Builder {
+	return Builder{config: Config{
+		Path:    Path(testID, assertion),
+		MinCols: DefaultMinCols,
+		MinRows: DefaultMinRows,
+	}}
+}
+
+// Normalize sets snapshot normalization for this visual assertion.
+func (b Builder) Normalize(fn func(string) string) Builder {
+	b.config.Normalize = fn
+	return b
+}
+
+// Fixture overrides the derived fixture path when a local proof needs an
+// explicit file.
+func (b Builder) Fixture(path string) Builder {
+	path = strings.TrimSpace(path)
+	if path != "" {
+		b.config.Path = path
+	}
+	return b
+}
+
+// Viewport sets minimum comparison dimensions for fixed terminal frames.
+func (b Builder) Viewport(minCols, minRows int) Builder {
+	if minCols > 0 {
+		b.config.MinCols = minCols
+	}
+	if minRows > 0 {
+		b.config.MinRows = minRows
+	}
+	return b
+}
+
+// Config returns the immutable fixture comparison config for a surface hook.
+func (b Builder) Config() Config {
+	return b.config
+}
+
+// ConfigForIn builds a fixture config under a caller-selected base directory.
+func ConfigForIn(baseDir, testID, assertion string) Config {
+	return Config{Path: PathIn(baseDir, testID, assertion)}
+}
+
 // Report is the result of comparing a rendered snapshot against a fixture.
 type Report struct {
 	FixturePath string
@@ -31,6 +120,12 @@ type Report struct {
 	Actual      string
 	Diff        string
 	Err         error
+}
+
+// CompareSnapshot checks snapshot against the fixture configuration using the
+// shared visual fixture promotion environment.
+func CompareSnapshot(snapshot string, cfg Config) Report {
+	return Compare(snapshot, cfg, UpdateEnv)
 }
 
 // Compare checks snapshot against the fixture configuration.

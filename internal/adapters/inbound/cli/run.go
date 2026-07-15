@@ -21,8 +21,8 @@ import (
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	platformlogging "github.com/swobuforge/swobu/internal/platform/logging"
 	"github.com/swobuforge/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/cockpit"
 	uicli "github.com/swobuforge/swobu/internal/terminalui/apps/cli"
-	"github.com/swobuforge/swobu/internal/terminalui/apps/cockpit"
 	uimode "github.com/swobuforge/swobu/internal/terminalui/session"
 )
 
@@ -42,6 +42,7 @@ type Runner struct {
 	Stdout              io.Writer
 	Stderr              io.Writer
 	HTTPClient          *http.Client
+	DaemonURL           string // resolved by caller; zero means use platform default
 	Start               func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
 	IsInteractive       func() bool
 	AttachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
@@ -85,7 +86,14 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	}
 	launchInteractive := r.LaunchInteractive
 	if launchInteractive == nil {
-		launchInteractive = cockpit.Run
+		// V0: direct launch into the active go-tui Cockpit.
+		// We import internal/cockpit — the canonical operator TUI authority —
+		// because it owns the interactive workspace surface, not terminalui or
+		// any abandoned internal/tui wrapper.
+		daemonURL := platformconfig.ResolveDaemonURL(r.DaemonURL)
+		launchInteractive = func(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+			return cockpit.Run(ctx, daemonURL, stdin, stdout, stderr)
+		}
 	}
 	attachOrStart := r.AttachOrStart
 	if attachOrStart == nil {

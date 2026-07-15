@@ -13,6 +13,7 @@
 //   - GET    /_swobu/endpoints/<name> → get one endpoint
 //   - PUT    /_swobu/endpoints/<name> → upsert endpoint
 //   - DELETE /_swobu/endpoints/<name> → delete endpoint
+//   - GET    /_swobu/status-projection?scope=<scope> → read traffic projection
 //   - POST   /_swobu/auth/sessions → start provider auth session
 //   - GET    /_swobu/auth/sessions/<id> → poll provider auth session state
 //   - POST   /_swobu/auth/sessions/<id>/cancel → cancel auth session

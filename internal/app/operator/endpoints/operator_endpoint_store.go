@@ -158,12 +158,12 @@ func (s OperatorEndpointStore) Delete(ctx context.Context, name string) error {
 	}
 	next := make([]endpointintent.Endpoint, 0, len(endpoints))
 	removed := false
-	for _, endpoint := range endpoints {
-		if endpoint.Name() == parsed {
+	for _, ep := range endpoints {
+		if ep.Name() == parsed {
 			removed = true
 			continue
 		}
-		next = append(next, endpoint)
+		next = append(next, ep)
 	}
 	if !removed {
 		return CommandError{

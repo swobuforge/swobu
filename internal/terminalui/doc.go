@@ -1,21 +1,24 @@
-// Package terminalui is the centralized terminal presentation system.
+// Package terminalui is retained noninteractive startup/session residue.
 //
-// See ARCHITECTURE.md for the stable mode split and boundary contract.
+// It has been reduced to noninteractive startup and session residue only.
+// The active interactive cockpit is internal/cockpit, built on go-tui.
 //
-// Boundary law:
-//   - component: author-facing semantic component API that builds core.Node
-//   - components/*: reusable semantic primitive and compound component
-//     constructors that build core.Node values
-//   - core: semantic UI algebra and validation vocabulary for component
-//     authoring
-//   - corelower: bridge from semantic core nodes into retained rendergraph
-//   - transcript: line-oriented, append/live/fullscreen rendering for
-//     non-interactive output
-//   - retained: interactive cockpit UI with retained identity, local state,
-//     focus, effects, layout, and paint
-//   - engine: framework runtime/model/output mechanics
-//   - toolkit: reusable framework-grammar views and interaction elements
-//   - apps/*: product-specific presentation assemblies (CLI, cockpit)
+// Remaining subpackages and their status:
+//   - apps/cli    : CLI startup presenter (noninteractive). Keep until
+//     startup surface migrates to go-tui or plain writer.
+//   - session     : Session/mode type definitions. Keep until CLI startup
+//     path no longer imports them.
+//   - transcript  : Line-oriented output primitives for startup rendering.
+//     Keep until startup presenter migrates.
+//   - engine/reconcile, engine/output : Transcript reconciler/output used
+//     only by the CLI presenter.
+//   - view/layout : Layout constraints used only by transcript rendering.
 //
-// This package family is product runtime, not developer tooling.
+// Deleted interactive subpackages:
+//   - apps/cockpit, core, component, components/*, toolkit,
+//     engine/retained/*, view/retained, testharness
+//
+// No new code should import these packages except to maintain or delete the
+// startup surface until it also migrates. Interactive TUI work belongs in
+// internal/cockpit and follows docs/04-design/go-tui-canons.md.
 package terminalui

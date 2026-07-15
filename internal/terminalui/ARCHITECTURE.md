@@ -1,28 +1,63 @@
-# terminalui architecture
+# terminalui residue architecture
 
-terminalui has two presentation modes:
+`internal/terminalui` is not the Swobu TUI architecture anymore.
 
-1. transcript: line-oriented, append/live/fullscreen rendering for non-interactive output.
-2. retained: interactive cockpit UI with retained identity, local state, focus, effects, layout, and paint.
+The active interactive cockpit lives in `internal/cockpit` and is built
+directly on `github.com/grindlemire/go-tui`. New cockpit work must start from:
 
-Rules:
+- `docs/04-design/tui-design-system.md`
+- `docs/04-design/go-tui-canons.md`
+- `swobucli/opencore/internal/cockpit/doc.go`
+- `.agents/skills/swobu-go-tui-authoring/SKILL.md`
 
-- Author-facing components live in `component`; they build semantic
-  `core.Node` values and own build-scoped local state.
-- Reusable primitive and compound constructors live in `components/*`; they
-  stay on the core side of the seam and avoid rendergraph coupling.
-- Semantic UI algebra lives in `core`; it describes nodes, layout, style,
-  interaction, and contract vocabulary without owning runtime or terminal I/O.
-- `corelower` is the bridge from semantic `core.Node` into retained
-  rendergraph primitives.
-- `transcript` is the canonical transcript API for line-oriented output.
-- `view/retained` owns the bridge functions that lower core views into the
-  retained view contract.
-- Components describe UI.
-- Runtime owns time, focus, reconciliation, and effects.
-- Domain/app owns truth.
-- Rendergraph owns measure, arrange, and paint.
-- Host owns terminal I/O.
-- Effects touch the world.
-- Views must not mutate during build.
-- Dynamic and stateful children need stable keys.
+## Remaining Purpose
+
+This subtree is retained only for noninteractive startup/session residue:
+
+| Package | Status |
+|---|---|
+| `apps/cli` | CLI startup presenter |
+| `session` | session/mode plumbing still imported by CLI/logging |
+| `transcript` | line-oriented transcript primitives for startup output |
+| `engine/output` | transcript output renderer |
+| `engine/reconcile` | transcript reconciliation |
+| `view/layout` and `view/textmetrics` | transcript layout support |
+
+No package here owns interactive cockpit state, focus, keys, forms, route
+editing, or operator workflow semantics.
+
+## Deleted Interactive Surface
+
+These retained-framework packages are gone and must not be reintroduced:
+
+- `apps/cockpit`
+- `core`
+- `component`
+- `components/*`
+- `toolkit`
+- `engine/retained/*`
+- `view/retained`
+- `testharness`
+
+`swobucli/tools/cmd/check-tui-system` enforces this boundary in the opencore
+lint bundle.
+
+## Rules
+
+- Do not add new imports of `internal/terminalui` from `internal/cockpit`.
+- Do not import `internal/cockpit` from this subtree.
+- Do not add new interactive UI features here.
+- Do not build wrapper APIs or compatibility bridges from this subtree into
+  go-tui.
+- If startup output needs more behavior, either keep the change transcript-only
+  and local to this subtree or frame a deletion/migration slice that moves it
+  out of `terminalui`.
+
+## Deletion Direction
+
+The desired end state is no `internal/terminalui` package family. Until then,
+changes here must either:
+
+- preserve the existing startup transcript/session behavior, or
+- delete/migrate a retained residue package with proof that CLI startup,
+  logging/session mode, and opencore tests still pass.

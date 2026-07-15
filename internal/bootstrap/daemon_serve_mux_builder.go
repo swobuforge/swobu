@@ -101,5 +101,6 @@ func buildDaemonServeMux(
 	)
 	mux.Handle("/_swobu/endpoints", controlHandler)
 	mux.Handle("/_swobu/endpoints/", controlHandler)
+
 	return mux, chatGPTLogin, nil
 }

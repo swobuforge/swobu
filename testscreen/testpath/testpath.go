@@ -41,6 +41,20 @@ func TestID(testFileStem, testName string) string {
 	return Token(testFileStem) + "__" + Token(testName)
 }
 
+// TestIDToken normalizes a caller-supplied test identity while preserving the
+// canonical double-underscore separator between identity parts.
+func TestIDToken(raw string) string {
+	parts := strings.Split(strings.TrimSpace(raw), "__")
+	if len(parts) < 2 {
+		return Token(raw)
+	}
+	tokens := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tokens = append(tokens, Token(part))
+	}
+	return strings.Join(tokens, "__")
+}
+
 // CallerTestFrame locates the nearest non-excluded *_test.go caller frame.
 func CallerTestFrame(skipContains []string) (file string, fn string, line int, ok bool) {
 	pcs := make([]uintptr, 64)
@@ -58,7 +72,15 @@ func CallerTestFrame(skipContains []string) (file string, fn string, line int, o
 	return "", "", 0, false
 }
 
+// FunctionNameToken normalizes a Go function name into a stable filesystem
+// token without caller line-number entropy.
+func FunctionNameToken(function string) string {
+	return FunctionToken(function, 0)
+}
+
 // FunctionToken normalizes a Go function name into a filesystem token.
+// Pass line=0 for stable test identities. Non-zero line numbers are reserved
+// for rare call-site disambiguation and must not be used for visual fixtures.
 func FunctionToken(function string, line int) string {
 	fn := strings.TrimSpace(function)
 	if idx := strings.LastIndex(fn, "."); idx >= 0 && idx+1 < len(fn) {
@@ -68,6 +90,16 @@ func FunctionToken(function string, line int) string {
 		return Token(fmt.Sprintf("%s_l%d", fn, line))
 	}
 	return Token(fn)
+}
+
+// CallerTestID locates the nearest non-excluded *_test.go caller frame and
+// returns the canonical <testfile>__<testname> identity without line numbers.
+func CallerTestID(skipContains []string) (string, bool) {
+	file, fn, _, ok := CallerTestFrame(skipContains)
+	if !ok {
+		return "", false
+	}
+	return TestID(FileStem(file), FunctionNameToken(fn)), true
 }
 
 // FileStem extracts the normalized test-file stem from a path.
