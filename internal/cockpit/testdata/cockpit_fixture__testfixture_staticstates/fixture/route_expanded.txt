@@ -6,24 +6,11 @@ SWOBU    [› dev] [lab] [+] [?]                                   local
      edit workspace                                        open ↵
 
   routes ▾
->    gpt               default · 2 targets                 open ↵
-        name           target-1
-        provider       openai_compatible
-        model          gpt-4.1
-        base URL       https://api.openai.com/v1
-        credential     default-key
-        rank           1
-        weight         1
-
-        name           target-2
-        provider       openai_compatible
-        model          gpt-4o
-        base URL       https://api.openai.com/v1
-        credential     default-key
-        rank           2
-        weight         1
-
-     local             1 target                            open ↵
+     gpt               default · 2 targets                 collapse ↵
+     target 1          openai_compatible/gpt-4.1           open ↵
+     target 2          openai_compatible/gpt-4o            open ↵
+     add target                                            add ↵
+     local             1 target                            expand ↵
      add route                                             add ↵
 
   activity ▾
@@ -32,3 +19,15 @@ SWOBU    [› dev] [lab] [+] [?]                                   local
 
 ──────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   ? help   esc back
+
+
+
+
+
+
+
+
+
+
+
+

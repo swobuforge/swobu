@@ -7,8 +7,8 @@ SWOBU    [› dev] [lab] [+] [?]                                   local
      delete workspace dev?                                    y/n
 
   routes ▾
-     gpt               default · 2 targets                 open ↵
-     local             1 target                            open ↵
+     gpt               default · 2 targets                 expand ↵
+     local             1 target                            expand ↵
      add route                                             add ↵
 
   activity ▾

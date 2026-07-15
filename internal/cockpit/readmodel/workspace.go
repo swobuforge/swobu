@@ -28,9 +28,7 @@ type WorkspaceViewState struct {
 	WorkspaceSummaryOnly    bool
 	RoutesExpanded          bool
 	ActivityExpanded        bool
-	FocusedRouteID          RouteID
 	ExpandedRouteID         RouteID
-	FocusedActivityID       ActivityID
 	ExpandedActivityID      ActivityID
 	DeleteWorkspaceConfirm  bool
 	WorkspaceConfirmationID WorkspaceID

@@ -3,16 +3,33 @@ package activity
 import (
 	"fmt"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 )
 
-templ Section(workspace readmodel.WorkspaceReadModel) {
+type SectionView struct {
+	Workspace    readmodel.WorkspaceReadModel
+	OpenActivity *tui.State[readmodel.ActivityID]
+}
+
+func Section(workspace readmodel.WorkspaceReadModel) *SectionView {
+	return &SectionView{
+		Workspace:    workspace,
+		OpenActivity: tui.NewState(readmodel.ActivityID("")),
+	}
+}
+
+func (s *SectionView) openActivity(row readmodel.ActivityRowReadModel) {
+	s.OpenActivity.Set(row.ID)
+}
+
+templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		@SectionHeader("activity", workspace.View.ActivityExpanded)
-		if workspace.View.ActivityExpanded {
-			if latest, ok := workspace.Activity.LatestRow(); ok {
-				@ContentRow("latest", latest.RowValue(), activityAction(latest), workspace.View.FocusedActivityID == latest.ID)
-				if workspace.View.ExpandedActivityID == latest.ID {
+		@SectionHeader("activity", s.Workspace.View.ActivityExpanded)
+		if s.Workspace.View.ActivityExpanded {
+			if latest, ok := s.Workspace.Activity.LatestRow(); ok {
+				@FocusableRow("latest", latest.RowValue(), activityAction(latest), func() { s.openActivity(latest) })
+				if s.Workspace.View.ExpandedActivityID == latest.ID {
 					@DetailRow("resolved", latest.ResolvedName)
 					@DetailRow("model", latest.Model)
 					for i, attempt := range latest.Attempts {
@@ -22,10 +39,10 @@ templ Section(workspace readmodel.WorkspaceReadModel) {
 					@DetailRow("tokens in", commaInt(latest.TokensIn))
 					@DetailRow("tokens out", commaInt(latest.TokensOut))
 				}
-			} else if workspace.IsDraft() {
-				@ContentRow("(no activity)", "", "", false)
+			} else if s.Workspace.IsDraft() {
+				@InertRow("(no activity)", "", "")
 			} else {
-				@ContentRow("latest", "no requests yet", "", false)
+				@InertRow("latest", "no requests yet", "")
 			}
 		}
 	</div>
@@ -42,13 +59,18 @@ templ SectionHeader(label string, expanded bool) {
 	</div>
 }
 
-templ ContentRow(label string, value string, action string, focused bool) {
+templ FocusableRow(label string, value string, action string, activate func()) {
+	<div class="flex-row w-full focusable" onActivate={activate}>
+		<span class="w-5"></span>
+		<span class="w-18">{label}</span>
+		<span class="w-36">{value}</span>
+		<span>{action}</span>
+	</div>
+}
+
+templ InertRow(label string, value string, action string) {
 	<div class="flex-row w-full">
-		if focused {
-			<span class="w-5">{">"}</span>
-		} else {
-			<span class="w-5"></span>
-		}
+		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
 		<span>{action}</span>

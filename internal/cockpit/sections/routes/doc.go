@@ -1,6 +1,7 @@
 // Package routes renders Cockpit route rows and expanded target detail.
 //
-// It owns static row presentation for model names, route state labels, target
-// detail, and focused/expanded route snapshots. It does not sort, mutate, or
+// Route parent rows own their local expand/collapse activation. Target child
+// rows are rendered into the go-tui focus graph only while their parent route
+// is expanded. This package does not sort, mutate, register rows upward, or
 // redefine domain routing semantics.
 package routes

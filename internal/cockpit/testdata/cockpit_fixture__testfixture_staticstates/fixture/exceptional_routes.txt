@@ -6,10 +6,10 @@ SWOBU    [› dev] [lab] [+] [?]                                   local
      edit workspace                                        open ↵
 
   routes ▾
-     gpt               default · 2 targets                 open ↵
-     free              3 weighted · degraded 429 x9        open ↵
-     local             1 target · blocked unreachable      open ↵
-     route-new         incomplete · no targets             open ↵
+     gpt               default · 2 targets                 expand ↵
+     free              3 weighted · degraded 429 x9        expand ↵
+     local             1 target · blocked unreachable      expand ↵
+     route-new         incomplete · no targets             expand ↵
      add route                                             add ↵
 
   activity ▾

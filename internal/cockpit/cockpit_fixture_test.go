@@ -56,13 +56,11 @@ func trimRightLines(s string) string {
 }
 
 func routeFocusedFixtureReadModel() readmodel.CockpitReadModel {
-	model := DefaultFixtureReadModel()
-	model.SelectedWorkspace.View.FocusedRouteID = "gpt"
-	return model
+	return DefaultFixtureReadModel()
 }
 
 func routeExpandedFixtureReadModel() readmodel.CockpitReadModel {
-	model := routeFocusedFixtureReadModel()
+	model := DefaultFixtureReadModel()
 	model.SelectedWorkspace.View.ExpandedRouteID = "gpt"
 	return model
 }
@@ -136,7 +134,6 @@ func activityLatestFixtureReadModel(errorRow bool, expanded bool) readmodel.Cock
 	}
 	model.SelectedWorkspace.Activity = readmodel.ActivityReadModel{Latest: &row}
 	if expanded {
-		model.SelectedWorkspace.View.FocusedActivityID = row.ID
 		model.SelectedWorkspace.View.ExpandedActivityID = row.ID
 	}
 	return model
