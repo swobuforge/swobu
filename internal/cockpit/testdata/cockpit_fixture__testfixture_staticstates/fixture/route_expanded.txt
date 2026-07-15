@@ -1,0 +1,34 @@
+SWOBU    [› dev] [lab] [+] [?]                                   local
+──────────────────────────────────────────────────────────────────────
+  workspace ▾
+     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
+     run once          Codex                               open ↵
+     edit workspace                                        open ↵
+
+  routes ▾
+>    gpt               default · 2 targets                 open ↵
+        name           target-1
+        provider       openai_compatible
+        model          gpt-4.1
+        base URL       https://api.openai.com/v1
+        credential     default-key
+        rank           1
+        weight         1
+
+        name           target-2
+        provider       openai_compatible
+        model          gpt-4o
+        base URL       https://api.openai.com/v1
+        credential     default-key
+        rank           2
+        weight         1
+
+     local             1 target                            open ↵
+     add route                                             add ↵
+
+  activity ▾
+     latest            no requests yet
+
+
+──────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ open   ? help   esc back

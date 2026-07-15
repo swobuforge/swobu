@@ -1,0 +1,19 @@
+SWOBU    [dev] [lab] [› +] [?]                                   local
+──────────────────────────────────────────────────────────────────────
+  workspace ▾
+     slug                                                  create ↵
+     client base URL   (derived from slug)
+
+  routes ▾
+     (no routes)
+
+  activity ▾
+     (no activity)
+
+
+──────────────────────────────────────────────────────────────────────
+Tab next   Shift+Tab prev   esc back
+
+
+
+

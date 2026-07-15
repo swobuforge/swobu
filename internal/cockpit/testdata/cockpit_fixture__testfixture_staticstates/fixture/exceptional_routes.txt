@@ -1,0 +1,23 @@
+SWOBU    [› dev] [lab] [+] [?]                                   local
+──────────────────────────────────────────────────────────────────────
+  workspace ▾
+     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
+     run once          Codex                               open ↵
+     edit workspace                                        open ↵
+
+  routes ▾
+     gpt               default · 2 targets                 open ↵
+     free              3 weighted · degraded 429 x9        open ↵
+     local             1 target · blocked unreachable      open ↵
+     route-new         incomplete · no targets             open ↵
+     add route                                             add ↵
+
+  activity ▾
+     latest            no requests yet
+
+
+──────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ open   ? help   esc back
+
+
+
