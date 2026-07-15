@@ -1,4 +1,4 @@
-SWOBU    [› dev] [lab] [+] [?]
+SWOBU    [› dev] [lab] [+] [?]                          http://pi:7926
 ──────────────────────────────────────────────────────────────────────
   workspace ▾
      slug              dev                           edit ↵
@@ -12,15 +12,8 @@ SWOBU    [› dev] [lab] [+] [?]
      add route                                             add ↵
 
   activity ▾
-     latest            14:32:01 codex gpt 200 145ms
-        resolved       gpt
-        model          gpt-4.1
-        attempt 1      gpt-4.1 rank 1 — success
-
-        tokens in      1,200
-        tokens out     450
+     latest            no requests yet
 
 
 ──────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   ? help   esc back
-

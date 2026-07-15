@@ -71,6 +71,7 @@ func (v *PageView) activateFocused(event tui.KeyEvent) {
 	}
 }
 
+// swobu:lint ignore tui-parent-calls-child-method because=staged refactor: replace imperative Back() with parent-owned ActiveInline state enum per go-tui-canons anti-pattern #7
 func (v *PageView) backOut(event tui.KeyEvent) {
 	if v.RoutesSection.Back() {
 		return

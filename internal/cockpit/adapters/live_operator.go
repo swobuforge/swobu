@@ -72,8 +72,8 @@ func (a *LiveOperatorAdapter) LoadCockpit(ctx context.Context) (readmodel.Cockpi
 	})
 
 	model := readmodel.CockpitReadModel{
-		EnvironmentLabel: a.environmentLabel(),
-		ActivePage:       readmodel.CockpitWorkspacePage,
+		HeaderRight: a.headerRight(),
+		ActivePage:  readmodel.CockpitWorkspacePage,
 	}
 	if len(endpoints) == 0 {
 		model.SelectedWorkspaceID = "+"
@@ -124,9 +124,9 @@ func (a *LiveOperatorAdapter) LoadWorkspace(ctx context.Context, id readmodel.Wo
 	return workspace, nil
 }
 
-// SaveWorkspace updates the daemon endpoint name. The daemon does not expose an
-// atomic rename, so a slug change is a best-effort upsert-then-delete move.
-// TODO: switch to a daemon-side atomic rename when the control plane exposes it.
+// SaveWorkspace updates the daemon endpoint. Slug changes (renames) are
+// rejected because the daemon does not expose an atomic rename operation.
+// Only in-place field edits of an existing endpoint are supported.
 func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
 	slug := strings.TrimSpace(request.Slug) // swobu:io-string source=boundary
 	if request.ID == "" || request.ID == "+" {
@@ -262,7 +262,7 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 	} else {
 		replaced := false
 		for i := range endpoint.ProviderConfigs {
-			if endpoint.ProviderConfigs[i].Ref != targetID {
+			if !targetMatchesRoute(endpoint.ProviderConfigs[i], targetID, routeID) {
 				continue
 			}
 			config.Ref = targetID
@@ -271,7 +271,7 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 			break
 		}
 		if !replaced {
-			return readmodel.TargetReadModel{}, fmt.Errorf("save target %q: target could not be resolved", targetID)
+			return readmodel.TargetReadModel{}, fmt.Errorf("save target %q: target not found in route %q", targetID, routeID)
 		}
 	}
 	if err := a.client.UpsertEndpoint(ctx, endpoint); err != nil {
@@ -297,8 +297,9 @@ func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.De
 	next := make([]operatorclient.ProviderConfigData, 0, len(endpoint.ProviderConfigs))
 	removedSelected := false
 	removed := false
+	routeID := strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
 	for _, config := range endpoint.ProviderConfigs {
-		if config.Ref != targetID {
+		if !targetMatchesRoute(config, targetID, routeID) {
 			next = append(next, config)
 			continue
 		}

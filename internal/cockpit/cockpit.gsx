@@ -17,13 +17,13 @@ const cockpitRefreshTimeout = 5 * time.Second
 // Cockpit composes the operator shell, active page, and static global frame.
 //
 // It owns shell composition and selected top-level readmodel data. It does not
-// own feature drafts, submit lifecycle, route mutation, target mutation, or run
-// execution.
+// own feature drafts, submit lifecycle, route mutation, target mutation, run
+// execution, or model refresh policy.
 type Cockpit struct {
-	Ctx            context.Context
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]
 	RefreshNotice  *tui.State[readmodel.Notice]
+	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
 	WorkspacePage  *workspace_page.PageView
 	HelpPage       *help_page.ViewView
@@ -46,13 +46,13 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 	}
 	activeTab := selectedTabIndex(model.Tabs)
 	cockpit := &Cockpit{
-		Ctx:            ctx,
-		Model:          model,
-		ActiveTabIndex: tui.NewState(activeTab),
-		RefreshNotice:  tui.NewState(readmodel.Notice{}),
-		HelpPage:       help_page.View(model.Help),
-		WorkspacePorts: commands,
-		WorkspaceQuery: query,
+		Model:           model,
+		ActiveTabIndex:  tui.NewState(activeTab),
+		RefreshNotice:   tui.NewState(readmodel.Notice{}),
+		Reloader:        NewModelReloader(ctx, query, cockpitRefreshTimeout),
+		HelpPage:        help_page.View(model.Help),
+		WorkspacePorts:  commands,
+		WorkspaceQuery:  query,
 	}
 	cockpit.WorkspacePages = cockpit.workspacePagesByTab(model)
 	cockpit.WorkspacePage = cockpit.initialWorkspacePage(model, activeTab)
@@ -142,47 +142,15 @@ func (c *Cockpit) activeWorkspacePage(model readmodel.CockpitReadModel) *workspa
 }
 
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
-	if c.WorkspaceQuery != nil {
-		ctx, cancel := c.refreshContext()
-		defer cancel()
-		if fresh, err := c.WorkspaceQuery.LoadCockpit(ctx); err == nil {
-			workspace, workspaceErr := c.WorkspaceQuery.LoadWorkspace(ctx, saved.ID)
-			if workspaceErr != nil {
-				workspace = saved
-				c.RefreshNotice.Set(staleRefreshNotice("refresh stale: saved workspace shown; " + workspaceErr.Error()))
-			} else {
-				c.RefreshNotice.Set(readmodel.Notice{})
-			}
-			c.replaceModel(selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID))
-			return
-		} else {
-			c.RefreshNotice.Set(staleRefreshNotice("refresh stale: saved workspace shown; " + err.Error()))
-		}
-	}
-	c.replaceModel(selectWorkspace(updateWorkspaceInModel(c.Model, saved), saved.ID))
+	model, notice := c.Reloader.RefreshAfterSave(c.Model, saved)
+	c.RefreshNotice.Set(notice)
+	c.replaceModel(model)
 }
 
 func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
-	if c.WorkspaceQuery != nil {
-		ctx, cancel := c.refreshContext()
-		defer cancel()
-		if fresh, err := c.WorkspaceQuery.LoadCockpit(ctx); err == nil {
-			c.RefreshNotice.Set(readmodel.Notice{})
-			c.replaceModel(removeWorkspaceFromModel(fresh, deleted))
-			return
-		} else {
-			c.RefreshNotice.Set(staleRefreshNotice("refresh stale: deleted workspace hidden; " + err.Error()))
-		}
-	}
-	c.replaceModel(removeWorkspaceFromModel(c.Model, deleted))
-}
-
-func (c *Cockpit) refreshContext() (context.Context, context.CancelFunc) {
-	base := c.Ctx
-	if base == nil {
-		base = context.Background()
-	}
-	return context.WithTimeout(base, cockpitRefreshTimeout)
+	model, notice := c.Reloader.RefreshAfterDelete(c.Model, deleted)
+	c.RefreshNotice.Set(notice)
+	c.replaceModel(model)
 }
 
 func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel) {
@@ -223,11 +191,19 @@ templ (c *Cockpit) Render() {
 		if c.activeModel().ActivePage == readmodel.CockpitHelpPage {
 			@c.HelpPage
 		} else {
-			@c.WorkspacePage
+			if app != nil {
+				@ActiveWorkspacePage(c)
+			} else {
+				@c.WorkspacePage
+			}
 		}
 		<hr />
 		@ShellFooter(c.activeModel())
 	</div>
+}
+
+func ActiveWorkspacePage(c *Cockpit) *workspace_page.PageView {
+	return c.WorkspacePage
 }
 
 templ RefreshNotice(notice readmodel.Notice) {
@@ -252,7 +228,9 @@ templ ShellHeader(model readmodel.CockpitReadModel) {
 				}
 			}
 		</div>
-		<span>{model.EnvironmentLabel}</span>
+		if model.HeaderRight != "" {
+			<span>{model.HeaderRight}</span>
+		}
 	</div>
 }
 
@@ -403,9 +381,11 @@ func removeWorkspaceFromModel(model readmodel.CockpitReadModel, deleted readmode
 	}
 	model.SelectedWorkspaceID = ""
 	model.SelectedWorkspace = readmodel.WorkspaceReadModel{}
-	model.ActivePage = readmodel.CockpitHelpPage
-	if index, ok := helpTabIndex(model.Tabs); ok {
+	model.ActivePage = readmodel.CockpitWorkspacePage
+	if index, ok := draftTabIndex(model.Tabs); ok {
 		model.Tabs[index].Selected = true
+		model.SelectedWorkspaceID = model.Tabs[index].ID
+		model.SelectedWorkspace = workspaceForTab(model, model.Tabs[index])
 	}
 	return model
 }
@@ -422,6 +402,15 @@ func selectedTabIndex(tabs []readmodel.WorkspaceTabReadModel) int {
 func helpTabIndex(tabs []readmodel.WorkspaceTabReadModel) (int, bool) {
 	for i, tab := range tabs {
 		if tab.Kind == readmodel.WorkspaceTabHelp {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func draftTabIndex(tabs []readmodel.WorkspaceTabReadModel) (int, bool) {
+	for i, tab := range tabs {
+		if tab.Kind == readmodel.WorkspaceTabDraft {
 			return i, true
 		}
 	}

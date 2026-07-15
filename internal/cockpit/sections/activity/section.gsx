@@ -5,6 +5,7 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type SectionView struct {
@@ -33,21 +34,35 @@ func (s *SectionView) Back() bool {
 	return false
 }
 
+func FocusableRow(label string, value string, action string, activate func()) *ui.FocusableRowView {
+	return ui.NewFocusableRowView(label, value, action, activate)
+}
+
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@SectionHeader("activity", s.Expanded.Get())
 		if s.Expanded.Get() {
 			if latest, ok := s.Workspace.Activity.LatestRow(); ok {
-				@FocusableRow("latest", latest.RowValue(), activityAction(latest), func() { s.openActivity(latest) })
+				if app != nil {
+					@FocusableRow("latest", latest.RowValue(), activityAction(latest), func() { s.openActivity(latest) })
+				} else {
+					@FocusablePreviewRow("latest", latest.RowValue(), activityAction(latest), func() { s.openActivity(latest) })
+				}
 				if s.OpenActivity.Get() == latest.ID {
 					@DetailRow("resolved", latest.ResolvedName)
 					@DetailRow("model", latest.Model)
 					for i, attempt := range latest.Attempts {
 						@DetailRow(fmt.Sprintf("attempt %d", i+1), attemptLabel(attempt))
 					}
-					<br />
-					@DetailRow("tokens in", commaInt(latest.TokensIn))
-					@DetailRow("tokens out", commaInt(latest.TokensOut))
+					if latest.TokensIn > 0 || latest.TokensOut > 0 {
+						<br />
+					}
+					if latest.TokensIn > 0 {
+						@DetailRow("tokens in", commaInt(latest.TokensIn))
+					}
+					if latest.TokensOut > 0 {
+						@DetailRow("tokens out", commaInt(latest.TokensOut))
+					}
 				}
 			} else if s.Workspace.IsDraft() {
 				@InertRow("(no activity)", "", "")
@@ -69,8 +84,8 @@ templ SectionHeader(label string, expanded bool) {
 	</div>
 }
 
-templ FocusableRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={activate}>
+templ FocusablePreviewRow(label string, value string, action string, activate func()) {
+	<div class="flex-row w-full" onActivate={activate}>
 		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
@@ -95,21 +110,6 @@ templ DetailRow(label string, value string) {
 	</div>
 }
 
-func focusRowMarker(row *tui.Element) {
-	setRowMarker(row, ">")
-}
-
-func blurRowMarker(row *tui.Element) {
-	setRowMarker(row, "")
-}
-
-func setRowMarker(row *tui.Element, marker string) {
-	children := row.Children()
-	if len(children) == 0 {
-		return
-	}
-	children[0].SetText(marker)
-}
 
 func activityAction(row readmodel.ActivityRowReadModel) string {
 	if row.Error {

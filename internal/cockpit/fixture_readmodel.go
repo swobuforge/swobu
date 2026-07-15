@@ -15,7 +15,6 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
 		},
 		SelectedWorkspaceID: dev,
-		EnvironmentLabel:    "local",
 		Help: readmodel.HelpReadModel{
 			Version:        "swobu dev",
 			CockpitVersion: "cockpit v2",

@@ -29,15 +29,16 @@ func TestSection_FocusableWorkspaceRowsActivateLocally(t *testing.T) {
 }
 
 func TestFocusableRow_FocusUpdatesVisibleMarker(t *testing.T) {
-	row := collectFocusables(FocusableRow("client base URL", "http://127.0.0.1:7926/c/dev", "copy ↵", func() {}).Root)[0].(*tui.Element)
+	view := FocusableRow("client base URL", "http://127.0.0.1:7926/c/dev", "copy ↵", func() {})
+	row := collectFocusables(view.Render(nil))[0].(*tui.Element)
 
 	row.Focus()
-	if got, want := row.Children()[0].Text(), ">"; got != want {
+	if got, want := view.Render(nil).Children()[0].Text(), ">"; got != want {
 		t.Fatalf("focused marker = %q, want %q", got, want)
 	}
 
 	row.Blur()
-	if got := row.Children()[0].Text(); got != "" {
+	if got := view.Render(nil).Children()[0].Text(); got != "" {
 		t.Fatalf("blurred marker = %q, want empty", got)
 	}
 }

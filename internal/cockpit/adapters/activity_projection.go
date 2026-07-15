@@ -69,19 +69,20 @@ func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.Activ
 		Error:        row.StatusCode >= 400 || row.Result == "backend_error" || row.Result == "swobu_error",
 		ResolvedName: row.ModelResolved,
 		Model:        firstNonEmpty(row.ModelResolved, row.ModelRequested),
-		TokensIn:     tokenValue(row.TokenUsage, "in"),
-		TokensOut:    tokenValue(row.TokenUsage, "out"),
+		TokensIn:     inputTokens(row.TokenUsage),
+		TokensOut:    outputTokens(row.TokenUsage),
 	}
 }
 
 func activityStatus(result string, statusCode int) readmodel.ActivityStatus {
+	result = strings.ToLower(strings.TrimSpace(result))
 	switch {
 	case statusCode >= 400:
 		return readmodel.ActivityFailed
-	case strings.Contains(strings.ToLower(result), "cancel"):
-		return readmodel.ActivityCanceled
-	case strings.TrimSpace(result) == "" || strings.Contains(strings.ToLower(result), "success"):
+	case result == "", result == "success":
 		return readmodel.ActivitySucceeded
+	case result == "canceled":
+		return readmodel.ActivityCanceled
 	default:
 		return readmodel.ActivityFailed
 	}
@@ -94,19 +95,16 @@ func trafficDuration(row operatorclient.RecentTrafficRow) time.Duration {
 	return time.Duration(*row.Timing.DurMillis) * time.Millisecond
 }
 
-func tokenValue(usage *operatorclient.RecentTrafficTokenUse, field string) int {
-	if usage == nil {
-		return 0
+func inputTokens(usage *operatorclient.RecentTrafficTokenUse) int {
+	if usage != nil && usage.InputTokens != nil {
+		return *usage.InputTokens
 	}
-	switch field {
-	case "in":
-		if usage.InputTokens != nil {
-			return *usage.InputTokens
-		}
-	case "out":
-		if usage.OutputTokens != nil {
-			return *usage.OutputTokens
-		}
+	return 0
+}
+
+func outputTokens(usage *operatorclient.RecentTrafficTokenUse) int {
+	if usage != nil && usage.OutputTokens != nil {
+		return *usage.OutputTokens
 	}
 	return 0
 }

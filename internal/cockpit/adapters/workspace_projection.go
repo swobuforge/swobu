@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
 func (a *LiveOperatorAdapter) workspaceFromEndpoint(ctx context.Context, endpoint operatorclient.EndpointData) (readmodel.WorkspaceReadModel, error) {
@@ -29,9 +30,10 @@ func (a *LiveOperatorAdapter) clientBaseURL(slug string) string {
 	return a.daemonURL + "/c/" + strings.Trim(strings.TrimSpace(slug), "/")
 }
 
-func (a *LiveOperatorAdapter) environmentLabel() string {
-	if a.daemonURL == "" {
-		return "local"
+func (a *LiveOperatorAdapter) headerRight() string {
+	defaultDaemonURL := strings.TrimRight("http://"+config.DefaultBindAddr(), "/")
+	if a.daemonURL == "" || a.daemonURL == defaultDaemonURL {
+		return ""
 	}
 	return a.daemonURL
 }

@@ -135,6 +135,81 @@ func TestLiveOperatorAdapter_LoadCockpitProjectsEndpoints(t *testing.T) {
 	}
 }
 
+func TestLiveOperatorAdapter_LoadCockpitWithDefaultDaemonHidesHeaderRight(t *testing.T) {
+	t.Parallel()
+
+	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{{
+				Ref:          "cfg-fast",
+				ProviderSpec: "openai_compatible",
+				ModelID:      "gpt-4.1",
+				BaseURL:      "https://fast.example/v1",
+			}},
+		}},
+	}, "")
+
+	model, err := adapter.LoadCockpit(context.Background())
+	if err != nil {
+		t.Fatalf("LoadCockpit returned error: %v", err)
+	}
+	if got := model.HeaderRight; got != "" {
+		t.Fatalf("header right = %q, want empty for default daemon", got)
+	}
+}
+
+func TestLiveOperatorAdapter_LoadCockpitWithCustomDaemonShowsHeaderRight(t *testing.T) {
+	t.Parallel()
+
+	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{{
+				Ref:          "cfg-fast",
+				ProviderSpec: "openai_compatible",
+				ModelID:      "gpt-4.1",
+				BaseURL:      "https://fast.example/v1",
+			}},
+		}},
+	}, "http://pi:7926")
+
+	model, err := adapter.LoadCockpit(context.Background())
+	if err != nil {
+		t.Fatalf("LoadCockpit returned error: %v", err)
+	}
+	if got, want := model.HeaderRight, "http://pi:7926"; got != want {
+		t.Fatalf("header right = %q, want %q", got, want)
+	}
+}
+
+func TestLiveOperatorAdapter_LoadCockpitWithEnvCustomDaemonShowsHeaderRight(t *testing.T) {
+	t.Setenv("SWOBU_DAEMON_URL", "http://pi:7926")
+
+	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{{
+				Ref:          "cfg-fast",
+				ProviderSpec: "openai_compatible",
+				ModelID:      "gpt-4.1",
+				BaseURL:      "https://fast.example/v1",
+			}},
+		}},
+	}, "")
+
+	model, err := adapter.LoadCockpit(context.Background())
+	if err != nil {
+		t.Fatalf("LoadCockpit returned error: %v", err)
+	}
+	if got, want := model.HeaderRight, "http://pi:7926"; got != want {
+		t.Fatalf("header right = %q, want %q", got, want)
+	}
+}
+
 func TestLiveOperatorAdapter_EmptyEndpointListProjectsDraftWorkspace(t *testing.T) {
 	t.Parallel()
 
@@ -634,6 +709,68 @@ func countEnvValue(env []string, key, value string) int {
 		}
 	}
 	return count
+}
+
+func TestLiveOperatorAdapter_SaveTargetRejectsWrongRoute(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{
+				{Ref: "cfg-fast", ProviderSpec: "openai_compatible", ModelID: "gpt-4.1", BaseURL: "https://fast.example/v1"},
+				{Ref: "cfg-local", ProviderSpec: "openai_compatible", ModelID: "llama3.2", BaseURL: "http://127.0.0.1:11434/v1"},
+			},
+		}},
+	}
+	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
+
+	// cfg-fast exists but not in route "llama3.2".
+	_, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
+		WorkspaceID:   "dev",
+		RouteID:       "llama3.2",
+		TargetID:      "cfg-fast",
+		Name:          "fast",
+		Provider:      "openai_compatible",
+		BaseURL:       "https://new.example/v1",
+		CredentialRef: "env:KEY",
+	})
+	if err == nil {
+		t.Fatal("SaveTarget should reject a target edit into the wrong route")
+	}
+	if client.upserted.Name != "" {
+		t.Fatal("SaveTarget should not upsert on route mismatch")
+	}
+}
+
+func TestLiveOperatorAdapter_DeleteTargetRejectsWrongRoute(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{
+				{Ref: "cfg-fast", ProviderSpec: "openai_compatible", ModelID: "gpt-4.1", BaseURL: "https://fast.example/v1"},
+				{Ref: "cfg-local", ProviderSpec: "openai_compatible", ModelID: "llama3.2", BaseURL: "http://127.0.0.1:11434/v1"},
+			},
+		}},
+	}
+	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
+
+	// cfg-fast exists but not in route "llama3.2".
+	err := adapter.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
+		WorkspaceID: "dev",
+		RouteID:     "llama3.2",
+		TargetID:    "cfg-fast",
+	})
+	if err == nil {
+		t.Fatal("DeleteTarget should reject a target delete from the wrong route")
+	}
+	if client.upserted.Name != "" {
+		t.Fatal("DeleteTarget should not upsert on route mismatch")
+	}
 }
 
 func TestLiveOperatorAdapter_DeleteWorkspaceDelegatesEndpointDelete(t *testing.T) {

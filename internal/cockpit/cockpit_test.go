@@ -94,7 +94,7 @@ func TestApplyCockpitDefaultsInstallsHelpCopy(t *testing.T) {
 func TestCockpit_WorkspaceSaveRefreshesAndSelectsSavedWorkspace(t *testing.T) {
 	fake := &fakeWorkspacePorts{
 		cockpit: readmodel.CockpitReadModel{
-			EnvironmentLabel:    "test",
+			HeaderRight:         "test",
 			ActivePage:          readmodel.CockpitWorkspacePage,
 			SelectedWorkspaceID: "lab",
 			SelectedWorkspace: readmodel.WorkspaceReadModel{
@@ -142,7 +142,7 @@ func TestCockpit_WorkspaceSaveRefreshesAndSelectsSavedWorkspace(t *testing.T) {
 func TestCockpit_WorkspaceSaveRefreshPreservesDraftPage(t *testing.T) {
 	fake := &fakeWorkspacePorts{
 		cockpit: readmodel.CockpitReadModel{
-			EnvironmentLabel:    "test",
+			HeaderRight:         "test",
 			ActivePage:          readmodel.CockpitWorkspacePage,
 			SelectedWorkspaceID: "prod",
 			SelectedWorkspace: readmodel.WorkspaceReadModel{
@@ -201,7 +201,7 @@ func TestCockpit_WorkspaceSaveRefreshFailureShowsStaleNotice(t *testing.T) {
 func TestCockpit_WorkspaceSaveRefreshLoadWorkspaceFailureUsesSavedModelAndShowsNotice(t *testing.T) {
 	fake := &fakeWorkspacePorts{
 		cockpit: readmodel.CockpitReadModel{
-			EnvironmentLabel:    "test",
+			HeaderRight:         "test",
 			ActivePage:          readmodel.CockpitWorkspacePage,
 			SelectedWorkspaceID: "lab",
 			SelectedWorkspace:   readmodel.WorkspaceReadModel{ID: "lab", Slug: "lab", State: readmodel.WorkspaceExisting},
@@ -230,7 +230,7 @@ func TestCockpit_WorkspaceSaveRefreshLoadWorkspaceFailureUsesSavedModelAndShowsN
 func TestCockpit_WorkspaceDeleteRefreshesAndSelectsRemainingWorkspace(t *testing.T) {
 	fake := &fakeWorkspacePorts{
 		cockpit: readmodel.CockpitReadModel{
-			EnvironmentLabel:    "test",
+			HeaderRight:         "test",
 			ActivePage:          readmodel.CockpitWorkspacePage,
 			SelectedWorkspaceID: "lab",
 			SelectedWorkspace: readmodel.WorkspaceReadModel{
@@ -261,7 +261,7 @@ func TestCockpit_WorkspaceDeleteRefreshesAndSelectsRemainingWorkspace(t *testing
 func TestCockpit_WorkspaceDeleteConfirmationRefreshesThroughCommandPath(t *testing.T) {
 	fake := &fakeWorkspacePorts{
 		cockpit: readmodel.CockpitReadModel{
-			EnvironmentLabel:    "test",
+			HeaderRight:         "test",
 			ActivePage:          readmodel.CockpitWorkspacePage,
 			SelectedWorkspaceID: "lab",
 			SelectedWorkspace: readmodel.WorkspaceReadModel{
@@ -326,7 +326,7 @@ func TestCockpit_WorkspaceDeleteRefreshFailureHidesDeletedWorkspace(t *testing.T
 	}
 }
 
-func TestCockpit_RemoveLastWorkspaceFallsBackToHelpTab(t *testing.T) {
+func TestCockpit_RemoveLastWorkspaceActivatesDraftTab(t *testing.T) {
 	model := readmodel.CockpitReadModel{
 		ActivePage:          readmodel.CockpitWorkspacePage,
 		SelectedWorkspaceID: "dev",
@@ -340,14 +340,17 @@ func TestCockpit_RemoveLastWorkspaceFallsBackToHelpTab(t *testing.T) {
 
 	got := removeWorkspaceFromModel(model, "dev")
 
-	if got.ActivePage != readmodel.CockpitHelpPage {
-		t.Fatalf("active page = %v, want help", got.ActivePage)
+	if got.ActivePage != readmodel.CockpitWorkspacePage {
+		t.Fatalf("active page = %v, want workspace", got.ActivePage)
 	}
-	if got.SelectedWorkspaceID != "" {
-		t.Fatalf("selected workspace = %q, want empty", got.SelectedWorkspaceID)
+	if got.SelectedWorkspaceID != "+" {
+		t.Fatalf("selected workspace = %q, want draft", got.SelectedWorkspaceID)
 	}
-	if index, ok := helpTabIndex(got.Tabs); !ok || !got.Tabs[index].Selected {
-		t.Fatalf("help tab should be selected: %#v", got.Tabs)
+	if index, ok := draftTabIndex(got.Tabs); !ok || !got.Tabs[index].Selected {
+		t.Fatalf("draft tab should be selected: %#v", got.Tabs)
+	}
+	if !got.SelectedWorkspace.IsDraft() {
+		t.Fatalf("selected workspace = %#v, want draft workspace", got.SelectedWorkspace)
 	}
 }
 

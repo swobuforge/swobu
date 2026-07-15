@@ -15,6 +15,30 @@ func TestFixture_DefaultWorkspace(t *testing.T) {
 	testkit.AssertVisual("default_workspace").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
 }
 
+func TestFixture_CustomDaemonHeader(t *testing.T) {
+	model := DefaultFixtureReadModel()
+	model.HeaderRight = "http://pi:7926"
+	root := newFixtureCockpit(model, nil).Render(nil)
+	rendered := testkit.RenderTrimmed(root, 70, 20)
+	testkit.AssertVisual("custom_daemon_header").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
+}
+
+func TestFixture_LastWorkspaceDeletedDraftActive(t *testing.T) {
+	model := readmodel.CockpitReadModel{
+		ActivePage:          readmodel.CockpitWorkspacePage,
+		SelectedWorkspaceID: "dev",
+		SelectedWorkspace:   readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting},
+		Tabs: []readmodel.WorkspaceTabReadModel{
+			{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting, Selected: true},
+			{ID: "+", Kind: readmodel.WorkspaceTabDraft},
+			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+		},
+	}
+	root := newFixtureCockpit(removeWorkspaceFromModel(model, "dev"), nil).Render(nil)
+	rendered := testkit.RenderTrimmed(root, 70, 20)
+	testkit.AssertVisual("last_workspace_deleted_draft_active").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
+}
+
 func TestFixture_StaticStates(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -5,6 +5,7 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type SectionView struct {
@@ -61,6 +62,10 @@ func (s *SectionView) Back() bool {
 	return false
 }
 
+func FocusableRow(label string, value string, action string, activate func()) *ui.FocusableRowView {
+	return ui.NewFocusableRowView(label, value, action, activate)
+}
+
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@SectionHeader("routes", s.Expanded.Get())
@@ -69,12 +74,24 @@ templ (s *SectionView) Render() {
 				@InertRow("(no routes)", "", "")
 			} else {
 				for _, route := range s.Model.Routes {
-					@FocusableRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), func() { s.toggleRoute(route) })
+					if app != nil {
+						@FocusableRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), func() { s.toggleRoute(route) })
+					} else {
+						@FocusablePreviewRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), func() { s.toggleRoute(route) })
+					}
 					if s.isExpanded(route) {
 						for _, target := range route.Targets {
-							@FocusableRow("target "+targetRankLabel(target), targetValue(target), "open ↵", func() { s.openTarget(target) })
+							if app != nil {
+								@FocusableRow("target "+targetRankLabel(target), targetValue(target), "open ↵", func() { s.openTarget(target) })
+							} else {
+								@FocusablePreviewRow("target "+targetRankLabel(target), targetValue(target), "open ↵", func() { s.openTarget(target) })
+							}
 						}
-						@FocusableRow("add target", "", "add ↵", func() { s.addTarget(route) })
+						if app != nil {
+							@FocusableRow("add target", "", "add ↵", func() { s.addTarget(route) })
+						} else {
+							@FocusablePreviewRow("add target", "", "add ↵", func() { s.addTarget(route) })
+						}
 					}
 				}
 				@InertRow("add route", "", "add ↵")
@@ -94,8 +111,8 @@ templ SectionHeader(label string, expanded bool) {
 	</div>
 }
 
-templ FocusableRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={activate}>
+templ FocusablePreviewRow(label string, value string, action string, activate func()) {
+	<div class="flex-row w-full" onActivate={activate}>
 		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
@@ -134,20 +151,4 @@ func targetValue(target readmodel.TargetReadModel) string {
 		return target.Provider
 	}
 	return target.Provider + "/" + target.Model
-}
-
-func focusRowMarker(row *tui.Element) {
-	setRowMarker(row, ">")
-}
-
-func blurRowMarker(row *tui.Element) {
-	setRowMarker(row, "")
-}
-
-func setRowMarker(row *tui.Element, marker string) {
-	children := row.Children()
-	if len(children) == 0 {
-		return
-	}
-	children[0].SetText(marker)
 }

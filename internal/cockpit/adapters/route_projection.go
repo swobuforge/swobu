@@ -118,6 +118,13 @@ func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID s
 	}
 }
 
+// targetMatchesRoute reports whether a provider config belongs to the given
+// route and target identity pair. This is the canonical route-invariant
+// check for all target mutations.
+func targetMatchesRoute(config operatorclient.ProviderConfigData, targetID, routeID string) bool {
+	return config.Ref == targetID && projectedRouteModel(config) == routeID
+}
+
 func newProviderConfigRef(existing []operatorclient.ProviderConfigData) (string, error) {
 	used := make(map[string]struct{}, len(existing))
 	for _, config := range existing {

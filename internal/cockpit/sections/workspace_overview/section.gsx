@@ -6,6 +6,7 @@ import (
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type SectionView struct {
@@ -84,6 +85,10 @@ func DeleteConfirmation(s *SectionView) *workspace_delete.ConfirmationView {
 	return confirmation
 }
 
+func FocusableRow(label string, value string, action string, activate func()) *ui.FocusableRowView {
+	return ui.NewFocusableRowView(label, value, action, activate)
+}
+
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@SectionHeader("workspace", s.Expanded.Get())
@@ -98,10 +103,18 @@ templ (s *SectionView) Render() {
 			if s.Model.IsDraft() {
 				@InertRow("client base URL", WorkspaceEdit(s).ClientBaseURLPreview(), "")
 			} else {
-				@FocusableRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
+				if app != nil {
+					@FocusableRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
+				} else {
+					@FocusablePreviewRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
+				}
 				if !s.SummaryOnly.Get() {
 					if len(s.Model.RunCommands) > 0 {
-						@FocusableRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
+						if app != nil {
+							@FocusableRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
+						} else {
+							@FocusablePreviewRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
+						}
 					}
 					if app != nil {
 						<div key={workspaceDeleteKey(s)} class="w-full">
@@ -118,7 +131,7 @@ templ (s *SectionView) Render() {
 
 templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
 	<div class="flex-col w-full">
-		<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={workflow.Activate}>
+		<div class="flex-row w-full" onActivate={workflow.Activate}>
 			<span class="w-5"></span>
 			<span class="w-18">slug</span>
 			<span class="w-30">{workflow.ValueLabel()}</span>
@@ -135,12 +148,7 @@ templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
 
 templ DeleteConfirmationPreview(confirmation *workspace_delete.ConfirmationView) {
 	<div class="flex-col w-full">
-		<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={confirmation.Activate}>
-			<span class="w-5"></span>
-			<span class="w-18">delete</span>
-			<span class="w-36">{confirmation.RowValue()}</span>
-			<span>{confirmation.ActionLabel()}</span>
-		</div>
+		@FocusablePreviewRow("delete", confirmation.RowValue(), confirmation.ActionLabel(), confirmation.Activate)
 	</div>
 }
 
@@ -173,8 +181,8 @@ templ SectionHeader(label string, expanded bool) {
 	</div>
 }
 
-templ FocusableRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={activate}>
+templ FocusablePreviewRow(label string, value string, action string, activate func()) {
+	<div class="flex-row w-full" onActivate={activate}>
 		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
@@ -189,20 +197,4 @@ templ InertRow(label string, value string, action string) {
 		<span class="w-36">{value}</span>
 		<span>{action}</span>
 	</div>
-}
-
-func focusRowMarker(row *tui.Element) {
-	setRowMarker(row, ">")
-}
-
-func blurRowMarker(row *tui.Element) {
-	setRowMarker(row, "")
-}
-
-func setRowMarker(row *tui.Element, marker string) {
-	children := row.Children()
-	if len(children) == 0 {
-		return
-	}
-	children[0].SetText(marker)
 }

@@ -88,17 +88,24 @@ func prepareRunCommandFile(spec clientprofile.RunPrepareFileSpec) error {
 }
 
 func runCommandEnvironment(overrides map[string]string) []string {
-	values := map[string]string{}
+	return sortEnv(mergedEnv(overrides))
+}
+
+func mergedEnv(overrides map[string]string) map[string]string {
+	merged := map[string]string{}
 	for _, entry := range os.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
+		if ok {
+			merged[key] = value
 		}
-		values[key] = value
 	}
 	for key, value := range overrides {
-		values[key] = value
+		merged[key] = value
 	}
+	return merged
+}
+
+func sortEnv(values map[string]string) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

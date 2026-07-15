@@ -10,7 +10,7 @@ type CockpitReadModel struct {
 	SelectedWorkspaceID WorkspaceID
 	SelectedWorkspace   WorkspaceReadModel
 	Help                HelpReadModel
-	EnvironmentLabel    string
+	HeaderRight         string
 	ActivePage          CockpitPage
 }
 
