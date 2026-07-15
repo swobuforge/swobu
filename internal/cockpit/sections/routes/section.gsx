@@ -9,6 +9,7 @@ import (
 
 type SectionView struct {
 	Model           readmodel.WorkspaceReadModel
+	Expanded        *tui.State[bool]
 	ExpandedRoute  *tui.State[readmodel.RouteID]
 	OpenTarget     *tui.State[readmodel.TargetID]
 	AddTargetRoute *tui.State[readmodel.RouteID]
@@ -17,7 +18,8 @@ type SectionView struct {
 func Section(model readmodel.WorkspaceReadModel) *SectionView {
 	return &SectionView{
 		Model:           model,
-		ExpandedRoute:   tui.NewState(model.View.ExpandedRouteID),
+		Expanded:        tui.NewState(true),
+		ExpandedRoute:   tui.NewState(readmodel.RouteID("")),
 		OpenTarget:      tui.NewState(readmodel.TargetID("")),
 		AddTargetRoute: tui.NewState(readmodel.RouteID("")),
 	}
@@ -43,10 +45,26 @@ func (s *SectionView) addTarget(route readmodel.RouteReadModel) {
 	s.AddTargetRoute.Set(route.ID)
 }
 
+func (s *SectionView) Back() bool {
+	if s.OpenTarget.Get() != "" {
+		s.OpenTarget.Set("")
+		return true
+	}
+	if s.AddTargetRoute.Get() != "" {
+		s.AddTargetRoute.Set("")
+		return true
+	}
+	if s.ExpandedRoute.Get() != "" {
+		s.ExpandedRoute.Set("")
+		return true
+	}
+	return false
+}
+
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		@SectionHeader("routes", s.Model.View.RoutesExpanded)
-		if s.Model.View.RoutesExpanded {
+		@SectionHeader("routes", s.Expanded.Get())
+		if s.Expanded.Get() {
 			if len(s.Model.Routes) == 0 {
 				@InertRow("(no routes)", "", "")
 			} else {
@@ -78,11 +96,7 @@ templ SectionHeader(label string, expanded bool) {
 
 templ FocusableRow(label string, value string, action string, focused bool, activate func()) {
 	<div class="flex-row w-full focusable" onActivate={activate}>
-		if focused {
-			<span class="w-5">{">"}</span>
-		} else {
-			<span class="w-5"></span>
-		}
+		<span class="w-5">{focusMarker(focused)}</span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
 		<span>{action}</span>
@@ -110,6 +124,13 @@ func routeActionLabel(open bool) string {
 		return "collapse ↵"
 	}
 	return "expand ↵"
+}
+
+func focusMarker(focused bool) string {
+	if focused {
+		return ">"
+	}
+	return ""
 }
 
 func targetValue(target readmodel.TargetReadModel) string {

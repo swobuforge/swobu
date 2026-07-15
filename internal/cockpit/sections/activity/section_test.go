@@ -51,7 +51,6 @@ func activitySectionModel() readmodel.WorkspaceReadModel {
 		Duration:    145 * time.Millisecond,
 	}
 	return readmodel.WorkspaceReadModel{
-		View: readmodel.WorkspaceViewState{ActivityExpanded: true},
 		Activity: readmodel.ActivityReadModel{
 			Latest: &row,
 		},

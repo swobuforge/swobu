@@ -29,11 +29,6 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 			Slug:          "dev",
 			State:         readmodel.WorkspaceExisting,
 			ClientBaseURL: "http://127.0.0.1:7926/c/dev",
-			View: readmodel.WorkspaceViewState{
-				WorkspaceExpanded: true,
-				RoutesExpanded:    true,
-				ActivityExpanded:  true,
-			},
 			RunCommands: []readmodel.RunCommandReadModel{
 				{
 					ID:          "codex",

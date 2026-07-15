@@ -1,4 +1,4 @@
-package workspace
+package workspace_overview
 
 import (
 	"testing"
@@ -25,7 +25,7 @@ func TestSection_FocusableWorkspaceRowsActivateLocally(t *testing.T) {
 	}
 
 	activate(t, focusables[2])
-	if !section.OpenWorkspaceEdit.Get() {
+	if !section.WorkspaceEdit.Open.Get() {
 		t.Fatal("edit workspace row did not record local edit intent")
 	}
 }
@@ -54,9 +54,6 @@ func workspaceSectionModel() readmodel.WorkspaceReadModel {
 		Slug:          "dev",
 		State:         readmodel.WorkspaceExisting,
 		ClientBaseURL: "http://127.0.0.1:7926/c/dev",
-		View: readmodel.WorkspaceViewState{
-			WorkspaceExpanded: true,
-		},
 		RunCommands: []readmodel.RunCommandReadModel{{
 			ID:    "codex",
 			Label: "Codex",

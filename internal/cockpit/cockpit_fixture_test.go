@@ -10,7 +10,7 @@ import (
 )
 
 func TestFixture_DefaultWorkspace(t *testing.T) {
-	root := NewCockpit(DefaultFixtureReadModel()).Render(nil)
+	root := newFixtureCockpit(DefaultFixtureReadModel(), nil).Render(nil)
 	rendered := testkit.RenderTrimmed(root, 70, 20)
 	testkit.AssertVisual("default_workspace").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
 }
@@ -19,24 +19,24 @@ func TestFixture_StaticStates(t *testing.T) {
 	tests := []struct {
 		name   string
 		height int
-		model  readmodel.CockpitReadModel
+		view   *Cockpit
 	}{
-		{name: "route_focused", height: 22, model: routeFocusedFixtureReadModel()},
-		{name: "route_expanded", height: 34, model: routeExpandedFixtureReadModel()},
-		{name: "exceptional_routes", height: 24, model: exceptionalRoutesFixtureReadModel()},
-		{name: "activity_latest", height: 22, model: activityLatestFixtureReadModel(false, false)},
-		{name: "activity_error", height: 22, model: activityLatestFixtureReadModel(true, false)},
-		{name: "activity_expanded", height: 27, model: activityLatestFixtureReadModel(false, true)},
-		{name: "draft_workspace", height: 20, model: draftWorkspaceFixtureReadModel()},
-		{name: "help", height: 16, model: helpFixtureReadModel(readmodel.DiagnosticsReady)},
-		{name: "help_copied", height: 16, model: helpFixtureReadModel(readmodel.DiagnosticsCopied)},
-		{name: "delete_confirm", height: 22, model: deleteConfirmFixtureReadModel()},
-		{name: "all_collapsed", height: 16, model: collapsedFixtureReadModel()},
+		{name: "route_focused", height: 22, view: routeFocusedFixtureCockpit()},
+		{name: "route_expanded", height: 34, view: routeExpandedFixtureCockpit()},
+		{name: "exceptional_routes", height: 24, view: exceptionalRoutesFixtureCockpit()},
+		{name: "activity_latest", height: 22, view: activityLatestFixtureCockpit(false, false)},
+		{name: "activity_error", height: 22, view: activityLatestFixtureCockpit(true, false)},
+		{name: "activity_expanded", height: 27, view: activityLatestFixtureCockpit(false, true)},
+		{name: "draft_workspace", height: 20, view: draftWorkspaceFixtureCockpit()},
+		{name: "help", height: 16, view: helpFixtureCockpit(readmodel.DiagnosticsReady)},
+		{name: "help_copied", height: 16, view: helpFixtureCockpit(readmodel.DiagnosticsCopied)},
+		{name: "delete_confirm", height: 22, view: deleteConfirmFixtureCockpit()},
+		{name: "all_collapsed", height: 16, view: collapsedFixtureCockpit()},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := NewCockpit(tt.model).Render(nil)
+			root := tt.view.Render(nil)
 			rendered := testkit.RenderTrimmed(root, 70, tt.height)
 			testkit.AssertVisual(tt.name).
 				Fixture("testdata/cockpit_fixture__testfixture_staticstates/fixture/"+tt.name+".txt").
@@ -55,17 +55,25 @@ func trimRightLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func routeFocusedFixtureReadModel() readmodel.CockpitReadModel {
-	return DefaultFixtureReadModel()
+func newFixtureCockpit(model readmodel.CockpitReadModel, configure func(*Cockpit)) *Cockpit {
+	cockpit := NewCockpit(model)
+	if configure != nil {
+		configure(cockpit)
+	}
+	return cockpit
 }
 
-func routeExpandedFixtureReadModel() readmodel.CockpitReadModel {
-	model := DefaultFixtureReadModel()
-	model.SelectedWorkspace.View.ExpandedRouteID = "gpt"
-	return model
+func routeFocusedFixtureCockpit() *Cockpit {
+	return newFixtureCockpit(DefaultFixtureReadModel(), nil)
 }
 
-func exceptionalRoutesFixtureReadModel() readmodel.CockpitReadModel {
+func routeExpandedFixtureCockpit() *Cockpit {
+	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
+		c.WorkspacePage.RoutesSection.ExpandedRoute.Set("gpt")
+	})
+}
+
+func exceptionalRoutesFixtureCockpit() *Cockpit {
 	model := DefaultFixtureReadModel()
 	model.SelectedWorkspace.Routes = []readmodel.RouteReadModel{
 		model.SelectedWorkspace.Routes[0],
@@ -102,10 +110,10 @@ func exceptionalRoutesFixtureReadModel() readmodel.CockpitReadModel {
 			Enabled:   true,
 		},
 	}
-	return model
+	return newFixtureCockpit(model, nil)
 }
 
-func activityLatestFixtureReadModel(errorRow bool, expanded bool) readmodel.CockpitReadModel {
+func activityLatestFixtureCockpit(errorRow bool, expanded bool) *Cockpit {
 	model := DefaultFixtureReadModel()
 	row := readmodel.ActivityRowReadModel{
 		ID:           "req-1",
@@ -133,13 +141,14 @@ func activityLatestFixtureReadModel(errorRow bool, expanded bool) readmodel.Cock
 		row.Error = true
 	}
 	model.SelectedWorkspace.Activity = readmodel.ActivityReadModel{Latest: &row}
-	if expanded {
-		model.SelectedWorkspace.View.ExpandedActivityID = row.ID
-	}
-	return model
+	return newFixtureCockpit(model, func(c *Cockpit) {
+		if expanded {
+			c.WorkspacePage.ActivitySection.OpenActivity.Set(row.ID)
+		}
+	})
 }
 
-func draftWorkspaceFixtureReadModel() readmodel.CockpitReadModel {
+func draftWorkspaceFixtureCockpit() *Cockpit {
 	model := DefaultFixtureReadModel()
 	for i := range model.Tabs {
 		model.Tabs[i].Selected = model.Tabs[i].Kind == readmodel.WorkspaceTabDraft
@@ -148,37 +157,31 @@ func draftWorkspaceFixtureReadModel() readmodel.CockpitReadModel {
 	model.SelectedWorkspace = readmodel.WorkspaceReadModel{
 		ID:    "+",
 		State: readmodel.WorkspaceDraft,
-		View: readmodel.WorkspaceViewState{
-			WorkspaceExpanded: true,
-			RoutesExpanded:    true,
-			ActivityExpanded:  true,
-		},
 	}
-	return model
+	return newFixtureCockpit(model, nil)
 }
 
-func helpFixtureReadModel(status readmodel.DiagnosticsStatus) readmodel.CockpitReadModel {
+func helpFixtureCockpit(status readmodel.DiagnosticsStatus) *Cockpit {
 	model := DefaultFixtureReadModel()
 	for i := range model.Tabs {
 		model.Tabs[i].Selected = model.Tabs[i].Kind == readmodel.WorkspaceTabHelp
 	}
 	model.SelectedWorkspaceID = "?"
-	model.Surface = readmodel.CockpitHelpSurface
+	model.ActivePage = readmodel.CockpitHelpPage
 	model.Help.DiagnosticsStatus = status
-	return model
+	return newFixtureCockpit(model, nil)
 }
 
-func deleteConfirmFixtureReadModel() readmodel.CockpitReadModel {
-	model := DefaultFixtureReadModel()
-	model.SelectedWorkspace.View.DeleteWorkspaceConfirm = true
-	model.SelectedWorkspace.View.WorkspaceConfirmationID = "dev"
-	return model
+func deleteConfirmFixtureCockpit() *Cockpit {
+	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
+		c.WorkspacePage.OverviewSection.DeleteConfirmation.Request("dev")
+	})
 }
 
-func collapsedFixtureReadModel() readmodel.CockpitReadModel {
-	model := DefaultFixtureReadModel()
-	model.SelectedWorkspace.View.WorkspaceSummaryOnly = true
-	model.SelectedWorkspace.View.RoutesExpanded = false
-	model.SelectedWorkspace.View.ActivityExpanded = false
-	return model
+func collapsedFixtureCockpit() *Cockpit {
+	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
+		c.WorkspacePage.OverviewSection.SummaryOnly.Set(true)
+		c.WorkspacePage.RoutesSection.Expanded.Set(false)
+		c.WorkspacePage.ActivitySection.Expanded.Set(false)
+	})
 }

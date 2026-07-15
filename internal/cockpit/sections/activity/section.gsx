@@ -9,12 +9,14 @@ import (
 
 type SectionView struct {
 	Workspace    readmodel.WorkspaceReadModel
+	Expanded     *tui.State[bool]
 	OpenActivity *tui.State[readmodel.ActivityID]
 }
 
 func Section(workspace readmodel.WorkspaceReadModel) *SectionView {
 	return &SectionView{
 		Workspace:    workspace,
+		Expanded:     tui.NewState(true),
 		OpenActivity: tui.NewState(readmodel.ActivityID("")),
 	}
 }
@@ -23,13 +25,21 @@ func (s *SectionView) openActivity(row readmodel.ActivityRowReadModel) {
 	s.OpenActivity.Set(row.ID)
 }
 
+func (s *SectionView) Back() bool {
+	if s.OpenActivity.Get() != "" {
+		s.OpenActivity.Set("")
+		return true
+	}
+	return false
+}
+
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		@SectionHeader("activity", s.Workspace.View.ActivityExpanded)
-		if s.Workspace.View.ActivityExpanded {
+		@SectionHeader("activity", s.Expanded.Get())
+		if s.Expanded.Get() {
 			if latest, ok := s.Workspace.Activity.LatestRow(); ok {
 				@FocusableRow("latest", latest.RowValue(), activityAction(latest), func() { s.openActivity(latest) })
-				if s.Workspace.View.ExpandedActivityID == latest.ID {
+				if s.OpenActivity.Get() == latest.ID {
 					@DetailRow("resolved", latest.ResolvedName)
 					@DetailRow("model", latest.Model)
 					for i, attempt := range latest.Attempts {

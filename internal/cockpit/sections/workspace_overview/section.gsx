@@ -1,23 +1,31 @@
-package workspace
+package workspace_overview
 
 import (
 	tui "github.com/grindlemire/go-tui"
+	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
+	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 )
 
 type SectionView struct {
 	Model               readmodel.WorkspaceReadModel
+	Expanded            *tui.State[bool]
+	SummaryOnly         *tui.State[bool]
 	CopiedClientBaseURL *tui.State[bool]
 	OpenRun            *tui.State[readmodel.RunCommandID]
-	OpenWorkspaceEdit  *tui.State[bool]
+	WorkspaceEdit      *workspace_edit.Workflow
+	DeleteConfirmation *workspace_delete.ConfirmationView
 }
 
 func Section(model readmodel.WorkspaceReadModel) *SectionView {
 	return &SectionView{
 		Model:               model,
+		Expanded:            tui.NewState(true),
+		SummaryOnly:         tui.NewState(false),
 		CopiedClientBaseURL: tui.NewState(false),
 		OpenRun:            tui.NewState(readmodel.RunCommandID("")),
-		OpenWorkspaceEdit:  tui.NewState(false),
+		WorkspaceEdit:      workspace_edit.NewWorkflow(),
+		DeleteConfirmation: workspace_delete.Confirmation(model),
 	}
 }
 
@@ -30,26 +38,35 @@ func (s *SectionView) openRun(command readmodel.RunCommandReadModel) {
 }
 
 func (s *SectionView) openWorkspaceEdit() {
-	s.OpenWorkspaceEdit.Set(true)
+	s.WorkspaceEdit.OpenEditor()
+}
+
+func (s *SectionView) Back() bool {
+	if s.DeleteConfirmation.Back() {
+		return true
+	}
+	if s.WorkspaceEdit.Open.Get() {
+		s.WorkspaceEdit.Open.Set(false)
+		return true
+	}
+	return false
 }
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		@SectionHeader("workspace", s.Model.View.WorkspaceExpanded)
-		if s.Model.View.WorkspaceExpanded {
+		@SectionHeader("workspace", s.Expanded.Get())
+		if s.Expanded.Get() {
 			if s.Model.IsDraft() {
 				@FocusableRow("slug", "", "create ↵", func() {})
 				@InertRow("client base URL", "(derived from slug)", "")
 			} else {
 				@FocusableRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
-				if !s.Model.View.WorkspaceSummaryOnly {
+				if !s.SummaryOnly.Get() {
 					if len(s.Model.RunCommands) > 0 {
 						@FocusableRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
 					}
 					@FocusableRow("edit workspace", "", "open ↵", s.openWorkspaceEdit)
-					if s.Model.View.DeleteWorkspaceConfirm {
-						@InertRow("delete workspace "+confirmationSlug(s.Model)+"?", "", "y/n")
-					}
+					@s.DeleteConfirmation
 				}
 			}
 		}
@@ -83,11 +100,4 @@ templ InertRow(label string, value string, action string) {
 		<span class="w-36">{value}</span>
 		<span>{action}</span>
 	</div>
-}
-
-func confirmationSlug(model readmodel.WorkspaceReadModel) string {
-	if model.View.WorkspaceConfirmationID != "" {
-		return string(model.View.WorkspaceConfirmationID)
-	}
-	return model.Slug
 }

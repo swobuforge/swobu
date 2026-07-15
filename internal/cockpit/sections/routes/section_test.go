@@ -15,8 +15,9 @@ func TestSection_FocusableRowsFollowExpansion(t *testing.T) {
 		t.Fatalf("collapsed focusables = %d, want %d", got, want)
 	}
 
-	model.View.ExpandedRouteID = "gpt"
-	expanded := Section(model).Render(nil)
+	section := Section(model)
+	section.ExpandedRoute.Set("gpt")
+	expanded := section.Render(nil)
 	if got, want := countFocusables(expanded), 5; got != want {
 		t.Fatalf("expanded focusables = %d, want %d", got, want)
 	}
@@ -92,7 +93,6 @@ func activate(t *testing.T, focusable tui.Focusable) {
 
 func routeSectionModel() readmodel.WorkspaceReadModel {
 	return readmodel.WorkspaceReadModel{
-		View: readmodel.WorkspaceViewState{RoutesExpanded: true},
 		Routes: []readmodel.RouteReadModel{
 			{
 				ID:        "gpt",

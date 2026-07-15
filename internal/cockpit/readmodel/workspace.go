@@ -5,7 +5,7 @@ type WorkspaceID string
 
 // WorkspaceReadModel is the shared screen snapshot for one Cockpit workspace.
 //
-// Workspace state is navigation/shared data owned by the workspace plane. It
+// Workspace state is product projection data rendered by the workspace page. It
 // includes only operator-facing projection fields; adapters translate concrete
 // config, daemon, and client-profile state into this shape.
 type WorkspaceReadModel struct {
@@ -16,22 +16,6 @@ type WorkspaceReadModel struct {
 	RunCommands   []RunCommandReadModel
 	Routes        []RouteReadModel
 	Activity      ActivityReadModel
-	View          WorkspaceViewState
-}
-
-// WorkspaceViewState is screen state for static section rendering.
-//
-// It belongs to the workspace plane, not a feature workflow: all fields describe
-// what is visible or focused in the current snapshot.
-type WorkspaceViewState struct {
-	WorkspaceExpanded       bool
-	WorkspaceSummaryOnly    bool
-	RoutesExpanded          bool
-	ActivityExpanded        bool
-	ExpandedRouteID         RouteID
-	ExpandedActivityID      ActivityID
-	DeleteWorkspaceConfirm  bool
-	WorkspaceConfirmationID WorkspaceID
 }
 
 // WorkspaceTabReadModel is the tab-rail projection for an existing, draft, or

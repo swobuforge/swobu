@@ -3,28 +3,28 @@ package cockpit
 import (
 	tui "github.com/grindlemire/go-tui"
 
+	help_page "github.com/swobuforge/swobu/internal/cockpit/pages/help"
+	workspace_page "github.com/swobuforge/swobu/internal/cockpit/pages/workspace"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	help_surface "github.com/swobuforge/swobu/internal/cockpit/surfaces/help"
-	workspace_plane "github.com/swobuforge/swobu/internal/cockpit/surfaces/workspace_plane"
 )
 
-// Cockpit composes the operator shell, active surface, and static global frame.
+// Cockpit composes the operator shell, active page, and static global frame.
 //
 // It owns shell composition and selected top-level readmodel data. It does not
 // own feature drafts, submit lifecycle, route mutation, target mutation, or run
 // execution.
 type Cockpit struct {
-	Model          readmodel.CockpitReadModel
-	WorkspacePlane *workspace_plane.ViewModel
-	HelpSurface    *help_surface.ViewView
+	Model         readmodel.CockpitReadModel
+	WorkspacePage *workspace_page.PageView
+	HelpPage      *help_page.ViewView
 }
 
 // NewCockpit constructs the root shell from an already-loaded readmodel.
 func NewCockpit(model readmodel.CockpitReadModel) *Cockpit {
 	return &Cockpit{
-		Model:          model,
-		WorkspacePlane: workspace_plane.View(model.SelectedWorkspace),
-		HelpSurface:    help_surface.View(model.Help),
+		Model:         model,
+		WorkspacePage: workspace_page.Page(model.SelectedWorkspace),
+		HelpPage:      help_page.View(model.Help),
 	}
 }
 
@@ -32,10 +32,10 @@ templ (c *Cockpit) Render() {
 	<div class="flex-col h-full w-full">
 		@ShellHeader(c.Model)
 		<hr />
-		if c.Model.Surface == readmodel.CockpitHelpSurface {
-			@c.HelpSurface
+		if c.Model.ActivePage == readmodel.CockpitHelpPage {
+			@c.HelpPage
 		} else {
-			@c.WorkspacePlane
+			@c.WorkspacePage
 		}
 		<hr />
 		@ShellFooter(c.Model)
@@ -59,7 +59,7 @@ templ ShellHeader(model readmodel.CockpitReadModel) {
 }
 
 templ ShellFooter(model readmodel.CockpitReadModel) {
-	if model.Surface == readmodel.CockpitHelpSurface {
+	if model.ActivePage == readmodel.CockpitHelpPage {
 		<div class="flex-row gap-3">
 			<span>↑↓ move</span>
 			<span>↵ open/copy</span>
