@@ -4,6 +4,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 )
 
@@ -18,14 +19,44 @@ type SectionView struct {
 }
 
 func Section(model readmodel.WorkspaceReadModel) *SectionView {
-	return &SectionView{
+	return SectionWithWorkspaceCommands(model, nil)
+}
+
+func SectionWithWorkspaceCommands(model readmodel.WorkspaceReadModel, commands ports.WorkspaceCommands) *SectionView {
+	section := &SectionView{
 		Model:               model,
 		Expanded:            tui.NewState(true),
 		SummaryOnly:         tui.NewState(false),
 		CopiedClientBaseURL: tui.NewState(false),
 		OpenRun:            tui.NewState(readmodel.RunCommandID("")),
-		WorkspaceEdit:      workspace_edit.NewWorkflow(),
-		DeleteConfirmation: workspace_delete.Confirmation(model),
+	}
+	section.WorkspaceEdit = workspace_edit.NewWorkflow(model, saveWorkspace(commands), section.workspaceSaved)
+	section.DeleteConfirmation = workspace_delete.Confirmation(model, deleteWorkspace(commands), section.workspaceDeleted)
+	return section
+}
+
+func saveWorkspace(commands ports.WorkspaceCommands) workspace_edit.SaveFunc {
+	if commands == nil {
+		return nil
+	}
+	return commands.SaveWorkspace
+}
+
+func deleteWorkspace(commands ports.WorkspaceCommands) workspace_delete.DeleteFunc {
+	if commands == nil {
+		return nil
+	}
+	return commands.DeleteWorkspace
+}
+
+func (s *SectionView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
+	s.Model = workspace
+	s.DeleteConfirmation.Workspace = workspace
+}
+
+func (s *SectionView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
+	if workspaceID == s.Model.ID {
+		s.SummaryOnly.Set(true)
 	}
 }
 
@@ -37,16 +68,11 @@ func (s *SectionView) openRun(command readmodel.RunCommandReadModel) {
 	s.OpenRun.Set(command.ID)
 }
 
-func (s *SectionView) openWorkspaceEdit() {
-	s.WorkspaceEdit.OpenEditor()
-}
-
 func (s *SectionView) Back() bool {
 	if s.DeleteConfirmation.Back() {
 		return true
 	}
-	if s.WorkspaceEdit.Open.Get() {
-		s.WorkspaceEdit.Open.Set(false)
+	if s.WorkspaceEdit.Back() {
 		return true
 	}
 	return false
@@ -56,16 +82,15 @@ templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@SectionHeader("workspace", s.Expanded.Get())
 		if s.Expanded.Get() {
+			@s.WorkspaceEdit
 			if s.Model.IsDraft() {
-				@FocusableRow("slug", "", "create ↵", func() {})
-				@InertRow("client base URL", "(derived from slug)", "")
+				@InertRow("client base URL", s.WorkspaceEdit.ClientBaseURLPreview(), "")
 			} else {
 				@FocusableRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
 				if !s.SummaryOnly.Get() {
 					if len(s.Model.RunCommands) > 0 {
 						@FocusableRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
 					}
-					@FocusableRow("edit workspace", "", "open ↵", s.openWorkspaceEdit)
 					@s.DeleteConfirmation
 				}
 			}

@@ -1,7 +1,7 @@
 SWOBU    [dev] [lab] [› +] [?]                                   local
 ──────────────────────────────────────────────────────────────────────
   workspace ▾
-     slug                                                  create ↵
+     slug              _                             create ↵
      client base URL   (derived from slug)
 
   routes ▾

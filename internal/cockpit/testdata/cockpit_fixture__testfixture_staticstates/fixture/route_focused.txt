@@ -1,9 +1,10 @@
 SWOBU    [› dev] [lab] [+] [?]                                   local
 ──────────────────────────────────────────────────────────────────────
   workspace ▾
+     slug              dev                           edit ↵
      client base URL   http://127.0.0.1:7926/c/dev         copy ↵
      run once          Codex                               open ↵
-     edit workspace                                        open ↵
+     delete            workspace                           delete ↵
 
   routes ▾
      gpt               default · 2 targets                 expand ↵
@@ -16,6 +17,5 @@ SWOBU    [› dev] [lab] [+] [?]                                   local
 
 ──────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   ? help   esc back
-
 
 

@@ -28,12 +28,12 @@ func TestPage_KeyMapOwnsSurfaceNavigationOnly(t *testing.T) {
 
 func TestPage_FocusableGraphFollowsExpandedRoute(t *testing.T) {
 	view := Page(workspacePageModel())
-	if got, want := countFocusables(view.Render(nil)), 5; got != want {
+	if got, want := countFocusables(view.Render(nil)), 6; got != want {
 		t.Fatalf("collapsed workspace focusables = %d, want %d", got, want)
 	}
 
 	view.RoutesSection.ExpandedRoute.Set("gpt")
-	if got, want := countFocusables(view.Render(nil)), 8; got != want {
+	if got, want := countFocusables(view.Render(nil)), 9; got != want {
 		t.Fatalf("expanded workspace focusables = %d, want %d", got, want)
 	}
 }
@@ -42,23 +42,23 @@ func TestPage_ActivationWalksExpandedRouteChildrenInRenderOrder(t *testing.T) {
 	view := Page(workspacePageModel())
 	focusables := collectFocusables(view.Render(nil))
 
-	activate(t, focusables[3])
+	activate(t, focusables[4])
 	if got := view.RoutesSection.ExpandedRoute.Get(); got != "gpt" {
 		t.Fatalf("expanded route = %q, want gpt", got)
 	}
 
 	focusables = collectFocusables(view.Render(nil))
-	activate(t, focusables[4])
+	activate(t, focusables[5])
 	if got := view.RoutesSection.OpenTarget.Get(); got != "target-1" {
 		t.Fatalf("opened first target = %q, want target-1", got)
 	}
 
-	activate(t, focusables[5])
+	activate(t, focusables[6])
 	if got := view.RoutesSection.OpenTarget.Get(); got != "target-2" {
 		t.Fatalf("opened second target = %q, want target-2", got)
 	}
 
-	activate(t, focusables[7])
+	activate(t, focusables[8])
 	if got := view.RoutesSection.ExpandedRoute.Get(); got != "local" {
 		t.Fatalf("next route expansion = %q, want local", got)
 	}
@@ -89,7 +89,7 @@ func TestPage_BackClosesWorkspaceDeleteConfirmationBeforeRoutes(t *testing.T) {
 	view.RoutesSection.ExpandedRoute.Set("gpt")
 
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if view.OverviewSection.DeleteConfirmation.Open.Get() {
+	if view.OverviewSection.DeleteConfirmation.IsOpen() {
 		t.Fatal("delete confirmation should close on first Esc")
 	}
 	if got := view.RoutesSection.ExpandedRoute.Get(); got != "gpt" {

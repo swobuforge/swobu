@@ -10,23 +10,28 @@ import (
 func TestSection_FocusableWorkspaceRowsActivateLocally(t *testing.T) {
 	section := Section(workspaceSectionModel())
 	focusables := collectFocusables(section.Render(nil))
-	if got, want := len(focusables), 3; got != want {
+	if got, want := len(focusables), 4; got != want {
 		t.Fatalf("workspace focusables = %d, want %d", got, want)
 	}
 
 	activate(t, focusables[0])
+	if !section.WorkspaceEdit.IsEditing() {
+		t.Fatal("slug row did not enter editing state")
+	}
+
+	activate(t, focusables[1])
 	if !section.CopiedClientBaseURL.Get() {
 		t.Fatal("copy row did not record local copy intent")
 	}
 
-	activate(t, focusables[1])
+	activate(t, focusables[2])
 	if got, want := section.OpenRun.Get(), readmodel.RunCommandID("codex"); got != want {
 		t.Fatalf("open run = %q, want %q", got, want)
 	}
 
-	activate(t, focusables[2])
-	if !section.WorkspaceEdit.Open.Get() {
-		t.Fatal("edit workspace row did not record local edit intent")
+	activate(t, focusables[3])
+	if !section.DeleteConfirmation.IsOpen() {
+		t.Fatal("delete row did not enter confirmation state")
 	}
 }
 

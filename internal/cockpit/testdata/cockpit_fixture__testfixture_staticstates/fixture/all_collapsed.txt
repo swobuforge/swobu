@@ -1,6 +1,7 @@
 SWOBU    [› dev] [lab] [+] [?]                                   local
 ──────────────────────────────────────────────────────────────────────
   workspace ▾
+     slug              dev                           edit ↵
      client base URL   http://127.0.0.1:7926/c/dev         copy ↵
 
   routes ▸
@@ -10,6 +11,5 @@ SWOBU    [› dev] [lab] [+] [?]                                   local
 
 ──────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   ? help   esc back
-
 
 
