@@ -118,7 +118,7 @@ templ (s *SectionView) Render() {
 
 templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
 	<div class="flex-col w-full">
-		<div class="flex-row w-full focusable" onActivate={workflow.Activate}>
+		<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={workflow.Activate}>
 			<span class="w-5"></span>
 			<span class="w-18">slug</span>
 			<span class="w-30">{workflow.ValueLabel()}</span>
@@ -135,7 +135,7 @@ templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
 
 templ DeleteConfirmationPreview(confirmation *workspace_delete.ConfirmationView) {
 	<div class="flex-col w-full">
-		<div class="flex-row w-full focusable" onActivate={confirmation.Activate}>
+		<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={confirmation.Activate}>
 			<span class="w-5"></span>
 			<span class="w-18">delete</span>
 			<span class="w-36">{confirmation.RowValue()}</span>
@@ -174,7 +174,7 @@ templ SectionHeader(label string, expanded bool) {
 }
 
 templ FocusableRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full focusable" onActivate={activate}>
+	<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={activate}>
 		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
@@ -189,4 +189,20 @@ templ InertRow(label string, value string, action string) {
 		<span class="w-36">{value}</span>
 		<span>{action}</span>
 	</div>
+}
+
+func focusRowMarker(row *tui.Element) {
+	setRowMarker(row, ">")
+}
+
+func blurRowMarker(row *tui.Element) {
+	setRowMarker(row, "")
+}
+
+func setRowMarker(row *tui.Element, marker string) {
+	children := row.Children()
+	if len(children) == 0 {
+		return
+	}
+	children[0].SetText(marker)
 }

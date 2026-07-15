@@ -275,7 +275,6 @@ func TestLiveOperatorAdapter_SaveWorkspaceRejectsRename(t *testing.T) {
 	}
 }
 
-
 func TestLiveOperatorAdapter_SaveRouteRenamesExistingModelAndCanSelectDefault(t *testing.T) {
 	t.Parallel()
 

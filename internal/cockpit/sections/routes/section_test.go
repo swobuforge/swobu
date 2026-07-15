@@ -40,6 +40,20 @@ func TestRouteParentRow_ActivationTogglesExpansion(t *testing.T) {
 	}
 }
 
+func TestFocusableRow_FocusUpdatesVisibleMarker(t *testing.T) {
+	row := collectFocusables(FocusableRow("gpt", "default · 1 target", "expand ↵", func() {}).Root)[0].(*tui.Element)
+
+	row.Focus()
+	if got, want := row.Children()[0].Text(), ">"; got != want {
+		t.Fatalf("focused marker = %q, want %q", got, want)
+	}
+
+	row.Blur()
+	if got := row.Children()[0].Text(); got != "" {
+		t.Fatalf("blurred marker = %q, want empty", got)
+	}
+}
+
 func TestTargetChildRow_ActivationOpensTargetWithoutCollapsingParent(t *testing.T) {
 	section := Section(routeSectionModel())
 	route := section.Model.Routes[0]

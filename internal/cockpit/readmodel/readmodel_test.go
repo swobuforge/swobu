@@ -138,6 +138,23 @@ func TestWorkspaceReadModel_RepresentsDefaultAndDraft(t *testing.T) {
 	}
 }
 
+func TestNoticeVisibleAndEmpty(t *testing.T) {
+	if !(Notice{}).IsEmpty() {
+		t.Fatal("zero notice should be empty")
+	}
+	if (Notice{}).Visible() {
+		t.Fatal("zero notice should not be visible")
+	}
+
+	notice := Notice{Kind: NoticeStale, Message: "refresh stale: saved workspace shown; daemon offline"}
+	if notice.IsEmpty() {
+		t.Fatal("stale notice with copy should not be empty")
+	}
+	if !notice.Visible() {
+		t.Fatal("stale notice with copy should be visible")
+	}
+}
+
 func TestRunCommandReadModel_Disclosure(t *testing.T) {
 	command := RunCommandReadModel{
 		CommandName:   "codex",

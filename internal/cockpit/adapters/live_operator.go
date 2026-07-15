@@ -153,7 +153,6 @@ func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.S
 	return workspace, nil
 }
 
-
 // DeleteWorkspace removes one daemon endpoint.
 func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports.DeleteWorkspaceRequest) error {
 	if err := a.client.DeleteEndpoint(ctx, string(request.ID)); err != nil {
@@ -162,7 +161,11 @@ func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports
 	return nil
 }
 
-// SaveRoute updates a route model across its provider configs.
+// SaveRoute renames the projected route group backed by matching provider
+// configs. The daemon does not have a first-class route record yet: Cockpit
+// groups provider configs by client-visible model name and rewrites that group
+// in place. Creating an empty route, persisting an enabled flag, or changing
+// routing policy without targets is therefore not representable here yet.
 func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
 	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
 	if err != nil {
@@ -179,7 +182,7 @@ func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveR
 	var selectedRef string
 	changed := false
 	for i := range endpoint.ProviderConfigs {
-		if configRouteModel(endpoint.ProviderConfigs[i]) != routeID {
+		if projectedRouteModel(endpoint.ProviderConfigs[i]) != routeID {
 			continue
 		}
 		endpoint.ProviderConfigs[i].ModelID = modelName
@@ -200,7 +203,7 @@ func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveR
 	return routeFromEndpoint(endpoint, modelName)
 }
 
-// DeleteRoute removes a route model from the provider configs.
+// DeleteRoute removes one projected route group from the provider configs.
 func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.DeleteRouteRequest) error {
 	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
 	if err != nil {
@@ -211,7 +214,7 @@ func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.Del
 	removedSelected := false
 	removed := false
 	for _, config := range endpoint.ProviderConfigs {
-		if configRouteModel(config) != routeID {
+		if projectedRouteModel(config) != routeID {
 			next = append(next, config)
 			continue
 		}

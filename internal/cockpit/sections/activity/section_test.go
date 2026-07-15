@@ -21,6 +21,20 @@ func TestSection_FocusableActivityRowActivatesLocally(t *testing.T) {
 	}
 }
 
+func TestFocusableRow_FocusUpdatesVisibleMarker(t *testing.T) {
+	row := collectFocusables(FocusableRow("latest", "codex -> gpt", "", func() {}).Root)[0].(*tui.Element)
+
+	row.Focus()
+	if got, want := row.Children()[0].Text(), ">"; got != want {
+		t.Fatalf("focused marker = %q, want %q", got, want)
+	}
+
+	row.Blur()
+	if got := row.Children()[0].Text(); got != "" {
+		t.Fatalf("blurred marker = %q, want empty", got)
+	}
+}
+
 func collectFocusables(root *tui.Element) []tui.Focusable {
 	var focusables []tui.Focusable
 	root.WalkFocusables(func(f tui.Focusable) {

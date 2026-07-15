@@ -132,6 +132,7 @@ func TestCockpit_WorkspaceSaveRefreshesAndSelectsSavedWorkspace(t *testing.T) {
 	cockpit.WorkspacePage.OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
 
 	assertActiveTab(t, cockpit, "prod", readmodel.CockpitWorkspacePage)
+	assertNoRefreshNotice(t, cockpit)
 	assertRenderContains(t, cockpit, "[› prod]", "http://127.0.0.1:7926/c/prod", "gpt-4.1")
 	if fake.loadCockpitCalls != 1 || fake.loadWorkspaceCalls != 1 {
 		t.Fatalf("refresh calls = cockpit %d workspace %d, want 1/1", fake.loadCockpitCalls, fake.loadWorkspaceCalls)
@@ -193,6 +194,7 @@ func TestCockpit_WorkspaceSaveRefreshFailureShowsStaleNotice(t *testing.T) {
 	})
 
 	assertActiveTab(t, cockpit, "prod", readmodel.CockpitWorkspacePage)
+	assertRefreshNotice(t, cockpit, readmodel.NoticeStale, "refresh stale: saved workspace shown; daemon offline")
 	assertRenderContains(t, cockpit, "refresh stale: saved workspace shown; daemon offline")
 }
 
@@ -221,6 +223,7 @@ func TestCockpit_WorkspaceSaveRefreshLoadWorkspaceFailureUsesSavedModelAndShowsN
 	})
 
 	assertActiveTab(t, cockpit, "prod", readmodel.CockpitWorkspacePage)
+	assertRefreshNotice(t, cockpit, readmodel.NoticeStale, "refresh stale: saved workspace shown; workspace stale")
 	assertRenderContains(t, cockpit, "refresh stale: saved workspace shown; workspace stale", "http://127.0.0.1:7926/c/prod")
 }
 
@@ -248,6 +251,7 @@ func TestCockpit_WorkspaceDeleteRefreshesAndSelectsRemainingWorkspace(t *testing
 	cockpit.WorkspacePage.OnWorkspaceDeleted("dev")
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
+	assertNoRefreshNotice(t, cockpit)
 	assertRenderContains(t, cockpit, "[› lab]", "http://127.0.0.1:7926/c/lab")
 	if fake.loadCockpitCalls != 1 {
 		t.Fatalf("refresh calls = %d, want 1", fake.loadCockpitCalls)
@@ -314,6 +318,7 @@ func TestCockpit_WorkspaceDeleteRefreshFailureHidesDeletedWorkspace(t *testing.T
 	cockpit.WorkspacePage.OnWorkspaceDeleted("dev")
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
+	assertRefreshNotice(t, cockpit, readmodel.NoticeStale, "refresh stale: deleted workspace hidden; daemon offline")
 	assertRenderContains(t, cockpit, "refresh stale: deleted workspace hidden; daemon offline", "[› lab]")
 	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
 	if strings.Contains(got, "[dev]") || strings.Contains(got, "[› dev]") {
@@ -448,6 +453,27 @@ func assertRenderContains(t *testing.T, cockpit *Cockpit, values ...string) {
 		if !strings.Contains(got, value) {
 			t.Fatalf("render should contain %q:\n%s", value, got)
 		}
+	}
+}
+
+func assertRefreshNotice(t *testing.T, cockpit *Cockpit, kind readmodel.NoticeKind, message string) {
+	t.Helper()
+	if cockpit.RefreshNotice == nil {
+		t.Fatal("refresh notice state is nil")
+	}
+	got := cockpit.RefreshNotice.Get()
+	if got.Kind != kind || got.Message != message {
+		t.Fatalf("refresh notice = %#v, want kind %v message %q", got, kind, message)
+	}
+}
+
+func assertNoRefreshNotice(t *testing.T, cockpit *Cockpit) {
+	t.Helper()
+	if cockpit.RefreshNotice == nil {
+		t.Fatal("refresh notice state is nil")
+	}
+	if got := cockpit.RefreshNotice.Get(); !got.IsEmpty() {
+		t.Fatalf("refresh notice = %#v, want empty", got)
 	}
 }
 

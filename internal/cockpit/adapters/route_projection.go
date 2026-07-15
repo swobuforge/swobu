@@ -13,6 +13,11 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 )
 
+// routesFromEndpoint projects daemon provider configs into Cockpit route rows.
+//
+// This is not a daemon route entity. A Cockpit route is the group of provider
+// configs that share the same client-visible model name; mutations against a
+// route rewrite or remove the configs in that projected group.
 func routesFromEndpoint(endpoint operatorclient.EndpointData) []readmodel.RouteReadModel {
 	groups := map[string][]operatorclient.ProviderConfigData{}
 	for _, target := range endpoint.ProviderConfigs {
@@ -54,7 +59,9 @@ func routeFromEndpoint(endpoint operatorclient.EndpointData, modelName string) (
 	return readmodel.RouteReadModel{}, errors.New("route could not be resolved after save")
 }
 
-func configRouteModel(config operatorclient.ProviderConfigData) string {
+// projectedRouteModel returns the client-visible model name used to group one
+// provider config into a Cockpit route projection.
+func projectedRouteModel(config operatorclient.ProviderConfigData) string {
 	modelName := strings.TrimSpace(config.ModelID) // swobu:io-string source=boundary
 	if modelName == "" {
 		return exchange.PublicModelIDSwobu

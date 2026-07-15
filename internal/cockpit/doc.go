@@ -1,9 +1,10 @@
 // Package cockpit is the active operator-facing TUI surface for Swobu.
 //
 // It is the canonical go-tui interactive entrypoint. It owns active tab
-// product state, route and target inspection, inline editing workflows, and
-// activity review. It does not own daemon lifecycle commands, telemetry
-// disclosure, transcript-mode output, or framework focus state.
+// product state, route and target inspection, inline editing workflows,
+// activity review, and root-shell notices. It does not own daemon lifecycle
+// commands, telemetry disclosure, transcript-mode output, or framework focus
+// state.
 //
 // Topology: readmodel, ports, adapters, pages, sections, features, ui, design,
 // and testkit.

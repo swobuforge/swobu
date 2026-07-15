@@ -70,7 +70,7 @@ templ SectionHeader(label string, expanded bool) {
 }
 
 templ FocusableRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full focusable" onActivate={activate}>
+	<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={activate}>
 		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
@@ -93,6 +93,22 @@ templ DetailRow(label string, value string) {
 		<span class="w-15">{label}</span>
 		<span>{value}</span>
 	</div>
+}
+
+func focusRowMarker(row *tui.Element) {
+	setRowMarker(row, ">")
+}
+
+func blurRowMarker(row *tui.Element) {
+	setRowMarker(row, "")
+}
+
+func setRowMarker(row *tui.Element, marker string) {
+	children := row.Children()
+	if len(children) == 0 {
+		return
+	}
+	children[0].SetText(marker)
 }
 
 func activityAction(row readmodel.ActivityRowReadModel) string {

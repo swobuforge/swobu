@@ -69,12 +69,12 @@ templ (s *SectionView) Render() {
 				@InertRow("(no routes)", "", "")
 			} else {
 				for _, route := range s.Model.Routes {
-					@FocusableRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), false, func() { s.toggleRoute(route) })
+					@FocusableRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), func() { s.toggleRoute(route) })
 					if s.isExpanded(route) {
 						for _, target := range route.Targets {
-							@FocusableRow("target "+targetRankLabel(target), targetValue(target), "open ↵", false, func() { s.openTarget(target) })
+							@FocusableRow("target "+targetRankLabel(target), targetValue(target), "open ↵", func() { s.openTarget(target) })
 						}
-						@FocusableRow("add target", "", "add ↵", false, func() { s.addTarget(route) })
+						@FocusableRow("add target", "", "add ↵", func() { s.addTarget(route) })
 					}
 				}
 				@InertRow("add route", "", "add ↵")
@@ -94,9 +94,9 @@ templ SectionHeader(label string, expanded bool) {
 	</div>
 }
 
-templ FocusableRow(label string, value string, action string, focused bool, activate func()) {
-	<div class="flex-row w-full focusable" onActivate={activate}>
-		<span class="w-5">{focusMarker(focused)}</span>
+templ FocusableRow(label string, value string, action string, activate func()) {
+	<div class="flex-row w-full" onFocus={focusRowMarker} onBlur={blurRowMarker} onActivate={activate}>
+		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
 		<span>{action}</span>
@@ -126,13 +126,6 @@ func routeActionLabel(open bool) string {
 	return "expand ↵"
 }
 
-func focusMarker(focused bool) string {
-	if focused {
-		return ">"
-	}
-	return ""
-}
-
 func targetValue(target readmodel.TargetReadModel) string {
 	if target.Provider == "" {
 		return target.Model
@@ -141,4 +134,20 @@ func targetValue(target readmodel.TargetReadModel) string {
 		return target.Provider
 	}
 	return target.Provider + "/" + target.Model
+}
+
+func focusRowMarker(row *tui.Element) {
+	setRowMarker(row, ">")
+}
+
+func blurRowMarker(row *tui.Element) {
+	setRowMarker(row, "")
+}
+
+func setRowMarker(row *tui.Element, marker string) {
+	children := row.Children()
+	if len(children) == 0 {
+		return
+	}
+	children[0].SetText(marker)
 }

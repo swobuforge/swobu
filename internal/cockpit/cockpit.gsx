@@ -23,7 +23,7 @@ type Cockpit struct {
 	Ctx            context.Context
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]
-	RefreshNotice  *tui.State[string]
+	RefreshNotice  *tui.State[readmodel.Notice]
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
 	WorkspacePage  *workspace_page.PageView
 	HelpPage       *help_page.ViewView
@@ -49,7 +49,7 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 		Ctx:            ctx,
 		Model:          model,
 		ActiveTabIndex: tui.NewState(activeTab),
-		RefreshNotice:  tui.NewState(""),
+		RefreshNotice:  tui.NewState(readmodel.Notice{}),
 		HelpPage:       help_page.View(model.Help),
 		WorkspacePorts: commands,
 		WorkspaceQuery: query,
@@ -149,14 +149,14 @@ func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) 
 			workspace, workspaceErr := c.WorkspaceQuery.LoadWorkspace(ctx, saved.ID)
 			if workspaceErr != nil {
 				workspace = saved
-				c.RefreshNotice.Set("refresh stale: saved workspace shown; " + workspaceErr.Error())
+				c.RefreshNotice.Set(staleRefreshNotice("refresh stale: saved workspace shown; " + workspaceErr.Error()))
 			} else {
-				c.RefreshNotice.Set("")
+				c.RefreshNotice.Set(readmodel.Notice{})
 			}
 			c.replaceModel(selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID))
 			return
 		} else {
-			c.RefreshNotice.Set("refresh stale: saved workspace shown; " + err.Error())
+			c.RefreshNotice.Set(staleRefreshNotice("refresh stale: saved workspace shown; " + err.Error()))
 		}
 	}
 	c.replaceModel(selectWorkspace(updateWorkspaceInModel(c.Model, saved), saved.ID))
@@ -167,11 +167,11 @@ func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
 		ctx, cancel := c.refreshContext()
 		defer cancel()
 		if fresh, err := c.WorkspaceQuery.LoadCockpit(ctx); err == nil {
-			c.RefreshNotice.Set("")
+			c.RefreshNotice.Set(readmodel.Notice{})
 			c.replaceModel(removeWorkspaceFromModel(fresh, deleted))
 			return
 		} else {
-			c.RefreshNotice.Set("refresh stale: deleted workspace hidden; " + err.Error())
+			c.RefreshNotice.Set(staleRefreshNotice("refresh stale: deleted workspace hidden; " + err.Error()))
 		}
 	}
 	c.replaceModel(removeWorkspaceFromModel(c.Model, deleted))
@@ -216,7 +216,7 @@ func (c *Cockpit) preserveDraftWorkspacePages(previous map[readmodel.WorkspaceID
 templ (c *Cockpit) Render() {
 	<div class="flex-col h-full w-full" deps={c.ActiveTabIndex, c.RefreshNotice}>
 		@ShellHeader(c.activeModel())
-		if c.RefreshNotice.Get() != "" {
+		if c.RefreshNotice.Get().Visible() {
 			@RefreshNotice(c.RefreshNotice.Get())
 		}
 		<hr />
@@ -230,10 +230,14 @@ templ (c *Cockpit) Render() {
 	</div>
 }
 
-templ RefreshNotice(message string) {
+templ RefreshNotice(notice readmodel.Notice) {
 	<div class="flex-row w-full">
-		<span>{message}</span>
+		<span>{notice.Message}</span>
 	</div>
+}
+
+func staleRefreshNotice(message string) readmodel.Notice {
+	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
 }
 
 templ ShellHeader(model readmodel.CockpitReadModel) {
