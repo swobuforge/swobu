@@ -53,6 +53,15 @@ func (c *ConfirmationView) Back() bool {
 	return true
 }
 
+func (c *ConfirmationView) KeyMap() tui.KeyMap {
+	if !c.IsOpen() {
+		return nil
+	}
+	return tui.KeyMap{
+		tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { c.Back() }),
+	}
+}
+
 func (c *ConfirmationView) Confirm(ctx context.Context) {
 	if !c.IsOpen() {
 		return
@@ -104,14 +113,14 @@ func (c *ConfirmationView) confirmationSlug() string {
 	return c.Workspace.Slug
 }
 
-func (c *ConfirmationView) rowValue() string {
+func (c *ConfirmationView) RowValue() string {
 	if c.IsOpen() {
 		return "delete " + c.confirmationSlug() + "?"
 	}
 	return "workspace"
 }
 
-func (c *ConfirmationView) actionLabel() string {
+func (c *ConfirmationView) ActionLabel() string {
 	if c.IsOpen() {
 		return "confirm ↵"
 	}
@@ -123,8 +132,8 @@ templ (c *ConfirmationView) Render() {
 		<div class="flex-row w-full focusable" onActivate={c.Activate}>
 			<span class="w-5"></span>
 			<span class="w-18">delete</span>
-			<span class="w-36">{c.rowValue()}</span>
-			<span>{c.actionLabel()}</span>
+			<span class="w-36">{c.RowValue()}</span>
+			<span>{c.ActionLabel()}</span>
 		</div>
 		if c.Error.Get() != "" {
 			<div class="flex-row w-full">

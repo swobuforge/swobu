@@ -174,7 +174,7 @@ func helpFixtureCockpit(status readmodel.DiagnosticsStatus) *Cockpit {
 
 func deleteConfirmFixtureCockpit() *Cockpit {
 	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
-		c.WorkspacePage.OverviewSection.DeleteConfirmation.Request("dev")
+		c.WorkspacePage.OverviewSection.OpenDeleteConfirmation("dev")
 	})
 }
 

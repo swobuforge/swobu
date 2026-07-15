@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
@@ -67,6 +68,17 @@ func TestConfirmation_ActivateRequiresTwoEnters(t *testing.T) {
 	}
 }
 
+func TestConfirmation_KeyMapEscClosesFocusedConfirmation(t *testing.T) {
+	confirmation := Confirmation(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
+	confirmation.Request("dev")
+
+	pressBinding(t, confirmation.KeyMap(), tui.KeyEscape)
+
+	if confirmation.IsOpen() {
+		t.Fatal("Escape should close confirmation")
+	}
+}
+
 func TestConfirmation_ConfirmFailureLeavesErrorVisible(t *testing.T) {
 	confirmation := Confirmation(
 		readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"},
@@ -114,4 +126,15 @@ func assertRenderContains(t *testing.T, got string, values ...string) {
 			t.Fatalf("render should contain %q:\n%s", value, got)
 		}
 	}
+}
+
+func pressBinding(t *testing.T, keymap tui.KeyMap, key tui.Key) {
+	t.Helper()
+	for _, binding := range keymap {
+		if binding.Pattern.Key == key {
+			binding.Handler(tui.KeyEvent{Key: key})
+			return
+		}
+	}
+	t.Fatalf("keymap missing binding for %v", key)
 }

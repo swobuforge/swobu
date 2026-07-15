@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
@@ -138,6 +139,21 @@ func TestWorkflow_BackClosesOpenWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflow_KeyMapEscClosesFocusedWorkflow(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
+	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
+	workflow.Slug.Set("prod")
+
+	pressBinding(t, workflow.KeyMap(), tui.KeyEscape)
+
+	if workflow.IsEditing() {
+		t.Fatal("Escape should leave editing state")
+	}
+	if workflow.Slug.Get() != "dev" {
+		t.Fatalf("slug after Escape = %q, want dev", workflow.Slug.Get())
+	}
+}
+
 func TestWorkflow_ActivateSlugRowEditsNoopsOrSubmits(t *testing.T) {
 	var got ports.SaveWorkspaceRequest
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, func(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
@@ -205,4 +221,15 @@ func assertContains(t *testing.T, got string, values ...string) {
 			t.Fatalf("render should contain %q:\n%s", value, got)
 		}
 	}
+}
+
+func pressBinding(t *testing.T, keymap tui.KeyMap, key tui.Key) {
+	t.Helper()
+	for _, binding := range keymap {
+		if binding.Pattern.Key == key {
+			binding.Handler(tui.KeyEvent{Key: key})
+			return
+		}
+	}
+	t.Fatalf("keymap missing binding for %v", key)
 }

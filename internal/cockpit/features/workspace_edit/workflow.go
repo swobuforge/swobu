@@ -47,6 +47,16 @@ type Workflow struct {
 	OnSaved     func(readmodel.WorkspaceReadModel)
 }
 
+func (w *Workflow) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*Workflow)
+	if !ok {
+		return
+	}
+	w.Workspace = f.Workspace
+	w.Save = f.Save
+	w.OnSaved = f.OnSaved
+}
+
 func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved func(readmodel.WorkspaceReadModel)) *Workflow {
 	workflow := &Workflow{
 		Workspace:   workspace,
@@ -91,6 +101,15 @@ func (w *Workflow) Back() bool {
 	return true
 }
 
+func (w *Workflow) KeyMap() tui.KeyMap {
+	if !w.IsEditing() {
+		return nil
+	}
+	return tui.KeyMap{
+		tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { w.Back() }),
+	}
+}
+
 func (w *Workflow) closeEdit() {
 	w.Error.Set("")
 	if w.Mode.Get() == ModeCreate {
@@ -115,7 +134,7 @@ func (w *Workflow) Activate() {
 		w.Phase.Set(PhaseEditing)
 		return
 	}
-	if w.invalidMessage() != "" {
+	if w.ErrorMessage() != "" {
 		return
 	}
 	if w.Mode.Get() == ModeEdit && strings.TrimSpace(w.Slug.Get()) == w.Workspace.Slug {
@@ -160,7 +179,7 @@ func (w *Workflow) Submit(ctx context.Context) {
 }
 
 func (w *Workflow) ActionLabel() string {
-	if w.invalidMessage() != "" {
+	if w.ErrorMessage() != "" {
 		return "invalid"
 	}
 	if w.Mode.Get() == ModeCreate {
@@ -183,7 +202,14 @@ func (w *Workflow) ValueLabel() string {
 }
 
 func (w *Workflow) ErrorMessage() string {
-	return w.invalidMessage()
+	slug := strings.TrimSpace(w.Slug.Get())
+	if slug == "" {
+		return ""
+	}
+	if _, err := NormalizeSlug(slug); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (w *Workflow) ClientBaseURLPreview() string {
@@ -200,17 +226,6 @@ func (w *Workflow) ClientBaseURLPreview() string {
 		return baseURL[:i+len(marker)] + slug
 	}
 	return baseURL
-}
-
-func (w *Workflow) invalidMessage() string {
-	slug := strings.TrimSpace(w.Slug.Get())
-	if slug == "" {
-		return ""
-	}
-	if _, err := NormalizeSlug(slug); err != nil {
-		return err.Error()
-	}
-	return ""
 }
 
 // NormalizeSlug validates the product-level workspace slug shape used by the

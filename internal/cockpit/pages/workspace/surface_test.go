@@ -83,17 +83,14 @@ func TestPage_BackClosesLocalRouteStateWithoutFocusState(t *testing.T) {
 	}
 }
 
-func TestPage_BackClosesWorkspaceDeleteConfirmationBeforeRoutes(t *testing.T) {
+func TestPage_BackLeavesFeatureOwnedDeleteConfirmationToFocusedFeature(t *testing.T) {
 	view := Page(workspacePageModel())
-	view.OverviewSection.DeleteConfirmation.Request("dev")
+	view.OverviewSection.OpenDeleteConfirmation("dev")
 	view.RoutesSection.ExpandedRoute.Set("gpt")
 
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if view.OverviewSection.DeleteConfirmation.IsOpen() {
-		t.Fatal("delete confirmation should close on first Esc")
-	}
-	if got := view.RoutesSection.ExpandedRoute.Get(); got != "gpt" {
-		t.Fatalf("expanded route after first Esc = %q, want gpt", got)
+	if got := view.RoutesSection.ExpandedRoute.Get(); got != "" {
+		t.Fatalf("expanded route after page-level Esc = %q, want empty", got)
 	}
 }
 

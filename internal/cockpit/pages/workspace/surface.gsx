@@ -54,9 +54,6 @@ func (v *PageView) activateFocused(event tui.KeyEvent) {
 }
 
 func (v *PageView) backOut(event tui.KeyEvent) {
-	if v.OverviewSection.Back() {
-		return
-	}
 	if v.RoutesSection.Back() {
 		return
 	}

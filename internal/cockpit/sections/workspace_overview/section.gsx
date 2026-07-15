@@ -14,15 +14,12 @@ type SectionView struct {
 	SummaryOnly         *tui.State[bool]
 	CopiedClientBaseURL *tui.State[bool]
 	OpenRun            *tui.State[readmodel.RunCommandID]
-	WorkspaceEdit      *workspace_edit.Workflow
-	DeleteConfirmation *workspace_delete.ConfirmationView
+	SaveWorkspace      workspace_edit.SaveFunc
+	DeleteWorkspace    workspace_delete.DeleteFunc
+	InitialDeleteID    readmodel.WorkspaceID
 }
 
-func Section(model readmodel.WorkspaceReadModel) *SectionView {
-	return SectionWithWorkspaceCommands(model, nil)
-}
-
-func SectionWithWorkspaceCommands(model readmodel.WorkspaceReadModel, commands ports.WorkspaceCommands) *SectionView {
+func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceCommands) *SectionView {
 	section := &SectionView{
 		Model:               model,
 		Expanded:            tui.NewState(true),
@@ -30,28 +27,15 @@ func SectionWithWorkspaceCommands(model readmodel.WorkspaceReadModel, commands p
 		CopiedClientBaseURL: tui.NewState(false),
 		OpenRun:            tui.NewState(readmodel.RunCommandID("")),
 	}
-	section.WorkspaceEdit = workspace_edit.NewWorkflow(model, saveWorkspace(commands), section.workspaceSaved)
-	section.DeleteConfirmation = workspace_delete.Confirmation(model, deleteWorkspace(commands), section.workspaceDeleted)
+	if len(commands) > 0 && commands[0] != nil {
+		section.SaveWorkspace = commands[0].SaveWorkspace
+		section.DeleteWorkspace = commands[0].DeleteWorkspace
+	}
 	return section
-}
-
-func saveWorkspace(commands ports.WorkspaceCommands) workspace_edit.SaveFunc {
-	if commands == nil {
-		return nil
-	}
-	return commands.SaveWorkspace
-}
-
-func deleteWorkspace(commands ports.WorkspaceCommands) workspace_delete.DeleteFunc {
-	if commands == nil {
-		return nil
-	}
-	return commands.DeleteWorkspace
 }
 
 func (s *SectionView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
 	s.Model = workspace
-	s.DeleteConfirmation.Workspace = workspace
 }
 
 func (s *SectionView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
@@ -68,34 +52,106 @@ func (s *SectionView) openRun(command readmodel.RunCommandReadModel) {
 	s.OpenRun.Set(command.ID)
 }
 
-func (s *SectionView) Back() bool {
-	if s.DeleteConfirmation.Back() {
-		return true
+func (s *SectionView) OpenDeleteConfirmation(workspaceID readmodel.WorkspaceID) {
+	s.InitialDeleteID = workspaceID
+}
+
+func WorkspaceEdit(s *SectionView) *workspace_edit.Workflow {
+	return workspace_edit.NewWorkflow(
+		s.Model,
+		s.SaveWorkspace,
+		s.workspaceSaved,
+	)
+}
+
+func DeleteConfirmation(s *SectionView) *workspace_delete.ConfirmationView {
+	confirmation := workspace_delete.Confirmation(
+		s.Model,
+		s.DeleteWorkspace,
+		s.workspaceDeleted,
+	)
+	if s.InitialDeleteID != "" {
+		confirmation.Request(s.InitialDeleteID)
 	}
-	if s.WorkspaceEdit.Back() {
-		return true
-	}
-	return false
+	return confirmation
 }
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@SectionHeader("workspace", s.Expanded.Get())
 		if s.Expanded.Get() {
-			@s.WorkspaceEdit
+			if app != nil {
+				<div key={workspaceEditKey(s)} class="w-full">
+					@WorkspaceEdit(s)
+				</div>
+			} else {
+				@WorkspaceEditPreview(WorkspaceEdit(s))
+			}
 			if s.Model.IsDraft() {
-				@InertRow("client base URL", s.WorkspaceEdit.ClientBaseURLPreview(), "")
+				@InertRow("client base URL", WorkspaceEdit(s).ClientBaseURLPreview(), "")
 			} else {
 				@FocusableRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
 				if !s.SummaryOnly.Get() {
 					if len(s.Model.RunCommands) > 0 {
 						@FocusableRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
 					}
-					@s.DeleteConfirmation
+					if app != nil {
+						<div key={workspaceDeleteKey(s)} class="w-full">
+							@DeleteConfirmation(s)
+						</div>
+					} else {
+						@DeleteConfirmationPreview(DeleteConfirmation(s))
+					}
 				}
 			}
 		}
 	</div>
+}
+
+templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
+	<div class="flex-col w-full">
+		<div class="flex-row w-full focusable" onActivate={workflow.Activate}>
+			<span class="w-5"></span>
+			<span class="w-18">slug</span>
+			<span class="w-30">{workflow.ValueLabel()}</span>
+			<span>{workflow.ActionLabel()}</span>
+		</div>
+		if workflow.ErrorMessage() != "" {
+			<div class="flex-row w-full">
+				<span class="w-9"></span>
+				<span>{workflow.ErrorMessage()}</span>
+			</div>
+		}
+	</div>
+}
+
+templ DeleteConfirmationPreview(confirmation *workspace_delete.ConfirmationView) {
+	<div class="flex-col w-full">
+		<div class="flex-row w-full focusable" onActivate={confirmation.Activate}>
+			<span class="w-5"></span>
+			<span class="w-18">delete</span>
+			<span class="w-36">{confirmation.RowValue()}</span>
+			<span>{confirmation.ActionLabel()}</span>
+		</div>
+	</div>
+}
+
+func workspaceEditKey(s *SectionView) string {
+	return "workspace-edit:" + workspaceIdentity(s)
+}
+
+func workspaceDeleteKey(s *SectionView) string {
+	return "workspace-delete:" + workspaceIdentity(s)
+}
+
+func workspaceIdentity(s *SectionView) string {
+	if s.Model.ID != "" {
+		return string(s.Model.ID)
+	}
+	if s.Model.Slug != "" {
+		return s.Model.Slug
+	}
+	return "+"
 }
 
 templ SectionHeader(label string, expanded bool) {
