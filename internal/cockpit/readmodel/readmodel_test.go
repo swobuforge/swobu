@@ -156,7 +156,7 @@ func TestRunCommandReadModel_Disclosure(t *testing.T) {
 func TestActivityReadModel_LatestAndRowValue(t *testing.T) {
 	row := ActivityRowReadModel{
 		ID:          "req-1",
-		At:          time.Date(2026, 6, 23, 14, 32, 1, 0, time.UTC),
+		ObservedAt:  "14:32:01",
 		ClientLabel: "codex",
 		RouteID:     "gpt",
 		RouteLabel:  "gpt",

@@ -2,6 +2,7 @@ package readmodel
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -18,8 +19,10 @@ type ActivityReadModel struct {
 // ActivityRowReadModel is one observed request row plus optional expanded
 // inspection detail.
 type ActivityRowReadModel struct {
-	ID           ActivityID
-	At           time.Time
+	ID ActivityID
+	// ObservedAt preserves the daemon's observation label as display text.
+	// Cockpit does not synthesize a timestamp from partial clock data.
+	ObservedAt   string
 	ClientLabel  string
 	RouteID      RouteID
 	RouteLabel   string
@@ -81,6 +84,10 @@ func (a ActivityRowReadModel) RowValue() string {
 	if route == "" {
 		route = string(a.RouteID)
 	}
+	observedAt := strings.TrimSpace(a.ObservedAt)
+	if observedAt == "" {
+		observedAt = "unknown"
+	}
 	status := ""
 	if a.HTTPStatus > 0 {
 		status = fmt.Sprint(a.HTTPStatus)
@@ -95,7 +102,7 @@ func (a ActivityRowReadModel) RowValue() string {
 			status = "ok"
 		}
 	}
-	return fmt.Sprintf("%s  %s  %s  %s  %s", a.At.Format("15:04:05"), a.ClientLabel, route, status, durationLabel(a.Duration))
+	return fmt.Sprintf("%s  %s  %s  %s  %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
 }
 
 func durationLabel(d time.Duration) string {

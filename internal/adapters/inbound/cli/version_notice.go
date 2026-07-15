@@ -11,7 +11,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
-	uicli "github.com/swobuforge/swobu/internal/terminalui/apps/cli"
 )
 
 const installCommand = "curl -fsSL https://swobu.com/install.sh | sh"
@@ -29,10 +28,7 @@ func emitVersionNoticeIfConfigured(out io.Writer) versionNoticeDecision {
 	if !decision.show {
 		return decision
 	}
-	uicli.NewStartupConsolePresenter(out).Emit(uicli.StartupEvent{
-		Kind: uicli.StartupEventVersionNotice,
-		Text: strings.Join(decision.rows, "\n"),
-	})
+	writeNoticeBlock(out, "Update Available", decision.rows)
 	return decision
 }
 

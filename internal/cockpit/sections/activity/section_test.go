@@ -43,7 +43,7 @@ func activate(t *testing.T, focusable tui.Focusable) {
 func activitySectionModel() readmodel.WorkspaceReadModel {
 	row := readmodel.ActivityRowReadModel{
 		ID:          "req-1",
-		At:          time.Date(2026, 6, 23, 14, 32, 1, 0, time.UTC),
+		ObservedAt:  "14:32:01",
 		ClientLabel: "codex",
 		RouteID:     "gpt",
 		Status:      readmodel.ActivitySucceeded,

@@ -1,4 +1,5 @@
-// Package help renders the Cockpit support and orientation page.
+// Package help renders the Cockpit support and orientation page and owns the
+// default support-orientation model used when live data omits help copy.
 //
 // It owns read-only rows for version, docs, community, issue filing, and
 // diagnostics-copy status. It does not render shortcut manuals, print

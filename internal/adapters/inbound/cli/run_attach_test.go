@@ -107,12 +107,14 @@ func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
 	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
 
 	var stdout bytes.Buffer
+	var launchStdout io.Writer
 	runner := Runner{
 		Stdout:        &stdout,
 		IsInteractive: func() bool { return true },
 		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error { return nil },
 		Sleep:         func(time.Duration) {},
-		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		LaunchInteractive: func(_ context.Context, _ io.Reader, out io.Writer, _ io.Writer) error {
+			launchStdout = out
 			return nil
 		},
 	}
@@ -123,5 +125,19 @@ func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
 	}
 	if got := stdout.String(); bytes.Contains([]byte(got), []byte("entering interactive cockpit")) {
 		t.Fatalf("stdout should not include slog phase log event; stdout=%q", got)
+	}
+	if got := stdout.String(); bytes.Contains([]byte(got), []byte("\x1b[2J\x1b[H")) {
+		t.Fatalf("stdout should not clear non-terminal buffer; stdout=%q", got)
+	}
+	if launchStdout != &stdout {
+		t.Fatalf("launch stdout = %#v, want original runner stdout", launchStdout)
+	}
+}
+
+func TestClearInteractiveScreenSkipsNonTerminalWriters(t *testing.T) {
+	var out bytes.Buffer
+	clearInteractiveScreen(&out)
+	if out.Len() != 0 {
+		t.Fatalf("clear wrote to non-terminal buffer: %q", out.String())
 	}
 }

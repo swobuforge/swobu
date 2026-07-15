@@ -50,6 +50,12 @@ func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
 	} else if notice := strings.Index(out, "╭─ telemetry disclosure "); notice >= 0 && splash > notice {
 		t.Fatalf("splash must render before telemetry disclosure; stdout=%q", out)
 	}
+	if !strings.Contains(out, "starting daemon runtime") {
+		t.Fatalf("stdout missing daemon runtime start block; stdout=%q", out)
+	}
+	if !strings.Contains(out, "config path: /tmp/swobu-config.yaml") {
+		t.Fatalf("stdout missing daemon runtime config path; stdout=%q", out)
+	}
 }
 
 func TestRunner_DaemonSkipsTelemetryNoticeWhenEnvSet(t *testing.T) {

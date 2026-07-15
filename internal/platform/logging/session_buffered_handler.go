@@ -5,39 +5,31 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-
-	tuisession "github.com/swobuforge/swobu/internal/terminalui/session"
 )
 
-type sessionBufferedSurface interface {
-	Mode() tuisession.Mode
-	OnModeChange(func(prev, next tuisession.Mode))
-}
-
-// NewSessionBufferedHandler returns a slog handler policy that buffers records
-// while interactive mode is active and flushes records when transcript mode resumes.
-func NewSessionBufferedHandler(base slog.Handler, uiMode sessionBufferedSurface) slog.Handler {
+// NewBufferedHandler returns a slog handler that buffers records until Flush is called.
+//
+// The handler preserves attrs and groups across flush so replayed records keep the
+// same call-site scoping they had when emitted.
+func NewBufferedHandler(base slog.Handler) *BufferedHandler {
 	if base == nil {
 		base = NewCommonLineHandler(&bytes.Buffer{}, slog.LevelInfo)
 	}
-	state := &sessionBufferController{uiMode: uiMode}
-	h := &sessionBufferedHandler{base: base, state: state}
-	if uiMode != nil {
-		uiMode.OnModeChange(state.onModeChange)
+	return &BufferedHandler{
+		base:  base,
+		state: &bufferState{},
 	}
-	return h
 }
 
-type sessionBufferedHandler struct {
+// BufferedHandler buffers slog records and replays them later through the
+// original base handler.
+type BufferedHandler struct {
 	base  slog.Handler
-	state *sessionBufferController
+	state *bufferState
 }
 
-type sessionBufferController struct {
-	uiMode sessionBufferedSurface
+type bufferState struct {
 	mu     sync.Mutex
-	// Shared across handler derivatives produced by WithAttrs/WithGroup so one
-	// interactive period captures all records regardless of callsite scoping.
 	buffer []bufferedRecord
 }
 
@@ -46,53 +38,53 @@ type bufferedRecord struct {
 	record  slog.Record
 }
 
-func (h *sessionBufferedHandler) Enabled(ctx context.Context, level slog.Level) bool {
+func (h *BufferedHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	if h == nil || h.base == nil {
 		return false
 	}
 	return h.base.Enabled(ctx, level)
 }
 
-func (h *sessionBufferedHandler) Handle(ctx context.Context, r slog.Record) error {
-	mode := tuisession.ModeTranscript
-	if h.state != nil && h.state.uiMode != nil {
-		mode = h.state.uiMode.Mode()
-	}
-	if mode == tuisession.ModeInteractive {
-		// Keep the fully scoped base handler so flush replays with the exact
-		// attrs/groups the record had when it was originally emitted.
-		h.state.mu.Lock()
-		h.state.buffer = append(h.state.buffer, bufferedRecord{handler: h.base, record: cloneRecord(r)})
-		h.state.mu.Unlock()
+func (h *BufferedHandler) Handle(ctx context.Context, r slog.Record) error {
+	if h == nil || h.state == nil || h.base == nil {
 		return nil
 	}
-	return h.base.Handle(ctx, r)
+	// Keep the fully scoped base handler so flush replays with the exact attrs/groups
+	// the record had when it was originally emitted.
+	h.state.mu.Lock()
+	h.state.buffer = append(h.state.buffer, bufferedRecord{handler: h.base, record: cloneRecord(r)})
+	h.state.mu.Unlock()
+	return nil
 }
 
-func (h *sessionBufferedHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &sessionBufferedHandler{
+func (h *BufferedHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &BufferedHandler{
 		base:  h.base.WithAttrs(attrs),
 		state: h.state,
 	}
 }
 
-func (h *sessionBufferedHandler) WithGroup(name string) slog.Handler {
-	return &sessionBufferedHandler{
+func (h *BufferedHandler) WithGroup(name string) slog.Handler {
+	return &BufferedHandler{
 		base:  h.base.WithGroup(name),
 		state: h.state,
 	}
 }
 
-func (s *sessionBufferController) onModeChange(prev, next tuisession.Mode) {
-	if prev != tuisession.ModeInteractive || next != tuisession.ModeTranscript {
+// Flush replays buffered records through the original handler chain and clears the buffer.
+func (h *BufferedHandler) Flush(ctx context.Context) {
+	if h == nil || h.state == nil {
 		return
 	}
-	s.mu.Lock()
-	pending := append([]bufferedRecord(nil), s.buffer...)
-	s.buffer = nil
-	s.mu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.state.mu.Lock()
+	pending := append([]bufferedRecord(nil), h.state.buffer...)
+	h.state.buffer = nil
+	h.state.mu.Unlock()
 	for _, item := range pending {
-		_ = item.handler.Handle(context.Background(), item.record)
+		_ = item.handler.Handle(ctx, item.record)
 	}
 }
 

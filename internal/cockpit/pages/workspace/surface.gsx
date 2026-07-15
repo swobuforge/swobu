@@ -2,6 +2,7 @@ package workspace
 
 import (
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	activitysection "github.com/swobuforge/swobu/internal/cockpit/sections/activity"
 	routessection "github.com/swobuforge/swobu/internal/cockpit/sections/routes"
@@ -9,16 +10,33 @@ import (
 )
 
 type PageView struct {
-	OverviewSection  *overviewsection.SectionView
-	RoutesSection    *routessection.SectionView
-	ActivitySection  *activitysection.SectionView
+	OverviewSection    *overviewsection.SectionView
+	RoutesSection      *routessection.SectionView
+	ActivitySection    *activitysection.SectionView
+	OnWorkspaceSaved   func(readmodel.WorkspaceReadModel)
+	OnWorkspaceDeleted func(readmodel.WorkspaceID)
 }
 
-func Page(workspace readmodel.WorkspaceReadModel) *PageView {
-	return &PageView{
-		OverviewSection:  overviewsection.Section(workspace),
+func Page(workspace readmodel.WorkspaceReadModel, commands ...ports.WorkspaceCommands) *PageView {
+	page := &PageView{
+		OverviewSection:  overviewsection.Section(workspace, commands...),
 		RoutesSection:    routessection.Section(workspace),
 		ActivitySection:  activitysection.Section(workspace),
+	}
+	page.OverviewSection.OnWorkspaceSaved = page.workspaceSaved
+	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
+	return page
+}
+
+func (v *PageView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
+	if v.OnWorkspaceSaved != nil {
+		v.OnWorkspaceSaved(workspace)
+	}
+}
+
+func (v *PageView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
+	if v.OnWorkspaceDeleted != nil {
+		v.OnWorkspaceDeleted(workspaceID)
 	}
 }
 

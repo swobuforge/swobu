@@ -18,12 +18,11 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/swobuforge/swobu/internal/bootstrap"
+	"github.com/swobuforge/swobu/internal/cockpit"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	platformlogging "github.com/swobuforge/swobu/internal/platform/logging"
 	"github.com/swobuforge/swobu/internal/telemetry"
-	"github.com/swobuforge/swobu/internal/cockpit"
-	uicli "github.com/swobuforge/swobu/internal/terminalui/apps/cli"
-	uimode "github.com/swobuforge/swobu/internal/terminalui/session"
+	"golang.org/x/term"
 )
 
 // ExitCode is contract-bearing for `swobu status`: healthy=0, uninitialized=1, daemon unreachable=2.
@@ -51,14 +50,7 @@ type Runner struct {
 	Sleep               func(time.Duration)
 }
 
-type uiModeBridge interface {
-	Mode() uimode.Mode
-	OnModeChange(func(prev, next uimode.Mode))
-	BindWriter(mode uimode.Mode, writer io.Writer) io.Writer
-	SetMode(mode uimode.Mode) error
-}
-
-// daemon control, explicit lifecycle commands, and TUI launch handoff.
+// daemon control, explicit lifecycle commands, and go-tui launch handoff.
 func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	stdin := r.Stdin
 	if stdin == nil {
@@ -88,8 +80,7 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if launchInteractive == nil {
 		// V0: direct launch into the active go-tui Cockpit.
 		// We import internal/cockpit — the canonical operator TUI authority —
-		// because it owns the interactive workspace surface, not terminalui or
-		// any abandoned internal/tui wrapper.
+		// because it owns the interactive workspace surface.
 		daemonURL := platformconfig.ResolveDaemonURL(r.DaemonURL)
 		launchInteractive = func(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 			return cockpit.Run(ctx, daemonURL, stdin, stdout, stderr)
@@ -107,22 +98,18 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if sleep == nil {
 		sleep = time.Sleep
 	}
-	uiMode := uimode.New(uimode.ModeTranscript)
-	stdout = uiMode.BindWriter(uimode.ModeTranscript, stdout)
-	stderr = uiMode.BindWriter(uimode.ModeTranscript, stderr)
 
 	if len(args) == 0 {
 		return runInteractiveDefault(ctx, interactiveDefaultRunSpec{
 			stdin:               stdin,
+			stdout:              stdout,
 			stderr:              stderr,
 			client:              client,
 			attachOrStart:       attachOrStart,
 			launchInteractive:   launchInteractive,
 			isInteractive:       isInteractive,
-			uiMode:              uiMode,
 			startupHandoffFloor: startupHandoffFloor,
 			sleep:               sleep,
-			runner:              r,
 		})
 	}
 	return dispatchSubcommand(ctx, args, start, client, stdout, stderr)
@@ -130,15 +117,14 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 
 type interactiveDefaultRunSpec struct {
 	stdin               io.Reader
+	stdout              io.Writer
 	stderr              io.Writer
 	client              *http.Client
 	attachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
 	launchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer) error
 	isInteractive       func() bool
-	uiMode              uiModeBridge
 	startupHandoffFloor time.Duration
 	sleep               func(time.Duration)
-	runner              Runner
 }
 
 func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) ExitCode {
@@ -146,14 +132,8 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 		_, _ = fmt.Fprintln(spec.stderr, "interactive cockpit requires a terminal; use `swobu status` or `swobu daemon --config <path>`")
 		return ExitDown
 	}
-	startupOut := spec.uiMode.BindWriter(uimode.ModeTranscript, spec.runner.Stdout)
-	if startupOut == nil {
-		startupOut = spec.uiMode.BindWriter(uimode.ModeTranscript, os.Stdout)
-	}
-	startupErr := spec.uiMode.BindWriter(uimode.ModeTranscript, spec.runner.Stderr)
-	if startupErr == nil {
-		startupErr = spec.uiMode.BindWriter(uimode.ModeTranscript, os.Stderr)
-	}
+	startupOut := spec.stdout
+	startupErr := spec.stderr
 	versionDecision := emitVersionNoticeIfConfigured(startupOut)
 	if versionDecision.show {
 		if err := waitForVersionNoticeContinue(spec.stdin, startupOut); err != nil {
@@ -170,45 +150,41 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 		return ExitDown
 	}
 	spec.sleep(spec.startupHandoffFloor)
-	uicli.NewStartupConsolePresenter(startupOut).Emit(uicli.StartupEvent{Kind: uicli.StartupEventHandoffToInteractive})
 	debugHandoff := platformconfig.EnvTruthy(os.Getenv("SWOBU_E2E_DEBUG_HANDOFF"))
 	if debugHandoff {
-		_, _ = fmt.Fprintln(startupOut, "swobu handoff: switching session mode to interactive")
-		_, _ = fmt.Fprintln(startupErr, "swobu handoff: switching session mode to interactive")
+		_, _ = fmt.Fprintln(startupOut, "swobu handoff: starting interactive cockpit")
+		_, _ = fmt.Fprintln(startupErr, "swobu handoff: starting interactive cockpit")
 	}
-	if err := spec.uiMode.SetMode(uimode.ModeInteractive); err != nil {
-		_, _ = fmt.Fprintln(startupErr, err.Error())
-		return ExitDown
-	}
-	defer func() { _ = spec.uiMode.SetMode(uimode.ModeTranscript) }()
-	cockpitOut := spec.uiMode.BindWriter(uimode.ModeInteractive, spec.runner.Stdout)
-	if cockpitOut == nil {
-		cockpitOut = spec.uiMode.BindWriter(uimode.ModeInteractive, os.Stdout)
-	}
-	cockpitErr := spec.uiMode.BindWriter(uimode.ModeInteractive, spec.runner.Stderr)
-	if cockpitErr == nil {
-		cockpitErr = spec.uiMode.BindWriter(uimode.ModeInteractive, os.Stderr)
-	}
+	clearInteractiveScreen(spec.stdout)
 	prevLogger := slog.Default()
-	bridgedLogger := slog.New(platformlogging.NewSessionBufferedHandler(prevLogger.Handler(), spec.uiMode))
-	slog.SetDefault(bridgedLogger)
+	bufferedHandler := platformlogging.NewBufferedHandler(prevLogger.Handler())
+	slog.SetDefault(slog.New(bufferedHandler))
 	defer slog.SetDefault(prevLogger)
 	if debugHandoff {
 		_, _ = fmt.Fprintln(startupOut, "swobu handoff: launching cockpit interactive app")
 		_, _ = fmt.Fprintln(startupErr, "swobu handoff: launching cockpit interactive app")
 	}
-	if err := spec.launchInteractive(ctx, spec.stdin, cockpitOut, cockpitErr); err != nil {
-		// Mirror launch failure into transcript stderr as well; if interactive
-		// mode failed before drawing, cockpitErr may be invisible to operators.
+	if err := spec.launchInteractive(ctx, spec.stdin, spec.stdout, spec.stderr); err != nil {
+		bufferedHandler.Flush(context.Background())
+		// Mirror launch failure into stderr; if the cockpit failed before drawing,
+		// operators would otherwise only see the handoff failure indirectly.
 		_, _ = fmt.Fprintln(startupErr, err.Error())
-		_, _ = fmt.Fprintln(cockpitErr, err.Error())
 		return ExitDown
 	}
+	bufferedHandler.Flush(context.Background())
 	if debugHandoff {
 		_, _ = fmt.Fprintln(startupOut, "swobu handoff: cockpit interactive app exited cleanly")
 		_, _ = fmt.Fprintln(startupErr, "swobu handoff: cockpit interactive app exited cleanly")
 	}
 	return ExitHealthy
+}
+
+func clearInteractiveScreen(out io.Writer) {
+	file, ok := out.(*os.File)
+	if !ok || file == nil || !term.IsTerminal(int(file.Fd())) {
+		return
+	}
+	_, _ = out.Write([]byte("\x1b[2J\x1b[H"))
 }
 
 func dispatchSubcommand(ctx context.Context, args []string, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), client *http.Client, stdout io.Writer, stderr io.Writer) ExitCode {
@@ -250,14 +226,14 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	transcript := uicli.NewStartupConsolePresenter(stdout)
-	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventSplash})
+	startupReporter := startupReporterFromWriter(stdout)
+	startupReporter.Report(daemonlifecycle.StartupEvent{Kind: daemonlifecycle.StartupEventSplash})
 	_ = emitVersionNoticeIfConfigured(stdout)
 	if err := ensureTelemetryNoticeBeforeDaemonStart(stdout); err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStart, ConfigPath: resolvedConfigPath})
+	writePlainLines(stdout, []string{"starting daemon runtime", "config path: " + resolvedConfigPath})
 
 	logger := slog.Default()
 	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, Logger: logger})
@@ -272,8 +248,8 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 				"run `swobu status`",
 			}
 		}
-		transcript.Emit(uicli.StartupEvent{
-			Kind:       uicli.StartupEventStartupFailed,
+		startupReporter.Report(daemonlifecycle.StartupEvent{
+			Kind:       daemonlifecycle.StartupEventStartupFailed,
 			Text:       err.Error(),
 			NextAction: next,
 		})
@@ -282,7 +258,6 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 	defer func() {
 		_ = daemon.Close(context.Background())
 		logger.Info("daemon lifecycle", "component", "daemon", "event", "process_stop")
-		transcript.Emit(uicli.StartupEvent{Kind: uicli.StartupEventDaemonRuntimeStop})
 	}()
 
 	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -321,10 +296,7 @@ func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
 	if state.NoticeShown {
 		return nil
 	}
-	uicli.NewStartupConsolePresenter(out).Emit(uicli.StartupEvent{
-		Kind: uicli.StartupEventTelemetryDisclosure,
-		Text: telemetry.FirstRunNoticeText(),
-	})
+	writeNoticeBlock(out, "telemetry disclosure", splitNoticeRows(telemetry.FirstRunNoticeText()))
 	_, err = store.MarkNoticeShown()
 	return err
 }

@@ -10,12 +10,13 @@
 //
 // Laws:
 //   - direct go-tui only; no wrappers, no internal/tui shim, no retained
-//     terminalui interactive resurrection
+//     legacy interactive resurrection
 //   - UI packages import ports, not raw operator clients
 //   - adapters import ports and concrete clients, not UI
 //   - state belongs to the lowest component that owns the full lifecycle
 //   - active tab is Cockpit state; focus and text cursor are go-tui state
 //
-// Temporary launch behavior is scoped to epic-05-tui-cockpit-v2 and will be
-// replaced by a real go-tui app loop in subsequent tasks.
+// Launch loads the daemon-backed Cockpit read model, enters the go-tui app loop
+// for interactive terminals, and renders deterministic snapshots for
+// non-interactive tests and transcript contexts.
 package cockpit

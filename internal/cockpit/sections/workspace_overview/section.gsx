@@ -16,6 +16,8 @@ type SectionView struct {
 	OpenRun            *tui.State[readmodel.RunCommandID]
 	SaveWorkspace      workspace_edit.SaveFunc
 	DeleteWorkspace    workspace_delete.DeleteFunc
+	OnWorkspaceSaved   func(readmodel.WorkspaceReadModel)
+	OnWorkspaceDeleted func(readmodel.WorkspaceID)
 	InitialDeleteID    readmodel.WorkspaceID
 }
 
@@ -36,11 +38,17 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 
 func (s *SectionView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
 	s.Model = workspace
+	if s.OnWorkspaceSaved != nil {
+		s.OnWorkspaceSaved(workspace)
+	}
 }
 
 func (s *SectionView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
 	if workspaceID == s.Model.ID {
 		s.SummaryOnly.Set(true)
+	}
+	if s.OnWorkspaceDeleted != nil {
+		s.OnWorkspaceDeleted(workspaceID)
 	}
 }
 
