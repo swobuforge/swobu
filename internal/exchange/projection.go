@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/effect"
 )
 
 func projectClientDocument(ctx context.Context, envelope canonical.EventReader) (Result[canonical.CanonicalOutput], error) {
@@ -16,5 +17,5 @@ func projectClientDocument(ctx context.Context, envelope canonical.EventReader) 
 	if err != nil {
 		return Result[canonical.CanonicalOutput]{}, err
 	}
-	return NewResult[canonical.CanonicalOutput](output, collectReaderEffects(envelope)...), nil
+	return effect.NewResult[canonical.CanonicalOutput](output, collectReaderEffects(envelope)...), nil
 }

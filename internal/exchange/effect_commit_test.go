@@ -43,11 +43,11 @@ func (t invariantDocPatch) Stage() stage.Stage {
 func (t invariantDocPatch) Capabilities() stage.StageCapabilities {
 	return stage.StageCapabilities{}
 }
-func (t invariantDocPatch) Match(stage.Context, carrier.WireDocument) bool { return true }
-func (t invariantDocPatch) Apply(_ stage.Context, in carrier.WireDocument) (stage.Result[carrier.WireDocument], error) {
+func (t invariantDocPatch) Match(stage.Context, carrier.CarrierDocument) bool { return true }
+func (t invariantDocPatch) Apply(_ stage.Context, in carrier.CarrierDocument) (stage.Result[carrier.CarrierDocument], error) {
 	out := in
 	out.Raw = append([]byte(nil), t.nextRaw...)
-	return stage.Result[carrier.WireDocument]{
+	return stage.Result[carrier.CarrierDocument]{
 		Value:   out,
 		Mutated: t.mutated,
 		Effects: append([]effect.Effect(nil), t.effects...),

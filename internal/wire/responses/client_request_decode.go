@@ -20,7 +20,7 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effect.Result[wire.ClientRequestResult], error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (wire.ClientRequestResult, error) {
 		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
 		return wire.ClientRequestResult{
@@ -30,7 +30,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effec
 	})
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto responsesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "responses request", nil); err != nil {
@@ -80,8 +80,13 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	instructions, err := decodeResponsesInstructions(dto.Instructions)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		Instructions:  instructions,
 		InputText:     inputText,
 		Items:         conversation,
 		Tools:         tools,
@@ -96,6 +101,18 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
 	return request, resolvedDelivery, nil
+}
+
+func decodeResponsesInstructions(raw json.RawMessage) (string, error) {
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
+	if trimmed == "" || trimmed == "null" {
+		return "", nil
+	}
+	var instructions string
+	if err := json.Unmarshal(raw, &instructions); err != nil {
+		return "", canonical.BadRequest("responses request instructions is invalid")
+	}
+	return strings.TrimSpace(instructions), nil // swobu:io-string source=boundary
 }
 
 func logResponsesRawInput(input json.RawMessage, previousResponseID string) {

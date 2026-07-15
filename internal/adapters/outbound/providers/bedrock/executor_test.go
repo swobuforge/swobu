@@ -486,9 +486,9 @@ func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T
 	if err != nil {
 		t.Fatalf("ResolveProviderIngress error: %v", err)
 	}
-	doc, ok := ingress.(carrier.WireDocument)
+	doc, ok := ingress.(carrier.CarrierDocument)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireDocument", ingress)
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
 	}
 	if string(gotBody) == "" {
 		t.Fatal("expected encoded request body")
@@ -532,9 +532,9 @@ func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T
 	if err != nil {
 		t.Fatalf("ResolveProviderIngress error: %v", err)
 	}
-	stream, ok := ingress.(carrier.WireStream)
+	stream, ok := ingress.(carrier.CarrierStream)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireStream", ingress)
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierStream", ingress)
 	}
 	if stream.Family != protocolkind.Messages {
 		t.Fatalf("family=%q want messages", stream.Family)
@@ -608,9 +608,9 @@ func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *t
 	if err != nil {
 		t.Fatalf("ResolveProviderIngress error: %v", err)
 	}
-	doc, ok := ingress.(carrier.WireDocument)
+	doc, ok := ingress.(carrier.CarrierDocument)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireDocument", ingress)
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
 	}
 	if string(doc.RawBytes()) == "" {
 		t.Fatal("expected upstream response body")

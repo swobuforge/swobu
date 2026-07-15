@@ -24,7 +24,7 @@ func TestDecodeClientRequestWithEffects_RecordsToolCallIDAndKindScars(t *testing
 	}`)
 	sink := &recordingEffectSink{}
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithEffects(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_decode")
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithEffects(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_decode")
 	if err == nil {
 		t.Fatal("expected DecodeClientRequestWithEffects to reject unsupported tool call type")
 	}
@@ -71,7 +71,7 @@ func TestDecodeClientRequestWithEffects_RecordsToolCallArgumentsScar(t *testing.
 	}`)
 	sink := &recordingEffectSink{}
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithEffects(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_args")
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithEffects(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_args")
 	if err == nil {
 		t.Fatal("expected DecodeClientRequestWithEffects to reject invalid function arguments")
 	}

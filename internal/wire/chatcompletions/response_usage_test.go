@@ -107,7 +107,7 @@ func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
 		"data: {\"id\":\"chatcmpl_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
 
 	sink := &recordingEffectSink{}
-	reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_usage", sink)
+	reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_usage", sink)
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 	if err != nil {

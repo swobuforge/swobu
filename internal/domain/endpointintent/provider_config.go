@@ -93,6 +93,8 @@ type ProviderConfig struct {
 	providerProtocol string
 	modelID          string
 	targetAlias      string
+	targetRank       int
+	targetWeight     int
 }
 
 var targetAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -145,6 +147,8 @@ func NewProviderConfig(
 		providerProtocol: providerProtocol,
 		modelID:          "",
 		targetAlias:      "",
+		targetRank:       1,
+		targetWeight:     1,
 	}
 	var err error
 	config, err = config.WithAuthHeader("")
@@ -311,5 +315,35 @@ func (c ProviderConfig) WithTargetAlias(targetAlias string) (ProviderConfig, err
 		)
 	}
 	c.targetAlias = targetAlias
+	return c, nil
+}
+
+func (c ProviderConfig) TargetRank() int {
+	if c.targetRank <= 0 {
+		return 1
+	}
+	return c.targetRank
+}
+
+func (c ProviderConfig) WithTargetRank(rank int) (ProviderConfig, error) {
+	if rank < 1 {
+		return ProviderConfig{}, fmt.Errorf("%w: target rank must be at least 1", ErrInvalidProviderConfig)
+	}
+	c.targetRank = rank
+	return c, nil
+}
+
+func (c ProviderConfig) TargetWeight() int {
+	if c.targetWeight <= 0 {
+		return 1
+	}
+	return c.targetWeight
+}
+
+func (c ProviderConfig) WithTargetWeight(weight int) (ProviderConfig, error) {
+	if weight < 1 {
+		return ProviderConfig{}, fmt.Errorf("%w: target weight must be at least 1", ErrInvalidProviderConfig)
+	}
+	c.targetWeight = weight
 	return c, nil
 }

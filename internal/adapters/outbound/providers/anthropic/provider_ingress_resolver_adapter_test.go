@@ -72,7 +72,7 @@ func TestResolveProviderIngress_UsesContractDeliveryForStreamingRequests(t *test
 				canonical.NewFunctionToolDecl("tool_0", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`)),
 			},
 		}),
-		carrier.NewWireDocument("", "", "application/json", nil, []byte(`{}`), carrier.Meta{}),
+		carrier.NewCarrierDocument("", "", "application/json", nil, []byte(`{}`), carrier.Meta{}),
 		exchange.NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingSSE), delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"backend-a",
@@ -91,9 +91,9 @@ func TestResolveProviderIngress_UsesContractDeliveryForStreamingRequests(t *test
 		t.Fatalf("ResolveProviderIngress returned error: %v", err)
 	}
 
-	stream, ok := ingress.(carrier.WireStream)
+	stream, ok := ingress.(carrier.CarrierStream)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireStream", ingress)
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierStream", ingress)
 	}
 	defer func() { _ = stream.Frames.Close() }()
 
@@ -150,7 +150,7 @@ func TestResolveProviderIngress_DoesNotEmitCacheBreakpoints(t *testing.T) {
 				tool,
 			},
 		}),
-		carrier.NewWireDocument("", "", "application/json", nil, []byte(`{}`), carrier.Meta{}),
+		carrier.NewCarrierDocument("", "", "application/json", nil, []byte(`{}`), carrier.Meta{}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget(
 			"backend-a",
@@ -170,8 +170,8 @@ func TestResolveProviderIngress_DoesNotEmitCacheBreakpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveProviderIngress returned error: %v", err)
 	}
-	if _, ok := ingress.(carrier.WireDocument); !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireDocument", ingress)
+	if _, ok := ingress.(carrier.CarrierDocument); !ok {
+		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
 	}
 
 	var body string

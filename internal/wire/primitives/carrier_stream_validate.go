@@ -8,7 +8,7 @@ import (
 )
 
 // ValidateResponseSSECarrierStream validates one carrier-native response stream contract.
-func ValidateResponseSSECarrierStream(stream carrier.WireStream, expectedProtocol protocolkind.ProtocolKind) error {
+func ValidateResponseSSECarrierStream(stream carrier.CarrierStream, expectedProtocol protocolkind.ProtocolKind) error {
 	if stream.Family != expectedProtocol {
 		return fmt.Errorf("wire stream protocol must be %q", expectedProtocol)
 	}

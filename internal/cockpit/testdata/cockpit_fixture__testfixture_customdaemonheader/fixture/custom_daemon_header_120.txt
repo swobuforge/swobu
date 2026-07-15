@@ -1,0 +1,19 @@
+SWOBU    [› dev] [lab] [+] [?]                                                                            http://pi:7926
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     slug              dev                           edit ↵
+     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
+     run once          Codex                               open ↵
+     delete            workspace                           delete ↵
+
+  routes ▾
+     gpt               default · 2 targets                 expand ↵
+     local             1 target                            expand ↵
+     add route                                             add ↵
+
+  activity ▾
+     latest            no requests yet
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ open   F1 help   esc back

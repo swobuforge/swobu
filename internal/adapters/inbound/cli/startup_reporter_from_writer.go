@@ -45,7 +45,7 @@ func writeNoticeBlock(out io.Writer, title string, rows []string) {
 	}
 	_, _ = fmt.Fprintf(out, "╭─ %s \n", title)
 	for _, row := range rows {
-		trimmed := strings.TrimSpace(row)
+		trimmed := strings.TrimSpace(row) // swobu:io-string source=boundary
 		if trimmed == "" {
 			continue
 		}
@@ -58,7 +58,7 @@ func writePlainLines(out io.Writer, rows []string) {
 		return
 	}
 	for _, row := range rows {
-		trimmed := strings.TrimSpace(row)
+		trimmed := strings.TrimSpace(row) // swobu:io-string source=boundary
 		if trimmed == "" {
 			continue
 		}
@@ -77,11 +77,11 @@ func writeRawLines(out io.Writer, rows []string) {
 
 func noticeRows(text string, nextActions []string) []string {
 	rows := make([]string, 0, 1+len(nextActions))
-	if trimmed := strings.TrimSpace(text); trimmed != "" {
+	if trimmed := strings.TrimSpace(text); trimmed != "" { // swobu:io-string source=boundary
 		rows = append(rows, trimmed)
 	}
 	for _, next := range nextActions {
-		trimmed := strings.TrimSpace(next)
+		trimmed := strings.TrimSpace(next) // swobu:io-string source=boundary
 		if trimmed == "" {
 			continue
 		}
@@ -92,8 +92,8 @@ func noticeRows(text string, nextActions []string) []string {
 
 func splitNoticeRows(text string) []string {
 	rows := make([]string, 0)
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
-		trimmed := strings.TrimSpace(line)
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") { // swobu:io-string source=boundary
+		trimmed := strings.TrimSpace(line) // swobu:io-string source=boundary
 		if trimmed == "" {
 			continue
 		}

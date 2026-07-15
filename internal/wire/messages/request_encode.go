@@ -31,39 +31,42 @@ type contentID struct {
 	Content   string         `json:"content,omitempty"`
 }
 
-func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.WireDocument, error) {
+func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.WireDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
+		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
 	}
 	items := req.Items()
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	payload := map[string]any{
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
+	if instructions := strings.TrimSpace(req.Instructions()); instructions != "" { // swobu:io-string source=boundary
+		payload["system"] = instructions
+	}
 	if wireTools, err := encodeMessagesTools(tools, sink, exchangeID); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
 	}
 	if err := encodeMessagesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if err := encodeMessagesGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if choice != nil {
 		payload["tool_choice"] = choice
@@ -73,9 +76,9 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.WireDocument{}, canonical.BadRequest("conversation request could not be encoded for the messages protocol")
+		return carrier.CarrierDocument{}, canonical.BadRequest("conversation request could not be encoded for the messages protocol")
 	}
-	return carrier.NewWireDocument(
+	return carrier.NewCarrierDocument(
 		carrier.StageProviderRequestOut,
 		"",
 		"application/json",

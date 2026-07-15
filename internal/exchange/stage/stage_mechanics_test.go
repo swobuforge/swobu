@@ -15,7 +15,7 @@ func TestStageMechanicsApplyDocument_DeterministicOrderByID(t *testing.T) {
 		testDocPatch{id: "b"},
 		testDocPatch{id: "a"},
 	}, nil)
-	_, applied, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.WireDocument{})
+	_, applied, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.CarrierDocument{})
 	if err != nil {
 		t.Fatalf("ApplyDocument() error = %v", err)
 	}
@@ -72,7 +72,7 @@ func TestStageMechanicsApplyDocument_DoesNotApplyOnCarrierMismatch(t *testing.T)
 	}, nil)
 	_, applied, err := reg.ApplyDocument(StageRequestDocumentOut, Context{
 		Carrier: carrier.KindCanonicalEventStream,
-	}, carrier.WireDocument{})
+	}, carrier.CarrierDocument{})
 	if err != nil {
 		t.Fatalf("ApplyDocument() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestStageMechanicsApplyDocument_FailsOnSilentMutation(t *testing.T) {
 	reg := NewStageMechanics([]DocumentPatch{
 		silentMutationDocPatch{id: "mut"},
 	}, nil)
-	_, _, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.WireDocument{
+	_, _, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.CarrierDocument{
 		Stage:  carrier.StageProviderRequestOut,
 		Family: canonical.ClientFamilyResponses,
 		Raw:    []byte(`{"model":"m","input":"hi"}`),
@@ -99,7 +99,7 @@ func TestStageMechanicsApplyDocument_FailsOnSilentHeaderMutation(t *testing.T) {
 	reg := NewStageMechanics([]DocumentPatch{
 		silentHeaderMutationDocPatch{id: "mut_header"},
 	}, nil)
-	_, _, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.WireDocument{
+	_, _, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.CarrierDocument{
 		Stage:  carrier.StageProviderRequestOut,
 		Family: canonical.ClientFamilyResponses,
 		Header: http.Header{"X-A": {"1"}},
@@ -114,7 +114,7 @@ func TestStageMechanicsApplyDocument_FailsOnSilentMetaMutation(t *testing.T) {
 	reg := NewStageMechanics([]DocumentPatch{
 		silentMetaMutationDocPatch{id: "mut_meta"},
 	}, nil)
-	_, _, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.WireDocument{
+	_, _, err := reg.ApplyDocument(StageRequestDocumentOut, Context{}, carrier.CarrierDocument{
 		Stage:  carrier.StageProviderRequestOut,
 		Family: canonical.ClientFamilyResponses,
 		Meta:   carrier.Meta{BackendRef: "ex1"},
@@ -139,12 +139,12 @@ type testDocPatch struct {
 	id string
 }
 
-func (t testDocPatch) ID() string                               { return t.id }
-func (t testDocPatch) Stage() Stage                             { return StageRequestDocumentOut }
-func (t testDocPatch) Capabilities() StageCapabilities          { return StageCapabilities{} }
-func (t testDocPatch) Match(Context, carrier.WireDocument) bool { return true }
-func (t testDocPatch) Apply(_ Context, in carrier.WireDocument) (Result[carrier.WireDocument], error) {
-	return Result[carrier.WireDocument]{Value: in}, nil
+func (t testDocPatch) ID() string                                          { return t.id }
+func (t testDocPatch) Stage() Stage                                        { return StageRequestDocumentOut }
+func (t testDocPatch) Capabilities() StageCapabilities                     { return StageCapabilities{} }
+func (t testDocPatch) Match(Context, carrier.CarrierDocument) bool { return true }
+func (t testDocPatch) Apply(_ Context, in carrier.CarrierDocument) (Result[carrier.CarrierDocument], error) {
+	return Result[carrier.CarrierDocument]{Value: in}, nil
 }
 
 type testStreamWrapper struct {
@@ -172,12 +172,14 @@ func (t silentHeaderMutationDocPatch) Stage() Stage { return StageRequestDocumen
 func (t silentHeaderMutationDocPatch) Capabilities() StageCapabilities {
 	return StageCapabilities{}
 }
-func (t silentHeaderMutationDocPatch) Match(Context, carrier.WireDocument) bool { return true }
-func (t silentHeaderMutationDocPatch) Apply(_ Context, in carrier.WireDocument) (Result[carrier.WireDocument], error) {
+func (t silentHeaderMutationDocPatch) Match(Context, carrier.CarrierDocument) bool {
+	return true
+}
+func (t silentHeaderMutationDocPatch) Apply(_ Context, in carrier.CarrierDocument) (Result[carrier.CarrierDocument], error) {
 	out := in
 	out.Header = out.Header.Clone()
 	out.Header.Set("X-A", "2")
-	return Result[carrier.WireDocument]{Value: out}, nil
+	return Result[carrier.CarrierDocument]{Value: out}, nil
 }
 
 type silentMetaMutationDocPatch struct {
@@ -189,11 +191,11 @@ func (t silentMetaMutationDocPatch) Stage() Stage { return StageRequestDocumentO
 func (t silentMetaMutationDocPatch) Capabilities() StageCapabilities {
 	return StageCapabilities{}
 }
-func (t silentMetaMutationDocPatch) Match(Context, carrier.WireDocument) bool { return true }
-func (t silentMetaMutationDocPatch) Apply(_ Context, in carrier.WireDocument) (Result[carrier.WireDocument], error) {
+func (t silentMetaMutationDocPatch) Match(Context, carrier.CarrierDocument) bool { return true }
+func (t silentMetaMutationDocPatch) Apply(_ Context, in carrier.CarrierDocument) (Result[carrier.CarrierDocument], error) {
 	out := in
 	out.Meta.BackendRef = "ex2"
-	return Result[carrier.WireDocument]{Value: out}, nil
+	return Result[carrier.CarrierDocument]{Value: out}, nil
 }
 
 func (t silentMutationDocPatch) ID() string   { return t.id }
@@ -201,11 +203,11 @@ func (t silentMutationDocPatch) Stage() Stage { return StageRequestDocumentOut }
 func (t silentMutationDocPatch) Capabilities() StageCapabilities {
 	return StageCapabilities{}
 }
-func (t silentMutationDocPatch) Match(Context, carrier.WireDocument) bool { return true }
-func (t silentMutationDocPatch) Apply(_ Context, in carrier.WireDocument) (Result[carrier.WireDocument], error) {
+func (t silentMutationDocPatch) Match(Context, carrier.CarrierDocument) bool { return true }
+func (t silentMutationDocPatch) Apply(_ Context, in carrier.CarrierDocument) (Result[carrier.CarrierDocument], error) {
 	out := in
 	out.Raw = []byte(`{"model":"m","input":"changed"}`)
-	return Result[carrier.WireDocument]{Value: out}, nil
+	return Result[carrier.CarrierDocument]{Value: out}, nil
 }
 
 type undetailedMutatingStreamWrapper struct {

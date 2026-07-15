@@ -502,7 +502,7 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 	})
 	req := exchange.NewProviderRequest(
 		"test-ex", protocolkind.Responses, request,
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget("backend-b", "anthropic", "https://example.test/v1", "cred-1", protocolkind.Messages, "credential_ref", "", "messages"),
 	)

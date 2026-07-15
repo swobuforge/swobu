@@ -12,13 +12,13 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, exchangeID string) (effect.Result[carrier.WireDocument], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.WireDocument, error) {
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
+	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.CarrierDocument, error) {
 		return EncodeCarrierWithEffects(request, delivery, sink, exchangeID)
 	})
 }
 
-func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.WireDocument, exchangeID string) (effect.Result[canonical.EventReader], error) {
+func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.CarrierDocument, exchangeID string) (effect.Result[canonical.EventReader], error) {
 	if err := core.ValidateResponseCarrierDocument(doc, protocolkind.ChatCompletions); err != nil {
 		carrierErr := canonical.InternalError("chat completions response wire carrier is invalid")
 		carrierErr.Details = map[string]string{"wire_document_invariant": err.Error()}
@@ -29,7 +29,7 @@ func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc c
 	})
 }
 
-func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.WireStream, exchangeID string) (effect.Result[canonical.EventReader], error) {
+func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string) (effect.Result[canonical.EventReader], error) {
 	if err := core.ValidateResponseSSECarrierStream(stream, protocolkind.ChatCompletions); err != nil {
 		carrierErr := canonical.InternalError("chat completions stream wire carrier is invalid")
 		carrierErr.Details = map[string]string{"wire_stream_invariant": err.Error()}

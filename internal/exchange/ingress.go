@@ -272,16 +272,16 @@ func requestOutcomeDiagnostics(err error) []string {
 	return []string{strings.TrimSpace(err.Error())} // swobu:io-string source=boundary
 }
 
-func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.WireDocument, error) {
+func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.CarrierDocument, error) {
 	body, err := readTransportRequestBody(req.Body)
 	if err != nil {
-		return carrier.WireDocument{}, canonical.BadRequest("request body could not be read")
+		return carrier.CarrierDocument{}, canonical.BadRequest("request body could not be read")
 	}
 	mediaType := strings.TrimSpace(req.Header.Get("Content-Type")) // swobu:io-string source=boundary
 	if mediaType == "" {
 		mediaType = "application/json"
 	}
-	return carrier.NewWireDocument(
+	return carrier.NewCarrierDocument(
 		carrier.StageClientRequestIn,
 		family,
 		mediaType,

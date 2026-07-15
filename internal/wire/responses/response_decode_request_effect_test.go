@@ -25,7 +25,7 @@ func TestDecodeClientRequestWithEffects_RecordsResponsesRequestScars(t *testing.
 	}`)
 	sink := &recordingEffectSink{}
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithEffects(carrier.WireDocument{Family: protocolkind.Responses, Raw: raw}, sink, "ex_responses_decode")
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithEffects(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw}, sink, "ex_responses_decode")
 	if err == nil {
 		t.Fatal("expected DecodeClientRequestWithEffects to reject missing function_call_output call_id")
 	}

@@ -67,19 +67,19 @@ func (r Runner) Run(ctx context.Context, in ExchangeInput) (TransportResponse, e
 
 	store := machine.NewStore(
 		machine.StateCell{Value: reflect.ValueOf(in)},
-		machine.StateCell{Value: reflect.ValueOf(codecResolution{})},
-		machine.StateCell{Value: reflect.ValueOf(encodedRequest{})},
-		machine.StateCell{Value: reflect.ValueOf(providerResponse{})},
-		machine.StateCell{Value: reflect.ValueOf(decodedEnvelope{})},
-		machine.StateCell{Value: reflect.ValueOf(continuationContext{})},
-		machine.StateCell{Value: reflect.ValueOf(pipelineOutcome{})},
+		machine.StateCell{Value: reflect.ValueOf(codecResolutionState{})},
+		machine.StateCell{Value: reflect.ValueOf(EncodedRequestState{})},
+		machine.StateCell{Value: reflect.ValueOf(ProviderResponseState{})},
+		machine.StateCell{Value: reflect.ValueOf(DecodedEnvelopeState{})},
+		machine.StateCell{Value: reflect.ValueOf(continuationContextState{})},
+		machine.StateCell{Value: reflect.ValueOf(pipelineOutcomeState{})},
 	)
 
-	if _, err := eng.Run(ctx, store, pipelineStarted{}); err != nil {
+	if _, err := eng.Run(ctx, store, PipelineStartedEvent{}); err != nil {
 		return TransportResponse{}, err
 	}
 
-	var out pipelineOutcome
+	var out pipelineOutcomeState
 	_ = store.Get(&out)
 	return out.Response, out.Err
 }

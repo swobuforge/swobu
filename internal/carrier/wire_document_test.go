@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestWireDocumentCloneAndRawBytes_DefensiveCopies(t *testing.T) {
-	in := NewWireDocument(StageProviderRequestOut, "responses", "application/json", nil, []byte(`{"a":1}`), Meta{})
+func TestCarrierDocumentCloneAndRawBytes_DefensiveCopies(t *testing.T) {
+	in := NewCarrierDocument(StageProviderRequestOut, "responses", "application/json", nil, []byte(`{"a":1}`), Meta{})
 
 	cloned := in.Clone()
 	cloned.Raw[0] = 'X'
@@ -21,11 +21,11 @@ func TestWireDocumentCloneAndRawBytes_DefensiveCopies(t *testing.T) {
 	}
 }
 
-func TestNewWireDocument_ClonesHeaderAndMeta(t *testing.T) {
+func TestNewCarrierDocument_ClonesHeaderAndMeta(t *testing.T) {
 	header := http.Header{}
 	header.Set("X-Id", "a")
 	meta := Meta{Opaque: map[string]string{"k": "v"}}
-	doc := NewWireDocument(StageProviderRequestOut, "responses", "application/json", header, []byte(`{}`), meta)
+	doc := NewCarrierDocument(StageProviderRequestOut, "responses", "application/json", header, []byte(`{}`), meta)
 
 	header.Set("X-Id", "b")
 	meta.Opaque["k"] = "x"

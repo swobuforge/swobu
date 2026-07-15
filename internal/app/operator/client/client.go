@@ -1,3 +1,5 @@
+// Runtime lane: daemon HTTP client behavior and transport orchestration.
+//
 // Shared HTTP client for the daemon operator control plane.
 // All operator clients (TUI, CLI, WebUI) should use this package
 // rather than issuing raw HTTP requests.
@@ -20,36 +22,6 @@ import (
 type Client struct {
 	http    *http.Client
 	baseURL string
-}
-
-type AccessCheckResult struct {
-	Status  string
-	Message string
-}
-
-type AuthSessionStartResult struct {
-	ProviderSpec string
-	SessionID    string
-	AuthorizeURL string
-	UserCode     string
-	ExpiresAt    string
-	State        string
-}
-
-type AuthSessionStatusResult struct {
-	ProviderSpec  string
-	SessionID     string
-	State         string
-	CredentialRef string
-	ErrorMessage  string
-}
-
-type AuthSessionRetryResult struct {
-	SessionID    string
-	AuthorizeURL string
-	UserCode     string
-	ExpiresAt    string
-	State        string
 }
 
 // New creates a client that talks to the daemon at the given base URL
@@ -196,52 +168,6 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 		Status:  fmt.Sprintf("backend %d", resp.StatusCode),
 		Message: message,
 	}, nil
-}
-
-// TODO who is depending on it? How was legacy UI living without it?
-type StatusProjection struct {
-	State         string             `json:"state"`
-	RecentTraffic []RecentTrafficRow `json:"recent_traffic"`
-}
-
-type RecentTrafficRow struct {
-	RequestID      string                 `json:"request_id"`
-	Endpoint       string                 `json:"endpoint"`
-	ClientHandler  string                 `json:"client_handler,omitempty"`
-	ClientProtocol string                 `json:"client_protocol,omitempty"`
-	ClientFamily   string                 `json:"client_family,omitempty"`
-	NormalizedOp   string                 `json:"normalized_op,omitempty"`
-	Route          string                 `json:"route"`
-	Result         string                 `json:"result"`
-	StatusCode     int                    `json:"status_code"`
-	ObservedAt     string                 `json:"observed_at,omitempty"`
-	Timing         *RecentTrafficTiming   `json:"timing,omitempty"`
-	TokenUsage     *RecentTrafficTokenUse `json:"token_usage,omitempty"`
-
-	ModelRequested      string                `json:"model_requested,omitempty"`
-	ModelResolved       string                `json:"model_resolved,omitempty"`
-	ModelResolutionMode string                `json:"model_resolution_mode,omitempty"`
-	ExchangeDiagnostics []string              `json:"exchange_diagnostics,omitempty"`
-	StageReports        []ExchangeStageReport `json:"exchange_stage_reports,omitempty"`
-}
-
-type RecentTrafficTiming struct {
-	TTFBMillis *int `json:"ttfb_millis,omitempty"`
-	DurMillis  *int `json:"dur_millis,omitempty"`
-}
-
-type RecentTrafficTokenUse struct {
-	InputTokens      *int `json:"input_tokens,omitempty"`
-	OutputTokens     *int `json:"output_tokens,omitempty"`
-	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
-}
-
-type ExchangeStageReport struct {
-	Stage   string   `json:"stage"`
-	Carrier string   `json:"carrier"`
-	Applied []string `json:"applied,omitempty"`
-	Mutated bool     `json:"mutated"`
 }
 
 // Status returns the daemon-owned traffic projection for an operator scope.

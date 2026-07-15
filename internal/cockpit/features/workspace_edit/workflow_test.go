@@ -3,7 +3,6 @@ package workspace_edit
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
@@ -154,6 +153,23 @@ func TestWorkflow_KeyMapEscClosesFocusedWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflow_DraftCreateAutoFocusesSlugInput(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, nil, nil)
+	h, err := testkit.NewHarness(workflow)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	h.Frame()
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: '?'})
+	if got := workflow.Slug.Get(); got != "?" {
+		t.Fatalf("slug after typing ? = %q, want ?", got)
+	}
+}
+
 func TestWorkflow_ActivateSlugRowEditsNoopsOrSubmits(t *testing.T) {
 	var got ports.SaveWorkspaceRequest
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, func(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
@@ -184,20 +200,32 @@ func TestWorkflow_ActivateSlugRowEditsNoopsOrSubmits(t *testing.T) {
 
 func TestWorkflow_RenderSlugLifecycleStatesInComponentLane(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
-	got := testkit.RenderString(workflow.Render(nil), 90, 4)
-	assertContains(t, got, "slug", "dev", "edit")
+	rendered := testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	testkit.AssertVisual("viewing").
+		Fixture("testdata/workspace_edit_workflow/fixture/viewing.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
 
 	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
-	got = testkit.RenderString(workflow.Render(nil), 90, 8)
-	assertContains(t, got, "slug", "dev", "save")
+	rendered = testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	testkit.AssertVisual("editing").
+		Fixture("testdata/workspace_edit_workflow/fixture/editing.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
 
 	workflow.Slug.Set("dev!")
-	got = testkit.RenderString(workflow.Render(nil), 90, 9)
-	assertContains(t, got, "invalid", "use lowercase letters, numbers, and hyphens")
+	rendered = testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	testkit.AssertVisual("invalid").
+		Fixture("testdata/workspace_edit_workflow/fixture/invalid.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
 
 	workflow.OpenCreate()
-	got = testkit.RenderString(workflow.Render(nil), 90, 7)
-	assertContains(t, got, "slug", "_", "create")
+	rendered = testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	testkit.AssertVisual("create").
+		Fixture("testdata/workspace_edit_workflow/fixture/create.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
 }
 
 func TestWorkflow_ClientBaseURLPreviewDerivesFromSlug(t *testing.T) {
@@ -211,15 +239,6 @@ func TestWorkflow_ClientBaseURLPreviewDerivesFromSlug(t *testing.T) {
 	workflow.Slug.Set("staging!")
 	if got, want := workflow.ClientBaseURLPreview(), "(derived from slug)"; got != want {
 		t.Fatalf("invalid preview = %q, want %q", got, want)
-	}
-}
-
-func assertContains(t *testing.T, got string, values ...string) {
-	t.Helper()
-	for _, value := range values {
-		if !strings.Contains(got, value) {
-			t.Fatalf("render should contain %q:\n%s", value, got)
-		}
 	}
 }
 

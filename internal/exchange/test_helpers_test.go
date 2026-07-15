@@ -28,7 +28,7 @@ func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effe
 func bufferedProviderIngressResolver(raw []byte) func(context.Context, ProviderRequest) (ProviderIngress, error) {
 	_ = raw
 	return func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
@@ -42,7 +42,7 @@ func bufferedProviderIngressResolver(raw []byte) func(context.Context, ProviderR
 func streamingProviderIngressResolver(stream io.ReadCloser) func(context.Context, ProviderRequest) (ProviderIngress, error) {
 	_ = stream
 	return func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		return carrier.WireStream{
+		return carrier.CarrierStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
 			Framing: carrier.FramingSSE,
@@ -127,7 +127,7 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct{}
 
-func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[wire.ClientRequestResult], error) {
+func (testClientCodec) DecodeClientRequest(doc carrier.CarrierDocument) (Result[wire.ClientRequestResult], error) {
 	model := "m"
 	var turn canonical.TurnRef
 	var items []canonical.CanonicalItem
@@ -173,7 +173,7 @@ func (testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[wir
 	}, nil
 }
 
-func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.WireDocument], error) {
+func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.CarrierDocument], error) {
 	text := ""
 	if textual, ok := any(output).(interface{ Text() string }); ok {
 		text = textual.Text()
@@ -188,15 +188,15 @@ func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) 
 	if text == "" {
 		text = "ok"
 	}
-	return NewResult(carrier.NewWireDocument("", protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{})), nil
+	return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{})), nil
 }
 
-func (testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.WireStream], error) {
+func (testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.CarrierStream], error) {
 	_ = events
 	_ = d
 	raw := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
-	return NewResult(carrier.WireStream{
+	return effect.NewResult(carrier.CarrierStream{
 		Stage:   carrier.StageClientResponseOut,
 		Family:  protocolkind.Responses,
 		Framing: carrier.FramingSSE,
@@ -206,25 +206,25 @@ func (testClientCodec) EncodeResponseStream(events canonical.EventReader, d deli
 
 type testProviderRequestDocumentEncoder struct{}
 
-func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, d delivery.Delivery, exchangeID string) (Result[carrier.WireDocument], error) {
+func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, d delivery.Delivery, exchangeID string) (Result[carrier.CarrierDocument], error) {
 	_ = d
 	_ = exchangeID
-	return NewResult(carrier.NewWireDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+request.Model()+`"}`), carrier.Meta{})), nil
+	return effect.NewResult(carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+request.Model()+`"}`), carrier.Meta{})), nil
 }
 
 type testProviderEnvelopeDecoder struct{}
 
-func (testProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.WireStream, exchangeID string) (Result[canonical.EventReader], error) {
+func (testProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string) (Result[canonical.EventReader], error) {
 	_ = stream
-	return NewResult(stubResponseEventReader(exchangeID)), nil
+	return effect.NewResult(stubResponseEventReader(exchangeID)), nil
 }
 
 type testProviderDocumentDecoder struct{}
 
-func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.WireDocument, exchangeID string) (Result[canonical.EventReader], error) {
+func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.CarrierDocument, exchangeID string) (Result[canonical.EventReader], error) {
 	_ = ctx
 	_ = doc
-	return NewResult(stubResponseEventReader(exchangeID)), nil
+	return effect.NewResult(stubResponseEventReader(exchangeID)), nil
 }
 
 func stubResponseEventReader(exchangeID string) canonical.EventReader {

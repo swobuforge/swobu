@@ -8,25 +8,28 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
+func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.CarrierDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.WireDocument{}, canonical.UnsupportedDelivery("prompt requests do not implement the requested delivery mode on the completions protocol")
+		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("prompt requests do not implement the requested delivery mode on the completions protocol")
 	}
 	if !req.ToolPolicy().IsZero() {
-		return carrier.WireDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool choice")
+		return carrier.CarrierDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool choice")
 	}
 	if len(req.Tools()) > 0 {
-		return carrier.WireDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool declarations")
+		return carrier.CarrierDocument{}, canonical.UnsupportedOperation("completions protocol does not support tool declarations")
+	}
+	if req.Instructions() != "" {
+		return carrier.CarrierDocument{}, canonical.UnsupportedOperation("completions protocol does not support instructions")
 	}
 	if err := rejectCompletionsOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 
 	prompt, err := promptFromItems(req.Items())
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 
 	payload := map[string]any{
@@ -34,17 +37,17 @@ func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier
 		"prompt": prompt,
 	}
 	if err := encodeCompletionsGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.WireDocument{}, canonical.BadRequest("prompt request could not be encoded for the completions protocol")
+		return carrier.CarrierDocument{}, canonical.BadRequest("prompt request could not be encoded for the completions protocol")
 	}
 
-	return carrier.NewWireDocument(
+	return carrier.NewCarrierDocument(
 		carrier.StageProviderRequestOut,
 		"",
 		"application/json",

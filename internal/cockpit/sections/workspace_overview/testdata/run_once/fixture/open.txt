@@ -1,0 +1,12 @@
+  workspace ▾
+     slug              dev                           edit ↵
+     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
+     run once          Codex                               open ↵
+     Codex run
+        model          gpt-4.1 default                     change ↵
+        command        codex --model gpt-4.1               run ↵
+     delete            workspace                           delete ↵
+
+
+
+

@@ -90,3 +90,26 @@ func TestEncode_PreservesRawCustomToolFormatAndToolSearchParameters(t *testing.T
 		t.Fatalf("tool_search query.type = %v, want string", query["type"])
 	}
 }
+
+func TestEncode_PreservesInstructions(t *testing.T) {
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        "gpt-4o-mini",
+		Instructions: "Use native tools for filesystem work.",
+		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "inspect files")},
+	})
+
+	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
+	if err != nil {
+		t.Fatalf("EncodeCarrier: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wire.Raw, &body); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if got := body["instructions"]; got != "Use native tools for filesystem work." {
+		t.Fatalf("instructions = %#v, want canonical instructions", got)
+	}
+	if got := body["input"]; got != "inspect files" {
+		t.Fatalf("input = %#v, want user item only", got)
+	}
+}

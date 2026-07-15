@@ -12,7 +12,7 @@ import (
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effect.Result[wire.ClientRequestResult], error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
 	var effects []effect.Effect
 	request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, effect.AccumulatorSink{Effects: &effects}, "")
 	return effect.NewResult(wire.ClientRequestResult{
@@ -21,7 +21,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effec
 	}, effects...), err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto completionsRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "completions request", nil); err != nil {
@@ -29,6 +29,9 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 	}
 	if dto.Prompt == "" {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("completions request is missing required fields")
+	}
+	if strings.TrimSpace(string(dto.Instructions)) != "" && strings.TrimSpace(string(dto.Instructions)) != "null" { // swobu:io-string source=boundary
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.UnsupportedOperation("completions request instructions are not supported")
 	}
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "completions")
 	if err != nil {

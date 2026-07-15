@@ -84,7 +84,7 @@ func (a ActivityRowReadModel) RowValue() string {
 	if route == "" {
 		route = string(a.RouteID)
 	}
-	observedAt := strings.TrimSpace(a.ObservedAt)
+	observedAt := strings.TrimSpace(a.ObservedAt) // swobu:io-string source=boundary
 	if observedAt == "" {
 		observedAt = "unknown"
 	}

@@ -51,7 +51,7 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude","prompt_cache_key":"repo","messages":[{"role":"user","content":"hi"}]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Messages, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestDecodeRequest_IgnoresAnthropicCacheMarkers(t *testing.T) {
 		t.Fatalf("ProjectedToolName: %v", err)
 	}
 	req := []byte(`{"model":"claude","tools":[{"name":"` + projectedToolName + `","description":"read files","input_schema":{"type":"object","properties":{"path":{"type":"string"}}},"cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Messages, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestDecodeRequest_IgnoresAnthropicCacheMarkers(t *testing.T) {
 func TestDecodeRequest_IgnoresBedrockCachePointParts(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude","messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"cachePoint":{"type":"default","ttl":"5m"}}]}]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Messages, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}

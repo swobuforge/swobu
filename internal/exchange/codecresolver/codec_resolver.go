@@ -144,24 +144,24 @@ type protocolBundle struct {
 // wire.ClientCodec. It is a composition convenience, not a semantic type.
 type clientCodecBundle struct {
 	request interface {
-		DecodeClientRequest(carrier.WireDocument) (effect.Result[wire.ClientRequestResult], error)
+		DecodeClientRequest(carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error)
 	}
 	document interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (effect.Result[carrier.WireDocument], error)
+		EncodeResponseDocument(canonical.CanonicalOutput) (effect.Result[carrier.CarrierDocument], error)
 	}
 	stream interface {
-		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (effect.Result[carrier.WireStream], error)
+		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (effect.Result[carrier.CarrierStream], error)
 	}
 }
 
-func (b clientCodecBundle) DecodeClientRequest(doc carrier.WireDocument) (effect.Result[wire.ClientRequestResult], error) {
+func (b clientCodecBundle) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
 	return b.request.DecodeClientRequest(doc)
 }
 
-func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.WireDocument], error) {
+func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.CarrierDocument], error) {
 	return b.document.EncodeResponseDocument(output)
 }
 
-func (b clientCodecBundle) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (effect.Result[carrier.WireStream], error) {
+func (b clientCodecBundle) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (effect.Result[carrier.CarrierStream], error) {
 	return b.stream.EncodeResponseStream(events, d)
 }

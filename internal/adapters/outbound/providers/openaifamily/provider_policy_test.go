@@ -44,7 +44,7 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		NewOpenAICompatiblePolicy(),
 		NewOpenRouterPolicy(),
 	} {
-		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), carrier.WireDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
+		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), carrier.CarrierDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
 		if err != nil {
 			t.Fatalf("provider=%s decode: %v", profile.ProviderID(), err)
 		}

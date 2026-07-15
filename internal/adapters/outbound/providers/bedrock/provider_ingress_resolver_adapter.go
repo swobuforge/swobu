@@ -111,7 +111,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		return nil, backendErr
 	}
 	if req.Contract.ProviderDelivery.IsStreaming() {
-		return carrier.WireStream{
+		return carrier.CarrierStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
 			Framing: carrier.FramingSSE,
@@ -124,7 +124,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if readErr != nil {
 		return nil, canonical.InternalError("backend success response could not be read")
 	}
-	return carrier.NewWireDocument(
+	return carrier.NewCarrierDocument(
 		carrier.StageProviderIngressIn,
 		req.Target.ProtocolKind,
 		"application/json",

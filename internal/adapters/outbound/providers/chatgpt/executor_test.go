@@ -234,7 +234,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
@@ -250,7 +250,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	streamBody, ok := resp.(carrier.WireStream)
+	streamBody, ok := resp.(carrier.CarrierStream)
 	if !ok || streamBody.Frames == nil {
 		t.Fatal("expected transport stream response")
 	}
@@ -289,7 +289,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
@@ -308,7 +308,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	streamBody, ok := resp.(carrier.WireStream)
+	streamBody, ok := resp.(carrier.CarrierStream)
 	if !ok || streamBody.Frames == nil {
 		t.Fatal("expected transport stream response")
 	}
@@ -344,7 +344,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
@@ -378,7 +378,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
@@ -450,7 +450,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
@@ -466,7 +466,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
-	if streamBody, ok := resp.(carrier.WireStream); ok && streamBody.Frames != nil {
+	if streamBody, ok := resp.(carrier.CarrierStream); ok && streamBody.Frames != nil {
 		_ = streamBody.Frames.Close()
 	}
 	if attempts != 2 {
@@ -503,7 +503,7 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		exchange.NewRoutableTarget(
 			"draft",
@@ -519,7 +519,7 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	streamBody, ok := resp.(carrier.WireStream)
+	streamBody, ok := resp.(carrier.CarrierStream)
 	if !ok || streamBody.Frames == nil {
 		t.Fatal("expected transport stream response")
 	}

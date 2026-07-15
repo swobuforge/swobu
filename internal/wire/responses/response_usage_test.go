@@ -99,7 +99,7 @@ func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 
 	sink := &recordingEffectSink{}
-	reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_usage", sink)
+	reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_usage", sink)
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestDecodeResponseStream_UsesCompletedOutputFallbackWhenNoDeltas(t *testing
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 
 	sink := &recordingEffectSink{}
-	reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_fallback", sink)
+	reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_fallback", sink)
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 	if err != nil {

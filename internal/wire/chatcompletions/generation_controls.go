@@ -6,7 +6,7 @@ import (
 )
 
 func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (canonical.GenerationControls, error) {
-	maxTokens, err := openaicompat.DecodeOptionalInt(dto.MaxTokens, "chat completions request max_tokens is invalid")
+	maxTokens, err := decodeChatCompletionsMaxOutputTokens(dto)
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
@@ -30,9 +30,22 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 	})
 }
 
-func encodeChatCompletionsGenerationControls(payload map[string]any, controls canonical.GenerationControls) error {
+func decodeChatCompletionsMaxOutputTokens(dto chatCompletionsRequestDTO) (*int, error) {
+	// GPT-5-series reasoning models use the newer field name on chat completions.
+	// Prefer it when present, then fall back to the legacy name for older models.
+	maxCompletionTokens, err := openaicompat.DecodeOptionalInt(dto.MaxCompletionTokens, "chat completions request max_completion_tokens is invalid")
+	if err != nil {
+		return nil, err
+	}
+	if maxCompletionTokens != nil {
+		return maxCompletionTokens, nil
+	}
+	return openaicompat.DecodeOptionalInt(dto.MaxTokens, "chat completions request max_tokens is invalid")
+}
+
+func encodeChatCompletionsGenerationControls(payload map[string]any, _ string, controls canonical.GenerationControls) error {
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
-		payload["max_tokens"] = value
+		payload["max_completion_tokens"] = value
 	}
 	if value, ok := controls.Sampling.Temperature.Value(); ok {
 		payload["temperature"] = value

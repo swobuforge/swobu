@@ -72,31 +72,6 @@ func TestRenderTrimmed_StripsTrailingSpaces(t *testing.T) {
 	}
 }
 
-// TestAppLoop_NotSupportedWithoutTTY documents the known upstream limitation:
-// NewApp/NewAppWithReader create a real ANSITerminal and call EnterRawMode,
-// which fails without a controlling terminal. There is no public AppOption to
-// inject MockTerminal. This means App-loop testing (event loop, keyboard
-// dispatch, focus, state updates) is a PTY/e2e lane, not a component-render
-// lane. This characterization test proves the limitation is real and prevents
-// future task agents from inventing nonexistent options like WithTerminal.
-func TestAppLoop_NotSupportedWithoutTTY(t *testing.T) {
-	// go-tui v0.17.0 offers MockTerminal, but App construction hard-codes
-	// real ANSITerminal creation. Attempting to create an App without a TTY
-	// fails deterministically.
-	//
-	// Future upstream work that adds terminal injection would make this
-	// characterization test suddenly pass; at that point upgrade go-tui and
-	// replace this with real app-loop tests.
-	_, err := tui.NewApp()
-	if err == nil {
-		t.Skip("app construction succeeded — terminal injection may now be available; replace characterization with real app-loop tests")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "inappropriate ioctl") && !strings.Contains(msg, "raw") && !strings.Contains(msg, "terminal") && !strings.Contains(msg, "tty") {
-		t.Fatalf("expected raw-mode/terminal error without TTY, got: %v", err)
-	}
-}
-
 // TestAssertNow_TextExists proves AssertNow works with our re-exported API.
 func TestAssertNow_TextExists(t *testing.T) {
 	root := tui.New(tui.WithText("target phrase"))

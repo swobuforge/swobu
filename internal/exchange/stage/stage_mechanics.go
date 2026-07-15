@@ -16,8 +16,8 @@ type DocumentPatch interface {
 	ID() string
 	Stage() Stage
 	Capabilities() StageCapabilities
-	Match(Context, carrier.WireDocument) bool
-	Apply(Context, carrier.WireDocument) (Result[carrier.WireDocument], error)
+	Match(Context, carrier.CarrierDocument) bool
+	Apply(Context, carrier.CarrierDocument) (Result[carrier.CarrierDocument], error)
 }
 
 // AppliedDocumentPatch is one executed document patch result.
@@ -73,7 +73,7 @@ func NewStageMechanics(document []DocumentPatch, stream []EventStreamWrapper) St
 		if patch == nil {
 			continue
 		}
-		key := registryKey{Stage: patch.Stage(), Carrier: carrier.KindWireDocument}
+		key := registryKey{Stage: patch.Stage(), Carrier: carrier.KindCarrierDocument}
 		out.documentByStageCarrier[key] = append(out.documentByStageCarrier[key], patch)
 	}
 	for _, wrapper := range stream {
@@ -113,10 +113,10 @@ func NewStageMechanics(document []DocumentPatch, stream []EventStreamWrapper) St
 }
 
 // ApplyDocument applies the stage-selected document patches for one carrier kind.
-func (r StageMechanics) ApplyDocument(stage Stage, ctx Context, doc carrier.WireDocument) (carrier.WireDocument, []AppliedDocumentPatch, error) {
+func (r StageMechanics) ApplyDocument(stage Stage, ctx Context, doc carrier.CarrierDocument) (carrier.CarrierDocument, []AppliedDocumentPatch, error) {
 	carrierKind := ctx.Carrier
 	if carrierKind == "" {
-		carrierKind = carrier.KindWireDocument
+		carrierKind = carrier.KindCarrierDocument
 	}
 	patches := r.documentByStageCarrier[registryKey{Stage: stage, Carrier: carrierKind}]
 	if len(patches) == 0 {
@@ -137,14 +137,14 @@ func (r StageMechanics) ApplyDocument(stage Stage, ctx Context, doc carrier.Wire
 				Capabilities: patch.Capabilities(),
 				Effects:      effects,
 			})
-			return carrier.WireDocument{}, applied, err
+			return carrier.CarrierDocument{}, applied, err
 		}
 		changed := wireDocumentChanged(out, result.Value)
 		if changed && !result.Mutated && len(effects) == 0 {
-			return carrier.WireDocument{}, nil, errors.New("document patch changed carrier without mutation or effect detail")
+			return carrier.CarrierDocument{}, nil, errors.New("document patch changed carrier without mutation or effect detail")
 		}
 		if result.Mutated && !changed {
-			return carrier.WireDocument{}, nil, errors.New("document patch reported mutation without carrier change")
+			return carrier.CarrierDocument{}, nil, errors.New("document patch reported mutation without carrier change")
 		}
 		out = result.Value
 		applied = append(applied, AppliedDocumentPatch{
@@ -205,7 +205,7 @@ func cloneEffects(src []effect.Effect) []effect.Effect {
 	return append([]effect.Effect(nil), src...)
 }
 
-func wireDocumentChanged(before, after carrier.WireDocument) bool {
+func wireDocumentChanged(before, after carrier.CarrierDocument) bool {
 	if before.Stage != after.Stage || before.Family != after.Family || before.Media != after.Media {
 		return true
 	}

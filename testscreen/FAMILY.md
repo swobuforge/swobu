@@ -92,7 +92,7 @@ be embedded as a plan step.
 ## Migration Path
 
 When a new testing surface needs visual assertions:
-1. Create `SURFACE/testkit/testkit.go` with re-exports and execution hooks
+1. Create `SURFACE/testkit/visual_assert.go` with re-exports and execution hooks
 2. Name the surface-specific helpers explicitly (don't name them generically like `Assert`)
 3. Add a family-membership comment: `// Part of testscreen family: surface=SURFACE`
 4. Use `testscreen/fixture.Config`, `testscreen/fixture.Path`, and

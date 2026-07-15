@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
-	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
+	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/platform/config"
@@ -27,7 +27,7 @@ func (a *LiveOperatorAdapter) workspaceFromEndpoint(ctx context.Context, endpoin
 }
 
 func (a *LiveOperatorAdapter) clientBaseURL(slug string) string {
-	return a.daemonURL + "/c/" + strings.Trim(strings.TrimSpace(slug), "/")
+	return a.daemonURL + "/c/" + strings.Trim(strings.TrimSpace(slug), "/") // swobu:io-string source=boundary
 }
 
 func (a *LiveOperatorAdapter) headerRight() string {

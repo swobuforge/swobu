@@ -1,0 +1,3 @@
+package cockpit
+
+//go:generate go run github.com/grindlemire/go-tui/cmd/tui generate ./...

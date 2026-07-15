@@ -21,6 +21,8 @@ endpoints:
         base_url: https://example.test/v1
         model_id: gpt-4.1-mini
         target_alias: fast
+        target_rank: 2
+        target_weight: 4
 `
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
@@ -54,6 +56,12 @@ endpoints:
 	}
 	if got := selectedProvider.TargetAlias(); got != "fast" {
 		t.Fatalf("selected provider target_alias = %q, want %q", got, "fast")
+	}
+	if got := selectedProvider.TargetRank(); got != 2 {
+		t.Fatalf("selected provider target_rank = %d, want 2", got)
+	}
+	if got := selectedProvider.TargetWeight(); got != 4 {
+		t.Fatalf("selected provider target_weight = %d, want 4", got)
 	}
 }
 
@@ -224,6 +232,14 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithTargetAlias returned error: %v", err)
 	}
+	providerConfig, err = providerConfig.WithTargetRank(2)
+	if err != nil {
+		t.Fatalf("WithTargetRank returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithTargetWeight(4)
+	if err != nil {
+		t.Fatalf("WithTargetWeight returned error: %v", err)
+	}
 	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{providerConfig}, ref)
 	if err != nil {
 		t.Fatalf("NewEndpoint returned error: %v", err)
@@ -243,6 +259,12 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 	if !strings.Contains(text, "target_alias: fast") {
 		t.Fatalf("saved config missing target_alias, got:\n%s", text)
 	}
+	if !strings.Contains(text, "target_rank: 2") {
+		t.Fatalf("saved config missing target_rank, got:\n%s", text)
+	}
+	if !strings.Contains(text, "target_weight: 4") {
+		t.Fatalf("saved config missing target_weight, got:\n%s", text)
+	}
 
 	loaded, err := Load(path)
 	if err != nil {
@@ -256,6 +278,12 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 	}
 	if got := loaded.Endpoints[0].SelectedProviderConfig().TargetAlias(); got != "fast" {
 		t.Fatalf("roundtrip target_alias = %q, want %q", got, "fast")
+	}
+	if got := loaded.Endpoints[0].SelectedProviderConfig().TargetRank(); got != 2 {
+		t.Fatalf("roundtrip target_rank = %d, want 2", got)
+	}
+	if got := loaded.Endpoints[0].SelectedProviderConfig().TargetWeight(); got != 4 {
+		t.Fatalf("roundtrip target_weight = %d, want 4", got)
 	}
 }
 
@@ -368,6 +396,61 @@ func TestSaveLoad_RoundTripMultiProviderCredentialRefsAndAliases_JSON(t *testing
 	}
 	if got := cfgs[1].TargetAlias(); got != "personal-safe" {
 		t.Fatalf("roundtrip target_alias[1]=%q", got)
+	}
+}
+
+func TestSave_OmitsDefaultRankWeight(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	name, err := endpointintent.ParseEndpointName("jobs")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	ref, err := endpointintent.ParseProviderConfigRef("cfg-main")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://api.openai.com/v1", "env:OPENAI_API_KEY")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if cfg.TargetRank() != 1 || cfg.TargetWeight() != 1 {
+		t.Fatalf("defaults must be 1/1, got %d/%d", cfg.TargetRank(), cfg.TargetWeight())
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	if err := Save(path, RuntimeConfig{BindAddr: DefaultBindAddr()}, []endpointintent.Endpoint{endpoint}); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "target_rank:") {
+		t.Fatalf("saved config should omit target_rank for default value 1, got:\n%s", text)
+	}
+	if strings.Contains(text, "target_weight:") {
+		t.Fatalf("saved config should omit target_weight for default value 1, got:\n%s", text)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Endpoints[0].ProviderConfigs()[0].TargetRank(); got != 1 {
+		t.Fatalf("roundtrip target_rank = %d, want 1", got)
+	}
+	if got := loaded.Endpoints[0].ProviderConfigs()[0].TargetWeight(); got != 1 {
+		t.Fatalf("roundtrip target_weight = %d, want 1", got)
 	}
 }
 

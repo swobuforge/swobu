@@ -26,7 +26,7 @@ type ProviderRequest struct {
 	Request canonical.CanonicalRequest
 	// RequestDocument is the already-realized provider wire document for the
 	// selected path.
-	RequestDocument carrier.WireDocument
+	RequestDocument carrier.CarrierDocument
 	Contract        ExecutionContract
 	Target          RoutableTarget
 	ExchangeID      string
@@ -38,7 +38,7 @@ func NewProviderRequest(
 	exchangeID string,
 	clientFamily canonical.ClientFamily,
 	request canonical.CanonicalRequest,
-	wireRequest carrier.WireDocument,
+	wireRequest carrier.CarrierDocument,
 	contract ExecutionContract,
 	target RoutableTarget,
 	effectSink ...effect.Sink,
@@ -103,7 +103,7 @@ type ProviderIngress any
 
 func ValidateProviderIngress(ingress ProviderIngress) error {
 	switch in := ingress.(type) {
-	case carrier.WireDocument:
+	case carrier.CarrierDocument:
 		if in.IsEmpty() {
 			return fmt.Errorf("provider ingress wire document must not be empty")
 		}
@@ -111,7 +111,7 @@ func ValidateProviderIngress(ingress ProviderIngress) error {
 			return fmt.Errorf("provider ingress wire document must use %q carrier stage", carrier.StageProviderIngressIn)
 		}
 		return nil
-	case carrier.WireStream:
+	case carrier.CarrierStream:
 		if in.Frames == nil {
 			return fmt.Errorf("provider ingress wire stream is required")
 		}

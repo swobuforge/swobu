@@ -1,7 +1,7 @@
-// ui provides shared presentation component types for cockpit.
+// ui provides shared presentation component types and select-flow helpers for
+// cockpit.
 //
-// Row components (FocusableRow, FocusablePreviewRow, InertRow, DetailRow) are
-// defined here once and composed by section packages via the gsx compiler.
-// Each section may mount them interactively (via app.Mount) or render them
-// statically for preview/test rendering.
+// Row components and the select-flow kernel live here once so section packages
+// can reuse the same focus markers, focus repair, and key grammar without
+// owning extra selection state.
 package ui

@@ -60,8 +60,6 @@ func buildTemplateVars(baseURL string, varsFn func(baseURL string) TemplateVars)
 			vars[key] = value
 		}
 	}
-	// Resolve nested placeholders in variables (for example a custom var that
-	// references {{openai_base_url}}).
 	for i := 0; i < 2; i++ {
 		for key, value := range vars {
 			vars[key] = renderTemplate(value, vars)

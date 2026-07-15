@@ -8,39 +8,38 @@ import (
 	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
-func TestSection_FocusableWorkspaceRowsActivateLocally(t *testing.T) {
+func TestSection_CopyClientBaseURLSetsState(t *testing.T) {
 	section := Section(workspaceSectionModel())
-	focusables := collectFocusables(section.Render(nil))
-	if got, want := len(focusables), 4; got != want {
-		t.Fatalf("workspace focusables = %d, want %d", got, want)
-	}
-
-	activate(t, focusables[1])
+	section.copyClientBaseURL()
 	if !section.CopiedClientBaseURL.Get() {
 		t.Fatal("copy row did not record local copy intent")
 	}
+}
 
-	activate(t, focusables[2])
+func TestSection_RunOnceOpensWorkflow(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	cmd := section.Model.RunCommands[0]
+	section.openRun(cmd)
 	if got, want := section.OpenRun.Get(), readmodel.RunCommandID("codex"); got != want {
 		t.Fatalf("open run = %q, want %q", got, want)
 	}
 }
 
-func TestFocusableRow_FocusUpdatesVisibleMarker(t *testing.T) {
-	view := FocusableRow("client base URL", "http://127.0.0.1:7926/c/dev", "copy ↵", func() {})
-	row := collectFocusables(view.Render(nil))[0].(*tui.Element)
+func TestSection_CopyClientBaseURLShowsVisibleFeedback(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	section.copyClientBaseURL()
 
-	row.Focus()
-	if got, want := view.Render(nil).Children()[0].Text(), ">"; got != want {
-		t.Fatalf("focused marker = %q, want %q", got, want)
+	if !section.CopiedClientBaseURL.Get() {
+		t.Fatal("copy row did not record visible copy state")
 	}
-
-	row.Blur()
-	if got := view.Render(nil).Children()[0].Text(); got != "" {
-		t.Fatalf("blurred marker = %q, want empty", got)
-	}
+	rendered := testkit.RenderTrimmed(section.Render(nil), 100, 10)
+	testkit.AssertVisual("copied_client_base_url").
+		Fixture("testdata/workspace_overview/fixture/copied_client_base_url.txt").
+		Viewport(100, 10).
+		Now(t, rendered)
 }
 
 func TestSection_UsesStableFeatureMountKeys(t *testing.T) {

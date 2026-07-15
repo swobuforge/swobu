@@ -303,7 +303,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 
 func bufferedProviderIngressResolver(raw []byte) func(context.Context, ProviderRequest) (ProviderIngress, error) {
 	return func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
@@ -316,7 +316,7 @@ func bufferedProviderIngressResolver(raw []byte) func(context.Context, ProviderR
 
 func streamingProviderIngressResolver(stream io.ReadCloser) func(context.Context, ProviderRequest) (ProviderIngress, error) {
 	return func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		return carrier.WireStream{
+		return carrier.CarrierStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
 			Framing: carrier.Framing(req.Contract.ProviderDelivery.Framing),
@@ -450,25 +450,25 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 
 type testClientCodec struct {
 	req interface {
-		DecodeClientRequest(carrier.WireDocument) (Result[wire.ClientRequestResult], error)
+		DecodeClientRequest(carrier.CarrierDocument) (Result[wire.ClientRequestResult], error)
 	}
 	doc interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (Result[carrier.WireDocument], error)
+		EncodeResponseDocument(canonical.CanonicalOutput) (Result[carrier.CarrierDocument], error)
 	}
 	stream interface {
-		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (Result[carrier.WireStream], error)
+		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (Result[carrier.CarrierStream], error)
 	}
 }
 
-func (c testClientCodec) DecodeClientRequest(doc carrier.WireDocument) (Result[wire.ClientRequestResult], error) {
+func (c testClientCodec) DecodeClientRequest(doc carrier.CarrierDocument) (Result[wire.ClientRequestResult], error) {
 	return c.req.DecodeClientRequest(doc)
 }
 
-func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.WireDocument], error) {
+func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.CarrierDocument], error) {
 	return c.doc.EncodeResponseDocument(output)
 }
 
-func (c testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.WireStream], error) {
+func (c testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.CarrierStream], error) {
 	return c.stream.EncodeResponseStream(events, d)
 }
 

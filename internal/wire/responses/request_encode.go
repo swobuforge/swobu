@@ -40,23 +40,27 @@ type functionCallOutputItem struct {
 	Output string `json:"output"`
 }
 
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.WireDocument, error) {
+func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.CarrierDocument, error) {
 	return EncodeCarrierWithEffects(req, d, nil, "", EncodeOptions{})
 }
 
-func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string, options EncodeOptions) (carrier.WireDocument, error) {
+func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string, options EncodeOptions) (carrier.CarrierDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.WireDocument{}, canonical.UnsupportedDelivery("response requests do not implement the requested delivery mode on the responses protocol")
+		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("response requests do not implement the requested delivery mode on the responses protocol")
 	}
 
 	tools := req.Tools()
 	input, err := encodeInput(req, options.ForceStructuredInput)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
-	logResponsesEncodeShape(req, input, d)
+	choice, err := encodeToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
+	if err != nil {
+		return carrier.CarrierDocument{}, err
+	}
+	logResponsesEncodeShape(req, input, choice, d)
 
 	payload := map[string]any{
 		"model": req.Model(),
@@ -64,27 +68,25 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	if input != nil {
 		payload["input"] = input
 	}
-	if trimmed := strings.TrimSpace(options.Instructions); trimmed != "" { // swobu:io-string source=boundary
-		payload["instructions"] = trimmed
+	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" {
+		payload["instructions"] = instructions
 	}
-	if choice, err := encodeToolChoice(req.ToolPolicy(), tools, sink, exchangeID); err != nil {
-		return carrier.WireDocument{}, err
-	} else if choice != nil {
+	if choice != nil {
 		payload["tool_choice"] = choice
 	}
 	if wireTools, err := encodeResponsesTools(tools, sink, exchangeID); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
 	}
 	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	} else if text != nil {
 		payload["text"] = text
 	}
@@ -99,10 +101,10 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.WireDocument{}, canonical.BadRequest("response request could not be encoded for the responses protocol")
+		return carrier.CarrierDocument{}, canonical.BadRequest("response request could not be encoded for the responses protocol")
 	}
 
-	return carrier.NewWireDocument(
+	return carrier.NewCarrierDocument(
 		carrier.StageProviderRequestOut,
 		"",
 		"application/json",
@@ -112,12 +114,26 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	), nil
 }
 
-func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, d delivery.Delivery) {
+func mergedResponsesInstructions(requestInstructions string, optionInstructions string) string {
+	requestInstructions = strings.TrimSpace(requestInstructions) // swobu:io-string source=boundary
+	optionInstructions = strings.TrimSpace(optionInstructions)   // swobu:io-string source=boundary
+	switch {
+	case requestInstructions == "":
+		return optionInstructions
+	case optionInstructions == "":
+		return requestInstructions
+	default:
+		return requestInstructions + "\n\n" + optionInstructions
+	}
+}
+
+func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice any, d delivery.Delivery) {
 	thread := req.Items()
 	encodedItems := thread
 	if !req.Turn().IsZero() {
 		encodedItems = canonical.CurrentTurnDelta(thread)
 	}
+	instructions := strings.TrimSpace(req.Instructions()) // swobu:io-string source=domain
 	inputType := "nil"
 	if input != nil {
 		switch input.(type) {
@@ -134,11 +150,21 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, d delive
 		"event", "outbound_request_shape",
 		"streaming", d.Mode == delivery.Streaming,
 		"has_previous_response_id", !req.Turn().IsZero(), // swobu:io-string source=boundary
+		"instructions_present", instructions != "",
+		"instructions_bytes", len(instructions),
 		"thread_item_count", len(thread),
 		"encoded_item_count", len(encodedItems),
 		"thread_tail_role", responsesTailRole(thread),
 		"encoded_tail_role", responsesTailRole(encodedItems),
 		"input_type", inputType,
+		"tool_count", len(req.Tools()),
+		"function_tool_count", responsesToolKindCount(req.Tools(), canonical.ToolTypeFunction),
+		"custom_tool_count", responsesToolKindCount(req.Tools(), canonical.ToolTypeCustom),
+		"capability_tool_count", responsesCapabilityToolCount(req.Tools()),
+		"tool_policy", strings.TrimSpace(string(req.ToolPolicy().Mode)), // swobu:io-string source=domain
+		"tool_policy_specific", toolPolicySpecificID(req.ToolPolicy()),
+		"tool_choice_wired", responsesWireToolChoice(choice),
+		"parallel_tool_calls", strings.TrimSpace(string(req.ToolCallBatch().Mode)), // swobu:io-string source=domain
 	)
 }
 
@@ -154,6 +180,60 @@ func responsesTailRole(items []canonical.CanonicalItem) string {
 		return "tool"
 	}
 	return "user"
+}
+
+func responsesToolKindCount(tools []canonical.ToolDecl, kind string) int {
+	count := 0
+	for _, tool := range tools {
+		if canonical.ToolDeclKind(tool) == kind {
+			count++
+		}
+	}
+	return count
+}
+
+func responsesCapabilityToolCount(tools []canonical.ToolDecl) int {
+	count := 0
+	for _, tool := range tools {
+		switch tool.(type) {
+		case canonical.CapabilityToolDecl, *canonical.CapabilityToolDecl:
+			count++
+		}
+	}
+	return count
+}
+
+func toolPolicySpecificID(policy canonical.ToolPolicy) string {
+	if policy.Mode != canonical.ToolPolicySpecific {
+		return ""
+	}
+	specific, ok := policy.SpecificID()
+	if !ok {
+		return ""
+	}
+	return specific.String()
+}
+
+func responsesWireToolChoice(choice any) string {
+	switch v := choice.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case map[string]any:
+		if name, ok := v["name"].(string); ok {
+			toolType, _ := v["type"].(string)
+			toolType = strings.TrimSpace(toolType)
+			name = strings.TrimSpace(name)
+			if toolType != "" && name != "" {
+				return toolType + ":" + name
+			}
+			if name != "" {
+				return name
+			}
+		}
+	}
+	return "object"
 }
 
 func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any, error) {

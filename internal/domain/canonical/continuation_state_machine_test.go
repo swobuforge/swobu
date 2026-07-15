@@ -123,6 +123,120 @@ func TestContinuationRuntime_PrepareRequest_MaterializesCanonicalHistoryForNonRe
 	}
 }
 
+func TestContinuationRuntime_PrepareRequest_InheritsMissingSemanticBandsFromChain(t *testing.T) {
+	maxTokens := 64
+	temperature := 0.2
+	controls, err := NewGenerationControls(GenerationControlsParams{
+		MaxOutputTokens: &maxTokens,
+		Temperature:     &temperature,
+		StopSequences:   []string{"DONE"},
+	})
+	if err != nil {
+		t.Fatalf("NewGenerationControls returned error: %v", err)
+	}
+	outputFormat, err := NewOutputFormat(OutputFormatParams{
+		Kind:        OutputFormatJSONSchema,
+		Name:        "continuation_reply",
+		Description: "structured continuation reply",
+		Schema:      NewRawJSONObject(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		Strict:      true,
+	})
+	if err != nil {
+		t.Fatalf("NewOutputFormat returned error: %v", err)
+	}
+	store := &fakeContinuationStore{
+		records: map[ContinuationID]ContinuationRecord{
+			NewContinuationID("resp_prev"): {
+				ID: NewContinuationID("resp_prev"),
+				RequestDelta: NewCanonicalRequest(RequestParams{
+					Model:        "provider-model",
+					Instructions: "Use native tools for filesystem work.",
+					Items: []CanonicalItem{
+						NewTextItem(ItemAuthorUser, "previous-turn"),
+					},
+					Tools: []ToolDecl{
+						NewFunctionToolDecl("tool_1", "exec_command", "run a command", NewToolSchemaObject(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`)),
+					},
+					ToolPolicy:    NewToolPolicy(ToolPolicyRequired, nil),
+					ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
+					Controls:      controls,
+					OutputFormat:  outputFormat,
+				}),
+				Response: NewConversationOutput(
+					"resp_prev",
+					"provider-model",
+					[]OutputItem{NewTextOutputItem("text_0", "previous-response")},
+					"completed",
+				),
+				Status: ContinuationStatusCompleted,
+			},
+		},
+	}
+	runtime := NewContinuationRuntime(store)
+
+	currentMaxTokens := 16
+	currentControls, err := NewGenerationControls(GenerationControlsParams{
+		MaxOutputTokens: &currentMaxTokens,
+	})
+	if err != nil {
+		t.Fatalf("NewGenerationControls returned error: %v", err)
+	}
+	request, err := runtime.PrepareRequest(context.Background(), NewContinuationNamespace("alpha"), protocolkind.ChatCompletions, NewCanonicalRequest(RequestParams{
+		Model: "provider-model",
+		Turn:  NewTurnRef("resp_prev"),
+		Items: []CanonicalItem{
+			NewTextItem(ItemAuthorUser, "continue"),
+		},
+		Controls: currentControls,
+	}))
+	if err != nil {
+		t.Fatalf("PrepareRequest returned error: %v", err)
+	}
+	if got := request.Model(); got != "provider-model" {
+		t.Fatalf("model = %q, want provider-model", got)
+	}
+	if got := request.Instructions(); got != "Use native tools for filesystem work." {
+		t.Fatalf("instructions = %q, want inherited instructions", got)
+	}
+	if got := len(request.Tools()); got != 1 {
+		t.Fatalf("tool count = %d, want 1", got)
+	}
+	if got := request.Tools()[0].ToolName(); got != "exec_command" {
+		t.Fatalf("tool name = %q, want exec_command", got)
+	}
+	if got := request.ToolPolicy(); got.Mode != ToolPolicyRequired {
+		t.Fatalf("tool policy mode = %q, want required", got.Mode)
+	}
+	if got := request.ToolCallBatch(); got.Mode != ToolCallBatchAtMostOne {
+		t.Fatalf("tool call batch mode = %q, want at_most_one", got.Mode)
+	}
+	if got, ok := request.Controls().Limits.MaxOutputTokens.Value(); !ok || got != 16 {
+		t.Fatalf("max_output_tokens = (%d, %v), want (16, true)", got, ok)
+	}
+	if got, ok := request.Controls().Sampling.Temperature.Value(); !ok || got != 0.2 {
+		t.Fatalf("temperature = (%f, %v), want (0.2, true)", got, ok)
+	}
+	if stops := request.Controls().Limits.StopSequences; len(stops) != 1 || stops[0] != "DONE" {
+		t.Fatalf("stop_sequences = %#v, want [DONE]", stops)
+	}
+	if gotFormat := request.OutputFormat(); gotFormat.Kind != OutputFormatJSONSchema || gotFormat.Name != "continuation_reply" || gotFormat.Strict != true {
+		t.Fatalf("output format = %#v, want inherited structured format", gotFormat)
+	}
+	if got := request.Turn().IsZero(); !got {
+		t.Fatal("Turn().IsZero() = false, want true after materialization")
+	}
+	items := request.Items()
+	if len(items) != 3 {
+		t.Fatalf("materialized item len = %d, want 3", len(items))
+	}
+	if got := items[0].Text; got != "previous-turn" {
+		t.Fatalf("materialized prefix[0] = %q, want %q", got, "previous-turn")
+	}
+	if got := items[2].Text; got != "continue" {
+		t.Fatalf("latest text = %q, want %q", got, "continue")
+	}
+}
+
 func TestContinuationRuntime_PrepareRequest_PreservesNativeContinuationWhenSafe(t *testing.T) {
 	store := &fakeContinuationStore{
 		records: map[ContinuationID]ContinuationRecord{

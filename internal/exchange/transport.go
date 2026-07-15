@@ -18,7 +18,7 @@ import (
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
-func NewTransportResponseFromDocument(doc carrier.WireDocument) TransportResponse {
+func NewTransportResponseFromDocument(doc carrier.CarrierDocument) TransportResponse {
 	header := cloneHeader(doc.Header)
 	if header.Get("Content-Type") == "" {
 		header.Set("Content-Type", "application/json")
@@ -30,7 +30,7 @@ func NewTransportResponseFromDocument(doc carrier.WireDocument) TransportRespons
 	}}
 }
 
-func NewTransportResponseFromStream(stream carrier.WireStream, progressive bool) TransportResponse {
+func NewTransportResponseFromStream(stream carrier.CarrierStream, progressive bool) TransportResponse {
 	header := cloneHeader(stream.Header)
 	if header.Get("Content-Type") == "" {
 		switch stream.Framing {
@@ -91,10 +91,10 @@ func streamProgressive(clientDelivery delivery.Delivery, providerDelivery delive
 	return true
 }
 
-func applyDocumentPatches(ctx context.Context, mechanics stage.StageMechanics, exchangeID string, stageKey stage.Stage, doc carrier.WireDocument, d delivery.Delivery) (Result[carrier.WireDocument], error) {
+func applyDocumentPatches(ctx context.Context, mechanics stage.StageMechanics, exchangeID string, stageKey stage.Stage, doc carrier.CarrierDocument, d delivery.Delivery) (Result[carrier.CarrierDocument], error) {
 	next, applied, err := mechanics.ApplyDocument(stageKey, stage.Context{
 		ExchangeID: exchangeID,
-		Carrier:    carrier.KindWireDocument,
+		Carrier:    carrier.KindCarrierDocument,
 		Family:     doc.Family,
 		Delivery:   d,
 	}, doc)
@@ -118,12 +118,12 @@ func applyDocumentPatches(ctx context.Context, mechanics stage.StageMechanics, e
 		}
 	}
 	if err != nil {
-		return Result[carrier.WireDocument]{Effects: effects}, canonical.InternalError("request patch failed")
+		return Result[carrier.CarrierDocument]{Effects: effects}, canonical.InternalError("request patch failed")
 	}
 	if hasReject {
-		return Result[carrier.WireDocument]{Effects: effects}, reject
+		return Result[carrier.CarrierDocument]{Effects: effects}, reject
 	}
-	return NewResult(next, effects...), nil
+	return effect.NewResult(next, effects...), nil
 }
 
 func commitEffectsBestEffort(ctx context.Context, sink effect.Sink, exchangeID string, effects []effect.Effect) {
@@ -238,7 +238,7 @@ func deliveryStreamingDecision(in ExchangeInput, progressive bool) (effect.Effec
 	}, true
 }
 
-func nativePayloadEffects(in ExchangeInput, providerDoc carrier.WireDocument) []effect.Effect {
+func nativePayloadEffects(in ExchangeInput, providerDoc carrier.CarrierDocument) []effect.Effect {
 	if in.ProviderProtocol != protocolkind.Responses {
 		return nil
 	}

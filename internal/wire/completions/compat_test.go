@@ -11,7 +11,7 @@ import (
 
 type legacyClientRequestDecoder struct{}
 
-func (legacyClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (legacyClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	result, err := (ClientRequestDecoder{}).DecodeClientRequest(doc)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -19,41 +19,41 @@ func (legacyClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) 
 	return result.Value.Request, result.Value.Delivery, nil
 }
 
-func (legacyClientRequestDecoder) DecodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (legacyClientRequestDecoder) DecodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	return (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, exchangeID)
 }
 
 type legacyResponseDocumentEncoder struct{}
 
-func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
 	return result.Value, err
 }
 
 type legacyResponseStreamEncoder struct{}
 
-func (legacyResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+func (legacyResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 	result, err := (ResponseStreamEncoder{}).EncodeResponseStream(events, d)
 	return result.Value, err
 }
 
 type legacyProviderRequestDocumentEncoder struct{}
 
-func (legacyProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, _ effect.Sink, exchangeID string) (carrier.WireDocument, error) {
+func (legacyProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, _ effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
 	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(request, delivery, exchangeID)
 	return result.Value, err
 }
 
 type legacyProviderDocumentDecoder struct{}
 
-func (legacyProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.WireDocument, exchangeID string, _ effect.Sink) (canonical.EventReader, error) {
+func (legacyProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.CarrierDocument, exchangeID string, _ effect.Sink) (canonical.EventReader, error) {
 	result, err := (ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, doc, exchangeID)
 	return result.Value, err
 }
 
 type legacyProviderEnvelopeDecoder struct{}
 
-func (legacyProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.WireStream, exchangeID string, _ effect.Sink) canonical.EventReader {
+func (legacyProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string, _ effect.Sink) canonical.EventReader {
 	result, _ := (ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(stream, exchangeID)
 	return result.Value
 }

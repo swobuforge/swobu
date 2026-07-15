@@ -2,6 +2,7 @@ package workspace_overview
 
 import (
 	tui "github.com/grindlemire/go-tui"
+	run_once "github.com/swobuforge/swobu/internal/cockpit/features/run_once"
 	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
@@ -15,6 +16,7 @@ type SectionView struct {
 	SummaryOnly         *tui.State[bool]
 	CopiedClientBaseURL *tui.State[bool]
 	OpenRun            *tui.State[readmodel.RunCommandID]
+	ExecuteRun         run_once.ExecuteFunc
 	SaveWorkspace      workspace_edit.SaveFunc
 	DeleteWorkspace    workspace_delete.DeleteFunc
 	OnWorkspaceSaved   func(readmodel.WorkspaceReadModel)
@@ -33,6 +35,9 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 	if len(commands) > 0 && commands[0] != nil {
 		section.SaveWorkspace = commands[0].SaveWorkspace
 		section.DeleteWorkspace = commands[0].DeleteWorkspace
+		if executor, ok := any(commands[0]).(ports.RunExecutor); ok {
+			section.ExecuteRun = executor.ExecuteRunCommand
+		}
 	}
 	return section
 }
@@ -61,6 +66,18 @@ func (s *SectionView) openRun(command readmodel.RunCommandReadModel) {
 	s.OpenRun.Set(command.ID)
 }
 
+func (s *SectionView) closeRun() {
+	s.OpenRun.Set("")
+}
+
+func (s *SectionView) Back() bool {
+	if s.OpenRun.Get() == "" {
+		return false
+	}
+	s.closeRun()
+	return true
+}
+
 func (s *SectionView) OpenDeleteConfirmation(workspaceID readmodel.WorkspaceID) {
 	s.InitialDeleteID = workspaceID
 }
@@ -85,9 +102,79 @@ func DeleteConfirmation(s *SectionView) *workspace_delete.ConfirmationView {
 	return confirmation
 }
 
-func FocusableRow(label string, value string, action string, activate func()) *ui.FocusableRowView {
-	return ui.NewFocusableRowView(label, value, action, activate)
+func RunOnceWorkflow(s *SectionView, command readmodel.RunCommandReadModel) *run_once.Workflow {
+	if s.OpenRun.Get() != command.ID {
+		return nil
+	}
+	return run_once.NewWorkflow(s.Model, command, s.ExecuteRun, s.closeRun)
 }
+
+// ---------------------------------------------------------------------------
+// Mount keys
+// ---------------------------------------------------------------------------
+
+func workspaceEditKey(s *SectionView) string {
+	return "workspace-edit:" + workspaceIdentity(s)
+}
+
+func workspaceDeleteKey(s *SectionView) string {
+	return "workspace-delete:" + workspaceIdentity(s)
+}
+
+func runOnceKey(s *SectionView, command readmodel.RunCommandReadModel) string {
+	return "run-once:" + workspaceIdentity(s) + ":" + string(command.ID)
+}
+
+func workspaceIdentity(s *SectionView) string {
+	if s.Model.ID != "" {
+		return string(s.Model.ID)
+	}
+	if s.Model.Slug != "" {
+		return s.Model.Slug
+	}
+	return "+"
+}
+
+// ---------------------------------------------------------------------------
+// Selectable row components
+// ---------------------------------------------------------------------------
+
+func clientBaseURLRowKey(s *SectionView) string  { return "client-base-url:" + workspaceIdentity(s) }
+
+func clientBaseURLAction(s *SectionView) string {
+	if s.CopiedClientBaseURL.Get() {
+		return "copied"
+	}
+	return "copy ↵"
+}
+
+func ClientBaseURLRowComponent(s *SectionView) *ui.SelectableRow {
+	return ui.NewSelectableRow(
+		clientBaseURLRowKey(s),
+		"client base URL",
+		s.Model.ClientBaseURL,
+		clientBaseURLAction(s),
+		s.copyClientBaseURL,
+	)
+}
+
+func runOnceRowKey(s *SectionView, cmd readmodel.RunCommandReadModel) string {
+	return "run-once-row:" + workspaceIdentity(s) + ":" + string(cmd.ID)
+}
+
+func RunOnceRowComponent(s *SectionView, cmd readmodel.RunCommandReadModel) *ui.SelectableRow {
+	return ui.NewSelectableRow(
+		runOnceRowKey(s, cmd),
+		"run once",
+		cmd.Label,
+		"open ↵",
+		func() { s.openRun(cmd) },
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Section render
+// ---------------------------------------------------------------------------
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
@@ -104,16 +191,29 @@ templ (s *SectionView) Render() {
 				@InertRow("client base URL", WorkspaceEdit(s).ClientBaseURLPreview(), "")
 			} else {
 				if app != nil {
-					@FocusableRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
+					<div key={clientBaseURLRowKey(s)} class="w-full">
+						@ClientBaseURLRowComponent(s)
+					</div>
 				} else {
-					@FocusablePreviewRow("client base URL", s.Model.ClientBaseURL, "copy ↵", s.copyClientBaseURL)
+					@InertRow("client base URL", s.Model.ClientBaseURL, clientBaseURLAction(s))
 				}
 				if !s.SummaryOnly.Get() {
 					if len(s.Model.RunCommands) > 0 {
 						if app != nil {
-							@FocusableRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
-						} else {
-							@FocusablePreviewRow("run once", s.Model.RunCommands[0].Label, "open ↵", func() { s.openRun(s.Model.RunCommands[0]) })
+							<div key={runOnceRowKey(s, s.Model.RunCommands[0])} class="w-full">
+								@RunOnceRowComponent(s, s.Model.RunCommands[0])
+							</div>
+					} else {
+						@InertRow("run once", s.Model.RunCommands[0].Label, "open ↵")
+					}
+						if s.OpenRun.Get() == s.Model.RunCommands[0].ID {
+							if app != nil {
+								<div key={runOnceKey(s, s.Model.RunCommands[0])} class="w-full">
+									@RunOnceWorkflow(s, s.Model.RunCommands[0])
+								</div>
+							} else {
+								@RunOncePreview(RunOnceWorkflow(s, s.Model.RunCommands[0]))
+							}
 						}
 					}
 					if app != nil {
@@ -128,6 +228,10 @@ templ (s *SectionView) Render() {
 		}
 	</div>
 }
+
+// ---------------------------------------------------------------------------
+// Preview templates
+// ---------------------------------------------------------------------------
 
 templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
 	<div class="flex-col w-full">
@@ -148,27 +252,40 @@ templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
 
 templ DeleteConfirmationPreview(confirmation *workspace_delete.ConfirmationView) {
 	<div class="flex-col w-full">
-		@FocusablePreviewRow("delete", confirmation.RowValue(), confirmation.ActionLabel(), confirmation.Activate)
+		@InertRow("delete", confirmation.RowValue(), confirmation.ActionLabel())
 	</div>
 }
 
-func workspaceEditKey(s *SectionView) string {
-	return "workspace-edit:" + workspaceIdentity(s)
+templ RunOncePreview(workflow *run_once.Workflow) {
+	<div class="flex-col w-full">
+		<div class="flex-row w-full">
+			<span class="w-5"></span>
+			<span>{workflow.Title()}</span>
+		</div>
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">model</span>
+			<span class="w-36">{workflow.ModelValue()}</span>
+			<span>change ↵</span>
+		</div>
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">command</span>
+			<span class="w-36">{workflow.CommandValue()}</span>
+			<span>{workflow.RunActionLabel()}</span>
+		</div>
+		if workflow.StatusMessage() != "" {
+			<div class="flex-row w-full">
+				<span class="w-8"></span>
+				<span>{workflow.StatusMessage()}</span>
+			</div>
+		}
+	</div>
 }
 
-func workspaceDeleteKey(s *SectionView) string {
-	return "workspace-delete:" + workspaceIdentity(s)
-}
-
-func workspaceIdentity(s *SectionView) string {
-	if s.Model.ID != "" {
-		return string(s.Model.ID)
-	}
-	if s.Model.Slug != "" {
-		return s.Model.Slug
-	}
-	return "+"
-}
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
 
 templ SectionHeader(label string, expanded bool) {
 	<div class="flex-row">
@@ -178,15 +295,6 @@ templ SectionHeader(label string, expanded bool) {
 		} else {
 			<span>{label + " ▸"}</span>
 		}
-	</div>
-}
-
-templ FocusablePreviewRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full" onActivate={activate}>
-		<span class="w-5"></span>
-		<span class="w-18">{label}</span>
-		<span class="w-36">{value}</span>
-		<span>{action}</span>
 	</div>
 }
 

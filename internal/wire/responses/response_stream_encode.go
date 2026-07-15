@@ -17,7 +17,7 @@ func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 	return &sseEnvelopeStreamEncoder{adapter: sse.NewEnvelopeEventAdapter()}
 }
 
-func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (effect.Result[carrier.WireStream], error) {
+func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (effect.Result[carrier.CarrierStream], error) {
 	state := e.newStreamState()
 	framing := carrier.FramingSSE
 	if d.Framing == delivery.FramingWebSocket {
@@ -52,5 +52,5 @@ func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader
 	}()
 	// Stage marks the carrier boundary for this streamed response leg; the
 	// exchange graph owns path selection above the adapter edge.
-	return effect.NewResult(carrier.WireStream{Stage: carrier.StageClientResponseOut, Family: protocolkind.Responses, Framing: framing, Frames: carrier.FrameReaderFromReadCloser(pr)}), nil
+	return effect.NewResult(carrier.CarrierStream{Stage: carrier.StageClientResponseOut, Family: protocolkind.Responses, Framing: framing, Frames: carrier.FrameReaderFromReadCloser(pr)}), nil
 }

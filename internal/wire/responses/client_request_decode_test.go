@@ -15,7 +15,7 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
@@ -60,7 +60,7 @@ func TestDecodeClientRequest_AcceptsMultilineToolOutputTranscript(t *testing.T) 
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
@@ -83,7 +83,7 @@ func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testin
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"oops"}]}`)
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: raw})
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw})
 	if err == nil {
 		t.Fatal("DecodeClientRequest returned nil error, want BAD_REQUEST")
 	}

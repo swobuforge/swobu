@@ -8,7 +8,7 @@ import (
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
-func EncodeProviderRequestDocument(request canonical.CanonicalRequest, _ delivery.Delivery, exchangeID string) (exchange.Result[carrier.WireDocument], error) {
+func EncodeProviderRequestDocument(request canonical.CanonicalRequest, _ delivery.Delivery, exchangeID string) (exchange.Result[carrier.CarrierDocument], error) {
 	// Codex execute path is stream-native; batch clients are handled via
 	// stream->batch projection outside this protocol encoder. No extra prompt
 	// overlay is injected here; the adapter only preserves the required wire

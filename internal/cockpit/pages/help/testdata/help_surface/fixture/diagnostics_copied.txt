@@ -1,0 +1,9 @@
+  help
+
+     version           unknown · cockpit v2 · commit unavailable
+
+     docs              unavailable · link missing
+     community         unavailable · link missing
+     issue             unavailable · link missing
+     diagnostics       copied · paste into issue/Discord   copy ↵
+

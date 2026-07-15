@@ -1,7 +1,6 @@
 package activity
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -10,42 +9,33 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
-func TestSection_FocusableActivityRowActivatesLocally(t *testing.T) {
+func TestSection_ActivationOpensActivity(t *testing.T) {
 	section := Section(activitySectionModel())
-	focusables := collectFocusables(section.Render(nil))
-	if got, want := len(focusables), 1; got != want {
-		t.Fatalf("activity focusables = %d, want %d", got, want)
-	}
-
-	activate(t, focusables[0])
+	section.openActivity(*section.Workspace.Activity.Latest)
 	if got, want := section.OpenActivity.Get(), readmodel.ActivityID("req-1"); got != want {
 		t.Fatalf("open activity = %q, want %q", got, want)
 	}
 }
 
-func TestFocusableRow_FocusUpdatesVisibleMarker(t *testing.T) {
-	view := FocusableRow("latest", "codex -> gpt", "", func() {})
-	row := collectFocusables(view.Render(nil))[0].(*tui.Element)
+func TestSection_ErrorRowShowsErrInspect(t *testing.T) {
+	model := activitySectionModel()
+	model.Activity.Latest.Error = true
+	section := Section(model)
+	section.OpenActivity.Set("req-1")
 
-	row.Focus()
-	if got, want := view.Render(nil).Children()[0].Text(), ">"; got != want {
-		t.Fatalf("focused marker = %q, want %q", got, want)
-	}
-
-	row.Blur()
-	if got := view.Render(nil).Children()[0].Text(); got != "" {
-		t.Fatalf("blurred marker = %q, want empty", got)
-	}
+	rendered := testkit.RenderTrimmed(section.Render(nil), 100, 14)
+	testkit.AssertNow(t, rendered, testkit.Text("err ↵").Exists())
 }
 
 func TestSection_HidesZeroTokens(t *testing.T) {
 	section := Section(activitySectionModel())
 	section.OpenActivity.Set("req-1")
 
-	rendered := testkit.RenderString(section.Render(nil), 100, 16)
-	if strings.Contains(rendered, "tokens in") || strings.Contains(rendered, "tokens out") {
-		t.Fatalf("zero token rows should be hidden:\n%s", rendered)
-	}
+	rendered := testkit.RenderTrimmed(section.Render(nil), 100, 16)
+	testkit.AssertNow(t, rendered, testkit.All(
+		testkit.Not(testkit.Text("tokens in").Exists()),
+		testkit.Not(testkit.Text("tokens out").Exists()),
+	))
 }
 
 func TestSection_ShowsNonZeroTokens(t *testing.T) {
@@ -55,12 +45,33 @@ func TestSection_ShowsNonZeroTokens(t *testing.T) {
 	section := Section(model)
 	section.OpenActivity.Set("req-1")
 
-	rendered := testkit.RenderString(section.Render(nil), 100, 16)
-	for _, want := range []string{"tokens in", "1,200", "tokens out", "450"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("render missing %q:\n%s", want, rendered)
-		}
+	rendered := testkit.RenderTrimmed(section.Render(nil), 100, 16)
+	testkit.AssertNow(t, rendered, testkit.All(
+		testkit.Text("tokens in").Exists(),
+		testkit.Text("1,200").Exists(),
+		testkit.Text("tokens out").Exists(),
+		testkit.Text("450").Exists(),
+	))
+}
+
+func TestSection_ExpandedLatestRowUsesIndentedDetails(t *testing.T) {
+	model := activitySectionModel()
+	model.Activity.Latest.ResolvedName = "resolved-name"
+	model.Activity.Latest.Model = "gpt-4.1"
+	model.Activity.Latest.Attempts = []readmodel.ActivityAttemptReadModel{
+		{Label: "attempt", Rank: 1, Result: readmodel.ActivityAttemptSucceeded},
+		{Label: "attempt", Rank: 2, Result: readmodel.ActivityAttemptFailed},
 	}
+	model.Activity.Latest.TokensIn = 1200
+	model.Activity.Latest.TokensOut = 450
+	section := Section(model)
+	section.OpenActivity.Set("req-1")
+
+	rendered := testkit.RenderTrimmed(section.Render(nil), 100, 16)
+	testkit.AssertVisual("expanded_latest").
+		Fixture("testdata/activity_section/fixture/expanded_latest.txt").
+		Viewport(100, 16).
+		Now(t, rendered)
 }
 
 func collectFocusables(root *tui.Element) []tui.Focusable {

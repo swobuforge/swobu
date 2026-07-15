@@ -1,6 +1,9 @@
 package canonical
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestTurnRef_NormalizesAndClonesPreviousID(t *testing.T) {
 	ref := NewTurnRef("  resp_123  ")
@@ -104,4 +107,39 @@ func TestContinuationRecord_CloneCopiesPointerFieldsAndPayloads(t *testing.T) {
 	if cloned.Response.ResultID() != "resp_child" {
 		t.Fatal("Clone() lost response snapshot")
 	}
+}
+
+func TestBuildContinuationRecord_PreservesToolCallBatch(t *testing.T) {
+	request := NewCanonicalRequest(RequestParams{
+		Model:        "m",
+		Instructions: "Use native tools.",
+		Items: []CanonicalItem{
+			NewTextItem(ItemAuthorUser, "hi"),
+		},
+		ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
+	})
+	output := NewConversationOutput(
+		"resp_child",
+		"m",
+		[]OutputItem{NewTextOutputItem("text_0", "ok")},
+		"completed",
+	)
+
+	record, ok, err := buildContinuationRecord(NewContinuationNamespace("alpha"), request, output, testTime())
+	if err != nil {
+		t.Fatalf("buildContinuationRecord returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("buildContinuationRecord did not produce a record")
+	}
+	if got := record.RequestDelta.ToolCallBatch(); got.Mode != ToolCallBatchAtMostOne {
+		t.Fatalf("request delta tool call batch = %q, want %q", got.Mode, ToolCallBatchAtMostOne)
+	}
+	if got := record.RequestDelta.Instructions(); got != "Use native tools." {
+		t.Fatalf("request delta instructions = %q, want preserved instructions", got)
+	}
+}
+
+func testTime() time.Time {
+	return time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 }

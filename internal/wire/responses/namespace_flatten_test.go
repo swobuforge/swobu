@@ -57,7 +57,7 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesProjectedToolChoice(t *t
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -129,7 +129,7 @@ func TestDecodeRequest_RejectsNamespaceWithoutSupportedChildren(t *testing.T) {
 		]
 	}`)
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -164,7 +164,7 @@ func TestDecodeRequest_DecodesUnnamespacedFlatFunctionToolName(t *testing.T) {
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -201,7 +201,7 @@ func TestDecodeRequest_DecodesLeadingUnderscorePlainFunctionToolNameRaw(t *testi
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -251,7 +251,7 @@ func TestDecodeRequest_DecodesProjectedLookingFlatFunctionToolNameAsRaw(t *testi
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})

@@ -1,6 +1,7 @@
 package cockpit
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,62 +11,73 @@ import (
 )
 
 func TestFixture_DefaultWorkspace(t *testing.T) {
-	root := newFixtureCockpit(DefaultFixtureReadModel(), nil).Render(nil)
-	rendered := testkit.RenderTrimmed(root, 70, 20)
-	testkit.AssertVisual("default_workspace").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
+	assertCockpitFixtureWidths(t, "default_workspace", 20, []int{80, 100, 120}, func() *Cockpit {
+		return newFixtureCockpit(DefaultFixtureReadModel(), nil)
+	})
 }
 
 func TestFixture_CustomDaemonHeader(t *testing.T) {
-	model := DefaultFixtureReadModel()
-	model.HeaderRight = "http://pi:7926"
-	root := newFixtureCockpit(model, nil).Render(nil)
-	rendered := testkit.RenderTrimmed(root, 70, 20)
-	testkit.AssertVisual("custom_daemon_header").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
+	assertCockpitFixtureWidths(t, "custom_daemon_header", 20, []int{80, 100, 120}, func() *Cockpit {
+		model := DefaultFixtureReadModel()
+		model.HeaderRight = "http://pi:7926"
+		return newFixtureCockpit(model, nil)
+	})
 }
 
 func TestFixture_LastWorkspaceDeletedDraftActive(t *testing.T) {
-	model := readmodel.CockpitReadModel{
-		ActivePage:          readmodel.CockpitWorkspacePage,
-		SelectedWorkspaceID: "dev",
-		SelectedWorkspace:   readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting},
-		Tabs: []readmodel.WorkspaceTabReadModel{
-			{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting, Selected: true},
-			{ID: "+", Kind: readmodel.WorkspaceTabDraft},
-			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
-		},
-	}
-	root := newFixtureCockpit(removeWorkspaceFromModel(model, "dev"), nil).Render(nil)
-	rendered := testkit.RenderTrimmed(root, 70, 20)
-	testkit.AssertVisual("last_workspace_deleted_draft_active").Normalize(trimRightLines).Viewport(70, 20).Now(t, rendered)
+	assertCockpitFixtureWidths(t, "last_workspace_deleted_draft_active", 20, []int{80, 100, 120}, func() *Cockpit {
+		model := readmodel.CockpitReadModel{
+			ActivePage:          readmodel.CockpitWorkspacePage,
+			SelectedWorkspaceID: "dev",
+			SelectedWorkspace:   readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting},
+			Tabs: []readmodel.WorkspaceTabReadModel{
+				{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting, Selected: true},
+				{ID: "+", Kind: readmodel.WorkspaceTabDraft},
+				{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+			},
+		}
+		return newFixtureCockpit(removeWorkspaceFromModel(model, "dev"), nil)
+	})
 }
 
 func TestFixture_StaticStates(t *testing.T) {
 	tests := []struct {
 		name   string
 		height int
-		view   *Cockpit
+		view   func() *Cockpit
 	}{
-		{name: "route_focused", height: 22, view: routeFocusedFixtureCockpit()},
-		{name: "route_expanded", height: 34, view: routeExpandedFixtureCockpit()},
-		{name: "exceptional_routes", height: 24, view: exceptionalRoutesFixtureCockpit()},
-		{name: "activity_latest", height: 22, view: activityLatestFixtureCockpit(false, false)},
-		{name: "activity_error", height: 22, view: activityLatestFixtureCockpit(true, false)},
-		{name: "activity_expanded", height: 27, view: activityLatestFixtureCockpit(false, true)},
-		{name: "draft_workspace", height: 20, view: draftWorkspaceFixtureCockpit()},
-		{name: "help", height: 16, view: helpFixtureCockpit(readmodel.DiagnosticsReady)},
-		{name: "help_copied", height: 16, view: helpFixtureCockpit(readmodel.DiagnosticsCopied)},
-		{name: "delete_confirm", height: 22, view: deleteConfirmFixtureCockpit()},
-		{name: "all_collapsed", height: 16, view: collapsedFixtureCockpit()},
+		{name: "route_focused", height: 22, view: routeFocusedFixtureCockpit},
+		{name: "route_expanded", height: 34, view: routeExpandedFixtureCockpit},
+		{name: "exceptional_routes", height: 24, view: exceptionalRoutesFixtureCockpit},
+		{name: "activity_latest", height: 22, view: func() *Cockpit { return activityLatestFixtureCockpit(false, false) }},
+		{name: "activity_error", height: 22, view: func() *Cockpit { return activityLatestFixtureCockpit(true, false) }},
+		{name: "activity_expanded", height: 27, view: func() *Cockpit { return activityLatestFixtureCockpit(false, true) }},
+		{name: "draft_workspace", height: 20, view: draftWorkspaceFixtureCockpit},
+		{name: "help", height: 16, view: func() *Cockpit { return helpFixtureCockpit(readmodel.DiagnosticsReady) }},
+		{name: "help_copied", height: 16, view: func() *Cockpit { return helpFixtureCockpit(readmodel.DiagnosticsCopied) }},
+		{name: "delete_confirm", height: 22, view: deleteConfirmFixtureCockpit},
+		{name: "all_collapsed", height: 16, view: collapsedFixtureCockpit},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := tt.view.Render(nil)
-			rendered := testkit.RenderTrimmed(root, 70, tt.height)
-			testkit.AssertVisual(tt.name).
-				Fixture("testdata/cockpit_fixture__testfixture_staticstates/fixture/"+tt.name+".txt").
+			assertCockpitFixtureWidths(t, tt.name, tt.height, []int{80, 100, 120}, tt.view)
+		})
+	}
+}
+
+func assertCockpitFixtureWidths(t *testing.T, name string, height int, widths []int, view func() *Cockpit) {
+	t.Helper()
+	for _, width := range widths {
+		width := width
+		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
+			root := view().Render(nil)
+			rendered := testkit.RenderTrimmed(root, width, height)
+			fixtureName := fmt.Sprintf("%s_%d", name, width)
+			testkit.AssertVisual(fixtureName).
+				Fixture(fmt.Sprintf("testdata/cockpit_fixture__testfixture_%s/fixture/%s.txt", strings.ReplaceAll(name, "_", ""), fixtureName)).
 				Normalize(trimRightLines).
-				Viewport(70, tt.height).
+				Viewport(width, height).
 				Now(t, rendered)
 		})
 	}
@@ -93,7 +105,7 @@ func routeFocusedFixtureCockpit() *Cockpit {
 
 func routeExpandedFixtureCockpit() *Cockpit {
 	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
-		c.WorkspacePage.RoutesSection.ExpandedRoute.Set("gpt")
+		c.WorkspacePage.RoutesSection.OpenRoute(c.WorkspacePage.RoutesSection.State.Routes[0])
 	})
 }
 

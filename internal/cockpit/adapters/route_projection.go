@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -71,6 +72,9 @@ func projectedRouteModel(config operatorclient.ProviderConfigData) string {
 
 func targetsFromProviderConfigs(configs []operatorclient.ProviderConfigData, selectedRef string) []readmodel.TargetReadModel {
 	sort.Slice(configs, func(i, j int) bool {
+		if targetRank(configs[i]) != targetRank(configs[j]) {
+			return targetRank(configs[i]) < targetRank(configs[j])
+		}
 		if configs[i].Ref == selectedRef && configs[j].Ref != selectedRef {
 			return true
 		}
@@ -80,13 +84,13 @@ func targetsFromProviderConfigs(configs []operatorclient.ProviderConfigData, sel
 		return configs[i].Ref < configs[j].Ref
 	})
 	targets := make([]readmodel.TargetReadModel, 0, len(configs))
-	for i, config := range configs {
-		targets = append(targets, targetFromProviderConfig(config, i+1))
+	for _, config := range configs {
+		targets = append(targets, targetFromProviderConfig(config))
 	}
 	return targets
 }
 
-func targetFromProviderConfig(config operatorclient.ProviderConfigData, rank int) readmodel.TargetReadModel {
+func targetFromProviderConfig(config operatorclient.ProviderConfigData) readmodel.TargetReadModel {
 	name := strings.TrimSpace(config.TargetAlias) // swobu:io-string source=boundary
 	if name == "" {
 		name = config.Ref
@@ -98,12 +102,18 @@ func targetFromProviderConfig(config operatorclient.ProviderConfigData, rank int
 		Model:         config.ModelID,
 		BaseURL:       config.BaseURL,
 		CredentialRef: config.CredentialRef,
-		Rank:          rank,
-		Weight:        1,
+		Rank:          targetRank(config),
+		Weight:        targetWeight(config),
 	}
 }
 
-func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID string) operatorclient.ProviderConfigData {
+func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID string) (operatorclient.ProviderConfigData, error) {
+	if request.Rank < 1 {
+		return operatorclient.ProviderConfigData{}, fmt.Errorf("target rank must be at least 1")
+	}
+	if request.Weight < 1 {
+		return operatorclient.ProviderConfigData{}, fmt.Errorf("target weight must be at least 1")
+	}
 	modelID := strings.TrimSpace(request.Model) // swobu:io-string source=boundary
 	if modelID == "" {
 		modelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
@@ -115,7 +125,9 @@ func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID s
 		CredentialRef: strings.TrimSpace(request.CredentialRef), // swobu:io-string source=boundary
 		ModelID:       modelID,
 		TargetAlias:   strings.TrimSpace(request.Name), // swobu:io-string source=boundary
-	}
+		TargetRank:    request.Rank,
+		TargetWeight:  request.Weight,
+	}, nil
 }
 
 // targetMatchesRoute reports whether a provider config belongs to the given
@@ -123,6 +135,21 @@ func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID s
 // check for all target mutations.
 func targetMatchesRoute(config operatorclient.ProviderConfigData, targetID, routeID string) bool {
 	return config.Ref == targetID && projectedRouteModel(config) == routeID
+}
+
+func targetRank(config operatorclient.ProviderConfigData) int {
+	return positiveOrDefault(config.TargetRank, 1)
+}
+
+func targetWeight(config operatorclient.ProviderConfigData) int {
+	return positiveOrDefault(config.TargetWeight, 1)
+}
+
+func positiveOrDefault(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 func newProviderConfigRef(existing []operatorclient.ProviderConfigData) (string, error) {
@@ -147,7 +174,7 @@ func newProviderConfigRef(existing []operatorclient.ProviderConfigData) (string,
 func selectedModelName(endpoint operatorclient.EndpointData) string {
 	for _, config := range endpoint.ProviderConfigs {
 		if config.Ref == endpoint.SelectedRef {
-			if model := strings.TrimSpace(config.ModelID); model != "" {
+			if model := strings.TrimSpace(config.ModelID); model != "" { // swobu:io-string source=boundary
 				return model
 			}
 			return exchange.PublicModelIDSwobu
@@ -164,6 +191,11 @@ func routeState(targets []readmodel.TargetReadModel) readmodel.RouteState {
 }
 
 func routePlanKind(targets []readmodel.TargetReadModel) readmodel.RoutePlanKind {
+	for _, target := range targets {
+		if target.Weight > 1 {
+			return readmodel.RoutePlanWeighted
+		}
+	}
 	if len(targets) > 1 {
 		return readmodel.RoutePlanRanked
 	}

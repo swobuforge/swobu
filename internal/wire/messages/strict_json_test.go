@@ -10,7 +10,7 @@ import (
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"unexpected":true}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Messages, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest() error = %v", err)
 	}

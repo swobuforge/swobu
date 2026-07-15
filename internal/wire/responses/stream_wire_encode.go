@@ -77,7 +77,7 @@ func (e *ResponseStreamWireEncoder) Encode(event sse.StreamEvent) ([][]byte, err
 			return nil, err
 		}
 		status, incompleteReason := responsesWireStatusForFinishReason(event.FinishReason)
-		if len(e.outputItems) == 0 && strings.TrimSpace(event.FinishReason) == "" {
+		if len(e.outputItems) == 0 && trimmedResponseString(event.FinishReason) == "" {
 			failed, err := e.encodeFailed(event, responsesStreamCompletedWithoutOutputItemsCode, responsesStreamCompletedWithoutOutputItemsMessage)
 			if err != nil {
 				return nil, err

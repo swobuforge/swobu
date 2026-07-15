@@ -1,104 +1,122 @@
 package routes
 
 import (
-	"fmt"
-
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	route_edit "github.com/swobuforge/swobu/internal/cockpit/features/route_edit"
+	target_edit "github.com/swobuforge/swobu/internal/cockpit/features/target_edit"
 )
 
-type SectionView struct {
-	Model           readmodel.WorkspaceReadModel
-	Expanded        *tui.State[bool]
-	ExpandedRoute  *tui.State[readmodel.RouteID]
-	OpenTarget     *tui.State[readmodel.TargetID]
-	AddTargetRoute *tui.State[readmodel.RouteID]
-}
-
-func Section(model readmodel.WorkspaceReadModel) *SectionView {
-	return &SectionView{
-		Model:           model,
-		Expanded:        tui.NewState(true),
-		ExpandedRoute:   tui.NewState(readmodel.RouteID("")),
-		OpenTarget:      tui.NewState(readmodel.TargetID("")),
-		AddTargetRoute: tui.NewState(readmodel.RouteID("")),
-	}
-}
-
-func (s *SectionView) isExpanded(route readmodel.RouteReadModel) bool {
-	return s.ExpandedRoute.Get() == route.ID
-}
-
-func (s *SectionView) toggleRoute(route readmodel.RouteReadModel) {
-	if s.isExpanded(route) {
-		s.ExpandedRoute.Set("")
-		return
-	}
-	s.ExpandedRoute.Set(route.ID)
-}
-
-func (s *SectionView) openTarget(target readmodel.TargetReadModel) {
-	s.OpenTarget.Set(target.ID)
-}
-
-func (s *SectionView) addTarget(route readmodel.RouteReadModel) {
-	s.AddTargetRoute.Set(route.ID)
-}
-
-func (s *SectionView) Back() bool {
-	if s.OpenTarget.Get() != "" {
-		s.OpenTarget.Set("")
-		return true
-	}
-	if s.AddTargetRoute.Get() != "" {
-		s.AddTargetRoute.Set("")
-		return true
-	}
-	if s.ExpandedRoute.Get() != "" {
-		s.ExpandedRoute.Set("")
-		return true
-	}
-	return false
-}
-
-func FocusableRow(label string, value string, action string, activate func()) *ui.FocusableRowView {
-	return ui.NewFocusableRowView(label, value, action, activate)
-}
+// ---------------------------------------------------------------------------
+// Section render
+// ---------------------------------------------------------------------------
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@SectionHeader("routes", s.Expanded.Get())
 		if s.Expanded.Get() {
-			if len(s.Model.Routes) == 0 {
-				@InertRow("(no routes)", "", "")
+			// --- Routes list ---------------------------------------------------
+			if len(s.State.Routes) == 0 {
+				@SectionInertRow("(no routes)", "", "")
 			} else {
-				for _, route := range s.Model.Routes {
+				for _, route := range s.State.Routes {
+					// --- Route row ------------------------------------------------
 					if app != nil {
-						@FocusableRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), func() { s.toggleRoute(route) })
+						<div key={routeMountKey(route)} class="w-full">
+							@RouteRowComponent(s, route)
+						</div>
 					} else {
-						@FocusablePreviewRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)), func() { s.toggleRoute(route) })
+						@SectionInertRow(route.ModelName, route.RowValue(), routeActionLabel(s.isExpanded(route)))
 					}
 					if s.isExpanded(route) {
+						// --- Target rows ------------------------------------------
 						for _, target := range route.Targets {
 							if app != nil {
-								@FocusableRow("target "+targetRankLabel(target), targetValue(target), "open ↵", func() { s.openTarget(target) })
+								<div key={targetMountKey(route, target)} class="w-full">
+									@TargetRowComponent(s, route, target)
+								</div>
 							} else {
-								@FocusablePreviewRow("target "+targetRankLabel(target), targetValue(target), "open ↵", func() { s.openTarget(target) })
+								@SectionInertRow("target "+targetRankLabel(target), targetValue(target), "open ↵")
+							}
+							if s.State.OpenTarget.Get() == target.ID {
+								workflow := s.targetEditor(route, target)
+								if app != nil && workflow != nil {
+									<div key={s.targetWorkflowKey(route, target.ID)} class="w-full">
+										@workflow
+									</div>
+								} else if workflow != nil {
+									@SectionTargetEditPreview(workflow)
+								}
 							}
 						}
+						// --- Route actions ----------------------------------------
 						if app != nil {
-							@FocusableRow("add target", "", "add ↵", func() { s.addTarget(route) })
+							<div key={addTargetMountKey(route)} class="w-full">
+								@AddTargetRowComponent(s, route)
+							</div>
 						} else {
-							@FocusablePreviewRow("add target", "", "add ↵", func() { s.addTarget(route) })
+							@SectionInertRow("add target", "", "add ↵")
+						}
+						// --- Target creator ---------------------------------------
+						if s.State.AddTargetRoute.Get() == route.ID {
+							workflow := s.targetCreator(route)
+							if app != nil && workflow != nil {
+								<div key={s.targetWorkflowKey(route, "")} class="w-full">
+									@workflow
+								</div>
+							} else if workflow != nil {
+									@SectionTargetEditPreview(workflow)
+							}
+						}
+						// --- Route editor -----------------------------------------
+						workflow := s.routeEditor(route)
+						if app != nil && workflow != nil {
+							<div key={s.routeWorkflowKey(route)} class="w-full">
+								@workflow
+							</div>
+						} else if workflow != nil {
+							@SectionRouteEditPreview(workflow)
 						}
 					}
 				}
-				@InertRow("add route", "", "add ↵")
+			}
+			// --- Draft route ---------------------------------------------------
+			if s.RouteDraft.IsOpen() {
+				if app != nil {
+					@SectionDraftRouteRow(s)
+				} else {
+					@SectionDraftRoutePreview(s)
+				}
+			}
+			// --- Add route action ----------------------------------------------
+			if app != nil {
+				<div key={addRouteMountKey()} class="w-full">
+					@AddRouteRowComponent(s)
+				</div>
+			} else {
+				@SectionInertRow("add route", "", "add ↵")
 			}
 		}
 	</div>
 }
+
+templ (r *SectionDraftRouteRowView) Render() {
+	<div class="flex-row w-full">
+		<span class="w-5"></span>
+		if app != nil {
+			<div class="w-18">
+				<input value={r.ModelName} autoFocus onSubmit={r.Submit} border={tui.BorderRounded} />
+			</div>
+		} else {
+			<span class="w-18">{r.ModelName.Get()}</span>
+		}
+		<span class="w-36">incomplete · no targets</span>
+		<span>create ↵</span>
+	</div>
+}
+
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
 
 templ SectionHeader(label string, expanded bool) {
 	<div class="flex-row">
@@ -111,16 +129,7 @@ templ SectionHeader(label string, expanded bool) {
 	</div>
 }
 
-templ FocusablePreviewRow(label string, value string, action string, activate func()) {
-	<div class="flex-row w-full" onActivate={activate}>
-		<span class="w-5"></span>
-		<span class="w-18">{label}</span>
-		<span class="w-36">{value}</span>
-		<span>{action}</span>
-	</div>
-}
-
-templ InertRow(label string, value string, action string) {
+templ SectionInertRow(label string, value string, action string) {
 	<div class="flex-row w-full">
 		<span class="w-5"></span>
 		<span class="w-18">{label}</span>
@@ -129,26 +138,100 @@ templ InertRow(label string, value string, action string) {
 	</div>
 }
 
-func targetRankLabel(target readmodel.TargetReadModel) string {
-	if target.Rank > 0 {
-		return fmt.Sprint(target.Rank)
-	}
-	return string(target.ID)
+// ---------------------------------------------------------------------------
+// Draft route preview
+// ---------------------------------------------------------------------------
+
+templ SectionDraftRoutePreview(s *SectionView) {
+	<div class="flex-row w-full" onActivate={func() { s.createDraftRoute() }}>
+		<span class="w-5"></span>
+		<span class="w-18">{s.RouteDraft.ModelName.Get()}</span>
+		<span class="w-36">incomplete · no targets</span>
+		<span>create ↵</span>
+	</div>
 }
 
-func routeActionLabel(open bool) string {
-	if open {
-		return "collapse ↵"
-	}
-	return "expand ↵"
+// ---------------------------------------------------------------------------
+// Route edit preview
+// ---------------------------------------------------------------------------
+
+templ SectionRouteEditPreview(workflow *route_edit.Workflow) {
+	<div class="flex-col w-full">
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">model</span>
+			<span class="w-30">{workflow.ModelName.Get()}</span>
+			<span>{workflow.ActionLabel()}</span>
+		</div>
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">default</span>
+			<span class="w-30">{workflow.DefaultValueLabel()}</span>
+			<span>{workflow.DefaultActionLabel()}</span>
+		</div>
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">delete</span>
+			<span class="w-30">{workflow.DeleteValueLabel()}</span>
+			<span>{workflow.DeleteActionLabel()}</span>
+		</div>
+		if workflow.Error.Get() != "" {
+			<div class="flex-row w-full">
+				<span class="w-8"></span>
+				<span>{workflow.Error.Get()}</span>
+			</div>
+		}
+	</div>
 }
 
-func targetValue(target readmodel.TargetReadModel) string {
-	if target.Provider == "" {
-		return target.Model
-	}
-	if target.Model == "" {
-		return target.Provider
-	}
-	return target.Provider + "/" + target.Model
+// ---------------------------------------------------------------------------
+// Target edit preview
+// ---------------------------------------------------------------------------
+
+templ SectionTargetEditPreview(workflow *target_edit.Workflow) {
+	<div class="flex-col w-full">
+		@SectionTargetEditPreviewField("name", workflow.Name.Get())
+		@SectionTargetEditPreviewField("provider", workflow.Provider.Get())
+		@SectionTargetEditPreviewField(workflow.ModelLabel(), workflow.Model.Get())
+		if workflow.ShowBaseURL() {
+			@SectionTargetEditPreviewField(workflow.BaseURLLabel(), workflow.BaseURL.Get())
+		}
+		if workflow.ShowAuthDisclosure() {
+			@SectionTargetEditPreviewField("auth", workflow.AuthDisclosureValue())
+		}
+		if workflow.ShowDeviceCode() {
+			@SectionTargetEditPreviewField("code", workflow.DeviceCodeValue())
+		}
+		if workflow.ShowCredential() {
+			@SectionTargetEditPreviewField(workflow.CredentialLabel(), workflow.CredentialValue())
+		}
+		@SectionTargetEditPreviewField("rank", workflow.Rank.Get())
+		@SectionTargetEditPreviewField("weight", workflow.Weight.Get())
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">target</span>
+			<span class="w-36">{workflow.Name.Get()}</span>
+			<span>{workflow.SaveActionLabel()}</span>
+		</div>
+		<div class="flex-row w-full">
+			<span class="w-8"></span>
+			<span class="w-15">delete</span>
+			<span class="w-36">{workflow.DeleteValueLabel()}</span>
+			<span>{workflow.DeleteActionLabel()}</span>
+		</div>
+		if workflow.ErrorMessage() != "" {
+			<div class="flex-row w-full">
+				<span class="w-8"></span>
+				<span>{workflow.ErrorMessage()}</span>
+			</div>
+		}
+	</div>
+}
+
+templ SectionTargetEditPreviewField(label string, value string) {
+	<div class="flex-row w-full">
+		<span class="w-8"></span>
+		<span class="w-15">{label}</span>
+		<span class="w-30">{value}</span>
+	</div>
 }

@@ -15,10 +15,9 @@ type RunCommandSpec struct {
 }
 
 type RunPrepareFileSpec struct {
-	Path    string
-	Content string
-	Mode    fs.FileMode
-	// WriteIfMissing preserves explicit per-profile intent when preparing files.
+	Path           string
+	Content        string
+	Mode           fs.FileMode
 	WriteIfMissing bool
 }
 
@@ -74,12 +73,14 @@ func shellToken(raw string) string {
 }
 
 func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool) {
-	_ = modelID
 	spec, ok := capabilitySpecByID(clientID)
 	if !ok || spec.Run == nil {
 		return RunCommandSpec{}, false
 	}
 	vars := buildTemplateVars(baseURL, spec.Vars)
+	if model := strings.TrimSpace(modelID); model != "" { // swobu:io-string source=boundary
+		vars["primary_model"] = model
+	}
 	command := RunCommandSpec{
 		ClientID: strings.TrimSpace(clientID), // swobu:io-string source=boundary
 		Binary:   renderTemplate(spec.Run.Binary, vars),
@@ -97,7 +98,6 @@ func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool)
 	return command, true
 }
 
-// RenderRunCommand renders the exact shell-style command from RunCommandSpec.
 func RenderRunCommand(command RunCommandSpec) string {
 	return renderRunCommandDisplay(command.Binary, command.Args, command.Env)
 }

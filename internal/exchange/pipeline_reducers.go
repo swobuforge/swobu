@@ -9,51 +9,51 @@ import (
 
 // ---- pure reducers (commands only, zero side effects) ----
 
-func pipelineStartedReduce(in ExchangeInput, _ pipelineStarted) (ExchangeInput, []machine.Event, []machine.Command, error) {
-	if strings.TrimSpace(in.Request.Model()) == "" {
+func pipelineStartedReduce(in ExchangeInput, _ PipelineStartedEvent) (ExchangeInput, []machine.Event, []machine.Command, error) {
+	if strings.TrimSpace(in.Request.Model()) == "" { // swobu:io-string source=boundary
 		return in, nil, nil, canonical.BadRequest("canonical request is required")
 	}
 	if err := in.Contract.Validate(); err != nil {
 		return in, nil, nil, canonical.BadRequest("execution contract is invalid: " + err.Error())
 	}
-	if strings.TrimSpace(in.Target.ProviderSpec) == "" {
+	if strings.TrimSpace(in.Target.ProviderSpec) == "" { // swobu:io-string source=boundary
 		return in, nil, nil, canonical.BadEndpoint("provider target is required")
 	}
-	return in, nil, []machine.Command{machine.Command(resolveCodecs{})}, nil
+	return in, nil, []machine.Command{machine.Command(ResolveCodecsAction{})}, nil
 }
 
 func codecsResolvedReduce(s struct {
 	In     ExchangeInput
-	Codecs codecResolution
-}, _ codecsResolved) (codecResolution, []machine.Event, []machine.Command, error) {
+	Codecs codecResolutionState
+}, _ CodecsResolvedEvent) (codecResolutionState, []machine.Event, []machine.Command, error) {
 	if !s.Codecs.OK {
 		return s.Codecs, nil, nil, canonical.UnsupportedOperation("required codec not resolved")
 	}
-	return s.Codecs, nil, []machine.Command{machine.Command(encodeProviderRequest{})}, nil
+	return s.Codecs, nil, []machine.Command{machine.Command(EncodeProviderRequestAction{})}, nil
 }
 
-func requestEncodedReduce(s encodedRequest, _ requestEncoded) (encodedRequest, []machine.Event, []machine.Command, error) {
-	return s, nil, []machine.Command{machine.Command(resolveProviderIngress{})}, nil
+func requestEncodedReduce(s EncodedRequestState, _ RequestEncodedEvent) (EncodedRequestState, []machine.Event, []machine.Command, error) {
+	return s, nil, []machine.Command{machine.Command(ResolveProviderIngressAction{})}, nil
 }
 
 func ingressReceivedReduce(s struct {
-	Ingress providerResponse
+	Ingress ProviderResponseState
 	In      ExchangeInput
-}, _ ingressReceived) (providerResponse, []machine.Event, []machine.Command, error) {
+}, _ IngressReceivedEvent) (ProviderResponseState, []machine.Event, []machine.Command, error) {
 	if s.Ingress.Ingress == nil {
 		return s.Ingress, nil, nil, canonical.InternalError("provider ingress is nil")
 	}
-	return s.Ingress, nil, []machine.Command{machine.Command(decodeProviderEnvelope{})}, nil
+	return s.Ingress, nil, []machine.Command{machine.Command(DecodeProviderEnvelopeAction{})}, nil
 }
 
-func envelopeDecodedReduce(s decodedEnvelope, _ envelopeDecoded) (decodedEnvelope, []machine.Event, []machine.Command, error) {
-	return s, nil, []machine.Command{machine.Command(captureContinuation{})}, nil
+func envelopeDecodedReduce(s DecodedEnvelopeState, _ EnvelopeDecodedEvent) (DecodedEnvelopeState, []machine.Event, []machine.Command, error) {
+	return s, nil, []machine.Command{machine.Command(CaptureContinuationAction{})}, nil
 }
 
-func continuationCapturedReduce(s decodedEnvelope, _ continuationCaptured) (decodedEnvelope, []machine.Event, []machine.Command, error) {
-	return s, nil, []machine.Command{machine.Command(encodeClientOutputCmd{})}, nil
+func continuationCapturedReduce(s DecodedEnvelopeState, _ ContinuationCapturedEvent) (DecodedEnvelopeState, []machine.Event, []machine.Command, error) {
+	return s, nil, []machine.Command{machine.Command(EncodeClientOutputAction{})}, nil
 }
 
-func pipelineCompletedReduce(out pipelineOutcome, _ pipelineCompleted) (pipelineOutcome, []machine.Event, []machine.Command, error) {
+func pipelineCompletedReduce(out pipelineOutcomeState, _ PipelineCompletedEvent) (pipelineOutcomeState, []machine.Event, []machine.Command, error) {
 	return out, nil, nil, nil
 }

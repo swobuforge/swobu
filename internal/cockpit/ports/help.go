@@ -18,6 +18,7 @@ type HelpActions interface {
 type DiagnosticsCopyResult struct {
 	Status DiagnosticsCopyStatus
 	Path   string
+	Text   string
 }
 
 // DiagnosticsCopyStatus is the port-level result of a diagnostics copy attempt.

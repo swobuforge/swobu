@@ -31,7 +31,7 @@ func TestResolveProviderIngress_PreservesTransportErrorDetail(t *testing.T) {
 		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-4o-mini",
 		}),
-		RequestDocument: carrier.NewWireDocument(
+		RequestDocument: carrier.NewCarrierDocument(
 			carrier.StageProviderRequestOut,
 			protocolkind.Responses,
 			"application/json",

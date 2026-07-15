@@ -89,6 +89,41 @@ func TestProviderConfig_TargetAliasValidation(t *testing.T) {
 	}
 }
 
+func TestProviderConfig_TargetRankWeightValidation(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "https://example.test/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	if cfg.TargetRank() != 1 || cfg.TargetWeight() != 1 {
+		t.Fatalf("defaults rank/weight = %d/%d, want 1/1", cfg.TargetRank(), cfg.TargetWeight())
+	}
+	cfg, err = cfg.WithTargetRank(2)
+	if err != nil {
+		t.Fatalf("WithTargetRank returned error: %v", err)
+	}
+	cfg, err = cfg.WithTargetWeight(7)
+	if err != nil {
+		t.Fatalf("WithTargetWeight returned error: %v", err)
+	}
+	if cfg.TargetRank() != 2 || cfg.TargetWeight() != 7 {
+		t.Fatalf("rank/weight = %d/%d, want 2/7", cfg.TargetRank(), cfg.TargetWeight())
+	}
+	if _, err := cfg.WithTargetRank(0); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithTargetRank(0) error = %v, want ErrInvalidProviderConfig", err)
+	}
+	if _, err := cfg.WithTargetWeight(0); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithTargetWeight(0) error = %v, want ErrInvalidProviderConfig", err)
+	}
+}
+
 func TestProviderConfig_DerivesProtocolFromProviderSpec(t *testing.T) {
 	ref, err := ParseProviderConfigRef("cfg-anthropic")
 	if err != nil {

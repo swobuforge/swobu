@@ -18,7 +18,7 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effect.Result[wire.ClientRequestResult], error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (wire.ClientRequestResult, error) {
 		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
 		return wire.ClientRequestResult{
@@ -28,7 +28,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effec
 	})
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "chat completions request", nil); err != nil {
@@ -54,7 +54,19 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	items := make([]canonical.CanonicalItem, 0, len(dto.Messages))
+	instructionParts := make([]string, 0, 2)
 	for idx, msg := range dto.Messages {
+		role := strings.TrimSpace(msg.Role) // swobu:io-string source=boundary
+		if role == "system" || role == "developer" {
+			textItems, err := openaicompat.DecodeTextContentItems(msg.Content, "chat completions", canonical.ItemAuthorUser)
+			if err != nil {
+				return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+			}
+			if text := strings.TrimSpace(joinItemText(textItems)); text != "" { // swobu:io-string source=boundary
+				instructionParts = append(instructionParts, text)
+			}
+			continue
+		}
 		decoded, err := decodeChatCompletionsItems(sink, exchangeID, msg.Role, msg.Content, msg.ToolCalls, msg.ToolCallID, idx)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -75,6 +87,7 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		Instructions:  strings.Join(instructionParts, "\n\n"),
 		Items:         items,
 		Tools:         tools,
 		ToolPolicy:    toolPolicy,

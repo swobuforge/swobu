@@ -66,6 +66,81 @@ func TestEncodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	}
 }
 
+func TestDecodeEndpointDocument_RejectsZeroAndNegativeTargetRankWeight(t *testing.T) {
+	t.Parallel()
+
+	rankVal := 0
+	weightVal := 0
+	doc := endpointDocument{
+		Name:                      "jobs",
+		SelectedProviderConfigRef: "cfg-main",
+		ProviderConfigs: []providerConfigDocument{
+			{
+				Ref:           "cfg-main",
+				ProviderSpec:  "openai",
+				BaseURL:       "https://api.openai.com/v1",
+				CredentialRef: "env:OPENAI_API_KEY",
+				TargetRank:    &rankVal,
+				TargetWeight:  &weightVal,
+			},
+		},
+	}
+	if _, err := decodeEndpointDocument(doc); err == nil {
+		t.Fatal("decodeEndpointDocument expected error for zero TargetRank/TargetWeight, got nil")
+	}
+
+	nrankVal := -1
+	nweightVal := -2
+	doc2 := endpointDocument{
+		Name:                      "jobs",
+		SelectedProviderConfigRef: "cfg-main",
+		ProviderConfigs: []providerConfigDocument{
+			{
+				Ref:           "cfg-main",
+				ProviderSpec:  "openai",
+				BaseURL:       "https://api.openai.com/v1",
+				CredentialRef: "env:OPENAI_API_KEY",
+				TargetRank:    &nrankVal,
+				TargetWeight:  &nweightVal,
+			},
+		},
+	}
+	if _, err := decodeEndpointDocument(doc2); err == nil {
+		t.Fatal("decodeEndpointDocument expected error for negative TargetRank/TargetWeight, got nil")
+	}
+}
+
+func TestDecodeEndpointDocument_OmitsTargetRankWeightDefaultsToOne(t *testing.T) {
+	t.Parallel()
+
+	doc := endpointDocument{
+		Name:                      "jobs",
+		SelectedProviderConfigRef: "cfg-main",
+		ProviderConfigs: []providerConfigDocument{
+			{
+				Ref:           "cfg-main",
+				ProviderSpec:  "openai",
+				BaseURL:       "https://api.openai.com/v1",
+				CredentialRef: "env:OPENAI_API_KEY",
+			},
+		},
+	}
+	endpoint, err := decodeEndpointDocument(doc)
+	if err != nil {
+		t.Fatalf("decodeEndpointDocument returned error: %v", err)
+	}
+	providers := endpoint.ProviderConfigs()
+	if len(providers) != 1 {
+		t.Fatalf("provider configs len=%d want=1", len(providers))
+	}
+	if got := providers[0].TargetRank(); got != 1 {
+		t.Fatalf("target rank=%d want=1", got)
+	}
+	if got := providers[0].TargetWeight(); got != 1 {
+		t.Fatalf("target weight=%d want=1", got)
+	}
+}
+
 func TestDecodeEndpointDocument_AcceptsProtocolAutoAsUnspecified(t *testing.T) {
 	t.Parallel()
 

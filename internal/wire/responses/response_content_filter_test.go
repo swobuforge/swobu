@@ -97,7 +97,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 				"event: " + tc.eventType + "\ndata: {\"type\":\"" + tc.eventType + "\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"" + tc.status + "\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"content_filters\":[{\"source_type\":\"completion\",\"blocked\":true}],\"output\":[]}}\n\n"
 
 			sink := &recordingEffectSink{}
-			reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_content_filter", sink)
+			reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_content_filter", sink)
 			defer func() { _ = reader.Close(context.Background()) }()
 
 			closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)

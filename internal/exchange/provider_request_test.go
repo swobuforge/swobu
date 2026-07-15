@@ -17,7 +17,7 @@ import (
 func TestNewProviderRequest_ClonesCanonicalRequestAndTargetInputs(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}})
 	target := NewRoutableTarget("backend-a", "openai_"+"com"+"patible", "http://localhost:8080/v1", "cred-1", "chat_completions", "", "", "")
-	wireRequest := carrier.NewWireDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"request":true}`), carrier.Meta{})
+	wireRequest := carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"request":true}`), carrier.Meta{})
 	req := NewProviderRequest("ex-1", protocolkind.Responses, request, wireRequest, NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)), target)
 	if req.Contract.ClientDelivery != delivery.StreamingDelivery(delivery.FramingSSE) || req.Contract.ProviderDelivery != delivery.StreamingDelivery(delivery.FramingSSE) {
 		t.Fatalf("delivery clone mismatch")
@@ -70,7 +70,7 @@ func TestProviderIngressValidate_RequiresExactlyOneCarrier(t *testing.T) {
 	if err := ValidateProviderIngress(none); err == nil {
 		t.Fatal("expected error")
 	}
-	if err := ValidateProviderIngress(carrier.NewWireDocument(
+	if err := ValidateProviderIngress(carrier.NewCarrierDocument(
 		carrier.StageProviderIngressIn,
 		protocolkind.Responses,
 		"application/json",
@@ -80,7 +80,7 @@ func TestProviderIngressValidate_RequiresExactlyOneCarrier(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := ValidateProviderIngress(carrier.WireStream{
+	if err := ValidateProviderIngress(carrier.CarrierStream{
 		Stage:   carrier.StageProviderIngressIn,
 		Family:  protocolkind.Responses,
 		Framing: carrier.FramingSSE,
@@ -114,7 +114,7 @@ func TestProviderIngressValidate_ExactlyOneCarrierRequired(t *testing.T) {
 		},
 		{
 			name: "document only valid",
-			input: carrier.NewWireDocument(
+			input: carrier.NewCarrierDocument(
 				carrier.StageProviderIngressIn,
 				protocolkind.Responses,
 				"application/json",
@@ -125,7 +125,7 @@ func TestProviderIngressValidate_ExactlyOneCarrierRequired(t *testing.T) {
 		},
 		{
 			name: "stream only valid",
-			input: carrier.WireStream{
+			input: carrier.CarrierStream{
 				Stage:   carrier.StageProviderIngressIn,
 				Family:  protocolkind.Responses,
 				Framing: carrier.FramingSSE,
@@ -181,7 +181,7 @@ func TestProviderCanonicalEventStreamIngress_ExposesReader(t *testing.T) {
 func TestNewProviderRequest_OptionalEffectSink(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m"})
 	target := NewRoutableTarget("b", "spec", "http://x", "c", "chat_completions", "", "", "")
-	wireRequest := carrier.NewWireDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{}`), carrier.Meta{})
+	wireRequest := carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{}`), carrier.Meta{})
 
 	reqNone := NewProviderRequest("ex", protocolkind.Responses, request, wireRequest, NewExecutionContract(delivery.BufferedDelivery()), target)
 	if reqNone.EffectSink != nil {

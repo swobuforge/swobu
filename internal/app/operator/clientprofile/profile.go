@@ -1,6 +1,6 @@
 package clientprofile
 
-// Profile defines one client integration profile.
+// Profile is the static profile contract for launcher/capability declarations.
 //
 // Static identity is returned by Identity; runtime-derived operator actions are
 // returned by Actions.

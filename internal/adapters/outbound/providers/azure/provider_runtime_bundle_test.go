@@ -128,7 +128,7 @@ func TestResolveProviderIngress_UsesAnthropicPathForMessages(t *testing.T) {
 			Model: "claude-sonnet-4",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.WireDocument{},
+		carrier.CarrierDocument{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		exchange.NewRoutableTarget(
 			"draft",

@@ -80,8 +80,21 @@ func renderCockpitSnapshot(stdout io.Writer, model readmodel.CockpitReadModel) e
 }
 
 func applyCockpitDefaults(model readmodel.CockpitReadModel) readmodel.CockpitReadModel {
-	if model.Help == (readmodel.HelpReadModel{}) {
-		model.Help = helppage.DefaultModel()
+	defaultHelp := helppage.DefaultModel()
+	if model.Help.Version == "" {
+		model.Help.Version = defaultHelp.Version
+	}
+	if model.Help.CockpitVersion == "" {
+		model.Help.CockpitVersion = defaultHelp.CockpitVersion
+	}
+	if model.Help.DocsURL == "" {
+		model.Help.DocsURL = defaultHelp.DocsURL
+	}
+	if model.Help.CommunityURL == "" {
+		model.Help.CommunityURL = defaultHelp.CommunityURL
+	}
+	if model.Help.IssueURL == "" {
+		model.Help.IssueURL = defaultHelp.IssueURL
 	}
 	return model
 }

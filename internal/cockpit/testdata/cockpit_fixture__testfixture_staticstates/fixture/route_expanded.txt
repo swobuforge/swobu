@@ -11,6 +11,9 @@ SWOBU    [› dev] [lab] [+] [?]
      target 1          openai_compatible/gpt-4.1           open ↵
      target 2          openai_compatible/gpt-4o            open ↵
      add target                                            add ↵
+        model          gpt                           edit ↵
+        default        yes                           current
+        delete         gpt                           delete ↵
      local             1 target                            expand ↵
      add route                                             add ↵
 
@@ -20,9 +23,6 @@ SWOBU    [› dev] [lab] [+] [?]
 
 ──────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   ? help   esc back
-
-
-
 
 
 

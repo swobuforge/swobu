@@ -15,12 +15,16 @@
 //
 // What is deferred (app-loop limitation):
 //   - Full App lifecycle (event loop, keyboard dispatch, focus navigation) is
-//     NOT testable without a real TTY because NewApp/NewAppWithReader create a
-//     real ANSITerminal and attempt EnterRawMode, which fails without a
-//     controlling terminal. The upstream module provides MockTerminal but no
-//     public AppOption to inject it (go-tui v0.17.0). App-loop behavior
-//     (focus, keymap, state updates) is therefore a PTY/e2e lane, not a
-//     component-render lane.
+//     approximated by seeded MockAppHarness, a testkit-only harness that mutates
+//     go-tui App internals with reflect and unsafe so cockpit app-loop behavior
+//     can be proven without a real PTY.
+//   - That harness is intentionally coupled to upstream App internals and must
+//     stay quarantined to this package. Loud drift tests in testkit must fail if
+//     go-tui changes the private App fields or mount shape the harness seeds.
+//     Use PTY/e2e only for binary-runtime claims the seeded mock app cannot
+//     prove.
 //   - This is an intentional boundary: component-render catches layout drift;
-//     PTY/e2e catches interaction drift. Do not fake the app loop.
+//     MockAppHarness catches cockpit interaction drift; PTY/e2e catches shipped
+//     binary/runtime drift. Do not describe the harness as the full upstream
+//     app loop.
 package testkit

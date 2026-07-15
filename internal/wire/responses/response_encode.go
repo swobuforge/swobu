@@ -2,7 +2,6 @@ package responses
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -11,7 +10,7 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.WireDocument], error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.CarrierDocument], error) {
 	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
 	status, incompleteReason := responsesWireStatusForFinishReason(output.FinishReason())
@@ -51,29 +50,28 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Usage:             responsesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
-		return effect.Result[carrier.WireDocument]{}, err
+		return effect.Result[carrier.CarrierDocument]{}, err
 	}
 	logResponsesEgressBuffered(encodedBody)
-	return effect.NewResult(carrier.NewWireDocument("", protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})), nil
+	return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})), nil
 }
 
 func responsesWireStatusForFinishReason(finishReason string) (string, string) {
-	normalized := strings.ToLower(strings.TrimSpace(finishReason)) // swobu:io-string source=boundary
-	switch normalized {
-	case "", "completed", "incomplete", "stop", "end_turn", "tool_calls":
-		return "completed", ""
-	case "content_filter", "max_output_tokens", "length", "refusal", "safety", "guardrail_intervened", "content_filtered":
-		return "incomplete", normalized
-	default:
+	normalized := normalizedResponseString(finishReason)
+	if normalized == "" || normalized == "completed" || normalized == "incomplete" || normalized == "stop" || normalized == "end_turn" || normalized == "tool_calls" {
 		return "completed", ""
 	}
+	if normalized == "content_filter" || normalized == "max_output_tokens" || normalized == "length" || normalized == "refusal" || normalized == "safety" || normalized == "guardrail_intervened" || normalized == "content_filtered" {
+		return "incomplete", normalized
+	}
+	return "completed", ""
 }
 
 func responsesIncompleteDetailsForStatus(status string, incompleteReason string) *responsesIncompleteDetailsDTO {
-	if strings.TrimSpace(status) != "incomplete" {
+	if trimmedResponseString(status) != "incomplete" {
 		return nil
 	}
-	reason := strings.TrimSpace(incompleteReason)
+	reason := trimmedResponseString(incompleteReason)
 	if reason == "" {
 		return nil
 	}

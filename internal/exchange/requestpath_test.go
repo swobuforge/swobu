@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,7 +10,10 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/turnstate"
 )
@@ -26,7 +30,7 @@ func TestExchangeMachine_RetryFallback_SelectsSecondBackendOnFirstFailure(t *tes
 		if len(calls) == 1 {
 			return nil, canonical.NewBackendError(req.Target.BackendRef, http.StatusServiceUnavailable, "down", "")
 		}
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
@@ -183,6 +187,340 @@ func TestExchangeMachine_PlanRoute_ProducesDeterministicOrder(t *testing.T) {
 	}
 }
 
+func TestBuildPathRecord_PreservesCanonicalRequestSemanticBands(t *testing.T) {
+	ref, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "https://api.openai.com/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithModelID("provider-model")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	maxTokens := 64
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
+		MaxOutputTokens: &maxTokens,
+		StopSequences:   []string{"DONE"},
+	})
+	if err != nil {
+		t.Fatalf("NewGenerationControls returned error: %v", err)
+	}
+	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:        canonical.OutputFormatJSONSchema,
+		Name:        "route_shape",
+		Description: "route-level schema",
+		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}`),
+		Strict:      true,
+	})
+	if err != nil {
+		t.Fatalf("NewOutputFormat returned error: %v", err)
+	}
+	turn := canonical.NewTurnRef("resp_prev")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        "client-model",
+		Instructions: "Use native tools for filesystem work.",
+		Items: []canonical.CanonicalItem{
+			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+		},
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("tool_1", "search", "search workspace", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
+		},
+		Turn:          turn,
+		ToolPolicy:    canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+		Controls:      controls,
+		OutputFormat:  outputFormat,
+	})
+
+	endpointName, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	record, err := buildPathRecord(context.Background(), "ex-route-bands", endpointName, providerConfig, delivery.StreamingDelivery(delivery.FramingSSE), request)
+	if err != nil {
+		t.Fatalf("buildPathRecord returned error: %v", err)
+	}
+
+	got := record.Request
+	if got.Model() != "provider-model" {
+		t.Fatalf("route request model = %q, want provider-model", got.Model())
+	}
+	if got.Instructions() != "Use native tools for filesystem work." {
+		t.Fatalf("route request instructions = %q, want preserved instructions", got.Instructions())
+	}
+	if len(got.Items()) != 1 || got.Items()[0].Text != "hi" {
+		t.Fatalf("route request items = %#v, want original item", got.Items())
+	}
+	if len(got.Tools()) != 1 {
+		t.Fatalf("route request tools len = %d, want 1", len(got.Tools()))
+	}
+	if got.Turn().IsZero() {
+		t.Fatal("route request lost turn reference")
+	}
+	if got.ToolPolicy().Mode != canonical.ToolPolicyRequired {
+		t.Fatalf("route request tool policy = %q, want required", got.ToolPolicy().Mode)
+	}
+	if got.ToolCallBatch().Mode != canonical.ToolCallBatchAtMostOne {
+		t.Fatalf("route request tool batch = %q, want at_most_one", got.ToolCallBatch().Mode)
+	}
+	if gotMax, ok := got.Controls().Limits.MaxOutputTokens.Value(); !ok || gotMax != 64 {
+		t.Fatalf("route request max output tokens = (%d, %v), want (64, true)", gotMax, ok)
+	}
+	if stops := got.Controls().Limits.StopSequences; len(stops) != 1 || stops[0] != "DONE" {
+		t.Fatalf("route request stop sequences = %#v, want [DONE]", stops)
+	}
+	if gotFormat := got.OutputFormat(); gotFormat.Kind != canonical.OutputFormatJSONSchema || gotFormat.Name != "route_shape" || !gotFormat.Strict {
+		t.Fatalf("route request output format = %#v, want route schema", gotFormat)
+	}
+}
+
+func TestResponsesRouteToProviderEncode_PreservesToolSurface(t *testing.T) {
+	resolver := codecresolver.NewRuntimeCodecResolver()
+	clientCodec := resolver.ClientCodec(canonical.ClientFamilyResponses)
+	clientRequest := []byte(`{
+		"model":"client-model",
+		"input":"edit a file",
+		"parallel_tool_calls":false,
+		"tools":[{
+			"type":"function",
+			"name":"exec_command",
+			"description":"run a command",
+			"parameters":{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}
+		}]
+	}`)
+	decoded, err := clientCodec.DecodeClientRequest(carrier.NewCarrierDocument(
+		carrier.StageClientRequestIn,
+		protocolkind.Responses,
+		"application/json",
+		nil,
+		clientRequest,
+		carrier.Meta{},
+	))
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
+	}
+
+	ref, err := endpointintent.ParseProviderConfigRef("primary")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("azure")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "contact-8837-resource", "keychain")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithProviderProtocol("responses_stream")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithModelID("gpt-5.3-codex")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	endpointName, err := endpointintent.ParseEndpointName("dev")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	pathRecord, err := buildPathRecord(context.Background(), "ex-tool-route", endpointName, providerConfig, decoded.Value.Delivery, decoded.Value.Request)
+	if err != nil {
+		t.Fatalf("buildPathRecord returned error: %v", err)
+	}
+	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(pathRecord.Request, pathRecord.ProviderDelivery, "ex-tool-route")
+	if err != nil {
+		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(encoded.Value.RawBytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal provider payload returned error: %v", err)
+	}
+	if got := payload["model"]; got != "gpt-5.3-codex" {
+		t.Fatalf("provider model = %#v, want gpt-5.3-codex", got)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("provider tools = %#v, want one tool", payload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("provider tool = %T, want object", tools[0])
+	}
+	if tool["type"] != "function" || tool["name"] != "exec_command" {
+		t.Fatalf("provider tool = %#v, want function exec_command", tool)
+	}
+	if got, ok := payload["parallel_tool_calls"].(bool); !ok || got {
+		t.Fatalf("parallel_tool_calls = %#v, want false", payload["parallel_tool_calls"])
+	}
+	if got := payload["tool_choice"]; got != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", got)
+	}
+}
+
+func TestResponsesRouteToProviderEncode_PreservesCustomToolSurface(t *testing.T) {
+	resolver := codecresolver.NewRuntimeCodecResolver()
+	clientCodec := resolver.ClientCodec(canonical.ClientFamilyResponses)
+	clientRequest := []byte(`{
+		"model":"client-model",
+		"input":"edit a file",
+		"tools":[{
+			"type":"custom",
+			"name":"apply_patch",
+			"description":"edit files",
+			"format":{"type":"grammar","syntax":"lark","definition":"start: PATCH\nPATCH: /.+/"}
+		}]
+	}`)
+	decoded, err := clientCodec.DecodeClientRequest(carrier.NewCarrierDocument(
+		carrier.StageClientRequestIn,
+		protocolkind.Responses,
+		"application/json",
+		nil,
+		clientRequest,
+		carrier.Meta{},
+	))
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
+	}
+
+	ref, err := endpointintent.ParseProviderConfigRef("primary")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("azure")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "contact-8837-resource", "keychain")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithProviderProtocol("responses_stream")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithModelID("gpt-5.3-codex")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	endpointName, err := endpointintent.ParseEndpointName("dev")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	pathRecord, err := buildPathRecord(context.Background(), "ex-custom-tool-route", endpointName, providerConfig, decoded.Value.Delivery, decoded.Value.Request)
+	if err != nil {
+		t.Fatalf("buildPathRecord returned error: %v", err)
+	}
+	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(pathRecord.Request, pathRecord.ProviderDelivery, "ex-custom-tool-route")
+	if err != nil {
+		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(encoded.Value.RawBytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal provider payload returned error: %v", err)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("provider tools = %#v, want one tool", payload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("provider tool = %T, want object", tools[0])
+	}
+	if tool["type"] != "custom" || tool["name"] != "apply_patch" {
+		t.Fatalf("provider custom tool = %#v, want custom apply_patch", tool)
+	}
+	if _, ok := tool["format"].(map[string]any); !ok {
+		t.Fatalf("provider custom tool format = %#v, want object", tool["format"])
+	}
+}
+
+func TestChatRouteToResponsesProviderEncode_PreservesInstructions(t *testing.T) {
+	resolver := codecresolver.NewRuntimeCodecResolver()
+	clientCodec := resolver.ClientCodec(canonical.ClientFamilyChatCompletions)
+	clientRequest := []byte(`{
+		"model":"client-model",
+		"messages":[
+			{"role":"system","content":"You are a coding agent."},
+			{"role":"developer","content":"Use native tools for file edits."},
+			{"role":"user","content":"inspect files"}
+		],
+		"tools":[{
+			"type":"function",
+			"function":{
+				"name":"exec_command",
+				"description":"run a command",
+				"parameters":{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}
+			}
+		}]
+	}`)
+	decoded, err := clientCodec.DecodeClientRequest(carrier.NewCarrierDocument(
+		carrier.StageClientRequestIn,
+		protocolkind.ChatCompletions,
+		"application/json",
+		nil,
+		clientRequest,
+		carrier.Meta{},
+	))
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
+	}
+
+	ref, err := endpointintent.ParseProviderConfigRef("primary")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("azure")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "contact-8837-resource", "keychain")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithProviderProtocol("responses_stream")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithModelID("gpt-5.3-codex")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	endpointName, err := endpointintent.ParseEndpointName("dev")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	pathRecord, err := buildPathRecord(context.Background(), "ex-chat-instructions-route", endpointName, providerConfig, decoded.Value.Delivery, decoded.Value.Request)
+	if err != nil {
+		t.Fatalf("buildPathRecord returned error: %v", err)
+	}
+	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(pathRecord.Request, pathRecord.ProviderDelivery, "ex-chat-instructions-route")
+	if err != nil {
+		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(encoded.Value.RawBytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal provider payload returned error: %v", err)
+	}
+	if got := payload["instructions"]; got != "You are a coding agent.\n\nUse native tools for file edits." {
+		t.Fatalf("instructions = %#v, want preserved system/developer instructions", got)
+	}
+	input, ok := payload["input"].(string)
+	if !ok || input != "inspect files" {
+		t.Fatalf("input = %#v, want user request only", payload["input"])
+	}
+}
+
 // ---- continuation (adversarial) -------------------------------------------------
 //
 // These tests prove that the continuation pipeline:
@@ -200,7 +538,7 @@ func TestContinuation_NilStore_Passthrough(t *testing.T) {
 	var capturedReq canonical.CanonicalRequest
 	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
 		capturedReq = req.Request
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
@@ -261,7 +599,7 @@ func TestContinuation_NativeContinuation_Preserved(t *testing.T) {
 	var capturedReq canonical.CanonicalRequest
 	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
 		capturedReq = req.Request
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
@@ -297,6 +635,138 @@ func TestContinuation_NativeContinuation_Preserved(t *testing.T) {
 	}
 	if rec.Status != canonical.ContinuationStatusCompleted {
 		t.Fatalf("record status = %q, want completed", rec.Status)
+	}
+}
+
+// TestContinuation_ResponsesRoute_PreservesProviderModelAndInheritedBands
+// proves that the routed provider request keeps the selected provider model
+// and inherited tool grammar even when the current turn only sends new input.
+func TestContinuation_ResponsesRoute_PreservesProviderModelAndInheritedBands(t *testing.T) {
+	endpointName, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	providerRef, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	providerSpec, err := endpointintent.ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(providerRef, providerSpec, "https://example.test/v1", "")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithProviderProtocol("responses")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithModelID("provider-model")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(endpointName, []endpointintent.ProviderConfig{providerConfig}, providerRef)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	maxTokens := 64
+	temperature := 0.2
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
+		MaxOutputTokens: &maxTokens,
+		Temperature:     &temperature,
+		StopSequences:   []string{"DONE"},
+	})
+	if err != nil {
+		t.Fatalf("NewGenerationControls returned error: %v", err)
+	}
+	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:        canonical.OutputFormatJSONSchema,
+		Name:        "continuation_reply",
+		Description: "structured continuation reply",
+		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		Strict:      true,
+	})
+	if err != nil {
+		t.Fatalf("NewOutputFormat returned error: %v", err)
+	}
+
+	store := turnstate.NewMemoryContinuationStore()
+	prevID := canonical.NewContinuationID("resp_prev")
+	if err := store.Put(context.Background(), canonical.ContinuationRecord{
+		ID:      prevID,
+		RouteID: "alpha",
+		ModelID: "provider-model",
+		RequestDelta: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model:        "provider-model",
+			Instructions: "Use native tools for filesystem work.",
+			Items: []canonical.CanonicalItem{
+				canonical.NewTextItem(canonical.ItemAuthorUser, "previous-turn"),
+			},
+			Tools: []canonical.ToolDecl{
+				canonical.NewFunctionToolDecl("tool_1", "exec_command", "run a command", canonical.NewToolSchemaObject(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`)),
+			},
+			ToolPolicy:    canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+			ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+			Controls:      controls,
+			OutputFormat:  outputFormat,
+		}),
+		Response: canonical.NewConversationOutput(
+			"resp_prev",
+			"provider-model",
+			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "previous-response")},
+			"completed",
+		),
+		Status: canonical.ContinuationStatusCompleted,
+	}); err != nil {
+		t.Fatalf("store.Put returned error: %v", err)
+	}
+
+	var capturedReq canonical.CanonicalRequest
+	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+		capturedReq = req.Request
+		return carrier.NewCarrierDocument(
+			carrier.StageProviderIngressIn,
+			req.Target.ProtocolKind,
+			"application/json",
+			nil,
+			[]byte(`{"id":"resp_2","model":"provider-model","output_text":"ok"}`),
+			carrier.Meta{},
+		), nil
+	})
+	ingress := RequestIngress{runner: runner.WithContinuationStore(store)}
+
+	_, err = ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
+		ExchangeID:      "continuation-route-1",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"client-model","previous_response_id":"resp_prev","messages":[{"role":"user","content":"continue"}]}`)),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatalf("HandleRequestWithEndpoint returned error: %v", err)
+	}
+
+	if got := capturedReq.Model(); got != "provider-model" {
+		t.Fatalf("provider request model = %q, want provider-model", got)
+	}
+	if got := capturedReq.Instructions(); got != "Use native tools for filesystem work." {
+		t.Fatalf("provider request instructions = %q, want inherited instructions", got)
+	}
+	if got := len(capturedReq.Tools()); got != 1 {
+		t.Fatalf("provider request tool count = %d, want 1", got)
+	}
+	if got := capturedReq.Tools()[0].ToolName(); got != "exec_command" {
+		t.Fatalf("provider request tool name = %q, want exec_command", got)
+	}
+	if got := capturedReq.ToolPolicy(); got.Mode != canonical.ToolPolicyRequired {
+		t.Fatalf("provider request tool policy = %q, want required", got.Mode)
+	}
+	if got := capturedReq.ToolCallBatch(); got.Mode != canonical.ToolCallBatchAtMostOne {
+		t.Fatalf("provider request tool call batch = %q, want at_most_one", got.Mode)
+	}
+	if got := capturedReq.Turn().IsZero(); got {
+		t.Fatal("provider request turn should be preserved for safe Responses continuation")
 	}
 }
 
@@ -338,7 +808,7 @@ func TestContinuation_Fallback_MaterializesHistory(t *testing.T) {
 		if len(calls) == 1 {
 			return nil, canonical.NewBackendError(req.Target.BackendRef, http.StatusServiceUnavailable, "down", "")
 		}
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
@@ -468,7 +938,7 @@ func TestContinuation_NoDuplicate_PersistsOnceOnRetry(t *testing.T) {
 		if calls == 1 {
 			return nil, canonical.NewBackendError("backend-a", http.StatusServiceUnavailable, "down", "")
 		}
-		return carrier.NewWireDocument(
+		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",

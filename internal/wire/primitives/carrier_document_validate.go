@@ -9,7 +9,7 @@ import (
 )
 
 // ValidateResponseCarrierDocument validates one carrier-native buffered response document contract.
-func ValidateResponseCarrierDocument(doc carrier.WireDocument, expectedProtocol protocolkind.ProtocolKind) error {
+func ValidateResponseCarrierDocument(doc carrier.CarrierDocument, expectedProtocol protocolkind.ProtocolKind) error {
 	if doc.Family != expectedProtocol {
 		return fmt.Errorf("wire document protocol must be %q", expectedProtocol)
 	}

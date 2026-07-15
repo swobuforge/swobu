@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
+	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 )
 
-type runCommandIO struct {
+type runCommandIOConfig struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -21,15 +21,15 @@ type runCommandIO struct {
 
 type runCommandExecutor func(context.Context, clientprofile.RunCommandSpec) error
 
-func processRunCommandIO() runCommandIO {
-	return runCommandIO{
+func processRunCommandIO() runCommandIOConfig {
+	return runCommandIOConfig{
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}
 }
 
-func executeClientRunCommand(ctx context.Context, command clientprofile.RunCommandSpec, ioCfg runCommandIO) error {
+func executeClientRunCommand(ctx context.Context, command clientprofile.RunCommandSpec, ioCfg runCommandIOConfig) error {
 	if strings.TrimSpace(command.Binary) == "" { // swobu:io-string source=boundary
 		return errors.New("run command binary is required")
 	}
@@ -50,7 +50,7 @@ func executeClientRunCommand(ctx context.Context, command clientprofile.RunComma
 	return nil
 }
 
-func normalizeRunCommandIO(ioCfg runCommandIO) runCommandIO {
+func normalizeRunCommandIO(ioCfg runCommandIOConfig) runCommandIOConfig {
 	if ioCfg.Stdin == nil {
 		ioCfg.Stdin = os.Stdin
 	}

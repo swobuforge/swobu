@@ -45,18 +45,18 @@ func logResponsesEgressStreamFrame(raw []byte) {
 }
 
 func logResponsesTerminalProjection(usedFallback bool, status string, rawOutputCount int, rawOutputTextPresent bool, items []canonical.OutputItem) {
-	textCount := 0
-	toolUseCount := 0
+	fallbackTextCount := 0
+	fallbackToolUseCount := 0
 	textPreview := ""
 	for _, item := range items {
 		switch item.Kind {
 		case canonical.ItemKindText:
-			textCount++
+			fallbackTextCount++
 			if textPreview == "" {
 				textPreview = strings.TrimSpace(item.Text) // swobu:io-string source=log-formatting
 			}
 		case canonical.ItemKindToolUse:
-			toolUseCount++
+			fallbackToolUseCount++
 		}
 	}
 	slog.Debug("responses terminal projection",
@@ -66,10 +66,10 @@ func logResponsesTerminalProjection(usedFallback bool, status string, rawOutputC
 		"status", strings.TrimSpace(status), // swobu:io-string source=log-formatting
 		"raw_output_count", rawOutputCount,
 		"raw_output_text_present", rawOutputTextPresent,
-		"item_count", len(items),
-		"text_count", textCount,
-		"tool_use_count", toolUseCount,
-		"text_preview", textPreview,
+		"fallback_item_count", len(items),
+		"fallback_text_count", fallbackTextCount,
+		"fallback_tool_use_count", fallbackToolUseCount,
+		"fallback_text_preview", textPreview,
 	)
 }
 

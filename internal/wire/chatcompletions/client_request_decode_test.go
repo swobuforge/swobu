@@ -14,7 +14,7 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"{\"query\":\"hello\"}"}}]}]}`)
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
@@ -41,7 +41,7 @@ func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testin
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"oops"}}]}]}`)
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: raw})
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err == nil {
 		t.Fatal("DecodeClientRequest returned nil error, want BAD_REQUEST")
 	}
@@ -54,5 +54,29 @@ func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testin
 	}
 	if !strings.Contains(compatErr.Message, "chat completions tool call arguments are invalid") {
 		t.Fatalf("error message = %q, want function_call arguments rejection", compatErr.Message)
+	}
+}
+
+func TestDecodeClientRequest_PreservesSystemAndDeveloperMessagesAsInstructions(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"model":"gpt-4o-mini","messages":[
+		{"role":"system","content":"You are a coding agent."},
+		{"role":"developer","content":"Use native tools for file edits."},
+		{"role":"user","content":"inspect files"}
+	]}`)
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	if got.Instructions() != "You are a coding agent.\n\nUse native tools for file edits." {
+		t.Fatalf("instructions = %q", got.Instructions())
+	}
+	items := got.Items()
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want only user message", len(items))
+	}
+	if items[0].Author != canonical.ItemAuthorUser || items[0].Text != "inspect files" {
+		t.Fatalf("item = %#v, want user inspect files", items[0])
 	}
 }

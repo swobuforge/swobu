@@ -21,7 +21,7 @@ func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t 
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 
 	reader := decodeResponseStream(
-		carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))},
+		carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))},
 		"ex_stream_tool_lifecycle",
 		nil,
 	)

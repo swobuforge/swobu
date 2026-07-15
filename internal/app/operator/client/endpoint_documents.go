@@ -20,6 +20,8 @@ type providerConfigDocument struct {
 	CredentialRef    string `json:"credential_ref,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty"`
+	TargetRank       *int   `json:"target_rank,omitempty"`
+	TargetWeight     *int   `json:"target_weight,omitempty"`
 	ProviderProtocol string `json:"provider_protocol,omitempty"`
 }
 
@@ -35,6 +37,15 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 		ProviderConfigs:           make([]providerConfigDocument, 0, len(providerConfigs)),
 	}
 	for _, pc := range providerConfigs {
+		var tr, tw *int
+		if pc.TargetRank() > 1 {
+			v := pc.TargetRank()
+			tr = &v
+		}
+		if pc.TargetWeight() > 1 {
+			v := pc.TargetWeight()
+			tw = &v
+		}
 		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
 			Ref:              pc.Ref().String(),
 			ProviderSpec:     pc.ProviderSpec().String(),
@@ -43,6 +54,8 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 			CredentialRef:    pc.CredentialRef(),
 			ModelID:          pc.ModelID(),
 			TargetAlias:      pc.TargetAlias(),
+			TargetRank:       tr,
+			TargetWeight:     tw,
 			ProviderProtocol: profile.EncodeProviderProtocolForPersistence(pc.ProviderProtocol()),
 		})
 	}
@@ -93,6 +106,18 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 		config, err = config.WithTargetAlias(pc.TargetAlias)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
+		}
+		if pc.TargetRank != nil {
+			config, err = config.WithTargetRank(*pc.TargetRank)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
+		}
+		if pc.TargetWeight != nil {
+			config, err = config.WithTargetWeight(*pc.TargetWeight)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
 		}
 		providerConfigs = append(providerConfigs, config)
 	}

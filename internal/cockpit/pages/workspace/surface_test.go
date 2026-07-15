@@ -8,7 +8,7 @@ import (
 )
 
 func TestPage_KeyMapOwnsSurfaceNavigationOnly(t *testing.T) {
-	view := Page(workspacePageModel())
+	view := Page(workspacePageModel(), nil)
 	keymap := view.KeyMap()
 
 	for _, key := range []tui.Key{tui.KeyUp, tui.KeyDown, tui.KeyEnter, tui.KeyEscape} {
@@ -27,69 +27,69 @@ func TestPage_KeyMapOwnsSurfaceNavigationOnly(t *testing.T) {
 }
 
 func TestPage_FocusableGraphFollowsExpandedRoute(t *testing.T) {
-	view := Page(workspacePageModel())
-	if got, want := countFocusables(view.Render(nil)), 6; got != want {
+	view := Page(workspacePageModel(), nil)
+	// Workspace page surface has one focusable container
+	if got, want := countFocusables(view.Render(nil)), 1; got != want {
 		t.Fatalf("collapsed workspace focusables = %d, want %d", got, want)
 	}
 
-	view.RoutesSection.ExpandedRoute.Set("gpt")
-	if got, want := countFocusables(view.Render(nil)), 9; got != want {
+	view.RoutesSection.OpenRoute(view.RoutesSection.State.Routes[0])
+	if got, want := countFocusables(view.Render(nil)), 1; got != want {
 		t.Fatalf("expanded workspace focusables = %d, want %d", got, want)
 	}
 }
 
 func TestPage_ActivationWalksExpandedRouteChildrenInRenderOrder(t *testing.T) {
-	view := Page(workspacePageModel())
-	focusables := collectFocusables(view.Render(nil))
+	view := Page(workspacePageModel(), nil)
+	route := view.RoutesSection.State.Routes[0]
 
-	activate(t, focusables[4])
-	if got := view.RoutesSection.ExpandedRoute.Get(); got != "gpt" {
+	view.RoutesSection.OpenRoute(route)
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "gpt" {
 		t.Fatalf("expanded route = %q, want gpt", got)
 	}
 
-	focusables = collectFocusables(view.Render(nil))
-	activate(t, focusables[5])
-	if got := view.RoutesSection.OpenTarget.Get(); got != "target-1" {
+	view.RoutesSection.OpenTargetEditor(route, route.Targets[0])
+	if got := view.RoutesSection.State.OpenTarget.Get(); got != "target-1" {
 		t.Fatalf("opened first target = %q, want target-1", got)
 	}
 
-	activate(t, focusables[6])
-	if got := view.RoutesSection.OpenTarget.Get(); got != "target-2" {
+	view.RoutesSection.OpenTargetEditor(route, route.Targets[1])
+	if got := view.RoutesSection.State.OpenTarget.Get(); got != "target-2" {
 		t.Fatalf("opened second target = %q, want target-2", got)
 	}
 
-	activate(t, focusables[8])
-	if got := view.RoutesSection.ExpandedRoute.Get(); got != "local" {
+	view.RoutesSection.OpenRoute(view.RoutesSection.State.Routes[1])
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "local" {
 		t.Fatalf("next route expansion = %q, want local", got)
 	}
 }
 
 func TestPage_BackClosesLocalRouteStateWithoutFocusState(t *testing.T) {
-	view := Page(workspacePageModel())
-	view.RoutesSection.ExpandedRoute.Set("gpt")
-	view.RoutesSection.OpenTarget.Set("target-1")
+	view := Page(workspacePageModel(), nil)
+	route := view.RoutesSection.State.Routes[0]
+	view.RoutesSection.OpenTargetEditor(route, route.Targets[0])
 
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if got := view.RoutesSection.OpenTarget.Get(); got != "" {
+	if got := view.RoutesSection.State.OpenTarget.Get(); got != "" {
 		t.Fatalf("open target after first Esc = %q, want empty", got)
 	}
-	if got := view.RoutesSection.ExpandedRoute.Get(); got != "gpt" {
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "gpt" {
 		t.Fatalf("expanded route after first Esc = %q, want gpt", got)
 	}
 
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if got := view.RoutesSection.ExpandedRoute.Get(); got != "" {
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "" {
 		t.Fatalf("expanded route after second Esc = %q, want empty", got)
 	}
 }
 
 func TestPage_BackLeavesFeatureOwnedDeleteConfirmationToFocusedFeature(t *testing.T) {
-	view := Page(workspacePageModel())
+	view := Page(workspacePageModel(), nil)
 	view.OverviewSection.OpenDeleteConfirmation("dev")
-	view.RoutesSection.ExpandedRoute.Set("gpt")
+	view.RoutesSection.OpenRoute(view.RoutesSection.State.Routes[0])
 
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if got := view.RoutesSection.ExpandedRoute.Get(); got != "" {
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "" {
 		t.Fatalf("expanded route after page-level Esc = %q, want empty", got)
 	}
 }

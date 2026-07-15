@@ -43,7 +43,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 	raw := "data: {\"created\":1781902359,\"id\":\"chatcmpl-b1a3544fdfaf41e3a3e812af05b1e\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\",\"content_filter_result\":{\"error\":{\"code\":\"content_filter\",\"message\":\"ResponsibleAI result indicated block action.\"}}}]}\n\n"
 
 	sink := &recordingEffectSink{}
-	reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_content_filter", sink)
+	reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_content_filter", sink)
 	defer func() { _ = reader.Close(context.Background()) }()
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)

@@ -17,7 +17,7 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effect.Result[wire.ClientRequestResult], error) {
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (wire.ClientRequestResult, error) {
 		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
 		return wire.ClientRequestResult{
@@ -27,7 +27,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.WireDocument) (effec
 	})
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
@@ -35,6 +35,10 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 	}
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
+	}
+	instructions, err := decodeMessagesSystem(dto.System)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	tools, err := decodeMessagesTools(dto.Tools, sink, exchangeID)
 	if err != nil {
@@ -75,12 +79,39 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.WireDocum
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		Instructions:  instructions,
 		Items:         items,
 		Tools:         tools,
 		ToolPolicy:    toolPolicy,
 		ToolCallBatch: toolCallBatch,
 		Controls:      controls,
 	}), resolvedDelivery, nil
+}
+
+func decodeMessagesSystem(raw json.RawMessage) (string, error) {
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
+	if trimmed == "" || trimmed == "null" {
+		return "", nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.TrimSpace(text), nil // swobu:io-string source=boundary
+	}
+	parts, err := openaicompat.DecodeTextContentItems(raw, "messages system", canonical.ItemAuthorUser)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(joinMessagesText(parts)), nil // swobu:io-string source=boundary
+}
+
+func joinMessagesText(items []canonical.CanonicalItem) string {
+	var builder strings.Builder
+	for _, item := range items {
+		if item.Kind == canonical.ItemKindText {
+			builder.WriteString(item.Text)
+		}
+	}
+	return builder.String()
 }
 
 func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingToolUseIDs []string) ([]canonical.CanonicalItem, []string, error) {

@@ -26,7 +26,8 @@ func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
 	req := NewCanonicalRequest(RequestParams{
-		Model: "m",
+		Model:        "m",
+		Instructions: "Use tools for filesystem work.",
 		Items: []CanonicalItem{
 			NewTextItem(ItemAuthorAssistant, "hi"),
 			NewToolUseItem(ItemAuthorAssistant, "", "toolu_1", "calculator", NewToolArgumentsObject(`{"expr":"2+2"}`)),
@@ -63,6 +64,9 @@ func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
 	if got[0].Text != "hi" {
 		t.Fatalf("text = %q, want %q", got[0].Text, "hi")
 	}
+	if gotInstructions := req.Instructions(); gotInstructions != "Use tools for filesystem work." {
+		t.Fatalf("instructions = %q, want preserved instructions", gotInstructions)
+	}
 	if got[1].Input.RawObject() != `{"expr":"2+2"}` {
 		t.Fatalf("tool input = %q, want %q", got[1].Input.RawObject(), `{"expr":"2+2"}`)
 	}
@@ -96,6 +100,7 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	}
 	req := NewCanonicalRequest(RequestParams{
 		Model:         "m",
+		Instructions:  "Continue using tools.",
 		Turn:          NewTurnRef("resp_123"),
 		ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
 		Items: []CanonicalItem{
@@ -134,6 +139,9 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	}
 	if prev, ok := cloned.Turn().PreviousID(); !ok || prev.String() != "resp_123" {
 		t.Fatalf("clone lost response state")
+	}
+	if gotInstructions := cloned.Instructions(); gotInstructions != "Continue using tools." {
+		t.Fatalf("clone instructions = %q, want preserved instructions", gotInstructions)
 	}
 	if gotBatch := cloned.ToolCallBatch(); gotBatch.Mode != ToolCallBatchAtMostOne {
 		t.Fatalf("clone tool call batch mode = %q, want %q", gotBatch.Mode, ToolCallBatchAtMostOne)

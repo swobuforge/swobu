@@ -10,9 +10,10 @@ import (
 	"testing"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
-	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
+	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
 type fakeOperatorClient struct {
@@ -257,6 +258,79 @@ func TestLiveOperatorAdapter_LoadCockpitDegradesOnActivityFailure(t *testing.T) 
 	}
 }
 
+func TestLiveOperatorAdapter_DiagnosticsPayloadIsRedacted(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{{
+				Ref:              "cfg-fast",
+				ProviderSpec:     "openai_compatible",
+				ModelID:          "gpt-4.1",
+				TargetAlias:      "fast",
+				BaseURL:          "https://secret-backend.example/v1",
+				AuthHeader:       "Bearer sk-live-secret",
+				CredentialRef:    "env:OPENAI_API_KEY",
+				ProviderProtocol: "responses",
+			}},
+		}},
+		status: operatorclient.StatusProjection{
+			RecentTraffic: []operatorclient.RecentTrafficRow{{
+				RequestID:           "req-1",
+				Endpoint:            "dev",
+				ClientFamily:        "codex",
+				Route:               "gpt-4.1",
+				Result:              "success",
+				StatusCode:          200,
+				ModelRequested:      "prompt body should not leak",
+				ExchangeDiagnostics: []string{"Authorization: Bearer sk-live-secret"},
+			}},
+		},
+	}
+	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
+
+	model, err := adapter.LoadCockpit(context.Background())
+	if err != nil {
+		t.Fatalf("LoadCockpit returned error: %v", err)
+	}
+	payload := model.Help.Diagnostics
+	assertDiagnosticsDoesNotContain(t, payload, "sk-live-secret", "OPENAI_API_KEY", "secret-backend", "Authorization", "prompt body", "responses")
+	text := payload.Text()
+	for _, want := range []string{"dev", "gpt-4.1", "fast"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("diagnostics payload missing safe value %q:\n%s", want, text)
+		}
+	}
+
+	result, err := adapter.CopyDiagnostics(context.Background())
+	if err != nil {
+		t.Fatalf("CopyDiagnostics returned error: %v", err)
+	}
+	if result.Status != ports.DiagnosticsCopyCopied {
+		t.Fatalf("copy status = %v, want copied", result.Status)
+	}
+	for _, unsafe := range []string{"sk-live-secret", "OPENAI_API_KEY", "secret-backend", "Authorization"} {
+		if strings.Contains(result.Text, unsafe) {
+			t.Fatalf("diagnostics copy leaked %q:\n%s", unsafe, result.Text)
+		}
+	}
+}
+
+func assertDiagnosticsDoesNotContain(t *testing.T, payload readmodel.DiagnosticsPayload, values ...string) {
+	t.Helper()
+	text := payload.Text()
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if strings.Contains(text, value) {
+			t.Fatalf("diagnostics payload leaked unsafe value %q:\n%s", value, text)
+		}
+	}
+}
+
 func TestLiveOperatorAdapter_LoadCockpitHonorsCanceledContext(t *testing.T) {
 	t.Parallel()
 
@@ -289,8 +363,8 @@ func TestLiveOperatorAdapter_ListActivityMapsStatusProjection(t *testing.T) {
 				StatusCode:    200,
 				ObservedAt:    "14:32:01",
 				ModelResolved: "gpt-4.1",
-				Timing:        &operatorclient.RecentTrafficTiming{DurMillis: &dur},
-				TokenUsage:    &operatorclient.RecentTrafficTokenUse{InputTokens: &in, OutputTokens: &out},
+				Timing:        &operatorclient.RecentTrafficTimingRecord{DurMillis: &dur},
+				TokenUsage:    &operatorclient.RecentTrafficTokenUseRecord{InputTokens: &in, OutputTokens: &out},
 			}},
 		},
 	}
@@ -460,11 +534,13 @@ func TestLiveOperatorAdapter_SaveTargetEditsAndAddsProviderConfigs(t *testing.T)
 		Model:         "gpt-4.1",
 		BaseURL:       "https://new-fast.example/v1",
 		CredentialRef: "env:FAST_KEY",
+		Rank:          2,
+		Weight:        4,
 	})
 	if err != nil {
 		t.Fatalf("SaveTarget edit returned error: %v", err)
 	}
-	if edited.ID != "cfg-fast" || edited.BaseURL != "https://new-fast.example/v1" || edited.Name != "fast" {
+	if edited.ID != "cfg-fast" || edited.BaseURL != "https://new-fast.example/v1" || edited.Name != "fast" || edited.Rank != 2 || edited.Weight != 4 {
 		t.Fatalf("edited target = %#v", edited)
 	}
 
@@ -476,15 +552,79 @@ func TestLiveOperatorAdapter_SaveTargetEditsAndAddsProviderConfigs(t *testing.T)
 		Model:         "gpt-4.1",
 		BaseURL:       "https://deep.example/v1",
 		CredentialRef: "env:DEEP_KEY",
+		Rank:          1,
+		Weight:        2,
 	})
 	if err != nil {
 		t.Fatalf("SaveTarget add returned error: %v", err)
 	}
-	if added.ID == "" || added.Name != "deep" || added.Model != "gpt-4.1" {
+	if added.ID == "" || added.Name != "deep" || added.Model != "gpt-4.1" || added.Rank != 1 || added.Weight != 2 {
 		t.Fatalf("added target = %#v", added)
 	}
 	if got := len(client.upserted.ProviderConfigs); got != 2 {
 		t.Fatalf("saved configs = %d, want 2", got)
+	}
+	for _, config := range client.upserted.ProviderConfigs {
+		if config.TargetAlias == "deep" && (config.TargetRank != 1 || config.TargetWeight != 2) {
+			t.Fatalf("deep rank/weight = %d/%d, want 1/2", config.TargetRank, config.TargetWeight)
+		}
+	}
+}
+
+func TestRouteProjection_ProviderConfigFromTargetRequestRejectsInvalidRankWeight(t *testing.T) {
+	t.Parallel()
+
+	_, err := providerConfigFromTargetRequest(ports.SaveTargetRequest{Rank: 0, Weight: 1}, "id")
+	if err == nil {
+		t.Fatal("providerConfigFromTargetRequest expected error for rank < 1, got nil")
+	}
+	_, err = providerConfigFromTargetRequest(ports.SaveTargetRequest{Rank: 1, Weight: 0}, "id")
+	if err == nil {
+		t.Fatal("providerConfigFromTargetRequest expected error for weight < 1, got nil")
+	}
+	_, err = providerConfigFromTargetRequest(ports.SaveTargetRequest{Rank: -1, Weight: 1}, "id")
+	if err == nil {
+		t.Fatal("providerConfigFromTargetRequest expected error for negative rank, got nil")
+	}
+}
+
+func TestRouteProjection_ProviderConfigFromTargetRequestAcceptsValidRankWeight(t *testing.T) {
+	t.Parallel()
+
+	config, err := providerConfigFromTargetRequest(ports.SaveTargetRequest{Provider: "openai", BaseURL: "https://example.com/v1", Rank: 2, Weight: 3, Model: "gpt-4", Name: "main"}, "id")
+	if err != nil {
+		t.Fatalf("providerConfigFromTargetRequest returned error: %v", err)
+	}
+	if config.TargetRank != 2 || config.TargetWeight != 3 {
+		t.Fatalf("rank/weight = %d/%d, want 2/3", config.TargetRank, config.TargetWeight)
+	}
+}
+
+func TestRouteProjection_UsesPersistedTargetRankAndWeight(t *testing.T) {
+	t.Parallel()
+
+	routes := routesFromEndpoint(operatorclient.EndpointData{
+		Name: "dev",
+		ProviderConfigs: []operatorclient.ProviderConfigData{
+			{Ref: "slow", ProviderSpec: "openai", ModelID: "gpt-4.1", TargetRank: 2, TargetWeight: 1},
+			{Ref: "fast", ProviderSpec: "openai", ModelID: "gpt-4.1", TargetRank: 1, TargetWeight: 3},
+		},
+	})
+	if len(routes) != 1 {
+		t.Fatalf("routes = %d, want 1", len(routes))
+	}
+	route := routes[0]
+	if route.PlanKind != readmodel.RoutePlanWeighted {
+		t.Fatalf("plan kind = %v, want weighted", route.PlanKind)
+	}
+	if got := route.RowValue(); got != "2 weighted" {
+		t.Fatalf("row value = %q, want %q", got, "2 weighted")
+	}
+	if got := route.Targets[0].ID; got != readmodel.TargetID("fast") {
+		t.Fatalf("first target = %q, want fast", got)
+	}
+	if route.Targets[0].Rank != 1 || route.Targets[0].Weight != 3 {
+		t.Fatalf("first target rank/weight = %d/%d, want 1/3", route.Targets[0].Rank, route.Targets[0].Weight)
 	}
 }
 
@@ -594,7 +734,7 @@ func TestExecuteClientRunCommandUsesInjectedIO(t *testing.T) {
 	var stderr bytes.Buffer
 	if err := executeClientRunCommand(context.Background(), clientprofile.RunCommandSpec{
 		Binary: "cat",
-	}, runCommandIO{
+	}, runCommandIOConfig{
 		Stdin:  strings.NewReader("hello"),
 		Stdout: &stdout,
 		Stderr: &stderr,
@@ -698,6 +838,18 @@ func (c *cancelAwareOperatorClient) DeleteEndpoint(context.Context, string) erro
 
 func (c *cancelAwareOperatorClient) Status(context.Context, string) (operatorclient.StatusProjection, error) {
 	return operatorclient.StatusProjection{}, errors.New("unexpected call")
+}
+
+func newLiveOperatorAdapterWithClient(client operatorClient, daemonURL string) *LiveOperatorAdapter {
+	adapter := &LiveOperatorAdapter{
+		client:    client,
+		daemonURL: strings.TrimRight(config.ResolveDaemonURL(daemonURL), "/"),
+		commandIO: processRunCommandIO(),
+	}
+	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
+		return executeClientRunCommand(ctx, command, adapter.commandIO)
+	}
+	return adapter
 }
 
 func countEnvValue(env []string, key, value string) int {

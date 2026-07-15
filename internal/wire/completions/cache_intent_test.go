@@ -32,7 +32,7 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","prompt":"hi","prompt_cache_key":"repo"}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Completions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","prompt":"hi","unexpected":true}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Completions, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Completions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest() error = %v", err)
 	}

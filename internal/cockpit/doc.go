@@ -11,7 +11,7 @@
 //
 // Laws:
 //   - direct go-tui only; no wrappers, no internal/tui shim, no retained
-//     legacy interactive resurrection
+//     interactive resurrection path
 //   - UI packages import ports, not raw operator clients
 //   - adapters import ports and concrete clients, not UI
 //   - state belongs to the lowest component that owns the full lifecycle

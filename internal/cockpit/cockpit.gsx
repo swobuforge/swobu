@@ -26,9 +26,11 @@ type Cockpit struct {
 	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
 	WorkspacePage  *workspace_page.PageView
-	HelpPage       *help_page.ViewView
+	HelpPage       *help_page.PageView
+	Context        context.Context
 	WorkspacePorts ports.WorkspaceCommands
 	WorkspaceQuery ports.WorkspaceQueries
+	HelpActions    ports.HelpActions
 }
 
 // NewCockpit constructs the root shell from an already-loaded readmodel.
@@ -36,23 +38,22 @@ func NewCockpit(model readmodel.CockpitReadModel) *Cockpit {
 	return NewCockpitWithContext(model, context.Background(), nil, nil)
 }
 
-func NewCockpitWithWorkspacePorts(model readmodel.CockpitReadModel, query ports.WorkspaceQueries, commands ports.WorkspaceCommands) *Cockpit {
-	return NewCockpitWithContext(model, context.Background(), query, commands)
-}
-
 func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context, query ports.WorkspaceQueries, commands ports.WorkspaceCommands) *Cockpit {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	activeTab := selectedTabIndex(model.Tabs)
+	helpActions, _ := any(commands).(ports.HelpActions)
 	cockpit := &Cockpit{
 		Model:           model,
 		ActiveTabIndex:  tui.NewState(activeTab),
 		RefreshNotice:   tui.NewState(readmodel.Notice{}),
 		Reloader:        NewModelReloader(ctx, query, cockpitRefreshTimeout),
-		HelpPage:        help_page.View(model.Help),
+		HelpPage:        help_page.ViewWithContext(model.Help, ctx, helpActions),
+		Context:         ctx,
 		WorkspacePorts:  commands,
 		WorkspaceQuery:  query,
+		HelpActions:     helpActions,
 	}
 	cockpit.WorkspacePages = cockpit.workspacePagesByTab(model)
 	cockpit.WorkspacePage = cockpit.initialWorkspacePage(model, activeTab)
@@ -63,7 +64,7 @@ func (c *Cockpit) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
 		tui.OnPreemptStop(tui.KeyTab, c.activateNextTab),
 		tui.OnPreemptStop(tui.KeyTab.Shift(), c.activatePreviousTab),
-		tui.OnStop(tui.Rune('?'), c.activateHelpTab),
+		tui.OnStop(tui.KeyF1, c.activateHelpTab),
 		tui.OnStop(tui.Rune('q'), c.quit),
 	}
 }
@@ -77,9 +78,32 @@ func (c *Cockpit) activatePreviousTab(event tui.KeyEvent) {
 }
 
 func (c *Cockpit) activateHelpTab(event tui.KeyEvent) {
+	if focusedTextEditor(event) {
+		return
+	}
 	if index, ok := helpTabIndex(c.Model.Tabs); ok {
 		c.activateTab(index)
 	}
+}
+
+func focusedTextEditor(event tui.KeyEvent) bool {
+	app := event.App()
+	if app == nil {
+		return false
+	}
+	switch app.Focused().(type) {
+	case *tui.Input, *tui.TextArea:
+		return true
+	case *tui.Element:
+		focused := app.Focused().(*tui.Element)
+		switch focused.Component().(type) {
+		case *tui.Input, *tui.TextArea:
+			return true
+		}
+	default:
+		return false
+	}
+	return false
 }
 
 func (c *Cockpit) quit(event tui.KeyEvent) {
@@ -161,7 +185,7 @@ func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel) {
 	c.WorkspacePages = c.workspacePagesByTab(model)
 	c.preserveDraftWorkspacePages(previousPages, model)
 	c.WorkspacePage = c.initialWorkspacePage(model, activeTab)
-	c.HelpPage = help_page.View(model.Help)
+	c.HelpPage = help_page.ViewWithContext(model.Help, c.Context, c.HelpActions)
 }
 
 // preserveDraftWorkspacePages carries unsaved [+] workflow state across a
@@ -253,7 +277,7 @@ templ ShellFooter(model readmodel.CockpitReadModel) {
 		<div class="flex-row gap-3">
 			<span>↑↓ move</span>
 			<span>↵ open</span>
-			<span>? help</span>
+			<span>F1 help</span>
 			<span>esc back</span>
 		</div>
 	}

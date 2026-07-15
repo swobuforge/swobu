@@ -201,6 +201,7 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 	if len(chain) == 0 {
 		return CanonicalRequest{}, BadRequest("continuation selector could not be rehydrated")
 	}
+	request = inheritContinuationRequestBands(chain, request)
 	anchor := materializeContinuationThread(chain)
 	currentThread := request.Items()
 	prefixLen := longestCommonPrefixLength(anchor, currentThread)
@@ -232,6 +233,7 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 	// divergent thread.
 	return NewCanonicalRequest(RequestParams{
 		Model:         request.Model(),
+		Instructions:  request.Instructions(),
 		Items:         thread,
 		Tools:         request.Tools(),
 		Turn:          preparedTurn,
@@ -240,6 +242,82 @@ func (m ContinuationRuntime) PrepareRequest(ctx context.Context, namespace Conti
 		Controls:      request.Controls(),
 		OutputFormat:  request.OutputFormat(),
 	}), nil
+}
+
+// inheritContinuationRequestBands fills omitted semantic request bands from the
+// replay chain so continuation requests do not lose tool grammar or controls
+// when the client only sends the current turn.
+func inheritContinuationRequestBands(chain []ContinuationRecord, request CanonicalRequest) CanonicalRequest {
+	model := request.Model()
+	instructions := request.Instructions()
+	tools := request.Tools()
+	toolPolicy := request.ToolPolicy()
+	toolCallBatch := request.ToolCallBatch()
+	controls := request.Controls()
+	outputFormat := request.OutputFormat()
+
+	for i := len(chain) - 1; i >= 0; i-- {
+		delta := chain[i].RequestDelta
+		if model == "" {
+			model = delta.Model()
+		}
+		if instructions == "" {
+			instructions = delta.Instructions()
+		}
+		if len(tools) == 0 {
+			chainTools := delta.Tools()
+			if len(chainTools) > 0 {
+				tools = chainTools
+			}
+		}
+		if toolPolicy.IsZero() {
+			chainPolicy := delta.ToolPolicy()
+			if !chainPolicy.IsZero() {
+				toolPolicy = chainPolicy
+			}
+		}
+		if toolCallBatch.IsZero() {
+			chainBatch := delta.ToolCallBatch()
+			if !chainBatch.IsZero() {
+				toolCallBatch = chainBatch
+			}
+		}
+		controls = inheritContinuationGenerationControls(controls, delta.Controls())
+		if outputFormat.IsZero() {
+			chainOutputFormat := delta.OutputFormat()
+			if !chainOutputFormat.IsZero() {
+				outputFormat = chainOutputFormat
+			}
+		}
+	}
+
+	return NewCanonicalRequest(RequestParams{
+		Model:         model,
+		Instructions:  instructions,
+		Items:         request.Items(),
+		Tools:         tools,
+		Turn:          request.Turn(),
+		ToolPolicy:    toolPolicy,
+		ToolCallBatch: toolCallBatch,
+		Controls:      controls,
+		OutputFormat:  outputFormat,
+	})
+}
+
+func inheritContinuationGenerationControls(base GenerationControls, inherited GenerationControls) GenerationControls {
+	if base.Limits.MaxOutputTokens.IsZero() {
+		base.Limits.MaxOutputTokens = inherited.Limits.MaxOutputTokens.Clone()
+	}
+	if len(base.Limits.StopSequences) == 0 && len(inherited.Limits.StopSequences) > 0 {
+		base.Limits.StopSequences = cloneStrings(inherited.Limits.StopSequences)
+	}
+	if base.Sampling.Temperature.IsZero() {
+		base.Sampling.Temperature = inherited.Sampling.Temperature.Clone()
+	}
+	if base.Sampling.TopP.IsZero() {
+		base.Sampling.TopP = inherited.Sampling.TopP.Clone()
+	}
+	return base
 }
 
 // WrapResponseEnvelope captures the completed semantic continuation record once
@@ -320,13 +398,15 @@ func buildContinuationRecord(namespace ContinuationNamespace, request CanonicalR
 	}
 	requestDelta := CurrentTurnDelta(request.Items())
 	delta := NewCanonicalRequest(RequestParams{
-		Model:        request.Model(),
-		Items:        requestDelta,
-		Tools:        request.Tools(),
-		Turn:         TurnRef{},
-		ToolPolicy:   request.ToolPolicy(),
-		Controls:     request.Controls(),
-		OutputFormat: request.OutputFormat(),
+		Model:         request.Model(),
+		Instructions:  request.Instructions(),
+		Items:         requestDelta,
+		Tools:         request.Tools(),
+		Turn:          TurnRef{},
+		ToolPolicy:    request.ToolPolicy(),
+		ToolCallBatch: request.ToolCallBatch(),
+		Controls:      request.Controls(),
+		OutputFormat:  request.OutputFormat(),
 	})
 	record := ContinuationRecord{
 		ID:           NewContinuationID(output.ResultID()),

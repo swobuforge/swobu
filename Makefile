@@ -8,7 +8,7 @@ SWOBU_VERSION ?= dev
 SWOBU_LDFLAGS := -s -w -X $(MODULE_PATH)/internal/app/operator/controlplane.swobuVersion=$(SWOBU_VERSION)
 GO_TEST_FLAGS ?= -failfast -timeout=5m
 
-.PHONY: help check check-fmt check-test test build artifacts clean fmt-check lint
+.PHONY: help check check-fmt check-test test generate build artifacts clean fmt-check lint
 
 help: ## Show public entrypoints
 	@awk 'BEGIN {FS = ":.*## "; print "swobucli/opencore entrypoints:"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -24,14 +24,19 @@ check-fmt: ## Run child formatting check
 check-test: ## Run child tests
 	@$(MAKE) test
 
-build: ## Build local swobu binary artifact
+generate: ## Regenerate cockpit GSX sources
+	@$(GO) generate ./internal/cockpit
+
+# Cockpit .gsx sources are the source of truth, so every compile path refreshes
+# generated Go before building or packaging anything that imports cockpit.
+build: generate ## Build local swobu binary artifact
 	@mkdir -p $(BUILD_OUT_DIR)
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(SWOBU_LDFLAGS)" -o $(BUILD_OUT_DIR)/swobu ./cmd/swobu
 
-artifacts: ## Build release archives + checksums into dist/release/v<SWOBU_VERSION>
+artifacts: generate ## Build release archives + checksums into dist/release/v<SWOBU_VERSION>
 	./scripts/release.sh "$(SWOBU_VERSION)"
 
-test:
+test: generate
 	@CGO_ENABLED=0 $(GO) test $(GO_TEST_FLAGS) ./...
 
 fmt-check:

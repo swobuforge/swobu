@@ -6,15 +6,23 @@ import (
 
 const responsesContentFilterReason = "content_filter"
 
+func trimmedResponseString(value string) string {
+	return strings.TrimSpace(value) // swobu:io-string source=boundary
+}
+
+func normalizedResponseString(value string) string {
+	return strings.ToLower(trimmedResponseString(value)) // swobu:io-string source=boundary
+}
+
 func responsesTerminalStatus(eventType string, primaryStatus string, fallbackStatus string) string {
-	status := strings.TrimSpace(primaryStatus)
+	status := trimmedResponseString(primaryStatus)
 	if status == "" {
-		status = strings.TrimSpace(fallbackStatus)
+		status = trimmedResponseString(fallbackStatus)
 	}
 	if status != "" {
 		return status
 	}
-	if strings.EqualFold(strings.TrimSpace(eventType), "response.incomplete") {
+	if normalizedResponseString(eventType) == "response.incomplete" {
 		return "incomplete"
 	}
 	return "completed"
@@ -22,13 +30,13 @@ func responsesTerminalStatus(eventType string, primaryStatus string, fallbackSta
 
 func responsesTerminalReason(eventType string, primaryStatus string, fallbackStatus string, filters []responsesContentFilterDTO, incompleteReason string) (string, bool) {
 	blockedSource := responsesBlockedContentFilterSource(filters)
-	switch blockedSource {
-	case "prompt", "mixed":
+	if blockedSource == "prompt" || blockedSource == "mixed" {
 		return responsesContentFilterReason, true
-	case "completion":
+	}
+	if blockedSource == "completion" {
 		return responsesContentFilterReason, false
 	}
-	reason := strings.TrimSpace(incompleteReason)
+	reason := trimmedResponseString(incompleteReason)
 	if reason != "" {
 		return reason, false
 	}
@@ -42,7 +50,7 @@ func responsesBlockedContentFilterSource(filters []responsesContentFilterDTO) st
 		if !filter.Blocked {
 			continue
 		}
-		source := strings.ToLower(strings.TrimSpace(filter.SourceType))
+		source := normalizedResponseString(filter.SourceType)
 		if source == "" {
 			continue
 		}
@@ -58,14 +66,14 @@ func responsesBlockedContentFilterSource(filters []responsesContentFilterDTO) st
 }
 
 func responsesContentFilterMessage(sourceType string) string {
-	switch strings.ToLower(strings.TrimSpace(sourceType)) {
-	case "prompt":
+	source := normalizedResponseString(sourceType)
+	if source == "prompt" {
 		return "provider input was blocked by content filter"
-	case "completion":
-		return "provider output was blocked by content filter"
-	default:
-		return "provider response was blocked by content filter"
 	}
+	if source == "completion" {
+		return "provider output was blocked by content filter"
+	}
+	return "provider response was blocked by content filter"
 }
 
 func responseIncompleteReason(details *responsesIncompleteDetailsDTO) string {

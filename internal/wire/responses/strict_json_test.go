@@ -13,7 +13,7 @@ import (
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","unexpected":true}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest() error = %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
 	wantFormat := `{"type":"grammar", "syntax":"lark", "definition":"start: \"x\" LF\n%import common.LF"}`
 	customTool := canonical.NewCustomToolDecl("apply_patch", "apply_patch", "edit files", canonical.NewToolFormatObject(wantFormat))
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","tools":[{"type":"custom","name":"` + customTool.ToolName() + `","format":` + wantFormat + `}]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest: %v", err)
 	}
@@ -54,6 +54,18 @@ func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
 	}
 	if custom.Format.RawObject() != wantFormat {
 		t.Fatalf("custom format raw = %q, want %q", custom.Format.RawObject(), wantFormat)
+	}
+}
+
+func TestDecodeRequest_PreservesTopLevelInstructions(t *testing.T) {
+	codec := legacyClientRequestDecoder{}
+	req := []byte(`{"model":"gpt-4o-mini","instructions":"Use tools for filesystem work.","input":"inspect files"}`)
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: req})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest: %v", err)
+	}
+	if got.Instructions() != "Use tools for filesystem work." {
+		t.Fatalf("instructions = %q, want top-level instructions", got.Instructions())
 	}
 }
 

@@ -35,7 +35,7 @@ func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: []byte(tc.raw)})
+			got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: []byte(tc.raw)})
 			if err != nil {
 				t.Fatalf("DecodeClientRequest: %v", err)
 			}
@@ -48,7 +48,7 @@ func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
 
 func TestDecodeRequest_RejectsParallelToolCallsWrongType(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
-	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Responses, Raw: []byte(`{"model":"gpt-4o-mini","input":"hi","parallel_tool_calls":"nope"}`)})
+	_, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: []byte(`{"model":"gpt-4o-mini","input":"hi","parallel_tool_calls":"nope"}`)})
 	if err == nil {
 		t.Fatal("expected DecodeClientRequest to reject invalid parallel_tool_calls")
 	}

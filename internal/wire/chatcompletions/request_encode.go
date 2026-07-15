@@ -2,6 +2,7 @@ package chatcompletions
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -34,63 +35,67 @@ type toolCustomBody struct {
 	Input string `json:"input"`
 }
 
-func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.WireDocument, error) {
+func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.WireDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
+		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
 	}
 
 	items := req.Items()
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	wireTools, err := encodeChatCompletionsTools(tools, sink, exchangeID)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	if d.Mode == delivery.Streaming && hasChatCompletionsCustomTools(tools) {
-		return carrier.WireDocument{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
+		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
 	}
 	choice, err := encodeChatCompletionsToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 
 	payload := map[string]any{
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
+	if instructions := strings.TrimSpace(req.Instructions()); instructions != "" { // swobu:io-string source=boundary
+		payload["messages"] = append([]messageBody{{Role: "system", Content: instructions}}, wireMessages...)
+	}
 	if len(wireTools) > 0 {
 		payload["tools"] = wireTools
 	}
 	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
-	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.WireDocument{}, err
+	if err := encodeChatCompletionsGenerationControls(payload, req.Model(), req.Controls()); err != nil {
+		return carrier.CarrierDocument{}, err
 	}
 	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	} else if len(responseFormat) > 0 {
 		payload["response_format"] = json.RawMessage(responseFormat)
 	}
 	if choice != nil {
 		payload["tool_choice"] = choice
 	}
+	logChatCompletionsEncodeShape(req, wireMessages, choice, d)
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.WireDocument{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
+		return carrier.CarrierDocument{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
 	}
 
 	// Stage marks the carrier boundary for this wire leg; exchange path
 	// selection happens above this adapter.
-	return carrier.NewWireDocument(
+	return carrier.NewCarrierDocument(
 		carrier.StageProviderRequestOut,
 		"",
 		"application/json",
@@ -98,6 +103,64 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 		raw,
 		carrier.Meta{},
 	), nil
+}
+
+func logChatCompletionsEncodeShape(req canonical.CanonicalRequest, wireMessages []messageBody, choice any, d delivery.Delivery) {
+	instructions := strings.TrimSpace(req.Instructions())              // swobu:io-string source=domain
+	toolChoiceMode := strings.TrimSpace(string(req.ToolPolicy().Mode)) // swobu:io-string source=domain
+	toolChoiceSpecific := ""
+	if req.ToolPolicy().Mode == canonical.ToolPolicySpecific {
+		if specific, ok := req.ToolPolicy().SpecificID(); ok {
+			toolChoiceSpecific = specific.String()
+		}
+	}
+	slog.Debug("chat completions encode",
+		"component", "protocol.chat_completions",
+		"event", "outbound_request_shape",
+		"streaming", d.Mode == delivery.Streaming,
+		"instructions_present", instructions != "",
+		"instructions_bytes", len(instructions),
+		"message_count", len(wireMessages),
+		"tool_count", len(req.Tools()),
+		"function_tool_count", chatCompletionsToolKindCount(req.Tools(), canonical.ToolTypeFunction),
+		"custom_tool_count", chatCompletionsToolKindCount(req.Tools(), canonical.ToolTypeCustom),
+		"tool_policy", toolChoiceMode,
+		"tool_policy_specific", toolChoiceSpecific,
+		"tool_choice_wired", chatCompletionsWireToolChoice(choice),
+		"parallel_tool_calls", strings.TrimSpace(string(req.ToolCallBatch().Mode)), // swobu:io-string source=domain
+	)
+}
+
+func chatCompletionsToolKindCount(tools []canonical.ToolDecl, kind string) int {
+	count := 0
+	for _, tool := range tools {
+		if canonical.ToolDeclKind(tool) == kind {
+			count++
+		}
+	}
+	return count
+}
+
+func chatCompletionsWireToolChoice(choice any) string {
+	switch v := choice.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case map[string]any:
+		if name, ok := v["name"].(string); ok {
+			toolType, _ := v["type"].(string)
+			toolType = strings.TrimSpace(toolType)
+			name = strings.TrimSpace(name)
+			if toolType != "" && name != "" {
+				return toolType + ":" + name
+			}
+			if name != "" {
+				return name
+			}
+		}
+	}
+	return "object"
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.

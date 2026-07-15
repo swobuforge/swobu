@@ -1010,25 +1010,25 @@ func decodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest
 	}
 }
 
-func buildRequestDocumentForTest(in exchange.RequestInput) (carrier.WireDocument, error) {
+func buildRequestDocumentForTest(in exchange.RequestInput) (carrier.CarrierDocument, error) {
 	raw, err := io.ReadAll(in.Request.Body)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	_ = in.Request.Body.Close()
 	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
 	if err != nil {
-		return carrier.WireDocument{}, err
+		return carrier.CarrierDocument{}, err
 	}
 	family := in.ClientFamily
 	if family == "" {
 		hasMessagesProtocolMarker := strings.TrimSpace(in.Request.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
 		family, err = canonical.InferClientFamily(in.Request.Method, normalizedPath, hasMessagesProtocolMarker)
 		if err != nil {
-			return carrier.WireDocument{}, err
+			return carrier.CarrierDocument{}, err
 		}
 	}
-	return carrier.NewWireDocument(carrier.StageClientRequestIn, family, "application/json", in.Request.Header, raw, carrier.Meta{}), nil
+	return carrier.NewCarrierDocument(carrier.StageClientRequestIn, family, "application/json", in.Request.Header, raw, carrier.Meta{}), nil
 }
 
 func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]exchange.RequestInput, error) {
@@ -1058,7 +1058,7 @@ func normalizeStreamingDeliveryForTest(clientDelivery delivery.Delivery, framing
 	return delivery.StreamingDelivery(framing)
 }
 
-func testDocumentFromOutput(family canonical.ClientFamily, output canonical.CanonicalOutput) carrier.WireDocument {
+func testDocumentFromOutput(family canonical.ClientFamily, output canonical.CanonicalOutput) carrier.CarrierDocument {
 	doc, err := testResponseDocumentEncoderForFamily(family).EncodeResponseDocument(output)
 	if err != nil {
 		panic(err)
@@ -1067,32 +1067,32 @@ func testDocumentFromOutput(family canonical.ClientFamily, output canonical.Cano
 }
 
 type responseDocumentEncoderForTest struct {
-	encode func(canonical.CanonicalOutput) (carrier.WireDocument, error)
+	encode func(canonical.CanonicalOutput) (carrier.CarrierDocument, error)
 }
 
-func (e responseDocumentEncoderForTest) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+func (e responseDocumentEncoderForTest) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 	return e.encode(output)
 }
 
 func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) responseDocumentEncoderForTest {
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 			result, err := chatcompletions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyResponses:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 			result, err := responses.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyCompletions:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 			result, err := completions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyMessages:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.WireDocument, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 			result, err := messages.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Value, err
 		}}
@@ -1102,32 +1102,32 @@ func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) respons
 }
 
 type responseStreamEncoderForTest struct {
-	encode func(canonical.EventReader, delivery.Delivery) (carrier.WireStream, error)
+	encode func(canonical.EventReader, delivery.Delivery) (carrier.CarrierStream, error)
 }
 
-func (e responseStreamEncoderForTest) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+func (e responseStreamEncoderForTest) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 	return e.encode(events, d)
 }
 
 func testResponseStreamEncoderForFamily(family canonical.ClientFamily) responseStreamEncoderForTest {
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
-		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 			result, err := chatcompletions.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyResponses:
-		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 			result, err := responses.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyCompletions:
-		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 			result, err := completions.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyMessages:
-		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.WireStream, error) {
+		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 			result, err := messages.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
 			return result.Value, err
 		}}

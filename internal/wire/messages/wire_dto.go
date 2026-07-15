@@ -4,6 +4,7 @@ import "encoding/json"
 
 type messagesRequestDTO struct {
 	Model                  string               `json:"model"`
+	System                 json.RawMessage      `json:"system,omitempty"`
 	Messages               []messagesMessageDTO `json:"messages"`
 	Tools                  []messagesToolDTO    `json:"tools,omitempty"`
 	ToolChoice             json.RawMessage      `json:"tool_choice,omitempty"`

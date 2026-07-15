@@ -21,6 +21,15 @@ func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
 	}
 	for _, providerConfig := range providerConfigs {
 		providerProtocol := profile.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
+		var tr, tw *int
+		if providerConfig.TargetRank() > 1 {
+			v := providerConfig.TargetRank()
+			tr = &v
+		}
+		if providerConfig.TargetWeight() > 1 {
+			v := providerConfig.TargetWeight()
+			tw = &v
+		}
 		doc.ProviderConfigs = append(doc.ProviderConfigs, providerConfigDocument{
 			Ref:              providerConfig.Ref().String(),
 			ProviderSpec:     providerConfig.ProviderSpec().String(),
@@ -28,6 +37,8 @@ func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
 			CredentialRef:    providerConfig.CredentialRef(),
 			ModelID:          providerConfig.ModelID(),
 			TargetAlias:      providerConfig.TargetAlias(),
+			TargetRank:       tr,
+			TargetWeight:     tw,
 			ProviderProtocol: providerProtocol,
 		})
 	}
@@ -78,6 +89,18 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 		providerConfig, err = providerConfig.WithTargetAlias(encoded.TargetAlias)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
+		}
+		if encoded.TargetRank != nil {
+			providerConfig, err = providerConfig.WithTargetRank(*encoded.TargetRank)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
+		}
+		if encoded.TargetWeight != nil {
+			providerConfig, err = providerConfig.WithTargetWeight(*encoded.TargetWeight)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
 		}
 		providerConfigs = append(providerConfigs, providerConfig)
 	}

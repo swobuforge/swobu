@@ -43,7 +43,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 	raw := "data: {\"id\":\"cmpl_1\",\"model\":\"m\",\"choices\":[{\"text\":\"\",\"finish_reason\":\"content_filter\"}]}\n\n"
 
 	sink := &recordingEffectSink{}
-	reader := decodeResponseStream(carrier.WireStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_content_filter", sink)
+	reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_stream_content_filter", sink)
 	defer func() { _ = reader.Close(context.Background()) }()
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)

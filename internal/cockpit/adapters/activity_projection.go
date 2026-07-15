@@ -59,7 +59,7 @@ func activityFromProjection(projection operatorclient.StatusProjection, limit in
 func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.ActivityRowReadModel {
 	return readmodel.ActivityRowReadModel{
 		ID:           readmodel.ActivityID(row.RequestID),
-		ObservedAt:   strings.TrimSpace(row.ObservedAt),
+		ObservedAt:   strings.TrimSpace(row.ObservedAt), // swobu:io-string source=boundary
 		ClientLabel:  firstNonEmpty(row.ClientHandler, row.ClientFamily, row.ClientProtocol),
 		RouteID:      readmodel.RouteID(row.Route),
 		RouteLabel:   row.Route,
@@ -75,7 +75,7 @@ func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.Activ
 }
 
 func activityStatus(result string, statusCode int) readmodel.ActivityStatus {
-	result = strings.ToLower(strings.TrimSpace(result))
+	result = strings.ToLower(strings.TrimSpace(result)) // swobu:io-string source=boundary
 	switch {
 	case statusCode >= 400:
 		return readmodel.ActivityFailed
@@ -95,14 +95,14 @@ func trafficDuration(row operatorclient.RecentTrafficRow) time.Duration {
 	return time.Duration(*row.Timing.DurMillis) * time.Millisecond
 }
 
-func inputTokens(usage *operatorclient.RecentTrafficTokenUse) int {
+func inputTokens(usage *operatorclient.RecentTrafficTokenUseRecord) int {
 	if usage != nil && usage.InputTokens != nil {
 		return *usage.InputTokens
 	}
 	return 0
 }
 
-func outputTokens(usage *operatorclient.RecentTrafficTokenUse) int {
+func outputTokens(usage *operatorclient.RecentTrafficTokenUseRecord) int {
 	if usage != nil && usage.OutputTokens != nil {
 		return *usage.OutputTokens
 	}
@@ -111,7 +111,7 @@ func outputTokens(usage *operatorclient.RecentTrafficTokenUse) int {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
+		if trimmed := strings.TrimSpace(value); trimmed != "" { // swobu:io-string source=boundary
 			return trimmed
 		}
 	}

@@ -6,6 +6,7 @@ SWOBU    [dev] [lab] [› +] [?]
 
   routes ▾
      (no routes)
+     add route                                             add ↵
 
   activity ▾
      (no activity)
@@ -13,7 +14,6 @@ SWOBU    [dev] [lab] [› +] [?]
 
 ──────────────────────────────────────────────────────────────────────
 Tab next   Shift+Tab prev   esc back
-
 
 
 

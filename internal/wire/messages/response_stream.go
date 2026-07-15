@@ -19,7 +19,7 @@ import (
 )
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.
-func decodeResponseStream(stream carrier.WireStream, exchangeID string, sink effect.Sink) canonical.EventReader {
+func decodeResponseStream(stream carrier.CarrierStream, exchangeID string, sink effect.Sink) canonical.EventReader {
 	recording := &effect.RecordingSink{Delegate: sink}
 	return &messagesEventReader{
 		exchangeID:  exchangeID,

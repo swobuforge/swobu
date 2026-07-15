@@ -236,9 +236,9 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 
 			switch tc.providerDelivery.Mode {
 			case delivery.Buffered:
-				doc, ok := ingress.(carrier.WireDocument)
+				doc, ok := ingress.(carrier.CarrierDocument)
 				if !ok {
-					t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireDocument", ingress)
+					t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
 				}
 				readerResult, err := resolver.ProviderDocumentDecoder(tc.protocolKind, tc.providerDelivery).DecodeProviderDocument(context.Background(), doc, req.ExchangeID)
 				if err != nil {
@@ -266,9 +266,9 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					}
 				}
 			case delivery.Streaming:
-				stream, ok := ingress.(carrier.WireStream)
+				stream, ok := ingress.(carrier.CarrierStream)
 				if !ok {
-					t.Fatalf("ResolveProviderIngress returned %T, want carrier.WireStream", ingress)
+					t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierStream", ingress)
 				}
 				readerResult, err := resolver.ProviderEnvelopeDecoder(tc.protocolKind, tc.providerDelivery).DecodeProviderEnvelope(stream, req.ExchangeID)
 				if err != nil {

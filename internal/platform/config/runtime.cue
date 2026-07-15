@@ -22,6 +22,8 @@ endpoints: *[] | [...#Endpoint]
 	credential_ref?: string
 	model_id?: string
 	target_alias?: string
+	target_rank?: int & >=1
+	target_weight?: int & >=1
 	provider_protocol?: string
 	if provider_spec == "openai_compatible" {
 		base_url!: string

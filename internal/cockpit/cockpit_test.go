@@ -3,7 +3,6 @@ package cockpit
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
@@ -13,6 +12,10 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
+func NewCockpitWithWorkspacePorts(model readmodel.CockpitReadModel, query ports.WorkspaceQueries, commands ports.WorkspaceCommands) *Cockpit {
+	return NewCockpitWithContext(model, context.Background(), query, commands)
+}
+
 func TestCockpit_KeyMapOwnsGlobalNavigationOnly(t *testing.T) {
 	cockpit := NewCockpit(DefaultFixtureReadModel())
 	keymap := cockpit.KeyMap()
@@ -20,7 +23,6 @@ func TestCockpit_KeyMapOwnsGlobalNavigationOnly(t *testing.T) {
 	for _, event := range []tui.KeyEvent{
 		{Key: tui.KeyTab},
 		{Key: tui.KeyTab, Mod: tui.ModShift},
-		{Key: tui.KeyRune, Rune: '?'},
 		{Key: tui.KeyRune, Rune: 'q'},
 	} {
 		binding, ok := findRootBinding(keymap, event)
@@ -35,6 +37,17 @@ func TestCockpit_KeyMapOwnsGlobalNavigationOnly(t *testing.T) {
 		}
 	}
 
+	binding, ok := findRootBinding(keymap, tui.KeyEvent{Key: tui.KeyF1})
+	if !ok {
+		t.Fatal("missing root binding for help hotkey")
+	}
+	if !binding.Stop {
+		t.Fatal("help hotkey should stop propagation")
+	}
+	if binding.Pattern.FocusRequired {
+		t.Fatal("help hotkey should not require focus")
+	}
+
 	for _, key := range []tui.Key{tui.KeyUp, tui.KeyDown, tui.KeyEnter, tui.KeyEscape} {
 		if _, ok := findRootBinding(keymap, tui.KeyEvent{Key: key}); ok {
 			t.Fatalf("root should not own surface key %v", key)
@@ -42,38 +55,18 @@ func TestCockpit_KeyMapOwnsGlobalNavigationOnly(t *testing.T) {
 	}
 }
 
-func TestCockpit_TabNavigationSwitchesVisibleWorlds(t *testing.T) {
+func TestCockpit_F1ActivatesHelpWorld(t *testing.T) {
 	cockpit := NewCockpit(DefaultFixtureReadModel())
 
-	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyTab})
-	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
-	assertRenderContains(t, cockpit, "[› lab]", "workspace")
-
-	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyTab})
-	assertActiveTab(t, cockpit, "+", readmodel.CockpitWorkspacePage)
-	assertRenderContains(t, cockpit, "[› +]", "create ↵", "(derived from slug)")
-
-	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyTab})
+	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyF1})
 	assertActiveTab(t, cockpit, "?", readmodel.CockpitHelpPage)
 	assertRenderContains(t, cockpit, "[› ?]", "help")
-
-	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyTab})
-	assertActiveTab(t, cockpit, "dev", readmodel.CockpitWorkspacePage)
-	assertRenderContains(t, cockpit, "[› dev]", "routes")
 }
 
 func TestCockpit_ShiftTabNavigationWrapsBackward(t *testing.T) {
 	cockpit := NewCockpit(DefaultFixtureReadModel())
 
 	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyTab, Mod: tui.ModShift})
-	assertActiveTab(t, cockpit, "?", readmodel.CockpitHelpPage)
-	assertRenderContains(t, cockpit, "[› ?]", "help")
-}
-
-func TestCockpit_QuestionActivatesHelpWorld(t *testing.T) {
-	cockpit := NewCockpit(DefaultFixtureReadModel())
-
-	pressRootKey(t, cockpit, tui.KeyEvent{Key: tui.KeyRune, Rune: '?'})
 	assertActiveTab(t, cockpit, "?", readmodel.CockpitHelpPage)
 	assertRenderContains(t, cockpit, "[› ?]", "help")
 }
@@ -304,9 +297,10 @@ func TestCockpit_WorkspaceDeleteRefreshSuccessHidesDeletedWorkspaceWhenProjectio
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
 	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
-	if strings.Contains(got, "[dev]") || strings.Contains(got, "[› dev]") {
-		t.Fatalf("render should hide deleted workspace even after stale successful refresh:\n%s", got)
-	}
+	testkit.AssertNow(t, got, testkit.All(
+		testkit.Not(testkit.Text("[dev]").Exists()),
+		testkit.Not(testkit.Text("[› dev]").Exists()),
+	))
 }
 
 func TestCockpit_WorkspaceDeleteRefreshFailureHidesDeletedWorkspace(t *testing.T) {
@@ -319,11 +313,13 @@ func TestCockpit_WorkspaceDeleteRefreshFailureHidesDeletedWorkspace(t *testing.T
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
 	assertRefreshNotice(t, cockpit, readmodel.NoticeStale, "refresh stale: deleted workspace hidden; daemon offline")
-	assertRenderContains(t, cockpit, "refresh stale: deleted workspace hidden; daemon offline", "[› lab]")
 	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
-	if strings.Contains(got, "[dev]") || strings.Contains(got, "[› dev]") {
-		t.Fatalf("render should hide deleted workspace:\n%s", got)
-	}
+	testkit.AssertNow(t, got, testkit.All(
+		testkit.Text("refresh stale: deleted workspace hidden; daemon offline").Exists(),
+		testkit.Text("[› lab]").Exists(),
+		testkit.Not(testkit.Text("[dev]").Exists()),
+		testkit.Not(testkit.Text("[› dev]").Exists()),
+	))
 }
 
 func TestCockpit_RemoveLastWorkspaceActivatesDraftTab(t *testing.T) {
@@ -452,11 +448,11 @@ func assertActiveTab(t *testing.T, cockpit *Cockpit, wantID readmodel.WorkspaceI
 func assertRenderContains(t *testing.T, cockpit *Cockpit, values ...string) {
 	t.Helper()
 	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
+	preds := make([]testkit.Predicate, 0, len(values))
 	for _, value := range values {
-		if !strings.Contains(got, value) {
-			t.Fatalf("render should contain %q:\n%s", value, got)
-		}
+		preds = append(preds, testkit.Text(value).Exists())
 	}
+	testkit.AssertNow(t, got, testkit.All(preds...))
 }
 
 func assertRefreshNotice(t *testing.T, cockpit *Cockpit, kind readmodel.NoticeKind, message string) {

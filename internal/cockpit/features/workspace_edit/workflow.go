@@ -129,6 +129,12 @@ func (w *Workflow) IsEditing() bool {
 	return w.Phase.Get() == PhaseEditing || w.Phase.Get() == PhaseFailed || w.Phase.Get() == PhaseSubmitting
 }
 
+// IsFocused reports whether workflow-local focus bindings should stay active
+// while the edit subtree owns the slug field.
+func (w *Workflow) IsFocused() bool {
+	return w.IsEditing()
+}
+
 func (w *Workflow) Activate() {
 	if w.Mode.Get() == ModeEdit && !w.IsEditing() {
 		w.Phase.Set(PhaseEditing)
@@ -137,7 +143,8 @@ func (w *Workflow) Activate() {
 	if w.ErrorMessage() != "" {
 		return
 	}
-	if w.Mode.Get() == ModeEdit && strings.TrimSpace(w.Slug.Get()) == w.Workspace.Slug {
+	slug := strings.TrimSpace(w.Slug.Get()) // swobu:io-string source=boundary
+	if w.Mode.Get() == ModeEdit && slug == w.Workspace.Slug {
 		w.closeEdit()
 		return
 	}
@@ -202,7 +209,7 @@ func (w *Workflow) ValueLabel() string {
 }
 
 func (w *Workflow) ErrorMessage() string {
-	slug := strings.TrimSpace(w.Slug.Get())
+	slug := strings.TrimSpace(w.Slug.Get()) // swobu:io-string source=boundary
 	if slug == "" {
 		return ""
 	}
@@ -231,7 +238,7 @@ func (w *Workflow) ClientBaseURLPreview() string {
 // NormalizeSlug validates the product-level workspace slug shape used by the
 // Cockpit workflow before command assembly.
 func NormalizeSlug(raw string) (string, error) {
-	slug := strings.TrimSpace(raw)
+	slug := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	if slug == "" {
 		return "", errors.New("enter a workspace slug")
 	}

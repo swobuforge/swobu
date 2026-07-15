@@ -63,7 +63,7 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
 	}
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"` + projectedName + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.ChatCompletions, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}

@@ -4,6 +4,7 @@ import "encoding/json"
 
 type completionsRequestDTO struct {
 	Model          string          `json:"model"`
+	Instructions   json.RawMessage `json:"instructions,omitempty"`
 	Prompt         string          `json:"prompt"`
 	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
 	MaxTokens      json.RawMessage `json:"max_tokens,omitempty"`

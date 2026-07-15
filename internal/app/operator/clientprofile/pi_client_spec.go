@@ -1,19 +1,10 @@
 package clientprofile
 
 // piClientSpec declares the Pi coding agent launch contract.
-//
-// Pi is wired to the workspace-local OpenAI-compatible endpoint through a
-// tiny custom provider in `models.json` so the run row stays deterministic
-// without depending on the host's global Pi config or built-in OpenAI routing.
 func piClientSpec() capabilityClientSpec {
 	return capabilityClientSpec{
 		Identity: Identity{ID: "pi", Label: "Pi"},
-		Actions: []capabilityActionSpec{
-			{
-				ID:   "run",
-				Kind: ActionKindRun,
-			},
-		},
+		Actions:  []capabilityActionSpec{{ID: "run", Kind: ActionKindRun}},
 		Run: &capabilityRunSpec{
 			Binary: "pi",
 			Args: []string{

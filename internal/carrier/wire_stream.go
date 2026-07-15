@@ -16,8 +16,8 @@ const (
 	FramingNDJSON    Framing = "ndjson"
 )
 
-// WireStream is one framed stream carrier on a wire leg.
-type WireStream struct {
+// CarrierStream is one framed stream carrier on a wire leg.
+type CarrierStream struct {
 	Stage   Stage
 	Family  protocolkind.ProtocolKind
 	Framing Framing

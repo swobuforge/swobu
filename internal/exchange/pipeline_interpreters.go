@@ -19,22 +19,22 @@ import (
 // drives the next reducer.
 func runRunnerInterpret(ctx context.Context, store *machine.Store, cmd machine.Command, runner Runner) ([]machine.Event, error) {
 	switch c := cmd.(type) {
-	case resolveCodecs:
+	case ResolveCodecsAction:
 		_ = c
 		return interpResolveCodecs(runner, store)
-	case encodeProviderRequest:
+	case EncodeProviderRequestAction:
 		_ = c
 		return interpEncodeProviderRequest(ctx, runner, store)
-	case resolveProviderIngress:
+	case ResolveProviderIngressAction:
 		_ = c
 		return interpResolveProviderIngress(ctx, runner, store)
-	case decodeProviderEnvelope:
+	case DecodeProviderEnvelopeAction:
 		_ = c
 		return interpDecodeProviderEnvelope(ctx, runner, store)
-	case captureContinuation:
+	case CaptureContinuationAction:
 		_ = c
 		return interpCaptureContinuation(ctx, runner, store)
-	case encodeClientOutputCmd:
+	case EncodeClientOutputAction:
 		_ = c
 		return interpEncodeClientOutput(ctx, runner, store)
 	default:
@@ -46,9 +46,9 @@ func interpResolveCodecs(runner Runner, store *machine.Store) ([]machine.Event, 
 	var in ExchangeInput
 	if err := store.Get(&in); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	cr := codecResolution{
+	cr := codecResolutionState{
 		ClientCodec:     runner.Runtime.ClientCodec(in.ClientFamily),
 		RequestEncoder:  runner.Runtime.ProviderRequestDocumentEncoder(in.ProviderProtocol),
 		StreamDecoder:   runner.Runtime.ProviderEnvelopeDecoder(in.ProviderProtocol, in.ProviderDelivery),
@@ -58,19 +58,19 @@ func interpResolveCodecs(runner Runner, store *machine.Store) ([]machine.Event, 
 		(in.ProviderDelivery.Mode != delivery.Streaming || cr.StreamDecoder != nil) &&
 		(in.ProviderDelivery.Mode != delivery.Buffered || cr.DocumentDecoder != nil)
 	store.Put(reflect.TypeOf(cr), reflect.ValueOf(cr))
-	return []machine.Event{machine.Event(codecsResolved{})}, nil
+	return []machine.Event{machine.Event(CodecsResolvedEvent{})}, nil
 }
 
 func interpEncodeProviderRequest(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
 	var in ExchangeInput
 	if err := store.Get(&in); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var codecs codecResolution
+	var codecs codecResolutionState
 	if err := store.Get(&codecs); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
 	result, err := codecs.RequestEncoder.EncodeProviderRequestDocument(
@@ -80,7 +80,7 @@ func interpEncodeProviderRequest(ctx context.Context, runner Runner, store *mach
 	if err != nil {
 		commitEffectsBestEffort(ctx, runner.EffectSink, in.ExchangeID, effs)
 		storePutError(store, wrapStageErr("encodeProviderRequest", err))
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
 	patch, err := applyDocumentPatches(ctx, runner.StageMechanics, in.ExchangeID,
@@ -89,28 +89,28 @@ func interpEncodeProviderRequest(ctx context.Context, runner Runner, store *mach
 	if err != nil {
 		commitEffectsBestEffort(ctx, runner.EffectSink, in.ExchangeID, effs)
 		storePutError(store, wrapStageErr("encodeProviderRequest-patch", err))
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 	effs = append(effs, nativePayloadEffects(in, patch.Value)...)
 
-	store.Put(reflect.TypeOf(encodedRequest{}), reflect.ValueOf(encodedRequest{
+	store.Put(reflect.TypeOf(EncodedRequestState{}), reflect.ValueOf(EncodedRequestState{
 		Raw:     result.Value,
 		Patched: patch.Value,
 		Effects: effs,
 	}))
-	return []machine.Event{machine.Event(requestEncoded{})}, nil
+	return []machine.Event{machine.Event(RequestEncodedEvent{})}, nil
 }
 
 func interpResolveProviderIngress(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
 	var in ExchangeInput
 	if err := store.Get(&in); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var enc encodedRequest
+	var enc EncodedRequestState
 	if err := store.Get(&enc); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
 	var effs []effect.Effect
@@ -125,104 +125,104 @@ func interpResolveProviderIngress(ctx context.Context, runner Runner, store *mac
 		effs = append(effs, backendErrorShapeEffects(in, err)...)
 		commitEffectsBestEffort(ctx, runner.EffectSink, in.ExchangeID, effs)
 		storePutError(store, wrapStageErr("resolveProviderIngress", err))
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 	if err := ValidateProviderIngress(ingress); err != nil {
 		commitEffectsBestEffort(ctx, runner.EffectSink, in.ExchangeID, effs)
 		storePutError(store, canonical.InternalError("provider ingress shape is invalid"))
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
-	store.Put(reflect.TypeOf(providerResponse{}), reflect.ValueOf(providerResponse{
+	store.Put(reflect.TypeOf(ProviderResponseState{}), reflect.ValueOf(ProviderResponseState{
 		Ingress: ingress,
 		Effects: effs,
 	}))
-	return []machine.Event{machine.Event(ingressReceived{})}, nil
+	return []machine.Event{machine.Event(IngressReceivedEvent{})}, nil
 }
 
 func interpDecodeProviderEnvelope(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
 	var in ExchangeInput
 	if err := store.Get(&in); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var codecs codecResolution
+	var codecs codecResolutionState
 	if err := store.Get(&codecs); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var resp providerResponse
+	var resp ProviderResponseState
 	if err := store.Get(&resp); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
 	events, effs, progressive, err := decodeIngress(ctx, in, resp, codecs, runner)
 	if err != nil {
 		commitEffectsBestEffort(ctx, runner.EffectSink, in.ExchangeID, effs)
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
-	store.Put(reflect.TypeOf(decodedEnvelope{}), reflect.ValueOf(decodedEnvelope{
+	store.Put(reflect.TypeOf(DecodedEnvelopeState{}), reflect.ValueOf(DecodedEnvelopeState{
 		Events:      events,
 		Effects:     effs,
 		Progressive: progressive,
 	}))
-	return []machine.Event{machine.Event(envelopeDecoded{})}, nil
+	return []machine.Event{machine.Event(EnvelopeDecodedEvent{})}, nil
 }
 
 func interpCaptureContinuation(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
 	if runner.ContinuationStore == nil {
-		return []machine.Event{machine.Event(continuationCaptured{})}, nil
+		return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
 	}
 	var in ExchangeInput
 	if err := store.Get(&in); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var dec decodedEnvelope
+	var dec DecodedEnvelopeState
 	if err := store.Get(&dec); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var contCtx continuationContext
+	var contCtx continuationContextState
 	if err := store.Get(&contCtx); err != nil {
 		// No namespace seeded means this pipeline was not wired for continuation.
-		return []machine.Event{machine.Event(continuationCaptured{})}, nil
+		return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
 	}
 	if contCtx.Namespace.IsZero() || dec.Events == nil {
-		return []machine.Event{machine.Event(continuationCaptured{})}, nil
+		return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
 	}
 	runtime := canonical.NewContinuationRuntime(runner.ContinuationStore)
 	wrapped, err := runtime.WrapResponseEnvelope(ctx, contCtx.Namespace, in.Request, dec.Events)
 	if err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	store.Put(reflect.TypeOf(decodedEnvelope{}), reflect.ValueOf(decodedEnvelope{
+	store.Put(reflect.TypeOf(DecodedEnvelopeState{}), reflect.ValueOf(DecodedEnvelopeState{
 		Events:      wrapped,
 		Effects:     dec.Effects,
 		Progressive: dec.Progressive,
 	}))
-	return []machine.Event{machine.Event(continuationCaptured{})}, nil
+	return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
 }
 
 func interpEncodeClientOutput(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
 	var in ExchangeInput
 	if err := store.Get(&in); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var codecs codecResolution
+	var codecs codecResolutionState
 	if err := store.Get(&codecs); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
-	var dec decodedEnvelope
+	var dec DecodedEnvelopeState
 	if err := store.Get(&dec); err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
 	// Commit effects accumulated through all earlier stages before encoding output.
@@ -231,19 +231,19 @@ func interpEncodeClientOutput(ctx context.Context, runner Runner, store *machine
 	response, err := encodeClientOutput(ctx, in, codecs.ClientCodec, dec.Events, dec.Progressive, runner.EffectSink)
 	if err != nil {
 		storePutError(store, err)
-		return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
-	store.Put(reflect.TypeOf(pipelineOutcome{}), reflect.ValueOf(pipelineOutcome{
+	store.Put(reflect.TypeOf(pipelineOutcomeState{}), reflect.ValueOf(pipelineOutcomeState{
 		Response: response,
 	}))
-	return []machine.Event{machine.Event(pipelineCompleted{})}, nil
+	return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 }
 
 // ---- pure helpers (no side effects beyond explicit params) ----
 
 func storePutError(store *machine.Store, err error) {
-	store.Put(reflect.TypeOf(pipelineOutcome{}), reflect.ValueOf(pipelineOutcome{Err: err}))
+	store.Put(reflect.TypeOf(pipelineOutcomeState{}), reflect.ValueOf(pipelineOutcomeState{Err: err}))
 }
 
 func wrapStageErr(stage string, cause error) error {
@@ -253,8 +253,8 @@ func wrapStageErr(stage string, cause error) error {
 func decodeIngress(
 	ctx context.Context,
 	in ExchangeInput,
-	resp providerResponse,
-	codecs codecResolution,
+	resp ProviderResponseState,
+	codecs codecResolutionState,
 	runner Runner,
 ) (canonical.EventReader, []effect.Effect, bool, error) {
 	effs := resp.Effects
@@ -265,7 +265,7 @@ func decodeIngress(
 			return nil, effs, false, canonical.InternalError("provider ingress canonical event stream is required")
 		}
 		events = resolved.Events
-	case carrier.WireStream:
+	case carrier.CarrierStream:
 		if resolved.Frames != nil {
 			if in.ProviderDelivery.Mode != delivery.Streaming {
 				return nil, effs, false, canonical.InternalError("provider wire stream requires streaming delivery")
@@ -282,7 +282,7 @@ func decodeIngress(
 		} else {
 			return nil, effs, false, canonical.InternalError("provider wire stream is required")
 		}
-	case carrier.WireDocument:
+	case carrier.CarrierDocument:
 		if resolved.IsEmpty() {
 			return nil, effs, false, canonical.InternalError("provider wire document is required")
 		}

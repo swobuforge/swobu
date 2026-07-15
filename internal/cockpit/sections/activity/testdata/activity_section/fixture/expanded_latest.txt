@@ -1,0 +1,15 @@
+  activity ▾
+     latest            14:32:01 codex gpt 200 145ms
+        resolved       resolved-name
+        model          gpt-4.1
+        attempt 1      attempt rank 1 — success
+        attempt 2      attempt rank 2 — failed
+
+        tokens in      1,200
+        tokens out     450
+
+
+
+
+
+

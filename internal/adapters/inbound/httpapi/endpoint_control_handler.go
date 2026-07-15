@@ -47,6 +47,8 @@ type providerConfigDocument struct {
 	CredentialRef    string `json:"credential_ref,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty"`
+	TargetRank       *int   `json:"target_rank,omitempty"`
+	TargetWeight     *int   `json:"target_weight,omitempty"`
 	ProviderProtocol string `json:"provider_protocol,omitempty"`
 }
 

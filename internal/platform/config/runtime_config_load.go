@@ -70,6 +70,8 @@ type providerConfigDTO struct {
 	CredentialRef    string `json:"credential_ref" yaml:"credential_ref"`
 	ModelID          string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty" yaml:"target_alias,omitempty"`
+	TargetRank       *int   `json:"target_rank,omitempty" yaml:"target_rank,omitempty"`
+	TargetWeight     *int   `json:"target_weight,omitempty" yaml:"target_weight,omitempty"`
 	ProviderProtocol string `json:"provider_protocol,omitempty" yaml:"provider_protocol,omitempty"`
 }
 
@@ -326,6 +328,18 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
+		if encoded.TargetRank != nil {
+			providerConfig, err = providerConfig.WithTargetRank(*encoded.TargetRank)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
+		}
+		if encoded.TargetWeight != nil {
+			providerConfig, err = providerConfig.WithTargetWeight(*encoded.TargetWeight)
+			if err != nil {
+				return endpointintent.Endpoint{}, err
+			}
+		}
 		providerConfigs = append(providerConfigs, providerConfig)
 	}
 	return endpointintent.NewEndpoint(name, providerConfigs, selectedRef)
@@ -336,6 +350,15 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 	encodedProviderConfigs := make([]providerConfigDTO, 0, len(providerConfigs))
 	for _, providerConfig := range providerConfigs {
 		providerProtocol := profile.EncodeProviderProtocolForPersistence(providerConfig.ProviderProtocol())
+		var tr, tw *int
+		if providerConfig.TargetRank() > 1 {
+			v := providerConfig.TargetRank()
+			tr = &v
+		}
+		if providerConfig.TargetWeight() > 1 {
+			v := providerConfig.TargetWeight()
+			tw = &v
+		}
 		encodedProviderConfigs = append(encodedProviderConfigs, providerConfigDTO{
 			Ref:              providerConfig.Ref().String(),
 			ProviderSpec:     providerConfig.ProviderSpec().String(),
@@ -343,6 +366,8 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 			CredentialRef:    providerConfig.CredentialRef(),
 			ModelID:          providerConfig.ModelID(),
 			TargetAlias:      providerConfig.TargetAlias(),
+			TargetRank:       tr,
+			TargetWeight:     tw,
 			ProviderProtocol: providerProtocol,
 		})
 	}

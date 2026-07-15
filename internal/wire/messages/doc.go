@@ -9,6 +9,7 @@
 // closed because this family does not expose an exact structured-output field.
 // Canonical at_most_one tool batching lowers through
 // disable_parallel_tool_use when the selected target supports the exact field.
+// Canonical instructions lower to and decode from the top-level system field.
 // Provider auth, base URL, and transport behavior stay in provider wiring
 // packages.
 package messages

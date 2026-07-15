@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
-	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
+	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/platform/config"
@@ -29,7 +29,7 @@ type LiveOperatorAdapter struct {
 	client     operatorClient
 	daemonURL  string
 	runCommand runCommandExecutor
-	commandIO  runCommandIO
+	commandIO  runCommandIOConfig
 }
 
 // NewLiveOperatorAdapter builds the daemon-backed Cockpit adapter.
@@ -41,18 +41,6 @@ func NewLiveOperatorAdapter(httpClient *http.Client, daemonURL string) *LiveOper
 	adapter := &LiveOperatorAdapter{
 		client:    operatorclient.New(httpClient, resolvedURL),
 		daemonURL: strings.TrimRight(resolvedURL, "/"),
-		commandIO: processRunCommandIO(),
-	}
-	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
-		return executeClientRunCommand(ctx, command, adapter.commandIO)
-	}
-	return adapter
-}
-
-func newLiveOperatorAdapterWithClient(client operatorClient, daemonURL string) *LiveOperatorAdapter {
-	adapter := &LiveOperatorAdapter{
-		client:    client,
-		daemonURL: strings.TrimRight(config.ResolveDaemonURL(daemonURL), "/"),
 		commandIO: processRunCommandIO(),
 	}
 	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
@@ -74,10 +62,14 @@ func (a *LiveOperatorAdapter) LoadCockpit(ctx context.Context) (readmodel.Cockpi
 	model := readmodel.CockpitReadModel{
 		HeaderRight: a.headerRight(),
 		ActivePage:  readmodel.CockpitWorkspacePage,
+		Help: readmodel.HelpReadModel{
+			Diagnostics: diagnosticsPayloadFromEndpoints(a.baseDiagnosticsPayload(), endpoints, a.diagnosticsActivityCounts(ctx, endpoints)),
+		},
 	}
 	if len(endpoints) == 0 {
 		model.SelectedWorkspaceID = "+"
 		model.SelectedWorkspace = draftWorkspace()
+		model.Help.Diagnostics = diagnosticsPayloadFromEndpoints(a.baseDiagnosticsPayload(), nil, nil)
 		model.Tabs = []readmodel.WorkspaceTabReadModel{
 			{ID: "+", Kind: readmodel.WorkspaceTabDraft, Selected: true},
 			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
@@ -106,6 +98,24 @@ func (a *LiveOperatorAdapter) LoadCockpit(ctx context.Context) (readmodel.Cockpi
 		readmodel.WorkspaceTabReadModel{ID: "?", Kind: readmodel.WorkspaceTabHelp},
 	)
 	return model, nil
+}
+
+func (a *LiveOperatorAdapter) diagnosticsActivityCounts(ctx context.Context, endpoints []operatorclient.EndpointData) map[string]int {
+	projection, err := a.client.Status(ctx, "all")
+	if err != nil {
+		return nil
+	}
+	counts := make(map[string]int, len(endpoints))
+	endpointNames := make(map[string]struct{}, len(endpoints))
+	for _, endpoint := range endpoints {
+		endpointNames[endpoint.Name] = struct{}{}
+	}
+	for _, traffic := range projection.RecentTraffic {
+		if _, ok := endpointNames[traffic.Endpoint]; ok {
+			counts[traffic.Endpoint]++
+		}
+	}
+	return counts
 }
 
 // LoadWorkspace projects one daemon endpoint into a Cockpit workspace row.
@@ -248,7 +258,10 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 		return readmodel.TargetReadModel{}, errors.New("save target: route is required")
 	}
 	targetID := strings.TrimSpace(string(request.TargetID)) // swobu:io-string source=boundary
-	config := providerConfigFromTargetRequest(request, targetID)
+	config, err := providerConfigFromTargetRequest(request, targetID)
+	if err != nil {
+		return readmodel.TargetReadModel{}, adapterFailure("save target", err)
+	}
 	if targetID == "" {
 		ref, err := newProviderConfigRef(endpoint.ProviderConfigs)
 		if err != nil {
@@ -284,7 +297,7 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 			}
 		}
 	}
-	return targetFromProviderConfig(config, 0), nil
+	return targetFromProviderConfig(config), nil
 }
 
 // DeleteTarget removes one provider config from the endpoint.
@@ -322,7 +335,8 @@ func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.De
 	return nil
 }
 
-// ExecuteRunCommand resolves a run command through clientprofile and executes it.
+// ExecuteRunCommand resolves a run command through the operator client-profile
+// facade and executes it.
 func (a *LiveOperatorAdapter) ExecuteRunCommand(ctx context.Context, request ports.ExecuteRunCommandRequest) (ports.RunExecutionResult, error) {
 	if request.WorkspaceID == "" {
 		return ports.RunExecutionResult{}, errors.New("workspace is required")

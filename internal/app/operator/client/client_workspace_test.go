@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+func intPtr(v int) *int { return &v }
+
 func TestUpsertEndpoint_CreateWithEmptyProviderConfigs(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,13 +26,16 @@ func TestUpsertEndpoint_CreateWithEmptyProviderConfigs(t *testing.T) {
 		if len(doc.ProviderConfigs) != 1 || doc.ProviderConfigs[0].ProviderSpec != "openai_compatible" {
 			t.Fatalf("unexpected provider configs: %+v", doc.ProviderConfigs)
 		}
+		if *doc.ProviderConfigs[0].TargetRank != 2 || *doc.ProviderConfigs[0].TargetWeight != 4 {
+			t.Fatalf("rank/weight = %d/%d, want 2/4", *doc.ProviderConfigs[0].TargetRank, *doc.ProviderConfigs[0].TargetWeight)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(doc)
 	}))
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	err := c.UpsertEndpoint(context.Background(), EndpointData{Name: "test-ws", ProviderConfigs: []ProviderConfigData{{ProviderSpec: "openai_compatible", ModelID: "gpt-4.1"}}})
+	err := c.UpsertEndpoint(context.Background(), EndpointData{Name: "test-ws", ProviderConfigs: []ProviderConfigData{{ProviderSpec: "openai_compatible", ModelID: "gpt-4.1", TargetRank: 2, TargetWeight: 4}}})
 	if err != nil {
 		t.Fatalf("UpsertEndpoint returned error: %v", err)
 	}
@@ -45,7 +50,7 @@ func TestListEndpoints_ReadsEndpointList(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(endpointListDocument{Endpoints: []endpointDocument{
 			{Name: "alpha", ProviderConfigs: []providerConfigDocument{
-				{Ref: "cfg-1", ProviderSpec: "openai", ModelID: "gpt-4"},
+				{Ref: "cfg-1", ProviderSpec: "openai", ModelID: "gpt-4", TargetRank: intPtr(2), TargetWeight: intPtr(4)},
 			}},
 			{Name: "beta"},
 		}})
@@ -65,6 +70,12 @@ func TestListEndpoints_ReadsEndpointList(t *testing.T) {
 	}
 	if len(eps[0].ProviderConfigs) != 1 {
 		t.Fatalf("alpha providers = %d, want 1", len(eps[0].ProviderConfigs))
+	}
+	if got := eps[0].ProviderConfigs[0].TargetRank; got != 2 {
+		t.Fatalf("target rank = %d, want 2", got)
+	}
+	if got := eps[0].ProviderConfigs[0].TargetWeight; got != 4 {
+		t.Fatalf("target weight = %d, want 4", got)
 	}
 	if len(eps[1].ProviderConfigs) != 0 {
 		t.Fatalf("beta providers = %d, want 0", len(eps[1].ProviderConfigs))

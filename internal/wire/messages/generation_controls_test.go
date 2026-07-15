@@ -52,10 +52,45 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 	}
 }
 
+func TestEncode_PreservesInstructionsAsTopLevelSystem(t *testing.T) {
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        "claude-3-5",
+		Instructions: "Use native tools for filesystem work.",
+		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "inspect files")},
+	})
+	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
+	if err != nil {
+		t.Fatalf("EncodeCarrier returned error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wire.Raw, &body); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if got := body["system"]; got != "Use native tools for filesystem work." {
+		t.Fatalf("system = %#v, want canonical instructions", got)
+	}
+}
+
+func TestDecodeRequest_PreservesTopLevelSystemAsInstructions(t *testing.T) {
+	codec := legacyClientRequestDecoder{}
+	req := []byte(`{"model":"claude-3-5","system":"Use native tools for filesystem work.","messages":[{"role":"user","content":"inspect files"}]}`)
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
+	}
+	if got.Instructions() != "Use native tools for filesystem work." {
+		t.Fatalf("instructions = %q, want top-level system", got.Instructions())
+	}
+	items := got.Items()
+	if len(items) != 1 || items[0].Text != "inspect files" {
+		t.Fatalf("items = %#v, want user request only", items)
+	}
+}
+
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"max_tokens":88,"temperature":0.3,"top_p":0.75,"stop_sequences":["END"]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Messages, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
@@ -95,7 +130,7 @@ func TestEncode_RejectsStructuredOutputFormat(t *testing.T) {
 func TestDecodeRequest_RejectsStructuredOutputFormat(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"reply_shape","schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}}`)
-	_, _, err := codec.DecodeClientRequest(carrier.WireDocument{Family: protocolkind.Messages, Raw: req})
+	_, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: req})
 	if err == nil || !strings.Contains(err.Error(), "structured output") {
 		t.Fatalf("DecodeClientRequest err=%v, want structured-output rejection", err)
 	}

@@ -29,8 +29,8 @@ import (
 
 // ExchangeInput (defined in runner.go) is the seed cell.
 
-// codecResolution holds the codec lookup result for one provider protocol.
-type codecResolution struct {
+// codecResolutionState holds the codec lookup result for one provider protocol.
+type codecResolutionState struct {
 	ClientCodec     ClientCodec
 	RequestEncoder  ProviderRequestDocumentEncoder
 	StreamDecoder   ProviderEnvelopeDecoder
@@ -38,76 +38,76 @@ type codecResolution struct {
 	OK              bool
 }
 
-// encodedRequest holds the provider request after encoding and patching.
-type encodedRequest struct {
-	Raw     carrier.WireDocument
-	Patched carrier.WireDocument
+// EncodedRequestState holds the provider request after encoding and patching.
+type EncodedRequestState struct {
+	Raw     carrier.CarrierDocument
+	Patched carrier.CarrierDocument
 	Effects []effect.Effect
 }
 
-// providerResponse holds the raw ingress from the provider backend.
-type providerResponse struct {
+// ProviderResponseState holds the raw ingress from the provider backend.
+type ProviderResponseState struct {
 	Ingress ProviderIngress
 	Effects []effect.Effect
 }
 
-// decodedEnvelope holds the canonical event stream after decoding and wrapping.
-type decodedEnvelope struct {
+// DecodedEnvelopeState holds the canonical event stream after decoding and wrapping.
+type DecodedEnvelopeState struct {
 	Events      canonical.EventReader
 	Effects     []effect.Effect
 	Progressive bool
 }
 
-// continuationContext carries the namespace for response capture.
-type continuationContext struct {
+// continuationContextState carries the namespace for response capture.
+type continuationContextState struct {
 	Namespace canonical.ContinuationNamespace
 }
 
-// pipelineOutcome holds the final client-facing response or error.
-type pipelineOutcome struct {
+// pipelineOutcomeState holds the final client-facing response or error.
+type pipelineOutcomeState struct {
 	Response TransportResponse
 	Err      error
 }
 
 // ---- events (past participles: what just happened) ----
 
-// pipelineStarted: input has been seeded into the store; begin pipeline.
-type pipelineStarted struct{}
+// PipelineStartedEvent: input has been seeded into the store; begin pipeline.
+type PipelineStartedEvent struct{}
 
-// codecsResolved: codec lookup finished.
-type codecsResolved struct{}
+// CodecsResolvedEvent: codec lookup finished.
+type CodecsResolvedEvent struct{}
 
-// requestEncoded: provider request encoded and patched.
-type requestEncoded struct{}
+// RequestEncodedEvent: provider request encoded and patched.
+type RequestEncodedEvent struct{}
 
-// ingressReceived: HTTP response received from provider.
-type ingressReceived struct{}
+// IngressReceivedEvent: HTTP response received from provider.
+type IngressReceivedEvent struct{}
 
-// envelopeDecoded: provider envelope decoded and wrapped.
-type envelopeDecoded struct{}
+// EnvelopeDecodedEvent: provider envelope decoded and wrapped.
+type EnvelopeDecodedEvent struct{}
 
-// pipelineCompleted: client output encoded; result is in pipelineOutcome.
-type pipelineCompleted struct{}
+// PipelineCompletedEvent: client output encoded; result is in pipelineOutcome.
+type PipelineCompletedEvent struct{}
 
-// continuationCaptured: envelope wrapped with continuation persistence.
-type continuationCaptured struct{}
+// ContinuationCapturedEvent: envelope wrapped with continuation persistence.
+type ContinuationCapturedEvent struct{}
 
 // ---- commands (imperatives: what to do next) ----
 
-// resolveCodecs looks up client and provider codecs for the current protocol.
-type resolveCodecs struct{}
+// ResolveCodecsAction looks up client and provider codecs for the current protocol.
+type ResolveCodecsAction struct{}
 
-// encodeProviderRequest translates canonical request to provider wire document.
-type encodeProviderRequest struct{}
+// EncodeProviderRequestAction translates canonical request to provider wire document.
+type EncodeProviderRequestAction struct{}
 
-// resolveProviderIngress sends the encoded request to the provider backend.
-type resolveProviderIngress struct{}
+// ResolveProviderIngressAction sends the encoded request to the provider backend.
+type ResolveProviderIngressAction struct{}
 
-// decodeProviderEnvelope translates provider response to canonical events.
-type decodeProviderEnvelope struct{}
+// DecodeProviderEnvelopeAction translates provider response to canonical events.
+type DecodeProviderEnvelopeAction struct{}
 
-// captureContinuation wraps the decoded envelope with WrapResponseEnvelope.
-type captureContinuation struct{}
+// CaptureContinuationAction wraps the decoded envelope with WrapResponseEnvelope.
+type CaptureContinuationAction struct{}
 
 // encodeClientOutput translates canonical events to client-family wire format.
-type encodeClientOutputCmd struct{}
+type EncodeClientOutputAction struct{}

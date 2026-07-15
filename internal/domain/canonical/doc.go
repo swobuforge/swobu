@@ -20,6 +20,9 @@
 // max_output_tokens, temperature, top_p, and stop sequences are represented
 // separately so adapters can lower or reject them without inventing wire-only
 // request state.
+// Canonical requests also own the instruction band: provider/system/developer
+// guidance is represented separately from user-authored conversation items so
+// coding-agent contracts are not replayed as user requests.
 // Canonical requests also own the semantic tool-call batch band:
 // parallel_tool_calls:false / disable_parallel_tool_use:true lowerings are
 // represented explicitly so adapters can lower or reject them without inventing

@@ -17,9 +17,10 @@ const (
 // and output format belong here because they are request grammar, not wire
 // shape.
 type CanonicalRequest struct {
-	model string
-	items []CanonicalItem
-	tools []ToolDecl
+	model        string
+	instructions string
+	items        []CanonicalItem
+	tools        []ToolDecl
 
 	turn         TurnRef
 	toolPolicy   ToolPolicy
@@ -33,6 +34,7 @@ type CanonicalRequest struct {
 // controls, output format, and the canonical turn reference.
 type RequestParams struct {
 	Model         string
+	Instructions  string
 	Items         []CanonicalItem
 	Tools         []ToolDecl
 	InputText     string
@@ -50,7 +52,8 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		items = append(items, NewTextItem(ItemAuthorUser, params.InputText))
 	}
 	return CanonicalRequest{
-		model:        strings.TrimSpace(params.Model), // swobu:io-string source=domain
+		model:        strings.TrimSpace(params.Model),        // swobu:io-string source=domain
+		instructions: strings.TrimSpace(params.Instructions), // swobu:io-string source=domain
 		items:        items,
 		tools:        tools,
 		turn:         params.Turn.Clone(),
@@ -67,6 +70,10 @@ func (r CanonicalRequest) Model() string {
 
 func (r CanonicalRequest) SemanticKind() SemanticKind {
 	return SemanticKindCanonical
+}
+
+func (r CanonicalRequest) Instructions() string {
+	return r.instructions
 }
 
 func (r CanonicalRequest) Items() []CanonicalItem {
@@ -100,6 +107,7 @@ func (r CanonicalRequest) OutputFormat() OutputFormat {
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
 		Model:         r.model,
+		Instructions:  r.instructions,
 		Items:         r.items,
 		Tools:         r.tools,
 		Turn:          r.turn,

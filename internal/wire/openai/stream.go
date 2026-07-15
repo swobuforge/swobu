@@ -21,7 +21,7 @@ func EncodeEnvelopeStream(
 	events canonical.EventReader,
 	encoder sse.EnvelopeStreamEncoder,
 	family protocolkind.ProtocolKind,
-) (effect.Result[carrier.WireStream], error) {
+) (effect.Result[carrier.CarrierStream], error) {
 	pr, pw := io.Pipe()
 	go func() {
 		defer func() { _ = events.Close(context.Background()) }()
@@ -48,5 +48,5 @@ func EncodeEnvelopeStream(
 			}
 		}
 	}()
-	return effect.NewResult(carrier.WireStream{Family: family, Framing: carrier.FramingSSE, Frames: carrier.FrameReaderFromReadCloser(pr)}), nil
+	return effect.NewResult(carrier.CarrierStream{Family: family, Framing: carrier.FramingSSE, Frames: carrier.FrameReaderFromReadCloser(pr)}), nil
 }
