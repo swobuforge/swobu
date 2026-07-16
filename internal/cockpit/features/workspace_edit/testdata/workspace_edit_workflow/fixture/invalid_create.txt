@@ -1,4 +1,4 @@
-> slug              ▌dev!                                                   invalid
+> slug              _dev!                                                   invalid
 use lowercase letters, numbers, and hyphens
 
 

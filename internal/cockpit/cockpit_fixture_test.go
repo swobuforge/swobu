@@ -1,11 +1,13 @@
 package cockpit
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
@@ -57,6 +59,7 @@ func TestFixture_StaticStates(t *testing.T) {
 		{name: "help_copied", height: 16, view: func() *Cockpit { return helpFixtureCockpit(readmodel.DiagnosticsCopied) }},
 		{name: "delete_confirm", height: 22, view: deleteConfirmFixtureCockpit},
 		{name: "all_collapsed", height: 16, view: collapsedFixtureCockpit},
+		{name: "first_target_ready", height: 30, view: firstTargetReadyFixtureCockpit},
 		{name: "first_target_created", height: 30, view: firstTargetCreatedFixtureCockpit},
 	}
 
@@ -224,11 +227,10 @@ func firstTargetCreatedFixtureCockpit() *Cockpit {
 	}
 	model.SelectedWorkspaceID = "lab"
 	model.SelectedWorkspace = readmodel.WorkspaceReadModel{
-		ID:                "lab",
-		Slug:              "lab",
-		State:             readmodel.WorkspaceExisting,
-		CompatibleClients: "OpenAI · Anthropic",
-		ClientBaseURL:     "http://127.0.0.1:7926/c/lab",
+		ID:            "lab",
+		Slug:          "lab",
+		State:         readmodel.WorkspaceExisting,
+		ClientBaseURL: "http://127.0.0.1:7926/c/lab",
 		Routes: []readmodel.RouteReadModel{
 			{
 				ID:        "gpt",
@@ -255,4 +257,74 @@ func firstTargetCreatedFixtureCockpit() *Cockpit {
 		// Expand the route so the target is visible.
 		c.currentWorkspacePage().RoutesSection.OpenRoute(c.currentWorkspacePage().RoutesSection.State.Routes[0])
 	})
+}
+
+func firstTargetReadyFixtureCockpit() *Cockpit {
+	model := DefaultFixtureReadModel()
+	model.Tabs = []readmodel.WorkspaceTabReadModel{
+		{ID: "lab", Slug: "lab", Kind: readmodel.WorkspaceTabExisting, Selected: true},
+		{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting},
+		{ID: "+", Kind: readmodel.WorkspaceTabDraft},
+		{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+	}
+	model.SelectedWorkspaceID = "lab"
+	model.SelectedWorkspace = readmodel.WorkspaceReadModel{
+		ID:            "lab",
+		Slug:          "lab",
+		State:         readmodel.WorkspaceExisting,
+		ClientBaseURL: "http://127.0.0.1:7926/c/lab",
+		Routes: []readmodel.RouteReadModel{
+			{
+				ID:        "gpt",
+				ModelName: "gpt",
+				State:     readmodel.RouteNormal,
+				Default:   true,
+				Enabled:   true,
+			},
+		},
+	}
+	return newFixtureCockpit(model, func(c *Cockpit) {
+		c.currentWorkspacePage().RoutesSection.TargetSetupQueries = readyTargetSetupQueries{}
+		route := c.currentWorkspacePage().RoutesSection.State.Routes[0]
+		c.currentWorkspacePage().RoutesSection.OpenRoute(route)
+		c.currentWorkspacePage().RoutesSection.AddTarget(route)
+		wf := c.currentWorkspacePage().RoutesSection.TargetAddWorkflows[route.ID]
+		if wf == nil {
+			panic("expected open target-add workflow")
+		}
+		wf.SelectProvider("openai")
+		wf.SetCatalogResult(readmodel.ModelCatalogReadModel{
+			Deployments: []readmodel.ModelDeploymentReadModel{
+				{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+			},
+		})
+		wf.SelectModel(readmodel.ModelDeploymentReadModel{
+			ID:                      "gpt-4.1",
+			Name:                    "GPT-4.1",
+			ModelName:               "gpt-4.1",
+			DefaultProviderProtocol: "chat_completions",
+		})
+	})
+}
+
+type readyTargetSetupQueries struct{}
+
+func (readyTargetSetupQueries) ListTargetProviders(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
+	return nil, nil
+}
+
+func (readyTargetSetupQueries) ResolveProviderSetup(context.Context, ports.ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error) {
+	return readmodel.ProviderSetupReadModel{
+		ProviderSpec:       "openai",
+		DisplayName:        "OpenAI",
+		CredentialLabel:    "env:OPENAI_API_KEY",
+		CredentialRef:      "env:OPENAI_API_KEY",
+		CredentialRequired: true,
+		ReadyForCatalog:    true,
+		DefaultBaseURL:     "https://api.openai.com/v1",
+	}, nil
+}
+
+func (readyTargetSetupQueries) ProbeProviderModels(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
+	return readmodel.ModelCatalogReadModel{}, nil
 }

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	inlineInputCursorRune      = '▌'
+	inlineInputCursorRune      = '_'
 	inlineInputCursorBlinkRune = ' '
 )
 

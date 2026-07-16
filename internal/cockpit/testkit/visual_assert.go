@@ -179,6 +179,6 @@ func formatVisualReport(report fixture.Report) string {
 		msg.WriteString("\n--- expected ---\n")
 		msg.WriteString(report.Expected)
 	}
-	msg.WriteString(fmt.Sprintf("\npromote with: %s=1 go test ./...\n", fixture.UpdateEnv))
+	msg.WriteString("\npromote with: SWOBU_UPDATE_FIXTURES=\"I generated the fixture candidate, opened it in my editor, compared every row to the RFC wireframe, edited by hand wherever rendering diverged from intent, and verified the fixture matches the intended operator experience before committing.\" go test ./...\n")
 	return msg.String()
 }

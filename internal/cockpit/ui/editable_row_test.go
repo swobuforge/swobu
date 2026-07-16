@@ -97,7 +97,7 @@ func TestEditableRow_FocusShowsArrowActivateOpensInput(t *testing.T) {
 		t.Fatalf("frame missing edit action post-activate:\n%s", frame)
 	}
 	// The input is mounted and autoFocused; cursor should appear
-	if !strings.Contains(frame, "▌") {
+	if !strings.Contains(frame, "_") {
 		t.Fatalf("frame missing input cursor in edit mode:\n%s", frame)
 	}
 }

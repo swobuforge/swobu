@@ -23,7 +23,7 @@ func TestPath_EmptyAssertionUsesDefault(t *testing.T) {
 }
 
 func TestCompareSnapshot_UsesSharedUpdateEnv(t *testing.T) {
-	t.Setenv(UpdateEnv, "1")
+	t.Setenv(UpdateEnv, fixturePromotionAck)
 	cfg := ConfigForIn(t.TempDir(), "screen", "default")
 	report := CompareSnapshot("fresh\n", cfg)
 	if report.Err != nil {
@@ -31,6 +31,25 @@ func TestCompareSnapshot_UsesSharedUpdateEnv(t *testing.T) {
 	}
 	if !strings.HasSuffix(report.FixturePath, filepath.Join("screen", "fixture", "default.txt")) {
 		t.Fatalf("FixturePath=%q", report.FixturePath)
+	}
+}
+
+func TestCompareSnapshot_RejectsCasualPromotionValues(t *testing.T) {
+	for _, bad := range []string{"1", "true", "yes", "on", "please", "i-have-reviewed", fixturePromotionAck[:20]} {
+		t.Run(bad, func(t *testing.T) {
+			t.Setenv(UpdateEnv, bad)
+			cfg := ConfigForIn(t.TempDir(), "screen", "default")
+			report := CompareSnapshot("fresh\n", cfg)
+			if report.Err == nil {
+				t.Fatal("expected error for casual promotion value, got nil")
+			}
+			if !strings.Contains(report.Err.Error(), "does not match the required acknowledgment") {
+				t.Fatalf("error should explain required acknowledgment, got: %v", report.Err)
+			}
+			if !strings.Contains(report.Err.Error(), "tui-done-criteria.md") {
+				t.Fatalf("error should reference tui-done-criteria.md, got: %v", report.Err)
+			}
+		})
 	}
 }
 

@@ -79,7 +79,7 @@
 //     // in KeyMap() when editing:
 //     return append(EscapeBinding, w.editor.TypingKeyMap()...)
 //     // in Render() when editing:
-//     surface := ui.EditRow("▌", "label", w.editor.Render(), "save ↵")
+//     surface := ui.EditRow("_", "label", w.editor.Render(), "save ↵")
 //
 // ---------------------------------------------------------------------------
 // FocusableControl

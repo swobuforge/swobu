@@ -32,7 +32,7 @@ func TestEditableRow_EscapeFromEditReturnsToView(t *testing.T) {
 	if !strings.Contains(frame, "edit ↵") {
 		t.Fatalf("expected view mode action after Escape, got:\n%s", frame)
 	}
-	if strings.Contains(frame, "▌") {
+	if strings.Contains(frame, "_") {
 		t.Fatalf("cursor should disappear after Escape, got:\n%s", frame)
 	}
 	if row.IsEditing() {
@@ -78,7 +78,7 @@ func TestEditableRow_TypingInEditModeUpdatesValue(t *testing.T) {
 		t.Fatalf("value after typing = %q, want xy", got)
 	}
 	frame := h.Frame()
-	if !strings.Contains(frame, "xy▌") && !strings.Contains(frame, "xy ") {
+	if !strings.Contains(frame, "xy_") && !strings.Contains(frame, "xy ") {
 		// Cursor may be on or off depending on blink phase; value must be there.
 		if !strings.Contains(frame, "xy") {
 			t.Fatalf("frame should show typed value 'xy', got:\n%s", frame)

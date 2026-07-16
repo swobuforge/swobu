@@ -7,14 +7,17 @@
      delete            workspace                                                      delete ↵
 
   model routes ▾
-     gpt               default · 1 target                                             collapse ↵
+     gpt               default · incomplete · no targets                              collapse ↵
         name              gpt                                                         edit ↵
         default           yes                                                         current
         delete            gpt                                                         delete ↵
         client sends      model = gpt
-        step 1
-        openai/gpt-4.1                                                                edit ↵
-        add target                                                                    add ↵
+      new target · OpenAI
+        provider          OpenAI                                                      change ↵
+        credential        env:OPENAI_API_KEY                                          ok
+        model             gpt-4.1                                                     change ↵
+        placement         step 1
+      > create                                                                        create ↵
      add model route                                                                  add ↵
 
   activity ▾
@@ -23,7 +26,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
-
-
-
 

@@ -1,4 +1,4 @@
-  model             gpt-4.1▌                                                save ↵
+  model             gpt-4.1_                                                save ↵
   default           no                                                      make default ↵
   delete            gpt-4.1                                                 delete ↵
 

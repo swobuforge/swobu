@@ -18,7 +18,13 @@ import (
 )
 
 const (
-	// UpdateEnv is the single promotion knob for text terminal visual fixtures.
+	// UpdateEnv is the fixture promotion gate. Set it to a paragraph
+	// (80+ chars, your own words) that proves you:
+	//   1. generated the fixture candidate,
+	//   2. opened it and compared every row to the RFC wireframe,
+	//   3. edited by hand where the render diverged,
+	//   4. verified the fixture matches intent before committing.
+	// See tui-done-criteria.md: Fixture promotion rule.
 	UpdateEnv = "SWOBU_UPDATE_FIXTURES"
 
 	DefaultBaseDir   = "testdata"
@@ -129,14 +135,24 @@ func CompareSnapshot(snapshot string, cfg Config) Report {
 }
 
 // Compare checks snapshot against the fixture configuration.
-// When updateEnv is non-empty and set to a truthy value, it writes snapshot
-// to the fixture path instead of comparing.
+// When updateEnv is set to the exact value "i-have-reviewed", it writes snapshot
+// to the fixture path instead of comparing. Any other non-empty value produces
+// an error that explains the required acknowledgement.
 func Compare(snapshot string, cfg Config, updateEnv string) Report {
 	path := strings.TrimSpace(cfg.Path)
 	if path == "" {
 		return Report{Err: fmt.Errorf("visual fixture path is required")}
 	}
-	if updateEnabled(updateEnv) {
+
+	promote, err := updateEnabled(updateEnv)
+	if err != nil {
+		return Report{
+			FixturePath: path,
+			Actual:      snapshot,
+			Err:         err,
+		}
+	}
+	if promote {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return Report{FixturePath: path, Err: fmt.Errorf("create fixture dir: %w", err)}
 		}
@@ -152,7 +168,7 @@ func Compare(snapshot string, cfg Config, updateEnv string) Report {
 				FixturePath: path,
 				Actual:      snapshot,
 				Err: fmt.Errorf(
-					"missing visual fixture %q; review snapshot and promote with %s=1 go test ./...",
+					"missing visual fixture %q; review snapshot and promote with %s=<ack> go test (see tui-done-criteria.md) ./...",
 					path, updateEnv,
 				),
 			}
@@ -172,18 +188,25 @@ func Compare(snapshot string, cfg Config, updateEnv string) Report {
 	}
 }
 
-func updateEnabled(envKey string) bool {
+const fixturePromotionAck = "I generated the fixture candidate, opened it in my editor, compared every row to the RFC wireframe, edited by hand wherever rendering diverged from intent, and verified the fixture matches the intended operator experience before committing."
+
+func updateEnabled(envKey string) (bool, error) {
 	if envKey == "" {
-		return false
+		return false, nil
 	}
 	value := strings.TrimSpace(os.Getenv(envKey))
 	if value == "" {
-		return false
+		return false, nil
 	}
-	switch strings.ToLower(value) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
+	if value != fixturePromotionAck {
+		return false, fmt.Errorf(
+			"fixture promotion refused: %s does not match the required acknowledgment.\n\n"+
+			"Set it to exactly this paragraph, then run the test again:\n"+
+			"  %s=%s\n\n"+
+			"After the fixture is written, open it, compare every row to the RFC wireframe, edit by hand if needed, and run without this env var to verify.\n"+
+			"See tui-done-criteria.md: Fixture promotion rule.",
+			envKey, envKey, fixturePromotionAck,
+		)
 	}
+	return true, nil
 }

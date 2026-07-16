@@ -28,11 +28,10 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 			IssueURL:       "https://github.com/swobuforge/swobu/issues/new",
 		},
 		SelectedWorkspace: readmodel.WorkspaceReadModel{
-			ID:                dev,
-			Slug:              "dev",
-			State:             readmodel.WorkspaceExisting,
-			CompatibleClients: "OpenAI · Anthropic",
-			ClientBaseURL:     "http://127.0.0.1:7926/c/dev",
+			ID:            dev,
+			Slug:          "dev",
+			State:         readmodel.WorkspaceExisting,
+			ClientBaseURL: "http://127.0.0.1:7926/c/dev",
 			RunCommands: []readmodel.RunCommandReadModel{
 				{
 					ID:          "codex",

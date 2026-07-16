@@ -16,14 +16,13 @@ func (a *LiveOperatorAdapter) workspaceFromEndpoint(ctx context.Context, endpoin
 	activity, _ := a.activityForWorkspace(ctx, workspaceID)
 	baseURL := a.clientBaseURL(endpoint.Name)
 	return readmodel.WorkspaceReadModel{
-		ID:                workspaceID,
-		Slug:              endpoint.Name,
-		State:             readmodel.WorkspaceExisting,
-		ClientBaseURL:     baseURL,
-		CompatibleClients: "OpenAI · Anthropic",
-		RunCommands:       runCommands(baseURL),
-		Routes:            routesFromEndpoint(endpoint),
-		Activity:          activity,
+		ID:            workspaceID,
+		Slug:          endpoint.Name,
+		State:         readmodel.WorkspaceExisting,
+		ClientBaseURL: baseURL,
+		RunCommands:   runCommands(baseURL),
+		Routes:        routesFromEndpoint(endpoint),
+		Activity:      activity,
 	}, nil
 }
 

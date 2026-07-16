@@ -1,7 +1,7 @@
 ⛉ SWOBU                                                                [› +] [?]
 ────────────────────────────────────────────────────────────────────────────────
 new workspace
-   > slug              ▌                                          required
+   > slug              _                                          required
    enter a workspace slug
      endpoint          after create
 

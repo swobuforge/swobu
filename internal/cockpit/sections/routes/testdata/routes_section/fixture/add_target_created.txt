@@ -1,0 +1,19 @@
+  model routes ▾
+     gpt               default · 2 fallback steps                                                                                                                                                             expand ↵
+     local             1 target                                                                                                                                                                               expand ↵
+     custom-route      1 target                                                                                                                                                                               collapse ↵
+        name              custom-route                                                                                                                                                                        edit ↵
+        default           no                                                                                                                                                                                  make default ↵
+        delete            custom-route                                                                                                                                                                        delete ↵
+        client sends      model = custom-route
+        step 1
+        openai_compatible/custom-route                                                                                                                                                                                    ed
+        add target                                                                                                                                                                                            add ↵
+     add model route                                                                                                                                                                                          add ↵
+
+
+
+
+
+
+
