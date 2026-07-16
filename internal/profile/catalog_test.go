@@ -144,6 +144,42 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 }
 
+func TestCatalog_ProviderSetupFieldInventoryIsExplicit(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"ollama":            "model, protocol",
+		"openai":            "credential, model, protocol",
+		"chatgpt":           "sign in, model, protocol",
+		"anthropic":         "credential, model, protocol",
+		"openrouter":        "credential, model, protocol",
+		"bedrock":           "base URL, AWS profile, AWS env session, AWS bearer token, model, protocol",
+		"azure":             "resource locator, credential, model, protocol",
+		"openai_compatible": "backend URL, credential, auth header, model, protocol",
+	}
+
+	for spec, want := range cases {
+		if got := ProviderSetupFieldSummaryForSpec(spec); got != want {
+			t.Fatalf("provider setup field summary for %q = %q, want %q", spec, got, want)
+		}
+	}
+}
+
+func TestCatalog_ProviderSetupPrimaryFieldForSpec(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"azure":             "resource locator",
+		"bedrock":           "base URL",
+		"openai_compatible": "backend URL",
+	}
+	for spec, want := range cases {
+		if got := ProviderSetupPrimaryFieldForSpec(spec); got != want {
+			t.Fatalf("primary setup field for %q = %q, want %q", spec, got, want)
+		}
+	}
+}
+
 func TestCatalog_ResolveRouteProfile(t *testing.T) {
 	t.Parallel()
 

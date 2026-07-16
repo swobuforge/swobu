@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/effect"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/machine"
@@ -31,8 +32,10 @@ type Runner struct {
 // Runtime lookup and stage mechanics live on Runner, not here.
 type ExchangeInput struct {
 	ExchangeID       string
+	ClientHandler    trafficevidence.ClientHandler
 	ClientFamily     canonical.ClientFamily
 	ClientDelivery   delivery.Delivery
+	Timing           *trafficevidence.Timing
 	Request          canonical.CanonicalRequest
 	ReplayScope      replay.Scope
 	NativeReplay     *replay.NativeRef

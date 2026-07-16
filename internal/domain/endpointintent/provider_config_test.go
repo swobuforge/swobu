@@ -81,8 +81,8 @@ func TestProviderConfig_TargetAliasValidation(t *testing.T) {
 	if got := cfg.TargetAlias(); got != "fast" {
 		t.Fatalf("target alias = %q, want %q", got, "fast")
 	}
-	if _, err := cfg.WithTargetAlias("primary"); !errors.Is(err, ErrInvalidProviderConfig) {
-		t.Fatalf("WithTargetAlias(primary) error = %v, want ErrInvalidProviderConfig", err)
+	if _, err := cfg.WithTargetAlias("default"); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("WithTargetAlias(default) error = %v, want ErrInvalidProviderConfig", err)
 	}
 	if _, err := cfg.WithTargetAlias("gpt.5"); !errors.Is(err, ErrInvalidProviderConfig) {
 		t.Fatalf("WithTargetAlias(gpt.5) error = %v, want ErrInvalidProviderConfig", err)

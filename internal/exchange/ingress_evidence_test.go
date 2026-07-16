@@ -31,6 +31,7 @@ func TestRequestIngress_RecordsTerminalTrafficEvidenceOnSuccess(t *testing.T) {
 	out, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
 		ExchangeID:      "req-1",
 		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"messages":[{"role":"user","content":"hi"}]}`)),
+		ClientHandler:   trafficevidence.NormalizeClientHandler("Codex/1.2"),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingSSE,
 	})
@@ -62,6 +63,9 @@ func TestRequestIngress_RecordsTerminalTrafficEvidenceOnSuccess(t *testing.T) {
 	if got := event.ClientFamily(); got != trafficevidence.ClientFamily("responses") {
 		t.Fatalf("event client family = %q, want responses", got)
 	}
+	if got := event.ClientHandler(); got != trafficevidence.ClientHandler("Codex/1.2") {
+		t.Fatalf("event client handler = %q, want codex", got)
+	}
 }
 
 func TestRequestIngress_RecordsTerminalTrafficEvidenceOnBackendError(t *testing.T) {
@@ -77,6 +81,7 @@ func TestRequestIngress_RecordsTerminalTrafficEvidenceOnBackendError(t *testing.
 	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
 		ExchangeID:      "req-2",
 		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"messages":[{"role":"user","content":"hi"}]}`)),
+		ClientHandler:   trafficevidence.NormalizeClientHandler("Claude-Code/2.0"),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingSSE,
 	})

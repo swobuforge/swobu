@@ -22,7 +22,8 @@ type ActivityRowReadModel struct {
 	ID ActivityID
 	// ObservedAt preserves the daemon's observation label as display text.
 	// Cockpit does not synthesize a timestamp from partial clock data.
-	ObservedAt   string
+	ObservedAt string
+	// ClientLabel is the normalized client handler shown in the activity row.
 	ClientLabel  string
 	RouteID      RouteID
 	RouteLabel   string
@@ -30,8 +31,6 @@ type ActivityRowReadModel struct {
 	HTTPStatus   int
 	Duration     time.Duration
 	Error        bool
-	ResolvedName string
-	Model        string
 	Attempts     []ActivityAttemptReadModel
 	TokensIn     int
 	TokensOut    int
@@ -105,6 +104,8 @@ func (a ActivityRowReadModel) RowValue() string {
 	return fmt.Sprintf("%s %s %s %s %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
 }
 
+// durationLabel renders the projected duration summary.
+// Missing or zero durations both display as 0ms.
 func durationLabel(d time.Duration) string {
 	if d <= 0 {
 		return "0ms"

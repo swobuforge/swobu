@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
@@ -93,6 +95,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeExchangeError(writer, err)
 		return
 	}
+	clientHandler := trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent"))
+	timing := trafficevidence.NewUnknownTiming()
+	timing.MarkStarted(time.Now())
+	writer.timing = &timing
 
 	requestID := requestIDFromRequest(r)
 	logClientRequestShape(requestID, endpoint.String(), family, normalizedPath)
@@ -105,13 +111,16 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
 		EndpointName:    endpoint,
 		Request:         newTransportRequest(r.Method, operationPath, r.Header, requestBody),
+		ClientHandler:   clientHandler,
 		ClientFamily:    family,
 		ResponseFraming: delivery.FramingSSE,
+		Timing:          &timing,
 		ExchangeID:      requestID,
 	})
 	if err != nil {
 		logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, err)
 		writeExchangeError(writer, err)
+		finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, err)
 		return
 	}
 	writeModelResolutionHeaders(writer)
@@ -128,10 +137,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"normalized_op", string(normalizedPath),
 				"error", err,
 			)
+			finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, err)
 			return
 		}
 		writeExchangeError(writer, err)
+		finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, err)
+		return
 	}
+	finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, nil)
 }
 
 func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, endpoint endpointintent.EndpointName) {
@@ -330,9 +343,20 @@ type committingResponseWriter struct {
 	http.ResponseWriter
 	committed bool
 	gate      *exchange.CommitGate
+	timing    *trafficevidence.Timing
+	firstByte bool
+}
+
+func (w *committingResponseWriter) markFirstByte() {
+	if w.timing == nil || w.firstByte {
+		return
+	}
+	w.timing.MarkFirstByte(time.Now())
+	w.firstByte = true
 }
 
 func (w *committingResponseWriter) WriteHeader(statusCode int) {
+	w.markFirstByte()
 	w.committed = true
 	if w.gate != nil {
 		w.gate.Commit()
@@ -341,11 +365,34 @@ func (w *committingResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (w *committingResponseWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		w.markFirstByte()
+	}
 	w.committed = true
 	if w.gate != nil {
 		w.gate.Commit()
 	}
 	return w.ResponseWriter.Write(p)
+}
+
+func finalizeTrafficEvidence(ctx context.Context, requestID string, endpoint string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, out exchange.RequestOutput, timing *trafficevidence.Timing, writeErr error) {
+	if timing != nil {
+		timing.MarkEnded(time.Now())
+	}
+	if out.CommitTrafficEvent == nil {
+		return
+	}
+	if err := out.CommitTrafficEvent(ctx, writeErr); err != nil {
+		slog.Warn("traffic evidence commit failed",
+			"component", "httpapi",
+			"event", "traffic_evidence_commit_failed",
+			"request_id", requestID,
+			"endpoint", endpoint,
+			"ingress_family", string(family),
+			"normalized_op", string(normalizedPath),
+			"error", err,
+		)
+	}
 }
 
 func (w *committingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

@@ -2,6 +2,7 @@ package trafficevidence
 
 import (
 	"testing"
+	"time"
 )
 
 func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
@@ -143,6 +144,32 @@ func TestTiming_RejectsDurationBeforeTTFB(t *testing.T) {
 	dur := 10
 	if _, err := NewTimingWithOptional(&ttfb, &dur); err == nil {
 		t.Fatal("NewTimingWithOptional should reject duration before ttfb")
+	}
+}
+
+func TestTiming_MarksLifecycleAndDerivesSummaries(t *testing.T) {
+	startedAt := time.Date(2026, time.July, 2, 12, 13, 18, 250000000, time.UTC)
+	firstByteAt := startedAt.Add(42 * time.Millisecond)
+	endedAt := startedAt.Add(123 * time.Millisecond)
+
+	timing := NewTimingStartedAt(startedAt)
+	timing.MarkFirstByte(firstByteAt)
+	timing.MarkEnded(endedAt)
+
+	if got, ok := timing.StartedAt(); !ok || !got.Equal(startedAt) {
+		t.Fatalf("started_at = (%v,%v), want (%v,true)", got, ok, startedAt)
+	}
+	if got, ok := timing.FirstByteAt(); !ok || !got.Equal(firstByteAt) {
+		t.Fatalf("first_byte_at = (%v,%v), want (%v,true)", got, ok, firstByteAt)
+	}
+	if got, ok := timing.EndedAt(); !ok || !got.Equal(endedAt) {
+		t.Fatalf("ended_at = (%v,%v), want (%v,true)", got, ok, endedAt)
+	}
+	if got, ok := timing.TTFBMillis(); !ok || got != 42 {
+		t.Fatalf("ttfb_ms = (%d,%v), want (42,true)", got, ok)
+	}
+	if got, ok := timing.DurationMillis(); !ok || got != 123 {
+		t.Fatalf("dur_ms = (%d,%v), want (123,true)", got, ok)
 	}
 }
 

@@ -44,7 +44,7 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 	if !called {
 		t.Fatal("Run did not call endpoint control plane")
 	}
-	for _, want := range []string{"SWOBU", "[› dev]", server.URL + "/c/dev", "gpt-4.1", "default · 1 target"} {
+	for _, want := range []string{"⛉ SWOBU", "[› dev]", server.URL + "/c/dev", "gpt-4.1", "default · 1 target"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, out.String())
 		}

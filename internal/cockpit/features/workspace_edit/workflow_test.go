@@ -239,7 +239,7 @@ func TestWorkflow_EditSubmitFailureShowsSaveErrorInRender(t *testing.T) {
 
 	workflow.Submit(context.Background())
 
-	if got, want := workflow.ActionLabel(), "invalid"; got != want {
+	if got, want := workflow.ActionLabel(), "duplicate"; got != want {
 		t.Fatalf("action label = %q, want %q", got, want)
 	}
 	if got, want := workflow.Slug.Get(), "dev-2"; got != want {
@@ -287,6 +287,57 @@ func TestWorkflow_KeyMapEscClosesFocusedWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflow_DraftCreateEscapeBacksOutAndClearsCursor(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, nil, nil)
+	h, err := testkit.NewHarness(workflow)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'd'})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'e'})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'v'})
+
+	if got := workflow.Slug.Get(); got != "dev" {
+		t.Fatalf("slug before Escape = %q, want dev", got)
+	}
+
+	frame := h.Frame()
+	if !strings.Contains(frame, "▌") {
+		t.Fatalf("draft create frame should show the input cursor before Escape:\n%s", frame)
+	}
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
+	if workflow.IsEditing() {
+		t.Fatal("Escape should leave draft create editing state")
+	}
+	if got := workflow.Slug.Get(); got != "" {
+		t.Fatalf("slug after Escape = %q, want empty draft", got)
+	}
+
+	frame = h.Frame()
+	if strings.Contains(frame, "▌") {
+		t.Fatalf("draft create frame still contains a cursor after Escape:\n%s", frame)
+	}
+	if !strings.Contains(frame, "required") {
+		t.Fatalf("draft create frame should return to the collapsed row after Escape:\n%s", frame)
+	}
+
+	workflow.Activate()
+
+	if !workflow.IsEditing() {
+		t.Fatal("activation should reopen draft create editing state")
+	}
+
+	frame = h.Frame()
+	if !strings.Contains(frame, "▌") {
+		t.Fatalf("draft create frame should restore the cursor after activation:\n%s", frame)
+	}
+}
+
 func TestWorkflow_FocusedViewingRowKeepsMarkerAndFlipsToSaveOnEnter(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
 	h, err := testkit.NewHarness(workflow)
@@ -299,7 +350,7 @@ func TestWorkflow_FocusedViewingRowKeepsMarkerAndFlipsToSaveOnEnter(t *testing.T
 	h.FocusNext()
 
 	frame := h.Frame()
-	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	testkit.AssertFocusedFrame(t, frame, "> slug")
 	if !strings.Contains(frame, "edit ↵") {
 		t.Fatalf("frame missing view action before Enter:\n%s", frame)
 	}
@@ -307,7 +358,7 @@ func TestWorkflow_FocusedViewingRowKeepsMarkerAndFlipsToSaveOnEnter(t *testing.T
 	workflow.Activate()
 
 	frame = h.Frame()
-	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	testkit.AssertFocusedFrame(t, frame, "> slug")
 	if !strings.Contains(frame, "save ↵") {
 		t.Fatalf("frame missing edit action after Enter:\n%s", frame)
 	}
@@ -323,7 +374,7 @@ func TestWorkflow_DraftCreateAutoFocusesSlugInput(t *testing.T) {
 
 	h.Open()
 	frame := h.Frame()
-	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	testkit.AssertFocusedFrame(t, frame, "> slug")
 	if !strings.Contains(frame, "▌") {
 		t.Fatalf("frame missing slug cursor:\n%s", frame)
 	}
@@ -418,8 +469,30 @@ func TestWorkflow_RenderSlugLifecycleStatesInComponentLane(t *testing.T) {
 
 	workflow.OpenCreate()
 	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	testkit.AssertVisual("required").
+		Fixture("testdata/workspace_edit_workflow/fixture/required.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
+
+	workflow.Slug.Set("dev")
+	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
 	testkit.AssertVisual("create").
 		Fixture("testdata/workspace_edit_workflow/fixture/create.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
+
+	workflow.Slug.Set("dev!")
+	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	testkit.AssertVisual("invalid").
+		Fixture("testdata/workspace_edit_workflow/fixture/invalid_create.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
+
+	workflow.Slug.Set("dev")
+	workflow.Error.Set("name conflict")
+	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	testkit.AssertVisual("duplicate").
+		Fixture("testdata/workspace_edit_workflow/fixture/duplicate.txt").
 		Viewport(90, 9).
 		Now(t, rendered)
 }
@@ -427,13 +500,16 @@ func TestWorkflow_RenderSlugLifecycleStatesInComponentLane(t *testing.T) {
 func TestWorkflow_ClientBaseURLPreviewDerivesFromSlug(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ClientBaseURL: "http://127.0.0.1:7926/c/dev"}, nil, nil)
 	workflow.OpenCreate()
+	if got, want := workflow.ClientBaseURLPreview(), "after create"; got != want {
+		t.Fatalf("empty preview = %q, want %q", got, want)
+	}
 	workflow.Slug.Set("staging")
 	if got, want := workflow.ClientBaseURLPreview(), "http://127.0.0.1:7926/c/staging"; got != want {
 		t.Fatalf("preview = %q, want %q", got, want)
 	}
 
 	workflow.Slug.Set("staging!")
-	if got, want := workflow.ClientBaseURLPreview(), "(derived from slug)"; got != want {
+	if got, want := workflow.ClientBaseURLPreview(), "after create"; got != want {
 		t.Fatalf("invalid preview = %q, want %q", got, want)
 	}
 }

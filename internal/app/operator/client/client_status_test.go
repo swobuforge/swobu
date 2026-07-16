@@ -22,7 +22,8 @@ func TestClientStatusProjection(t *testing.T) {
 			"recent_traffic":[{
 				"request_id":"req-1",
 				"endpoint":"dev",
-				"client_family":"codex",
+				"client_handler":"codex",
+				"client_family":"responses",
 				"route":"cfg-1:gpt-4.1",
 				"result":"success",
 				"status_code":200,
@@ -54,7 +55,7 @@ func TestClientStatusProjection(t *testing.T) {
 		t.Fatalf("recent traffic rows = %d, want 1", len(out.RecentTraffic))
 	}
 	row := out.RecentTraffic[0]
-	if row.Endpoint != "dev" || row.ClientFamily != "codex" || row.ModelResolved != "gpt-4.1" {
+	if row.Endpoint != "dev" || row.ClientHandler != "codex" || row.ClientFamily != "responses" || row.ModelResolved != "gpt-4.1" {
 		t.Fatalf("unexpected row: %#v", row)
 	}
 	if row.TokenUsage == nil || row.TokenUsage.InputTokens == nil || *row.TokenUsage.InputTokens != 120 {

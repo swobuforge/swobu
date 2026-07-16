@@ -4,6 +4,7 @@
 // request execution (including normalized client provenance and model-
 // resolution facts such as requested, resolved, and resolution mode) plus
 // optional token/cache usage counters, including reasoning-token breakdowns
-// when the provider exposes them, without letting transport DTOs, logs, or
-// hidden control logic become traffic truth.
+// when the provider exposes them. Traffic evidence is a projection seam, not a
+// behavior authority: it records observed facts so projections can summarize
+// them, but it does not decide routing, timing, or control flow.
 package trafficevidence

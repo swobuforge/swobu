@@ -97,6 +97,6 @@ func defaultTemplateVars(baseURL string) TemplateVars {
 		"base_url":        base,
 		"openai_base_url": openAIBaseURL(base),
 		"cwd":             strings.TrimSpace(cwd), // swobu:io-string source=domain
-		"primary_model":   exchange.PublicModelIDSwobu,
+		"default_model":   exchange.PublicModelIDSwobu,
 	}
 }

@@ -1,5 +1,5 @@
->       model          gpt-4.1                            save ↵
-        default        no                                 make default ↵
-        delete         gpt-4.1                            delete ↵
+  model             gpt-4.1▌                                                save ↵
+  default           no                                                      make default ↵
+  delete            gpt-4.1                                                 delete ↵
 
 

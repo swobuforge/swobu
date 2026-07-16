@@ -1,0 +1,24 @@
+new target · Ollama                                                                                                     
+  model                                                                                                                 
+  search            _                                                                                                   
+> Llama 3.2 3B                                   select ↵                                                               
+  Qwen 2.5 72B                                                                                                          
+  DeepSeek R1 32B                                                                                                       
+  3 of 3 shown                                   ↑↓ search                                                              
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

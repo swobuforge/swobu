@@ -63,7 +63,7 @@ func TestRouteSection_EnterActivatesRow(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
-	testkit.AssertFocusedFrame(t, frameBefore, ">    gpt")
+	testkit.AssertFocusedFrame(t, frameBefore, "> gpt")
 
 	testkit.AssertFocusVisible(t, h, func() {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})

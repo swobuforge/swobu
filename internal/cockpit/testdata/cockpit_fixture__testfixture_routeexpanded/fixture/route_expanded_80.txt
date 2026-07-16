@@ -1,31 +1,31 @@
-SWOBU    [› dev] [lab] [+] [?]
+⛉ SWOBU                                                    [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────
   workspace ▾
-     endpoint          http://127.0.0.1:7926/c/dev         copy ↵
-                       OpenAI · Anthropic
-     slug              dev                                 edit ↵
-     delete            workspace                           delete ↵
+     endpoint          http://127.0.0.1:7926/c/dev                copy ↵
+     OpenAI · Anthropic
+     slug              dev                                        edit ↵
+     delete            workspace                                  delete ↵
 
   model routes ▾
-     gpt               default · 2 fallback steps          collapse ↵
-        name              gpt                                 edit ↵
-        default           yes                                 current
-        delete            gpt                                 delete ↵
+     gpt               default · 2 fallback steps                 collapse ↵
+        name              gpt                                     edit ↵
+        default           yes                                     current
+        delete            gpt                                     delete ↵
         client sends      model = gpt
         step 1
-          openai/gpt-4.1                                        edit ↵
+        openai/gpt-4.1                                            edit ↵
         step 2
-          anthropic/claude-sonnet                                    edit ↵
-        add target                                            add ↵
-     local             1 target                            expand ↵
-     add model route                                       add ↵
+        anthropic/claude-sonnet                                        edit ↵
+        add target                                                add ↵
+     local             1 target                                   expand ↵
+     add model route                                              add ↵
 
   activity ▾
      latest            no requests yet
 
 
 ────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ open   F1 help   esc back
+↑↓ move   ↵ action   ? help   esc back   tab switch
 
 
 

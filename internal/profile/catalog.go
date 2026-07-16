@@ -52,7 +52,8 @@ func catalog() []Profile {
 		{
 			ProviderID:          ProviderSpecOllama,
 			ProviderDisplayName: "Ollama",
-			SetupHint:           string(ProviderSpecOllama),
+			SetupHint:           "local model catalog",
+			SetupFields:         []string{"model", "protocol"},
 			DefaultBaseURL:      "http://127.0.0.1:11434/v1",
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
@@ -64,7 +65,8 @@ func catalog() []Profile {
 		{
 			ProviderID:              ProviderSpecOpenAI,
 			ProviderDisplayName:     "OpenAI",
-			SetupHint:               string(ProviderSpecOpenAI),
+			SetupHint:               "API key",
+			SetupFields:             []string{"credential", "model", "protocol"},
 			DefaultBaseURL:          "https://api.openai.com/v1",
 			DefaultCredentialEnvVar: "OPENAI_API_KEY",
 			VisibleInOperatorUI:     true,
@@ -79,7 +81,8 @@ func catalog() []Profile {
 		{
 			ProviderID:          ProviderSpecChatGPT,
 			ProviderDisplayName: "ChatGPT",
-			SetupHint:           string(ProviderSpecChatGPT),
+			SetupHint:           "browser login",
+			SetupFields:         []string{"sign in", "model", "protocol"},
 			DefaultBaseURL:      "https://api.openai.com/v1",
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
@@ -92,7 +95,8 @@ func catalog() []Profile {
 		{
 			ProviderID:              ProviderSpecAnthropic,
 			ProviderDisplayName:     "Anthropic",
-			SetupHint:               string(ProviderSpecAnthropic),
+			SetupHint:               "API key",
+			SetupFields:             []string{"credential", "model", "protocol"},
 			DefaultBaseURL:          "https://api.anthropic.com/v1",
 			DefaultCredentialEnvVar: "ANTHROPIC_API_KEY",
 			VisibleInOperatorUI:     true,
@@ -107,7 +111,8 @@ func catalog() []Profile {
 		{
 			ProviderID:              ProviderSpecOpenRouter,
 			ProviderDisplayName:     "OpenRouter",
-			SetupHint:               string(ProviderSpecOpenRouter),
+			SetupHint:               "API key",
+			SetupFields:             []string{"credential", "model", "protocol"},
 			DefaultBaseURL:          "https://openrouter.ai/api/v1",
 			DefaultCredentialEnvVar: "OPENROUTER_API_KEY",
 			VisibleInOperatorUI:     true,
@@ -122,9 +127,9 @@ func catalog() []Profile {
 		{
 			ProviderID:              ProviderSpecBedrock,
 			ProviderDisplayName:     "AWS Bedrock",
-			SetupHint:               string(ProviderSpecBedrock) + "   Bedrock Mantle endpoint URL",
+			SetupHint:               "base URL / AWS auth",
+			SetupFields:             []string{"base URL", "AWS profile", "AWS env session", "AWS bearer token", "model", "protocol"},
 			DefaultBaseURL:          "",
-			DefaultCredentialEnvVar: "AWS_BEARER_TOKEN_BEDROCK",
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsBedrock),
 			AllowedAuthModes: []AuthModeSpec{
@@ -137,7 +142,8 @@ func catalog() []Profile {
 		{
 			ProviderID:              ProviderSpecAzure,
 			ProviderDisplayName:     "Azure AI Foundry",
-			SetupHint:               string(ProviderSpecAzure) + "   Azure resource locator or portal link (resource name or https://<resource>.services.ai.azure.com)",
+			SetupHint:               "resource locator",
+			SetupFields:             []string{"resource locator", "credential", "model", "protocol"},
 			DefaultBaseURL:          "",
 			DefaultCredentialEnvVar: "AZURE_OPENAI_API_KEY",
 			VisibleInOperatorUI:     true,
@@ -152,7 +158,8 @@ func catalog() []Profile {
 		{
 			ProviderID:          ProviderSpecOpenAICompatible,
 			ProviderDisplayName: "OpenAI Compatible",
-			SetupHint:           string(ProviderSpecOpenAICompatible) + "   OpenAI-style URL (https://host/v1)",
+			SetupHint:           "OpenAI-style URL",
+			SetupFields:         []string{"backend URL", "credential", "auth header", "model", "protocol"},
 			DefaultBaseURL:      "",
 			DefaultAuthHeader:   "Authorization",
 			VisibleInOperatorUI: true,

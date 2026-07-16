@@ -67,9 +67,12 @@ const (
 //
 // Add/remove/evolve provider specs in this catalog only.
 type Profile struct {
-	ProviderID              ProviderID
-	ProviderDisplayName     string
-	SetupHint               string
+	ProviderID          ProviderID
+	ProviderDisplayName string
+	SetupHint           string
+	// SetupFields names the operator-facing fields that the add-target picker
+	// should surface for this provider.
+	SetupFields             []string
 	DefaultBaseURL          string
 	DefaultCredentialEnvVar string
 	DefaultAuthHeader       string

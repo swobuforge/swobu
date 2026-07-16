@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/platform/browser"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -186,9 +185,10 @@ func (w *Workflow) SelectModel(model readmodel.ModelDeploymentReadModel) {
 }
 
 // OpenPlacementPicker generates placement options from current route targets
-// and opens the placement selection phase.
+// and opens the placement selection phase. The first target is fixed to step 1
+// and does not expose a placement picker.
 func (w *Workflow) OpenPlacementPicker() {
-	if w.Phase.Get() != PhaseReadyToCreate {
+	if w.Phase.Get() != PhaseReadyToCreate || !w.routeHasTargets() {
 		return
 	}
 	w.buildPlacementOptions()
@@ -402,8 +402,9 @@ func (w *Workflow) providerPicker() *ui.SearchPicker {
 		opts := make([]ui.SearchOption, len(w.providerOptions))
 		for i, p := range w.providerOptions {
 			opts[i] = ui.SearchOption{
-				ID:    p.ProviderSpec,
-				Label: p.DisplayName,
+				ID:       p.ProviderSpec,
+				Label:    providerPickerLabel(p.ProviderSpec, p.DisplayName),
+				Keywords: providerPickerKeywords(p),
 			}
 		}
 		w.providerPickerCache = ui.NewSearchPicker(
@@ -419,6 +420,34 @@ func (w *Workflow) providerPicker() *ui.SearchPicker {
 		w.providerPickerCache.AutoFocus = true
 	}
 	return w.providerPickerCache
+}
+
+func providerPickerLabel(providerSpec, displayName string) string {
+	label := strings.TrimSpace(displayName) // swobu:io-string source=boundary
+	if label == "" {
+		label = strings.TrimSpace(providerSpec)
+	}
+	if inventory := strings.TrimSpace(profile.ProviderSetupFieldSummaryForSpec(providerSpec)); inventory != "" {
+		if label == "" {
+			return inventory
+		}
+		return label + " · " + inventory
+	}
+	return label
+}
+
+func providerPickerKeywords(p readmodel.ProviderOptionReadModel) []string {
+	keywords := make([]string, 0, 4)
+	if spec := strings.TrimSpace(p.ProviderSpec); spec != "" {
+		keywords = append(keywords, spec)
+	}
+	if hint := strings.TrimSpace(p.SetupHint); hint != "" {
+		keywords = append(keywords, hint)
+	}
+	if summary := strings.TrimSpace(profile.ProviderSetupFieldSummaryForSpec(p.ProviderSpec)); summary != "" {
+		keywords = append(keywords, summary)
+	}
+	return keywords
 }
 
 func (w *Workflow) modelPicker() *ui.SearchPicker {
@@ -973,21 +1002,9 @@ func probeCatalogSnapshot(queries ports.TargetSetupQueries, provider, baseURL, c
 	}
 }
 
+// openBrowserURL is deprecated; use platform/browser.Open instead.
 func openBrowserURL(raw string) error {
-	url := strings.TrimSpace(raw)
-	if url == "" {
-		return fmt.Errorf("auth URL is missing")
-	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	return cmd.Start()
+	return browser.Open(raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -999,6 +1016,14 @@ func defaultPlacementForRoute(route readmodel.RouteReadModel) readmodel.Placemen
 	for _, t := range route.Targets {
 		if t.Rank > maxRank {
 			maxRank = t.Rank
+		}
+	}
+	if maxRank == 0 {
+		return readmodel.PlacementOptionReadModel{
+			Label:  "step 1",
+			Rank:   1,
+			Weight: 1,
+			Kind:   readmodel.PlacementFallback,
 		}
 	}
 	return readmodel.PlacementOptionReadModel{
@@ -1077,6 +1102,10 @@ func fallbackPlacementLabel(maxRank int) string {
 		return "fallback after last step"
 	}
 	return fmt.Sprintf("fallback after step %d", maxRank)
+}
+
+func (w *Workflow) routeHasTargets() bool {
+	return len(w.Route.Targets) > 0
 }
 
 // placementPickerSelectableRow creates one selectable row for a placement option.
@@ -1387,7 +1416,8 @@ func ModelDisplayRowComponent(w *Workflow) *ui.SelectableRow {
 	)
 }
 
-// PlacementDisplayRowComponent lets the operator open the placement picker.
+// PlacementDisplayRowComponent lets the operator open the placement picker for
+// routes that already have targets.
 func PlacementDisplayRowComponent(w *Workflow) *ui.SelectableRow {
 	return ui.NewSelectableRow(
 		targetAddMountKey(w, "placement-display"),
@@ -1396,6 +1426,19 @@ func PlacementDisplayRowComponent(w *Workflow) *ui.SelectableRow {
 		"change ↵",
 		func() { w.OpenPlacementPicker() },
 	)
+}
+
+// FixedPlacementRowComponent renders the fixed first-target placement summary.
+func FixedPlacementRowComponent(w *Workflow) tui.Component {
+	return &fixedPlacementRow{workflow: w}
+}
+
+type fixedPlacementRow struct {
+	workflow *Workflow
+}
+
+func (r *fixedPlacementRow) Render(app *tui.App) *tui.Element {
+	return ui.ActionRow("", "placement", r.workflow.Placement.Get().Summary(), "")
 }
 
 // CreateRowComponent is the final "create target" action row.

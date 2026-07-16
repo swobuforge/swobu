@@ -2,29 +2,27 @@ package ui
 
 import tui "github.com/grindlemire/go-tui"
 
-const (
-	selectableRowArrowWidth = 5
-	selectableRowLabelWidth = 18
-	// ActionRowValueWidth keeps action-bearing cockpit rows on one shared
-	// value column so verbs start in the same vertical line.
-	ActionRowValueWidth         = 35
-	selectableRowActionGapWidth = 1
-)
+// RowIndent is the parent-declared left padding (in cells) for all child rows
+// inside a section. The section adds this as padding-left on a wrapper div;
+// children render at the padded boundary without adding their own indent spans.
+const RowIndent = 3
 
 // SelectableRow is a selectable action row with focus markers and activation.
 // Sections mount this via app.Mount() so it participates in the go-tui focus
 // graph and has KeyMap-based activation.
+//
+// Escape is NOT handled here. SelectableRow is a leaf component; Escape
+// belongs to the containing FocusableControl, which calls the cancellation
+// callback from OnExit.
 type SelectableRow struct {
 	SelectBase
 	Label     string
 	Value     string
 	Action    string
 	Activate  func()
-	OnCancel  func() // If set, Escape fires this when the row is focused.
+	// AutoFocus seeds the row as selected on mount, or on the first transition
+	// from false to true on an already-mounted row.
 	AutoFocus bool
-	// ArrowPad increases the marker cell width so nested rows can keep their
-	// marker aligned with the row's own indent.
-	ArrowPad int
 }
 
 // NewSelectableRow builds a mountable selectable row.
@@ -44,24 +42,36 @@ func (r *SelectableRow) UpdateProps(fresh tui.Component) {
 		return
 	}
 
+	prevAutoFocus := r.AutoFocus
 	r.Label = f.Label
 	r.Value = f.Value
 	r.Action = f.Action
 	r.Activate = f.Activate
-	r.OnCancel = f.OnCancel
 	r.AutoFocus = f.AutoFocus
-	r.ArrowPad = f.ArrowPad
+
+	if !prevAutoFocus && r.AutoFocus && !r.IsFocused() {
+		r.Focus(r.App())
+	}
+}
+
+// Arrow returns the selected-row marker. AutoFocus is treated as a declarative
+// selected seed so the marker can appear immediately while the focus graph
+// catches up.
+func (r *SelectableRow) Arrow() string {
+	if r.AutoFocus {
+		return SelectArrowFocused
+	}
+	return r.SelectBase.Arrow()
 }
 
 func (r *SelectableRow) Init() func() {
-	if !r.AutoFocus {
+	if !r.AutoFocus || r.IsFocused() {
 		return nil
 	}
 
-	// Seed the visible marker immediately so the first render can show the
-	// child row as focused even though go-tui resolves the fresh ref only
-	// after render. The queued focus handoff then aligns the real focus
-	// manager with that visible trap state.
+	// Seed the visible marker once on mount so the first frame can show the
+	// selected row immediately. AutoFocus is a mount/update hint, not a
+	// per-render side effect.
 	r.focused.Set(true)
 	if r.app != nil {
 		r.Focus(r.app)
@@ -70,49 +80,30 @@ func (r *SelectableRow) Init() func() {
 }
 
 func (r *SelectableRow) Render(app *tui.App) *tui.Element {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
+	// Render stays pure; one-shot autofocus seeding happens in Init or
+	// UpdateProps, while Arrow() may read the declarative seed to draw the
+	// marker immediately.
+	root := ActionRow(r.Arrow(), r.Label, r.Value, r.Action,
 		tui.WithFocusable(true),
 		tui.WithAutoFocus(r.AutoFocus),
 		tui.WithOnFocus(r.OnFocus),
 		tui.WithOnBlur(r.OnBlur),
 		tui.WithOnActivate(r.Activate),
 	)
-	arrowWidth := selectableRowArrowWidth + r.ArrowPad
-	if arrowWidth < 1 {
-		arrowWidth = 1
-	}
-	root.AddChild(tui.New(tui.WithText(r.Arrow()), tui.WithWidth(arrowWidth)))
-	root.AddChild(tui.New(tui.WithText(r.Label), tui.WithWidth(selectableRowLabelWidth)))
-	// Keep the value field single-line and leave one explicit separator cell
-	// before the action label so long values cannot bleed into the action.
-	root.AddChild(tui.New(
-		tui.WithText(r.Value),
-		tui.WithWidth(ActionRowValueWidth),
-		tui.WithWrap(false),
-		tui.WithTruncate(true),
-	))
-	root.AddChild(tui.New(tui.WithWidth(selectableRowActionGapWidth)))
-	root.AddChild(tui.New(tui.WithText(r.Action)))
 	if r.Ref != nil {
 		r.Ref.Set(root)
 	}
 	return root
 }
 
+// KeyMap returns the keyboard bindings for activation and traversal.
+// Escape is NOT handled here — the containing FocusableControl owns it.
 func (r *SelectableRow) KeyMap() tui.KeyMap {
-	km := r.WithTraversal(ActivateFocused(func(tui.KeyEvent) {
+	return r.WithTraversal(ActivateFocused(func(tui.KeyEvent) {
 		if r.Activate != nil {
 			r.Activate()
 		}
 	}))
-	if r.OnCancel != nil {
-		km = append(km, tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) {
-			r.OnCancel()
-		}))
-	}
-	return km
 }
 
 var (

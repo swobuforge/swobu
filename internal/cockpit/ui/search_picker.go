@@ -24,6 +24,9 @@ type SearchOption struct {
 // and keyword match. The picker renders only a bounded visible window with
 // a "N of M shown" footer and keyboard navigation (↑↓ PgUp PgDn Enter Esc).
 //
+// Escape is handled by the containing FocusableControl, which calls the
+// picker's OnCancel. SearchPicker does not claim Escape directly.
+//
 // SearchPicker does not own option semantics; callers provide the option slice
 // and OnSelect/OnCancel callbacks.
 type SearchPicker struct {
@@ -34,6 +37,8 @@ type SearchPicker struct {
 	Offset     *tui.State[int]
 	Options    []SearchOption
 	MaxVisible int
+	// AutoFocus seeds the picker as selected on mount, or on the first
+	// transition from false to true on an already-mounted picker.
 	AutoFocus  bool
 	OnSelect   func(SearchOption)
 	OnCancel   func()
@@ -72,17 +77,22 @@ func (p *SearchPicker) UpdateProps(fresh tui.Component) {
 	if !ok {
 		return
 	}
+	prevAutoFocus := p.AutoFocus
 	p.Title = f.Title
 	p.Options = append([]SearchOption(nil), f.Options...)
 	p.MaxVisible = f.MaxVisible
 	p.AutoFocus = f.AutoFocus
 	p.OnSelect = f.OnSelect
 	p.OnCancel = f.OnCancel
+
+	if !prevAutoFocus && p.AutoFocus && !p.IsFocused() {
+		p.Focus(p.app)
+	}
 }
 
 // Init seeds the visible focus marker when the picker is configured to autofocus.
 func (p *SearchPicker) Init() func() {
-	if !p.AutoFocus {
+	if !p.AutoFocus || p.IsFocused() {
 		return nil
 	}
 
@@ -113,13 +123,15 @@ func (p *SearchPicker) UnbindApp() {
 }
 
 // KeyMap returns the keyboard bindings for query editing, cursor movement,
-// selection, and cancellation. All bindings are focus-gated on the picker.
+// and selection. All bindings are focus-gated on the picker.
+//
+// Escape is NOT listed here — the parent FocusableControl owns it and calls
+// OnCancel from OnExit.
 func (p *SearchPicker) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
 		tui.OnFocused(tui.AnyRune, p.onType),
 		tui.OnFocused(tui.KeyBackspace, p.onBackspace),
 		tui.OnFocused(tui.KeyEnter, p.onEnter),
-		tui.OnFocused(tui.KeyEscape, p.onEscape),
 		tui.OnFocused(tui.KeyUp, p.onUp),
 		tui.OnFocused(tui.KeyDown, p.onDown),
 		tui.OnFocused(tui.KeyPageUp, p.onPageUp),
@@ -171,7 +183,7 @@ func (p *SearchPicker) renderTitle() *tui.Element {
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithWidthPercent(100),
 	)
-	row.AddChild(tui.New(tui.WithWidth(selectableRowArrowWidth)))
+	row.AddChild(tui.New(tui.WithWidth(2)))
 	row.AddChild(tui.New(tui.WithText(p.Title)))
 	return row
 }
@@ -181,7 +193,7 @@ func (p *SearchPicker) renderQuery() *tui.Element {
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithWidthPercent(100),
 	)
-	row.AddChild(tui.New(tui.WithWidth(selectableRowArrowWidth)))
+	row.AddChild(tui.New(tui.WithWidth(2)))
 	row.AddChild(tui.New(tui.WithText("search"), tui.WithWidth(searchPickerQueryWidth)))
 	row.AddChild(tui.New(tui.WithText(p.Query.Get())))
 	if p.IsFocused() {
@@ -200,7 +212,7 @@ func (p *SearchPicker) renderOption(opt SearchOption, highlighted bool) *tui.Ele
 	if highlighted {
 		arrow = SelectArrowFocused
 	}
-	row.AddChild(tui.New(tui.WithText(arrow), tui.WithWidth(selectableRowArrowWidth)))
+	row.AddChild(tui.New(tui.WithText(arrow), tui.WithWidth(2)))
 	row.AddChild(tui.New(
 		tui.WithText(opt.Label),
 		tui.WithTruncate(true),
@@ -223,7 +235,7 @@ func (p *SearchPicker) renderFooter(shown, total int) *tui.Element {
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithWidthPercent(100),
 	)
-	row.AddChild(tui.New(tui.WithWidth(selectableRowArrowWidth)))
+	row.AddChild(tui.New(tui.WithWidth(2)))
 
 	row.AddChild(tui.New(tui.WithText(fmt.Sprintf("%d of %d shown", shown, total))))
 	row.AddChild(tui.New(tui.WithWidth(ActionRowValueWidth)))

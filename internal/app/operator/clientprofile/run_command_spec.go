@@ -79,7 +79,7 @@ func ResolveRunCommand(clientID, baseURL, modelID string) (RunCommandSpec, bool)
 	}
 	vars := buildTemplateVars(baseURL, spec.Vars)
 	if model := strings.TrimSpace(modelID); model != "" { // swobu:io-string source=boundary
-		vars["primary_model"] = model
+		vars["default_model"] = model
 	}
 	command := RunCommandSpec{
 		ClientID: strings.TrimSpace(clientID), // swobu:io-string source=boundary

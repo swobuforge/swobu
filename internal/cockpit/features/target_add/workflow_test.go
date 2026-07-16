@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -71,6 +72,78 @@ func TestWorkflow_ChoosingProviderRendersBoundedPicker(t *testing.T) {
 	}
 	if strings.Contains(rendered, "base URL") || strings.Contains(rendered, "credential") || strings.Contains(rendered, "model _") || strings.Contains(rendered, "provider/model") {
 		t.Fatalf("provider picker should not leak setup or raw input rows:\n%s", rendered)
+	}
+}
+
+func TestWorkflow_ProviderPickerFilters(t *testing.T) {
+	opts := []readmodel.ProviderOptionReadModel{
+		{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
+		{ProviderSpec: "chatgpt", DisplayName: "ChatGPT", SetupHint: "browser login"},
+		{ProviderSpec: "anthropic", DisplayName: "Anthropic", SetupHint: "API key"},
+		{ProviderSpec: "openrouter", DisplayName: "OpenRouter", SetupHint: "API key"},
+		{ProviderSpec: "ollama", DisplayName: "Ollama", SetupHint: "none"},
+		{ProviderSpec: "azure", DisplayName: "Azure AI Foundry", SetupHint: "endpoint"},
+		{ProviderSpec: "openai_compatible", DisplayName: "OpenAI Compatible", SetupHint: "endpoint"},
+	}
+
+	w := NewWorkflow("dev", sampleRoute(), nil, nil, WithProviderOptions(opts))
+	w.Open()
+
+	// Simulate typing "open" via the picker query state.
+	picker := w.providerPicker()
+	picker.Query.Set("open")
+
+	rendered, err := mountedrender.String(w, 120, 20)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+
+	// Prefix: OpenAI, OpenRouter. Token-subsequence: OpenAI Compatible.
+	// ChatGPT does NOT match "open" (spec=chatgpt, display=ChatGPT).
+	if !strings.Contains(rendered, "3 of 7 shown") {
+		t.Fatalf("expected '3 of 7 shown' footer after filtering:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Ollama") {
+		t.Fatalf("filtered list should NOT contain Ollama:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Anthropic") {
+		t.Fatalf("filtered list should NOT contain Anthropic:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Azure AI Foundry") {
+		t.Fatalf("filtered list should NOT contain Azure AI Foundry:\n%s", rendered)
+	}
+	for _, want := range []string{"OpenAI", "OpenRouter", "OpenAI Compatible"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("filtered list missing %q:\n%s", want, rendered)
+		}
+	}
+	if !strings.Contains(rendered, "> OpenAI") {
+		t.Fatalf("expected OpenAI to be focused after filtering:\n%s", rendered)
+	}
+}
+
+func TestWorkflow_ProviderPickerNoResults(t *testing.T) {
+	opts := []readmodel.ProviderOptionReadModel{
+		{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
+		{ProviderSpec: "ollama", DisplayName: "Ollama", SetupHint: "none"},
+	}
+
+	w := NewWorkflow("dev", sampleRoute(), nil, nil, WithProviderOptions(opts))
+	w.Open()
+
+	picker := w.providerPicker()
+	picker.Query.Set("xyz")
+
+	rendered, err := mountedrender.String(w, 120, 20)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+
+	if !strings.Contains(rendered, "0 of 2 shown") {
+		t.Fatalf("expected '0 of 2 shown' footer for empty search:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "provider") {
+		t.Fatalf("expected 'provider' title in empty picker:\n%s", rendered)
 	}
 }
 
@@ -569,6 +642,24 @@ func TestWorkflow_DefaultPlacementFallbackAfterLastStep(t *testing.T) {
 	}
 }
 
+func TestWorkflow_DefaultPlacementForEmptyRouteIsStep1(t *testing.T) {
+	w := NewWorkflow("dev", readmodel.RouteReadModel{ID: "gpt", ModelName: "gpt"}, nil, nil)
+
+	p := w.Placement.Get()
+	if p.Rank != 1 {
+		t.Fatalf("default rank = %d, want 1", p.Rank)
+	}
+	if p.Weight != 1 {
+		t.Fatalf("default weight = %d, want 1", p.Weight)
+	}
+	if p.Kind != readmodel.PlacementFallback {
+		t.Fatalf("kind = %v, want Fallback", p.Kind)
+	}
+	if got, want := p.Summary(), "step 1"; got != want {
+		t.Fatalf("default placement summary = %q, want %q", got, want)
+	}
+}
+
 func TestWorkflow_UpdatePropsRefreshesRouteAndSave(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 	w1 := NewWorkflow("dev", sampleRoute(), nil, nil)
@@ -751,6 +842,54 @@ func TestWorkflow_CreateUsesSelectedPlacement(t *testing.T) {
 	}
 }
 
+func TestWorkflow_FirstTargetSkipsPlacementPicker(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	var request ports.SaveTargetRequest
+	w := NewWorkflow("dev", readmodel.RouteReadModel{ID: "gpt", ModelName: "gpt"}, func(_ context.Context, req ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
+		request = req
+		return readmodel.TargetReadModel{ID: "target-new"}, nil
+	}, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: []readmodel.ModelDeploymentReadModel{
+			{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+		},
+	})
+	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"})
+
+	rendered, err := mountedrender.String(w, 120, 40)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseReadyToCreate {
+		t.Fatalf("phase = %v, want ReadyToCreate", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "step 1") {
+		t.Fatalf("expected fixed first-target placement summary:\n%s", rendered)
+	}
+	if got := strings.Count(rendered, "change ↵"); got != 2 {
+		t.Fatalf("first target should only expose provider/model change actions, got %d:\n%s", got, rendered)
+	}
+	if strings.Contains(rendered, "choose placement") {
+		t.Fatalf("first target should not render a placement chooser:\n%s", rendered)
+	}
+
+	w.OpenPlacementPicker()
+	if w.Phase.Get() != PhaseReadyToCreate {
+		t.Fatalf("empty-route placement picker should be a no-op, got %v", w.Phase.Get())
+	}
+
+	w.Create(context.Background())
+	if request.Rank != 1 {
+		t.Fatalf("create rank = %d, want 1", request.Rank)
+	}
+	if request.Weight != 1 {
+		t.Fatalf("create weight = %d, want 1", request.Weight)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -779,6 +918,164 @@ func TestWorkflow_CatalogFailedRendersRetryAndManual(t *testing.T) {
 	if !strings.Contains(rendered, "manual") || !strings.Contains(rendered, "enter model id") {
 		t.Fatalf("expected manual entry row in frame:\n%s", rendered)
 	}
+	// Fixture snapshot for catalog failure wireframe.
+	testkit.AssertVisual("catalog_failed").
+		Fixture("testdata/target_add_workflow/fixture/catalog_failed.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
+}
+
+func TestWorkflow_ModelPickerRendersBoundedModelList(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: []readmodel.ModelDeploymentReadModel{
+			{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+			{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", ModelName: "gpt-4.1-mini", DefaultProviderProtocol: "chat_completions"},
+			{ID: "gpt-4o", Name: "GPT-4o", ModelName: "gpt-4o", DefaultProviderProtocol: "chat_completions"},
+			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", ModelName: "gpt-4o-mini", DefaultProviderProtocol: "chat_completions"},
+			{ID: "gpt-4", Name: "GPT-4", ModelName: "gpt-4", DefaultProviderProtocol: "chat_completions"},
+			{ID: "gpt-3.5-turbo", Name: "GPT-3.5", ModelName: "gpt-3.5-turbo", DefaultProviderProtocol: "chat_completions"},
+		},
+	})
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseChoosingModel {
+		t.Fatalf("phase = %v, want ChoosingModel", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "6 of 6 shown") {
+		t.Fatalf("expected '6 of 6 shown' footer in model picker:\n%s", rendered)
+	}
+	// Should show some models.
+	if !strings.Contains(rendered, "GPT-4.1") {
+		t.Fatalf("expected GPT-4.1 in model picker:\n%s", rendered)
+	}
+	// Fixture snapshot for model picker wireframe.
+	testkit.AssertVisual("model_picker").
+		Fixture("testdata/target_add_workflow/fixture/model_picker.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+}
+
+func TestWorkflow_OllamaNoCredential(t *testing.T) {
+	w := NewWorkflow("dev", readmodel.RouteReadModel{ID: "gpt", ModelName: "gpt"}, nil, nil)
+	w.Open()
+	w.SelectProvider("ollama")
+	w.ContinueSetup()
+
+	if w.Phase.Get() != PhaseLoadingCatalog {
+		t.Fatalf("phase = %v, want LoadingCatalog", w.Phase.Get())
+	}
+	if !w.CatalogLoading.Get() {
+		t.Fatal("catalog loading should be active for Ollama")
+	}
+	if w.CredentialRef.Get() != "" {
+		t.Fatalf("credential ref should be empty for Ollama, got %q", w.CredentialRef.Get())
+	}
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if strings.Contains(rendered, "credential") {
+		t.Fatalf("Ollama setup should NOT show credential row:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "loading catalog") {
+		t.Fatalf("expected catalog loading row for Ollama:\n%s", rendered)
+	}
+
+	// After probe, Ollama model picker appears from static catalog.
+	w.ProbeCatalog()
+	if w.Phase.Get() != PhaseChoosingModel {
+		t.Fatalf("phase = %v, want ChoosingModel after Ollama probe", w.Phase.Get())
+	}
+
+	rendered2, _ := mountedrender.String(w, 120, 24)
+	if !strings.Contains(rendered2, "Llama 3.2 3B") {
+		t.Fatalf("expected Ollama model list after probe:\n%s", rendered2)
+	}
+	// Fixture snapshot for Ollama model picker wireframe.
+	testkit.AssertVisual("ollama_model_picker").
+		Fixture("testdata/target_add_workflow/fixture/ollama_model_picker.txt").
+		Viewport(120, 24).
+		Now(t, rendered2)
+}
+
+func TestWorkflow_ReadyToCreateRender(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: []readmodel.ModelDeploymentReadModel{
+			{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+		},
+	})
+	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"})
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseReadyToCreate {
+		t.Fatalf("phase = %v, want ReadyToCreate", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "create") {
+		t.Fatalf("expected create row in ready state:\n%s", rendered)
+	}
+	// Model is shown as its ModelName (not display name).
+	if !strings.Contains(rendered, "gpt-4.1") {
+		t.Fatalf("expected selected model in ready state:\n%s", rendered)
+	}
+	// Fixture snapshot for ready-to-create wireframe (existing route with targets).
+	testkit.AssertVisual("ready_to_create").
+		Fixture("testdata/target_add_workflow/fixture/ready_to_create.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+}
+
+func TestWorkflow_FirstTargetReadyNoPlacementPicker(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", readmodel.RouteReadModel{ID: "gpt", ModelName: "gpt"}, nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: []readmodel.ModelDeploymentReadModel{
+			{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+		},
+	})
+	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"})
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseReadyToCreate {
+		t.Fatalf("phase = %v, want ReadyToCreate", w.Phase.Get())
+	}
+	// First target shows fixed placement "step 1" as read-only (no action).
+	if !strings.Contains(rendered, "step 1") {
+		t.Fatalf("expected 'step 1' fixed placement for first target:\n%s", rendered)
+	}
+	// Verify the placement row line does NOT have "change" — it is read-only.
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "placement") && strings.Contains(line, "change") {
+			t.Fatalf("first target placement should NOT be changeable:\n%s", line)
+		}
+	}
+	// Fixture snapshot for first-target ready wireframe.
+	testkit.AssertVisual("first_target_ready").
+		Fixture("testdata/target_add_workflow/fixture/first_target_ready.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
 }
 
 func TestWorkflow_RetryCatalogReprobes(t *testing.T) {

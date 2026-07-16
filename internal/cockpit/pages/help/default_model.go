@@ -9,7 +9,7 @@ func DefaultModel() readmodel.HelpReadModel {
 		Version:        "swobu",
 		CockpitVersion: "cockpit v2",
 		DocsURL:        "swobu.com/docs",
-		CommunityURL:   "https://discord.gg/swobu",
+		CommunityURL:   "https://discord.gg/UejYpMGmw",
 		IssueURL:       "https://github.com/swobuforge/swobu/issues/new",
 	}
 }

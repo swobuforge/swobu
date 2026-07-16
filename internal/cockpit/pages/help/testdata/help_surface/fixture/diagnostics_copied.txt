@@ -5,5 +5,5 @@
      docs              unavailable · link missing
      community         unavailable · link missing
      issue             unavailable · link missing
-     diagnostics       copied · paste into issue/Discord   copy ↵
+     diagnostics       copied · paste into issue/Discord                    copy ↵
 

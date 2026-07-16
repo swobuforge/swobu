@@ -18,14 +18,14 @@ import (
 )
 
 type fakeOperatorClient struct {
-	endpoints []operatorclient.EndpointData
-	status    operatorclient.StatusProjection
-	statusErr error
-	getErr    error
-	deleted   string
-	upserted  operatorclient.EndpointData
-	modelCatalogResult  operatorclient.ModelCatalogResult
-	modelCatalogErr     error
+	endpoints          []operatorclient.EndpointData
+	status             operatorclient.StatusProjection
+	statusErr          error
+	getErr             error
+	deleted            string
+	upserted           operatorclient.EndpointData
+	modelCatalogResult operatorclient.ModelCatalogResult
+	modelCatalogErr    error
 }
 
 func (f *fakeOperatorClient) ListEndpoints(context.Context) ([]operatorclient.EndpointData, error) {
@@ -284,11 +284,11 @@ func TestLiveOperatorAdapter_ResolveProviderSetupRequiresBaseURLForOpenAICompati
 	if !setup.RequiresBaseURL {
 		t.Fatal("openai-compatible should require an explicit base URL")
 	}
-	if setup.CredentialLabel != "enter base URL" {
-		t.Fatalf("credential label = %q, want enter base URL", setup.CredentialLabel)
+	if setup.CredentialLabel != "enter backend URL" {
+		t.Fatalf("credential label = %q, want enter backend URL", setup.CredentialLabel)
 	}
-	if setup.BlockReason != "enter base URL" {
-		t.Fatalf("block reason = %q, want enter base URL", setup.BlockReason)
+	if setup.BlockReason != "enter backend URL" {
+		t.Fatalf("block reason = %q, want enter backend URL", setup.BlockReason)
 	}
 	if setup.ReadyForCatalog {
 		t.Fatal("openai-compatible without a base URL should not be ready for catalog")
@@ -547,7 +547,8 @@ func TestLiveOperatorAdapter_ListActivityMapsStatusProjection(t *testing.T) {
 		status: operatorclient.StatusProjection{
 			RecentTraffic: []operatorclient.RecentTrafficRow{{
 				RequestID:     "req-1",
-				ClientFamily:  "codex",
+				ClientHandler: "codex",
+				ClientFamily:  "responses",
 				Route:         "gpt",
 				Result:        "success",
 				StatusCode:    200,
@@ -1244,13 +1245,20 @@ func (c *cancelAwareOperatorClient) ProbeModelCatalog(context.Context, string, s
 
 func newLiveOperatorAdapterWithClient(client operatorClient, daemonURL string) *LiveOperatorAdapter {
 	adapter := &LiveOperatorAdapter{
-		client:    client,
-		daemonURL: strings.TrimRight(config.ResolveDaemonURL(daemonURL), "/"),
-		commandIO: processRunCommandIO(),
+		client:           client,
+		daemonURL:        strings.TrimRight(config.ResolveDaemonURL(daemonURL), "/"),
+		helpDocsURL:      "https://swobu.com/docs",
+		helpCommunityURL: "https://discord.gg/UejYpMGmw",
+		helpIssueURL:     "https://github.com/swobuforge/swobu/issues/new",
+		commandIO:        processRunCommandIO(),
 	}
 	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
 		return executeClientRunCommand(ctx, command, adapter.commandIO)
 	}
+	// Inject no-op side effects for tests to avoid hanging on clipboard
+	// initialisation or firing browsers.
+	adapter.copyText = func(string) (bool, error) { return true, nil }
+	adapter.openURL = func(string) error { return nil }
 	return adapter
 }
 

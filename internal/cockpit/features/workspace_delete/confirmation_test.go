@@ -68,10 +68,14 @@ func TestConfirmation_ActivateRequiresTwoEnters(t *testing.T) {
 	}
 }
 
-func TestConfirmation_KeyMap_AlwaysNil(t *testing.T) {
+func TestConfirmation_KeyMap_NilWhenClosed(t *testing.T) {
 	confirmation := Confirmation(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
 	if confirmation.KeyMap() != nil {
-		t.Fatalf("confirmation.KeyMap should always return nil; Escape is on the mounted SelectableRow via OnCancel")
+		t.Fatalf("confirmation.KeyMap should return nil when closed")
+	}
+	confirmation.Request("dev")
+	if confirmation.KeyMap() == nil {
+		t.Fatalf("confirmation.KeyMap should return Escape binding when open")
 	}
 }
 
@@ -139,7 +143,7 @@ func TestConfirmation_FocusedRowShowsMarker(t *testing.T) {
 	h.FocusNext()
 
 	frame := h.Frame()
-	testkit.AssertFocusedFrame(t, frame, ">    delete")
+	testkit.AssertFocusedFrame(t, frame, "> delete")
 	if !strings.Contains(frame, "delete ↵") {
 		t.Fatalf("frame missing delete action label:\n%s", frame)
 	}

@@ -34,11 +34,12 @@ const (
 	PhaseFailed
 )
 
-// Workflow owns the workspace slug lifecycle row: edit for unchanged existing
-// workspaces, save for changed existing workspaces, and create for draft
-// workspaces.
+// Workflow owns the workspace slug lifecycle row.
+//
+// The shared EditableRow component owns the focus shell, cursor, and inline
+// text editing. Workflow owns the higher-level create/edit lifecycle, submit
+// seam, and validation projection that turns slug state into RFC grammar.
 type Workflow struct {
-	ui.SelectBase
 	Workspace   readmodel.WorkspaceReadModel
 	Phase       *tui.State[Phase]
 	Mode        *tui.State[Mode]
@@ -47,10 +48,10 @@ type Workflow struct {
 	Error       *tui.State[string]
 	Save        SaveFunc
 	OnSaved     func(readmodel.WorkspaceReadModel)
+
+	row *ui.EditableRow
 }
 
-// workflowKey mirrors the section mount key so focus repair sees one stable
-// row identity per workspace slot.
 func workflowKey(workspace readmodel.WorkspaceReadModel) string {
 	if workspace.ID != "" {
 		return "workspace-edit:" + string(workspace.ID)
@@ -61,26 +62,8 @@ func workflowKey(workspace readmodel.WorkspaceReadModel) string {
 	return "workspace-edit:+"
 }
 
-func (w *Workflow) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*Workflow)
-	if !ok {
-		return
-	}
-	// Reset the local row state when the workspace identity or lifecycle flips.
-	// That prevents a promoted draft row from leaking its submit values into the
-	// fresh draft slot after refresh.
-	reseed := w.Workspace.ID != f.Workspace.ID || w.Workspace.State != f.Workspace.State
-	w.Workspace = f.Workspace
-	w.Save = f.Save
-	w.OnSaved = f.OnSaved
-	if reseed {
-		w.seedFromWorkspace(f.Workspace)
-	}
-}
-
 func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved func(readmodel.WorkspaceReadModel)) *Workflow {
-	workflow := &Workflow{
-		SelectBase:  ui.NewSelectBase(workflowKey(workspace)),
+	w := &Workflow{
 		Workspace:   workspace,
 		Phase:       tui.NewState(PhaseViewing),
 		Mode:        tui.NewState(ModeEdit),
@@ -90,102 +73,129 @@ func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved 
 		Save:        save,
 		OnSaved:     onSaved,
 	}
-	workflow.seedFromWorkspace(workspace)
-	return workflow
+	w.row = ui.NewEditableRow(workflowKey(workspace), "slug", w.Slug)
+	w.row.ValueWidth = 32
+	w.row.OnActivate = func() { w.Activate() }
+	w.row.OnSubmit = func(_ string) { w.Submit(context.Background()) }
+	w.row.OnClose = func() { w.cancelFromRow() }
+	w.seedFromWorkspace(workspace)
+	w.syncRow()
+	return w
+}
+
+func (w *Workflow) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*Workflow)
+	if !ok {
+		return
+	}
+	reseed := w.Workspace.ID != f.Workspace.ID || w.Workspace.State != f.Workspace.State
+	w.Workspace = f.Workspace
+	w.Save = f.Save
+	w.OnSaved = f.OnSaved
+	if reseed {
+		w.seedFromWorkspace(f.Workspace)
+	}
+	w.syncRow()
 }
 
 func (w *Workflow) OpenEditor(workspace readmodel.WorkspaceReadModel) {
 	w.seedFromWorkspace(workspace)
 	w.Mode.Set(ModeEdit)
 	w.Phase.Set(PhaseEditing)
-	w.OnFocus(nil)
+	w.row.Open()
+	w.syncRow()
 }
 
 func (w *Workflow) OpenCreate() {
 	w.seedFromWorkspace(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft})
-	w.OnFocus(nil)
+	w.row.Open()
+	w.syncRow()
 }
 
-// BindApp wires the workflow's focus state into the app so the selected row can
-// redraw its marker when focus changes.
 func (w *Workflow) BindApp(app *tui.App) {
-	w.SelectBase.BindApp(app)
+	w.Phase.BindApp(app)
+	w.Mode.BindApp(app)
+	w.WorkspaceID.BindApp(app)
+	w.Slug.BindApp(app)
+	w.Error.BindApp(app)
+	w.row.BindApp(app)
 }
 
-// UnbindApp releases the cached app handle when the workflow leaves the tree.
 func (w *Workflow) UnbindApp() {
-	w.SelectBase.UnbindApp()
+	w.row.UnbindApp()
+}
+
+func (w *Workflow) Watchers() []tui.Watcher {
+	return w.row.Watchers()
 }
 
 func (w *Workflow) Back() bool {
 	if !w.IsEditing() {
 		return false
 	}
-	w.cancel()
+	w.row.Cancel()
 	return true
 }
 
 func (w *Workflow) KeyMap() tui.KeyMap {
-	if !w.IsEditing() {
-		return nil
-	}
-	return tui.KeyMap{
-		tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { w.Back() }),
-	}
+	return w.row.KeyMap()
 }
 
-func (w *Workflow) closeEdit() {
-	w.Error.Set("")
-	if w.Mode.Get() == ModeCreate {
-		w.Phase.Set(PhaseEditing)
-		return
-	}
-	w.Phase.Set(PhaseViewing)
-}
-
-func (w *Workflow) cancel() {
-	w.Error.Set("")
-	w.Slug.Set(w.Workspace.Slug)
-	w.closeEdit()
+// RowComponent syncs the child row props before render and returns the shared
+// input row component for templ mounting.
+func RowComponent(w *Workflow) tui.Component {
+	w.syncRow()
+	return w.row
 }
 
 func (w *Workflow) seedFromWorkspace(workspace readmodel.WorkspaceReadModel) {
 	w.Workspace = workspace
-	w.SelectBase.ID = workflowKey(workspace)
 	w.WorkspaceID.Set(workspace.ID)
 	w.Slug.Set(workspace.Slug)
 	w.Error.Set("")
 	if workspace.IsDraft() {
 		w.Mode.Set(ModeCreate)
 		w.Phase.Set(PhaseEditing)
-		w.OnFocus(nil)
+		w.row.Open()
 		return
 	}
 	w.Mode.Set(ModeEdit)
 	w.Phase.Set(PhaseViewing)
+	w.row.Close()
+}
+
+func (w *Workflow) cancelFromRow() {
+	w.Error.Set("")
+	w.Slug.Set(w.Workspace.Slug)
+	w.Phase.Set(PhaseViewing)
+	w.syncRow()
+}
+
+func (w *Workflow) closeEdit() {
+	w.Error.Set("")
+	w.Phase.Set(PhaseViewing)
+	w.row.Close()
 }
 
 func (w *Workflow) IsEditing() bool {
 	return w.Phase.Get() == PhaseEditing || w.Phase.Get() == PhaseFailed || w.Phase.Get() == PhaseSubmitting
 }
 
-// Arrow returns the row marker for the workspace slug interaction scope.
-// Editing means the mounted input is the active descendant of this row; the
-// row marker remains the same selection grammar used by view-mode rows.
 func (w *Workflow) Arrow() string {
-	return w.ArrowWithActiveDescendant(w.IsEditing())
+	return w.row.Arrow()
 }
 
 func (w *Workflow) Activate() {
-	if w.Mode.Get() == ModeEdit && !w.IsEditing() {
+	if !w.IsEditing() {
 		w.Phase.Set(PhaseEditing)
-		w.OnFocus(nil)
+		w.row.Open()
+		w.syncRow()
 		return
 	}
 	if w.ErrorMessage() != "" {
 		return
 	}
-	slug := strings.TrimSpace(w.Slug.Get()) // swobu:io-string source=boundary
+	slug := strings.TrimSpace(w.Slug.Get())
 	if w.Mode.Get() == ModeEdit && slug == w.Workspace.Slug {
 		w.closeEdit()
 		return
@@ -198,50 +208,22 @@ func (w *Workflow) Submit(ctx context.Context) {
 	if err != nil {
 		w.Error.Set(err.Error())
 		w.Phase.Set(PhaseFailed)
-		return
-	}
-	if w.Mode.Get() == ModeCreate {
-		if w.Save == nil {
-			w.Error.Set("workspace save is not wired yet")
-			w.Phase.Set(PhaseFailed)
-			return
-		}
-		w.Error.Set("")
-		w.Phase.Set(PhaseSubmitting)
-		workspace, err := w.Save(ctx, ports.SaveWorkspaceRequest{
-			ID:   w.WorkspaceID.Get(),
-			Slug: slug,
-		})
-		if err != nil {
-			w.Error.Set(err.Error())
-			w.Phase.Set(PhaseFailed)
-			return
-		}
-		w.Workspace = workspace
-		w.WorkspaceID.Set(workspace.ID)
-		w.Slug.Set(workspace.Slug)
-		w.Mode.Set(ModeEdit)
-		w.closeEdit()
-		if w.OnSaved != nil {
-			w.OnSaved(workspace)
-		}
+		w.syncRow()
 		return
 	}
 	if w.Save == nil {
 		w.Error.Set("workspace save is not wired yet")
 		w.Phase.Set(PhaseFailed)
+		w.syncRow()
 		return
 	}
-
 	w.Error.Set("")
 	w.Phase.Set(PhaseSubmitting)
-	workspace, err := w.Save(ctx, ports.SaveWorkspaceRequest{
-		ID:   w.WorkspaceID.Get(),
-		Slug: slug,
-	})
+	workspace, err := w.Save(ctx, ports.SaveWorkspaceRequest{ID: w.WorkspaceID.Get(), Slug: slug})
 	if err != nil {
 		w.Error.Set(err.Error())
 		w.Phase.Set(PhaseFailed)
+		w.syncRow()
 		return
 	}
 	if w.OnSaved != nil {
@@ -252,6 +234,7 @@ func (w *Workflow) Submit(ctx context.Context) {
 	w.Slug.Set(workspace.Slug)
 	w.Mode.Set(ModeEdit)
 	w.closeEdit()
+	w.syncRow()
 }
 
 func (w *Workflow) SubmitSlug(value string) {
@@ -260,7 +243,13 @@ func (w *Workflow) SubmitSlug(value string) {
 }
 
 func (w *Workflow) ActionLabel() string {
-	if w.visibleError() != "" {
+	if msg := strings.TrimSpace(w.ErrorMessage()); msg != "" {
+		if msg == "enter a workspace slug" {
+			return "required"
+		}
+		if isDuplicateError(msg) {
+			return "duplicate"
+		}
 		return "invalid"
 	}
 	if w.Mode.Get() == ModeCreate {
@@ -273,18 +262,21 @@ func (w *Workflow) ActionLabel() string {
 }
 
 func (w *Workflow) ValueLabel() string {
-	if w.Slug.Get() != "" {
+	if slug := strings.TrimSpace(w.Slug.Get()); slug != "" {
 		return w.Slug.Get()
 	}
-	if w.Mode.Get() == ModeCreate {
-		return "_"
-	}
-	return w.Workspace.Slug
+	return ""
 }
 
 func (w *Workflow) ErrorMessage() string {
-	slug := strings.TrimSpace(w.Slug.Get()) // swobu:io-string source=boundary
+	if msg := strings.TrimSpace(w.Error.Get()); msg != "" {
+		return msg
+	}
+	slug := strings.TrimSpace(w.Slug.Get())
 	if slug == "" {
+		if w.Mode.Get() == ModeCreate {
+			return "enter a workspace slug"
+		}
 		return ""
 	}
 	if _, err := NormalizeSlug(slug); err != nil {
@@ -293,20 +285,17 @@ func (w *Workflow) ErrorMessage() string {
 	return ""
 }
 
-// visibleError keeps validation and submit failures on the row itself.
-// Without this, a rejected save reads like a no-op and the PTY proof lane
-// waits forever for a success state that never arrives.
 func (w *Workflow) visibleError() string {
-	if msg := w.ErrorMessage(); msg != "" {
-		return msg
-	}
-	return strings.TrimSpace(w.Error.Get())
+	return w.ErrorMessage()
 }
 
 func (w *Workflow) ClientBaseURLPreview() string {
+	if msg := strings.TrimSpace(w.ErrorMessage()); msg != "" {
+		return "after create"
+	}
 	slug, err := NormalizeSlug(w.Slug.Get())
 	if err != nil {
-		return "(derived from slug)"
+		return "after create"
 	}
 	baseURL := w.Workspace.ClientBaseURL
 	if baseURL == "" {
@@ -319,10 +308,48 @@ func (w *Workflow) ClientBaseURLPreview() string {
 	return baseURL
 }
 
-// NormalizeSlug validates the product-level workspace slug shape used by the
-// Cockpit workflow before command assembly.
+func (w *Workflow) syncRow() {
+	if w.row == nil {
+		return
+	}
+	w.row.Label = "slug"
+	w.row.Value = w.Slug
+	w.row.ValueWidth = 32
+	w.row.Validation = w.rowValidation()
+	w.row.ValidationText = w.ErrorMessage()
+	if w.Mode.Get() == ModeCreate {
+		w.row.ViewAction = "create ↵"
+		w.row.EditAction = "create ↵"
+		return
+	}
+	w.row.ViewAction = "edit ↵"
+	w.row.EditAction = "save ↵"
+}
+
+func (w *Workflow) rowValidation() ui.EditableRowValidation {
+	msg := strings.TrimSpace(w.ErrorMessage())
+	if msg == "" {
+		return ui.EditableRowValidationNone
+	}
+	if msg == "enter a workspace slug" {
+		return ui.EditableRowValidationRequired
+	}
+	if isDuplicateError(msg) {
+		return ui.EditableRowValidationDuplicate
+	}
+	return ui.EditableRowValidationInvalid
+}
+
+func isDuplicateError(msg string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(msg))
+	return strings.Contains(lowered, "conflict") ||
+		strings.Contains(lowered, "duplicate") ||
+		strings.Contains(lowered, "already exists") ||
+		strings.Contains(lowered, "taken")
+}
+
 func NormalizeSlug(raw string) (string, error) {
-	slug := strings.TrimSpace(raw) // swobu:io-string source=boundary
+	slug := strings.TrimSpace(raw)
 	if slug == "" {
 		return "", errors.New("enter a workspace slug")
 	}
@@ -340,3 +367,11 @@ func NormalizeSlug(raw string) (string, error) {
 	}
 	return slug, nil
 }
+
+var (
+	_ tui.Component       = (*Workflow)(nil)
+	_ tui.KeyListener     = (*Workflow)(nil)
+	_ tui.PropsUpdater    = (*Workflow)(nil)
+	_ tui.AppBinder       = (*Workflow)(nil)
+	_ tui.WatcherProvider = (*Workflow)(nil)
+)

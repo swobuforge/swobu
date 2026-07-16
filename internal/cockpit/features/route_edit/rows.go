@@ -1,20 +1,18 @@
 package route_edit
 
 import (
+	"strings"
+
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
-const (
-	// Route edit keeps the wider arrow gutter used by the nested route plane so
-	// the visible cursor lines up with the existing detail grammar.
-	routeEditRowArrowWidth = 8
-	routeEditRowLabelWidth = 15
-)
-
+// routeModelRowView renders the model-name row for route editing.
+// Focus never leaves the row shell; the text surface is an InlineEditor.
 type routeModelRowView struct {
 	ui.SelectBase
 	*Workflow
+	editor *ui.InlineEditor
 }
 
 func routeModelRowKey(w *Workflow) string {
@@ -35,6 +33,14 @@ func (r *routeModelRowView) UpdateProps(fresh tui.Component) {
 	}
 	r.Workflow = f.Workflow
 	r.ID = routeModelRowKey(f.Workflow)
+	// Preserve editor so typing survives re-render.
+}
+
+func (r *routeModelRowView) BindApp(app *tui.App) {
+	r.SelectBase.BindApp(app)
+	if r.editor != nil {
+		r.editor.BindApp(app)
+	}
 }
 
 func (r *routeModelRowView) activate() {
@@ -42,47 +48,56 @@ func (r *routeModelRowView) activate() {
 }
 
 func (r *routeModelRowView) KeyMap() tui.KeyMap {
-	return r.WithTraversal(ui.ActivateFocused(func(tui.KeyEvent) {
-		r.activate()
-	}))
+	w := r.Workflow
+	if !w.IsEditing() {
+		return r.WithTraversal(ui.ActivateFocused(func(tui.KeyEvent) {
+			r.activate()
+		}))
+	}
+	// Edit mode: Escape backs out; typing keys forward into InlineEditor.
+	km := tui.KeyMap{tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { w.Back() })}
+	return r.WithTraversal(append(km, r.editor.TypingKeyMap()...))
 }
 
-func (r *routeModelRowView) Render(app *tui.App) *tui.Element {
+func (r *routeModelRowView) Render(_ *tui.App) *tui.Element {
 	w := r.Workflow
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
+	if w.IsEditing() {
+		// Lazily create InlineEditor on first edit open so it binds to the
+		// correct app. Open sets cursor text from ModelName.
+		if r.editor == nil {
+			r.editor = ui.NewInlineEditor(w.ModelName)
+			r.editor.Width = ui.ActionRowValueWidth
+			r.editor.OnSubmit = func(_ string) {
+				if strings.TrimSpace(w.ModelName.Get()) == "" {
+					return
+				}
+				r.Workflow.ActivateName()
+			}
+			if app := r.App(); app != nil {
+				r.editor.BindApp(app)
+			}
+		}
+		r.editor.SetText(w.ModelName.Get())
+		root := ui.EditRow(
+			r.SelectBase.Arrow(), "model", r.editor.Render(), w.ActionLabel(),
+			tui.WithFocusable(true),
+			tui.WithOnFocus(r.OnFocus),
+			tui.WithOnBlur(r.OnBlur),
+			tui.WithOnActivate(r.activate),
+		)
+		if r.Ref != nil {
+			r.Ref.Set(root)
+		}
+		return root
+	}
+
+	root := ui.ActionRow(
+		r.Arrow(), "model", w.Route.ModelName, w.ActionLabel(),
 		tui.WithFocusable(true),
 		tui.WithOnFocus(r.OnFocus),
 		tui.WithOnBlur(r.OnBlur),
 		tui.WithOnActivate(r.activate),
 	)
-	root.AddChild(tui.New(
-		tui.WithText(r.ArrowWithActiveDescendant(w.IsEditing())),
-		tui.WithWidth(routeEditRowArrowWidth),
-	))
-	root.AddChild(tui.New(
-		tui.WithText("model"),
-		tui.WithWidth(routeEditRowLabelWidth),
-	))
-	if w.IsEditing() {
-		root.AddChild(app.MountPersistent(r, 0, func() tui.Component {
-			return tui.NewInput(
-				tui.WithInputValue(w.ModelName),
-				tui.WithInputAutoFocus(true),
-				tui.WithInputOnSubmit(func(string) {
-					r.activate()
-				}),
-				tui.WithInputWidth(ui.ActionRowValueWidth),
-			)
-		}))
-	} else {
-		root.AddChild(tui.New(
-			tui.WithText(w.Route.ModelName),
-			tui.WithWidth(ui.ActionRowValueWidth),
-		))
-	}
-	root.AddChild(tui.New(tui.WithText(w.ActionLabel())))
 	if r.Ref != nil {
 		r.Ref.Set(root)
 	}
@@ -184,29 +199,14 @@ func (r *routeActionRowView) action() string {
 	}
 }
 
-func (r *routeActionRowView) Render(app *tui.App) *tui.Element {
-	_ = app
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
+func (r *routeActionRowView) Render(_ *tui.App) *tui.Element {
+	root := ui.ActionRow(
+		r.Arrow(), r.label(), r.value(), r.action(),
 		tui.WithFocusable(true),
 		tui.WithOnFocus(r.OnFocus),
 		tui.WithOnBlur(r.OnBlur),
 		tui.WithOnActivate(r.activate),
 	)
-	root.AddChild(tui.New(
-		tui.WithText(r.Arrow()),
-		tui.WithWidth(routeEditRowArrowWidth),
-	))
-	root.AddChild(tui.New(
-		tui.WithText(r.label()),
-		tui.WithWidth(routeEditRowLabelWidth),
-	))
-	root.AddChild(tui.New(
-		tui.WithText(r.value()),
-		tui.WithWidth(ui.ActionRowValueWidth),
-	))
-	root.AddChild(tui.New(tui.WithText(r.action())))
 	if r.Ref != nil {
 		r.Ref.Set(root)
 	}

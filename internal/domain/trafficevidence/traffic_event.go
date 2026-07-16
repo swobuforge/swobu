@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Route identifies the chosen execution destination in traffic-evidence form.
@@ -34,46 +35,116 @@ func (r Route) String() string {
 	return r.providerConfigRef + ":" + r.model
 }
 
-// Timing records observed latency facts without guessing missing values.
+// Timing records request-lifecycle marks and derives latency summaries when
+// projected.
 type Timing struct {
-	ttfbMS    int
-	durMS     int
-	hasTTFBMS bool
-	hasDurMS  bool
+	startedAt    time.Time
+	firstByteAt  time.Time
+	endedAt      time.Time
+	hasStarted   bool
+	hasFirstByte bool
+	hasEnded     bool
 }
 
 func NewUnknownTiming() Timing {
 	return Timing{}
 }
 
+func NewTimingStartedAt(startedAt time.Time) Timing {
+	timing := Timing{}
+	timing.MarkStarted(startedAt)
+	return timing
+}
+
 func NewTimingWithOptional(ttfbMS *int, durMS *int) (Timing, error) {
 	timing := Timing{}
+	base := time.Unix(0, 0)
 	if ttfbMS != nil {
 		if *ttfbMS < 0 {
 			return Timing{}, fmt.Errorf("ttfb must not be negative")
 		}
-		timing.ttfbMS = *ttfbMS
-		timing.hasTTFBMS = true
+		timing.startedAt = base
+		timing.firstByteAt = base.Add(time.Duration(*ttfbMS) * time.Millisecond)
+		timing.hasStarted = true
+		timing.hasFirstByte = true
 	}
 	if durMS != nil {
 		if *durMS < 0 {
 			return Timing{}, fmt.Errorf("duration must not be negative")
 		}
-		timing.durMS = *durMS
-		timing.hasDurMS = true
+		if !timing.hasStarted {
+			timing.startedAt = base
+			timing.hasStarted = true
+		}
+		timing.endedAt = base.Add(time.Duration(*durMS) * time.Millisecond)
+		timing.hasEnded = true
 	}
-	if timing.hasTTFBMS && timing.hasDurMS && timing.durMS < timing.ttfbMS {
+	if timing.hasFirstByte && timing.hasEnded && timing.endedAt.Before(timing.firstByteAt) {
 		return Timing{}, fmt.Errorf("duration must not be less than ttfb")
 	}
 	return timing, nil
 }
 
+func (t *Timing) MarkStarted(startedAt time.Time) {
+	if t == nil || startedAt.IsZero() {
+		return
+	}
+	if t.hasStarted {
+		return
+	}
+	t.startedAt = startedAt
+	t.hasStarted = true
+}
+
+func (t *Timing) MarkFirstByte(firstByteAt time.Time) {
+	if t == nil || firstByteAt.IsZero() {
+		return
+	}
+	if !t.hasStarted || t.hasFirstByte {
+		return
+	}
+	t.firstByteAt = firstByteAt
+	t.hasFirstByte = true
+}
+
+func (t *Timing) MarkEnded(endedAt time.Time) {
+	if t == nil || endedAt.IsZero() {
+		return
+	}
+	t.endedAt = endedAt
+	t.hasEnded = true
+}
+
+func (t Timing) StartedAt() (time.Time, bool) {
+	return t.startedAt, t.hasStarted
+}
+
+func (t Timing) FirstByteAt() (time.Time, bool) {
+	return t.firstByteAt, t.hasFirstByte
+}
+
+func (t Timing) EndedAt() (time.Time, bool) {
+	return t.endedAt, t.hasEnded
+}
+
 func (t Timing) TTFBMillis() (int, bool) {
-	return t.ttfbMS, t.hasTTFBMS
+	if !t.hasStarted || !t.hasFirstByte {
+		return 0, false
+	}
+	if t.firstByteAt.Before(t.startedAt) {
+		return 0, false
+	}
+	return int(t.firstByteAt.Sub(t.startedAt) / time.Millisecond), true
 }
 
 func (t Timing) DurationMillis() (int, bool) {
-	return t.durMS, t.hasDurMS
+	if !t.hasStarted || !t.hasEnded {
+		return 0, false
+	}
+	if t.endedAt.Before(t.startedAt) {
+		return 0, false
+	}
+	return int(t.endedAt.Sub(t.startedAt) / time.Millisecond), true
 }
 
 type TrafficEvent struct {
@@ -97,6 +168,7 @@ type TrafficEvent struct {
 	modelResolutionMode       string
 	modelRequested            string
 	modelResolved             string
+	workspaceRouteModelID     string
 	tokenUsage                TokenUsage
 	wireMutations             []Mutation
 	exchangeDiagnostics       []string
@@ -123,6 +195,7 @@ type TrafficEventInput struct {
 	ModelResolutionMode       string
 	ModelRequested            string
 	ModelResolved             string
+	WorkspaceRouteModelID     string
 	TokenUsage                TokenUsage
 	Mutations                 []Mutation
 	ExchangeDiagnostics       []string
@@ -212,6 +285,7 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 		modelResolutionMode:       normalizedInput.ModelResolutionMode,
 		modelRequested:            normalizedInput.ModelRequested,
 		modelResolved:             normalizedInput.ModelResolved,
+		workspaceRouteModelID:     normalizedInput.WorkspaceRouteModelID,
 		tokenUsage:                normalizedInput.TokenUsage,
 		wireMutations:             cloneMutations(normalizedInput.Mutations),
 		exchangeDiagnostics:       slices.Clone(normalizedInput.ExchangeDiagnostics),
@@ -271,6 +345,7 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode) // swobu:io-string source=domain
 	input.ModelRequested = strings.TrimSpace(input.ModelRequested)           // swobu:io-string source=domain
 	input.ModelResolved = strings.TrimSpace(input.ModelResolved)             // swobu:io-string source=domain
+	input.WorkspaceRouteModelID = strings.TrimSpace(input.WorkspaceRouteModelID) // swobu:io-string source=domain
 	input.Mutations = normalizeTrafficEventMutations(input.Mutations)
 	input.ExchangeDiagnostics = normalizeTrafficEventStrings(input.ExchangeDiagnostics)
 	stageReports, err := normalizeTrafficEventStageReports(input.StageReports)
@@ -368,7 +443,8 @@ func (e TrafficEvent) ContinuityRecoveryTrigger() string { return e.continuityRe
 func (e TrafficEvent) ModelResolutionMode() string       { return e.modelResolutionMode }
 func (e TrafficEvent) ModelRequested() string            { return e.modelRequested }
 func (e TrafficEvent) ModelResolved() string             { return e.modelResolved }
-func (e TrafficEvent) TokenUsage() TokenUsage            { return e.tokenUsage }
+func (e TrafficEvent) WorkspaceRouteModelID() string          { return e.workspaceRouteModelID }
+func (e TrafficEvent) TokenUsage() TokenUsage                  { return e.tokenUsage }
 func (e TrafficEvent) Mutations() []Mutation {
 	return cloneMutations(e.wireMutations)
 }

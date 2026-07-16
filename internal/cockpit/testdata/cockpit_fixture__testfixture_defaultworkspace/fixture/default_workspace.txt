@@ -1,4 +1,4 @@
-SWOBU    [› dev] [lab] [+] [?]
+⛉ SWOBU  [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────
   workspace ▾
      endpoint          http://127.0.0.1:7926/c/dev         copy ↵
@@ -16,4 +16,4 @@ SWOBU    [› dev] [lab] [+] [?]
 
 
 ────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ open   F1 help   esc back
+↑↓ move   ↵ action   ? help   esc back   tab switch

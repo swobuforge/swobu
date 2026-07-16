@@ -25,7 +25,7 @@ func TestPenetrate_TabSwitch_CapturesFrame(t *testing.T) {
 	defer h.Close()
 
 	frame := h.Frame()
-	assertContainsFrame(t, frame, "[› dev]", "workspace ▾", "↑↓ move   ↵ open   F1 help   esc back")
+	assertContainsFrame(t, frame, "⛉ SWOBU", "[› dev]", "workspace ▾", "↑↓ move   ↵ action   ? help   esc back   tab switch")
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyTab})
 	frame = h.Frame()
@@ -95,8 +95,8 @@ func TestPenetrate_F1ActivatesHelpTab(t *testing.T) {
 
 			h.DispatchKey(tui.KeyEvent{Key: tui.KeyF1})
 			frame := h.Frame()
-			assertContainsFrame(t, frame, "[› ?]", "help", "docs", "community", "issue", "diagnostics")
-			assertContainsFrame(t, frame, "↑↓ move   ↵ open/copy   Tab next   Shift+Tab prev   esc back")
+			assertContainsFrame(t, frame, "⛉ SWOBU", "[› ?]", "help", "docs", "community", "issue", "diagnostics")
+			assertContainsFrame(t, frame, "↑↓ move   ↵ action   ? help   esc back   tab switch")
 		})
 	}
 }
@@ -109,10 +109,10 @@ func TestPenetrate_HelpTabFooterHints(t *testing.T) {
 			defer h.Close()
 
 			frame := h.Frame()
-			assertContainsFrame(t, frame, "[› ?]", "↑↓ move   ↵ open/copy   Tab next   Shift+Tab prev   esc back")
+			assertContainsFrame(t, frame, "⛉ SWOBU", "[› ?]", "↑↓ move   ↵ action   ? help   esc back   tab switch")
 
 			h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-			assertContainsFrame(t, h.Frame(), ">    docs", "open ↵")
+			assertContainsFrame(t, h.Frame(), "> docs", "open ↵")
 		})
 	}
 }
@@ -262,9 +262,9 @@ func writeJTBD10Trace(t *testing.T, w penetrationArtifactWriter, width, height i
 
 	steps := []traceStep{
 		{key: tui.KeyEvent{Key: tui.KeyF1}, want: []string{"[› ?]", "help"}, note: "F1 opens the help tab.", label: "f1"},
-		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{">    docs", "open ↵"}, note: "Down focuses the docs row.", label: "down"},
-		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{">    community", "open ↵"}, note: "Down moves to community.", label: "down"},
-		{key: tui.KeyEvent{Key: tui.KeyUp}, want: []string{">    docs", "open ↵"}, note: "Up returns to docs.", label: "up"},
+		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{"> docs", "open ↵"}, note: "Down focuses the docs row.", label: "down"},
+		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{"> community", "open ↵"}, note: "Down moves to community.", label: "down"},
+		{key: tui.KeyEvent{Key: tui.KeyUp}, want: []string{"> docs", "open ↵"}, note: "Up returns to docs.", label: "up"},
 		{key: tui.KeyEvent{Key: tui.KeyTab}, want: []string{"[› dev]", "workspace ▾"}, note: "Tab returns to the prior workspace tab.", label: "tab"},
 	}
 
@@ -274,7 +274,7 @@ func writeJTBD10Trace(t *testing.T, w penetrationArtifactWriter, width, height i
 func writeCollapsedStateTrace(t *testing.T, w penetrationArtifactWriter, width, height int) int {
 	t.Helper()
 	frame := captureFrame(t, collapsedFixtureCockpit(), width, height)
-	assertContainsFrame(t, frame, "workspace ▾", "model routes ▸", "activity ▸")
+	assertContainsFrame(t, frame, "workspace ▾", "model routes ▸", "activity")
 	w.writeOrCompare(t, filepath.Join("state-10", viewportName(width, height), "state.txt"), frame)
 	return 1
 }
@@ -299,13 +299,13 @@ func writeWorkspaceFocusTrace(t *testing.T, w penetrationArtifactWriter, width, 
 		},
 		{
 			key:   tui.KeyEvent{Key: tui.KeyDown},
-			want:  []string{">    endpoint"},
+			want:  []string{"> endpoint"},
 			note:  "Down reaches the hero endpoint row.",
 			label: "down",
 		},
 		{
 			key:   tui.KeyEvent{Key: tui.KeyTab},
-			want:  []string{"[› +]", "slug", "create ↵", "▌"},
+			want:  []string{"[› +]", "new workspace", "slug", "required", "after create", "▌"},
 			note:  "Tab to the draft workspace. The slug cursor must be visible on the first frame.",
 			label: "tab",
 		},

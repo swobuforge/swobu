@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // TestWorkflow_EndToEnd walks provider → setup/loading → catalog → model → ready
@@ -47,7 +48,11 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 	if !strings.Contains(rendered, "OpenAI") {
 		t.Fatalf("expected 'OpenAI' in provider picker:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, ">    OpenAI") {
+	expectedOpenAI := "OpenAI · " + profile.ProviderSetupFieldSummaryForSpec("openai")
+	if !strings.Contains(rendered, expectedOpenAI) {
+		t.Fatalf("expected provider inventory in provider picker:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "> "+expectedOpenAI) {
 		t.Fatalf("expected focused provider option in provider picker:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "API key") || strings.Contains(rendered, "endpoint") {
@@ -110,7 +115,7 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 	if !strings.Contains(rendered, "new target · OpenAI") {
 		t.Fatalf("expected ready-state workflow title:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, ">    create") {
+	if !strings.Contains(rendered, "> create") {
 		t.Fatalf("expected create row focused in ready state:\n%s", rendered)
 	}
 
@@ -137,6 +142,61 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 	rendered, _ = mountedrender.String(w, 120, 40)
 	if !strings.Contains(rendered, "balance with step 1") {
 		t.Fatalf("expected selected placement summary after picker:\n%s", rendered)
+	}
+}
+
+// TestWorkflow_EndToEnd_FirstTargetFixedPlacement walks the same mounted tree
+// for an empty route and proves the first target does not open a placement
+// picker.
+func TestWorkflow_EndToEnd_FirstTargetFixedPlacement(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	var request ports.SaveTargetRequest
+	route := readmodel.RouteReadModel{
+		ID: "gpt", ModelName: "gpt",
+	}
+	w := NewWorkflow("dev", route, func(_ context.Context, req ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
+		request = req
+		return readmodel.TargetReadModel{ID: "t-new"}, nil
+	}, nil)
+	w.Open()
+
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: []readmodel.ModelDeploymentReadModel{
+			{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+		},
+	})
+	for _, d := range w.Catalog.Get().Deployments {
+		if d.ID == "gpt-4.1" {
+			w.SelectModel(d)
+			break
+		}
+	}
+
+	if w.Phase.Get() != PhaseReadyToCreate {
+		t.Fatalf("phase = %v, want ReadyToCreate", w.Phase.Get())
+	}
+	rendered, err := mountedrender.String(w, 120, 40)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if !strings.Contains(rendered, "step 1") {
+		t.Fatalf("expected fixed first-target placement summary:\n%s", rendered)
+	}
+	if got := strings.Count(rendered, "change ↵"); got != 2 {
+		t.Fatalf("first target should only expose provider/model change actions, got %d:\n%s", got, rendered)
+	}
+	if strings.Contains(rendered, "choose placement") {
+		t.Fatalf("first target should not render a placement chooser:\n%s", rendered)
+	}
+
+	w.Create(context.Background())
+	if request.Rank != 1 {
+		t.Fatalf("create rank = %d, want 1", request.Rank)
+	}
+	if request.Weight != 1 {
+		t.Fatalf("create weight = %d, want 1", request.Weight)
 	}
 }
 
@@ -178,6 +238,108 @@ func TestWorkflow_ChatGPTAuthPendingRender(t *testing.T) {
 	if !strings.Contains(rendered, "cancel") {
 		t.Fatalf("expected cancel row in frame:\n%s", rendered)
 	}
+	// Fixture snapshot so we have a visual record of this wireframe.
+	testkit.AssertVisual("chatgpt_auth_pending").
+		Fixture("testdata/target_add_workflow/fixture/chatgpt_auth_pending.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
+}
+
+// TestWorkflow_ChatGPTAuthDeviceRender proves device auth shows code + copy.
+func TestWorkflow_ChatGPTAuthDeviceRender(t *testing.T) {
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.TargetAuthCommands = fakeTargetAuthCommands{
+		start: func(_ context.Context, _ ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
+			return readmodel.AuthSessionReadModel{
+				ProviderSpec: "chatgpt",
+				SessionID:    "sess-2",
+				State:        "pending",
+				AuthorizeURL: "https://auth.openai.com/device",
+				UserCode:     "ABCD-1234",
+			}, nil
+		},
+	}
+
+	w.SelectProvider("chatgpt")
+	w.ContinueSetup()
+
+	rendered, err := mountedrender.String(w, 120, 40)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseAuthPending {
+		t.Fatalf("phase = %v, want AuthPending", w.Phase.Get())
+	}
+	// Current implementation labels all interactive auth as "browser login".
+	// TODO(device-auth): add AuthPendingCodeRowComponent when UserCode is present.
+	if !strings.Contains(rendered, "browser login") {
+		t.Fatalf("expected browser login row in frame:\n%s", rendered)
+	}
+	// The URL should contain the device endpoint.
+	if !strings.Contains(rendered, "https://auth.openai.com/device") {
+		t.Fatalf("expected device auth URL in frame:\n%s", rendered)
+	}
+	// Fixture snapshot for device auth wireframe.
+	testkit.AssertVisual("chatgpt_device_auth").
+		Fixture("testdata/target_add_workflow/fixture/chatgpt_device_auth.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
+}
+
+// TestWorkflow_ChatGPTAuthCompleteRender proves auth success + catalog loading.
+func TestWorkflow_ChatGPTAuthCompleteRender(t *testing.T) {
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.TargetAuthCommands = fakeTargetAuthCommands{
+		start: func(_ context.Context, _ ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
+			return readmodel.AuthSessionReadModel{
+				ProviderSpec: "chatgpt",
+				SessionID:    "sess-1",
+				State:        "pending",
+				AuthorizeURL: "https://auth.openai.com/oauth/authorize",
+			}, nil
+		},
+		poll: func(_ context.Context, sessionID string) (readmodel.AuthSessionReadModel, error) {
+			if sessionID != "sess-1" {
+				t.Fatalf("poll session id = %q, want sess-1", sessionID)
+			}
+			return readmodel.AuthSessionReadModel{
+				ProviderSpec:  "chatgpt",
+				SessionID:     "sess-1",
+				State:         "succeeded",
+				CredentialRef: "chatgpt:acct_a",
+			}, nil
+		},
+	}
+
+	w.SelectProvider("chatgpt")
+	w.ContinueSetup()
+	w.RefreshAuthSession()
+
+	if w.CredentialRef.Get() != "chatgpt:acct_a" {
+		t.Fatalf("credential ref = %q, want chatgpt:acct_a", w.CredentialRef.Get())
+	}
+	if w.Phase.Get() != PhaseLoadingCatalog {
+		t.Fatalf("phase = %v, want LoadingCatalog", w.Phase.Get())
+	}
+
+	rendered, err := mountedrender.String(w, 120, 40)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if !strings.Contains(rendered, "signed in") {
+		t.Fatalf("expected signed-in state in frame:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "loading catalog") {
+		t.Fatalf("expected catalog loading in frame:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "credential") {
+		t.Fatalf("should not show raw credential row after auth success:\n%s", rendered)
+	}
+	// Fixture snapshot for auth complete wireframe.
+	testkit.AssertVisual("chatgpt_auth_complete").
+		Fixture("testdata/target_add_workflow/fixture/chatgpt_auth_complete.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
 }
 
 // TestWorkflow_FocusableComponentsWalk verifies that ProviderSetup and

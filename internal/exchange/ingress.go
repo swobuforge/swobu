@@ -95,16 +95,19 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 type RequestInput struct {
 	EndpointName    endpointintent.EndpointName
 	Request         transportpkg.TransportRequest
+	ClientHandler   trafficevidence.ClientHandler
 	ClientFamily    canonical.ClientFamily
 	ResponseFraming delivery.Framing
+	Timing          *trafficevidence.Timing
 	// ExchangeID is the request-scoped identifier used for event and effect
 	// tracing. Callers must supply one unique value per exchange run.
 	ExchangeID string
 }
 
 type RequestOutput struct {
-	Response TransportResponse
-	Target   RoutableTarget
+	Response           TransportResponse
+	Target             RoutableTarget
+	CommitTrafficEvent func(context.Context, error) error
 }
 
 // HandleRequest resolves the endpoint name, derives client semantics from the
@@ -126,40 +129,43 @@ func (h RequestIngress) HandleRequest(ctx context.Context, in RequestInput) (Req
 // HandleRequestWithEndpoint reuses the same request lifecycle when the caller
 // already owns endpoint resolution truth, such as control-plane probes.
 func (h RequestIngress) HandleRequestWithEndpoint(ctx context.Context, endpoint endpointintent.Endpoint, in RequestInput) (RequestOutput, error) {
-	response, target, err := h.runExchangeResponse(ctx, endpoint, in)
+	out, err := h.runExchangeResponse(ctx, endpoint, in)
+	if in.Timing == nil && out.CommitTrafficEvent != nil {
+		_ = out.CommitTrafficEvent(ctx, err)
+	}
 	if err != nil {
 		return RequestOutput{}, err
 	}
-	return RequestOutput{Response: response, Target: target}, nil
+	return out, nil
 }
 
-func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpointintent.Endpoint, in RequestInput) (TransportResponse, RoutableTarget, error) {
+func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpointintent.Endpoint, in RequestInput) (RequestOutput, error) {
 	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
 	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 	if err := canonical.ValidateClientTransport(in.Request.Method, normalizedPath, false); err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 	if h.runner.Runtime == nil {
-		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange runtime resolver is not configured")
+		return RequestOutput{}, canonical.InternalError("exchange runtime resolver is not configured")
 	}
 	clientFamily := in.ClientFamily
 	if clientFamily == "" {
-		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("client family is not configured")
+		return RequestOutput{}, canonical.InternalError("client family is not configured")
 	}
 	clientCodec := h.runner.Runtime.ClientCodec(clientFamily)
 	if clientCodec == nil {
-		return TransportResponse{}, RoutableTarget{}, canonical.UnsupportedOperation("client family is not implemented")
+		return RequestOutput{}, canonical.UnsupportedOperation("client family is not implemented")
 	}
 	exchangeID := strings.TrimSpace(in.ExchangeID) // swobu:io-string source=boundary
 	if exchangeID == "" {
-		return TransportResponse{}, RoutableTarget{}, canonical.InternalError("exchange id is required")
+		return RequestOutput{}, canonical.InternalError("exchange id is required")
 	}
 
 	requestDoc, err := newClientRequestDocument(clientFamily, in.Request)
 	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 	requestDocResult, err := applyDocumentPatches(
 		ctx,
@@ -170,29 +176,29 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		delivery.BufferedDelivery(),
 	)
 	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 	requestDoc = requestDocResult.Value
 	commitEffectsBestEffort(ctx, h.runner.EffectSink, exchangeID, requestDocResult.Effects)
 	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc)
 	commitEffectsBestEffort(ctx, h.runner.EffectSink, exchangeID, decodeResult.Effects)
 	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 	request := decodeResult.Value.Request
 	decodedDelivery := decodeResult.Value.Delivery
 	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=domain
-		return TransportResponse{}, RoutableTarget{}, canonical.BadRequest("canonical request is required")
+		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	response, target, err := runExchangeWithMachine(ctx, h.runner, h.trafficEvidence, exchangeID, clientFamily, clientDelivery, request, endpoint)
+	out, err := runExchangeWithMachine(ctx, h.runner, h.trafficEvidence, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, endpoint, in.Timing)
 	if err != nil {
-		return response, target, err
+		return out, err
 	}
-	return response, target, nil
+	return out, nil
 }
 
-func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID string, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error, attemptCount int) (trafficevidence.TrafficEvent, error) {
+func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID string, clientHandler trafficevidence.ClientHandler, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error, attemptCount int, timing *trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
 	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(exchangeID))
 	if parseErr != nil {
 		return trafficevidence.TrafficEvent{}, parseErr
@@ -205,20 +211,36 @@ func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID stri
 		return trafficevidence.TrafficEvent{}, routeErr
 	}
 
+	// Derive the actual workspace route model from the resolved provider config,
+	// not from the requested route model. The client may send "default" or an
+	// unknown route name, and routing resolves it to a concrete target.
+	pc := findProviderConfig(endpoint, target.BackendRef)
+	workspaceRouteModel := projectedRouteModel(pc)
+
 	result, statusCode := requestOutcomeEvidence(err, response)
 	input := trafficevidence.TrafficEventInput{
-		RequestID:           requestID,
-		Endpoint:            endpoint.Name().String(),
-		ClientFamily:        trafficevidence.ClientFamily(clientFamily),
-		Route:               route,
-		Result:              result,
-		StatusCode:          statusCode,
-		AttemptCount:        max(attemptCount, 1),
-		ModelRequested:      request.Model(),
-		ModelResolved:       request.Model(),
-		ExchangeDiagnostics: requestOutcomeDiagnostics(err),
+		RequestID:             requestID,
+		Endpoint:              endpoint.Name().String(),
+		ClientHandler:         clientHandler,
+		ClientFamily:          trafficevidence.ClientFamily(clientFamily),
+		Route:                 route,
+		Result:                result,
+		StatusCode:            statusCode,
+		Timing:                snapshotTiming(timing),
+		AttemptCount:          max(attemptCount, 1),
+		ModelRequested:        request.Model(),
+		ModelResolved:         request.Model(),
+		WorkspaceRouteModelID: workspaceRouteModel,
+		ExchangeDiagnostics:   requestOutcomeDiagnostics(err),
 	}
 	return trafficevidence.NewTerminalTrafficEvent(input)
+}
+
+func snapshotTiming(timing *trafficevidence.Timing) trafficevidence.Timing {
+	if timing == nil {
+		return trafficevidence.NewUnknownTiming()
+	}
+	return *timing
 }
 
 func requestOutcomeEvidence(err error, response TransportResponse) (trafficevidence.ResultClass, int) {

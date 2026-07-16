@@ -65,9 +65,10 @@ type RecentTrafficRow struct {
 	OutputTokens        *int                          `json:"-"`
 	CacheReadTokens     *int                          `json:"-"`
 	CacheWriteTokens    *int                          `json:"-"`
-	ModelRequested      string                        `json:"model_requested,omitempty"`
-	ModelResolved       string                        `json:"model_resolved,omitempty"`
-	ModelResolutionMode string                        `json:"model_resolution_mode,omitempty"`
+	ModelRequested        string                        `json:"model_requested,omitempty"`
+	ModelResolved         string                        `json:"model_resolved,omitempty"`
+	ModelResolutionMode   string                        `json:"model_resolution_mode,omitempty"`
+	WorkspaceRouteModelID string                        `json:"workspace_route_model,omitempty"`
 	Mutations           []trafficevidence.Mutation    `json:"wire_patch_mutations,omitempty"`
 	ExchangeDiagnostics []string                      `json:"exchange_diagnostics,omitempty"`
 	StageReports        []trafficevidence.StageReport `json:"exchange_stage_reports,omitempty"`
@@ -239,9 +240,10 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 		Route:               trafficEvent.Route().String(),
 		Result:              trafficEvent.Result().String(),
 		StatusCode:          trafficEvent.StatusCode(),
-		ModelRequested:      trafficEvent.ModelRequested(),
-		ModelResolved:       trafficEvent.ModelResolved(),
-		ModelResolutionMode: trafficEvent.ModelResolutionMode(),
+		ModelRequested:        trafficEvent.ModelRequested(),
+		ModelResolved:         trafficEvent.ModelResolved(),
+		ModelResolutionMode:   trafficEvent.ModelResolutionMode(),
+		WorkspaceRouteModelID: trafficEvent.WorkspaceRouteModelID(),
 		Mutations:           trafficEvent.Mutations(),
 		ExchangeDiagnostics: trafficEvent.ExchangeDiagnostics(),
 		StageReports:        trafficEvent.StageReports(),

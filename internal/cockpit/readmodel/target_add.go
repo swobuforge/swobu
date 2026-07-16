@@ -7,8 +7,9 @@ import (
 
 // ProviderOptionReadModel is one provider shown in the provider picker.
 type ProviderOptionReadModel struct {
-	ProviderSpec   string
-	DisplayName    string
+	ProviderSpec string
+	DisplayName  string
+	// SetupHint is a short search hint for the provider picker.
 	SetupHint      string
 	DefaultBaseURL string
 }

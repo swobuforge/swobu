@@ -64,7 +64,7 @@ func codexClientSpec() capabilityClientSpec {
 		Identity: Identity{ID: "codex", Label: "Codex"},
 		Vars: func(baseURL string) TemplateVars {
 			vars := defaultTemplateVars(baseURL)
-			vars["primary_model"] = "gpt-5.5"
+			vars["default_model"] = "gpt-5.5"
 			return vars
 		},
 		Actions: []capabilityActionSpec{{ID: "run", Kind: ActionKindRun}},
@@ -72,7 +72,7 @@ func codexClientSpec() capabilityClientSpec {
 			Binary: "codex",
 			Args: []string{
 				"--dangerously-bypass-approvals-and-sandbox",
-				"-c", "model=\"{{primary_model}}\"",
+				"-c", "model=\"{{default_model}}\"",
 				"-c", "model_provider=\"swobu\"",
 				"-c", "model_providers.swobu.name=\"Swobu\"",
 				"-c", "model_providers.swobu.base_url=\"{{openai_base_url}}\"",
@@ -88,12 +88,12 @@ func claudeClientSpec() capabilityClientSpec {
 		Actions:  []capabilityActionSpec{{ID: "run", Kind: ActionKindRun}},
 		Run: &capabilityRunSpec{
 			Binary: "claude",
-			Args:   []string{"--bare", "--add-dir", ".", "--tools", "Read", "--allowedTools", "Read", "--model", "{{primary_model}}"},
+			Args:   []string{"--bare", "--add-dir", ".", "--tools", "Read", "--allowedTools", "Read", "--model", "{{default_model}}"},
 			Env: map[string]string{
 				"ANTHROPIC_API_KEY":             "swobu-placeholder",
 				"ANTHROPIC_BASE_URL":            "{{base_url}}",
-				"ANTHROPIC_MODEL":               "{{primary_model}}",
-				"ANTHROPIC_CUSTOM_MODEL_OPTION": "{{primary_model}}",
+				"ANTHROPIC_MODEL":               "{{default_model}}",
+				"ANTHROPIC_CUSTOM_MODEL_OPTION": "{{default_model}}",
 			},
 		},
 	}
@@ -105,7 +105,7 @@ func aiderClientSpec() capabilityClientSpec {
 		Actions:  []capabilityActionSpec{{ID: "run", Kind: ActionKindRun}},
 		Run: &capabilityRunSpec{
 			Binary: "aider",
-			Args:   []string{"--no-show-model-warnings", "--no-browser", "--model", "openai/{{primary_model}}"},
+			Args:   []string{"--no-show-model-warnings", "--no-browser", "--model", "openai/{{default_model}}"},
 			Env: map[string]string{
 				"AIDER_OPENAI_API_BASE": "{{openai_base_url}}",
 				"OPENAI_API_KEY":        "swobu-placeholder",
@@ -132,7 +132,7 @@ func opencodeClientSpec() capabilityClientSpec {
 		Actions:  []capabilityActionSpec{{ID: "run", Kind: ActionKindRun}},
 		Run: &capabilityRunSpec{
 			Binary: "opencode",
-			Args:   []string{"--provider", "swobu", "--model", "swobu/primary"},
+			Args:   []string{"--provider", "swobu", "--model", "swobu/default"},
 			Env:    map[string]string{"OPENAI_API_KEY": "swobu-placeholder"},
 		},
 	}
@@ -144,7 +144,7 @@ schema: v1
 models:
   - name: swobu
     provider: openai
-    model: {{primary_model}}
+    model: {{default_model}}
     apiBase: {{openai_base_url}}
     apiKey: swobu-placeholder
 context:

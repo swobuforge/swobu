@@ -49,11 +49,7 @@ func Run(ctx context.Context, daemonURL string, stdin io.Reader, stdout, stderr 
 	cockpit := NewCockpitWithContext(model, ctx, adapter, adapter)
 	app, err := tui.NewApp(
 		tui.WithRootComponent(cockpit),
-		tui.WithOnResume(func() {
-			if page := currentWorkspacePage(cockpit); page != nil {
-				page.ActivitySection.Refresh()
-			}
-		}),
+		tui.WithOnResume(func() {}),
 		tui.WithLegacyKeyboard(),
 		tui.WithoutMouse(),
 	)

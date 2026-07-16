@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestPage_KeyMapOwnsSurfaceNavigationAndFallbackActivation(t *testing.T) {
@@ -34,6 +35,28 @@ func TestPage_KeyMapOwnsSurfaceNavigationAndFallbackActivation(t *testing.T) {
 	for _, binding := range keymap {
 		if binding.Pattern.AnyRune {
 			t.Fatalf("workspace page must not own arbitrary rune input via AnyRune, found binding %+v", binding)
+		}
+	}
+}
+
+func TestPage_DraftWorkspaceHidesRoutesAndActivity(t *testing.T) {
+	for _, width := range []int{80, 100, 120} {
+		view := Page(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, nil, nil, nil, context.Background(), nil)
+		rendered := testkit.RenderMountedTrimmed(t, view, width, 12)
+		if strings.Contains(rendered, "workspace ▾") {
+			t.Fatalf("draft workspace should not render a disclosure header at width %d:\n%s", width, rendered)
+		}
+		if !strings.Contains(rendered, "new workspace") {
+			t.Fatalf("draft workspace should render the create header at width %d:\n%s", width, rendered)
+		}
+		if strings.Contains(rendered, "model routes") {
+			t.Fatalf("draft workspace should not render routes at width %d:\n%s", width, rendered)
+		}
+		if strings.Contains(rendered, "activity") {
+			t.Fatalf("draft workspace should not render activity at width %d:\n%s", width, rendered)
+		}
+		if !strings.Contains(rendered, "slug") || !strings.Contains(rendered, "required") || !strings.Contains(rendered, "after create") {
+			t.Fatalf("draft workspace should still render the create flow at width %d:\n%s", width, rendered)
 		}
 	}
 }
@@ -105,6 +128,25 @@ func TestPage_BackLeavesFeatureOwnedDeleteConfirmationToFocusedFeature(t *testin
 	}
 }
 
+func TestPage_BackOutDelegatesToRoutesWhenOverviewHasNothing(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	route := view.RoutesSection.State.Routes[0]
+	view.RoutesSection.OpenRoute(route)
+
+	// Overview has nothing to back out; routes has an expanded route.
+	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "" {
+		t.Fatalf("expanded route should close, got %q", got)
+	}
+}
+
+func TestPage_BackOutDoesNotCrashAtTopLevel(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	// Nothing open in overview or routes; backOut should be a no-op
+	// without panicking (it attempts app.Stop but app is nil in this test).
+	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
+}
+
 func TestPage_AddTargetRowOpensWorkflow(t *testing.T) {
 	commands := fakeWorkspaceCommands{
 		listProviders: func(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
@@ -144,7 +186,9 @@ func TestPage_AddTargetRowOpensWorkflow(t *testing.T) {
 	// The target add workflow renders a provider picker with "provider" title.
 	focusUntilFrameContains(t, h, "provider", 20)
 	frame := h.Frame()
-	if !strings.Contains(frame, "OpenAI") || !strings.Contains(frame, "OpenRouter") {
+	expectedOpenAI := "OpenAI · " + profile.ProviderSetupFieldSummaryForSpec("openai")
+	expectedOpenRouter := "OpenRouter · " + profile.ProviderSetupFieldSummaryForSpec("openrouter")
+	if !strings.Contains(frame, expectedOpenAI) || !strings.Contains(frame, expectedOpenRouter) {
 		t.Fatalf("provider picker did not render provider options:\n%s", frame)
 	}
 	if strings.Contains(frame, "0 of 0 shown") {
@@ -193,6 +237,35 @@ func TestPage_DraftWorkspaceEnterSubmitsSlug(t *testing.T) {
 	if saved.Slug != "dev" {
 		t.Fatalf("draft workspace Enter did not submit slug; focused=%T\nframe:\n%s", h.App().Focused(), h.Frame())
 	}
+
+	frame := h.Frame()
+	if strings.Contains(frame, "new workspace") {
+		t.Fatalf("saved workspace should leave draft create mode:\n%s", frame)
+	}
+	if !strings.Contains(frame, "model routes") {
+		t.Fatalf("saved workspace should render the normal route section:\n%s", frame)
+	}
+	if !strings.Contains(frame, "activity") {
+		t.Fatalf("saved workspace should render the normal activity section:\n%s", frame)
+	}
+	if !strings.Contains(frame, "add model route") {
+		t.Fatalf("saved workspace should expose add model route in the normal body:\n%s", frame)
+	}
+	testkit.AssertFocusedFrame(t, frame, "> add model route")
+}
+
+func TestPage_RequestAddRouteFocusAfterSaveLandsOnAddRouteRow(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	view.RoutesSection.RequestAddRouteFocus()
+
+	h, err := testkit.NewHarness(view)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	testkit.AssertFocusedFrame(t, h.Frame(), "> add model route")
 }
 
 func focusUntilFrameContains(t *testing.T, h *testkit.MockAppHarness, needle string, limit int) {

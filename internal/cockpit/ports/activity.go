@@ -7,10 +7,9 @@ import (
 )
 
 // ActivityQueries loads recent request evidence for the Cockpit activity
-// section and request inspector.
+// section.
 type ActivityQueries interface {
 	ListActivity(ctx context.Context, request ListActivityRequest) (readmodel.ActivityReadModel, error)
-	GetActivity(ctx context.Context, id readmodel.ActivityID) (readmodel.ActivityRowReadModel, error)
 }
 
 // ListActivityRequest scopes recent activity to a workspace.

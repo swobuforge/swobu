@@ -2,175 +2,107 @@ package activity
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
-func TestSection_ActivationOpensActivity(t *testing.T) {
-	section := Section(activitySectionModel(), context.Background(), nil)
-	section.openActivity(*section.ActivitySnapshot.Get().Latest)
-	if got, want := section.OpenActivity.Get(), readmodel.ActivityID("req-1"); got != want {
-		t.Fatalf("open activity = %q, want %q", got, want)
-	}
-}
-
-func TestSection_ErrorRowShowsErrInspect(t *testing.T) {
-	model := activitySectionModel()
-	model.Activity.Latest.Error = true
-	section := Section(model, context.Background(), nil)
-	section.OpenActivity.Set("req-1")
-
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 14)
-	testkit.AssertNow(t, rendered, testkit.Text("err ↵").Exists())
-}
-
-func TestSection_HidesZeroTokens(t *testing.T) {
-	section := Section(activitySectionModel(), context.Background(), nil)
-	section.OpenActivity.Set("req-1")
-
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 16)
-	testkit.AssertNow(t, rendered, testkit.All(
-		testkit.Not(testkit.Text("tokens in").Exists()),
-		testkit.Not(testkit.Text("tokens out").Exists()),
-	))
-}
-
-func TestSection_ShowsNonZeroTokens(t *testing.T) {
-	model := activitySectionModel()
-	model.Activity.Latest.TokensIn = 1200
-	model.Activity.Latest.TokensOut = 450
-	section := Section(model, context.Background(), nil)
-	section.OpenActivity.Set("req-1")
-
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 16)
-	testkit.AssertNow(t, rendered, testkit.All(
-		testkit.Text("tokens in").Exists(),
-		testkit.Text("1,200").Exists(),
-		testkit.Text("tokens out").Exists(),
-		testkit.Text("450").Exists(),
-	))
-}
-
-func TestSection_ExpandedLatestRowUsesIndentedDetails(t *testing.T) {
-	model := activitySectionModel()
-	model.Activity.Latest.ResolvedName = "resolved-name"
-	model.Activity.Latest.Model = "gpt-4.1"
-	model.Activity.Latest.Attempts = []readmodel.ActivityAttemptReadModel{
-		{Label: "attempt", Rank: 1, Result: readmodel.ActivityAttemptSucceeded},
-		{Label: "attempt", Rank: 2, Result: readmodel.ActivityAttemptFailed},
-	}
-	model.Activity.Latest.TokensIn = 1200
-	model.Activity.Latest.TokensOut = 450
-	section := Section(model, context.Background(), nil)
-	section.OpenActivity.Set("req-1")
-
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 16)
-	testkit.AssertVisual("expanded_latest").
-		Fixture("testdata/activity_section/fixture/expanded_latest.txt").
-		Viewport(100, 16).
+func TestSection_RendersSuccessfulLatest(t *testing.T) {
+	section := Section(successfulModel(), context.Background(), nil)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 3)
+	testkit.AssertVisual("successful_latest").
+		Fixture("testdata/activity_section/fixture/successful_latest.txt").
+		Viewport(80, 3).
 		Now(t, rendered)
 }
 
-func TestSection_RefreshesLatestActivityOnExpand(t *testing.T) {
-	stale := activitySectionModel()
-	stale.Activity = readmodel.ActivityReadModel{}
-	fresh := activitySectionModel()
+func TestSection_RendersFailedLatest(t *testing.T) {
+	m := successfulModel()
+	m.Activity.Latest.ObservedAt = "14:35:10"
+	m.Activity.Latest.Status = readmodel.ActivityFailed
+	m.Activity.Latest.HTTPStatus = 500
+	m.Activity.Latest.Duration = 312 * time.Millisecond
+	section := Section(m, context.Background(), nil)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 3)
+	testkit.AssertVisual("failed_latest").
+		Fixture("testdata/activity_section/fixture/failed_latest.txt").
+		Viewport(80, 3).
+		Now(t, rendered)
+}
+
+func TestSection_RendersEmptyState(t *testing.T) {
+	m := activityModel(readmodel.ActivityReadModel{})
+	section := Section(m, context.Background(), nil)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 3)
+	testkit.AssertVisual("empty").
+		Fixture("testdata/activity_section/fixture/empty.txt").
+		Viewport(80, 3).
+		Now(t, rendered)
+}
+
+func TestSection_RendersDraftEmptyState(t *testing.T) {
+	m := activityModel(readmodel.ActivityReadModel{})
+	m.State = readmodel.WorkspaceDraft
+	section := Section(m, context.Background(), nil)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 3)
+	testkit.AssertVisual("draft").
+		Fixture("testdata/activity_section/fixture/draft.txt").
+		Viewport(80, 3).
+		Now(t, rendered)
+}
+
+func TestSection_QueriesLatestActivity(t *testing.T) {
+	stale := activityModel(readmodel.ActivityReadModel{})
+	fresh := successfulModel()
 	query := &fakeActivityQueries{activity: fresh.Activity}
 
 	section := Section(stale, context.Background(), query)
-	section.onToggle(true)
-
-	if got, want := query.calls, 1; got != want {
-		t.Fatalf("activity query calls = %d, want %d", got, want)
-	}
-	if latest, ok := section.ActivitySnapshot.Get().LatestRow(); !ok || latest.ID != "req-1" {
-		t.Fatalf("latest activity after refresh = %#v, %v", latest, ok)
-	}
-
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 22)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 3)
 	testkit.AssertNow(t, rendered, testkit.All(
-		testkit.Not(testkit.Text("no requests yet").Exists()),
 		testkit.Text("14:32:01").Exists(),
-		testkit.Text("latest").Exists(),
+		testkit.Text("codex").Exists(),
 	))
 }
 
-func TestSection_RefreshSkipsWhenCollapsed(t *testing.T) {
-	query := &fakeActivityQueries{activity: activitySectionModel().Activity}
-	section := Section(activitySectionModel(), context.Background(), query)
-	section.Expanded.Set(false)
+func TestSection_ShowsNoRowWhenQueryErrors(t *testing.T) {
+	stale := activityModel(readmodel.ActivityReadModel{})
+	query := &fakeActivityQueries{err: context.DeadlineExceeded}
 
-	if got := section.Refresh(); got {
-		t.Fatal("Refresh() = true, want false")
-	}
-
-	if got, want := query.calls, 0; got != want {
-		t.Fatalf("activity query calls = %d, want %d", got, want)
-	}
+	section := Section(stale, context.Background(), query)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 3)
+	testkit.AssertNow(t, rendered, testkit.Text("no requests yet").Exists())
 }
 
-func TestSection_RefreshAppliesVisibleChange(t *testing.T) {
-	stale := activitySectionModel()
-	stale.Activity = readmodel.ActivityReadModel{}
-	fresh := activitySectionModel()
-	query := &fakeActivityQueries{activity: fresh.Activity}
-	section := Section(stale, context.Background(), query)
+func TestSection_QueriesWithLimitOne(t *testing.T) {
+	stale := activityModel(readmodel.ActivityReadModel{})
+	query := &fakeActivityQueries{activity: successfulModel().Activity}
 
-	if got := section.Refresh(); !got {
-		t.Fatal("Refresh() = false, want true")
-	}
-	if got, want := query.calls, 1; got != want {
-		t.Fatalf("activity query calls = %d, want %d", got, want)
-	}
-	if latest, ok := section.ActivitySnapshot.Get().LatestRow(); !ok || latest.ID != "req-1" {
-		t.Fatalf("latest activity after refresh = %#v, %v", latest, ok)
+	section := Section(stale, context.Background(), query)
+	_ = testkit.RenderMountedTrimmed(t, section, 80, 3)
+
+	if got, want := query.lastLimit, 1; got != want {
+		t.Fatalf("query limit = %d, want %d", got, want)
 	}
 }
 
 type fakeActivityQueries struct {
-	calls    int
-	activity readmodel.ActivityReadModel
-	err      error
+	activity  readmodel.ActivityReadModel
+	err       error
+	lastLimit int
 }
 
-func (f *fakeActivityQueries) ListActivity(context.Context, ports.ListActivityRequest) (readmodel.ActivityReadModel, error) {
-	f.calls++
+func (f *fakeActivityQueries) ListActivity(_ context.Context, req ports.ListActivityRequest) (readmodel.ActivityReadModel, error) {
+	f.lastLimit = req.Limit
 	if f.err != nil {
 		return readmodel.ActivityReadModel{}, f.err
 	}
 	return f.activity, nil
 }
 
-func (f *fakeActivityQueries) GetActivity(context.Context, readmodel.ActivityID) (readmodel.ActivityRowReadModel, error) {
-	return readmodel.ActivityRowReadModel{}, errors.New("not implemented")
-}
-
-func collectFocusables(root *tui.Element) []tui.Focusable {
-	var focusables []tui.Focusable
-	root.WalkFocusables(func(f tui.Focusable) {
-		focusables = append(focusables, f)
-	})
-	return focusables
-}
-
-func activate(t *testing.T, focusable tui.Focusable) {
-	t.Helper()
-	el, ok := focusable.(*tui.Element)
-	if !ok {
-		t.Fatalf("focusable is %T, want *tui.Element", focusable)
-	}
-	if !el.Activate() {
-		t.Fatal("focusable did not handle activation")
-	}
-}
-
-func activitySectionModel() readmodel.WorkspaceReadModel {
+func successfulModel() readmodel.WorkspaceReadModel {
 	row := readmodel.ActivityRowReadModel{
 		ID:          "req-1",
 		ObservedAt:  "14:32:01",
@@ -180,9 +112,14 @@ func activitySectionModel() readmodel.WorkspaceReadModel {
 		HTTPStatus:  200,
 		Duration:    145 * time.Millisecond,
 	}
+	return activityModel(readmodel.ActivityReadModel{Latest: &row})
+}
+
+func activityModel(activity readmodel.ActivityReadModel) readmodel.WorkspaceReadModel {
 	return readmodel.WorkspaceReadModel{
-		Activity: readmodel.ActivityReadModel{
-			Latest: &row,
-		},
+		ID:       "ws-dev",
+		Slug:     "dev",
+		State:    readmodel.WorkspaceExisting,
+		Activity: activity,
 	}
 }

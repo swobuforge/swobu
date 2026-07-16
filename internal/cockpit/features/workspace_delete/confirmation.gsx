@@ -74,8 +74,16 @@ func (c *ConfirmationView) Cancel() {
 	c.Close()
 }
 
+// KeyMap returns Escape preemptive-stop when open. Preemptive bindings run in
+// a separate pass and do not conflict with parent OnStop handlers, ensuring
+// the modal confirmation blocks parent Escape navigation.
 func (c *ConfirmationView) KeyMap() tui.KeyMap {
-	return nil
+	if !c.IsOpen() {
+		return nil
+	}
+	return tui.KeyMap{
+		tui.OnPreemptStop(tui.KeyEscape, func(tui.KeyEvent) { c.Cancel() }),
+	}
 }
 
 func (c *ConfirmationView) Confirm(ctx context.Context) {
@@ -153,11 +161,7 @@ func ConfirmationRowComponent(c *ConfirmationView) *ui.SelectableRow {
 	} else if c.Workspace.Slug != "" {
 		id += ":" + c.Workspace.Slug
 	}
-	row := ui.NewSelectableRow(id, "delete", c.RowValue(), c.ActionLabel(), c.Activate)
-	if c.IsOpen() {
-		row.OnCancel = c.Cancel
-	}
-	return row
+	return ui.NewSelectableRow(id, "delete", c.RowValue(), c.ActionLabel(), c.Activate)
 }
 
 templ (c *ConfirmationView) Render() {
@@ -165,7 +169,6 @@ templ (c *ConfirmationView) Render() {
 		@ConfirmationRowComponent(c)
 		if c.Error.Get() != "" {
 			<div class="flex-row w-full">
-				<span class="w-9"></span>
 				<span>{c.Error.Get()}</span>
 			</div>
 		}
