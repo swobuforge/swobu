@@ -254,6 +254,10 @@ func TestWorkflow_ChatGPTSelectProviderShowsAuthStartWithoutStartingSession(t *t
 	if strings.Contains(rendered, "signed in") || strings.Contains(rendered, "loading catalog…") {
 		t.Fatalf("chatgpt setup should not advance into auth success or catalog loading:\n%s", rendered)
 	}
+	testkit.AssertVisual("chatgpt_auth_start").
+		Fixture("testdata/target_add_workflow/fixture/chatgpt_auth_start.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
 }
 
 func TestWorkflow_SetSetupReadyMovesToLoadingCatalog(t *testing.T) {
@@ -493,6 +497,37 @@ func TestWorkflow_ChatGPTCancelReturnsToProviderSetup(t *testing.T) {
 	if w.CredentialRef.Get() != "" {
 		t.Fatalf("credential ref after cancel = %q, want empty", w.CredentialRef.Get())
 	}
+}
+
+func TestWorkflow_ChatGPTAuthFailedRender(t *testing.T) {
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.TargetAuthCommands = fakeTargetAuthCommands{
+		start: func(_ context.Context, _ ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
+			return readmodel.AuthSessionReadModel{}, errors.New("auth service unavailable")
+		},
+	}
+
+	w.SelectProvider("chatgpt")
+	w.ContinueSetup()
+
+	if w.Phase.Get() != PhaseAuthFailed {
+		t.Fatalf("phase = %v, want AuthFailed", w.Phase.Get())
+	}
+
+	rendered, err := mountedrender.String(w, 120, 40)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if !strings.Contains(rendered, "failed") || !strings.Contains(rendered, "back ↵") {
+		t.Fatalf("expected auth failed row in frame:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "auth service unavailable") {
+		t.Fatalf("expected auth error text in frame:\n%s", rendered)
+	}
+	testkit.AssertVisual("chatgpt_auth_failed").
+		Fixture("testdata/target_add_workflow/fixture/chatgpt_auth_failed.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
 }
 
 func TestWorkflow_SelectModelMovesToReadyToCreate(t *testing.T) {
@@ -963,6 +998,111 @@ func TestWorkflow_ModelPickerRendersBoundedModelList(t *testing.T) {
 		Now(t, rendered)
 }
 
+func TestWorkflow_ModelPickerSearchFilters(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: append(
+			manyModelDeployments("GPT-4.1", 12),
+			manyModelDeployments("Claude Sonnet", 35)...,
+		),
+	})
+
+	picker := w.modelPicker()
+	picker.Query.Set("gpt 4.1")
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseChoosingModel {
+		t.Fatalf("phase = %v, want ChoosingModel", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "GPT-4.1 001") {
+		t.Fatalf("expected filtered GPT model in model picker:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Claude Sonnet") {
+		t.Fatalf("filtered model picker should not show unrelated catalog rows:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "of 47 shown") {
+		t.Fatalf("expected filtered footer in model picker:\n%s", rendered)
+	}
+	testkit.AssertVisual("model_picker_search").
+		Fixture("testdata/target_add_workflow/fixture/model_picker_search.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+}
+
+func TestWorkflow_ModelPickerManyResultsScroll(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: manyModelDeployments("Claude Sonnet", 112),
+	})
+
+	picker := w.modelPicker()
+	picker.Cursor.Set(10)
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseChoosingModel {
+		t.Fatalf("phase = %v, want ChoosingModel", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "Claude Sonnet 011") {
+		t.Fatalf("expected scrolled window to include later catalog rows:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Claude Sonnet 001") {
+		t.Fatalf("expected scrolled window to exclude the initial rows:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "of 112 shown") {
+		t.Fatalf("expected bounded footer in model picker:\n%s", rendered)
+	}
+	testkit.AssertVisual("model_picker_many").
+		Fixture("testdata/target_add_workflow/fixture/model_picker_many.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+}
+
+func TestWorkflow_ModelPickerEmptySearch(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", sampleRoute(), nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: manyModelDeployments("GPT-4.1", 47),
+	})
+
+	picker := w.modelPicker()
+	picker.Query.Set("xyz")
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseChoosingModel {
+		t.Fatalf("phase = %v, want ChoosingModel", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "0 of 47 shown") {
+		t.Fatalf("expected empty-search footer in model picker:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "select ↵") {
+		t.Fatalf("empty-search picker should not render selectable options:\n%s", rendered)
+	}
+	testkit.AssertVisual("model_picker_empty").
+		Fixture("testdata/target_add_workflow/fixture/model_picker_empty.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+}
+
 func TestWorkflow_OllamaNoCredential(t *testing.T) {
 	w := NewWorkflow("dev", readmodel.RouteReadModel{ID: "gpt", ModelName: "gpt"}, nil, nil)
 	w.Open()
@@ -989,6 +1129,10 @@ func TestWorkflow_OllamaNoCredential(t *testing.T) {
 	if !strings.Contains(rendered, "loading catalog") {
 		t.Fatalf("expected catalog loading row for Ollama:\n%s", rendered)
 	}
+	testkit.AssertVisual("ollama_setup").
+		Fixture("testdata/target_add_workflow/fixture/ollama_setup.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
 
 	// After probe, Ollama model picker appears from static catalog.
 	w.ProbeCatalog()
@@ -1037,6 +1181,43 @@ func TestWorkflow_ReadyToCreateRender(t *testing.T) {
 	// Fixture snapshot for ready-to-create wireframe (existing route with targets).
 	testkit.AssertVisual("ready_to_create").
 		Fixture("testdata/target_add_workflow/fixture/ready_to_create.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+}
+
+func TestWorkflow_PlacementPickerRender(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	w := NewWorkflow("dev", readmodel.RouteReadModel{
+		ID:        "gpt",
+		ModelName: "gpt",
+		Targets: []readmodel.TargetReadModel{
+			{ID: "t1", Rank: 1, Weight: 1},
+			{ID: "t2", Rank: 2, Weight: 1},
+		},
+	}, nil, nil)
+	w.Open()
+	w.SelectProvider("openai")
+	w.SetSetupReady("env:OPENAI_API_KEY", "")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{
+		Deployments: []readmodel.ModelDeploymentReadModel{
+			{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+		},
+	})
+	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"})
+	w.OpenPlacementPicker()
+
+	rendered, err := mountedrender.String(w, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseChoosingPlacement {
+		t.Fatalf("phase = %v, want ChoosingPlacement", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "balance with step 1") || !strings.Contains(rendered, "fallback after step 2") {
+		t.Fatalf("expected placement options in placement picker:\n%s", rendered)
+	}
+	testkit.AssertVisual("placement_picker").
+		Fixture("testdata/target_add_workflow/fixture/placement_picker.txt").
 		Viewport(120, 24).
 		Now(t, rendered)
 }
@@ -1104,6 +1285,22 @@ func TestWorkflow_RetryCatalogReprobes(t *testing.T) {
 	}
 
 	w.RetryCatalog()
+
+	rendered, err := mountedrender.String(w, 120, 40)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if w.Phase.Get() != PhaseLoadingCatalog {
+		t.Fatalf("phase = %v, want LoadingCatalog while retrying", w.Phase.Get())
+	}
+	if !strings.Contains(rendered, "loading catalog…") {
+		t.Fatalf("expected loading state during retry:\n%s", rendered)
+	}
+	testkit.AssertVisual("catalog_retrying").
+		Fixture("testdata/target_add_workflow/fixture/catalog_retrying.txt").
+		Viewport(120, 40).
+		Now(t, rendered)
+
 	w.ProbeCatalog()
 
 	if probeCount != 2 {
@@ -1126,8 +1323,23 @@ func TestWorkflow_ManualEntryCreatesModelWithRouteModelSplit(t *testing.T) {
 	w.SetSetupReady("env:OPENAI_API_KEY", "")
 	w.SetCatalogResult(readmodel.ModelCatalogReadModel{Error: "no catalog"})
 
-	// Simulate manual entry submission.
+	w.ManualModelID.Set("gpt-4.1")
 	row := ManualModelEntryRowComponent(w)
+	row.Open()
+
+	rendered, err := mountedrender.String(row, 120, 24)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if !strings.Contains(rendered, "gpt-4.1") || !strings.Contains(rendered, "save ↵") {
+		t.Fatalf("expected editable manual entry row:\n%s", rendered)
+	}
+	testkit.AssertVisual("manual_entry").
+		Fixture("testdata/target_add_workflow/fixture/manual_entry.txt").
+		Viewport(120, 24).
+		Now(t, rendered)
+
+	// Simulate manual entry submission.
 	row.OnSubmit("gpt-4.1-custom")
 
 	if w.Phase.Get() != PhaseReadyToCreate {
@@ -1158,6 +1370,24 @@ func sampleRoute() readmodel.RouteReadModel {
 			{ID: "t1", Rank: 1, Weight: 1},
 		},
 	}
+}
+
+func manyModelDeployments(prefix string, count int) []readmodel.ModelDeploymentReadModel {
+	if count < 0 {
+		count = 0
+	}
+	out := make([]readmodel.ModelDeploymentReadModel, 0, count)
+	for i := 0; i < count; i++ {
+		name := fmt.Sprintf("%s %03d", prefix, i+1)
+		modelID := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+		out = append(out, readmodel.ModelDeploymentReadModel{
+			ID:                      modelID,
+			Name:                    name,
+			ModelName:               modelID,
+			DefaultProviderProtocol: "chat_completions",
+		})
+	}
+	return out
 }
 
 type fakeTargetSetupQueries struct {

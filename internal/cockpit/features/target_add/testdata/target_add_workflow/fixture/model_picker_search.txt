@@ -1,0 +1,24 @@
+new target · OpenAI                                                                                                     
+  model                                                                                                                 
+  search            gpt 4.1_                                                                                            
+> GPT-4.1 001                                   select ↵                                                                
+  GPT-4.1 002                                                                                                           
+  GPT-4.1 003                                                                                                           
+  GPT-4.1 004                                                                                                           
+  GPT-4.1 005                                                                                                           
+  GPT-4.1 006                                                                                                           
+  GPT-4.1 007                                                                                                           
+  7 of 47 shown                                   ↑↓ PgUp PgDn                                                          
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

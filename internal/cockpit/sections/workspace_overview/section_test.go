@@ -309,9 +309,8 @@ func activate(t *testing.T, focusable tui.Focusable) {
 
 func workspaceSectionModel() readmodel.WorkspaceReadModel {
 	return readmodel.WorkspaceReadModel{
-		Slug:              "dev",
-		State:             readmodel.WorkspaceExisting,
-		ClientBaseURL:     "http://127.0.0.1:7926/c/dev",
-		CompatibleClients: "OpenAI · Anthropic",
+		Slug:          "dev",
+		State:         readmodel.WorkspaceExisting,
+		ClientBaseURL: "http://127.0.0.1:7926/c/dev",
 	}
 }

@@ -1,4 +1,4 @@
-> slug              ▌dev                                                    invalid
+> slug              _dev                                                    invalid
 disk full
 
 

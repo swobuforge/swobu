@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/features/target_add"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/profile"
 )
+
 
 func TestSection_FocusableRowsFollowExpansion(t *testing.T) {
 	model := routeSectionModel()
@@ -170,6 +172,79 @@ func TestAddTargetOpen_EscapeReturnsToAddTargetRow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Provider picker search wireframe fixtures (265)
+// ---------------------------------------------------------------------------
+
+func TestAddTargetOpen_ProviderPickerSearch(t *testing.T) {
+	section := Section(routeSectionModel(), fakeRouteCommands{})
+	section.ListProviders = func(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
+		return []readmodel.ProviderOptionReadModel{
+			{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
+			{ProviderSpec: "chatgpt", DisplayName: "ChatGPT", SetupHint: "browser login"},
+			{ProviderSpec: "anthropic", DisplayName: "Anthropic", SetupHint: "API key"},
+			{ProviderSpec: "openrouter", DisplayName: "OpenRouter", SetupHint: "API key"},
+			{ProviderSpec: "ollama", DisplayName: "Ollama", SetupHint: "none"},
+			{ProviderSpec: "azure", DisplayName: "Azure AI Foundry", SetupHint: "endpoint"},
+			{ProviderSpec: "openai_compatible", DisplayName: "OpenAI Compatible", SetupHint: "endpoint"},
+		}, nil
+	}
+
+	route := section.State.Routes[0]
+	section.State.ExpandedRoute.Set(route.ID)
+	section.AddTarget(route)
+
+	wf := section.targetAddWorkflow(route)
+	target_add.ProviderPickerComponent(wf).Query.Set("open")
+
+	rendered := testkit.RenderMountedTrimmed(t, section, 220, 20)
+	assertSubstringsInOrder(t, rendered, "add target", "provider", "search", "open", "OpenAI", "OpenRouter", "OpenAI Compatible")
+	if !strings.Contains(rendered, "3 of 7 shown") {
+		t.Fatalf("expected '3 of 7 shown' footer after filtering:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Ollama") {
+		t.Fatalf("filtered list should NOT contain Ollama:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Anthropic") {
+		t.Fatalf("filtered list should NOT contain Anthropic:\n%s", rendered)
+	}
+
+	testkit.AssertVisual("add_target_provider_search").
+		Fixture("testdata/routes_section/fixture/add_target_provider_search.txt").
+		Viewport(220, 20).
+		Now(t, rendered)
+}
+
+func TestAddTargetOpen_ProviderPickerNoResults(t *testing.T) {
+	section := Section(routeSectionModel(), fakeRouteCommands{})
+	section.ListProviders = func(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
+		return []readmodel.ProviderOptionReadModel{
+			{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
+			{ProviderSpec: "ollama", DisplayName: "Ollama", SetupHint: "none"},
+		}, nil
+	}
+
+	route := section.State.Routes[0]
+	section.State.ExpandedRoute.Set(route.ID)
+	section.AddTarget(route)
+
+	wf := section.targetAddWorkflow(route)
+	target_add.ProviderPickerComponent(wf).Query.Set("xyz")
+
+	rendered := testkit.RenderMountedTrimmed(t, section, 220, 20)
+	if !strings.Contains(rendered, "0 of 2 shown") {
+		t.Fatalf("expected '0 of 2 shown' footer for empty search:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "provider") {
+		t.Fatalf("expected 'provider' title in empty picker:\n%s", rendered)
+	}
+
+	testkit.AssertVisual("add_target_provider_noresults").
+		Fixture("testdata/routes_section/fixture/add_target_provider_noresults.txt").
+		Viewport(220, 20).
+		Now(t, rendered)
+}
+
+// ---------------------------------------------------------------------------
 // Target string row tests — replace old multi-row workflow tests
 // ---------------------------------------------------------------------------
 
@@ -275,6 +350,21 @@ func TestRouteAdd_FirstTargetSaveUsesDraftRoute(t *testing.T) {
 	if got, want := savedRoute.RowValue(), "1 target"; got != want {
 		t.Fatalf("saved route row value = %q, want %q", got, want)
 	}
+
+	rendered := testkit.RenderMountedTrimmed(t, section, 220, 20)
+	if !strings.Contains(rendered, "custom-route") {
+		t.Fatalf("expected new route in rendered frame:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "1 target") {
+		t.Fatalf("expected created route target count in rendered frame:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "openai_compatible/custom-route") {
+		t.Fatalf("expected created target row in rendered frame:\n%s", rendered)
+	}
+	testkit.AssertVisual("add_target_created").
+		Fixture("testdata/routes_section/fixture/add_target_created.txt").
+		Viewport(220, 20).
+		Now(t, rendered)
 }
 
 func TestRouteSection_UpdatePropsRefreshesOpenTargetAddWorkflow(t *testing.T) {

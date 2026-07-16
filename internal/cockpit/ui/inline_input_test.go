@@ -18,8 +18,8 @@ func TestInlineInput_RenderShowsText(t *testing.T) {
 	inp := NewInlineInput(value)
 
 	rendered := renderElementTrimmed(t, inp.Render(), 20, 1)
-	if !strings.Contains(rendered, "hello▌") {
-		t.Fatalf("expected 'hello▌' in rendered, got %q", rendered)
+	if !strings.Contains(rendered, "hello_") {
+		t.Fatalf("expected 'hello_' in rendered, got %q", rendered)
 	}
 }
 
@@ -98,13 +98,13 @@ func TestInlineInput_BlinkAffectsCursorRune(t *testing.T) {
 	inp.blink.Set(true)
 
 	renderedOn := renderElementTrimmed(t, inp.Render(), 10, 1)
-	if !strings.Contains(renderedOn, "▌") {
-		t.Fatalf("expected cursor '▌' when blink=true, got %q", renderedOn)
+	if !strings.Contains(renderedOn, "_") {
+		t.Fatalf("expected cursor '_' when blink=true, got %q", renderedOn)
 	}
 
 	inp.blink.Set(false)
 	renderedOff := renderElementTrimmed(t, inp.Render(), 10, 1)
-	if strings.Contains(renderedOff, "▌") {
+	if strings.Contains(renderedOff, "_") {
 		t.Fatalf("expected no cursor when blink=false, got %q", renderedOff)
 	}
 }

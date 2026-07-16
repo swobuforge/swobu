@@ -305,7 +305,7 @@ func TestWorkflow_DraftCreateEscapeBacksOutAndClearsCursor(t *testing.T) {
 	}
 
 	frame := h.Frame()
-	if !strings.Contains(frame, "▌") {
+	if !strings.Contains(frame, "_") {
 		t.Fatalf("draft create frame should show the input cursor before Escape:\n%s", frame)
 	}
 
@@ -319,7 +319,7 @@ func TestWorkflow_DraftCreateEscapeBacksOutAndClearsCursor(t *testing.T) {
 	}
 
 	frame = h.Frame()
-	if strings.Contains(frame, "▌") {
+	if strings.Contains(frame, "_") {
 		t.Fatalf("draft create frame still contains a cursor after Escape:\n%s", frame)
 	}
 	if !strings.Contains(frame, "required") {
@@ -333,7 +333,7 @@ func TestWorkflow_DraftCreateEscapeBacksOutAndClearsCursor(t *testing.T) {
 	}
 
 	frame = h.Frame()
-	if !strings.Contains(frame, "▌") {
+	if !strings.Contains(frame, "_") {
 		t.Fatalf("draft create frame should restore the cursor after activation:\n%s", frame)
 	}
 }
@@ -375,7 +375,7 @@ func TestWorkflow_DraftCreateAutoFocusesSlugInput(t *testing.T) {
 	h.Open()
 	frame := h.Frame()
 	testkit.AssertFocusedFrame(t, frame, "> slug")
-	if !strings.Contains(frame, "▌") {
+	if !strings.Contains(frame, "_") {
 		t.Fatalf("frame missing slug cursor:\n%s", frame)
 	}
 

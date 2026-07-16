@@ -305,7 +305,7 @@ func writeWorkspaceFocusTrace(t *testing.T, w penetrationArtifactWriter, width, 
 		},
 		{
 			key:   tui.KeyEvent{Key: tui.KeyTab},
-			want:  []string{"[› +]", "new workspace", "slug", "required", "after create", "▌"},
+			want:  []string{"[› +]", "new workspace", "slug", "required", "after create", "_"},
 			note:  "Tab to the draft workspace. The slug cursor must be visible on the first frame.",
 			label: "tab",
 		},
