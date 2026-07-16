@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/replay"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -40,11 +41,26 @@ type functionCallOutputItem struct {
 	Output string `json:"output"`
 }
 
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.CarrierDocument, error) {
-	return EncodeCarrierWithEffects(req, d, nil, "", EncodeOptions{})
+// EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
+// package does not import wire. It carries the canonical request plus an
+// optional native replay pointer for provider-specific continuation.
+type EncodeInput struct {
+	Request      canonical.CanonicalRequest
+	NativeReplay *replay.NativeRef
 }
 
-func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string, options EncodeOptions) (carrier.CarrierDocument, error) {
+// EncodeCarrier is a convenience that encodes a carrier document from a raw
+// canonical request without native replay support. It does not infer provider
+// continuation from TurnRef; callers that need provider continuation must pass
+// a fully populated NativeRef to EncodeCarrierWithEffects.
+func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.CarrierDocument, error) {
+	input := EncodeInput{Request: req}
+	return EncodeCarrierWithEffects(input, d, nil, "", EncodeOptions{})
+}
+
+func EncodeCarrierWithEffects(input EncodeInput, d delivery.Delivery, sink effect.Sink, exchangeID string, options EncodeOptions) (carrier.CarrierDocument, error) {
+	req := input.Request
+
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -52,7 +68,7 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	}
 
 	tools := req.Tools()
-	input, err := encodeInput(req, options.ForceStructuredInput)
+	payloadInput, err := encodeInput(req, options.ForceStructuredInput)
 	if err != nil {
 		return carrier.CarrierDocument{}, err
 	}
@@ -60,13 +76,13 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	if err != nil {
 		return carrier.CarrierDocument{}, err
 	}
-	logResponsesEncodeShape(req, input, choice, d)
+	logResponsesEncodeShape(req, payloadInput, choice, d)
 
 	payload := map[string]any{
 		"model": req.Model(),
 	}
-	if input != nil {
-		payload["input"] = input
+	if payloadInput != nil {
+		payload["input"] = payloadInput
 	}
 	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" {
 		payload["instructions"] = instructions
@@ -90,8 +106,8 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	} else if text != nil {
 		payload["text"] = text
 	}
-	if prev, ok := req.Turn().PreviousID(); ok {
-		payload["previous_response_id"] = prev
+	if input.NativeReplay != nil {
+		payload["previous_response_id"] = input.NativeReplay.Value
 	}
 	if options.Store != nil {
 		payload["store"] = *options.Store

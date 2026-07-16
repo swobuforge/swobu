@@ -5,6 +5,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/wire"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
@@ -14,7 +15,7 @@ func EncodeProviderRequestDocument(request canonical.CanonicalRequest, _ deliver
 	// overlay is injected here; the adapter only preserves the required wire
 	// shape for the execute route.
 	store := false
-	return responses.ProviderRequestDocumentEncoder{}.EncodeProviderRequestWithOptions(request, delivery.StreamingDelivery(delivery.FramingSSE), exchangeID, responses.EncodeOptions{
+	return responses.ProviderRequestDocumentEncoder{}.EncodeProviderRequestWithOptions(wire.ProviderEncodeInput{Request: request}, delivery.StreamingDelivery(delivery.FramingSSE), exchangeID, responses.EncodeOptions{
 		ForceStructuredInput: true,
 		Store:                &store,
 	})

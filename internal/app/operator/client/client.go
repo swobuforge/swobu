@@ -330,6 +330,33 @@ func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSe
 	}, nil
 }
 
+func (c *Client) ProbeModelCatalog(ctx context.Context, providerSpec, baseURL, authHeader, credentialRef, providerProtocol string) (ModelCatalogResult, error) {
+	q := make(url.Values)
+	q.Set("provider_spec", strings.TrimSpace(providerSpec))       // swobu:io-string source=boundary
+	q.Set("base_url", strings.TrimSpace(baseURL))                 // swobu:io-string source=boundary
+	q.Set("auth_header", strings.TrimSpace(authHeader))           // swobu:io-string source=boundary
+	q.Set("credential_ref", strings.TrimSpace(credentialRef))     // swobu:io-string source=boundary
+	q.Set("provider_protocol", strings.TrimSpace(providerProtocol)) // swobu:io-string source=boundary
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/model-catalog?"+q.Encode(), nil)
+	if err != nil {
+		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog request could not be built")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ModelCatalogResult{}, errorFromResponse(resp, "operator client: model catalog probe failed")
+	}
+	var result ModelCatalogResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog response could not be decoded")
+	}
+	return result, nil
+}
+
 func errorFromResponse(resp *http.Response, fallback string) error {
 	var payload struct {
 		Error struct {
@@ -339,8 +366,16 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
 		if msg := strings.TrimSpace(payload.Error.Message); msg != "" { // swobu:io-string source=boundary
-			return fmt.Errorf("operator client: %s (code=%s)", msg, payload.Error.Code)
+			return &ResponseError{
+				StatusCode: resp.StatusCode,
+				Code:       strings.TrimSpace(payload.Error.Code),
+				Message:    msg,
+				Fallback:   fallback,
+			}
 		}
 	}
-	return fmt.Errorf("%s returned status %d", fallback, resp.StatusCode)
+	return &ResponseError{
+		StatusCode: resp.StatusCode,
+		Fallback:   fallback,
+	}
 }

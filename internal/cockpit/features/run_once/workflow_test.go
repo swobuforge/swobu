@@ -13,7 +13,7 @@ import (
 func TestRunOnce_DisclosureShowsCommandPreview(t *testing.T) {
 	workflow := NewWorkflow(runOnceWorkspace(), runOnceWorkspace().RunCommands[0], nil, nil)
 
-	rendered := testkit.RenderTrimmed(workflow.Render(nil), 100, 8)
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 100, 8)
 	testkit.AssertVisual("disclosure").
 		Fixture("testdata/run_once_workflow/fixture/disclosure.txt").
 		Viewport(100, 8).
@@ -29,9 +29,10 @@ func TestRunOnce_ExecuteCallsPort(t *testing.T) {
 	if got := workflow.Selected.Get(); got != "gpt-4.1" {
 		t.Fatalf("selected route = %q, want gpt-4.1", got)
 	}
-	workflow.ChangeModel()
+	workflow.ToggleModelPicker()
+	workflow.SelectModel("gpt-4.1-alt")
 	if got := workflow.Selected.Get(); got != "gpt-4.1-alt" {
-		t.Fatalf("selected route after change = %q, want gpt-4.1-alt", got)
+		t.Fatalf("selected route after picker selection = %q, want gpt-4.1-alt", got)
 	}
 
 	workflow.Run(context.Background())
@@ -42,6 +43,45 @@ func TestRunOnce_ExecuteCallsPort(t *testing.T) {
 	if workflow.Message.Get() != "started · req-1" {
 		t.Fatalf("run message = %q, want started · req-1", workflow.Message.Get())
 	}
+}
+
+func TestRunOnce_SelectModel_InvalidRouteID_NoOp(t *testing.T) {
+	workflow := NewWorkflow(runOnceWorkspace(), runOnceWorkspace().RunCommands[0], nil, nil)
+	workflow.ToggleModelPicker()
+
+	workflow.SelectModel("missing-route")
+
+	if got := workflow.Selected.Get(); got != "gpt-4.1" {
+		t.Fatalf("selected route after invalid selection = %q, want gpt-4.1", got)
+	}
+	if !workflow.IsPickerOpen() {
+		t.Fatal("picker should remain open after invalid selection")
+	}
+}
+
+func TestRunOnce_SelectModel_ValidRouteID_Works(t *testing.T) {
+	workflow := NewWorkflow(runOnceWorkspace(), runOnceWorkspace().RunCommands[0], nil, nil)
+	workflow.ToggleModelPicker()
+
+	workflow.SelectModel("gpt-4.1-alt")
+
+	if got := workflow.Selected.Get(); got != "gpt-4.1-alt" {
+		t.Fatalf("selected route after valid selection = %q, want gpt-4.1-alt", got)
+	}
+	if workflow.IsPickerOpen() {
+		t.Fatal("picker should close after valid selection")
+	}
+}
+
+func TestRunOnce_ModelPickerOptionsRender(t *testing.T) {
+	workflow := NewWorkflow(runOnceWorkspace(), runOnceWorkspace().RunCommands[0], nil, nil)
+	workflow.ToggleModelPicker()
+
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 100, 8)
+	testkit.AssertVisual("model_picker_open").
+		Fixture("testdata/run_once_workflow/fixture/model_picker_open.txt").
+		Viewport(100, 8).
+		Now(t, rendered)
 }
 
 func TestRunOnce_CancelClosesDetail(t *testing.T) {
@@ -55,6 +95,24 @@ func TestRunOnce_CancelClosesDetail(t *testing.T) {
 	}
 	if !closed {
 		t.Fatal("run-once close callback not invoked")
+	}
+}
+
+func TestRunOnce_BackClosesPickerBeforeDetail(t *testing.T) {
+	var closed bool
+	workflow := NewWorkflow(runOnceWorkspace(), runOnceWorkspace().RunCommands[0], nil, func() {
+		closed = true
+	})
+	workflow.ToggleModelPicker()
+
+	if !workflow.Back() {
+		t.Fatal("Back should consume the open picker")
+	}
+	if workflow.IsPickerOpen() {
+		t.Fatal("picker should close before closing the workflow")
+	}
+	if closed {
+		t.Fatal("picker close should not invoke workflow close callback")
 	}
 }
 

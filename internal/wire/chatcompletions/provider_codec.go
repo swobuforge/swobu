@@ -10,11 +10,12 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.CarrierDocument, error) {
-		return EncodeCarrierWithEffects(request, delivery, sink, exchangeID)
+		return EncodeCarrierWithEffects(input.Request, delivery, sink, exchangeID)
 	})
 }
 

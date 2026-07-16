@@ -45,6 +45,7 @@ type providerConfigDocument struct {
 	ProviderSpec     string `json:"provider_spec"`
 	BaseURL          string `json:"base_url,omitempty"`
 	CredentialRef    string `json:"credential_ref,omitempty"`
+	RouteModelID     string `json:"route_model_id,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty"`
 	TargetRank       *int   `json:"target_rank,omitempty"`

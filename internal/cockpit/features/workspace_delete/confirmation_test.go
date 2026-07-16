@@ -68,14 +68,22 @@ func TestConfirmation_ActivateRequiresTwoEnters(t *testing.T) {
 	}
 }
 
-func TestConfirmation_KeyMapEscClosesFocusedConfirmation(t *testing.T) {
+func TestConfirmation_KeyMap_AlwaysNil(t *testing.T) {
+	confirmation := Confirmation(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
+	if confirmation.KeyMap() != nil {
+		t.Fatalf("confirmation.KeyMap should always return nil; Escape is on the mounted SelectableRow via OnCancel")
+	}
+}
+
+func TestConfirmation_BackClosesOpenConfirmation(t *testing.T) {
 	confirmation := Confirmation(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
 	confirmation.Request("dev")
 
-	pressBinding(t, confirmation.KeyMap(), tui.KeyEscape)
-
+	if !confirmation.Back() {
+		t.Fatal("Back should consume open confirmation")
+	}
 	if confirmation.IsOpen() {
-		t.Fatal("Escape should close confirmation")
+		t.Fatal("confirmation should close")
 	}
 }
 
@@ -107,16 +115,68 @@ func TestConfirmation_RenderInlineStates(t *testing.T) {
 		},
 		nil,
 	)
-	got := testkit.RenderString(confirmation.Render(nil), 90, 4)
+	got := testkit.RenderMountedString(t, confirmation, 90, 4)
 	assertRenderContains(t, got, "delete", "workspace", "delete")
 
 	confirmation.Request("dev")
-	got = testkit.RenderString(confirmation.Render(nil), 90, 4)
+	got = testkit.RenderMountedString(t, confirmation, 90, 4)
 	assertRenderContains(t, got, "delete", "delete dev?", "confirm")
 
 	confirmation.Confirm(context.Background())
-	got = testkit.RenderString(confirmation.Render(nil), 90, 5)
+	got = testkit.RenderMountedString(t, confirmation, 90, 5)
 	assertRenderContains(t, got, "permission denied")
+}
+
+func TestConfirmation_FocusedRowShowsMarker(t *testing.T) {
+	confirmation := Confirmation(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
+	h, err := testkit.NewHarness(confirmation)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	h.FocusNext()
+
+	frame := h.Frame()
+	testkit.AssertFocusedFrame(t, frame, ">    delete")
+	if !strings.Contains(frame, "delete ↵") {
+		t.Fatalf("frame missing delete action label:\n%s", frame)
+	}
+}
+
+func TestConfirmation_EscapeOnFocusedRow_SignalsBack(t *testing.T) {
+	var cancelled bool
+	confirmation := Confirmation(
+		readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"},
+		func(ctx context.Context, request ports.DeleteWorkspaceRequest) error {
+			return nil
+		},
+		func(id readmodel.WorkspaceID) {},
+	)
+	confirmation.OnCancel = func(_ readmodel.WorkspaceID) { cancelled = true }
+
+	// Arm via Request instead of Activate so the parent doesn't need wiring.
+	confirmation.Request("dev")
+	h, err := testkit.NewHarness(confirmation)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+	h.FocusNext()
+	if !confirmation.IsOpen() {
+		t.Fatal("confirmation should be open before Escape")
+	}
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
+	if confirmation.IsOpen() {
+		t.Fatal("Escape should cancel confirmation")
+	}
+	if !cancelled {
+		t.Fatal("OnCancel should have been called")
+	}
 }
 
 func assertRenderContains(t *testing.T, got string, values ...string) {
@@ -126,15 +186,4 @@ func assertRenderContains(t *testing.T, got string, values ...string) {
 			t.Fatalf("render should contain %q:\n%s", value, got)
 		}
 	}
-}
-
-func pressBinding(t *testing.T, keymap tui.KeyMap, key tui.Key) {
-	t.Helper()
-	for _, binding := range keymap {
-		if binding.Pattern.Key == key {
-			binding.Handler(tui.KeyEvent{Key: key})
-			return
-		}
-	}
-	t.Fatalf("keymap missing binding for %v", key)
 }

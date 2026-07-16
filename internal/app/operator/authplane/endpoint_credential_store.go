@@ -62,6 +62,14 @@ func (s EndpointCredentialStore) UpsertCredentialRef(ctx context.Context, provid
 		if configs[i].Ref() != providerRef {
 			continue
 		}
+		// Replay treats the credential ref as durable intent. Repointing an
+		// existing provider config to a different ref would make native replay
+		// compare equal across different accounts, so reject that rotation.
+		currentCredentialRef := strings.TrimSpace(configs[i].CredentialRef())
+		nextCredentialRef := strings.TrimSpace(credentialRef)
+		if currentCredentialRef != "" && currentCredentialRef != nextCredentialRef {
+			return "", fmt.Errorf("credential ref is immutable for provider config %q; create a new provider config to rotate credentials", providerRef.String())
+		}
 		next, err := cloneProviderConfigWithCredentialRef(configs[i], providerSpec, credentialRef)
 		if err != nil {
 			return "", err
@@ -130,6 +138,9 @@ func cloneProviderConfigWithCredentialRef(cfg endpointintent.ProviderConfig, pro
 	currentSpec := strings.TrimSpace(cfg.ProviderSpec().String())                                                     // swobu:io-string source=boundary
 	if spec := strings.TrimSpace(strings.ToLower(providerSpec)); spec != "" && spec != strings.ToLower(currentSpec) { // swobu:io-string source=boundary
 		return endpointintent.ProviderConfig{}, fmt.Errorf("provider spec mismatch for credential persistence")
+	}
+	if currentCredentialRef := strings.TrimSpace(cfg.CredentialRef()); currentCredentialRef != "" && currentCredentialRef != strings.TrimSpace(credentialRef) {
+		return endpointintent.ProviderConfig{}, fmt.Errorf("credential ref is immutable for provider config %q", cfg.Ref().String())
 	}
 	next, err := endpointintent.NewProviderConfig(
 		cfg.Ref(),

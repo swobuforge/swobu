@@ -51,6 +51,9 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if !RequiresExplicitExecuteBaseURL("azure") {
 		t.Fatal("azure should require an explicit execute base URL")
 	}
+	if !RequiresExplicitExecuteBaseURL("bedrock") {
+		t.Fatal("bedrock should require an explicit execute base URL")
+	}
 	if got := DefaultEnvKeyForSpec("azure"); got != "AZURE_OPENAI_API_KEY" {
 		t.Fatalf("azure default env key = %q", got)
 	}

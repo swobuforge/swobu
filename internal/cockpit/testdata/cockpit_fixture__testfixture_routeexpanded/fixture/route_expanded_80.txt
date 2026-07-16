@@ -1,21 +1,24 @@
 SWOBU    [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────
   workspace ▾
-     slug              dev                           edit ↵
-     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
-     run once          Codex                               open ↵
+     endpoint          http://127.0.0.1:7926/c/dev         copy ↵
+                       OpenAI · Anthropic
+     slug              dev                                 edit ↵
      delete            workspace                           delete ↵
 
-  routes ▾
-     gpt               default · 2 targets                 collapse ↵
-     target 1          openai_compatible/gpt-4.1           open ↵
-     target 2          openai_compatible/gpt-4o            open ↵
-     add target                                            add ↵
-        model          gpt                           edit ↵
-        default        yes                           current
-        delete         gpt                           delete ↵
+  model routes ▾
+     gpt               default · 2 fallback steps          collapse ↵
+        name              gpt                                 edit ↵
+        default           yes                                 current
+        delete            gpt                                 delete ↵
+        client sends      model = gpt
+        step 1
+          openai/gpt-4.1                                        edit ↵
+        step 2
+          anthropic/claude-sonnet                                    edit ↵
+        add target                                            add ↵
      local             1 target                            expand ↵
-     add route                                             add ↵
+     add model route                                       add ↵
 
   activity ▾
      latest            no requests yet
@@ -23,9 +26,6 @@ SWOBU    [› dev] [lab] [+] [?]
 
 ────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   F1 help   esc back
-
-
-
 
 
 

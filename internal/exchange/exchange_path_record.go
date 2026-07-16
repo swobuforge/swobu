@@ -39,19 +39,19 @@ func mapErrorToFailureClass(err error) routing.FailureClass {
 func endpointToWorkspaceRouting(e endpointintent.Endpoint) routing.WorkspaceRouting {
 	routes := map[string]routing.Route{}
 	for _, pc := range e.ProviderConfigs() {
-		modelID := pc.ModelID()
-		if modelID == "" {
+		routeModelID := projectedRouteModel(pc)
+		if routeModelID == "" {
 			continue
 		}
-		mod := routes[modelID]
-		mod.ModelName = modelID
+		mod := routes[routeModelID]
+		mod.ModelName = routeModelID
 		mod.Targets = append(mod.Targets, providerConfigToTarget(pc))
-		routes[modelID] = mod
+		routes[routeModelID] = mod
 	}
 
 	var defaultModel string
 	if sel := e.SelectedProviderConfig(); sel.Ref().String() != "" {
-		defaultModel = sel.ModelID()
+		defaultModel = projectedRouteModel(sel)
 	}
 
 	return routing.WorkspaceRouting{
@@ -59,6 +59,17 @@ func endpointToWorkspaceRouting(e endpointintent.Endpoint) routing.WorkspaceRout
 		DefaultModel:  defaultModel,
 		Routes:        routes,
 	}
+}
+
+// projectedRouteModel returns the client-visible route model name for request
+// routing. Legacy configs without an explicit route model fall back to the
+// provider-side model id.
+func projectedRouteModel(pc endpointintent.ProviderConfig) string {
+	routeModelID := strings.TrimSpace(pc.RouteModelID()) // swobu:io-string source=boundary
+	if routeModelID != "" {
+		return routeModelID
+	}
+	return strings.TrimSpace(pc.ModelID()) // swobu:io-string source=boundary
 }
 
 func providerConfigToTarget(pc endpointintent.ProviderConfig) routing.Target {

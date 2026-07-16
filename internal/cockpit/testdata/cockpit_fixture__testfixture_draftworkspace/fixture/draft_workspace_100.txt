@@ -1,12 +1,12 @@
 SWOBU    [dev] [lab] [› +] [?]
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
-     slug              _                             create ↵
-     client base URL   (derived from slug)
+>    slug                                                  create ↵
+     endpoint          (derived from slug)
 
-  routes ▾
+  model routes ▾
      (no routes)
-     add route                                             add ↵
+     add model route                                       add ↵
 
   activity ▾
      (no activity)

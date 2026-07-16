@@ -50,7 +50,7 @@ func TestRouteSectionState_ApplyTargetDeletedRemovesTargetAndClosesInlineState(t
 	route := section.State.Routes[0]
 	section.OpenTargetEditor(route, route.Targets[0])
 
-	section.deleteTarget(route.ID, route.Targets[0].ID)
+	section.deleteTargetAndClose(route.ID, route.Targets[0].ID)
 
 	if got := len(section.State.Routes[0].Targets); got != 1 {
 		t.Fatalf("targets after delete = %d, want 1", got)

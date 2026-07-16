@@ -17,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type testCredentialResolver struct{}
@@ -49,7 +50,7 @@ func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRe
 	if codec == nil {
 		t.Fatalf("provider request encoder missing for protocol %s", target.ProtocolKind)
 	}
-	wireRequestResult, err := codec.EncodeProviderRequestDocument(request, contract.ProviderDelivery, "")
+	wireRequestResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, contract.ProviderDelivery, "")
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}

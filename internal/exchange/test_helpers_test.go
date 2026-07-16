@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/replay"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -66,14 +67,35 @@ func newTransportRequestWithTurn(method, url string, turn string, body map[strin
 }
 
 func withRuntime(providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)) Runner {
-	return Runner{Runtime: testExecutionRuntime{
-		testRuntimeResolver: testRuntimeResolver{},
-		providerIngress:     providerIngress,
-	}}
+	return Runner{
+		Runtime: testExecutionRuntime{
+			testRuntimeResolver: testRuntimeResolver{},
+			providerIngress:     providerIngress,
+		},
+		ReplayStore: replay.NewMemoryStore(),
+		ResponseIDs: deterministicResponseIDGenerator{},
+	}
 }
 
-func (r Runner) WithContinuationStore(store canonical.ContinuationStore) Runner {
-	r.ContinuationStore = store
+type runtimeWithProviderIngress struct {
+	RuntimeResolver
+	providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)
+}
+
+func (r runtimeWithProviderIngress) ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error) {
+	if r.providerIngress == nil {
+		return nil, canonical.InternalError("test provider ingress resolver is required")
+	}
+	return r.providerIngress(ctx, req)
+}
+
+func (r Runner) WithReplayStore(store replay.Store) Runner {
+	r.ReplayStore = store
+	return r
+}
+
+func (r Runner) WithResponseIDs(gen replay.ResponseIDGenerator) Runner {
+	r.ResponseIDs = gen
 	return r
 }
 
@@ -188,6 +210,10 @@ func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) 
 	if text == "" {
 		text = "ok"
 	}
+	resultID := output.ResultID()
+	if resultID != "" {
+		return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, []byte(`{"id":"`+resultID+`","output_text":"`+text+`"}`), carrier.Meta{})), nil
+	}
 	return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{})), nil
 }
 
@@ -206,10 +232,10 @@ func (testClientCodec) EncodeResponseStream(events canonical.EventReader, d deli
 
 type testProviderRequestDocumentEncoder struct{}
 
-func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, d delivery.Delivery, exchangeID string) (Result[carrier.CarrierDocument], error) {
+func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
 	_ = d
 	_ = exchangeID
-	return effect.NewResult(carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+request.Model()+`"}`), carrier.Meta{})), nil
+	return effect.NewResult(carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+input.Request.Model()+`"}`), carrier.Meta{})), nil
 }
 
 type testProviderEnvelopeDecoder struct{}
@@ -217,6 +243,20 @@ type testProviderEnvelopeDecoder struct{}
 func (testProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string) (Result[canonical.EventReader], error) {
 	_ = stream
 	return effect.NewResult(stubResponseEventReader(exchangeID)), nil
+}
+
+// NativeReplayFromOutput implements wire.NativeReplaySource so streaming
+// tests can assert native replay capture.
+func (testProviderEnvelopeDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
+	if providerResultID == "" {
+		return nil
+	}
+	return &replay.NativeRef{
+		ReplayID: replayID,
+		Target:   target,
+		Kind:     replay.NativeRefProviderResponseID,
+		Value:    providerResultID,
+	}
 }
 
 type testProviderDocumentDecoder struct{}
@@ -227,10 +267,24 @@ func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, d
 	return effect.NewResult(stubResponseEventReader(exchangeID)), nil
 }
 
+// NativeReplayFromOutput implements wire.NativeReplaySource so buffered
+// tests can assert native replay capture.
+func (testProviderDocumentDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
+	if providerResultID == "" {
+		return nil
+	}
+	return &replay.NativeRef{
+		ReplayID: replayID,
+		Target:   target,
+		Kind:     replay.NativeRefProviderResponseID,
+		Value:    providerResultID,
+	}
+}
+
 func stubResponseEventReader(exchangeID string) canonical.EventReader {
 	now := time.Now().UTC()
 	// Produce a completed response envelope with metadata carrying a
-	// result_id so continuation capture can project and persist it.
+	// result_id so replay capture can project and persist it.
 	events := []canonical.Event{
 		{
 			ExchangeID: exchangeID,

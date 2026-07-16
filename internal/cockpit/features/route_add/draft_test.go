@@ -19,7 +19,7 @@ func TestDraft_OpenSeedsUniqueModelName(t *testing.T) {
 	}
 }
 
-func TestDraft_RouteUsesEditedModelNameAsIncompleteRoute(t *testing.T) {
+func TestDraft_RouteUsesEditedModelNameAsNormalRoute(t *testing.T) {
 	draft := NewDraft()
 	draft.OpenFor(nil)
 	draft.ModelName.Set("  custom-model  ")
@@ -29,8 +29,8 @@ func TestDraft_RouteUsesEditedModelNameAsIncompleteRoute(t *testing.T) {
 	if route.ID != "custom-model" || route.ModelName != "custom-model" {
 		t.Fatalf("draft route = %#v, want custom-model identity", route)
 	}
-	if route.State != readmodel.RouteIncomplete || !route.Enabled {
-		t.Fatalf("draft route state = %#v, want incomplete enabled route", route)
+	if route.State != readmodel.RouteNormal || !route.Enabled || len(route.Targets) != 0 {
+		t.Fatalf("draft route state = %#v, want normal enabled route with no targets", route)
 	}
 }
 

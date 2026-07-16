@@ -7,7 +7,9 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/adapters"
+	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 	helppage "github.com/swobuforge/swobu/internal/cockpit/pages/help"
+	workspace_page "github.com/swobuforge/swobu/internal/cockpit/pages/workspace"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"golang.org/x/term"
 )
@@ -44,8 +46,14 @@ func Run(ctx context.Context, daemonURL string, stdin io.Reader, stdout, stderr 
 		return renderCockpitSnapshot(stdout, model)
 	}
 
+	cockpit := NewCockpitWithContext(model, ctx, adapter, adapter)
 	app, err := tui.NewApp(
-		tui.WithRootComponent(NewCockpitWithContext(model, ctx, adapter, adapter)),
+		tui.WithRootComponent(cockpit),
+		tui.WithOnResume(func() {
+			if page := currentWorkspacePage(cockpit); page != nil {
+				page.ActivitySection.Refresh()
+			}
+		}),
 		tui.WithLegacyKeyboard(),
 		tui.WithoutMouse(),
 	)
@@ -70,12 +78,24 @@ func isInteractiveTerminal(stdin io.Reader, stdout io.Writer) bool {
 	return term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(out.Fd()))
 }
 
+func currentWorkspacePage(c *Cockpit) *workspace_page.PageView {
+	if c == nil {
+		return nil
+	}
+	model := c.activeModel()
+	if model.ActivePage != readmodel.CockpitWorkspacePage {
+		return nil
+	}
+	return c.activeWorkspacePage(model)
+}
+
 func renderCockpitSnapshot(stdout io.Writer, model readmodel.CockpitReadModel) error {
 	model = applyCockpitDefaults(model)
-	root := NewCockpit(model).Render(nil)
-	buffer := tui.NewBuffer(snapshotWidth, snapshotHeight)
-	root.Render(buffer, snapshotWidth, snapshotHeight)
-	_, err := io.WriteString(stdout, buffer.StringTrimmed()+cockpitSnapshotNewline)
+	snapshot, err := mountedrender.Trimmed(NewCockpit(model), snapshotWidth, snapshotHeight)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(stdout, snapshot+cockpitSnapshotNewline)
 	return err
 }
 

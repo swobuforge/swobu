@@ -139,9 +139,9 @@ type testDocPatch struct {
 	id string
 }
 
-func (t testDocPatch) ID() string                                          { return t.id }
-func (t testDocPatch) Stage() Stage                                        { return StageRequestDocumentOut }
-func (t testDocPatch) Capabilities() StageCapabilities                     { return StageCapabilities{} }
+func (t testDocPatch) ID() string                                  { return t.id }
+func (t testDocPatch) Stage() Stage                                { return StageRequestDocumentOut }
+func (t testDocPatch) Capabilities() StageCapabilities             { return StageCapabilities{} }
 func (t testDocPatch) Match(Context, carrier.CarrierDocument) bool { return true }
 func (t testDocPatch) Apply(_ Context, in carrier.CarrierDocument) (Result[carrier.CarrierDocument], error) {
 	return Result[carrier.CarrierDocument]{Value: in}, nil

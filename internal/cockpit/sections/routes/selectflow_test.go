@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
@@ -14,13 +13,15 @@ func TestRouteSection_FocusTraversal(t *testing.T) {
 	h := makeHarness(t, section)
 	defer h.Close()
 
-	// All selectable rows should be in focus tree
+	// All selectable rows should be in focus tree.
+	// Expanded route has: route row + 3 detail rows + 2 target rows + add target row = 7.
+	// With the detail rows now inline: route row + 3 detail + 2 targets + add target = 10.
 	root := h.App().Root()
 	if root == nil {
 		t.Fatal("app.Root() returned nil")
 	}
 	focusables := collectFocusables(root)
-	if got, want := len(focusables), 6; got != want {
+	if got, want := len(focusables), 10; got != want {
 		t.Fatalf("expanded route focusables = %d, want %d", got, want)
 	}
 }
@@ -31,12 +32,7 @@ func TestRouteSection_FocusMarkersRendered(t *testing.T) {
 	h := makeHarness(t, section)
 	defer h.Close()
 
-	h.FocusNext()
-
-	frame := h.Frame()
-	if !strings.Contains(frame, "> ") {
-		t.Fatalf("no focused row marker found in frame:\n%s", frame)
-	}
+	testkit.AssertFocusVisible(t, h, h.FocusNext, "> ")
 }
 
 func TestRouteSection_FocusMoveUpdatesMarker(t *testing.T) {
@@ -46,6 +42,7 @@ func TestRouteSection_FocusMoveUpdatesMarker(t *testing.T) {
 	defer h.Close()
 
 	h.FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frame1 := h.Frame()
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
@@ -63,21 +60,17 @@ func TestRouteSection_EnterActivatesRow(t *testing.T) {
 
 	// Focus the first row (route row)
 	h.FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
-	if !strings.Contains(frameBefore, "> gpt") {
-		t.Fatalf("expected gpt route focused before Enter, got:\n%s", frameBefore)
-	}
+	testkit.AssertFocusedFrame(t, frameBefore, ">    gpt")
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	testkit.AssertFocusVisible(t, h, func() {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	}, "> ")
 
 	if section.State.ExpandedRoute.Get() != "" {
 		t.Fatalf("expected route toggled closed after activation, got %q", section.State.ExpandedRoute.Get())
-	}
-
-	frameAfter := h.Frame()
-	if !strings.Contains(frameAfter, "> ") {
-		t.Fatalf("expected a focused row after Enter, got:\n%s", frameAfter)
 	}
 }
 
@@ -88,6 +81,7 @@ func TestRouteSection_SpaceActivatesRow(t *testing.T) {
 	defer h.Close()
 
 	h.FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: ' '})
 
 	if section.State.ExpandedRoute.Get() != "" {
@@ -108,8 +102,9 @@ func TestRouteAdd_InputSubmitCreatesDraftRoute(t *testing.T) {
 	if got := section.State.ExpandedRoute.Get(); got != "route-newx" {
 		t.Fatalf("expanded route = %q, want route-newx", got)
 	}
-	if got := section.State.AddTargetRoute.Get(); got != "route-newx" {
-		t.Fatalf("add target route = %q, want route-newx", got)
+	// Add target form stays closed — operator must explicitly choose to add.
+	if got := section.State.AddTargetRoute.Get(); got != "" {
+		t.Fatalf("add target route = %q, want closed", got)
 	}
 	if section.RouteDraft.IsOpen() {
 		t.Fatal("draft row should close after submit")

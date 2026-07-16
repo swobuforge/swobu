@@ -3,6 +3,7 @@ package workspace_edit
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
@@ -30,6 +31,41 @@ func TestWorkflow_OpenEditorSeedsExistingWorkspace(t *testing.T) {
 	}
 	if workflow.Slug.Get() != "dev" {
 		t.Fatalf("slug = %q, want dev", workflow.Slug.Get())
+	}
+}
+
+func TestWorkflow_UpdatePropsReseedsWhenWorkspaceIdentityChanges(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{
+		ID:    "lab",
+		Slug:  "lab",
+		State: readmodel.WorkspaceExisting,
+	}, nil, nil)
+
+	workflow.OpenEditor(readmodel.WorkspaceReadModel{
+		ID:    "lab",
+		Slug:  "lab",
+		State: readmodel.WorkspaceExisting,
+	})
+	workflow.Slug.Set("lab-2")
+
+	workflow.UpdateProps(&Workflow{
+		Workspace: readmodel.WorkspaceReadModel{
+			ID:    "+",
+			State: readmodel.WorkspaceDraft,
+		},
+	})
+
+	if workflow.Mode.Get() != ModeCreate {
+		t.Fatalf("mode = %v, want create", workflow.Mode.Get())
+	}
+	if workflow.Phase.Get() != PhaseEditing {
+		t.Fatalf("phase = %v, want editing", workflow.Phase.Get())
+	}
+	if workflow.WorkspaceID.Get() != "+" {
+		t.Fatalf("workspace id = %q, want +", workflow.WorkspaceID.Get())
+	}
+	if workflow.Slug.Get() != "" {
+		t.Fatalf("slug = %q, want empty draft", workflow.Slug.Get())
 	}
 }
 
@@ -99,11 +135,41 @@ func TestWorkflow_SubmitSuccessEmitsSavedWorkspaceAndCloses(t *testing.T) {
 	}
 }
 
+func TestWorkflow_SubmitSlugBridgesEnterToSave(t *testing.T) {
+	var saveCalled bool
+	var saved readmodel.WorkspaceReadModel
+	var request ports.SaveWorkspaceRequest
+	// The mounted draft tab owns the "+" identifier; create submits must
+	// preserve that draft ID so the live adapter stays on the create path.
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "+", State: readmodel.WorkspaceDraft}, func(ctx context.Context, got ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+		saveCalled = true
+		request = got
+		return readmodel.WorkspaceReadModel{ID: readmodel.WorkspaceID(got.Slug), Slug: got.Slug, State: readmodel.WorkspaceExisting}, nil
+	}, func(workspace readmodel.WorkspaceReadModel) {
+		saved = workspace
+	})
+
+	workflow.SubmitSlug("dev")
+
+	if !saveCalled {
+		t.Fatal("create submit should call the backend save seam")
+	}
+	if got, want := request.ID, readmodel.WorkspaceID("+"); got != want {
+		t.Fatalf("save request id = %q, want +", got)
+	}
+	if workflow.Mode.Get() != ModeEdit {
+		t.Fatalf("mode = %v, want edit after save", workflow.Mode.Get())
+	}
+	if saved.ID != "dev" || saved.Slug != "dev" || saved.State != readmodel.WorkspaceExisting {
+		t.Fatalf("saved workspace = %#v, want existing dev", saved)
+	}
+}
+
 func TestWorkflow_SubmitFailureLeavesDraftOpen(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{}, func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
 		return readmodel.WorkspaceReadModel{}, errors.New("disk full")
 	}, nil)
-	workflow.OpenCreate()
+	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
 	workflow.Slug.Set("dev")
 
 	workflow.Submit(context.Background())
@@ -117,6 +183,74 @@ func TestWorkflow_SubmitFailureLeavesDraftOpen(t *testing.T) {
 	if workflow.Error.Get() != "disk full" {
 		t.Fatalf("error = %q, want disk full", workflow.Error.Get())
 	}
+}
+
+func TestWorkflow_CreateSubmitFailureLeavesDraftOpen(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{}, func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+		return readmodel.WorkspaceReadModel{}, errors.New("slug taken")
+	}, nil)
+	workflow.OpenCreate()
+	workflow.Slug.Set("dev")
+
+	workflow.Submit(context.Background())
+
+	if workflow.Phase.Get() != PhaseFailed {
+		t.Fatalf("phase = %v, want failed", workflow.Phase.Get())
+	}
+	if workflow.WorkspaceID.Get() != "" {
+		t.Fatalf("workspace id = %q, want empty draft", workflow.WorkspaceID.Get())
+	}
+	if workflow.Error.Get() != "slug taken" {
+		t.Fatalf("error = %q, want slug taken", workflow.Error.Get())
+	}
+}
+
+func TestWorkflow_CreateSubmitFailureShowsSaveErrorInRender(t *testing.T) {
+	// Save failures must render on the row itself; otherwise the PTY proof lane
+	// cannot distinguish a rejected submit from a no-op Enter key.
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{}, func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+		return readmodel.WorkspaceReadModel{}, errors.New("disk full")
+	}, nil)
+	workflow.OpenCreate()
+	workflow.Slug.Set("dev")
+
+	workflow.Submit(context.Background())
+
+	if got, want := workflow.ActionLabel(), "invalid"; got != want {
+		t.Fatalf("action label = %q, want %q", got, want)
+	}
+
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	testkit.AssertVisual("submit_failed").
+		Fixture("testdata/workspace_edit_workflow/fixture/submit_failed.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
+}
+
+func TestWorkflow_EditSubmitFailureShowsSaveErrorInRender(t *testing.T) {
+	// Edit-mode save failures must render inline too; the shared visibleError
+	// path works for both create and edit, but each mode needs its own fixture
+	// regression because the row value and action semantics differ.
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{}, func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+		return readmodel.WorkspaceReadModel{}, errors.New("name conflict")
+	}, nil)
+	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
+	workflow.Slug.Set("dev-2")
+
+	workflow.Submit(context.Background())
+
+	if got, want := workflow.ActionLabel(), "invalid"; got != want {
+		t.Fatalf("action label = %q, want %q", got, want)
+	}
+	if got, want := workflow.Slug.Get(), "dev-2"; got != want {
+		t.Fatalf("slug = %q, want preserved dev-2", got)
+	}
+
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	testkit.AssertVisual("edit_submit_failed").
+		Fixture("testdata/workspace_edit_workflow/fixture/edit_submit_failed.txt").
+		Viewport(90, 9).
+		Now(t, rendered)
 }
 
 func TestWorkflow_BackClosesOpenWorkflow(t *testing.T) {
@@ -153,6 +287,32 @@ func TestWorkflow_KeyMapEscClosesFocusedWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflow_FocusedViewingRowKeepsMarkerAndFlipsToSaveOnEnter(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
+	h, err := testkit.NewHarness(workflow)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	h.FocusNext()
+
+	frame := h.Frame()
+	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	if !strings.Contains(frame, "edit ↵") {
+		t.Fatalf("frame missing view action before Enter:\n%s", frame)
+	}
+
+	workflow.Activate()
+
+	frame = h.Frame()
+	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	if !strings.Contains(frame, "save ↵") {
+		t.Fatalf("frame missing edit action after Enter:\n%s", frame)
+	}
+}
+
 func TestWorkflow_DraftCreateAutoFocusesSlugInput(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, nil, nil)
 	h, err := testkit.NewHarness(workflow)
@@ -162,11 +322,47 @@ func TestWorkflow_DraftCreateAutoFocusesSlugInput(t *testing.T) {
 	defer h.Close()
 
 	h.Open()
-	h.Frame()
+	frame := h.Frame()
+	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	if !strings.Contains(frame, "▌") {
+		t.Fatalf("frame missing slug cursor:\n%s", frame)
+	}
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: '?'})
 	if got := workflow.Slug.Get(); got != "?" {
 		t.Fatalf("slug after typing ? = %q, want ?", got)
+	}
+}
+
+func TestWorkflow_DraftCreateEnterSubmitsWorkspace(t *testing.T) {
+	var saveCalled bool
+	var saved readmodel.WorkspaceReadModel
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, func(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+		saveCalled = true
+		return readmodel.WorkspaceReadModel{ID: readmodel.WorkspaceID(request.Slug), Slug: request.Slug, State: readmodel.WorkspaceExisting}, nil
+	}, func(workspace readmodel.WorkspaceReadModel) {
+		saved = workspace
+	})
+	h, err := testkit.NewHarness(workflow)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'd'})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'e'})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'v'})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	if !saveCalled {
+		t.Fatal("draft create submit should call the backend save seam")
+	}
+	if workflow.Mode.Get() != ModeEdit {
+		t.Fatalf("mode = %v, want edit after submit", workflow.Mode.Get())
+	}
+	if saved.ID != "dev" || saved.Slug != "dev" || saved.State != readmodel.WorkspaceExisting {
+		t.Fatalf("saved workspace = %#v, want existing dev", saved)
 	}
 }
 
@@ -200,28 +396,28 @@ func TestWorkflow_ActivateSlugRowEditsNoopsOrSubmits(t *testing.T) {
 
 func TestWorkflow_RenderSlugLifecycleStatesInComponentLane(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
-	rendered := testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 9)
 	testkit.AssertVisual("viewing").
 		Fixture("testdata/workspace_edit_workflow/fixture/viewing.txt").
 		Viewport(90, 9).
 		Now(t, rendered)
 
 	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
-	rendered = testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
 	testkit.AssertVisual("editing").
 		Fixture("testdata/workspace_edit_workflow/fixture/editing.txt").
 		Viewport(90, 9).
 		Now(t, rendered)
 
 	workflow.Slug.Set("dev!")
-	rendered = testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
 	testkit.AssertVisual("invalid").
 		Fixture("testdata/workspace_edit_workflow/fixture/invalid.txt").
 		Viewport(90, 9).
 		Now(t, rendered)
 
 	workflow.OpenCreate()
-	rendered = testkit.RenderTrimmed(workflow.Render(nil), 90, 9)
+	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
 	testkit.AssertVisual("create").
 		Fixture("testdata/workspace_edit_workflow/fixture/create.txt").
 		Viewport(90, 9).

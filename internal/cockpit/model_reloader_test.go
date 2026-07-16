@@ -36,6 +36,24 @@ func TestModelReloader_RefreshAfterSaveFallsBackOnLoadWorkspaceError(t *testing.
 	}
 	reloader := NewModelReloader(context.Background(), fake, 5*time.Second)
 	current := DefaultFixtureReadModel()
+	current.SelectedWorkspace.Routes = []readmodel.RouteReadModel{
+		{
+			ID:        "route-new",
+			ModelName: "route-new",
+			State:     readmodel.RouteNormal,
+			Enabled:   true,
+			Targets: []readmodel.TargetReadModel{
+				{
+					ID:       "target-1",
+					Name:     "target",
+					Provider: "bedrock",
+					Model:    "route-new",
+					Rank:     1,
+					Weight:   1,
+				},
+			},
+		},
+	}
 
 	model, notice := reloader.RefreshAfterSave(current, readmodel.WorkspaceReadModel{ID: "lab", Slug: "lab"})
 
@@ -44,6 +62,9 @@ func TestModelReloader_RefreshAfterSaveFallsBackOnLoadWorkspaceError(t *testing.
 	}
 	if notice.Kind != readmodel.NoticeStale {
 		t.Fatalf("notice kind = %v, want NoticeStale", notice.Kind)
+	}
+	if len(model.SelectedWorkspace.Routes) != 1 || model.SelectedWorkspace.Routes[0].ID != "route-new" {
+		t.Fatalf("routes = %#v, want preserved draft route", model.SelectedWorkspace.Routes)
 	}
 }
 
@@ -68,6 +89,53 @@ func TestModelReloader_RefreshAfterSaveReturnsFreshWhenHealthy(t *testing.T) {
 	}
 	if fake.loadCockpitCalls != 1 || fake.loadWorkspaceCalls != 1 {
 		t.Fatalf("calls = cockpit %d workspace %d, want 1/1", fake.loadCockpitCalls, fake.loadWorkspaceCalls)
+	}
+}
+
+func TestModelReloader_RefreshAfterSavePromotesDraftWithoutDaemonReload(t *testing.T) {
+	t.Parallel()
+	fake := &fakeWorkspacePorts{
+		loadCockpitErr:   errors.New("should not be called"),
+		loadWorkspaceErr: errors.New("should not be called"),
+	}
+	reloader := NewModelReloader(context.Background(), fake, 5*time.Second)
+	current := readmodel.CockpitReadModel{
+		HeaderRight:         "http://pi:7926",
+		ActivePage:          readmodel.CockpitWorkspacePage,
+		SelectedWorkspaceID: "+",
+		SelectedWorkspace: readmodel.WorkspaceReadModel{
+			ID:    "+",
+			State: readmodel.WorkspaceDraft,
+		},
+		Tabs: []readmodel.WorkspaceTabReadModel{
+			{ID: "+", Kind: readmodel.WorkspaceTabDraft, Selected: true},
+			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+		},
+	}
+
+	model, notice := reloader.RefreshAfterSave(current, readmodel.WorkspaceReadModel{
+		ID:    "lab",
+		Slug:  "lab",
+		State: readmodel.WorkspaceExisting,
+	})
+
+	if model.SelectedWorkspaceID != "lab" {
+		t.Fatalf("selected workspace = %q, want lab", model.SelectedWorkspaceID)
+	}
+	if model.SelectedWorkspace.IsDraft() {
+		t.Fatal("draft save should promote the selected workspace")
+	}
+	if got, want := model.SelectedWorkspace.ClientBaseURL, "http://pi:7926/c/lab"; got != want {
+		t.Fatalf("client base url = %q, want %q", got, want)
+	}
+	if got := len(model.SelectedWorkspace.RunCommands); got == 0 {
+		t.Fatal("draft save should synthesize run commands")
+	}
+	if !notice.IsEmpty() {
+		t.Fatalf("notice = %#v, want empty", notice)
+	}
+	if fake.loadCockpitCalls != 0 || fake.loadWorkspaceCalls != 0 {
+		t.Fatalf("calls = cockpit %d workspace %d, want 0/0", fake.loadCockpitCalls, fake.loadWorkspaceCalls)
 	}
 }
 

@@ -1,0 +1,1 @@
+Down reaches the delete row and the row marker is visible on the correct indent.

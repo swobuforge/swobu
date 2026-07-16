@@ -6,6 +6,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/replay"
 )
 
 type realizedResponsesBody struct {
@@ -20,7 +21,10 @@ func TestEncode_OmitsInputForContinuationOnlyRequests(t *testing.T) {
 		Turn:  canonical.NewTurnRef("resp_123"),
 	})
 
-	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
+	wire, err := EncodeCarrierWithEffects(EncodeInput{
+		Request:      req,
+		NativeReplay: &replay.NativeRef{Value: "resp_123"},
+	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatalf("Encode returned err=%v", err)
 	}
@@ -47,7 +51,10 @@ func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 		Turn: canonical.NewTurnRef("resp_123"),
 	})
 
-	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
+	wire, err := EncodeCarrierWithEffects(EncodeInput{
+		Request:      req,
+		NativeReplay: &replay.NativeRef{Value: "resp_123"},
+	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatalf("Encode returned err=%v", err)
 	}

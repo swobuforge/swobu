@@ -1,0 +1,1 @@
+Tab wraps from help back to the first workspace tab.

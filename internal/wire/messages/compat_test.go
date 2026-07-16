@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type legacyClientRequestDecoder struct{}
@@ -40,7 +41,7 @@ func (legacyResponseStreamEncoder) EncodeResponseStream(events canonical.EventRe
 type legacyProviderRequestDocumentEncoder struct{}
 
 func (legacyProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, _ effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
-	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(request, delivery, exchangeID)
+	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery, exchangeID)
 	return result.Value, err
 }
 

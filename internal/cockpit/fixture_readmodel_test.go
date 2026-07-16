@@ -1,6 +1,10 @@
 package cockpit
 
-import "github.com/swobuforge/swobu/internal/cockpit/readmodel"
+import (
+	"testing"
+
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+)
 
 // DefaultFixtureReadModel returns fixed Cockpit data for the first visual
 // fixture. It is intentionally adapter-free so layout proof cannot depend on
@@ -24,10 +28,11 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 			IssueURL:       "https://github.com/swobuforge/swobu/issues/new",
 		},
 		SelectedWorkspace: readmodel.WorkspaceReadModel{
-			ID:            dev,
-			Slug:          "dev",
-			State:         readmodel.WorkspaceExisting,
-			ClientBaseURL: "http://127.0.0.1:7926/c/dev",
+			ID:                dev,
+			Slug:              "dev",
+			State:             readmodel.WorkspaceExisting,
+			CompatibleClients: "OpenAI · Anthropic",
+			ClientBaseURL:     "http://127.0.0.1:7926/c/dev",
 			RunCommands: []readmodel.RunCommandReadModel{
 				{
 					ID:          "codex",
@@ -42,14 +47,13 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 					ID:        "gpt",
 					ModelName: "gpt",
 					State:     readmodel.RouteNormal,
-					PlanKind:  readmodel.RoutePlanRanked,
 					Default:   true,
 					Enabled:   true,
 					Targets: []readmodel.TargetReadModel{
 						{
 							ID:            "target-1",
 							Name:          "target-1",
-							Provider:      "openai_compatible",
+							Provider:      "openai",
 							Model:         "gpt-4.1",
 							BaseURL:       "https://api.openai.com/v1",
 							CredentialRef: "default-key",
@@ -59,9 +63,9 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 						{
 							ID:            "target-2",
 							Name:          "target-2",
-							Provider:      "openai_compatible",
-							Model:         "gpt-4o",
-							BaseURL:       "https://api.openai.com/v1",
+							Provider:      "anthropic",
+							Model:         "claude-sonnet",
+							BaseURL:       "https://api.anthropic.com/v1",
 							CredentialRef: "default-key",
 							Rank:          2,
 							Weight:        1,
@@ -72,7 +76,6 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 					ID:        "local",
 					ModelName: "local",
 					State:     readmodel.RouteNormal,
-					PlanKind:  readmodel.RoutePlanSingle,
 					Enabled:   true,
 					Targets: []readmodel.TargetReadModel{
 						{
@@ -89,5 +92,32 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 				},
 			},
 		},
+	}
+}
+
+func TestDefaultFixtureReadModel_ModelRoutes(t *testing.T) {
+	model := DefaultFixtureReadModel()
+	if got, want := len(model.SelectedWorkspace.Routes), 2; got != want {
+		t.Fatalf("route count = %d, want %d", got, want)
+	}
+
+	gpt := model.SelectedWorkspace.Routes[0]
+	if got, want := gpt.ID, readmodel.RouteID("gpt"); got != want {
+		t.Fatalf("route id = %q, want %q", got, want)
+	}
+	if got, want := len(gpt.Targets), 2; got != want {
+		t.Fatalf("target count = %d, want %d", got, want)
+	}
+	if got, want := gpt.Targets[0].Provider, "openai"; got != want {
+		t.Fatalf("first target provider = %q, want %q", got, want)
+	}
+	if got, want := gpt.Targets[0].Model, "gpt-4.1"; got != want {
+		t.Fatalf("first target model = %q, want %q", got, want)
+	}
+	if got, want := gpt.Targets[1].Provider, "anthropic"; got != want {
+		t.Fatalf("second target provider = %q, want %q", got, want)
+	}
+	if got, want := gpt.Targets[1].Model, "claude-sonnet"; got != want {
+		t.Fatalf("second target model = %q, want %q", got, want)
 	}
 }

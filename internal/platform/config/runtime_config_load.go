@@ -68,6 +68,7 @@ type providerConfigDTO struct {
 	ProviderSpec     string `json:"provider_spec" yaml:"provider_spec"`
 	BaseURL          string `json:"base_url" yaml:"base_url"`
 	CredentialRef    string `json:"credential_ref" yaml:"credential_ref"`
+	RouteModelID     string `json:"route_model_id,omitempty" yaml:"route_model_id,omitempty"`
 	ModelID          string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty" yaml:"target_alias,omitempty"`
 	TargetRank       *int   `json:"target_rank,omitempty" yaml:"target_rank,omitempty"`
@@ -310,6 +311,10 @@ func decodeEndpointDTO(dto endpointDTO) (endpointintent.Endpoint, error) {
 		if err != nil {
 			return endpointintent.Endpoint{}, err
 		}
+		providerConfig, err = providerConfig.WithRouteModelID(encoded.RouteModelID)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
+		}
 		providerConfig, err = providerConfig.WithModelID(encoded.ModelID)
 		if err != nil {
 			return endpointintent.Endpoint{}, err
@@ -364,6 +369,7 @@ func encodeEndpointDTO(endpoint endpointintent.Endpoint) endpointDTO {
 			ProviderSpec:     providerConfig.ProviderSpec().String(),
 			BaseURL:          providerConfig.BaseURL(),
 			CredentialRef:    providerConfig.CredentialRef(),
+			RouteModelID:     providerConfig.RouteModelID(),
 			ModelID:          providerConfig.ModelID(),
 			TargetAlias:      providerConfig.TargetAlias(),
 			TargetRank:       tr,

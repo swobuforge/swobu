@@ -3,6 +3,7 @@ package cockpit
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
@@ -113,7 +114,6 @@ func TestCockpit_WorkspaceSaveRefreshesAndSelectsSavedWorkspace(t *testing.T) {
 					ID:        "gpt-4.1",
 					ModelName: "gpt-4.1",
 					State:     readmodel.RouteNormal,
-					PlanKind:  readmodel.RoutePlanSingle,
 					Enabled:   true,
 					Targets:   []readmodel.TargetReadModel{{ID: "target-1"}},
 				}},
@@ -122,7 +122,7 @@ func TestCockpit_WorkspaceSaveRefreshesAndSelectsSavedWorkspace(t *testing.T) {
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
+	cockpit.currentWorkspacePage().OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
 
 	assertActiveTab(t, cockpit, "prod", readmodel.CockpitWorkspacePage)
 	assertNoRefreshNotice(t, cockpit)
@@ -165,12 +165,82 @@ func TestCockpit_WorkspaceSaveRefreshPreservesDraftPage(t *testing.T) {
 		t.Fatal("draft page missing before refresh")
 	}
 
-	cockpit.WorkspacePage.OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
+	cockpit.currentWorkspacePage().OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
 
 	if got := cockpit.WorkspacePages["+"]; got != draftPage {
 		t.Fatalf("draft page should be preserved across refresh")
 	}
 	assertActiveTab(t, cockpit, "prod", readmodel.CockpitWorkspacePage)
+}
+
+func TestCockpit_WorkspaceSaveRefreshRemountsPromotedDraftPage(t *testing.T) {
+	cockpit := NewCockpitWithWorkspacePorts(readmodel.CockpitReadModel{
+		HeaderRight:         "test",
+		ActivePage:          readmodel.CockpitWorkspacePage,
+		SelectedWorkspaceID: "+",
+		SelectedWorkspace: readmodel.WorkspaceReadModel{
+			ID:    "+",
+			State: readmodel.WorkspaceDraft,
+		},
+		Tabs: []readmodel.WorkspaceTabReadModel{
+			{ID: "+", Kind: readmodel.WorkspaceTabDraft, Selected: true},
+			{ID: "lab", Slug: "lab", Kind: readmodel.WorkspaceTabExisting},
+			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+		},
+	}, nil, nil)
+	draftPage := cockpit.WorkspacePages["+"]
+	if draftPage == nil {
+		t.Fatal("draft page missing before promotion")
+	}
+
+	cockpit.currentWorkspacePage().OnWorkspaceSaved(readmodel.WorkspaceReadModel{
+		ID:            "lab",
+		Slug:          "lab",
+		State:         readmodel.WorkspaceExisting,
+		ClientBaseURL: "http://127.0.0.1:7926/c/lab",
+	})
+
+	promotedDraftPage := cockpit.WorkspacePages["+"]
+	if promotedDraftPage == nil {
+		t.Fatal("draft page missing after promotion")
+	}
+	if promotedDraftPage == draftPage {
+		t.Fatal("promoted draft page should remount as a fresh draft page")
+	}
+	if !promotedDraftPage.OverviewSection.Model.IsDraft() {
+		t.Fatalf("draft page model = %#v, want draft", promotedDraftPage.OverviewSection.Model)
+	}
+	if promotedDraftPage.OverviewSection.Model.Slug != "" {
+		t.Fatalf("draft page slug = %q, want empty", promotedDraftPage.OverviewSection.Model.Slug)
+	}
+}
+
+func TestCockpit_WorkspaceSaveRefreshPreservesActiveRouteEditor(t *testing.T) {
+	fake := &fakeWorkspacePorts{
+		cockpit:          DefaultFixtureReadModel(),
+		loadWorkspaceErr: errors.New("workspace stale"),
+	}
+	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
+
+	page := cockpit.currentWorkspacePage()
+	route := page.RoutesSection.State.Routes[0]
+	page.RoutesSection.OpenRoute(route)
+	page.RoutesSection.OpenTargetEditor(route, route.Targets[0])
+
+	page.OnWorkspaceSaved(readmodel.WorkspaceReadModel{
+		ID:            "prod",
+		Slug:          "prod",
+		State:         readmodel.WorkspaceExisting,
+		ClientBaseURL: "http://127.0.0.1:7926/c/prod",
+	})
+
+	assertActiveTab(t, cockpit, "prod", readmodel.CockpitWorkspacePage)
+	if got := cockpit.currentWorkspacePage().RoutesSection.State.ExpandedRoute.Get(); got != "gpt" {
+		t.Fatalf("expanded route = %q, want gpt", got)
+	}
+	if got := cockpit.currentWorkspacePage().RoutesSection.State.OpenTarget.Get(); got != "target-1" {
+		t.Fatalf("opened target = %q, want target-1", got)
+	}
 }
 
 func TestCockpit_WorkspaceSaveRefreshFailureShowsStaleNotice(t *testing.T) {
@@ -179,7 +249,7 @@ func TestCockpit_WorkspaceSaveRefreshFailureShowsStaleNotice(t *testing.T) {
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceSaved(readmodel.WorkspaceReadModel{
+	cockpit.currentWorkspacePage().OnWorkspaceSaved(readmodel.WorkspaceReadModel{
 		ID:            "prod",
 		Slug:          "prod",
 		State:         readmodel.WorkspaceExisting,
@@ -208,7 +278,7 @@ func TestCockpit_WorkspaceSaveRefreshLoadWorkspaceFailureUsesSavedModelAndShowsN
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceSaved(readmodel.WorkspaceReadModel{
+	cockpit.currentWorkspacePage().OnWorkspaceSaved(readmodel.WorkspaceReadModel{
 		ID:            "prod",
 		Slug:          "prod",
 		State:         readmodel.WorkspaceExisting,
@@ -241,7 +311,7 @@ func TestCockpit_WorkspaceDeleteRefreshesAndSelectsRemainingWorkspace(t *testing
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceDeleted("dev")
+	cockpit.currentWorkspacePage().OnWorkspaceDeleted("dev")
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
 	assertNoRefreshNotice(t, cockpit)
@@ -271,7 +341,7 @@ func TestCockpit_WorkspaceDeleteConfirmationRefreshesThroughCommandPath(t *testi
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	confirmation := overviewsection.DeleteConfirmation(cockpit.WorkspacePage.OverviewSection)
+	confirmation := overviewsection.DeleteConfirmation(cockpit.currentWorkspacePage().OverviewSection)
 	confirmation.Request("dev")
 	confirmation.Confirm(context.Background())
 
@@ -293,10 +363,10 @@ func TestCockpit_WorkspaceDeleteRefreshSuccessHidesDeletedWorkspaceWhenProjectio
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceDeleted("dev")
+	cockpit.currentWorkspacePage().OnWorkspaceDeleted("dev")
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
-	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
+	got := testkit.RenderMountedString(t, cockpit, 100, 24)
 	testkit.AssertNow(t, got, testkit.All(
 		testkit.Not(testkit.Text("[dev]").Exists()),
 		testkit.Not(testkit.Text("[› dev]").Exists()),
@@ -309,11 +379,11 @@ func TestCockpit_WorkspaceDeleteRefreshFailureHidesDeletedWorkspace(t *testing.T
 	}
 	cockpit := NewCockpitWithWorkspacePorts(DefaultFixtureReadModel(), fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceDeleted("dev")
+	cockpit.currentWorkspacePage().OnWorkspaceDeleted("dev")
 
 	assertActiveTab(t, cockpit, "lab", readmodel.CockpitWorkspacePage)
 	assertRefreshNotice(t, cockpit, readmodel.NoticeStale, "refresh stale: deleted workspace hidden; daemon offline")
-	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
+	got := testkit.RenderMountedString(t, cockpit, 100, 24)
 	testkit.AssertNow(t, got, testkit.All(
 		testkit.Text("refresh stale: deleted workspace hidden; daemon offline").Exists(),
 		testkit.Text("[› lab]").Exists(),
@@ -350,13 +420,42 @@ func TestCockpit_RemoveLastWorkspaceActivatesDraftTab(t *testing.T) {
 	}
 }
 
+func TestCockpit_SelectedExistingTabDoesNotReuseDraftWorkspaceBody(t *testing.T) {
+	cockpit := NewCockpit(readmodel.CockpitReadModel{
+		ActivePage:          readmodel.CockpitWorkspacePage,
+		SelectedWorkspaceID: "+",
+		SelectedWorkspace:   readmodel.WorkspaceReadModel{ID: "+", State: readmodel.WorkspaceDraft},
+		Tabs: []readmodel.WorkspaceTabReadModel{
+			{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting},
+			{ID: "+", Kind: readmodel.WorkspaceTabDraft, Selected: true},
+			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+		},
+	})
+	cockpit.ActiveTabIndex.Set(0)
+
+	model := cockpit.activeModel()
+	if model.SelectedWorkspaceID != "dev" {
+		t.Fatalf("selected workspace = %q, want dev", model.SelectedWorkspaceID)
+	}
+	if model.SelectedWorkspace.IsDraft() {
+		t.Fatalf("selected workspace = %#v, want existing workspace", model.SelectedWorkspace)
+	}
+
+	got := testkit.RenderMountedString(t, cockpit, 100, 24)
+	testkit.AssertNow(t, got, testkit.All(
+		testkit.Text("[› dev]").Exists(),
+		testkit.Text("edit ↵").Exists(),
+		testkit.Not(testkit.Text("create ↵").Exists()),
+	))
+}
+
 func TestCockpit_WorkspaceRefreshUsesCockpitContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	fake := &fakeWorkspacePorts{}
 	cockpit := NewCockpitWithContext(DefaultFixtureReadModel(), ctx, fake, fake)
 
-	cockpit.WorkspacePage.OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
+	cockpit.currentWorkspacePage().OnWorkspaceSaved(readmodel.WorkspaceReadModel{ID: "prod", Slug: "prod"})
 
 	if fake.loadCockpitCtxErr == nil || !errors.Is(fake.loadCockpitCtxErr, context.Canceled) {
 		t.Fatalf("load cockpit context error = %v, want canceled", fake.loadCockpitCtxErr)
@@ -374,6 +473,13 @@ func TestCockpit_QuitShortcutIsRootFallback(t *testing.T) {
 	}
 
 	binding.Handler(tui.KeyEvent{Key: tui.KeyRune, Rune: 'q'})
+}
+
+func TestCockpit_DoesNotRetainSeparateWorkspacePageOwner(t *testing.T) {
+	cockpitType := reflect.TypeOf(Cockpit{})
+	if _, ok := cockpitType.FieldByName("WorkspacePage"); ok {
+		t.Fatal("Cockpit must not retain separate WorkspacePage owner; use currentWorkspacePage() over WorkspacePages only")
+	}
 }
 
 type fakeWorkspacePorts struct {
@@ -447,7 +553,7 @@ func assertActiveTab(t *testing.T, cockpit *Cockpit, wantID readmodel.WorkspaceI
 
 func assertRenderContains(t *testing.T, cockpit *Cockpit, values ...string) {
 	t.Helper()
-	got := testkit.RenderString(cockpit.Render(nil), 100, 24)
+	got := testkit.RenderMountedString(t, cockpit, 100, 24)
 	preds := make([]testkit.Predicate, 0, len(values))
 	for _, value := range values {
 		preds = append(preds, testkit.Text(value).Exists())

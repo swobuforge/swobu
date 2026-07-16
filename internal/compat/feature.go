@@ -14,6 +14,7 @@ const (
 	RequestStructuredOutput Feature = "request.structured_output"
 	RequestContinuation     Feature = "request.continuation"
 	RequestConversation     Feature = "request.conversation"
+	RequestThinking         Feature = "request.thinking"
 
 	// Message/content semantics.
 	MessageRole     Feature = "message.role"

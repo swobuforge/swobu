@@ -102,7 +102,18 @@ func (o CanonicalOutputProjection) Usage() TokenUsage {
 }
 
 func (o CanonicalOutputProjection) CloneOutput() CanonicalOutput {
+	return o.CloneProjection()
+}
+
+// CloneProjection returns a deep copy of the concrete output projection
+// without forcing callers through an interface assertion.
+func (o CanonicalOutputProjection) CloneProjection() CanonicalOutputProjection {
 	return NewOutputWithUsage(o.semanticKind, o.resultID, o.model, o.items, o.finishReason, o.usage)
+}
+
+func (o CanonicalOutputProjection) WithResultID(id string) CanonicalOutputProjection {
+	o.resultID = id
+	return o
 }
 
 func (o CanonicalOutputProjection) Text() string {

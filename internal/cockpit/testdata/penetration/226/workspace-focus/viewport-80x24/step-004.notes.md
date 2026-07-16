@@ -1,0 +1,1 @@
+Tab to the draft workspace. The slug cursor must be visible on the first frame.

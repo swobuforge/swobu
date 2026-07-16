@@ -35,6 +35,7 @@ func encodeEndpointDocument(endpoint endpointintent.Endpoint) endpointDocument {
 			ProviderSpec:     providerConfig.ProviderSpec().String(),
 			BaseURL:          providerConfig.BaseURL(),
 			CredentialRef:    providerConfig.CredentialRef(),
+			RouteModelID:     providerConfig.RouteModelID(),
 			ModelID:          providerConfig.ModelID(),
 			TargetAlias:      providerConfig.TargetAlias(),
 			TargetRank:       tr,
@@ -81,6 +82,10 @@ func decodeEndpointDocument(doc endpointDocument) (endpointintent.Endpoint, erro
 			if err != nil {
 				return endpointintent.Endpoint{}, err
 			}
+		}
+		providerConfig, err = providerConfig.WithRouteModelID(encoded.RouteModelID)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
 		}
 		providerConfig, err = providerConfig.WithModelID(encoded.ModelID)
 		if err != nil {

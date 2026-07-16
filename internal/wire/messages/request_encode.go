@@ -55,9 +55,6 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
 	}
-	if err := encodeMessagesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.CarrierDocument{}, err
-	}
 	if err := encodeMessagesGenerationControls(payload, req.Controls()); err != nil {
 		return carrier.CarrierDocument{}, err
 	}
@@ -65,6 +62,10 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 		return carrier.CarrierDocument{}, err
 	}
 	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
+	if err != nil {
+		return carrier.CarrierDocument{}, err
+	}
+	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), len(tools) > 0)
 	if err != nil {
 		return carrier.CarrierDocument{}, err
 	}
@@ -159,36 +160,81 @@ func encodeMessagesTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeI
 	// compatibility decision before this encoder runs.
 	out := make([]messagesToolDTO, 0, len(tools))
 	for idx, tool := range tools {
-		decl, ok := tool.(canonical.FunctionToolDecl)
-		if !ok {
-			if ptr, ok := tool.(*canonical.FunctionToolDecl); ok {
-				decl = *ptr
-			} else {
-				return nil, canonical.UnsupportedOperation("messages protocol only supports function tool declarations")
+		switch decl := tool.(type) {
+		case canonical.FunctionToolDecl:
+			wire, err := encodeMessagesFunctionToolDecl(decl, sink, exchangeID, idx)
+			if err != nil {
+				return nil, err
 			}
+			out = append(out, wire)
+		case *canonical.FunctionToolDecl:
+			if decl == nil {
+				return nil, canonical.BadRequest("messages protocol tool declarations are invalid")
+			}
+			wire, err := encodeMessagesFunctionToolDecl(*decl, sink, exchangeID, idx)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, wire)
+		case canonical.CapabilityToolDecl:
+			wire, err := encodeMessagesCapabilityToolDecl(decl, sink, exchangeID, idx)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, wire)
+		case *canonical.CapabilityToolDecl:
+			if decl == nil {
+				return nil, canonical.BadRequest("messages protocol tool declarations are invalid")
+			}
+			wire, err := encodeMessagesCapabilityToolDecl(*decl, sink, exchangeID, idx)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, wire)
+		default:
+			return nil, canonical.UnsupportedOperation("messages protocol only supports function and web_search tool declarations")
 		}
-		schema, err := messagesToolSchema(decl.ToolInputSchema())
-		if err != nil {
-			return nil, err
-		}
-		name, err := canonical.ProjectedToolName(decl)
-		if err != nil {
-			return nil, err
-		}
-		if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, tool, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(idx)+"/name")); err != nil {
-			return nil, err
-		}
-		name = strings.TrimSpace(name) // swobu:io-string source=boundary
-		if name == "" {
-			return nil, canonical.BadRequest("messages protocol tool declarations require a name")
-		}
-		out = append(out, messagesToolDTO{
-			Name:        name,
-			Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=boundary
-			InputSchema: schema,
-		})
 	}
 	return out, nil
+}
+
+func encodeMessagesFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect.Sink, exchangeID string, index int) (messagesToolDTO, error) {
+	schema, err := messagesToolSchema(decl.ToolInputSchema())
+	if err != nil {
+		return messagesToolDTO{}, err
+	}
+	name, err := canonical.ProjectedToolName(decl)
+	if err != nil {
+		return messagesToolDTO{}, err
+	}
+	if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
+		return messagesToolDTO{}, err
+	}
+	name = strings.TrimSpace(name) // swobu:io-string source=boundary
+	if name == "" {
+		return messagesToolDTO{}, canonical.BadRequest("messages protocol tool declarations require a name")
+	}
+	return messagesToolDTO{
+		Name:        name,
+		Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=boundary
+		InputSchema: schema,
+	}, nil
+}
+
+func encodeMessagesCapabilityToolDecl(decl canonical.CapabilityToolDecl, sink effect.Sink, exchangeID string, index int) (messagesToolDTO, error) {
+	capability := strings.TrimSpace(string(decl.ToolCapability())) // swobu:io-string source=boundary
+	switch capability {
+	case "web_search":
+	default:
+		return messagesToolDTO{}, canonical.UnsupportedOperation("messages protocol only supports web_search capability tool declarations")
+	}
+	if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
+		return messagesToolDTO{}, err
+	}
+	return messagesToolDTO{
+		Type: "web_search_20250305",
+		Name: capability,
+	}, nil
 }
 
 func messagesToolSchema(schema canonical.ToolSchema) (json.RawMessage, error) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -18,6 +19,7 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/replay"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -33,10 +35,11 @@ type RequestIngress struct {
 }
 
 type RuntimePoliciesSpec struct {
-	ObservationStore  observation.Store
-	EffectSink        effect.Sink
-	TrafficEventSink  TrafficEventSink
-	ContinuationStore canonical.ContinuationStore
+	ObservationStore observation.Store
+	EffectSink       effect.Sink
+	TrafficEventSink TrafficEventSink
+	ReplayStore      replay.Store
+	ResponseIDs      replay.ResponseIDGenerator
 }
 
 // TrafficEventSink records immutable traffic events at the exchange
@@ -60,6 +63,12 @@ type ExecutionRuntime interface {
 }
 
 func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
+	if policies.ReplayStore == nil {
+		policies.ReplayStore = replay.NewMemoryStore()
+	}
+	if policies.ResponseIDs == nil {
+		policies.ResponseIDs = replay.NewDefaultResponseIDGenerator()
+	}
 	sink := policies.EffectSink
 	if sink == nil {
 		if policies.ObservationStore != nil {
@@ -74,10 +83,11 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 		endpoints:       endpoints,
 		trafficEvidence: policies.TrafficEventSink,
 		runner: Runner{
-			Runtime:           runtime,
-			StageMechanics:    stage.StageMechanics{},
-			EffectSink:        sink,
-			ContinuationStore: policies.ContinuationStore,
+			Runtime:        runtime,
+			StageMechanics: stage.StageMechanics{},
+			EffectSink:     sink,
+			ReplayStore:    policies.ReplayStore,
+			ResponseIDs:    policies.ResponseIDs,
 		},
 	}
 }
@@ -346,14 +356,28 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 	if err != nil {
 		return ListModelsOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
-	selected := endpoint.SelectedProviderConfig()
-	return ListModelsOutput{
-		DefaultModelID: PublicModelIDSwobu,
-		Models: []ModelOption{{
-			ID:           PublicModelIDSwobu,
-			ModelID:      selected.ModelID(),
-			ProviderSpec: selected.ProviderSpec().String(),
-			BackendRef:   selected.Ref().String(),
-		}},
-	}, nil
+	wr := endpointToWorkspaceRouting(endpoint)
+	modelIDs := make([]string, 0, len(wr.Routes))
+	for modelID := range wr.Routes {
+		modelIDs = append(modelIDs, modelID)
+	}
+	sort.Strings(modelIDs)
+
+	out := ListModelsOutput{
+		DefaultModelID: wr.DefaultModel,
+		Models:         make([]ModelOption, 0, len(modelIDs)),
+	}
+	for _, modelID := range modelIDs {
+		route := wr.Routes[modelID]
+		option := ModelOption{
+			ID:      route.ModelName,
+			ModelID: route.ModelName,
+		}
+		if len(route.Targets) > 0 {
+			option.ProviderSpec = route.Targets[0].Provider
+			option.BackendRef = route.Targets[0].ID
+		}
+		out.Models = append(out.Models, option)
+	}
+	return out, nil
 }

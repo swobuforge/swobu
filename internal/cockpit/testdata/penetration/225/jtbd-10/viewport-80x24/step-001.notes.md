@@ -1,0 +1,1 @@
+F1 opens the help tab.

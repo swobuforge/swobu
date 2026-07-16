@@ -17,6 +17,8 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
+	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/wire"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
@@ -110,6 +112,7 @@ func TestRunnerRun_PassesThroughCompatibilityAndTurnStateEffects(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 		ProviderProtocol: protocolkind.Responses,
@@ -163,6 +166,7 @@ func TestRunnerRun_CommitsCompatibilityEffectBeforeRejectError(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 		ProviderProtocol: protocolkind.Responses,
@@ -200,6 +204,7 @@ func TestRunnerRun_RecordsDeliveryStreamingDecisionExact(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ProviderProtocol: protocolkind.Responses,
@@ -229,6 +234,7 @@ func TestRunnerRun_RecordsDeliveryStreamingDecisionApproxWhenBuffered(t *testing
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingSSE), delivery.BufferedDelivery()),
 		ProviderProtocol: protocolkind.Responses,
@@ -261,6 +267,7 @@ func TestRunnerRun_RecordsDeliveryWebSocketConversionApproxWhenProviderIsSSE(t *
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingWebSocket),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.StreamingDelivery(delivery.FramingSSE)),
 		ProviderProtocol: protocolkind.Responses,
@@ -294,6 +301,7 @@ func TestRunnerRun_RecordsDeliveryTerminalEventDropWhenProviderStreamLacksUsage(
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
 		Contract:         NewExecutionContractForDeliveries(delivery.BufferedDelivery(), delivery.StreamingDelivery(delivery.FramingSSE)),
 		ProviderProtocol: protocolkind.Responses,
@@ -314,6 +322,7 @@ func TestRunnerRun_RecordsDeliveryTerminalEventDropWhenProviderStreamLacksUsage(
 func TestRunnerRun_RecordsWireNativePayloadAndTurnStateReplay(t *testing.T) {
 	sink := &recordingEffectSink{}
 	runner := withRuntime(bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)))
+	runner.ReplayStore = replay.NewMemoryStore()
 	runner.EffectSink = sink
 
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -322,7 +331,7 @@ func TestRunnerRun_RecordsWireNativePayloadAndTurnStateReplay(t *testing.T) {
 		Turn:  canonical.NewTurnRef("resp_prev"),
 	})
 	codec := responses.ProviderRequestDocumentEncoder{}
-	expectedWireResult, err := codec.EncodeProviderRequestDocument(request, delivery.BufferedDelivery(), "")
+	expectedWireResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "")
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}
@@ -333,6 +342,7 @@ func TestRunnerRun_RecordsWireNativePayloadAndTurnStateReplay(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          request,
+		ReplayScope:      replay.Scope{Namespace: "alpha", CallerKey: "local"},
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 		ProviderProtocol: protocolkind.Responses,
@@ -380,6 +390,7 @@ func TestRunnerRun_RecordsErrorShapeDropOnBackendError(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 		ProviderProtocol: protocolkind.Responses,

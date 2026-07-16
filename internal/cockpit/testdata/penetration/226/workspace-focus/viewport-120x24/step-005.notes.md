@@ -1,0 +1,1 @@
+Shift+Tab returns to the existing workspace body instead of leaving the draft screen behind.

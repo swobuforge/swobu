@@ -135,6 +135,8 @@ type RoutableTarget struct {
 	BackendRef       string
 	ProviderSpec     string
 	BaseURL          string
+	// CredentialRef is the durable auth handle selected by endpoint intent.
+	// Replay equality assumes the control plane does not repoint it in place.
 	CredentialRef    string
 	AuthHeader       string
 	ProtocolKind     protocolkind.ProtocolKind

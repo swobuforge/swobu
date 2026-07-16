@@ -22,19 +22,27 @@ func decodeMessagesToolCallBatch(raw json.RawMessage) (canonical.ToolCallBatchPo
 	return canonical.ToolCallBatchPolicy{}, nil
 }
 
-func encodeMessagesToolCallBatch(payload map[string]any, policy canonical.ToolCallBatchPolicy, hasTools bool) error {
+func encodeMessagesToolCallBatch(toolChoice any, policy canonical.ToolCallBatchPolicy, hasTools bool) (any, error) {
 	if policy.IsZero() {
-		return nil
+		return toolChoice, nil
 	}
 	if err := policy.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	// When no tools are declared, at_most_one is inert and must stay omitted.
 	if !hasTools {
-		return nil
+		return toolChoice, nil
 	}
 	if policy.Mode == canonical.ToolCallBatchAtMostOne {
+		if toolChoice == nil {
+			toolChoice = map[string]any{"type": "auto"}
+		}
+		payload, ok := toolChoice.(map[string]any)
+		if !ok {
+			return nil, canonical.InternalError("messages protocol tool_choice payload is invalid")
+		}
 		payload["disable_parallel_tool_use"] = true
+		return payload, nil
 	}
-	return nil
+	return toolChoice, nil
 }

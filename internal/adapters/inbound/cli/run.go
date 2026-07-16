@@ -137,8 +137,10 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 	versionDecision := emitVersionNoticeIfConfigured(startupOut)
 	if versionDecision.show {
 		if err := waitForVersionNoticeContinue(spec.stdin, startupOut); err != nil {
-			_, _ = fmt.Fprintln(startupErr, err.Error())
-			return ExitDown
+			if !errors.Is(err, errVersionNoticeAcknowledgmentUnavailable) {
+				_, _ = fmt.Fprintln(startupErr, err.Error())
+				return ExitDown
+			}
 		}
 	}
 	if err := ensureTelemetryNoticeBeforeDaemonStart(startupOut); err != nil {

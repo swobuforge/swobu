@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 const (
@@ -72,7 +73,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if err := providercompat.EmitToolSchemaStrictDecision(ctx, req.EffectSink, req.ExchangeID, req.Target.ProviderID(), req.Target.ProtocolKind, req.Request.Tools(), false); err != nil {
 		return nil, err
 	}
-	wireReqResult, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(req.Request, resolvedDelivery, req.ExchangeID)
+	wireReqResult, err := messages.ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: req.Request}, resolvedDelivery, req.ExchangeID)
 	if commitErr := providercompat.CommitEffects(ctx, req.EffectSink, req.ExchangeID, wireReqResult.Effects); commitErr != nil {
 		return nil, commitErr
 	}

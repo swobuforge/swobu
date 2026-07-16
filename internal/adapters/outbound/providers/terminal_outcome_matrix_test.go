@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type terminalMatrixCase struct {
@@ -216,7 +217,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
 				},
 			})
-			wireRequestResult, err := resolver.ProviderRequestDocumentEncoder(tc.protocolKind).EncodeProviderRequestDocument(request, tc.providerDelivery, "ex_matrix")
+			wireRequestResult, err := resolver.ProviderRequestDocumentEncoder(tc.protocolKind).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, tc.providerDelivery, "ex_matrix")
 			if err != nil {
 				t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 			}
@@ -326,7 +327,7 @@ func TestProviderIngress_AzurePromptContentFilterReturnsBackendError(t *testing.
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
 	resolver := codecresolver.NewRuntimeCodecResolver()
-	wireRequestResult, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(request, delivery.BufferedDelivery(), "ex_prompt")
+	wireRequestResult, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "ex_prompt")
 	if err != nil {
 		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
+	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	completions "github.com/swobuforge/swobu/internal/wire/completions"
@@ -43,6 +44,12 @@ func (r *blockingEnvelopeReader) Next(context.Context) (canonical.Event, error) 
 
 func (r *blockingEnvelopeReader) Close(context.Context) error { return nil }
 
+type deterministicResponseIDGenerator struct{}
+
+func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (replay.ResponseID, error) {
+	return replay.ResponseID("swobu_" + exchangeID), nil
+}
+
 func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 	runner := withRuntime(bufferedProviderIngressResolver([]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`)))
 	out, err := runner.Run(context.Background(), ExchangeInput{
@@ -50,6 +57,7 @@ func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
@@ -80,6 +88,7 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
@@ -110,6 +119,7 @@ func TestRunnerRun_StreamingWebSocketPreservesJsonTransport(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingWebSocket),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
@@ -143,6 +153,7 @@ func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenWrapperBuffersRespon
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
@@ -173,6 +184,7 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
@@ -218,6 +230,7 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
@@ -238,6 +251,7 @@ func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
@@ -267,6 +281,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
+		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
@@ -346,10 +361,14 @@ func (bufferingResponseWrapper) Wrap(_ stage.Context, reader canonical.EventRead
 }
 
 func withRuntime(providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)) Runner {
-	return Runner{Runtime: testExecutionRuntime{
-		testRuntimeResolver: testRuntimeResolver{},
-		providerIngress:     providerIngress,
-	}}
+	return Runner{
+		Runtime: testExecutionRuntime{
+			testRuntimeResolver: testRuntimeResolver{},
+			providerIngress:     providerIngress,
+		},
+		ReplayStore: replay.NewMemoryStore(),
+		ResponseIDs: deterministicResponseIDGenerator{},
+	}
 }
 
 type testExecutionRuntime struct {

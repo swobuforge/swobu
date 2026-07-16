@@ -102,7 +102,7 @@ func (a ActivityRowReadModel) RowValue() string {
 			status = "ok"
 		}
 	}
-	return fmt.Sprintf("%s  %s  %s  %s  %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
+	return fmt.Sprintf("%s %s %s %s %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
 }
 
 func durationLabel(d time.Duration) string {

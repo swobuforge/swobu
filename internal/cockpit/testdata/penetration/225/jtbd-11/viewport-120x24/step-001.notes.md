@@ -1,0 +1,1 @@
+Tab advances to the next workspace tab.

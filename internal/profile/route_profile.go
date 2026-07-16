@@ -33,7 +33,7 @@ func RequiresCredential(spec, baseURL string) bool {
 // explicit non-default execute base URL for this provider spec.
 func RequiresExplicitExecuteBaseURL(spec string) bool {
 	normalized := strings.TrimSpace(spec) // swobu:io-string source=boundary
-	if normalized == string(ProviderSpecOpenAICompatible) || normalized == string(ProviderSpecAzure) {
+	if normalized == string(ProviderSpecOpenAICompatible) || normalized == string(ProviderSpecBedrock) || normalized == string(ProviderSpecAzure) {
 		return true
 	}
 	return false

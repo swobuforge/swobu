@@ -136,3 +136,48 @@ func TestEndpointAutoProtocolResolver_ResolveOne_EncodesResponsesPingRequest(t *
 		t.Fatalf("probe body=%s want %s", string(gotBody), string(wantDoc.RawBytes()))
 	}
 }
+
+func TestEndpointAutoProtocolResolver_Resolve_SkipsConcreteDefaults(t *testing.T) {
+	t.Parallel()
+
+	doc := endpointDocument{
+		Name:                      "workspace",
+		SelectedProviderConfigRef: "cfg-main",
+		ProviderConfigs: []providerConfigDocument{
+			{
+				Ref:           "cfg-main",
+				ProviderSpec:  "bedrock",
+				BaseURL:       "https://bedrock-mantle.us-east-1.api.aws/v1",
+				CredentialRef: "env:AWS_BEARER_TOKEN_BEDROCK",
+				ModelID:       "anthropic.claude-3-5-sonnet-20240620-v1:0",
+			},
+		},
+	}
+	endpoint, err := decodeEndpointDocument(doc)
+	if err != nil {
+		t.Fatalf("decodeEndpointDocument error: %v", err)
+	}
+
+	called := false
+	probe := func(_ context.Context, _ endpointintent.Endpoint, _ exchange.RequestInput) (exchange.RequestOutput, error) {
+		called = true
+		return exchange.RequestOutput{}, errors.New("probe should not run for concrete defaults")
+	}
+
+	resolver := newEndpointAutoProtocolResolver(probe)
+	resolved, err := resolver.Resolve(context.Background(), endpoint, doc)
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if called {
+		t.Fatal("probe should not be called for a concrete default provider protocol")
+	}
+	wantProtocol, ok := profile.ResolveConcreteProtocolForAutoAtBoundary("bedrock")
+	if !ok {
+		t.Fatal("bedrock should have a concrete boundary default")
+	}
+	gotProtocol := resolved.ProviderConfigs()[0].ProviderProtocol()
+	if gotProtocol != wantProtocol {
+		t.Fatalf("resolved provider protocol=%q want %q", gotProtocol, wantProtocol)
+	}
+}

@@ -9,13 +9,14 @@ type WorkspaceID string
 // includes only operator-facing projection fields; adapters translate concrete
 // config, daemon, and client-profile state into this shape.
 type WorkspaceReadModel struct {
-	ID            WorkspaceID
-	Slug          string
-	State         WorkspaceState
-	ClientBaseURL string
-	RunCommands   []RunCommandReadModel
-	Routes        []RouteReadModel
-	Activity      ActivityReadModel
+	ID               WorkspaceID
+	Slug             string
+	State            WorkspaceState
+	ClientBaseURL    string
+	CompatibleClients string // e.g. "OpenAI • Anthropic"
+	RunCommands      []RunCommandReadModel
+	Routes           []RouteReadModel
+	Activity         ActivityReadModel
 }
 
 // WorkspaceTabReadModel is the tab-rail projection for an existing, draft, or

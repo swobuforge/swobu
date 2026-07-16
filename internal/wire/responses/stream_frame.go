@@ -96,14 +96,15 @@ func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFram
 }
 
 func (s *responsesEventReader) handleResponseCreated(frame streamFrame) {
-	if !s.started {
-		s.started = true
-		s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse})
+	if s.started {
+		return
 	}
+	s.started = true
 	resultID := strings.TrimSpace(frame.ID) // swobu:io-string source=boundary
 	if resultID == "" {
 		resultID = strings.TrimSpace(frame.Response.ID) // swobu:io-string source=boundary
 	}
+	s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}, canonical.EventMetadataFields{NativeID: resultID, ResultID: resultID})
 	model := strings.TrimSpace(frame.Model) // swobu:io-string source=boundary
 	if model == "" {
 		model = strings.TrimSpace(frame.Response.Model) // swobu:io-string source=boundary

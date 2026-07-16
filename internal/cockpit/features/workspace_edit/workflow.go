@@ -10,6 +10,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 // SaveFunc is the narrow command boundary for create and edit submissions.
@@ -37,6 +38,7 @@ const (
 // workspaces, save for changed existing workspaces, and create for draft
 // workspaces.
 type Workflow struct {
+	ui.SelectBase
 	Workspace   readmodel.WorkspaceReadModel
 	Phase       *tui.State[Phase]
 	Mode        *tui.State[Mode]
@@ -47,18 +49,38 @@ type Workflow struct {
 	OnSaved     func(readmodel.WorkspaceReadModel)
 }
 
+// workflowKey mirrors the section mount key so focus repair sees one stable
+// row identity per workspace slot.
+func workflowKey(workspace readmodel.WorkspaceReadModel) string {
+	if workspace.ID != "" {
+		return "workspace-edit:" + string(workspace.ID)
+	}
+	if workspace.Slug != "" {
+		return "workspace-edit:" + workspace.Slug
+	}
+	return "workspace-edit:+"
+}
+
 func (w *Workflow) UpdateProps(fresh tui.Component) {
 	f, ok := fresh.(*Workflow)
 	if !ok {
 		return
 	}
+	// Reset the local row state when the workspace identity or lifecycle flips.
+	// That prevents a promoted draft row from leaking its submit values into the
+	// fresh draft slot after refresh.
+	reseed := w.Workspace.ID != f.Workspace.ID || w.Workspace.State != f.Workspace.State
 	w.Workspace = f.Workspace
 	w.Save = f.Save
 	w.OnSaved = f.OnSaved
+	if reseed {
+		w.seedFromWorkspace(f.Workspace)
+	}
 }
 
 func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved func(readmodel.WorkspaceReadModel)) *Workflow {
 	workflow := &Workflow{
+		SelectBase:  ui.NewSelectBase(workflowKey(workspace)),
 		Workspace:   workspace,
 		Phase:       tui.NewState(PhaseViewing),
 		Mode:        tui.NewState(ModeEdit),
@@ -68,29 +90,31 @@ func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved 
 		Save:        save,
 		OnSaved:     onSaved,
 	}
-	if workspace.IsDraft() {
-		workflow.Mode.Set(ModeCreate)
-		workflow.Phase.Set(PhaseEditing)
-	}
+	workflow.seedFromWorkspace(workspace)
 	return workflow
 }
 
 func (w *Workflow) OpenEditor(workspace readmodel.WorkspaceReadModel) {
-	w.Workspace = workspace
+	w.seedFromWorkspace(workspace)
 	w.Mode.Set(ModeEdit)
-	w.WorkspaceID.Set(workspace.ID)
-	w.Slug.Set(workspace.Slug)
-	w.Error.Set("")
 	w.Phase.Set(PhaseEditing)
+	w.OnFocus(nil)
 }
 
 func (w *Workflow) OpenCreate() {
-	w.Workspace = readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}
-	w.Mode.Set(ModeCreate)
-	w.WorkspaceID.Set(readmodel.WorkspaceID(""))
-	w.Slug.Set("")
-	w.Error.Set("")
-	w.Phase.Set(PhaseEditing)
+	w.seedFromWorkspace(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft})
+	w.OnFocus(nil)
+}
+
+// BindApp wires the workflow's focus state into the app so the selected row can
+// redraw its marker when focus changes.
+func (w *Workflow) BindApp(app *tui.App) {
+	w.SelectBase.BindApp(app)
+}
+
+// UnbindApp releases the cached app handle when the workflow leaves the tree.
+func (w *Workflow) UnbindApp() {
+	w.SelectBase.UnbindApp()
 }
 
 func (w *Workflow) Back() bool {
@@ -125,19 +149,37 @@ func (w *Workflow) cancel() {
 	w.closeEdit()
 }
 
+func (w *Workflow) seedFromWorkspace(workspace readmodel.WorkspaceReadModel) {
+	w.Workspace = workspace
+	w.SelectBase.ID = workflowKey(workspace)
+	w.WorkspaceID.Set(workspace.ID)
+	w.Slug.Set(workspace.Slug)
+	w.Error.Set("")
+	if workspace.IsDraft() {
+		w.Mode.Set(ModeCreate)
+		w.Phase.Set(PhaseEditing)
+		w.OnFocus(nil)
+		return
+	}
+	w.Mode.Set(ModeEdit)
+	w.Phase.Set(PhaseViewing)
+}
+
 func (w *Workflow) IsEditing() bool {
 	return w.Phase.Get() == PhaseEditing || w.Phase.Get() == PhaseFailed || w.Phase.Get() == PhaseSubmitting
 }
 
-// IsFocused reports whether workflow-local focus bindings should stay active
-// while the edit subtree owns the slug field.
-func (w *Workflow) IsFocused() bool {
-	return w.IsEditing()
+// Arrow returns the row marker for the workspace slug interaction scope.
+// Editing means the mounted input is the active descendant of this row; the
+// row marker remains the same selection grammar used by view-mode rows.
+func (w *Workflow) Arrow() string {
+	return w.ArrowWithActiveDescendant(w.IsEditing())
 }
 
 func (w *Workflow) Activate() {
 	if w.Mode.Get() == ModeEdit && !w.IsEditing() {
 		w.Phase.Set(PhaseEditing)
+		w.OnFocus(nil)
 		return
 	}
 	if w.ErrorMessage() != "" {
@@ -156,6 +198,33 @@ func (w *Workflow) Submit(ctx context.Context) {
 	if err != nil {
 		w.Error.Set(err.Error())
 		w.Phase.Set(PhaseFailed)
+		return
+	}
+	if w.Mode.Get() == ModeCreate {
+		if w.Save == nil {
+			w.Error.Set("workspace save is not wired yet")
+			w.Phase.Set(PhaseFailed)
+			return
+		}
+		w.Error.Set("")
+		w.Phase.Set(PhaseSubmitting)
+		workspace, err := w.Save(ctx, ports.SaveWorkspaceRequest{
+			ID:   w.WorkspaceID.Get(),
+			Slug: slug,
+		})
+		if err != nil {
+			w.Error.Set(err.Error())
+			w.Phase.Set(PhaseFailed)
+			return
+		}
+		w.Workspace = workspace
+		w.WorkspaceID.Set(workspace.ID)
+		w.Slug.Set(workspace.Slug)
+		w.Mode.Set(ModeEdit)
+		w.closeEdit()
+		if w.OnSaved != nil {
+			w.OnSaved(workspace)
+		}
 		return
 	}
 	if w.Save == nil {
@@ -185,8 +254,13 @@ func (w *Workflow) Submit(ctx context.Context) {
 	w.closeEdit()
 }
 
+func (w *Workflow) SubmitSlug(value string) {
+	w.Slug.Set(value)
+	w.Submit(context.Background())
+}
+
 func (w *Workflow) ActionLabel() string {
-	if w.ErrorMessage() != "" {
+	if w.visibleError() != "" {
 		return "invalid"
 	}
 	if w.Mode.Get() == ModeCreate {
@@ -217,6 +291,16 @@ func (w *Workflow) ErrorMessage() string {
 		return err.Error()
 	}
 	return ""
+}
+
+// visibleError keeps validation and submit failures on the row itself.
+// Without this, a rejected save reads like a no-op and the PTY proof lane
+// waits forever for a success state that never arrives.
+func (w *Workflow) visibleError() string {
+	if msg := w.ErrorMessage(); msg != "" {
+		return msg
+	}
+	return strings.TrimSpace(w.Error.Get())
 }
 
 func (w *Workflow) ClientBaseURLPreview() string {

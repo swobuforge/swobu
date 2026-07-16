@@ -1,4 +1,4 @@
-     slug              dev                           edit ↵
+     slug              dev                                 edit ↵
 
 
 

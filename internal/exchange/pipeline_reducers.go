@@ -47,10 +47,6 @@ func ingressReceivedReduce(s struct {
 }
 
 func envelopeDecodedReduce(s DecodedEnvelopeState, _ EnvelopeDecodedEvent) (DecodedEnvelopeState, []machine.Event, []machine.Command, error) {
-	return s, nil, []machine.Command{machine.Command(CaptureContinuationAction{})}, nil
-}
-
-func continuationCapturedReduce(s DecodedEnvelopeState, _ ContinuationCapturedEvent) (DecodedEnvelopeState, []machine.Event, []machine.Command, error) {
 	return s, nil, []machine.Command{machine.Command(EncodeClientOutputAction{})}, nil
 }
 

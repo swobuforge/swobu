@@ -186,7 +186,7 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 	}
 }
 
-func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputFailsBeforeAttach(t *testing.T) {
+func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttach(t *testing.T) {
 	originalFetch := fetchLatestVersion
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
 	t.Cleanup(func() { fetchLatestVersion = originalFetch })
@@ -208,13 +208,16 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputFailsBeforeAttac
 	}
 
 	exitCode := runner.Run(context.Background(), nil)
-	if exitCode != ExitDown {
-		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
+	if exitCode != ExitHealthy {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
 	}
-	if attachCalled {
-		t.Fatal("attach/start called despite missing notice acknowledgment")
+	if !attachCalled {
+		t.Fatal("attach/start was not called")
 	}
-	if !strings.Contains(stderr.String(), "version notice acknowledgment failed") {
-		t.Fatalf("stderr missing acknowledgement error: %q", stderr.String())
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "press Enter to continue") {
+		t.Fatalf("stdout missing continue prompt: %q", stdout.String())
 	}
 }

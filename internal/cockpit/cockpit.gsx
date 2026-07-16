@@ -25,7 +25,6 @@ type Cockpit struct {
 	RefreshNotice  *tui.State[readmodel.Notice]
 	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
-	WorkspacePage  *workspace_page.PageView
 	HelpPage       *help_page.PageView
 	Context        context.Context
 	WorkspacePorts ports.WorkspaceCommands
@@ -56,7 +55,6 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 		HelpActions:     helpActions,
 	}
 	cockpit.WorkspacePages = cockpit.workspacePagesByTab(model)
-	cockpit.WorkspacePage = cockpit.initialWorkspacePage(model, activeTab)
 	return cockpit
 }
 
@@ -86,24 +84,12 @@ func (c *Cockpit) activateHelpTab(event tui.KeyEvent) {
 	}
 }
 
-func focusedTextEditor(event tui.KeyEvent) bool {
-	app := event.App()
-	if app == nil {
-		return false
+func (c *Cockpit) currentWorkspacePage() *workspace_page.PageView {
+	model := c.activeModel()
+	if model.ActivePage != readmodel.CockpitWorkspacePage {
+		return nil
 	}
-	switch app.Focused().(type) {
-	case *tui.Input, *tui.TextArea:
-		return true
-	case *tui.Element:
-		focused := app.Focused().(*tui.Element)
-		switch focused.Component().(type) {
-		case *tui.Input, *tui.TextArea:
-			return true
-		}
-	default:
-		return false
-	}
-	return false
+	return c.activeWorkspacePage(model)
 }
 
 func (c *Cockpit) quit(event tui.KeyEvent) {
@@ -118,10 +104,6 @@ func (c *Cockpit) activateTab(index int) {
 	}
 	index = wrapTabIndex(index, len(c.Model.Tabs))
 	c.ActiveTabIndex.Set(index)
-	if c.Model.Tabs[index].Kind != readmodel.WorkspaceTabHelp {
-		model := c.activeModel()
-		c.WorkspacePage = c.activeWorkspacePage(model)
-	}
 }
 
 func (c *Cockpit) activeTabIndex() int {
@@ -142,14 +124,16 @@ func (c *Cockpit) activeModel() readmodel.CockpitReadModel {
 	}
 
 	tab := model.Tabs[index]
-	model.SelectedWorkspaceID = tab.ID
 	if tab.Kind == readmodel.WorkspaceTabHelp {
+		model.SelectedWorkspaceID = tab.ID
 		model.ActivePage = readmodel.CockpitHelpPage
 		return model
 	}
 
+	workspace := workspaceForTab(model, tab)
+	model.SelectedWorkspaceID = tab.ID
 	model.ActivePage = readmodel.CockpitWorkspacePage
-	model.SelectedWorkspace = workspaceForTab(model, tab)
+	model.SelectedWorkspace = workspace
 	return model
 }
 
@@ -165,32 +149,60 @@ func (c *Cockpit) activeWorkspacePage(model readmodel.CockpitReadModel) *workspa
 	return page
 }
 
+func activityQueryPort(query ports.WorkspaceQueries) ports.ActivityQueries {
+	if query == nil {
+		return nil
+	}
+	if activity, ok := any(query).(ports.ActivityQueries); ok {
+		return activity
+	}
+	return nil
+}
+
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
+	previousPage := c.currentWorkspacePage()
+	wasDraft := c.Model.SelectedWorkspace.IsDraft()
 	model, notice := c.Reloader.RefreshAfterSave(c.Model, saved)
 	c.RefreshNotice.Set(notice)
-	c.replaceModel(model)
+	c.replaceModel(model, !wasDraft)
+	if previousPage != nil && !wasDraft {
+		if freshPage := c.WorkspacePages[saved.ID]; freshPage != nil && freshPage != previousPage {
+			if previousPage.OverviewSection != nil && freshPage.OverviewSection != nil {
+				previousPage.OverviewSection.UpdateProps(freshPage.OverviewSection)
+			}
+			if previousPage.RoutesSection != nil && freshPage.RoutesSection != nil {
+				previousPage.RoutesSection.UpdateProps(freshPage.RoutesSection)
+			}
+			if previousPage.ActivitySection != nil && freshPage.ActivitySection != nil {
+				previousPage.ActivitySection.UpdateProps(freshPage.ActivitySection)
+			}
+			c.WorkspacePages[saved.ID] = previousPage
+		}
+	}
 }
 
 func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
 	model, notice := c.Reloader.RefreshAfterDelete(c.Model, deleted)
 	c.RefreshNotice.Set(notice)
-	c.replaceModel(model)
+	c.replaceModel(model, true)
 }
 
-func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel) {
+func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel, preserveDraftPages bool) {
 	activeTab := selectedTabIndex(model.Tabs)
 	previousPages := c.WorkspacePages
 	c.Model = model
 	c.ActiveTabIndex.Set(activeTab)
 	c.WorkspacePages = c.workspacePagesByTab(model)
-	c.preserveDraftWorkspacePages(previousPages, model)
-	c.WorkspacePage = c.initialWorkspacePage(model, activeTab)
+	if preserveDraftPages {
+		c.preserveDraftWorkspacePages(previousPages, model)
+	}
 	c.HelpPage = help_page.ViewWithContext(model.Help, c.Context, c.HelpActions)
 }
 
 // preserveDraftWorkspacePages carries unsaved [+] workflow state across a
-// daemon-backed refresh. Saved workspace workflows intentionally remount after
-// mutation so their visible state matches the reloaded operator projection.
+// daemon-backed refresh. If the draft page has already been promoted, it must
+// remount as a fresh draft page instead of leaking the promoted values back
+// into the [+] slot.
 func (c *Cockpit) preserveDraftWorkspacePages(previous map[readmodel.WorkspaceID]*workspace_page.PageView, model readmodel.CockpitReadModel) {
 	if previous == nil {
 		return
@@ -199,10 +211,32 @@ func (c *Cockpit) preserveDraftWorkspacePages(previous map[readmodel.WorkspaceID
 		if tab.Kind != readmodel.WorkspaceTabDraft {
 			continue
 		}
-		if page := previous[tab.ID]; page != nil {
-			c.WorkspacePages[tab.ID] = page
+		page := previous[tab.ID]
+		if page == nil || !page.OverviewSection.Model.IsDraft() {
+			continue
 		}
+		c.WorkspacePages[tab.ID] = page
 	}
+}
+
+// ActiveHelpPage returns the cached help page through a constructor-shaped
+// expression. GSX mounts function-call components; direct stored-component
+// rendering bypasses the child KeyMap even when the child is app-bound.
+func ActiveHelpPage(c *Cockpit) *help_page.PageView {
+	return c.HelpPage
+}
+
+// ActiveWorkspacePage returns the cached active workspace page through the same
+// constructor-shaped path so generated go-tui dispatch includes page keys.
+func ActiveWorkspacePage(c *Cockpit, model readmodel.CockpitReadModel) *workspace_page.PageView {
+	if model.ActivePage != readmodel.CockpitWorkspacePage {
+		return nil
+	}
+	return c.activeWorkspacePage(model)
+}
+
+func activeWorkspaceMountKey(model readmodel.CockpitReadModel) string {
+	return "workspace-page:" + string(model.SelectedWorkspaceID)
 }
 
 templ (c *Cockpit) Render() {
@@ -213,31 +247,25 @@ templ (c *Cockpit) Render() {
 		}
 		<hr />
 		if c.activeModel().ActivePage == readmodel.CockpitHelpPage {
-			@c.HelpPage
-		} else {
-			if app != nil {
-				@ActiveWorkspacePage(c)
-			} else {
-				@c.WorkspacePage
-			}
+			@ActiveHelpPage(c)
+		} else if c.activeModel().ActivePage == readmodel.CockpitWorkspacePage {
+			<div key={activeWorkspaceMountKey(c.activeModel())} class="w-full">
+				@ActiveWorkspacePage(c, c.activeModel())
+			</div>
 		}
 		<hr />
 		@ShellFooter(c.activeModel())
 	</div>
 }
 
-func ActiveWorkspacePage(c *Cockpit) *workspace_page.PageView {
-	return c.WorkspacePage
+func staleRefreshNotice(message string) readmodel.Notice {
+	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
 }
 
 templ RefreshNotice(notice readmodel.Notice) {
 	<div class="flex-row w-full">
 		<span>{notice.Message}</span>
 	</div>
-}
-
-func staleRefreshNotice(message string) readmodel.Notice {
-	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
 }
 
 templ ShellHeader(model readmodel.CockpitReadModel) {
@@ -315,20 +343,39 @@ func (c *Cockpit) workspacePagesByTab(model readmodel.CockpitReadModel) map[read
 }
 
 func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspace_page.PageView {
-	page := workspace_page.Page(workspace, c.WorkspacePorts)
+	page := workspace_page.Page(
+		workspace,
+		c.WorkspacePorts,
+		targetSetupQueriesPort(c.WorkspacePorts),
+		targetAuthCommandsPort(c.WorkspacePorts),
+		c.Context,
+		activityQueryPort(c.WorkspaceQuery),
+	)
 	page.OnWorkspaceSaved = c.refreshAfterWorkspaceSave
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
 	return page
 }
 
-func (c *Cockpit) initialWorkspacePage(model readmodel.CockpitReadModel, activeTab int) *workspace_page.PageView {
-	if len(model.Tabs) > 0 {
-		tab := model.Tabs[wrapTabIndex(activeTab, len(model.Tabs))]
-		if tab.Kind != readmodel.WorkspaceTabHelp {
-			return c.WorkspacePages[tab.ID]
-		}
+// The root shell owns optional adapter capability discovery. The workspace
+// page receives explicit ports so it stays a pure composer.
+func targetSetupQueriesPort(commands ports.WorkspaceCommands) ports.TargetSetupQueries {
+	if commands == nil {
+		return nil
 	}
-	return c.WorkspacePages[model.SelectedWorkspaceID]
+	if setupQueries, ok := any(commands).(ports.TargetSetupQueries); ok {
+		return setupQueries
+	}
+	return nil
+}
+
+func targetAuthCommandsPort(commands ports.WorkspaceCommands) ports.TargetAuthCommands {
+	if commands == nil {
+		return nil
+	}
+	if authCommands, ok := any(commands).(ports.TargetAuthCommands); ok {
+		return authCommands
+	}
+	return nil
 }
 
 func workspaceForTab(model readmodel.CockpitReadModel, tab readmodel.WorkspaceTabReadModel) readmodel.WorkspaceReadModel {
@@ -354,9 +401,10 @@ func selectWorkspace(model readmodel.CockpitReadModel, id readmodel.WorkspaceID)
 		selected := model.Tabs[i].ID == id
 		model.Tabs[i].Selected = selected
 		if selected {
+			workspace := workspaceForTab(model, model.Tabs[i])
 			model.SelectedWorkspaceID = model.Tabs[i].ID
 			model.ActivePage = readmodel.CockpitWorkspacePage
-			model.SelectedWorkspace = workspaceForTab(model, model.Tabs[i])
+			model.SelectedWorkspace = workspace
 		}
 	}
 	return model
@@ -398,9 +446,10 @@ func removeWorkspaceFromModel(model readmodel.CockpitReadModel, deleted readmode
 			continue
 		}
 		model.Tabs[i].Selected = true
+		workspace := workspaceForTab(model, model.Tabs[i])
 		model.SelectedWorkspaceID = model.Tabs[i].ID
 		model.ActivePage = readmodel.CockpitWorkspacePage
-		model.SelectedWorkspace = workspaceForTab(model, model.Tabs[i])
+		model.SelectedWorkspace = workspace
 		return model
 	}
 	model.SelectedWorkspaceID = ""
@@ -408,8 +457,9 @@ func removeWorkspaceFromModel(model readmodel.CockpitReadModel, deleted readmode
 	model.ActivePage = readmodel.CockpitWorkspacePage
 	if index, ok := draftTabIndex(model.Tabs); ok {
 		model.Tabs[index].Selected = true
+		workspace := workspaceForTab(model, model.Tabs[index])
 		model.SelectedWorkspaceID = model.Tabs[index].ID
-		model.SelectedWorkspace = workspaceForTab(model, model.Tabs[index])
+		model.SelectedWorkspace = workspace
 	}
 	return model
 }

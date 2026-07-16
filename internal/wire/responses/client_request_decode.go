@@ -64,6 +64,16 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDo
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	slog.Debug("responses request tools",
+		"component", "httpapi",
+		"event", "responses_request_tools",
+		"tool_count", len(tools),
+		"function_tool_count", responsesToolKindCount(tools, canonical.ToolTypeFunction),
+		"custom_tool_count", responsesToolKindCount(tools, canonical.ToolTypeCustom),
+		"capability_tool_count", responsesCapabilityToolCount(tools),
+		"capability_tool_names", strings.Join(responsesCapabilityToolNames(tools), ","),
+		"capability_tool_configs", strings.Join(responsesCapabilityToolConfigs(tools), " | "),
+	)
 	toolPolicy, err := DecodeResponsesToolPolicy(dto.ToolChoice, tools, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -218,6 +228,42 @@ func decodeResponsesInput(raw json.RawMessage, sink effect.Sink, exchangeID stri
 		}
 	}
 	return "", decoded, nil
+}
+
+func responsesCapabilityToolNames(tools []canonical.ToolDecl) []string {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		switch decl := tool.(type) {
+		case canonical.CapabilityToolDecl:
+			out = append(out, strings.TrimSpace(decl.ToolName()))
+		case *canonical.CapabilityToolDecl:
+			if decl != nil {
+				out = append(out, strings.TrimSpace(decl.ToolName()))
+			}
+		}
+	}
+	return out
+}
+
+func responsesCapabilityToolConfigs(tools []canonical.ToolDecl) []string {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		switch decl := tool.(type) {
+		case canonical.CapabilityToolDecl:
+			out = append(out, strings.TrimSpace(decl.CapabilityConfig().RawObject()))
+		case *canonical.CapabilityToolDecl:
+			if decl != nil {
+				out = append(out, strings.TrimSpace(decl.CapabilityConfig().RawObject()))
+			}
+		}
+	}
+	return out
 }
 
 // OpenAI-family Responses bridges may stringify function_call.arguments when

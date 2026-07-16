@@ -54,6 +54,9 @@ endpoints:
 	if got := selectedProvider.ModelID(); got != "gpt-4.1-mini" {
 		t.Fatalf("selected provider model_id = %q, want %q", got, "gpt-4.1-mini")
 	}
+	if got := selectedProvider.RouteModelID(); got != "gpt-4.1-mini" {
+		t.Fatalf("selected provider route_model_id fallback = %q, want %q", got, "gpt-4.1-mini")
+	}
 	if got := selectedProvider.TargetAlias(); got != "fast" {
 		t.Fatalf("selected provider target_alias = %q, want %q", got, "fast")
 	}
@@ -284,6 +287,65 @@ func TestSave_PersistsProviderModelID(t *testing.T) {
 	}
 	if got := loaded.Endpoints[0].SelectedProviderConfig().TargetWeight(); got != 4 {
 		t.Fatalf("roundtrip target_weight = %d, want 4", got)
+	}
+}
+
+func TestSave_PersistsRouteModelID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	name, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	ref, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithRouteModelID("gpt")
+	if err != nil {
+		t.Fatalf("WithRouteModelID returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithModelID("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{providerConfig}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	if err := Save(path, RuntimeConfig{BindAddr: "127.0.0.1:7926"}, []endpointintent.Endpoint{endpoint}); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "route_model_id: gpt") {
+		t.Fatalf("saved config missing route_model_id, got:\n%s", text)
+	}
+	if !strings.Contains(text, "model_id: gpt-4.1-mini") {
+		t.Fatalf("saved config missing model_id, got:\n%s", text)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	selected := loaded.Endpoints[0].SelectedProviderConfig()
+	if got, want := selected.RouteModelID(), "gpt"; got != want {
+		t.Fatalf("roundtrip route_model_id = %q, want %q", got, want)
+	}
+	if got, want := selected.ModelID(), "gpt-4.1-mini"; got != want {
+		t.Fatalf("roundtrip model_id = %q, want %q", got, want)
 	}
 }
 

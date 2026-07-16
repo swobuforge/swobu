@@ -33,7 +33,7 @@ func NewEndpoint(
 	seen := make(map[string]struct{}, len(configs))
 	seenAlias := make(map[string]struct{}, len(configs))
 	seenProviderModelLiteral := make(map[string]struct{}, len(configs))
-	seenModelID := make(map[string]struct{}, len(configs))
+	seenRouteModelID := make(map[string]struct{}, len(configs))
 	selectedFound := false
 	for _, providerConfig := range configs {
 		ref := providerConfig.Ref().String()
@@ -44,14 +44,14 @@ func NewEndpoint(
 			return Endpoint{}, fmt.Errorf("%w: provider config ref must be unique", ErrInvalidEndpoint)
 		}
 		seen[ref] = struct{}{}
+		routeModelID := strings.ToLower(strings.TrimSpace(projectedRouteModelID(providerConfig))) // swobu:io-string source=domain
+		if routeModelID != "" {
+			seenRouteModelID[routeModelID] = struct{}{}
+		}
 		providerModelLiteral := strings.TrimSpace(providerConfig.ProviderSpec().String()) + ":" + strings.TrimSpace(providerConfig.ModelID()) // swobu:io-string source=domain
 		providerModelLiteral = strings.ToLower(strings.TrimSpace(providerModelLiteral))                                                       // swobu:io-string source=domain
 		if providerModelLiteral != ":" {
 			seenProviderModelLiteral[providerModelLiteral] = struct{}{}
-		}
-		modelID := strings.ToLower(strings.TrimSpace(providerConfig.ModelID())) // swobu:io-string source=domain
-		if modelID != "" {
-			seenModelID[modelID] = struct{}{}
 		}
 		alias := strings.ToLower(strings.TrimSpace(providerConfig.TargetAlias())) // swobu:io-string source=domain
 		if alias != "" {
@@ -65,11 +65,11 @@ func NewEndpoint(
 		}
 	}
 	for alias := range seenAlias {
+		if _, exists := seenRouteModelID[alias]; exists {
+			return Endpoint{}, fmt.Errorf("%w: target alias must not collide with route model selectors", ErrInvalidEndpoint)
+		}
 		if _, exists := seenProviderModelLiteral[alias]; exists {
 			return Endpoint{}, fmt.Errorf("%w: target alias must not collide with provider:model selectors", ErrInvalidEndpoint)
-		}
-		if _, exists := seenModelID[alias]; exists {
-			return Endpoint{}, fmt.Errorf("%w: target alias must not collide with model selectors", ErrInvalidEndpoint)
 		}
 	}
 	if !selectedFound {

@@ -1,0 +1,23 @@
+SWOBU    [dev] [lab] [› +] [?]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+>    slug              ▌                                   create ↵
+     endpoint          (derived from slug)
+
+  model routes ▾
+     (no routes)
+     add model route                                       add ↵
+
+  activity ▾
+     (no activity)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tab next   Shift+Tab prev   esc back
+
+
+
+
+
+
+

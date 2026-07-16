@@ -71,8 +71,7 @@ func assertCockpitFixtureWidths(t *testing.T, name string, height int, widths []
 	for _, width := range widths {
 		width := width
 		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
-			root := view().Render(nil)
-			rendered := testkit.RenderTrimmed(root, width, height)
+			rendered := testkit.RenderMountedTrimmed(t, view(), width, height)
 			fixtureName := fmt.Sprintf("%s_%d", name, width)
 			testkit.AssertVisual(fixtureName).
 				Fixture(fmt.Sprintf("testdata/cockpit_fixture__testfixture_%s/fixture/%s.txt", strings.ReplaceAll(name, "_", ""), fixtureName)).
@@ -105,7 +104,7 @@ func routeFocusedFixtureCockpit() *Cockpit {
 
 func routeExpandedFixtureCockpit() *Cockpit {
 	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
-		c.WorkspacePage.RoutesSection.OpenRoute(c.WorkspacePage.RoutesSection.State.Routes[0])
+		c.currentWorkspacePage().RoutesSection.OpenRoute(c.currentWorkspacePage().RoutesSection.State.Routes[0])
 	})
 }
 
@@ -117,7 +116,6 @@ func exceptionalRoutesFixtureCockpit() *Cockpit {
 			ID:        "free",
 			ModelName: "free",
 			State:     readmodel.RouteDegraded,
-			PlanKind:  readmodel.RoutePlanWeighted,
 			Enabled:   true,
 			Targets: []readmodel.TargetReadModel{
 				{ID: "free-1"}, {ID: "free-2"}, {ID: "free-3"},
@@ -132,7 +130,6 @@ func exceptionalRoutesFixtureCockpit() *Cockpit {
 			ID:        "local",
 			ModelName: "local",
 			State:     readmodel.RouteBlocked,
-			PlanKind:  readmodel.RoutePlanSingle,
 			Enabled:   true,
 			Targets:   []readmodel.TargetReadModel{{ID: "local-1"}},
 			Diagnostics: []readmodel.RouteDiagnosticReadModel{{
@@ -142,7 +139,7 @@ func exceptionalRoutesFixtureCockpit() *Cockpit {
 		{
 			ID:        "route-new",
 			ModelName: "route-new",
-			State:     readmodel.RouteIncomplete,
+			State:     readmodel.RouteNormal,
 			Enabled:   true,
 		},
 	}
@@ -179,7 +176,7 @@ func activityLatestFixtureCockpit(errorRow bool, expanded bool) *Cockpit {
 	model.SelectedWorkspace.Activity = readmodel.ActivityReadModel{Latest: &row}
 	return newFixtureCockpit(model, func(c *Cockpit) {
 		if expanded {
-			c.WorkspacePage.ActivitySection.OpenActivity.Set(row.ID)
+			c.currentWorkspacePage().ActivitySection.OpenActivity.Set(row.ID)
 		}
 	})
 }
@@ -210,14 +207,13 @@ func helpFixtureCockpit(status readmodel.DiagnosticsStatus) *Cockpit {
 
 func deleteConfirmFixtureCockpit() *Cockpit {
 	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
-		c.WorkspacePage.OverviewSection.OpenDeleteConfirmation("dev")
+		c.currentWorkspacePage().OverviewSection.OpenDeleteConfirmation("dev")
 	})
 }
 
 func collapsedFixtureCockpit() *Cockpit {
 	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
-		c.WorkspacePage.OverviewSection.SummaryOnly.Set(true)
-		c.WorkspacePage.RoutesSection.Expanded.Set(false)
-		c.WorkspacePage.ActivitySection.Expanded.Set(false)
+		c.currentWorkspacePage().RoutesSection.Expanded.Set(false)
+		c.currentWorkspacePage().ActivitySection.Expanded.Set(false)
 	})
 }

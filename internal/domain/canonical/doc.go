@@ -1,10 +1,9 @@
 // Package canonical owns Swobu's semantic center for the v0 request path.
 //
 // It classifies client families, normalizes paths, preserves canonical
-// request/output/continuation semantics, and defines the Swobu-vs-backend
-// error boundary. Continuation-aware flows use TurnRef and ContinuationRecord
-// so semantic chain ownership stays separate from provider-native turn-state
-// bytes. Canonical requests now also own the semantic tool ontology:
+// request/output/replay semantics, and defines the Swobu-vs-backend
+// error boundary. Playback-aware flows use TurnRef so semantic chain
+// ownership stays separate from provider-native turn-state bytes. Canonical requests now also own the semantic tool ontology:
 // function/custom/capability declarations, execution ownership, structured
 // tool identity, and tool policy are represented separately so adapters can
 // lower to wire formats without collapsing distinct lifecycles into one flat
