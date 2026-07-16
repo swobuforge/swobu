@@ -13,7 +13,6 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
@@ -60,12 +59,11 @@ var daemonIdleTimeout = 60 * time.Second
 // StartInput collects the one runtime config path plus the dependencies
 // bootstrap must wire into the live request path.
 type StartInput struct {
-	ConfigPath        string
-	Providers         exchange.ProviderIngressResolver
-	ModelCatalog      exchange.ProviderModelCatalog
-	TrafficEventSink  observation.TrafficEventSink
-	ContinuationStore canonical.ContinuationStore
-	Logger            *slog.Logger
+	ConfigPath       string
+	Providers        exchange.ProviderIngressResolver
+	ModelCatalog     exchange.ProviderModelCatalog
+	TrafficEventSink observation.TrafficEventSink
+	Logger           *slog.Logger
 }
 
 // operator routes, and request-path dependencies in one bootstrap flow.
@@ -124,7 +122,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.trafficEventStore = store
 	}
 	trafficEventSink = newTelemetryObservedTrafficEventSink(trafficEventSink, daemon.observeTelemetryEvent)
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, trafficEventSink, in.ContinuationStore, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, trafficEventSink, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}

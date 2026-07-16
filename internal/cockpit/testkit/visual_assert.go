@@ -7,6 +7,7 @@ import (
 
 	"github.com/grindlemire/go-tui"
 
+	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 	assert "github.com/swobuforge/swobu/testscreen/assert"
 	"github.com/swobuforge/swobu/testscreen/buf"
 	"github.com/swobuforge/swobu/testscreen/fixture"
@@ -53,6 +54,35 @@ func RenderBuffer(el *tui.Element, width, height int) buf.View {
 	b := tui.NewBuffer(width, height)
 	el.Render(b, width, height)
 	return buf.FromString(b.String())
+}
+
+// RenderMountedString renders a component through a mounted go-tui App.
+// Use it for any Cockpit component that may own KeyMap, focus, or app.Mount
+// descendants. Do not call component.Render(nil) in Cockpit tests.
+func RenderMountedString(t testing.TB, component tui.Component, width, height int) string {
+	t.Helper()
+	rendered, err := mountedrender.String(component, width, height)
+	if err != nil {
+		t.Fatalf("render mounted component: %v", err)
+	}
+	return rendered
+}
+
+// RenderMountedTrimmed renders a mounted component and strips trailing spaces.
+func RenderMountedTrimmed(t testing.TB, component tui.Component, width, height int) string {
+	t.Helper()
+	rendered, err := mountedrender.Trimmed(component, width, height)
+	if err != nil {
+		t.Fatalf("render mounted component: %v", err)
+	}
+	return rendered
+}
+
+// RenderMountedBuffer renders a mounted component into a testscreen view.
+func RenderMountedBuffer(t testing.TB, component tui.Component, width, height int) buf.View {
+	t.Helper()
+	rendered := RenderMountedString(t, component, width, height)
+	return buf.FromString(rendered)
 }
 
 // AssertNow executes a testscreen predicate against a rendered string.

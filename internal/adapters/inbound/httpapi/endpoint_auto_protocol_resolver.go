@@ -26,13 +26,11 @@ func (r endpointAutoProtocolResolver) Resolve(ctx context.Context, endpoint endp
 	if r.probe == nil {
 		return endpoint, nil
 	}
-	rawByRef := mapRawProviderProtocolsByRef(doc)
 	configs := endpoint.ProviderConfigs()
 	selectedRef := endpoint.SelectedProviderConfigRef()
 	rebuilt := false
 	for i := range configs {
-		rawProtocol := rawByRef[strings.TrimSpace(configs[i].Ref().String())] // swobu:io-string source=boundary
-		if rawProtocol != "" && rawProtocol != profile.ProviderProtocolAuto {
+		if configs[i].ProviderProtocol() != profile.ProviderProtocolAuto {
 			continue
 		}
 		resolved, err := r.resolveOne(ctx, endpoint.Name(), configs, i, selectedRef)
@@ -49,14 +47,6 @@ func (r endpointAutoProtocolResolver) Resolve(ctx context.Context, endpoint endp
 		return endpoint, nil
 	}
 	return endpointintent.NewEndpoint(endpoint.Name(), configs, selectedRef)
-}
-
-func mapRawProviderProtocolsByRef(doc endpointDocument) map[string]string {
-	out := make(map[string]string, len(doc.ProviderConfigs))
-	for _, cfg := range doc.ProviderConfigs {
-		out[strings.TrimSpace(cfg.Ref)] = strings.TrimSpace(cfg.ProviderProtocol) // swobu:io-string source=boundary
-	}
-	return out
 }
 
 func (r endpointAutoProtocolResolver) resolveOne(

@@ -1,15 +1,15 @@
 SWOBU    [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
-     slug              dev                           edit ↵
-     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
+     endpoint          http://127.0.0.1:7926/c/dev         copy ↵
+                       OpenAI · Anthropic
+     slug              dev                                 edit ↵
+     delete            workspace                           delete ↵
 
-  routes ▸
+  model routes ▸
 
   activity ▸
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ open   F1 help   esc back
-
-

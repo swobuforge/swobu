@@ -86,3 +86,26 @@ func TestEndpointCredentialRefStoreUpsertCredentialRef_SubjectLocatorSkipsEndpoi
 		t.Fatalf("credential ref = %q, want unchanged empty ref", got.ProviderConfigs()[0].CredentialRef())
 	}
 }
+
+func TestEndpointCredentialRefStoreRejectsCredentialRotation(t *testing.T) {
+	t.Parallel()
+	name, _ := endpointintent.ParseEndpointName("main")
+	ref, _ := endpointintent.ParseProviderConfigRef("cfg-a")
+	spec, _ := endpointintent.ParseProviderSpec("openai")
+	cfg, _ := endpointintent.NewProviderConfig(ref, spec, "", "cred-a")
+	cfg, _ = cfg.WithModelID("gpt-4.1")
+	ep, _ := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
+	repo := &endpointRepoStub{endpoints: []endpointintent.Endpoint{ep}}
+	store := NewEndpointCredentialStore(operatorendpoints.NewOperatorEndpointStore(repo))
+
+	if _, err := store.UpsertCredentialRef(context.Background(), "openai", "main#cfg-a", "cred-b"); err == nil {
+		t.Fatal("expected credential rotation to be rejected")
+	}
+	got, err := repo.GetEndpoint(context.Background(), name)
+	if err != nil {
+		t.Fatalf("GetEndpoint error: %v", err)
+	}
+	if got.ProviderConfigs()[0].CredentialRef() != "cred-a" {
+		t.Fatalf("credential ref = %q, want cred-a", got.ProviderConfigs()[0].CredentialRef())
+	}
+}

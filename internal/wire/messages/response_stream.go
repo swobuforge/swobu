@@ -213,6 +213,8 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		block.Name = strings.TrimSpace(payload.ContentBlock.Name) // swobu:io-string source=boundary
 		block.ItemID = block.ToolUseID
 		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMetadataFields{NativeID: block.ItemID})
+	case "server_tool_use", "web_search_tool_result":
+		return nil
 	default:
 		return canonical.InternalError("messages stream content block type is unsupported")
 	}

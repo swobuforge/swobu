@@ -132,3 +132,76 @@ func TestEnvelopeEventAdapter_UsageDoesNotCompleteBeforeResponseEnd(t *testing.T
 		t.Fatalf("finish reason = %q, want stop", completed[0].FinishReason)
 	}
 }
+
+func TestEnvelopeEventAdapter_ResponseStartIgnoresNativeID(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewEnvelopeEventAdapter()
+	started := adapter.Translate(canonical.Event{
+		Kind:  canonical.EventEnvelopeStart,
+		EnvID: "resp_1",
+		Meta:  canonical.EventMetadataFields{NativeID: "resp_swobu_alloc"},
+		Payload: canonical.EnvelopeStartPayload{
+			Kind: canonical.EnvResponse,
+		},
+	})
+	if len(started) != 1 || started[0].Kind != StreamEventStarted {
+		t.Fatalf("started events = %#v, want one started event", started)
+	}
+	if started[0].ResultID != "" {
+		t.Fatalf("started result id = %q, want empty when ResultID is absent", started[0].ResultID)
+	}
+
+	completed := adapter.Translate(canonical.Event{
+		Kind:  canonical.EventEnvelopeEnd,
+		EnvID: "resp_1",
+		Payload: canonical.EnvelopeEndPayload{
+			Kind:   canonical.EnvResponse,
+			Status: canonical.EnvelopeStatusCompleted,
+		},
+	})
+	if len(completed) != 1 || completed[0].Kind != StreamEventCompleted {
+		t.Fatalf("completed events = %#v, want one completed event", completed)
+	}
+	if completed[0].ResultID != "" {
+		t.Fatalf("completed result id = %q, want empty when ResultID is absent", completed[0].ResultID)
+	}
+}
+
+func TestEnvelopeEventAdapter_ResponseStartPrefersResultID(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewEnvelopeEventAdapter()
+	started := adapter.Translate(canonical.Event{
+		Kind:  canonical.EventEnvelopeStart,
+		EnvID: "resp_2",
+		Meta: canonical.EventMetadataFields{
+			NativeID: "provider_resp_2",
+			ResultID: "swobu_resp_2",
+		},
+		Payload: canonical.EnvelopeStartPayload{
+			Kind: canonical.EnvResponse,
+		},
+	})
+	if len(started) != 1 || started[0].Kind != StreamEventStarted {
+		t.Fatalf("started events = %#v, want one started event", started)
+	}
+	if started[0].ResultID != "swobu_resp_2" {
+		t.Fatalf("started result id = %q, want swobu_resp_2", started[0].ResultID)
+	}
+
+	completed := adapter.Translate(canonical.Event{
+		Kind:  canonical.EventEnvelopeEnd,
+		EnvID: "resp_2",
+		Payload: canonical.EnvelopeEndPayload{
+			Kind:   canonical.EnvResponse,
+			Status: canonical.EnvelopeStatusCompleted,
+		},
+	})
+	if len(completed) != 1 || completed[0].Kind != StreamEventCompleted {
+		t.Fatalf("completed events = %#v, want one completed event", completed)
+	}
+	if completed[0].ResultID != "swobu_resp_2" {
+		t.Fatalf("completed result id = %q, want swobu_resp_2", completed[0].ResultID)
+	}
+}

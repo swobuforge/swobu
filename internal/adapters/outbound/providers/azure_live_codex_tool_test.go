@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
@@ -44,7 +45,7 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
 	})
 
-	wireRequestResult, err := codecs.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(request, d, "live-azure-codex-required-tool")
+	wireRequestResult, err := codecs.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, d, "live-azure-codex-required-tool")
 	if err != nil {
 		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 	}

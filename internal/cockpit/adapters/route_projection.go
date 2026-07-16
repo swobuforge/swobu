@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // routesFromEndpoint projects daemon provider configs into Cockpit route rows.
@@ -22,7 +23,7 @@ import (
 func routesFromEndpoint(endpoint operatorclient.EndpointData) []readmodel.RouteReadModel {
 	groups := map[string][]operatorclient.ProviderConfigData{}
 	for _, target := range endpoint.ProviderConfigs {
-		modelName := strings.TrimSpace(target.ModelID) // swobu:io-string source=boundary
+		modelName := projectedRouteModel(target)
 		if modelName == "" {
 			modelName = exchange.PublicModelIDSwobu
 		}
@@ -42,7 +43,6 @@ func routesFromEndpoint(endpoint operatorclient.EndpointData) []readmodel.RouteR
 			ID:        readmodel.RouteID(modelName),
 			ModelName: modelName,
 			State:     routeState(targets),
-			PlanKind:  routePlanKind(targets),
 			Default:   modelName == selectedModel,
 			Enabled:   len(targets) > 0,
 			Targets:   targets,
@@ -63,7 +63,10 @@ func routeFromEndpoint(endpoint operatorclient.EndpointData, modelName string) (
 // projectedRouteModel returns the client-visible model name used to group one
 // provider config into a Cockpit route projection.
 func projectedRouteModel(config operatorclient.ProviderConfigData) string {
-	modelName := strings.TrimSpace(config.ModelID) // swobu:io-string source=boundary
+	modelName := strings.TrimSpace(config.RouteModelID) // swobu:io-string source=boundary
+	if modelName == "" {
+		modelName = strings.TrimSpace(config.ModelID) // swobu:io-string source=boundary
+	}
 	if modelName == "" {
 		return exchange.PublicModelIDSwobu
 	}
@@ -96,14 +99,15 @@ func targetFromProviderConfig(config operatorclient.ProviderConfigData) readmode
 		name = config.Ref
 	}
 	return readmodel.TargetReadModel{
-		ID:            readmodel.TargetID(config.Ref),
-		Name:          name,
-		Provider:      config.ProviderSpec,
-		Model:         config.ModelID,
-		BaseURL:       config.BaseURL,
-		CredentialRef: config.CredentialRef,
-		Rank:          targetRank(config),
-		Weight:        targetWeight(config),
+		ID:               readmodel.TargetID(config.Ref),
+		Name:             name,
+		Provider:         config.ProviderSpec,
+		Model:            config.ModelID,
+		ProviderProtocol: config.ProviderProtocol,
+		BaseURL:          config.BaseURL,
+		CredentialRef:    config.CredentialRef,
+		Rank:             targetRank(config),
+		Weight:           targetWeight(config),
 	}
 }
 
@@ -118,16 +122,41 @@ func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID s
 	if modelID == "" {
 		modelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
 	}
+	protocol := strings.TrimSpace(request.ProviderProtocol)
+	if protocol == "" {
+		protocol = defaultProtocolForProvider(strings.TrimSpace(request.Provider))
+	}
+	if protocol != "" && !validProtocol(strings.TrimSpace(request.Provider), protocol) {
+		return operatorclient.ProviderConfigData{}, fmt.Errorf("provider protocol %q is unsupported for provider %q", protocol, request.Provider)
+	}
+
 	return operatorclient.ProviderConfigData{
-		Ref:           targetID,
-		ProviderSpec:  strings.TrimSpace(request.Provider),      // swobu:io-string source=boundary
-		BaseURL:       strings.TrimSpace(request.BaseURL),       // swobu:io-string source=boundary
-		CredentialRef: strings.TrimSpace(request.CredentialRef), // swobu:io-string source=boundary
-		ModelID:       modelID,
-		TargetAlias:   strings.TrimSpace(request.Name), // swobu:io-string source=boundary
-		TargetRank:    request.Rank,
-		TargetWeight:  request.Weight,
+		Ref:              targetID,
+		ProviderSpec:     strings.TrimSpace(request.Provider),      // swobu:io-string source=boundary
+		BaseURL:          strings.TrimSpace(request.BaseURL),       // swobu:io-string source=boundary
+		CredentialRef:    strings.TrimSpace(request.CredentialRef), // swobu:io-string source=boundary
+		RouteModelID:     strings.TrimSpace(string(request.RouteID)), // swobu:io-string source=boundary
+		ModelID:          modelID,
+		ProviderProtocol: protocol,
+		TargetAlias:      strings.TrimSpace(request.Name), // swobu:io-string source=boundary
+		TargetRank:       request.Rank,
+		TargetWeight:     request.Weight,
 	}, nil
+}
+
+func validProtocol(spec, protocol string) bool {
+	if protocol == "" {
+		return true
+	}
+	return profile.SupportsProviderProtocolForSpec(spec, protocol)
+}
+
+func defaultProtocolForProvider(spec string) string {
+	protocol, ok := profile.ResolveConcreteProtocolForAutoAtBoundary(spec)
+	if !ok {
+		return ""
+	}
+	return protocol
 }
 
 // targetMatchesRoute reports whether a provider config belongs to the given
@@ -174,30 +203,14 @@ func newProviderConfigRef(existing []operatorclient.ProviderConfigData) (string,
 func selectedModelName(endpoint operatorclient.EndpointData) string {
 	for _, config := range endpoint.ProviderConfigs {
 		if config.Ref == endpoint.SelectedRef {
-			if model := strings.TrimSpace(config.ModelID); model != "" { // swobu:io-string source=boundary
-				return model
-			}
-			return exchange.PublicModelIDSwobu
+			return projectedRouteModel(config)
 		}
 	}
 	return ""
 }
 
+// Cockpit does not model a separate zero-target route state; row copy handles
+// that case directly in the routes surface.
 func routeState(targets []readmodel.TargetReadModel) readmodel.RouteState {
-	if len(targets) == 0 {
-		return readmodel.RouteIncomplete
-	}
 	return readmodel.RouteNormal
-}
-
-func routePlanKind(targets []readmodel.TargetReadModel) readmodel.RoutePlanKind {
-	for _, target := range targets {
-		if target.Weight > 1 {
-			return readmodel.RoutePlanWeighted
-		}
-	}
-	if len(targets) > 1 {
-		return readmodel.RoutePlanRanked
-	}
-	return readmodel.RoutePlanSingle
 }

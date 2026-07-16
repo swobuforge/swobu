@@ -22,7 +22,7 @@ func TestHelpPage_CopyDiagnosticsUpdatesVisibleStatus(t *testing.T) {
 	if got := page.DiagnosticsStatus.Get(); got != readmodel.DiagnosticsCopied {
 		t.Fatalf("diagnostics status = %v, want copied", got)
 	}
-	rendered := testkit.RenderTrimmed(page.Render(nil), 90, 10)
+	rendered := testkit.RenderMountedTrimmed(t, page, 90, 10)
 	testkit.AssertVisual("diagnostics_copied").
 		Fixture("testdata/help_surface/fixture/diagnostics_copied.txt").
 		Viewport(90, 10).
@@ -40,6 +40,48 @@ func TestHelpPage_CopyDiagnosticsFailureUpdatesVisibleStatus(t *testing.T) {
 
 	if got := page.DiagnosticsStatus.Get(); got != readmodel.DiagnosticsFailed {
 		t.Fatalf("diagnostics status = %v, want failed", got)
+	}
+}
+
+func TestHelpPage_UpdatePropsResetsCopiedStatusWhenHelpIdentityChanges(t *testing.T) {
+	page := View(readmodel.HelpReadModel{
+		Version:    "1.0.0",
+		DocsURL:    "https://docs.example.com/v1",
+		IssueURL:   "https://issues.example.com/v1",
+		CommunityURL: "https://discord.example.com/v1",
+	}, fakeHelpActions{})
+	page.DiagnosticsStatus.Set(readmodel.DiagnosticsCopied)
+
+	fresh := View(readmodel.HelpReadModel{
+		Version:    "1.0.1",
+		DocsURL:    "https://docs.example.com/v1",
+		IssueURL:   "https://issues.example.com/v1",
+		CommunityURL: "https://discord.example.com/v1",
+	}, fakeHelpActions{})
+
+	page.UpdateProps(fresh)
+
+	if got := page.DiagnosticsStatus.Get(); got != readmodel.DiagnosticsReady {
+		t.Fatalf("diagnostics status = %v, want ready after help identity change", got)
+	}
+}
+
+func TestHelpPage_UpdatePropsPreservesCopiedStatusWhenHelpIdentityStaysSame(t *testing.T) {
+	model := readmodel.HelpReadModel{
+		Version:       "1.0.0",
+		DocsURL:       "https://docs.example.com/v1",
+		IssueURL:      "https://issues.example.com/v1",
+		CommunityURL:  "https://discord.example.com/v1",
+		CockpitVersion: "cockpit v2",
+	}
+	page := View(model, fakeHelpActions{})
+	page.DiagnosticsStatus.Set(readmodel.DiagnosticsCopied)
+
+	fresh := View(model, fakeHelpActions{})
+	page.UpdateProps(fresh)
+
+	if got := page.DiagnosticsStatus.Get(); got != readmodel.DiagnosticsCopied {
+		t.Fatalf("diagnostics status = %v, want copied when help identity is unchanged", got)
 	}
 }
 

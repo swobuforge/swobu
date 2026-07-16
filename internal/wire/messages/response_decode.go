@@ -79,6 +79,8 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 				return nil, canonical.InternalError("messages response tool_use input is invalid JSON object")
 			}
 			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+		case "server_tool_use", "web_search_tool_result":
+			continue
 		default:
 			return nil, canonical.InternalError("messages response content block is unsupported")
 		}

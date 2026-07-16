@@ -88,9 +88,14 @@ type ProviderConfig struct {
 	ref              ProviderConfigRef
 	providerSpec     ProviderSpec
 	baseURL          string
+	// credentialRef is a durable intent handle. Once bound, replay assumes it
+	// is not repointed to a different provider account in place.
 	credentialRef    string
 	authHeader       string
 	providerProtocol string
+	// routeModelID is the client-visible route model name. Legacy configs may
+	// leave it empty and fall back to modelID when projected.
+	routeModelID     string
 	modelID          string
 	targetAlias      string
 	targetRank       int
@@ -288,6 +293,23 @@ func (c ProviderConfig) ModelID() string {
 	return c.modelID
 }
 
+// RouteModelID returns the client-visible route model name for this provider
+// config. Explicit route_model_id wins; legacy configs fall back to modelID.
+func (c ProviderConfig) RouteModelID() string {
+	if routeModelID := strings.TrimSpace(c.routeModelID); routeModelID != "" { // swobu:io-string source=domain
+		return routeModelID
+	}
+	return strings.TrimSpace(c.modelID) // swobu:io-string source=domain
+}
+
+// WithRouteModelID stores the client-visible route model name for this config.
+// Empty is allowed so legacy configs can continue to load through the modelID
+// fallback.
+func (c ProviderConfig) WithRouteModelID(routeModelID string) (ProviderConfig, error) {
+	c.routeModelID = strings.TrimSpace(routeModelID) // swobu:io-string source=domain
+	return c, nil
+}
+
 func (c ProviderConfig) WithModelID(modelID string) (ProviderConfig, error) {
 	c.modelID = strings.TrimSpace(modelID) // swobu:io-string source=domain
 	return c, nil
@@ -346,4 +368,10 @@ func (c ProviderConfig) WithTargetWeight(weight int) (ProviderConfig, error) {
 	}
 	c.targetWeight = weight
 	return c, nil
+}
+
+// projectedRouteModelID returns the route selector used by Cockpit and request
+// routing. Route model names take precedence, then legacy model IDs.
+func projectedRouteModelID(c ProviderConfig) string {
+	return strings.TrimSpace(c.RouteModelID()) // swobu:io-string source=domain
 }

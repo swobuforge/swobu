@@ -11,7 +11,7 @@ const (
 )
 
 // ItemKind is the shared semantic atom used by canonical requests, canonical
-// outputs, and continuity history.
+// outputs, and replay history.
 type ItemKind string
 
 const (
@@ -21,7 +21,7 @@ const (
 )
 
 // CanonicalItem is one ordered semantic unit in the canonical core.
-// Requests, outputs, and persisted continuation state all reuse this shape so
+// Requests, outputs, and persisted replay state all reuse this shape so
 // history is not modeled as a second parallel object graph.
 type CanonicalItem struct {
 	Author    ItemAuthor

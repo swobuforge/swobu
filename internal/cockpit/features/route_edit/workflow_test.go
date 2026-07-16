@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
@@ -74,11 +75,40 @@ func TestWorkflow_DeleteConfirmationVisual(t *testing.T) {
 	workflow := NewWorkflow("dev", routeEditRoute(false), nil, nil, nil, nil, nil)
 	workflow.ActivateDelete()
 
-	rendered := testkit.RenderTrimmed(workflow.Render(nil), 90, 6)
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 6)
 	testkit.AssertVisual("confirm_delete").
 		Fixture("testdata/route_edit_workflow/fixture/confirm_delete.txt").
 		Viewport(90, 6).
 		Now(t, rendered)
+}
+
+func TestWorkflow_EditModeVisualMarker(t *testing.T) {
+	workflow := NewWorkflow("dev", routeEditRoute(false), nil, nil, nil, nil, nil)
+	workflow.ActivateName()
+
+	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 6)
+	testkit.AssertVisual("editing").
+		Fixture("testdata/route_edit_workflow/fixture/editing.txt").
+		Viewport(90, 6).
+		Now(t, rendered)
+}
+
+func TestWorkflow_FocusMarkersReachModelDefaultAndDelete(t *testing.T) {
+	workflow := NewWorkflow("dev", routeEditRoute(false), nil, nil, nil, nil, nil)
+	h, err := testkit.NewHarness(workflow)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	h.Open()
+	t.Cleanup(h.Close)
+
+	testkit.AssertFocusVisible(t, h, h.FocusNext, ">       model")
+	testkit.AssertFocusVisible(t, h, func() {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}, ">       default")
+	testkit.AssertFocusVisible(t, h, func() {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}, ">       delete")
 }
 
 func routeEditRoute(defaultRoute bool) readmodel.RouteReadModel {

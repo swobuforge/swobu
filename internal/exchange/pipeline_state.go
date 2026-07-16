@@ -23,11 +23,17 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/replay"
 )
 
 // ---- state cells (one per stage, forward-only) ----
 
 // ExchangeInput (defined in runner.go) is the seed cell.
+
+// replayState holds runner-allocated replay identity for one exchange run.
+type replayState struct {
+	ResponseID replay.ResponseID
+}
 
 // codecResolutionState holds the codec lookup result for one provider protocol.
 type codecResolutionState struct {
@@ -58,11 +64,6 @@ type DecodedEnvelopeState struct {
 	Progressive bool
 }
 
-// continuationContextState carries the namespace for response capture.
-type continuationContextState struct {
-	Namespace canonical.ContinuationNamespace
-}
-
 // pipelineOutcomeState holds the final client-facing response or error.
 type pipelineOutcomeState struct {
 	Response TransportResponse
@@ -89,9 +90,6 @@ type EnvelopeDecodedEvent struct{}
 // PipelineCompletedEvent: client output encoded; result is in pipelineOutcome.
 type PipelineCompletedEvent struct{}
 
-// ContinuationCapturedEvent: envelope wrapped with continuation persistence.
-type ContinuationCapturedEvent struct{}
-
 // ---- commands (imperatives: what to do next) ----
 
 // ResolveCodecsAction looks up client and provider codecs for the current protocol.
@@ -105,9 +103,6 @@ type ResolveProviderIngressAction struct{}
 
 // DecodeProviderEnvelopeAction translates provider response to canonical events.
 type DecodeProviderEnvelopeAction struct{}
-
-// CaptureContinuationAction wraps the decoded envelope with WrapResponseEnvelope.
-type CaptureContinuationAction struct{}
 
 // encodeClientOutput translates canonical events to client-family wire format.
 type EncodeClientOutputAction struct{}

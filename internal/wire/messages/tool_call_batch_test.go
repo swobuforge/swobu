@@ -73,9 +73,13 @@ func TestEncodeCarrier_WiresDisableParallelToolUseWhenToolsExist(t *testing.T) {
 	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	got, ok := payload["disable_parallel_tool_use"].(bool)
+	toolChoice, ok := payload["tool_choice"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_choice = %#v, want object", payload["tool_choice"])
+	}
+	got, ok := toolChoice["disable_parallel_tool_use"].(bool)
 	if !ok || !got {
-		t.Fatalf("disable_parallel_tool_use = %#v, want true", payload["disable_parallel_tool_use"])
+		t.Fatalf("tool_choice.disable_parallel_tool_use = %#v, want true", toolChoice["disable_parallel_tool_use"])
 	}
 }
 
@@ -97,5 +101,25 @@ func TestEncodeCarrier_OmitsDisableParallelToolUseWithoutTools(t *testing.T) {
 	}
 	if _, ok := payload["disable_parallel_tool_use"]; ok {
 		t.Fatalf("disable_parallel_tool_use = %#v, want omitted", payload["disable_parallel_tool_use"])
+	}
+	if _, ok := payload["tool_choice"]; ok {
+		t.Fatalf("tool_choice = %#v, want omitted", payload["tool_choice"])
+	}
+}
+
+func TestEncodeCarrier_SynthesizesAutoToolChoiceWhenAbsent(t *testing.T) {
+	got, err := encodeMessagesToolCallBatch(nil, canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne), true)
+	if err != nil {
+		t.Fatalf("encodeMessagesToolCallBatch: %v", err)
+	}
+	payload, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("result = %#v, want map", got)
+	}
+	if got, want := payload["type"], "auto"; got != want {
+		t.Fatalf("tool_choice.type = %q, want %q", got, want)
+	}
+	if got, ok := payload["disable_parallel_tool_use"].(bool); !ok || !got {
+		t.Fatalf("tool_choice.disable_parallel_tool_use = %#v, want true", payload["disable_parallel_tool_use"])
 	}
 }

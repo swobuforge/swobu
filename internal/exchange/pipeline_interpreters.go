@@ -11,6 +11,8 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/machine"
+	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // runRunnerInterpret is the single interpreter that executes all runner-machine
@@ -31,9 +33,6 @@ func runRunnerInterpret(ctx context.Context, store *machine.Store, cmd machine.C
 	case DecodeProviderEnvelopeAction:
 		_ = c
 		return interpDecodeProviderEnvelope(ctx, runner, store)
-	case CaptureContinuationAction:
-		_ = c
-		return interpCaptureContinuation(ctx, runner, store)
 	case EncodeClientOutputAction:
 		_ = c
 		return interpEncodeClientOutput(ctx, runner, store)
@@ -74,7 +73,11 @@ func interpEncodeProviderRequest(ctx context.Context, runner Runner, store *mach
 	}
 
 	result, err := codecs.RequestEncoder.EncodeProviderRequestDocument(
-		canonical.CloneCanonicalRequest(in.Request), in.ProviderDelivery, in.ExchangeID,
+		wire.ProviderEncodeInput{
+			Request:      canonical.CloneCanonicalRequest(in.Request),
+			NativeReplay: in.NativeReplay,
+		},
+		in.ProviderDelivery, in.ExchangeID,
 	)
 	effs := append([]effect.Effect(nil), result.Effects...)
 	if err != nil {
@@ -156,6 +159,11 @@ func interpDecodeProviderEnvelope(ctx context.Context, runner Runner, store *mac
 		storePutError(store, err)
 		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
+	var replayInfo replayState
+	if err := store.Get(&replayInfo); err != nil {
+		storePutError(store, err)
+		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
+	}
 
 	events, effs, progressive, err := decodeIngress(ctx, in, resp, codecs, runner)
 	if err != nil {
@@ -164,48 +172,25 @@ func interpDecodeProviderEnvelope(ctx context.Context, runner Runner, store *mac
 		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
 	}
 
+	config := replay.TerminalCommitConfig{
+		Scope:          in.ReplayScope,
+		ExchangeID:     in.ExchangeID,
+		ResponseID:     replayInfo.ResponseID,
+		Store:          runner.ReplayStore,
+		NativeReplay:   in.NativeReplay,
+		CaptureRequest: in.Request,
+	}
+	if nativeExtractor := replayNativeExtractor(in, resp, codecs); nativeExtractor != nil {
+		config.NativeExtractor = nativeExtractor
+	}
+	events = replay.NewCommitReader(events, config)
+
 	store.Put(reflect.TypeOf(DecodedEnvelopeState{}), reflect.ValueOf(DecodedEnvelopeState{
 		Events:      events,
 		Effects:     effs,
 		Progressive: progressive,
 	}))
 	return []machine.Event{machine.Event(EnvelopeDecodedEvent{})}, nil
-}
-
-func interpCaptureContinuation(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
-	if runner.ContinuationStore == nil {
-		return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
-	}
-	var in ExchangeInput
-	if err := store.Get(&in); err != nil {
-		storePutError(store, err)
-		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
-	}
-	var dec DecodedEnvelopeState
-	if err := store.Get(&dec); err != nil {
-		storePutError(store, err)
-		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
-	}
-	var contCtx continuationContextState
-	if err := store.Get(&contCtx); err != nil {
-		// No namespace seeded means this pipeline was not wired for continuation.
-		return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
-	}
-	if contCtx.Namespace.IsZero() || dec.Events == nil {
-		return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
-	}
-	runtime := canonical.NewContinuationRuntime(runner.ContinuationStore)
-	wrapped, err := runtime.WrapResponseEnvelope(ctx, contCtx.Namespace, in.Request, dec.Events)
-	if err != nil {
-		storePutError(store, err)
-		return []machine.Event{machine.Event(PipelineCompletedEvent{})}, nil
-	}
-	store.Put(reflect.TypeOf(DecodedEnvelopeState{}), reflect.ValueOf(DecodedEnvelopeState{
-		Events:      wrapped,
-		Effects:     dec.Effects,
-		Progressive: dec.Progressive,
-	}))
-	return []machine.Event{machine.Event(ContinuationCapturedEvent{})}, nil
 }
 
 func interpEncodeClientOutput(ctx context.Context, runner Runner, store *machine.Store) ([]machine.Event, error) {
@@ -328,6 +313,33 @@ func decodeIngress(
 	for _, a := range applied {
 		effs = append(effs, a.Effects...)
 	}
-	effs = append(effs, deliveryCompatibilityEffects(in, progressive)...)
 	return wrapped, effs, progressive, nil
+}
+
+func replayNativeExtractor(in ExchangeInput, resp ProviderResponseState, codecs codecResolutionState) func(providerResultID string, replayID replay.ID) *replay.NativeRef {
+	source := nativeReplaySourceForIngress(resp.Ingress, codecs)
+	if source == nil {
+		return nil
+	}
+	targetKey := replayTargetKey(in.Target, in.ProviderProtocol, in.Request.Model())
+	if targetKey == nil {
+		return nil
+	}
+	return func(providerResultID string, replayID replay.ID) *replay.NativeRef {
+		return source.NativeReplayFromOutput(*targetKey, replayID, providerResultID)
+	}
+}
+
+func nativeReplaySourceForIngress(ingress ProviderIngress, codecs codecResolutionState) wire.NativeReplaySource {
+	switch ingress.(type) {
+	case carrier.CarrierStream:
+		if source, ok := codecs.StreamDecoder.(wire.NativeReplaySource); ok {
+			return source
+		}
+	case carrier.CarrierDocument:
+		if source, ok := codecs.DocumentDecoder.(wire.NativeReplaySource); ok {
+			return source
+		}
+	}
+	return nil
 }

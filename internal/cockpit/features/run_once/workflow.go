@@ -7,6 +7,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type ExecuteFunc func(context.Context, ports.ExecuteRunCommandRequest) (ports.RunExecutionResult, error)
@@ -25,6 +26,7 @@ type Workflow struct {
 	Command     readmodel.RunCommandReadModel
 	Routes      []readmodel.RouteReadModel
 	Selected    *tui.State[readmodel.RouteID]
+	Picker      *tui.State[bool]
 	Phase       *tui.State[Phase]
 	Message     *tui.State[string]
 	Execute     ExecuteFunc
@@ -37,6 +39,7 @@ func NewWorkflow(workspace readmodel.WorkspaceReadModel, command readmodel.RunCo
 		Command:     command,
 		Routes:      workspace.Routes,
 		Selected:    tui.NewState(initialRoute(command, workspace.Routes)),
+		Picker:      tui.NewState(false),
 		Phase:       tui.NewState(PhaseReady),
 		Message:     tui.NewState(""),
 		Execute:     execute,
@@ -63,25 +66,38 @@ func (w *Workflow) KeyMap() tui.KeyMap {
 }
 
 func (w *Workflow) Back() bool {
+	if w.Picker.Get() {
+		w.Picker.Set(false)
+		return true
+	}
 	if w.OnClose != nil {
 		w.OnClose()
 	}
 	return true
 }
 
-func (w *Workflow) ChangeModel() {
+func (w *Workflow) IsPickerOpen() bool {
+	return w.Picker.Get()
+}
+
+func (w *Workflow) ToggleModelPicker() {
 	if len(w.Routes) == 0 {
 		return
 	}
-	current := w.Selected.Get()
-	for i, route := range w.Routes {
-		if route.ID != current {
-			continue
-		}
-		w.Selected.Set(w.Routes[(i+1)%len(w.Routes)].ID)
+	w.Picker.Set(!w.Picker.Get())
+}
+
+func (w *Workflow) SelectModel(routeID readmodel.RouteID) {
+	if routeID == "" {
 		return
 	}
-	w.Selected.Set(initialRoute(w.Command, w.Routes))
+	for _, route := range w.Routes {
+		if route.ID == routeID {
+			w.Selected.Set(routeID)
+			w.Picker.Set(false)
+			return
+		}
+	}
 }
 
 func (w *Workflow) Run(ctx context.Context) {
@@ -153,8 +169,15 @@ func (w *Workflow) RunActionLabel() string {
 	return "run ↵"
 }
 
-func (w *Workflow) StatusMessage() string {
-	return w.Message.Get()
+func (w *Workflow) ModelActionLabel() string {
+	if w.IsPickerOpen() {
+		return "close ↵"
+	}
+	return "choose ↵"
+}
+
+func (w *Workflow) ModelOptionActionLabel() string {
+	return "select ↵"
 }
 
 func initialRoute(command readmodel.RunCommandReadModel, routes []readmodel.RouteReadModel) readmodel.RouteID {
@@ -183,4 +206,28 @@ func (w *Workflow) selectedRoute() readmodel.RouteReadModel {
 		}
 	}
 	return readmodel.RouteReadModel{ID: w.Selected.Get(), ModelName: w.Command.TargetLabel}
+}
+
+func ModelRowComponent(w *Workflow) *ui.SelectableRow {
+	row := ui.NewSelectableRow(
+		"run-once:"+string(w.Command.ID)+":model",
+		"model",
+		w.ModelValue(),
+		w.ModelActionLabel(),
+		func() { w.ToggleModelPicker() },
+	)
+	return row
+}
+
+func ModelOptionRowComponent(w *Workflow, idx int, route readmodel.RouteReadModel) *ui.SelectableRow {
+	row := ui.NewSelectableRow(
+		"run-once:"+string(w.Command.ID)+":model-option:"+string(route.ID),
+		route.ModelName,
+		route.RowValue(),
+		w.ModelOptionActionLabel(),
+		func() { w.SelectModel(route.ID) },
+	)
+	row.ArrowPad = 2
+	row.AutoFocus = idx == 0 && w.IsPickerOpen()
+	return row
 }

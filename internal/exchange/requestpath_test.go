@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,9 +15,25 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
+	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/turnstate"
+	"github.com/swobuforge/swobu/internal/wire"
 )
+
+type deterministicResponseIDGenerator struct{}
+
+func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (replay.ResponseID, error) {
+	return replay.ResponseID("swobu_" + exchangeID), nil
+}
+
+type countingResponseIDGenerator struct {
+	calls int
+}
+
+func (g *countingResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (replay.ResponseID, error) {
+	g.calls++
+	return replay.ResponseID("swobu_" + exchangeID), nil
+}
 
 // TestExchangeMachine_RetryFallback_SelectsSecondBackendOnFirstFailure proves
 // the machine retries the next target in the plan when the first returns a
@@ -164,6 +181,48 @@ func TestExchangeMachine_RetryFallback_RetriesBothThenExhausts(t *testing.T) {
 	}
 }
 
+// TestExchangeMachine_RetryFallback_AllocatesReplayResponseIDOnce proves the
+// exchange retry path preserves one response ID across backend retries.
+func TestExchangeMachine_RetryFallback_AllocatesReplayResponseIDOnce(t *testing.T) {
+	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a", "backend-b"}, "backend-a")
+
+	var calls []string
+	gen := &countingResponseIDGenerator{}
+	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+		calls = append(calls, req.Target.BackendRef)
+		if len(calls) == 1 {
+			return nil, canonical.NewBackendError(req.Target.BackendRef, http.StatusServiceUnavailable, "down", "")
+		}
+		return carrier.NewCarrierDocument(
+			carrier.StageProviderIngressIn,
+			req.Target.ProtocolKind,
+			"application/json",
+			nil,
+			[]byte(`{"id":"resp_2","model":"m","output_text":"fallback-ok"}`),
+			carrier.Meta{},
+		), nil
+	}).WithReplayStore(replay.NewMemoryStore()).WithResponseIDs(gen)
+
+	sink := &recordingEvidenceSink{}
+	ingress := RequestIngress{trafficEvidence: sink, runner: runner}
+
+	out, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
+		ExchangeID:      "fallback-ids",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"messages":[{"role":"user","content":"hi"}]}`)),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Response.Transport.Status != http.StatusOK {
+		t.Fatalf("response status = %d, want 200", out.Response.Transport.Status)
+	}
+	if gen.calls != 1 {
+		t.Fatalf("response id generator calls = %d, want 1", gen.calls)
+	}
+}
+
 // TestExchangeMachine_PlanRoute_ProducesDeterministicOrder checks that plan
 // building is deterministic across repeated calls with the same parameters.
 func TestExchangeMachine_PlanRoute_ProducesDeterministicOrder(t *testing.T) {
@@ -184,6 +243,157 @@ func TestExchangeMachine_PlanRoute_ProducesDeterministicOrder(t *testing.T) {
 	}
 	if plan[0].Target.ID != plan2[0].Target.ID || plan[1].Target.ID != plan2[1].Target.ID {
 		t.Fatalf("plan not deterministic: first=%v second=%v", plan, plan2)
+	}
+}
+
+func TestEndpointToWorkspaceRouting_UsesExplicitRouteModelID(t *testing.T) {
+	name, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	firstRef, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef(first) returned error: %v", err)
+	}
+	secondRef, err := endpointintent.ParseProviderConfigRef("backend-b")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef(second) returned error: %v", err)
+	}
+	first, err := endpointintent.NewProviderConfig(firstRef, spec, "https://a.test/v1", "cred-a")
+	if err != nil {
+		t.Fatalf("NewProviderConfig(first) returned error: %v", err)
+	}
+	first, err = first.WithRouteModelID("gpt")
+	if err != nil {
+		t.Fatalf("WithRouteModelID(first) returned error: %v", err)
+	}
+	first, err = first.WithModelID("gpt-4.1")
+	if err != nil {
+		t.Fatalf("WithModelID(first) returned error: %v", err)
+	}
+	second, err := endpointintent.NewProviderConfig(secondRef, spec, "https://b.test/v1", "cred-b")
+	if err != nil {
+		t.Fatalf("NewProviderConfig(second) returned error: %v", err)
+	}
+	second, err = second.WithRouteModelID("gpt")
+	if err != nil {
+		t.Fatalf("WithRouteModelID(second) returned error: %v", err)
+	}
+	second, err = second.WithModelID("gpt-4o")
+	if err != nil {
+		t.Fatalf("WithModelID(second) returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{first, second}, secondRef)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	wr := endpointToWorkspaceRouting(endpoint)
+	if got, want := wr.DefaultModel, "gpt"; got != want {
+		t.Fatalf("workspace default model = %q, want %q", got, want)
+	}
+	route, ok := wr.Routes["gpt"]
+	if !ok {
+		t.Fatalf("workspace routes missing gpt route: %#v", wr.Routes)
+	}
+	if got, want := route.ModelName, "gpt"; got != want {
+		t.Fatalf("route model name = %q, want %q", got, want)
+	}
+	if len(route.Targets) != 2 {
+		t.Fatalf("route targets = %d, want 2", len(route.Targets))
+	}
+	if got, want := route.Targets[0].ID, "backend-a"; got != want {
+		t.Fatalf("first target id = %q, want %q", got, want)
+	}
+	if got, want := route.Targets[0].Model, "gpt-4.1"; got != want {
+		t.Fatalf("first target model = %q, want %q", got, want)
+	}
+	if got, want := route.Targets[1].ID, "backend-b"; got != want {
+		t.Fatalf("second target id = %q, want %q", got, want)
+	}
+	if got, want := route.Targets[1].Model, "gpt-4o"; got != want {
+		t.Fatalf("second target model = %q, want %q", got, want)
+	}
+}
+
+type staticEndpointReader struct {
+	endpoint endpointintent.Endpoint
+}
+
+func (r staticEndpointReader) GetEndpoint(context.Context, endpointintent.EndpointName) (endpointintent.Endpoint, error) {
+	return r.endpoint, nil
+}
+
+func TestRequestIngress_ListModels_UsesRouteModelIDs(t *testing.T) {
+	t.Parallel()
+
+	endpoint := testIngressEndpointWithRouteModel(t, "gpt", "gpt-4.1")
+	name, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	ingress := RequestIngress{
+		endpoints: staticEndpointReader{endpoint: endpoint},
+	}
+
+	out, err := ingress.ListModels(context.Background(), ListModelsInput{EndpointName: name})
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if got, want := out.DefaultModelID, "gpt"; got != want {
+		t.Fatalf("default model = %q, want %q", got, want)
+	}
+	if len(out.Models) != 1 {
+		t.Fatalf("models len = %d, want 1", len(out.Models))
+	}
+	if got, want := out.Models[0].ID, "gpt"; got != want {
+		t.Fatalf("model id = %q, want %q", got, want)
+	}
+	if got, want := out.Models[0].ModelID, "gpt"; got != want {
+		t.Fatalf("model model_id = %q, want %q", got, want)
+	}
+	if got, want := out.Models[0].BackendRef, "backend-a"; got != want {
+		t.Fatalf("backend ref = %q, want %q", got, want)
+	}
+}
+
+func TestRequestIngress_HandleRequestWithEndpoint_UsesProviderModelForProviderIngress(t *testing.T) {
+	t.Parallel()
+
+	endpoint := testIngressEndpointWithRouteModel(t, "gpt", "gpt-4.1")
+	var gotRequestModel string
+	ingress := RequestIngress{
+		runner: withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+			gotRequestModel = req.Request.Model()
+			return carrier.NewCarrierDocument(
+				carrier.StageProviderIngressIn,
+				req.Target.ProtocolKind,
+				"application/json",
+				nil,
+				[]byte(`{"id":"resp_1","model":"gpt-4.1","output_text":"ok"}`),
+				carrier.Meta{},
+			), nil
+		}),
+	}
+
+	out, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
+		ExchangeID:      "route-model-request",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"gpt","messages":[{"role":"user","content":"hi"}]}`)),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatalf("HandleRequestWithEndpoint returned error: %v", err)
+	}
+	if out.Response.Transport.Status != http.StatusOK {
+		t.Fatalf("response status = %d, want 200", out.Response.Transport.Status)
+	}
+	if got, want := gotRequestModel, "gpt-4.1"; got != want {
+		t.Fatalf("provider request model = %q, want %q", got, want)
 	}
 }
 
@@ -335,7 +545,7 @@ func TestResponsesRouteToProviderEncode_PreservesToolSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildPathRecord returned error: %v", err)
 	}
-	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(pathRecord.Request, pathRecord.ProviderDelivery, "ex-tool-route")
+	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: pathRecord.Request}, pathRecord.ProviderDelivery, "ex-tool-route")
 	if err != nil {
 		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 	}
@@ -419,7 +629,7 @@ func TestResponsesRouteToProviderEncode_PreservesCustomToolSurface(t *testing.T)
 	if err != nil {
 		t.Fatalf("buildPathRecord returned error: %v", err)
 	}
-	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(pathRecord.Request, pathRecord.ProviderDelivery, "ex-custom-tool-route")
+	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: pathRecord.Request}, pathRecord.ProviderDelivery, "ex-custom-tool-route")
 	if err != nil {
 		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 	}
@@ -503,7 +713,7 @@ func TestChatRouteToResponsesProviderEncode_PreservesInstructions(t *testing.T) 
 	if err != nil {
 		t.Fatalf("buildPathRecord returned error: %v", err)
 	}
-	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(pathRecord.Request, pathRecord.ProviderDelivery, "ex-chat-instructions-route")
+	encoded, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: pathRecord.Request}, pathRecord.ProviderDelivery, "ex-chat-instructions-route")
 	if err != nil {
 		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 	}
@@ -513,92 +723,209 @@ func TestChatRouteToResponsesProviderEncode_PreservesInstructions(t *testing.T) 
 		t.Fatalf("json.Unmarshal provider payload returned error: %v", err)
 	}
 	if got := payload["instructions"]; got != "You are a coding agent.\n\nUse native tools for file edits." {
-		t.Fatalf("instructions = %#v, want preserved system/developer instructions", got)
-	}
-	input, ok := payload["input"].(string)
-	if !ok || input != "inspect files" {
-		t.Fatalf("input = %#v, want user request only", payload["input"])
+		t.Fatalf("instructions = %q, want merged instructions", got)
 	}
 }
 
-// ---- continuation (adversarial) -------------------------------------------------
+// ---- replay integration (adversarial) -------------------------------------------
 //
-// These tests prove that the continuation pipeline:
-//   1. Prepares continuation per-attempt (materializes history on fallback)
-//   2. Preserves native continuation for responses-native targets
-//   3. Fails closed on unsafe native replay divergence
-//   4. Captures the completed record exactly once per successful response
-//   5. Passes through cleanly when no store is wired
+// These tests prove that the replay pipeline:
+//   1. Captures terminal-success records into the store
+//   2. Substitutes Swobu response IDs for provider IDs
+//   3. Rejects cleanly when no store is wired
 
-// TestContinuation_NilStore_Passthrough proves the pipeline completes
-// successfully when no continuation store is wired.
-func TestContinuation_NilStore_Passthrough(t *testing.T) {
+// TestReplay_NilStore_RejectedBeforeProviderIngress proves the request path
+// fails closed before provider ingress when replay storage is missing.
+func TestReplay_NilStore_RejectedBeforeProviderIngress(t *testing.T) {
 	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a"}, "backend-a")
 
-	var capturedReq canonical.CanonicalRequest
-	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		capturedReq = req.Request
-		return carrier.NewCarrierDocument(
-			carrier.StageProviderIngressIn,
-			req.Target.ProtocolKind,
-			"application/json",
-			nil,
-			[]byte(`{"id":"resp_ok","model":"m","output_text":"ok"}`),
-			carrier.Meta{},
-		), nil
-	})
+	calls := 0
+	runner := Runner{
+		Runtime: runtimeWithProviderIngress{
+			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
+			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+				calls++
+				return carrier.NewCarrierDocument(
+					carrier.StageProviderIngressIn,
+					req.Target.ProtocolKind,
+					"application/json",
+					nil,
+					[]byte(`{"id":"resp_ok","model":"m","output_text":"ok"}`),
+					carrier.Meta{},
+				), nil
+			},
+		},
+		ResponseIDs: deterministicResponseIDGenerator{},
+	}
 
 	ingress := RequestIngress{runner: runner}
 
 	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
 		ExchangeID:      "nil-store-1",
-		Request:         newTransportRequestWithTurn(http.MethodPost, "/responses", "nonexistent", map[string]any{"model": "m", "messages": []map[string]any{{"role": "user", "content": "hello"}}}),
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"m","input":"hello"}`)),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
-		t.Fatalf("nil store should passthrough: %v", err)
+		if !strings.Contains(err.Error(), "replay store is required") {
+			t.Fatalf("nil store error = %v, want replay store rejection", err)
+		}
+	} else {
+		t.Fatal("expected nil replay store to reject before provider ingress")
 	}
-	if capturedReq.Turn().IsZero() {
-		t.Fatal("nil store should preserve turn reference (fail-open for 400 downstream)")
+	if calls != 0 {
+		t.Fatalf("provider ingress calls = %d, want 0", calls)
 	}
 }
 
-// TestContinuation_NativeContinuation_Preserved proves that for a
-// responses-native target the turn reference is kept when the current
-// request is a strict super-set of the stored chain.
-func TestContinuation_NativeContinuation_Preserved(t *testing.T) {
-	store := turnstate.NewMemoryContinuationStore()
-	prevID := canonical.NewContinuationID("resp_prev")
-	_ = store.Put(context.Background(), canonical.ContinuationRecord{
-		ID:      prevID,
-		RouteID: "alpha",
-		ModelID: "m",
-		RequestDelta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{
-				canonical.NewTextItem(canonical.ItemAuthorUser, "first-turn"),
-			},
-		}),
-		// Minimal stored response so chain length is 1 user item.
-		// Current thread [user:first-turn, assistant:reply, user:second-turn]
-		// is a strict superset (prefixLen == 1 == len(anchor)).
-		Response: canonical.NewOutputWithUsage(
-			canonical.SemanticKindConversation,
-			"resp_prev",
-			"m",
-			[]canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant-reply")},
-			"stop",
-			canonical.TokenUsage{},
-		),
-		Status: canonical.ContinuationStatusCompleted,
-	})
-
+// TestResponsesBufferedReplayRecordNativeTargetFullyPopulated proves that a
+// successful buffered response is captured into the replay store with the
+// Swobu response ID and a fully populated native replay ref.
+func TestResponsesBufferedReplayRecordNativeTargetFullyPopulated(t *testing.T) {
 	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a"}, "backend-a")
 
-	var capturedReq canonical.CanonicalRequest
+	store := replay.NewMemoryStore()
+	runner := Runner{
+		Runtime: runtimeWithProviderIngress{
+			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
+			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+				_ = req
+				return carrier.NewCarrierDocument(
+					carrier.StageProviderIngressIn,
+					protocolkind.Responses,
+					"application/json",
+					nil,
+					[]byte(`{"id":"provider_resp_1","model":"m","output_text":"ok"}`),
+					carrier.Meta{},
+				), nil
+			},
+		},
+	}.WithReplayStore(store).WithResponseIDs(deterministicResponseIDGenerator{})
+
+	ingress := RequestIngress{runner: runner}
+
+	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
+		ExchangeID:      "replay-commit-1",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"m","input":"hello"}`)),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The record should exist under the Swobu ID in namespace "alpha" (the endpoint name).
+	rec, ok, err := store.Get(context.Background(), unsafeLocalReplayScope("alpha"), replay.ReplayIDFromResponseID("swobu_replay-commit-1"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !ok {
+		t.Fatal("replay record was not captured")
+	}
+	if rec.Response.ResultID() != "swobu_replay-commit-1" {
+		t.Fatalf("stored response ID = %q, want Swobu ID", rec.Response.ResultID())
+	}
+	if rec.Native == nil {
+		t.Fatal("native ref = nil, want provider native ID persisted")
+	}
+	wantTarget := replay.TargetKey{
+		ProviderSpec:     "openai_compatible",
+		Protocol:         protocolkind.Responses,
+		ProviderProtocol: "responses",
+		BaseURL:          "https://example.test/v1",
+		AuthScope:        "cred-backend-a",
+		ModelID:          "m",
+	}
+	if rec.Native.ReplayID != replay.ReplayIDFromResponseID("swobu_replay-commit-1") {
+		t.Fatalf("native replay id = %q, want %q", rec.Native.ReplayID, replay.ReplayIDFromResponseID("swobu_replay-commit-1"))
+	}
+	if rec.Native.Target != wantTarget {
+		t.Fatalf("native target = %+v, want %+v", rec.Native.Target, wantTarget)
+	}
+	if rec.Native.Kind != replay.NativeRefProviderResponseID {
+		t.Fatalf("native kind = %q, want %q", rec.Native.Kind, replay.NativeRefProviderResponseID)
+	}
+	if rec.Native.Value != "provider_resp_1" {
+		t.Fatalf("native ref value = %q, want provider_resp_1", rec.Native.Value)
+	}
+}
+
+// TestResponsesBufferedReplayUsesDefaultResponseIDsWhenUnset proves the replay
+// runtime allocates a Swobu response ID even when the request input leaves it
+// unset.
+func TestResponsesBufferedReplayUsesDefaultResponseIDsWhenUnset(t *testing.T) {
+	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a"}, "backend-a")
+
+	store := replay.NewMemoryStore()
+	runner := Runner{
+		Runtime: runtimeWithProviderIngress{
+			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
+			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+				_ = req
+				return carrier.NewCarrierDocument(
+					carrier.StageProviderIngressIn,
+					protocolkind.Responses,
+					"application/json",
+					nil,
+					[]byte(`{"id":"provider_resp_1","model":"m","output_text":"ok"}`),
+					carrier.Meta{},
+				), nil
+			},
+		},
+		ResponseIDs: deterministicResponseIDGenerator{},
+	}.WithReplayStore(store)
+
+	ingress := RequestIngress{runner: runner}
+	resp, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
+		ExchangeID:      "replay-default-1",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"m","input":"hello"}`)),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Response.Transport.Body == nil {
+		t.Fatal("buffered response body was nil")
+	}
+	raw, err := io.ReadAll(resp.Response.Transport.Body)
+	if err != nil {
+		t.Fatalf("read buffered body: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	id, _ := body["id"].(string)
+	if id != "swobu_replay-default-1" {
+		t.Fatalf("response id=%q, want swobu_replay-default-1", id)
+	}
+	if id == "provider_resp_1" {
+		t.Fatalf("provider-native ID leaked to client: %s", string(raw))
+	}
+
+	rec, ok, err := store.Get(context.Background(), unsafeLocalReplayScope("alpha"), replay.ReplayIDFromResponseID(replay.ResponseID(id)))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !ok {
+		t.Fatalf("replay record not captured for id %q", id)
+	}
+	if rec.Response.ResultID() != id {
+		t.Fatalf("stored response ID = %q, want %q", rec.Response.ResultID(), id)
+	}
+	if rec.Native == nil || rec.Native.Value != "provider_resp_1" {
+		t.Fatalf("native replay capture = %+v, want provider_resp_1", rec.Native)
+	}
+}
+
+// TestReplay_FirstTurn_NoPreviousReplayID proves a fresh conversation turn
+// writes a record with no native replay pointer.
+func TestReplay_FirstTurn_NoPreviousReplayID(t *testing.T) {
+	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a"}, "backend-a")
+
+	store := replay.NewMemoryStore()
 	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		capturedReq = req.Request
 		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
@@ -607,222 +934,13 @@ func TestContinuation_NativeContinuation_Preserved(t *testing.T) {
 			[]byte(`{"id":"native-ok","model":"m","output_text":"ok"}`),
 			carrier.Meta{},
 		), nil
-	})
+	}).WithReplayStore(store).WithResponseIDs(deterministicResponseIDGenerator{})
 
-	ingress := RequestIngress{runner: runner.WithContinuationStore(store)}
-
-	// Exact match to stored chain + one new user item = strict superset -> native turn kept.
-	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
-		ExchangeID:      "native-1",
-		Request:         newTransportRequestWithTurn(http.MethodPost, "/responses", "resp_prev", map[string]any{"model": "m", "messages": []map[string]any{{"role": "user", "content": "first-turn"}, {"role": "assistant", "content": "assistant-reply"}, {"role": "user", "content": "second-turn"}}}),
-		ClientFamily:    canonical.ClientFamilyResponses,
-		ResponseFraming: delivery.FramingSSE,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if capturedReq.Turn().IsZero() {
-		t.Fatal("native continuation: turn should be preserved when current thread is superset of chain")
-	}
-
-	// Continuation record should be captured for the new response.
-	rec, ok, err := store.Get(context.Background(), canonical.NewContinuationID("native-1_result"))
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !ok {
-		t.Fatal("continuation record was not captured")
-	}
-	if rec.Status != canonical.ContinuationStatusCompleted {
-		t.Fatalf("record status = %q, want completed", rec.Status)
-	}
-}
-
-// TestContinuation_ResponsesRoute_PreservesProviderModelAndInheritedBands
-// proves that the routed provider request keeps the selected provider model
-// and inherited tool grammar even when the current turn only sends new input.
-func TestContinuation_ResponsesRoute_PreservesProviderModelAndInheritedBands(t *testing.T) {
-	endpointName, err := endpointintent.ParseEndpointName("alpha")
-	if err != nil {
-		t.Fatalf("ParseEndpointName returned error: %v", err)
-	}
-	providerRef, err := endpointintent.ParseProviderConfigRef("backend-a")
-	if err != nil {
-		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
-	}
-	providerSpec, err := endpointintent.ParseProviderSpec("openai_compatible")
-	if err != nil {
-		t.Fatalf("ParseProviderSpec returned error: %v", err)
-	}
-	providerConfig, err := endpointintent.NewProviderConfig(providerRef, providerSpec, "https://example.test/v1", "")
-	if err != nil {
-		t.Fatalf("NewProviderConfig returned error: %v", err)
-	}
-	providerConfig, err = providerConfig.WithProviderProtocol("responses")
-	if err != nil {
-		t.Fatalf("WithProviderProtocol returned error: %v", err)
-	}
-	providerConfig, err = providerConfig.WithModelID("provider-model")
-	if err != nil {
-		t.Fatalf("WithModelID returned error: %v", err)
-	}
-	endpoint, err := endpointintent.NewEndpoint(endpointName, []endpointintent.ProviderConfig{providerConfig}, providerRef)
-	if err != nil {
-		t.Fatalf("NewEndpoint returned error: %v", err)
-	}
-
-	maxTokens := 64
-	temperature := 0.2
-	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
-		MaxOutputTokens: &maxTokens,
-		Temperature:     &temperature,
-		StopSequences:   []string{"DONE"},
-	})
-	if err != nil {
-		t.Fatalf("NewGenerationControls returned error: %v", err)
-	}
-	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:        canonical.OutputFormatJSONSchema,
-		Name:        "continuation_reply",
-		Description: "structured continuation reply",
-		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
-		Strict:      true,
-	})
-	if err != nil {
-		t.Fatalf("NewOutputFormat returned error: %v", err)
-	}
-
-	store := turnstate.NewMemoryContinuationStore()
-	prevID := canonical.NewContinuationID("resp_prev")
-	if err := store.Put(context.Background(), canonical.ContinuationRecord{
-		ID:      prevID,
-		RouteID: "alpha",
-		ModelID: "provider-model",
-		RequestDelta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model:        "provider-model",
-			Instructions: "Use native tools for filesystem work.",
-			Items: []canonical.CanonicalItem{
-				canonical.NewTextItem(canonical.ItemAuthorUser, "previous-turn"),
-			},
-			Tools: []canonical.ToolDecl{
-				canonical.NewFunctionToolDecl("tool_1", "exec_command", "run a command", canonical.NewToolSchemaObject(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`)),
-			},
-			ToolPolicy:    canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
-			ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
-			Controls:      controls,
-			OutputFormat:  outputFormat,
-		}),
-		Response: canonical.NewConversationOutput(
-			"resp_prev",
-			"provider-model",
-			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "previous-response")},
-			"completed",
-		),
-		Status: canonical.ContinuationStatusCompleted,
-	}); err != nil {
-		t.Fatalf("store.Put returned error: %v", err)
-	}
-
-	var capturedReq canonical.CanonicalRequest
-	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		capturedReq = req.Request
-		return carrier.NewCarrierDocument(
-			carrier.StageProviderIngressIn,
-			req.Target.ProtocolKind,
-			"application/json",
-			nil,
-			[]byte(`{"id":"resp_2","model":"provider-model","output_text":"ok"}`),
-			carrier.Meta{},
-		), nil
-	})
-	ingress := RequestIngress{runner: runner.WithContinuationStore(store)}
-
-	_, err = ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
-		ExchangeID:      "continuation-route-1",
-		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"client-model","previous_response_id":"resp_prev","messages":[{"role":"user","content":"continue"}]}`)),
-		ClientFamily:    canonical.ClientFamilyResponses,
-		ResponseFraming: delivery.FramingSSE,
-	})
-	if err != nil {
-		t.Fatalf("HandleRequestWithEndpoint returned error: %v", err)
-	}
-
-	if got := capturedReq.Model(); got != "provider-model" {
-		t.Fatalf("provider request model = %q, want provider-model", got)
-	}
-	if got := capturedReq.Instructions(); got != "Use native tools for filesystem work." {
-		t.Fatalf("provider request instructions = %q, want inherited instructions", got)
-	}
-	if got := len(capturedReq.Tools()); got != 1 {
-		t.Fatalf("provider request tool count = %d, want 1", got)
-	}
-	if got := capturedReq.Tools()[0].ToolName(); got != "exec_command" {
-		t.Fatalf("provider request tool name = %q, want exec_command", got)
-	}
-	if got := capturedReq.ToolPolicy(); got.Mode != canonical.ToolPolicyRequired {
-		t.Fatalf("provider request tool policy = %q, want required", got.Mode)
-	}
-	if got := capturedReq.ToolCallBatch(); got.Mode != canonical.ToolCallBatchAtMostOne {
-		t.Fatalf("provider request tool call batch = %q, want at_most_one", got.Mode)
-	}
-	if got := capturedReq.Turn().IsZero(); got {
-		t.Fatal("provider request turn should be preserved for safe Responses continuation")
-	}
-}
-
-// TestContinuation_Fallback_MaterializesHistory proves that when the first
-// backend fails and the exchange falls back to a second backend with a
-// different protocol, the stored continuation history is materialized into the
-// outgoing request.
-func TestContinuation_Fallback_MaterializesHistory(t *testing.T) {
-	store := turnstate.NewMemoryContinuationStore()
-	prevID := canonical.NewContinuationID("resp_prev")
-	_ = store.Put(context.Background(), canonical.ContinuationRecord{
-		ID:      prevID,
-		RouteID: "alpha",
-		ModelID: "m",
-		RequestDelta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{
-				canonical.NewTextItem(canonical.ItemAuthorUser, "previous-turn"),
-			},
-		}),
-		Response: canonical.NewOutputWithUsage(
-			canonical.SemanticKindConversation,
-			"resp_prev",
-			"m",
-			[]canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "prev-response")},
-			"stop",
-			canonical.TokenUsage{},
-		),
-		Status: canonical.ContinuationStatusCompleted,
-	})
-
-	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a", "backend-b"}, "backend-a")
-
-	var calls []string
-	var capturedReqs []canonical.CanonicalRequest
-	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		calls = append(calls, req.Target.BackendRef)
-		capturedReqs = append(capturedReqs, req.Request)
-		if len(calls) == 1 {
-			return nil, canonical.NewBackendError(req.Target.BackendRef, http.StatusServiceUnavailable, "down", "")
-		}
-		return carrier.NewCarrierDocument(
-			carrier.StageProviderIngressIn,
-			req.Target.ProtocolKind,
-			"application/json",
-			nil,
-			[]byte(`{"id":"fallback-ok","model":"m","output_text":"ok"}`),
-			carrier.Meta{},
-		), nil
-	})
-
-	ingress := RequestIngress{runner: runner.WithContinuationStore(store)}
+	ingress := RequestIngress{runner: runner}
 
 	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
-		ExchangeID:      "fallback-1",
-		Request:         newTransportRequestWithTurn(http.MethodPost, "/responses", "resp_prev", map[string]any{"model": "m", "messages": []map[string]any{{"role": "user", "content": "current-turn"}}}),
+		ExchangeID:      "first-turn-1",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"m","messages":[{"role":"user","content":"first-turn"}]}`)),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingSSE,
 	})
@@ -830,129 +948,193 @@ func TestContinuation_Fallback_MaterializesHistory(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 provider calls, got %d", len(calls))
-	}
-	if calls[0] != "backend-a" || calls[1] != "backend-b" {
-		t.Fatalf("unexpected call order: %v", calls)
-	}
-
-	// Second attempt materialized history = previous-turn + assistant-reply + current-turn.
-	secondReq := capturedReqs[1]
-	items := secondReq.Items()
-	if len(items) < 2 {
-		t.Fatalf("fallback: expected >=2 items, got %d", len(items))
-	}
-	found := map[string]bool{}
-	for _, it := range items {
-		found[it.Text] = true
-	}
-	if !found["previous-turn"] {
-		t.Fatal("fallback: missing previous-turn")
-	}
-	if !found["current-turn"] {
-		t.Fatal("fallback: missing current-turn")
-	}
-
-	// New record captured.
-	rec, ok, err := store.Get(context.Background(), canonical.NewContinuationID("fallback-1_result"))
+	rec, ok, err := store.Get(context.Background(), unsafeLocalReplayScope("alpha"), replay.ReplayIDFromResponseID("swobu_first-turn-1"))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if !ok {
-		t.Fatal("continuation record was not captured after fallback success")
+		t.Fatal("replay record missing")
 	}
-	if rec.RouteID != "alpha" {
-		t.Fatalf("record routeID = %q, want alpha", rec.RouteID)
+	if rec.Native == nil {
+		t.Fatal("expected native ref to be captured from provider output")
+	}
+	wantTarget := replay.TargetKey{
+		ProviderSpec:     "openai_compatible",
+		Protocol:         protocolkind.Responses,
+		ProviderProtocol: "responses",
+		BaseURL:          "https://example.test/v1",
+		AuthScope:        "cred-backend-a",
+		ModelID:          "m",
+	}
+	if rec.Native.ReplayID != replay.ReplayIDFromResponseID("swobu_first-turn-1") {
+		t.Fatalf("native replay id = %q, want %q", rec.Native.ReplayID, replay.ReplayIDFromResponseID("swobu_first-turn-1"))
+	}
+	if rec.Native.Target != wantTarget {
+		t.Fatalf("native target = %+v, want %+v", rec.Native.Target, wantTarget)
+	}
+	if rec.Native.Kind != replay.NativeRefProviderResponseID {
+		t.Fatalf("native kind = %q, want %q", rec.Native.Kind, replay.NativeRefProviderResponseID)
+	}
+	if rec.Native.Value != "first-turn-1_result" {
+		t.Fatalf("native ref = %q, want first-turn-1_result", rec.Native.Value)
 	}
 }
 
-// TestContinuation_UnsafeNativeReplay_FailsClosed proves that when a
-// Responses target is selected but the current request diverges from the
-// stored chain, the router emits a 400-style error (UnsafeNativeReplayError)
-// instead of silently materializing a divergent thread.
-func TestContinuation_UnsafeNativeReplay_FailsClosed(t *testing.T) {
-	store := turnstate.NewMemoryContinuationStore()
-	prevID := canonical.NewContinuationID("resp_prev")
-	_ = store.Put(context.Background(), canonical.ContinuationRecord{
-		ID:      prevID,
-		RouteID: "alpha",
-		ModelID: "m",
-		RequestDelta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{
-				canonical.NewTextItem(canonical.ItemAuthorUser, "stored-turn"),
+// TestResponsesStreamingReplayRecordNativeTargetFullyPopulated proves the
+// streaming replay path captures the full native target binding, not only the
+// provider result ID string.
+func TestResponsesStreamingReplayRecordNativeTargetFullyPopulated(t *testing.T) {
+	store := replay.NewMemoryStore()
+	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"provider_resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+	runner := Runner{
+		Runtime: runtimeWithProviderIngress{
+			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
+			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+				return carrier.CarrierStream{
+					Stage:   carrier.StageProviderIngressIn,
+					Family:  req.Target.ProtocolKind,
+					Framing: carrier.FramingSSE,
+					Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(providerSSE))),
+				}, nil
 			},
-		}),
-		Response: canonical.NewOutputWithUsage(
-			canonical.SemanticKindConversation,
-			"resp_prev",
-			"m",
-			[]canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "stored-response")},
-			"stop",
-			canonical.TokenUsage{},
-		),
-		Status: canonical.ContinuationStatusCompleted,
-	})
+		},
+		ResponseIDs: deterministicResponseIDGenerator{},
+	}.WithReplayStore(store)
 
+	out, err := runner.Run(context.Background(), ExchangeInput{
+		ExchangeID:       "stream-native-1",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Request:          testCanonicalRequest("m"),
+		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		Target:           NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-backend-a", protocolkind.Responses, "", "", "responses"),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Transport.Body == nil {
+		t.Fatal("streaming response body was nil")
+	}
+	if _, err := io.ReadAll(out.Transport.Body); err != nil {
+		t.Fatalf("read streaming body: %v", err)
+	}
+
+	rec, ok, err := store.Get(context.Background(), unsafeLocalReplayScope("alpha"), replay.ReplayIDFromResponseID("swobu_stream-native-1"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !ok {
+		t.Fatal("replay record missing")
+	}
+	wantTarget := replay.TargetKey{
+		ProviderSpec:     "openai_compatible",
+		Protocol:         protocolkind.Responses,
+		ProviderProtocol: "responses",
+		BaseURL:          "https://example.test/v1",
+		AuthScope:        "cred-backend-a",
+		ModelID:          "m",
+	}
+	if rec.Native == nil {
+		t.Fatal("native ref = nil, want provider native ID persisted")
+	}
+	if rec.Native.ReplayID != replay.ReplayIDFromResponseID("swobu_stream-native-1") {
+		t.Fatalf("native replay id = %q, want %q", rec.Native.ReplayID, replay.ReplayIDFromResponseID("swobu_stream-native-1"))
+	}
+	if rec.Native.Target != wantTarget {
+		t.Fatalf("native target = %+v, want %+v", rec.Native.Target, wantTarget)
+	}
+	if rec.Native.Kind != replay.NativeRefProviderResponseID {
+		t.Fatalf("native kind = %q, want %q", rec.Native.Kind, replay.NativeRefProviderResponseID)
+	}
+	if rec.Native.Value != "provider_resp_1" {
+		t.Fatalf("native value = %q, want provider_resp_1", rec.Native.Value)
+	}
+}
+
+// TestResponsesStreamingCreatedAndCompletedUseSameSwobuID proves the wire
+// stream does not leak the provider ID on response.created and keeps the
+// allocated Swobu ID stable through completion.
+func TestResponsesStreamingCreatedAndCompletedUseSameSwobuID(t *testing.T) {
+	store := replay.NewMemoryStore()
+	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"provider_resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+	runner := Runner{
+		Runtime: runtimeWithProviderIngress{
+			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
+			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+				return carrier.CarrierStream{
+					Stage:   carrier.StageProviderIngressIn,
+					Family:  req.Target.ProtocolKind,
+					Framing: carrier.FramingSSE,
+					Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(providerSSE))),
+				}, nil
+			},
+		},
+		ResponseIDs: deterministicResponseIDGenerator{},
+	}.WithReplayStore(store)
+
+	out, err := runner.Run(context.Background(), ExchangeInput{
+		ExchangeID:       "stream-id",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Request:          testCanonicalRequest("m"),
+		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		Target:           NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-backend-a", protocolkind.Responses, "", "", "responses"),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Transport.Body == nil {
+		t.Fatal("streaming response body was nil")
+	}
+	raw, err := io.ReadAll(out.Transport.Body)
+	if err != nil {
+		t.Fatalf("read streaming body: %v", err)
+	}
+	body := string(raw)
+	wantID := "swobu_stream-id"
+	if !strings.Contains(body, `"type":"response.created","response":{"id":"`+wantID+`"`) {
+		t.Fatalf("streaming response.created did not use Swobu ID %q: %s", wantID, body)
+	}
+	if !strings.Contains(body, `"type":"response.completed","response":{"id":"`+wantID+`"`) {
+		t.Fatalf("streaming response.completed did not use Swobu ID %q: %s", wantID, body)
+	}
+	if strings.Contains(body, "provider_resp_1") {
+		t.Fatalf("provider-native ID leaked into client stream: %s", body)
+	}
+}
+
+// TestReplay_ClientResponseID_ReplacesProviderID proves the client-visible
+// response body contains the Swobu ID, not the provider-native one.
+func TestReplay_ClientResponseID_ReplacesProviderID(t *testing.T) {
 	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a"}, "backend-a")
 
-	var providerCalled bool
+	store := replay.NewMemoryStore()
 	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		providerCalled = true
-		return nil, canonical.InternalError("should not reach provider")
-	})
-
-	ingress := RequestIngress{runner: runner.WithContinuationStore(store)}
-
-	// Divergent request: overlapping but not prefix-equal to stored chain.
-	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
-		ExchangeID:      "unsafe-replay-1",
-		Request:         newTransportRequestWithTurn(http.MethodPost, "/responses", "resp_prev", map[string]any{"model": "m", "messages": []map[string]any{{"role": "user", "content": "stored-turn"}, {"role": "user", "content": "divergent-turn"}}}),
-		ClientFamily:    canonical.ClientFamilyResponses,
-		ResponseFraming: delivery.FramingSSE,
-	})
-	if providerCalled {
-		t.Fatal("provider should not be called for unsafe native replay")
-	}
-	if err == nil {
-		t.Fatal("expected error for unsafe native replay, got nil")
-	}
-	// UnsafeNativeReplayError unwraps to a BadRequest.
-	if !strings.Contains(err.Error(), "400") && !strings.Contains(strings.ToLower(err.Error()), "unsafe") {
-		t.Fatalf("expected UnsafeNativeReplayError (400), got: %v", err)
-	}
-}
-
-// TestContinuation_NoDuplicate_PersistsOnceOnRetry proves that even when
-// multiple fallback attempts occur, the continuation record is only persisted
-// once — on the first successful response.
-func TestContinuation_NoDuplicate_PersistsOnceOnRetry(t *testing.T) {
-	store := turnstate.NewMemoryContinuationStore()
-
-	endpoint := testIngressEndpointWithPaths(t, []string{"backend-a", "backend-b"}, "backend-a")
-
-	var calls int
-	runner := withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		calls++
-		if calls == 1 {
-			return nil, canonical.NewBackendError("backend-a", http.StatusServiceUnavailable, "down", "")
-		}
 		return carrier.NewCarrierDocument(
 			carrier.StageProviderIngressIn,
 			req.Target.ProtocolKind,
 			"application/json",
 			nil,
-			[]byte(`{"id":"retry-ok","model":"m","output_text":"ok"}`),
+			[]byte(`{"id":"provider_resp_1","model":"m","output_text":"ok"}`),
 			carrier.Meta{},
 		), nil
-	})
+	}).WithReplayStore(store).WithResponseIDs(deterministicResponseIDGenerator{})
 
-	ingress := RequestIngress{runner: runner.WithContinuationStore(store)}
+	ingress := RequestIngress{runner: runner}
 
-	_, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
-		ExchangeID:      "no-dup-1",
-		Request:         newTransportRequestWithTurn(http.MethodPost, "/responses", "", map[string]any{"model": "m", "messages": []map[string]any{{"role": "user", "content": "hi"}}}),
+	resp, err := ingress.HandleRequestWithEndpoint(context.Background(), endpoint, RequestInput{
+		ExchangeID:      "client-id-1",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingSSE,
 	})
@@ -960,27 +1142,14 @@ func TestContinuation_NoDuplicate_PersistsOnceOnRetry(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if calls != 2 {
-		t.Fatalf("expected 2 provider calls, got %d", calls)
+	var body map[string]any
+	raw, _ := io.ReadAll(resp.Response.Transport.Body)
+	_ = resp.Response.Transport.Body.Close()
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode body: %v", err)
 	}
-
-	rec, ok, err := store.Get(context.Background(), canonical.NewContinuationID("no-dup-1_result"))
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected continuation record to be persisted")
-	}
-	if rec.Status != canonical.ContinuationStatusCompleted {
-		t.Fatalf("record status = %q, want completed", rec.Status)
-	}
-
-	// Chain should contain only the single new record (no duplicates).
-	chain, err := store.Chain(context.Background(), canonical.NewContinuationID("no-dup-1_result"))
-	if err != nil {
-		t.Fatalf("Chain: %v", err)
-	}
-	if len(chain) != 1 {
-		t.Fatalf("expected chain length 1, got %d", len(chain))
+	id, _ := body["id"].(string)
+	if id != "swobu_client-id-1" {
+		t.Fatalf("client response id = %q, want swobu_client-id-1", id)
 	}
 }

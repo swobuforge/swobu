@@ -7,14 +7,16 @@ import (
 	"io"
 )
 
+var errVersionNoticeAcknowledgmentUnavailable = errors.New("version notice acknowledgment unavailable")
+
 func waitForVersionNoticeContinue(in io.Reader, out io.Writer) error {
 	if in == nil {
-		return errors.New("version notice acknowledgment requires stdin")
+		return fmt.Errorf("%w: stdin missing", errVersionNoticeAcknowledgmentUnavailable)
 	}
 	_, _ = fmt.Fprintln(out, "press Enter to continue")
 	reader := bufio.NewReader(in)
 	if _, err := reader.ReadBytes('\n'); err != nil {
-		return fmt.Errorf("version notice acknowledgment failed: %w", err)
+		return fmt.Errorf("%w: %v", errVersionNoticeAcknowledgmentUnavailable, err)
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ type providerConfigDocument struct {
 	BaseURL          string `json:"base_url,omitempty"`
 	AuthHeader       string `json:"auth_header,omitempty"`
 	CredentialRef    string `json:"credential_ref,omitempty"`
+	RouteModelID     string `json:"route_model_id,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`
 	TargetAlias      string `json:"target_alias,omitempty"`
 	TargetRank       *int   `json:"target_rank,omitempty"`
@@ -52,6 +53,7 @@ func endpointDocumentFromDomain(ep endpointintent.Endpoint) endpointDocument {
 			BaseURL:          pc.BaseURL(),
 			AuthHeader:       pc.AuthHeader(),
 			CredentialRef:    pc.CredentialRef(),
+			RouteModelID:     pc.RouteModelID(),
 			ModelID:          pc.ModelID(),
 			TargetAlias:      pc.TargetAlias(),
 			TargetRank:       tr,
@@ -118,6 +120,10 @@ func (d endpointDocument) toDomain() (endpointintent.Endpoint, error) {
 			if err != nil {
 				return endpointintent.Endpoint{}, err
 			}
+		}
+		config, err = config.WithRouteModelID(pc.RouteModelID)
+		if err != nil {
+			return endpointintent.Endpoint{}, err
 		}
 		providerConfigs = append(providerConfigs, config)
 	}

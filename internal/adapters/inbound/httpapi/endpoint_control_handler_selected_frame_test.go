@@ -20,6 +20,7 @@ func TestDecodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 				BaseURL:          "https://api.openai.com/v1",
 				CredentialRef:    "env:OPENAI_API_KEY",
 				ProviderProtocol: "responses_stream",
+				RouteModelID:     "gpt",
 				ModelID:          "gpt-5.4-mini",
 			},
 		},
@@ -35,6 +36,12 @@ func TestDecodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	}
 	if got := providers[0].ProviderProtocol(); got != "responses_stream" {
 		t.Fatalf("provider protocol=%q want=%q", got, "responses_stream")
+	}
+	if got := providers[0].RouteModelID(); got != "gpt" {
+		t.Fatalf("route model id=%q want=%q", got, "gpt")
+	}
+	if got := providers[0].ModelID(); got != "gpt-5.4-mini" {
+		t.Fatalf("model id=%q want=%q", got, "gpt-5.4-mini")
 	}
 }
 
@@ -52,6 +59,14 @@ func TestEncodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithProviderProtocol returned error: %v", err)
 	}
+	cfg, err = cfg.WithRouteModelID("gpt")
+	if err != nil {
+		t.Fatalf("WithRouteModelID returned error: %v", err)
+	}
+	cfg, err = cfg.WithModelID("gpt-5.4-mini")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
 	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
 	if err != nil {
 		t.Fatalf("NewEndpoint returned error: %v", err)
@@ -63,6 +78,12 @@ func TestEncodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	}
 	if got := doc.ProviderConfigs[0].ProviderProtocol; got != "responses_stream" {
 		t.Fatalf("provider protocol=%q want=%q", got, "responses_stream")
+	}
+	if got := doc.ProviderConfigs[0].RouteModelID; got != "gpt" {
+		t.Fatalf("route model id=%q want=%q", got, "gpt")
+	}
+	if got := doc.ProviderConfigs[0].ModelID; got != "gpt-5.4-mini" {
+		t.Fatalf("model id=%q want=%q", got, "gpt-5.4-mini")
 	}
 }
 
@@ -80,6 +101,7 @@ func TestDecodeEndpointDocument_RejectsZeroAndNegativeTargetRankWeight(t *testin
 				ProviderSpec:  "openai",
 				BaseURL:       "https://api.openai.com/v1",
 				CredentialRef: "env:OPENAI_API_KEY",
+				ModelID:       "gpt-4.1-mini",
 				TargetRank:    &rankVal,
 				TargetWeight:  &weightVal,
 			},
@@ -122,6 +144,7 @@ func TestDecodeEndpointDocument_OmitsTargetRankWeightDefaultsToOne(t *testing.T)
 				ProviderSpec:  "openai",
 				BaseURL:       "https://api.openai.com/v1",
 				CredentialRef: "env:OPENAI_API_KEY",
+				ModelID:       "gpt-4.1-mini",
 			},
 		},
 	}
@@ -138,6 +161,9 @@ func TestDecodeEndpointDocument_OmitsTargetRankWeightDefaultsToOne(t *testing.T)
 	}
 	if got := providers[0].TargetWeight(); got != 1 {
 		t.Fatalf("target weight=%d want=1", got)
+	}
+	if got := providers[0].RouteModelID(); got != "gpt-4.1-mini" {
+		t.Fatalf("route model fallback=%q want=%q", got, "gpt-4.1-mini")
 	}
 }
 

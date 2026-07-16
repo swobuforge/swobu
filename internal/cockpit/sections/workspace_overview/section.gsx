@@ -2,7 +2,6 @@ package workspace_overview
 
 import (
 	tui "github.com/grindlemire/go-tui"
-	run_once "github.com/swobuforge/swobu/internal/cockpit/features/run_once"
 	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
@@ -10,40 +9,45 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
+// ---------------------------------------------------------------------------
+// Section state
+// ---------------------------------------------------------------------------
+
 type SectionView struct {
-	Model               readmodel.WorkspaceReadModel
-	Expanded            *tui.State[bool]
-	SummaryOnly         *tui.State[bool]
-	CopiedClientBaseURL *tui.State[bool]
-	OpenRun            *tui.State[readmodel.RunCommandID]
-	ExecuteRun         run_once.ExecuteFunc
-	SaveWorkspace      workspace_edit.SaveFunc
-	DeleteWorkspace    workspace_delete.DeleteFunc
-	OnWorkspaceSaved   func(readmodel.WorkspaceReadModel)
-	OnWorkspaceDeleted func(readmodel.WorkspaceID)
-	InitialDeleteID    readmodel.WorkspaceID
+	Model                    readmodel.WorkspaceReadModel
+	Expanded                 *tui.State[bool]
+	CopiedEndpoint           *tui.State[bool]
+	SaveWorkspace            workspace_edit.SaveFunc
+	DeleteWorkspace          workspace_delete.DeleteFunc
+	OnWorkspaceSaved         func(readmodel.WorkspaceReadModel)
+	OnWorkspaceDeleted       func(readmodel.WorkspaceID)
+	// PendingDeleteWorkspaceID seeds the delete confirmation child while the
+	// delete row is armed. The parent keeps the request here so Back() can clear
+	// it without holding a persistent child reference.
+	PendingDeleteWorkspaceID *tui.State[readmodel.WorkspaceID]
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceCommands) *SectionView {
 	section := &SectionView{
-		Model:               model,
-		Expanded:            tui.NewState(true),
-		SummaryOnly:         tui.NewState(false),
-		CopiedClientBaseURL: tui.NewState(false),
-		OpenRun:            tui.NewState(readmodel.RunCommandID("")),
+		Model:                    model,
+		Expanded:                 tui.NewState(true),
+		CopiedEndpoint:           tui.NewState(false),
+		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
 	}
 	if len(commands) > 0 && commands[0] != nil {
 		section.SaveWorkspace = commands[0].SaveWorkspace
 		section.DeleteWorkspace = commands[0].DeleteWorkspace
-		if executor, ok := any(commands[0]).(ports.RunExecutor); ok {
-			section.ExecuteRun = executor.ExecuteRunCommand
-		}
 	}
 	return section
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle callbacks
+// ---------------------------------------------------------------------------
+
 func (s *SectionView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
 	s.Model = workspace
+	s.resetTransientState()
 	if s.OnWorkspaceSaved != nil {
 		s.OnWorkspaceSaved(workspace)
 	}
@@ -51,36 +55,45 @@ func (s *SectionView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
 
 func (s *SectionView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
 	if workspaceID == s.Model.ID {
-		s.SummaryOnly.Set(true)
+		// Summary-only rendering keeps the section visible but suppresses
+		// destructive actions after the workspace it owned is gone.
 	}
 	if s.OnWorkspaceDeleted != nil {
 		s.OnWorkspaceDeleted(workspaceID)
 	}
 }
 
-func (s *SectionView) copyClientBaseURL() {
-	s.CopiedClientBaseURL.Set(true)
+func (s *SectionView) copyEndpoint() {
+	s.CopiedEndpoint.Set(true)
 }
 
-func (s *SectionView) openRun(command readmodel.RunCommandReadModel) {
-	s.OpenRun.Set(command.ID)
+func (s *SectionView) resetTransientState() {
+	s.CopiedEndpoint.Set(false)
+	s.PendingDeleteWorkspaceID.Set("")
 }
 
-func (s *SectionView) closeRun() {
-	s.OpenRun.Set("")
-}
+// ---------------------------------------------------------------------------
+// Back / navigation
+// ---------------------------------------------------------------------------
 
 func (s *SectionView) Back() bool {
-	if s.OpenRun.Get() == "" {
-		return false
+	if s.deleteIsOpen() {
+		s.closeDelete()
+		return true
 	}
-	s.closeRun()
-	return true
+	return false
 }
 
+func (s *SectionView) deleteIsOpen() bool { return s.PendingDeleteWorkspaceID.Get() != "" }
+func (s *SectionView) closeDelete()      { s.PendingDeleteWorkspaceID.Set("") }
+
 func (s *SectionView) OpenDeleteConfirmation(workspaceID readmodel.WorkspaceID) {
-	s.InitialDeleteID = workspaceID
+	s.PendingDeleteWorkspaceID.Set(workspaceID)
 }
+
+// ---------------------------------------------------------------------------
+// Feature components
+// ---------------------------------------------------------------------------
 
 func WorkspaceEdit(s *SectionView) *workspace_edit.Workflow {
 	return workspace_edit.NewWorkflow(
@@ -96,17 +109,16 @@ func DeleteConfirmation(s *SectionView) *workspace_delete.ConfirmationView {
 		s.DeleteWorkspace,
 		s.workspaceDeleted,
 	)
-	if s.InitialDeleteID != "" {
-		confirmation.Request(s.InitialDeleteID)
+	if s.PendingDeleteWorkspaceID.Get() != "" {
+		confirmation.Request(s.PendingDeleteWorkspaceID.Get())
+	}
+	confirmation.OnArm = func(_ readmodel.WorkspaceID) {
+		s.OpenDeleteConfirmation(s.Model.ID)
+	}
+	confirmation.OnCancel = func(_ readmodel.WorkspaceID) {
+		s.closeDelete()
 	}
 	return confirmation
-}
-
-func RunOnceWorkflow(s *SectionView, command readmodel.RunCommandReadModel) *run_once.Workflow {
-	if s.OpenRun.Get() != command.ID {
-		return nil
-	}
-	return run_once.NewWorkflow(s.Model, command, s.ExecuteRun, s.closeRun)
 }
 
 // ---------------------------------------------------------------------------
@@ -121,10 +133,6 @@ func workspaceDeleteKey(s *SectionView) string {
 	return "workspace-delete:" + workspaceIdentity(s)
 }
 
-func runOnceKey(s *SectionView, command readmodel.RunCommandReadModel) string {
-	return "run-once:" + workspaceIdentity(s) + ":" + string(command.ID)
-}
-
 func workspaceIdentity(s *SectionView) string {
 	if s.Model.ID != "" {
 		return string(s.Model.ID)
@@ -135,41 +143,107 @@ func workspaceIdentity(s *SectionView) string {
 	return "+"
 }
 
+func sectionHeaderKey(s *SectionView) string { return "section-header:" + workspaceIdentity(s) }
+
+func SectionHeaderComponent(s *SectionView) tui.Component {
+	return ui.NewSectionDisclosure(sectionHeaderKey(s), "workspace", s.Expanded)
+}
+
 // ---------------------------------------------------------------------------
-// Selectable row components
+// Endpoint row
 // ---------------------------------------------------------------------------
 
-func clientBaseURLRowKey(s *SectionView) string  { return "client-base-url:" + workspaceIdentity(s) }
+func endpointRowKey(s *SectionView) string { return "endpoint:" + workspaceIdentity(s) }
 
-func clientBaseURLAction(s *SectionView) string {
-	if s.CopiedClientBaseURL.Get() {
+func endpointAction(s *SectionView) string {
+	if s.CopiedEndpoint.Get() {
 		return "copied"
 	}
 	return "copy ↵"
 }
 
-func ClientBaseURLRowComponent(s *SectionView) *ui.SelectableRow {
-	return ui.NewSelectableRow(
-		clientBaseURLRowKey(s),
-		"client base URL",
-		s.Model.ClientBaseURL,
-		clientBaseURLAction(s),
-		s.copyClientBaseURL,
-	)
+// EndpointRowComponent mounts the hero endpoint row: two visual lines
+// (compatibility badges + URL) as a single focusable component.
+func EndpointRowComponent(s *SectionView) tui.Component {
+	row := &endpointRowView{s: s}
+	row.SelectBase = ui.NewSelectBase(endpointRowKey(s))
+	return row
 }
 
-func runOnceRowKey(s *SectionView, cmd readmodel.RunCommandReadModel) string {
-	return "run-once-row:" + workspaceIdentity(s) + ":" + string(cmd.ID)
+type endpointRowView struct {
+	ui.SelectBase
+	s *SectionView
 }
 
-func RunOnceRowComponent(s *SectionView, cmd readmodel.RunCommandReadModel) *ui.SelectableRow {
-	return ui.NewSelectableRow(
-		runOnceRowKey(s, cmd),
-		"run once",
-		cmd.Label,
-		"open ↵",
-		func() { s.openRun(cmd) },
+func (r *endpointRowView) BindApp(app *tui.App) {
+	r.SelectBase.BindApp(app)
+}
+
+func (r *endpointRowView) UnbindApp() {
+	r.SelectBase.UnbindApp()
+}
+
+func (r *endpointRowView) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*endpointRowView)
+	if !ok {
+		return
+	}
+	r.s = f.s
+}
+
+func (r *endpointRowView) Render(app *tui.App) *tui.Element {
+	s := r.s
+	root := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
+		tui.WithWidthPercent(100.00),
+		tui.WithFocusable(true),
+		tui.WithOnFocus(r.OnFocus),
+		tui.WithOnBlur(r.OnBlur),
+		tui.WithOnActivate(func() { s.copyEndpoint() }),
 	)
+
+	// Row 1: arrow + endpoint label + URL + action
+	row1 := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
+		tui.WithWidthPercent(100.00),
+	)
+	row1.AddChild(tui.New(tui.WithText(r.Arrow()), tui.WithWidth(5)))
+	row1.AddChild(tui.New(tui.WithText("endpoint"), tui.WithWidth(18)))
+	row1.AddChild(tui.New(
+		tui.WithText(s.Model.ClientBaseURL),
+		tui.WithWidth(ui.ActionRowValueWidth),
+		tui.WithWrap(false),
+		tui.WithTruncate(true),
+	))
+	row1.AddChild(tui.New(tui.WithWidth(1))) // action gap
+	row1.AddChild(tui.New(tui.WithText(endpointAction(s))))
+	root.AddChild(row1)
+
+	// Row 2: arrow spacer + label spacer + compatibility badges
+	row2 := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
+		tui.WithWidthPercent(100.00),
+	)
+	row2.AddChild(tui.New(tui.WithWidth(5)))  // arrow spacer
+	row2.AddChild(tui.New(tui.WithWidth(18))) // label spacer
+	row2.AddChild(tui.New(
+		tui.WithText(s.Model.CompatibleClients),
+		tui.WithWidth(ui.ActionRowValueWidth),
+		tui.WithWrap(false),
+		tui.WithTruncate(true),
+	))
+	root.AddChild(row2)
+
+	if r.Ref != nil {
+		r.Ref.Set(root)
+	}
+	return root
+}
+
+func (r *endpointRowView) KeyMap() tui.KeyMap {
+	return r.WithTraversal(ui.ActivateFocused(func(tui.KeyEvent) {
+		r.s.copyEndpoint()
+	}))
 }
 
 // ---------------------------------------------------------------------------
@@ -178,107 +252,26 @@ func RunOnceRowComponent(s *SectionView, cmd readmodel.RunCommandReadModel) *ui.
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		@SectionHeader("workspace", s.Expanded.Get())
+		<div key={sectionHeaderKey(s)} class="w-full">
+			@SectionHeaderComponent(s)
+		</div>
 		if s.Expanded.Get() {
-			if app != nil {
+			if s.Model.IsDraft() {
 				<div key={workspaceEditKey(s)} class="w-full">
 					@WorkspaceEdit(s)
 				</div>
+				@InertRow("endpoint", WorkspaceEdit(s).ClientBaseURLPreview(), "")
 			} else {
-				@WorkspaceEditPreview(WorkspaceEdit(s))
+				<div key={endpointRowKey(s)} class="w-full">
+					@EndpointRowComponent(s)
+				</div>
+				<div key={workspaceEditKey(s)} class="w-full">
+					@WorkspaceEdit(s)
+				</div>
+				<div key={workspaceDeleteKey(s)} class="w-full">
+					@DeleteConfirmation(s)
+				</div>
 			}
-			if s.Model.IsDraft() {
-				@InertRow("client base URL", WorkspaceEdit(s).ClientBaseURLPreview(), "")
-			} else {
-				if app != nil {
-					<div key={clientBaseURLRowKey(s)} class="w-full">
-						@ClientBaseURLRowComponent(s)
-					</div>
-				} else {
-					@InertRow("client base URL", s.Model.ClientBaseURL, clientBaseURLAction(s))
-				}
-				if !s.SummaryOnly.Get() {
-					if len(s.Model.RunCommands) > 0 {
-						if app != nil {
-							<div key={runOnceRowKey(s, s.Model.RunCommands[0])} class="w-full">
-								@RunOnceRowComponent(s, s.Model.RunCommands[0])
-							</div>
-					} else {
-						@InertRow("run once", s.Model.RunCommands[0].Label, "open ↵")
-					}
-						if s.OpenRun.Get() == s.Model.RunCommands[0].ID {
-							if app != nil {
-								<div key={runOnceKey(s, s.Model.RunCommands[0])} class="w-full">
-									@RunOnceWorkflow(s, s.Model.RunCommands[0])
-								</div>
-							} else {
-								@RunOncePreview(RunOnceWorkflow(s, s.Model.RunCommands[0]))
-							}
-						}
-					}
-					if app != nil {
-						<div key={workspaceDeleteKey(s)} class="w-full">
-							@DeleteConfirmation(s)
-						</div>
-					} else {
-						@DeleteConfirmationPreview(DeleteConfirmation(s))
-					}
-				}
-			}
-		}
-	</div>
-}
-
-// ---------------------------------------------------------------------------
-// Preview templates
-// ---------------------------------------------------------------------------
-
-templ WorkspaceEditPreview(workflow *workspace_edit.Workflow) {
-	<div class="flex-col w-full">
-		<div class="flex-row w-full" onActivate={workflow.Activate}>
-			<span class="w-5"></span>
-			<span class="w-18">slug</span>
-			<span class="w-30">{workflow.ValueLabel()}</span>
-			<span>{workflow.ActionLabel()}</span>
-		</div>
-		if workflow.ErrorMessage() != "" {
-			<div class="flex-row w-full">
-				<span class="w-9"></span>
-				<span>{workflow.ErrorMessage()}</span>
-			</div>
-		}
-	</div>
-}
-
-templ DeleteConfirmationPreview(confirmation *workspace_delete.ConfirmationView) {
-	<div class="flex-col w-full">
-		@InertRow("delete", confirmation.RowValue(), confirmation.ActionLabel())
-	</div>
-}
-
-templ RunOncePreview(workflow *run_once.Workflow) {
-	<div class="flex-col w-full">
-		<div class="flex-row w-full">
-			<span class="w-5"></span>
-			<span>{workflow.Title()}</span>
-		</div>
-		<div class="flex-row w-full">
-			<span class="w-8"></span>
-			<span class="w-15">model</span>
-			<span class="w-36">{workflow.ModelValue()}</span>
-			<span>change ↵</span>
-		</div>
-		<div class="flex-row w-full">
-			<span class="w-8"></span>
-			<span class="w-15">command</span>
-			<span class="w-36">{workflow.CommandValue()}</span>
-			<span>{workflow.RunActionLabel()}</span>
-		</div>
-		if workflow.StatusMessage() != "" {
-			<div class="flex-row w-full">
-				<span class="w-8"></span>
-				<span>{workflow.StatusMessage()}</span>
-			</div>
 		}
 	</div>
 }
@@ -286,17 +279,6 @@ templ RunOncePreview(workflow *run_once.Workflow) {
 // ---------------------------------------------------------------------------
 // Layout helpers
 // ---------------------------------------------------------------------------
-
-templ SectionHeader(label string, expanded bool) {
-	<div class="flex-row">
-		<span class="w-2"></span>
-		if expanded {
-			<span>{label + " ▾"}</span>
-		} else {
-			<span>{label + " ▸"}</span>
-		}
-	</div>
-}
 
 templ InertRow(label string, value string, action string) {
 	<div class="flex-row w-full">

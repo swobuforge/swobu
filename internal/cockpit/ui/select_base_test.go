@@ -42,6 +42,23 @@ func TestSelectBase_ArrowMarker(t *testing.T) {
 	}
 }
 
+func TestSelectBase_FocusedStateAccessor(t *testing.T) {
+	base := NewSelectBase("test.3")
+	if base.FocusedState() == nil {
+		t.Fatal("FocusedState should expose the live state pointer")
+	}
+
+	base.OnFocus(nil)
+	if got := base.FocusedState().Get(); !got {
+		t.Fatalf("FocusedState after OnFocus = %v, want true", got)
+	}
+
+	base.OnBlur(nil)
+	if got := base.FocusedState().Get(); got {
+		t.Fatalf("FocusedState after OnBlur = %v, want false", got)
+	}
+}
+
 func TestSelectBase_ID(t *testing.T) {
 	base := NewSelectBase("section.slug")
 	if got := base.ID; got != "section.slug" {

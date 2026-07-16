@@ -8,19 +8,21 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.CarrierDocument, error) {
-		return EncodeCarrierWithEffects(request, delivery, sink, exchangeID, EncodeOptions{})
+		return EncodeCarrierWithEffects(EncodeInput{Request: input.Request, NativeReplay: input.NativeReplay}, d, sink, exchangeID, EncodeOptions{})
 	})
 }
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(request canonical.CanonicalRequest, delivery delivery.Delivery, exchangeID string, options EncodeOptions) (effect.Result[carrier.CarrierDocument], error) {
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (effect.Result[carrier.CarrierDocument], error) {
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.CarrierDocument, error) {
-		return EncodeCarrierWithEffects(request, delivery, sink, exchangeID, options)
+		return EncodeCarrierWithEffects(EncodeInput{Request: input.Request, NativeReplay: input.NativeReplay}, d, sink, exchangeID, options)
 	})
 }
 
@@ -35,6 +37,21 @@ func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc c
 	})
 }
 
+// NativeReplaySource implements wire.NativeReplaySource for the Responses protocol.
+// The Responses provider response ID is usable as a native replay continuation
+// token when it is present and the target key verifies equality.
+func (ProviderDocumentDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
+	if providerResultID == "" {
+		return nil
+	}
+	return &replay.NativeRef{
+		ReplayID: replayID,
+		Target:   target,
+		Kind:     replay.NativeRefProviderResponseID,
+		Value:    providerResultID,
+	}
+}
+
 func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string) (effect.Result[canonical.EventReader], error) {
 	if err := core.ValidateResponseSSECarrierStream(stream, protocolkind.Responses); err != nil {
 		carrierErr := canonical.InternalError("responses stream wire carrier is invalid")
@@ -44,4 +61,19 @@ func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStre
 	return shared.WithAccumulatedEffects(func(sink effect.Sink) (canonical.EventReader, error) {
 		return decodeResponseStream(stream, exchangeID, sink), nil
 	})
+}
+
+// NativeReplayFromOutput implements wire.NativeReplaySource for the streaming
+// Responses protocol decoder. The streaming event reader surfaces the provider
+// response ID through the same native replay contract as the buffered decoder.
+func (ProviderEnvelopeDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
+	if providerResultID == "" {
+		return nil
+	}
+	return &replay.NativeRef{
+		ReplayID: replayID,
+		Target:   target,
+		Kind:     replay.NativeRefProviderResponseID,
+		Value:    providerResultID,
+	}
 }

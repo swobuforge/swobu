@@ -10,7 +10,7 @@ import (
 
 const baseDraftModelName = "route-new"
 
-// Draft owns the incomplete route row that exists only in the routes section.
+// Draft owns the route row that exists only in the routes section.
 type Draft struct {
 	Open      *tui.State[bool]
 	ModelName *tui.State[string]
@@ -45,21 +45,15 @@ func (d *Draft) Back() bool {
 }
 
 func (d *Draft) Route(existing []readmodel.RouteReadModel) readmodel.RouteReadModel {
-	modelName := normalizeModelName(d.ModelName.Get())
+	modelName := strings.TrimSpace(d.ModelName.Get()) // swobu:io-string source=boundary
 	if modelName == "" {
 		modelName = nextModelName(existing)
 	}
 	return readmodel.RouteReadModel{
 		ID:        readmodel.RouteID(modelName),
 		ModelName: modelName,
-		State:     readmodel.RouteIncomplete,
-		PlanKind:  readmodel.RoutePlanSingle,
 		Enabled:   true,
 	}
-}
-
-func normalizeModelName(raw string) string {
-	return strings.TrimSpace(raw) // swobu:io-string source=boundary
 }
 
 func nextModelName(existing []readmodel.RouteReadModel) string {

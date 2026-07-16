@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type operatorClient interface {
@@ -21,6 +23,11 @@ type operatorClient interface {
 	UpsertEndpoint(context.Context, operatorclient.EndpointData) error
 	DeleteEndpoint(context.Context, string) error
 	Status(context.Context, string) (operatorclient.StatusProjection, error)
+	StartAuthSession(context.Context, string, string, string) (operatorclient.AuthSessionStartResult, error)
+	GetAuthSessionStatus(context.Context, string) (operatorclient.AuthSessionStatusResult, error)
+	CancelAuthSession(context.Context, string) error
+	RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error)
+	ProbeModelCatalog(context.Context, string, string, string, string, string) (operatorclient.ModelCatalogResult, error)
 }
 
 // LiveOperatorAdapter implements Cockpit ports over the daemon operator control
@@ -137,13 +144,18 @@ func (a *LiveOperatorAdapter) LoadWorkspace(ctx context.Context, id readmodel.Wo
 // SaveWorkspace updates the daemon endpoint. Slug changes (renames) are
 // rejected because the daemon does not expose an atomic rename operation.
 // Only in-place field edits of an existing endpoint are supported.
+//
+// Draft workspace creation stays local until the first real route/target save
+// can materialize a valid endpoint. The daemon endpoint domain requires at
+// least one provider config, so a blank slug submit must not synthesize an
+// invalid endpoint intent.
 func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
 	slug := strings.TrimSpace(request.Slug) // swobu:io-string source=boundary
-	if request.ID == "" || request.ID == "+" {
-		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("create workspace %q", slug), ErrUnsupportedCommand)
-	}
 	if slug == "" {
 		return readmodel.WorkspaceReadModel{}, errors.New("save workspace: workspace slug is required")
+	}
+	if request.ID == "" || request.ID == "+" {
+		return a.workspaceFromEndpoint(ctx, operatorclient.EndpointData{Name: slug})
 	}
 	current, err := a.client.GetEndpoint(ctx, string(request.ID))
 	if err != nil {
@@ -156,11 +168,7 @@ func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.S
 	if err := a.client.UpsertEndpoint(ctx, current); err != nil {
 		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("save workspace %q", slug), err)
 	}
-	workspace, err := a.workspaceFromEndpoint(ctx, current)
-	if err != nil {
-		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("load workspace %q after save", slug), err)
-	}
-	return workspace, nil
+	return a.workspaceFromEndpoint(ctx, current)
 }
 
 // DeleteWorkspace removes one daemon endpoint.
@@ -172,10 +180,10 @@ func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports
 }
 
 // SaveRoute renames the projected route group backed by matching provider
-// configs. The daemon does not have a first-class route record yet: Cockpit
-// groups provider configs by client-visible model name and rewrites that group
-// in place. Creating an empty route, persisting an enabled flag, or changing
-// routing policy without targets is therefore not representable here yet.
+// configs. Cockpit groups provider configs by client-visible route model name
+// and rewrites that route identity in place. Creating an empty route,
+// persisting an enabled flag, or changing routing policy without targets is
+// therefore not representable here yet.
 func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
 	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
 	if err != nil {
@@ -195,7 +203,7 @@ func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveR
 		if projectedRouteModel(endpoint.ProviderConfigs[i]) != routeID {
 			continue
 		}
-		endpoint.ProviderConfigs[i].ModelID = modelName
+		endpoint.ProviderConfigs[i].RouteModelID = modelName
 		if selectedRef == "" {
 			selectedRef = endpoint.ProviderConfigs[i].Ref
 		}
@@ -249,9 +257,16 @@ func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.Del
 
 // SaveTarget updates or appends one provider config.
 func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
-	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
+	workspaceID := strings.TrimSpace(string(request.WorkspaceID)) // swobu:io-string source=boundary
+	if workspaceID == "" {
+		return readmodel.TargetReadModel{}, errors.New("save target: workspace is required")
+	}
+	endpoint, err := a.client.GetEndpoint(ctx, workspaceID)
 	if err != nil {
-		return readmodel.TargetReadModel{}, adapterFailure(fmt.Sprintf("save target %q", request.TargetID), err)
+		if targetID := strings.TrimSpace(string(request.TargetID)); targetID != "" || !operatorclient.IsNotFound(err) {
+			return readmodel.TargetReadModel{}, adapterFailure(fmt.Sprintf("save target %q", request.TargetID), err)
+		}
+		endpoint = operatorclient.EndpointData{Name: workspaceID}
 	}
 	routeID := strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
 	if routeID == "" {
@@ -373,3 +388,273 @@ var _ ports.WorkspaceCommands = (*LiveOperatorAdapter)(nil)
 var _ ports.RouteCommands = (*LiveOperatorAdapter)(nil)
 var _ ports.RunExecutor = (*LiveOperatorAdapter)(nil)
 var _ ports.ActivityQueries = (*LiveOperatorAdapter)(nil)
+var _ ports.TargetSetupQueries = (*LiveOperatorAdapter)(nil)
+var _ ports.TargetAuthCommands = (*LiveOperatorAdapter)(nil)
+
+// ---------------------------------------------------------------------------
+// TargetSetupQueries
+// ---------------------------------------------------------------------------
+
+// ListTargetProviders returns provider options from the profile catalog
+// where VisibleInOperatorUI is true.
+func (a *LiveOperatorAdapter) ListTargetProviders(ctx context.Context) ([]readmodel.ProviderOptionReadModel, error) {
+	profiles := profile.All()
+	var opts []readmodel.ProviderOptionReadModel
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i].ProviderDisplayName < profiles[j].ProviderDisplayName
+	})
+	for _, p := range profiles {
+		if !p.VisibleInOperatorUI {
+			continue
+		}
+		opts = append(opts, readmodel.ProviderOptionReadModel{
+			ProviderSpec: string(p.ProviderID),
+			DisplayName:  p.ProviderDisplayName,
+			SetupHint:    p.SetupHint,
+		})
+	}
+	return opts, nil
+}
+
+// ResolveProviderSetup projects the provider-setup facts from the provider
+// profile catalog and current cockpit inputs.
+func (a *LiveOperatorAdapter) ResolveProviderSetup(ctx context.Context, req ports.ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error) {
+	_ = ctx
+	spec := strings.TrimSpace(req.ProviderSpec) // swobu:io-string source=boundary
+	if spec == "" {
+		return readmodel.ProviderSetupReadModel{}, errors.New("provider is required")
+	}
+	provider, ok := providerProfileForSpec(spec)
+	if !ok {
+		return readmodel.ProviderSetupReadModel{}, fmt.Errorf("provider %q is unsupported", spec)
+	}
+
+	baseURL := strings.TrimSpace(req.BaseURL) // swobu:io-string source=boundary
+	defaultBaseURL := strings.TrimSpace(provider.DefaultBaseURL)
+	if baseURL == "" && !profile.RequiresExplicitExecuteBaseURL(spec) {
+		baseURL = defaultBaseURL
+	}
+	credentialRef := strings.TrimSpace(req.CredentialRef) // swobu:io-string source=boundary
+	defaultEnvKey := strings.TrimSpace(provider.DefaultCredentialEnvVar)
+	if credentialRef == "" && defaultEnvKey != "" {
+		credentialRef = "env:" + defaultEnvKey
+	}
+
+	authModes := providerSetupAuthModes(provider.AllowedAuthModes)
+	setup := readmodel.ProviderSetupReadModel{
+		ProviderSpec:       spec,
+		DisplayName:        provider.ProviderDisplayName,
+		DefaultBaseURL:     defaultBaseURL,
+		DefaultAuthHeader:  strings.TrimSpace(provider.DefaultAuthHeader),
+		CredentialRef:      credentialRef,
+		CredentialRequired: profile.RequiresCredential(spec, baseURL),
+		InteractiveAuth:    providerSetupHasInteractiveAuth(authModes),
+		AuthModes:          authModes,
+		RequiresBaseURL:    profile.RequiresExplicitExecuteBaseURL(spec) && strings.TrimSpace(req.BaseURL) == "",
+	}
+
+	if setup.InteractiveAuth {
+		setup.CredentialLabel = providerSetupInteractiveLabel(authModes)
+		if setup.CredentialLabel == "" {
+			setup.CredentialLabel = "browser login"
+		}
+		setup.BlockReason = "auth first"
+		setup.ReadyForCatalog = false
+		return setup, nil
+	}
+
+	if setup.RequiresBaseURL {
+		setup.CredentialLabel = "enter base URL"
+		setup.BlockReason = "enter base URL"
+		setup.ReadyForCatalog = false
+		return setup, nil
+	}
+
+	if setup.CredentialRequired {
+		if ok := providerSetupCredentialReady(spec, credentialRef); !ok {
+			missing := defaultEnvKey
+			if missing == "" {
+				missing = "credential"
+			}
+			setup.CredentialLabel = "missing " + missing
+			setup.BlockReason = setup.CredentialLabel
+			setup.ReadyForCatalog = false
+			return setup, nil
+		}
+	}
+
+	if setup.CredentialLabel == "" {
+		setup.CredentialLabel = credentialRef
+	}
+	setup.ReadyForCatalog = true
+	return setup, nil
+}
+
+// ProbeProviderModels calls the daemon model catalog endpoint.
+func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
+	result, err := a.client.ProbeModelCatalog(ctx, req.ProviderSpec, req.BaseURL, req.AuthHeader, req.CredentialRef, req.ProviderProtocol)
+	if err != nil {
+		return readmodel.ModelCatalogReadModel{}, adapterFailure("probe model catalog", err)
+	}
+	var deployments []readmodel.ModelDeploymentReadModel
+	for _, d := range result.Deployments {
+		deployments = append(deployments, readmodel.ModelDeploymentReadModel{
+			ID:                         d.Name,
+			Name:                       d.Name,
+			ModelName:                  d.ModelName,
+			ModelPublisher:             d.ModelPublisher,
+			ModelVersion:               d.ModelVersion,
+			Family:                     d.Family,
+			DefaultProviderProtocol:    d.DefaultProviderProtocol,
+		})
+	}
+	return readmodel.ModelCatalogReadModel{
+		Deployments: deployments,
+		ResolvedProviderProtocol: result.ResolvedProviderProtocol,
+		Error: result.Error,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// TargetAuthCommands
+// ---------------------------------------------------------------------------
+
+// StartAuthSession starts an interactive auth session on the daemon.
+func (a *LiveOperatorAdapter) StartAuthSession(ctx context.Context, req ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
+	result, err := a.client.StartAuthSession(ctx, req.ProviderSpec, req.EndpointRef, req.AuthMode)
+	if err != nil {
+		return readmodel.AuthSessionReadModel{}, adapterFailure("start auth session", err)
+	}
+	return readmodel.AuthSessionReadModel{
+		ProviderSpec:  result.ProviderSpec,
+		SessionID:     result.SessionID,
+		AuthorizeURL:  result.AuthorizeURL,
+		UserCode:      result.UserCode,
+		State:         result.State,
+	}, nil
+}
+
+// PollAuthSession polls daemon for auth session status.
+func (a *LiveOperatorAdapter) PollAuthSession(ctx context.Context, sessionID string) (readmodel.AuthSessionReadModel, error) {
+	result, err := a.client.GetAuthSessionStatus(ctx, sessionID)
+	if err != nil {
+		return readmodel.AuthSessionReadModel{}, adapterFailure("poll auth session", err)
+	}
+	return readmodel.AuthSessionReadModel{
+		ProviderSpec:  result.ProviderSpec,
+		SessionID:     result.SessionID,
+		State:         result.State,
+		CredentialRef: result.CredentialRef,
+		ErrorMessage:  result.ErrorMessage,
+	}, nil
+}
+
+// CancelAuthSession cancels the auth session on the daemon.
+func (a *LiveOperatorAdapter) CancelAuthSession(ctx context.Context, sessionID string) error {
+	if err := a.client.CancelAuthSession(ctx, sessionID); err != nil {
+		return adapterFailure("cancel auth session", err)
+	}
+	return nil
+}
+
+// RetryAuthSession retries a failed auth session.
+func (a *LiveOperatorAdapter) RetryAuthSession(ctx context.Context, sessionID string) (readmodel.AuthSessionReadModel, error) {
+	result, err := a.client.RetryAuthSession(ctx, sessionID)
+	if err != nil {
+		return readmodel.AuthSessionReadModel{}, adapterFailure("retry auth session", err)
+	}
+	return readmodel.AuthSessionReadModel{
+		ProviderSpec:  "",
+		SessionID:     result.SessionID,
+		AuthorizeURL:  result.AuthorizeURL,
+		UserCode:      result.UserCode,
+		State:         result.State,
+	}, nil
+}
+
+func providerProfileForSpec(spec string) (profile.Profile, bool) {
+	for _, candidate := range profile.All() {
+		if string(candidate.ProviderID) == spec {
+			return candidate, true
+		}
+	}
+	return profile.Profile{}, false
+}
+
+func providerSetupAuthModes(modes []profile.AuthModeSpec) []readmodel.AuthModeReadModel {
+	out := make([]readmodel.AuthModeReadModel, 0, len(modes))
+	for _, mode := range modes {
+		out = append(out, readmodel.AuthModeReadModel{
+			Mode:        string(mode.Mode),
+			Kind:        string(mode.Kind),
+			Requirement: string(mode.Requirement),
+			Interactive: mode.Interactive,
+		})
+	}
+	return out
+}
+
+func providerSetupHasInteractiveAuth(modes []readmodel.AuthModeReadModel) bool {
+	for _, mode := range modes {
+		if mode.Interactive {
+			return true
+		}
+	}
+	return false
+}
+
+func providerSetupInteractiveLabel(modes []readmodel.AuthModeReadModel) string {
+	for _, mode := range modes {
+		if !mode.Interactive {
+			continue
+		}
+		switch strings.TrimSpace(strings.ToLower(mode.Mode)) {
+		case string(profile.AuthModeChatGPTLogin):
+			return "browser login"
+		case string(profile.AuthModeChatGPTDeviceAuth):
+			return "device auth"
+		default:
+			if mode.Mode != "" {
+				return mode.Mode
+			}
+		}
+	}
+	return ""
+}
+
+func providerSetupCredentialReady(providerSpec string, credentialRef string) bool {
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
+	if ref == "" {
+		return false
+	}
+	envKey, ok := providerSetupEnvCredentialName(providerSpec, ref)
+	if !ok {
+		return true
+	}
+	if envKey == "" {
+		return false
+	}
+	val, ok := os.LookupEnv(envKey)
+	return ok && strings.TrimSpace(val) != ""
+}
+
+func providerSetupEnvCredentialName(providerSpec string, credentialRef string) (string, bool) {
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
+	if ref == "" {
+		defaultKey := strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec))
+		return defaultKey, defaultKey != ""
+	}
+	lower := strings.ToLower(ref) // swobu:io-string source=boundary
+	switch {
+	case lower == "env":
+		defaultKey := strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec))
+		return defaultKey, defaultKey != ""
+	case lower == "env:":
+		defaultKey := strings.TrimSpace(profile.DefaultEnvKeyForSpec(providerSpec))
+		return defaultKey, defaultKey != ""
+	case strings.HasPrefix(lower, "env:"):
+		return strings.TrimSpace(ref[len("env:"):]), true
+	default:
+		return "", false
+	}
+}

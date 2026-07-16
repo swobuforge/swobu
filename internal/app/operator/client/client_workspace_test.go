@@ -41,6 +41,38 @@ func TestUpsertEndpoint_CreateWithEmptyProviderConfigs(t *testing.T) {
 	}
 }
 
+func TestUpsertEndpoint_EncodesRouteModelID(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/_swobu/endpoints/test-ws" {
+			t.Fatalf("request method/path = %s %s, want PUT /_swobu/endpoints/test-ws", r.Method, r.URL.Path)
+		}
+		var doc endpointDocument
+		if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(doc.ProviderConfigs) != 1 {
+			t.Fatalf("provider configs = %d, want 1", len(doc.ProviderConfigs))
+		}
+		pc := doc.ProviderConfigs[0]
+		if pc.RouteModelID != "gpt" {
+			t.Fatalf("route model id = %q, want gpt", pc.RouteModelID)
+		}
+		if pc.ModelID != "gpt-4.1" {
+			t.Fatalf("model id = %q, want gpt-4.1", pc.ModelID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(doc)
+	}))
+	defer server.Close()
+
+	c := New(server.Client(), server.URL)
+	err := c.UpsertEndpoint(context.Background(), EndpointData{Name: "test-ws", ProviderConfigs: []ProviderConfigData{{ProviderSpec: "openai_compatible", RouteModelID: "gpt", ModelID: "gpt-4.1", TargetRank: 2, TargetWeight: 4}}})
+	if err != nil {
+		t.Fatalf("UpsertEndpoint returned error: %v", err)
+	}
+}
+
 func TestListEndpoints_ReadsEndpointList(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +82,7 @@ func TestListEndpoints_ReadsEndpointList(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(endpointListDocument{Endpoints: []endpointDocument{
 			{Name: "alpha", ProviderConfigs: []providerConfigDocument{
-				{Ref: "cfg-1", ProviderSpec: "openai", ModelID: "gpt-4", TargetRank: intPtr(2), TargetWeight: intPtr(4)},
+				{Ref: "cfg-1", ProviderSpec: "openai", RouteModelID: "gpt", ModelID: "gpt-4", TargetRank: intPtr(2), TargetWeight: intPtr(4)},
 			}},
 			{Name: "beta"},
 		}})
@@ -76,6 +108,12 @@ func TestListEndpoints_ReadsEndpointList(t *testing.T) {
 	}
 	if got := eps[0].ProviderConfigs[0].TargetWeight; got != 4 {
 		t.Fatalf("target weight = %d, want 4", got)
+	}
+	if got := eps[0].ProviderConfigs[0].RouteModelID; got != "gpt" {
+		t.Fatalf("route model id = %q, want gpt", got)
+	}
+	if got := eps[0].ProviderConfigs[0].ModelID; got != "gpt-4" {
+		t.Fatalf("model id = %q, want gpt-4", got)
 	}
 	if len(eps[1].ProviderConfigs) != 0 {
 		t.Fatalf("beta providers = %d, want 0", len(eps[1].ProviderConfigs))
@@ -112,6 +150,12 @@ func TestGetEndpoint_ReadsSingleEndpoint(t *testing.T) {
 	}
 	if len(ep.ProviderConfigs) != 1 {
 		t.Fatalf("providers = %d, want 1", len(ep.ProviderConfigs))
+	}
+	if got := ep.ProviderConfigs[0].RouteModelID; got != "" {
+		t.Fatalf("route model id = %q, want empty", got)
+	}
+	if got := ep.ProviderConfigs[0].ModelID; got != "gpt-4" {
+		t.Fatalf("model id = %q, want gpt-4", got)
 	}
 }
 

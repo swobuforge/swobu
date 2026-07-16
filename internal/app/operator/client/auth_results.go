@@ -30,3 +30,20 @@ type AuthSessionRetryResult struct {
 	ExpiresAt    string
 	State        string
 }
+
+// ModelCatalogResult is the response from GET /_swobu/model-catalog.
+type ModelCatalogResult struct {
+	Deployments              []ModelCatalogDeployment `json:"deployments,omitempty"`
+	Error                    string                   `json:"error,omitempty"`
+	ResolvedProviderProtocol string                   `json:"resolved_provider_protocol,omitempty"`
+}
+
+// ModelCatalogDeployment is one deployment returned by the catalog probe.
+type ModelCatalogDeployment struct {
+	Name                    string `json:"name"`
+	ModelName               string `json:"model_name"`
+	ModelPublisher          string `json:"model_publisher,omitempty"`
+	ModelVersion            string `json:"model_version,omitempty"`
+	Family                  string `json:"family,omitempty"`
+	DefaultProviderProtocol string `json:"default_provider_protocol,omitempty"`
+}

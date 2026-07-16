@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/machine"
+	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -42,7 +43,6 @@ func runExchangeWithMachine(
 	reg.Register(requestEncodedReduce)
 	reg.Register(ingressReceivedReduce)
 	reg.Register(envelopeDecodedReduce)
-	reg.Register(continuationCapturedReduce)
 	reg.Register(pipelineCompletedReduce)
 
 	eng := machine.NewEngine(reg)
@@ -58,8 +58,6 @@ func runExchangeWithMachine(
 			return runRunnerInterpret(c, store, cmd, runner)
 		case DecodeProviderEnvelopeAction:
 			return runRunnerInterpret(c, store, cmd, runner)
-		case CaptureContinuationAction:
-			return runRunnerInterpret(c, store, cmd, runner)
 		case EncodeClientOutputAction:
 			return runRunnerInterpret(c, store, cmd, runner)
 		case recordEvidence:
@@ -68,6 +66,14 @@ func runExchangeWithMachine(
 			return nil, nil
 		}
 	})
+
+	if err := validateReplayRuntime(runner); err != nil {
+		return TransportResponse{}, RoutableTarget{}, err
+	}
+	replayInfo, err := allocateReplayState(ctx, exchangeID, runner.ResponseIDs)
+	if err != nil {
+		return TransportResponse{}, RoutableTarget{}, err
+	}
 
 	store := machine.NewStore(
 		machine.StateCell{Value: reflect.ValueOf(exchangeState{
@@ -82,15 +88,15 @@ func runExchangeWithMachine(
 		// Seed empty runner state cells so the store can assemble composite
 		// states that reference them.
 		machine.StateCell{Value: reflect.ValueOf(ExchangeInput{})},
+		machine.StateCell{Value: reflect.ValueOf(replayInfo)},
 		machine.StateCell{Value: reflect.ValueOf(CodecsResolvedEvent{})},
 		machine.StateCell{Value: reflect.ValueOf(EncodedRequestState{})},
 		machine.StateCell{Value: reflect.ValueOf(ProviderResponseState{})},
 		machine.StateCell{Value: reflect.ValueOf(DecodedEnvelopeState{})},
-		machine.StateCell{Value: reflect.ValueOf(continuationContextState{})},
 		machine.StateCell{Value: reflect.ValueOf(pipelineOutcomeState{})},
 	)
 
-	_, err := eng.Run(ctx, store, RoutePlannedEvent{})
+	_, err = eng.Run(ctx, store, RoutePlannedEvent{})
 
 	var outcome outcomeState
 	_ = store.Get(&outcome)
@@ -235,8 +241,7 @@ func terminalSuccess(s struct {
 // handleSendProvider seeds the runner pipeline: it reads routing state,
 // builds the ExchangeInput and outcome.Target, and emits pipelineStarted.
 // On path-build failure it emits providerFailed directly.
-// It also prepares continuation (materializes stored history) when the
-// selected target requires it.
+// It also prepares replay materialization when the selected target requires it.
 func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner) ([]machine.Event, error) {
 	var exchange exchangeState
 	if err := store.Get(&exchange); err != nil {
@@ -245,6 +250,13 @@ func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner
 	var attempt attemptState
 	if err := store.Get(&attempt); err != nil {
 		return nil, err
+	}
+	if err := validateReplayRuntime(runner); err != nil {
+		var outcome outcomeState
+		_ = store.Get(&outcome)
+		outcome.Err = canonical.InternalError(err.Error())
+		store.Put(reflect.TypeOf(outcome), reflect.ValueOf(outcome))
+		return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: outcome.Err})}, nil
 	}
 
 	providerConfig := findProviderConfig(exchange.Endpoint, attempt.Current.Target.ID)
@@ -273,31 +285,30 @@ func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner
 		return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: err})}, nil
 	}
 
-	// Prepare continuation: materialize stored history for non-native targets,
-	// or validate native continuation safety for Responses targets.
+	// Prepare replay: materialise native replay from store when present.
 	request := pathRecord.Request
-	if runner.ContinuationStore != nil {
-		runtime := canonical.NewContinuationRuntime(runner.ContinuationStore)
-		namespace := canonical.NewContinuationNamespace(exchange.Endpoint.Name().String())
-		preparedRequest, prepErr := runtime.PrepareRequest(ctx, namespace, pathRecord.ProtocolKind, pathRecord.Request)
-		if prepErr != nil {
-			var outcome outcomeState
-			_ = store.Get(&outcome)
-			outcome.Err = prepErr
-			store.Put(reflect.TypeOf(outcome), reflect.ValueOf(outcome))
-			return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: prepErr})}, nil
-		}
-		request = preparedRequest
-		store.Put(reflect.TypeOf(continuationContextState{}), reflect.ValueOf(continuationContextState{
-			Namespace: namespace,
-		}))
+	var nativeReplay *replay.NativeRef
+	var replayScope replay.Scope
+	replayScope = unsafeLocalReplayScope(exchange.Endpoint.Name().String())
+	targetKey := replayTargetKey(pathRecord.Target, pathRecord.ProtocolKind, pathRecord.Request.Model())
+	preparedRequest, native, prepErr := replay.Prepare(ctx, runner.ReplayStore, replayScope, targetKey, pathRecord.Request)
+	if prepErr != nil {
+		var outcome outcomeState
+		_ = store.Get(&outcome)
+		outcome.Err = prepErr
+		store.Put(reflect.TypeOf(outcome), reflect.ValueOf(outcome))
+		return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: prepErr})}, nil
 	}
+	request = preparedRequest
+	nativeReplay = native
 
 	input := ExchangeInput{
 		ExchangeID:       exchange.ExchangeID,
 		ClientFamily:     exchange.ClientFamily,
 		ClientDelivery:   exchange.ClientDelivery,
 		Request:          request,
+		ReplayScope:      replayScope,
+		NativeReplay:     nativeReplay,
 		Target:           pathRecord.Target,
 		Contract:         NewExecutionContract(exchange.ClientDelivery).WithProviderDelivery(pathRecord.ProviderDelivery),
 		ProviderProtocol: pathRecord.ProtocolKind,

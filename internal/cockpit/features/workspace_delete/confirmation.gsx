@@ -6,6 +6,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type DeleteFunc func(context.Context, ports.DeleteWorkspaceRequest) error
@@ -20,53 +21,71 @@ const (
 )
 
 type ConfirmationView struct {
-	Workspace   readmodel.WorkspaceReadModel
-	Phase       *tui.State[Phase]
-	WorkspaceID *tui.State[readmodel.WorkspaceID]
-	Error       *tui.State[string]
-	Delete      DeleteFunc
-	OnDeleted   func(readmodel.WorkspaceID)
+	Workspace readmodel.WorkspaceReadModel
+	Phase     *tui.State[Phase]
+	// PendingDeleteWorkspaceID is the local confirmation target. It survives the
+	// arm -> confirm flow so the feature can delete the armed workspace even if
+	// the parent snapshot rerenders underneath it.
+	PendingDeleteWorkspaceID *tui.State[readmodel.WorkspaceID]
+	Error                    *tui.State[string]
+	Delete                   DeleteFunc
+	OnDeleted                func(readmodel.WorkspaceID)
+	// OnArm is called when the confirmation opens. Sink state here so the
+	// parent can track that a cancellation is pending without holding a
+	// persistent child reference.
+	OnArm func(readmodel.WorkspaceID)
+	// OnCancel is called before Close on Escape/Back so the parent can clear
+	// its own pending-delete state in the same render cycle.
+	OnCancel func(readmodel.WorkspaceID)
 }
 
 func Confirmation(workspace readmodel.WorkspaceReadModel, delete DeleteFunc, onDeleted func(readmodel.WorkspaceID)) *ConfirmationView {
 	return &ConfirmationView{
-		Workspace:   workspace,
-		Phase:       tui.NewState(PhaseClosed),
-		WorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
-		Error:       tui.NewState(""),
-		Delete:      delete,
-		OnDeleted:   onDeleted,
+		Workspace:               workspace,
+		Phase:                   tui.NewState(PhaseClosed),
+		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
+		Error:                   tui.NewState(""),
+		Delete:                  delete,
+		OnDeleted:               onDeleted,
 	}
 }
 
 func (c *ConfirmationView) Request(workspaceID readmodel.WorkspaceID) {
-	c.WorkspaceID.Set(workspaceID)
+	c.PendingDeleteWorkspaceID.Set(workspaceID)
 	c.Error.Set("")
 	c.Phase.Set(PhaseConfirming)
+	if c.OnArm != nil {
+		c.OnArm(workspaceID)
+	}
 }
 
 func (c *ConfirmationView) Back() bool {
 	if !c.IsOpen() {
 		return false
 	}
-	c.Close()
+	c.Cancel()
 	return true
 }
 
+func (c *ConfirmationView) Cancel() {
+	if c.OnCancel != nil {
+		c.OnCancel(c.PendingDeleteWorkspaceID.Get())
+	}
+	c.Close()
+}
+
 func (c *ConfirmationView) KeyMap() tui.KeyMap {
-	if !c.IsOpen() {
-		return nil
-	}
-	return tui.KeyMap{
-		tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { c.Back() }),
-	}
+	return nil
 }
 
 func (c *ConfirmationView) Confirm(ctx context.Context) {
 	if !c.IsOpen() {
 		return
 	}
-	id := c.WorkspaceID.Get()
+	id := c.PendingDeleteWorkspaceID.Get()
+	// If the confirmation was armed from a fresh snapshot, the local state may
+	// still be empty. Fall back to the parent snapshot rather than failing the
+	// delete request.
 	if id == "" {
 		id = c.Workspace.ID
 	}
@@ -107,8 +126,8 @@ func (c *ConfirmationView) Activate() {
 }
 
 func (c *ConfirmationView) confirmationSlug() string {
-	if c.WorkspaceID.Get() != "" {
-		return string(c.WorkspaceID.Get())
+	if c.PendingDeleteWorkspaceID.Get() != "" {
+		return string(c.PendingDeleteWorkspaceID.Get())
 	}
 	return c.Workspace.Slug
 }
@@ -127,14 +146,23 @@ func (c *ConfirmationView) ActionLabel() string {
 	return "delete ↵"
 }
 
+func ConfirmationRowComponent(c *ConfirmationView) *ui.SelectableRow {
+	id := "workspace-delete"
+	if c.Workspace.ID != "" {
+		id += ":" + string(c.Workspace.ID)
+	} else if c.Workspace.Slug != "" {
+		id += ":" + c.Workspace.Slug
+	}
+	row := ui.NewSelectableRow(id, "delete", c.RowValue(), c.ActionLabel(), c.Activate)
+	if c.IsOpen() {
+		row.OnCancel = c.Cancel
+	}
+	return row
+}
+
 templ (c *ConfirmationView) Render() {
-	<div class="flex-col w-full" deps={c.Phase, c.WorkspaceID, c.Error}>
-		<div class="flex-row w-full focusable" onActivate={c.Activate}>
-			<span class="w-5"></span>
-			<span class="w-18">delete</span>
-			<span class="w-36">{c.RowValue()}</span>
-			<span>{c.ActionLabel()}</span>
-		</div>
+	<div class="flex-col w-full" deps={c.Phase, c.PendingDeleteWorkspaceID, c.Error}>
+		@ConfirmationRowComponent(c)
 		if c.Error.Get() != "" {
 			<div class="flex-row w-full">
 				<span class="w-9"></span>

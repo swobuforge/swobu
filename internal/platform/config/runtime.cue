@@ -20,6 +20,7 @@ endpoints: *[] | [...#Endpoint]
 	provider_spec!: string
 	base_url?: string
 	credential_ref?: string
+	route_model_id?: string
 	model_id?: string
 	target_alias?: string
 	target_rank?: int & >=1

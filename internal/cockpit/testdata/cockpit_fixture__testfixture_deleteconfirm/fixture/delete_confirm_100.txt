@@ -1,15 +1,15 @@
 SWOBU    [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
-     slug              dev                           edit ↵
-     client base URL   http://127.0.0.1:7926/c/dev         copy ↵
-     run once          Codex                               open ↵
+     endpoint          http://127.0.0.1:7926/c/dev         copy ↵
+                       OpenAI · Anthropic
+     slug              dev                                 edit ↵
      delete            delete dev?                         confirm ↵
 
-  routes ▾
-     gpt               default · 2 targets                 expand ↵
+  model routes ▾
+     gpt               default · 2 fallback steps          expand ↵
      local             1 target                            expand ↵
-     add route                                             add ↵
+     add model route                                       add ↵
 
   activity ▾
      latest            no requests yet

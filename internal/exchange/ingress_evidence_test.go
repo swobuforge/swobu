@@ -112,6 +112,39 @@ func testIngressSinglePathEndpoint(t *testing.T, selectedRef string) endpointint
 	return testIngressEndpointWithPaths(t, []string{selectedRef}, selectedRef)
 }
 
+func testIngressEndpointWithRouteModel(t *testing.T, routeModelID, providerModelID string) endpointintent.Endpoint {
+	t.Helper()
+	name, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	ref, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://a.test/v1", "cred-a")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	cfg, err = cfg.WithRouteModelID(routeModelID)
+	if err != nil {
+		t.Fatalf("WithRouteModelID returned error: %v", err)
+	}
+	cfg, err = cfg.WithModelID(providerModelID)
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+	return endpoint
+}
+
 func testIngressEndpointWithPaths(t *testing.T, refs []string, selectedRef string) endpointintent.Endpoint {
 	t.Helper()
 	name, err := endpointintent.ParseEndpointName("alpha")
@@ -128,7 +161,7 @@ func testIngressEndpointWithPaths(t *testing.T, refs []string, selectedRef strin
 		if err != nil {
 			t.Fatalf("ParseProviderConfigRef(%s) returned error: %v", refName, err)
 		}
-		cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "")
+		cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "cred-"+refName)
 		if err != nil {
 			t.Fatalf("NewProviderConfig(%s) returned error: %v", refName, err)
 		}

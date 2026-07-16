@@ -12,7 +12,6 @@ import (
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/observation"
@@ -24,15 +23,13 @@ func buildDaemonServeMux(
 	runtimeCfg config.RuntimeConfig,
 	runtime daemonProviderModelCatalogComposition,
 	trafficEventSink observation.TrafficEventSink,
-	continuationStore canonical.ContinuationStore,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeIngress := exchange.NewIngress(
 		daemon.endpoints,
 		runtime,
 		exchange.RuntimePoliciesSpec{
-			TrafficEventSink:  trafficEventSink,
-			ContinuationStore: continuationStore,
+			TrafficEventSink: trafficEventSink,
 		},
 	)
 	mux := http.NewServeMux()

@@ -124,6 +124,41 @@ func TestProviderConfig_TargetRankWeightValidation(t *testing.T) {
 	}
 }
 
+func TestProviderConfig_RouteModelIDProjection(t *testing.T) {
+	ref, err := ParseProviderConfigRef("cfg-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	cfg, err := NewProviderConfig(ref, spec, "https://example.test/v1", "cred-1")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	cfg, err = cfg.WithModelID("gpt-4.1")
+	if err != nil {
+		t.Fatalf("WithModelID returned error: %v", err)
+	}
+	if got, want := cfg.RouteModelID(), "gpt-4.1"; got != want {
+		t.Fatalf("route model fallback = %q, want %q", got, want)
+	}
+	if got, want := projectedRouteModelID(cfg), "gpt-4.1"; got != want {
+		t.Fatalf("projected route model = %q, want %q", got, want)
+	}
+	cfg, err = cfg.WithRouteModelID("  gpt  ")
+	if err != nil {
+		t.Fatalf("WithRouteModelID returned error: %v", err)
+	}
+	if got, want := cfg.RouteModelID(), "gpt"; got != want {
+		t.Fatalf("route model id = %q, want %q", got, want)
+	}
+	if got, want := projectedRouteModelID(cfg), "gpt"; got != want {
+		t.Fatalf("projected route model = %q, want %q", got, want)
+	}
+}
+
 func TestProviderConfig_DerivesProtocolFromProviderSpec(t *testing.T) {
 	ref, err := ParseProviderConfigRef("cfg-anthropic")
 	if err != nil {

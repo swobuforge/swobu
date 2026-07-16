@@ -2,10 +2,13 @@ package cockpit
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 // ModelReloader owns the refresh policy after workspace mutations. It loads
@@ -31,23 +34,26 @@ func NewModelReloader(ctx context.Context, query ports.WorkspaceQueries, timeout
 }
 
 // RefreshAfterSave loads a fresh cockpit projection after a workspace save.
-// It returns the reconciled model and a notice. When the daemon is
-// unreachable, it patches the current model in place and reports a stale
-// notice so the UI does not silently hide the mutation.
+// It returns the reconciled model and a notice. Draft-to-existing promotion
+// stays local because the daemon does not own that transition yet, but the
+// promoted workspace still gets the derived launch affordances the daemon
+// projection would normally supply. When the daemon is unreachable for ordinary
+// saves, it patches the current model in place and reports a stale notice so
+// the UI does not silently hide the mutation.
 func (r *ModelReloader) RefreshAfterSave(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) (readmodel.CockpitReadModel, readmodel.Notice) {
-	if r.query == nil {
-		return selectWorkspace(updateWorkspaceInModel(current, saved), saved.ID), readmodel.Notice{}
+	if r.query == nil || current.SelectedWorkspace.IsDraft() {
+		return r.localSaveProjection(current, saved), readmodel.Notice{}
 	}
 	ctx, cancel := r.refreshContext()
 	defer cancel()
 	fresh, err := r.query.LoadCockpit(ctx)
 	if err != nil {
-		return selectWorkspace(updateWorkspaceInModel(current, saved), saved.ID),
+		return r.localSaveProjection(current, saved),
 			staleRefreshNotice("refresh stale: saved workspace shown; " + err.Error())
 	}
 	workspace, workspaceErr := r.query.LoadWorkspace(ctx, saved.ID)
 	if workspaceErr != nil {
-		workspace = saved
+		workspace = mergeWorkspaceProjection(current.SelectedWorkspace, saved)
 		return selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID),
 			staleRefreshNotice("refresh stale: saved workspace shown; " + workspaceErr.Error())
 	}
@@ -77,4 +83,88 @@ func (r *ModelReloader) refreshContext() (context.Context, context.CancelFunc) {
 		base = context.Background()
 	}
 	return context.WithTimeout(base, r.timeout)
+}
+
+// localSaveProjection promotes a saved workspace into the current cockpit
+// model without querying the daemon. Draft create uses this path because the
+// workspace tab is still local when the first save completes, but the promoted
+// workspace still needs a usable client base URL and run-command projection so
+// the operator can launch immediately.
+func (r *ModelReloader) localSaveProjection(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
+	merged := mergeWorkspaceProjection(current.SelectedWorkspace, saved)
+	if merged.ClientBaseURL == "" {
+		merged.ClientBaseURL = derivedClientBaseURL(current, merged.Slug)
+	}
+	if len(merged.RunCommands) == 0 && merged.ClientBaseURL != "" {
+		merged.RunCommands = runCommandsForBaseURL(merged.ClientBaseURL)
+	}
+	return selectWorkspace(updateWorkspaceInModel(current, merged), saved.ID)
+}
+
+func derivedClientBaseURL(current readmodel.CockpitReadModel, slug string) string {
+	slug = strings.TrimSpace(slug) // swobu:io-string source=boundary
+	if slug == "" {
+		return ""
+	}
+	for _, candidate := range []string{
+		strings.TrimSpace(current.SelectedWorkspace.ClientBaseURL), // swobu:io-string source=boundary
+		strings.TrimSpace(current.HeaderRight),                     // swobu:io-string source=boundary
+	} {
+		if candidate == "" || !strings.Contains(candidate, "://") {
+			continue
+		}
+		if i := strings.LastIndex(candidate, "/c/"); i >= 0 {
+			return candidate[:i+len("/c/")] + slug
+		}
+		return strings.TrimRight(candidate, "/") + "/c/" + slug
+	}
+	return "http://127.0.0.1:7926/c/" + slug
+}
+
+func runCommandsForBaseURL(baseURL string) []readmodel.RunCommandReadModel {
+	profiles := clientprofile.Catalog()
+	commands := make([]readmodel.RunCommandReadModel, 0, len(profiles))
+	for _, profile := range profiles {
+		identity := profile.Identity()
+		actions := profile.Actions(baseURL)
+		if len(actions) == 0 {
+			continue
+		}
+		action := actions[0]
+		commands = append(commands, readmodel.RunCommandReadModel{
+			ID:             readmodel.RunCommandID(identity.ID),
+			ClientID:       readmodel.ClientID(identity.ID),
+			Label:          identity.Label,
+			CommandName:    identity.ID,
+			TargetRouteID:  readmodel.RouteID(exchange.PublicModelIDSwobu),
+			TargetLabel:    exchange.PublicModelIDSwobu,
+			Effect:         readmodel.RunCommandOpensClient,
+			CommandPreview: action.Content,
+		})
+	}
+	return commands
+}
+
+func mergeWorkspaceProjection(current readmodel.WorkspaceReadModel, saved readmodel.WorkspaceReadModel) readmodel.WorkspaceReadModel {
+	merged := current
+	if saved.ID != "" {
+		merged.ID = saved.ID
+	}
+	if saved.Slug != "" {
+		merged.Slug = saved.Slug
+	}
+	merged.State = saved.State
+	if saved.ClientBaseURL != "" {
+		merged.ClientBaseURL = saved.ClientBaseURL
+	}
+	if len(merged.RunCommands) == 0 && len(saved.RunCommands) > 0 {
+		merged.RunCommands = saved.RunCommands
+	}
+	if len(merged.Routes) == 0 && len(saved.Routes) > 0 {
+		merged.Routes = saved.Routes
+	}
+	if merged.Activity.IsEmpty() && !saved.Activity.IsEmpty() {
+		merged.Activity = saved.Activity
+	}
+	return merged
 }

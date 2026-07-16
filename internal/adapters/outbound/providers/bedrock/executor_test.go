@@ -20,6 +20,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolKind) exchange.RoutableTarget {
@@ -45,7 +46,7 @@ func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind
 	if codec == nil {
 		t.Fatalf("provider request encoder missing for protocol %s", kind)
 	}
-	wireRequestResult, err := codec.EncodeProviderRequestDocument(request, providerDelivery, "")
+	wireRequestResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, providerDelivery, "")
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}
@@ -589,7 +590,7 @@ func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *t
 	if codec == nil {
 		t.Fatal("provider request encoder missing for messages")
 	}
-	wireRequestResult, err := codec.EncodeProviderRequestDocument(request, delivery.BufferedDelivery(), "")
+	wireRequestResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "")
 	if err != nil {
 		t.Fatalf("encode provider request document: %v", err)
 	}

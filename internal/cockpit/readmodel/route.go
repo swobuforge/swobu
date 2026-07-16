@@ -17,7 +17,6 @@ type RouteReadModel struct {
 	ID          RouteID
 	ModelName   string
 	State       RouteState
-	PlanKind    RoutePlanKind
 	Default     bool
 	Enabled     bool
 	Targets     []TargetReadModel
@@ -31,31 +30,21 @@ type RouteState int
 const (
 	RouteNormal RouteState = iota
 	RouteDisabled
-	RouteIncomplete
 	RouteBlocked
 	RouteDegraded
 )
 
-// RoutePlanKind describes the target plan shape without exposing domain
-// routing internals to section renderers.
-type RoutePlanKind int
-
-const (
-	RoutePlanSingle RoutePlanKind = iota
-	RoutePlanRanked
-	RoutePlanWeighted
-)
-
 // TargetReadModel is the expanded route target detail shown under a route row.
 type TargetReadModel struct {
-	ID            TargetID
-	Name          string
-	Provider      string
-	Model         string
-	BaseURL       string
-	CredentialRef string
-	Rank          int
-	Weight        int
+	ID               TargetID
+	Name             string
+	Provider         string
+	Model            string
+	ProviderProtocol string
+	BaseURL          string
+	CredentialRef    string
+	Rank             int
+	Weight           int
 }
 
 // RouteDiagnosticReadModel is a typed exceptional-state detail for a route.
@@ -79,25 +68,69 @@ const (
 
 // IsClientVisible reports the design-system rule for routes visible to clients.
 func (r RouteReadModel) IsClientVisible() bool {
-	return r.Enabled && r.State != RouteIncomplete && len(r.Targets) > 0
+	return r.Enabled && len(r.Targets) > 0
+}
+
+// StepCount returns the number of distinct ranks (steps) in the route.
+// Targets with the same Rank are part of the same step.
+func (r RouteReadModel) StepCount() int {
+	seen := make(map[int]struct{})
+	for _, t := range r.Targets {
+		seen[t.Rank] = struct{}{}
+	}
+	return len(seen)
+}
+
+// HasBalancedStep reports whether any step has more than one target.
+func (r RouteReadModel) HasBalancedStep() bool {
+	counts := make(map[int]int)
+	for _, t := range r.Targets {
+		counts[t.Rank]++
+		if counts[t.Rank] > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // RowValue derives the bounded route row value used by Cockpit sections.
+// Grammar is mechanical per the structural model route RFC:
+//
+//	targets == 0                     → "incomplete · no targets"
+//	steps == 1 && targets == 1       → "1 target"
+//	steps == 1 && targets > 1        → "N balanced targets"
+//	steps > 1 && one target/step     → "N fallback steps"
+//	steps > 1                         → "N steps · M targets"
 func (r RouteReadModel) RowValue() string {
+	targets := len(r.Targets)
+	steps := r.StepCount()
+
+	var base string
+	switch {
+	case targets == 0:
+		base = "incomplete · no targets"
+	case steps == 1 && targets == 1:
+		base = "1 target"
+	case steps == 1 && targets > 1:
+		base = fmt.Sprintf("%d balanced targets", targets)
+	case steps > 1 && !r.HasBalancedStep():
+		base = fmt.Sprintf("%d fallback steps", steps)
+	default:
+		base = fmt.Sprintf("%d steps · %d targets", steps, targets)
+	}
+
 	switch r.State {
-	case RouteIncomplete:
-		return "incomplete · no targets"
 	case RouteBlocked:
-		return routePlanLabel(r.PlanKind, len(r.Targets)) + " · blocked " + r.primaryDiagnosticLabel()
+		return base + " · blocked " + r.primaryDiagnosticLabel()
 	case RouteDegraded:
-		return routePlanLabel(r.PlanKind, len(r.Targets)) + " · degraded " + r.primaryDiagnosticLabel()
+		return base + " · degraded " + r.primaryDiagnosticLabel()
 	case RouteDisabled:
-		return routePlanLabel(r.PlanKind, len(r.Targets)) + " · disabled"
+		return base + " · disabled"
 	default:
 		if r.Default {
-			return "default · " + routePlanLabel(r.PlanKind, len(r.Targets))
+			return "default · " + base
 		}
-		return routePlanLabel(r.PlanKind, len(r.Targets))
+		return base
 	}
 }
 
@@ -124,22 +157,4 @@ func (r RouteReadModel) primaryDiagnosticLabel() string {
 	default:
 		return "unknown"
 	}
-}
-
-func targetCountLabel(n int) string {
-	switch n {
-	case 0:
-		return "no targets"
-	case 1:
-		return "1 target"
-	default:
-		return fmt.Sprintf("%d targets", n)
-	}
-}
-
-func routePlanLabel(kind RoutePlanKind, targets int) string {
-	if kind == RoutePlanWeighted && targets > 1 {
-		return fmt.Sprintf("%d weighted", targets)
-	}
-	return targetCountLabel(targets)
 }

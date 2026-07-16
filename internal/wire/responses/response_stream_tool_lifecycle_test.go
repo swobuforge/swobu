@@ -2,6 +2,7 @@ package responses
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -47,5 +48,50 @@ func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t 
 	}
 	if item.ToolUseID != "call_1" {
 		t.Fatalf("tool use id=%q, want call_1", item.ToolUseID)
+	}
+}
+
+func TestDecodeResponseStream_IgnoresDuplicateResponseCreated(t *testing.T) {
+	t.Parallel()
+
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_2\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
+
+	reader := decodeResponseStream(
+		carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))},
+		"ex_stream_duplicate_created",
+		nil,
+	)
+
+	starts := 0
+	for {
+		ev, err := reader.Next(context.Background())
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next returned error: %v", err)
+		}
+		if ev.Kind != canonical.EventEnvelopeStart {
+			continue
+		}
+		payload, ok := ev.Payload.(canonical.EnvelopeStartPayload)
+		if !ok {
+			t.Fatalf("start payload type = %T, want EnvelopeStartPayload", ev.Payload)
+		}
+		if payload.Kind != canonical.EnvResponse {
+			continue
+		}
+		starts++
+		if starts == 1 && ev.Meta.ResultID != "resp_1" {
+			t.Fatalf("response start result id = %q, want resp_1", ev.Meta.ResultID)
+		}
+		if starts > 1 {
+			t.Fatalf("duplicate response.created emitted %d response starts", starts)
+		}
+	}
+	if starts != 1 {
+		t.Fatalf("response start count = %d, want 1", starts)
 	}
 }

@@ -1,30 +1,34 @@
 // Part of testscreen family: surface=cockpit
 //
 // Package testkit provides deterministic rendering and fixture-backed assertion
-// for go-tui Cockpit components. It is the canonical proof lane for layout
-// fidelity before feature logic is added.
+// for go-tui Cockpit components.
 //
-// What works (component render):
-//   - RenderString(element, width, height) → string: deterministic output for
-//     fixture comparison.
-//   - RenderBuffer(element, width, height) → buf.View: for testscreen/assert
-//     spatial predicates (Text, TextRE, LeftOf, Below, etc.).
+// Canonical lane:
+//   - fixture/unit proof in `swobucli/opencore`
+//   - RenderMountedString(component, width, height) → string: deterministic
+//     mounted output for component fixture comparison.
+//   - RenderMountedBuffer(component, width, height) → buf.View: mounted output
+//     for testscreen/assert spatial predicates (Text, TextRE, LeftOf, Below,
+//     etc.).
+//   - RenderString/RenderBuffer remain available only for already-built inert
+//     element trees; Cockpit tests must not call component.Render(nil).
 //   - AssertVisual(name).Fixture(...).Normalize(...).Viewport(...).Now(t, snapshot)
 //     uses the same visual fixture config shape as PTY/e2e assertions and
 //     delegates comparison to testscreen/fixture.CompareSnapshot.
+//   - AssertFocusedFrame(frame, want) / AssertUnfocusedFrame(frame, want)
+//     capture the visible focus marker contract when the test already has the
+//     frame string.
+//   - AssertFocusVisible(t, harness, step, want) is the shared contract for
+//     proving that a focusable interaction changes the frame and renders the
+//     expected visible marker.
 //
-// What is deferred (app-loop limitation):
-//   - Full App lifecycle (event loop, keyboard dispatch, focus navigation) is
-//     approximated by seeded MockAppHarness, a testkit-only harness that mutates
-//     go-tui App internals with reflect and unsafe so cockpit app-loop behavior
-//     can be proven without a real PTY.
-//   - That harness is intentionally coupled to upstream App internals and must
-//     stay quarantined to this package. Loud drift tests in testkit must fail if
-//     go-tui changes the private App fields or mount shape the harness seeds.
-//     Use PTY/e2e only for binary-runtime claims the seeded mock app cannot
-//     prove.
-//   - This is an intentional boundary: component-render catches layout drift;
-//     MockAppHarness catches cockpit interaction drift; PTY/e2e catches shipped
-//     binary/runtime drift. Do not describe the harness as the full upstream
-//     app loop.
+// Non-canonical helper surface:
+//   - MockAppHarness is a quarantined debug harness that seeds go-tui App
+//     internals with reflect/unsafe.
+//   - It exists for local package probes and harness drift tests, not as the
+//     canonical Cockpit integration lane.
+//   - Cockpit root/page/section temporal proof now belongs in
+//     `swobucli/test/integration/ui`, where mounted production roots are driven
+//     under the integration lane contract.
+//   - PTY/e2e remains the shipped-binary/runtime lane.
 package testkit

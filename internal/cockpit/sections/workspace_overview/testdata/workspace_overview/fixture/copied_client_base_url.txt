@@ -1,8 +1,9 @@
   workspace ▾
-     slug              dev                           edit ↵
+     slug              dev                                 edit ↵
      client base URL   http://127.0.0.1:7926/c/dev         copied
      run once          Codex                               open ↵
      delete            workspace                           delete ↵
+
 
 
 

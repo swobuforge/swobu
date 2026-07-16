@@ -1,11 +1,11 @@
 package testkit
 
 import (
-	"fmt"
 	"reflect"
 	"unsafe"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 )
 
 // MockAppHarness is a lightweight, in-process interactive test fixture for go-tui
@@ -17,7 +17,9 @@ import (
 // App. It does not prove the full upstream app loop.
 //
 // Use MockAppHarness for temporal tests that need focus management or event dispatch.
-// For one-shot layout assertions, prefer RenderString / RenderBuffer.
+// For one-shot mounted component assertions, prefer RenderMountedString /
+// RenderMountedBuffer. Use RenderString / RenderBuffer only for already-built
+// inert element trees.
 type MockAppHarness struct {
 	app    *tui.App
 	reader *tui.MockEventReader
@@ -25,7 +27,7 @@ type MockAppHarness struct {
 
 // NewHarness creates an interactive test fixture for the given root component.
 func NewHarness(root tui.Component) (*MockAppHarness, error) {
-	app, reader, err := newHarnessApp(120, 40)
+	app, reader, err := mountedrender.NewApp(120, 40)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +40,7 @@ func NewHarness(root tui.Component) (*MockAppHarness, error) {
 // Component. It is useful when the production root (e.g., *Cockpit) renders via
 // WorkspacePage surface components and you only need the outer element tree.
 func NewFuncHarness(root *tui.Element) (*MockAppHarness, error) {
-	app, reader, err := newHarnessApp(120, 40)
+	app, reader, err := mountedrender.NewApp(120, 40)
 	if err != nil {
 		return nil, err
 	}
@@ -91,87 +93,6 @@ func (h *MockAppHarness) Close() {
 	}
 }
 
-func newHarnessApp(width, height int) (*tui.App, *tui.MockEventReader, error) {
-	app := &tui.App{}
-	reader := tui.NewMockEventReader()
-	terminal := tui.NewMockTerminal(width, height)
-	buffer := tui.NewBuffer(width, height)
-	stopCh := make(chan struct{})
-	inputEvents := make(chan tui.Event, 256)
-	updates := make(chan tui.Event, 256)
-	merged := make(chan tui.Event, 256)
-	watcherQueue := make(chan func(), 256)
-
-	if err := setAppField(app, "terminal", reflect.ValueOf(terminal)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "reader", reflect.ValueOf(reader)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "buffer", reflect.ValueOf(buffer)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "stopCh", reflect.ValueOf(stopCh)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "inputEvents", reflect.ValueOf(inputEvents)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "updates", reflect.ValueOf(updates)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "merged", reflect.ValueOf(merged)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "watcherQueue", reflect.ValueOf(watcherQueue)); err != nil {
-		return nil, nil, err
-	}
-	if err := setAppField(app, "mounts", newHarnessMountState()); err != nil {
-		return nil, nil, err
-	}
-
-	startHarnessUpdateBridge(app, stopCh, watcherQueue, updates, merged)
-
-	return app, reader, nil
-}
-
-func startHarnessUpdateBridge(
-	app *tui.App,
-	stopCh <-chan struct{},
-	watcherQueue <-chan func(),
-	updates <-chan tui.Event,
-	merged chan<- tui.Event,
-) {
-	go func() {
-		for {
-			select {
-			case fn := <-watcherQueue:
-				if fn == nil {
-					continue
-				}
-				app.QueueUpdate(fn)
-			case <-stopCh:
-				return
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case ev := <-updates:
-				select {
-				case merged <- ev:
-				case <-stopCh:
-					return
-				}
-			case <-stopCh:
-				return
-			}
-		}
-	}()
-}
-
 func newHarnessMountState() reflect.Value {
 	appType := reflect.TypeOf(tui.App{})
 	field, ok := appType.FieldByName("mounts")
@@ -190,25 +111,4 @@ func newHarnessMountState() reflect.Value {
 	}
 
 	return mounts
-}
-
-func setAppField(app *tui.App, name string, value reflect.Value) error {
-	rv := reflect.ValueOf(app)
-	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("tui.App must be a pointer to struct")
-	}
-
-	fv := rv.Elem().FieldByName(name)
-	if !fv.IsValid() {
-		return fmt.Errorf("tui.App missing field %q", name)
-	}
-	if !value.IsValid() {
-		value = reflect.Zero(fv.Type())
-	}
-	if !value.Type().AssignableTo(fv.Type()) {
-		return fmt.Errorf("field %q expects %s, got %s", name, fv.Type(), value.Type())
-	}
-
-	reflect.NewAt(fv.Type(), unsafe.Pointer(fv.UnsafeAddr())).Elem().Set(value)
-	return nil
 }
