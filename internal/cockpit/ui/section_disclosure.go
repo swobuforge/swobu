@@ -4,6 +4,9 @@ import tui "github.com/grindlemire/go-tui"
 
 // SectionDisclosure is a focusable, collapsible section header.
 // Sections mount it and read Expanded state to conditionally render children.
+//
+// Enter toggles expand/collapse. Escape collapses when the header is focused.
+// Escape from section children is handled by the containing section scope.
 type SectionDisclosure struct {
 	SelectBase
 	Label    string

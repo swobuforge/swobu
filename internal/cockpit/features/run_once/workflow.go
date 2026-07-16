@@ -227,7 +227,6 @@ func ModelOptionRowComponent(w *Workflow, idx int, route readmodel.RouteReadMode
 		w.ModelOptionActionLabel(),
 		func() { w.SelectModel(route.ID) },
 	)
-	row.ArrowPad = 2
 	row.AutoFocus = idx == 0 && w.IsPickerOpen()
 	return row
 }

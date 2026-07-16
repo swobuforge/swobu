@@ -1,8 +1,5 @@
->    slug              dev!                                invalid
-         use lowercase letters, numbers, and hyphens
-
-
-
+> slug              dev▌!                                                   invalid
+use lowercase letters, numbers, and hyphens
 
 
 

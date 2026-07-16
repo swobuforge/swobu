@@ -13,6 +13,8 @@ import (
 	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/platform/browser"
+	"github.com/swobuforge/swobu/internal/platform/clipboard"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -33,10 +35,15 @@ type operatorClient interface {
 // LiveOperatorAdapter implements Cockpit ports over the daemon operator control
 // plane. Endpoint intent is projected as one Cockpit workspace per endpoint.
 type LiveOperatorAdapter struct {
-	client     operatorClient
-	daemonURL  string
-	runCommand runCommandExecutor
-	commandIO  runCommandIOConfig
+	client           operatorClient
+	daemonURL        string
+	helpDocsURL      string
+	helpCommunityURL string
+	helpIssueURL     string
+	copyText         func(string) (bool, error)
+	openURL          func(string) error
+	runCommand       runCommandExecutor
+	commandIO        runCommandIOConfig
 }
 
 // NewLiveOperatorAdapter builds the daemon-backed Cockpit adapter.
@@ -46,13 +53,18 @@ func NewLiveOperatorAdapter(httpClient *http.Client, daemonURL string) *LiveOper
 	}
 	resolvedURL := config.ResolveDaemonURL(daemonURL)
 	adapter := &LiveOperatorAdapter{
-		client:    operatorclient.New(httpClient, resolvedURL),
-		daemonURL: strings.TrimRight(resolvedURL, "/"),
-		commandIO: processRunCommandIO(),
+		client:           operatorclient.New(httpClient, resolvedURL),
+		daemonURL:        strings.TrimRight(resolvedURL, "/"),
+		helpDocsURL:      "https://swobu.com/docs",
+		helpCommunityURL: "https://discord.gg/UejYpMGmw",
+		helpIssueURL:     "https://github.com/swobuforge/swobu/issues/new",
+		commandIO:        processRunCommandIO(),
 	}
 	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
 		return executeClientRunCommand(ctx, command, adapter.commandIO)
 	}
+	adapter.copyText = clipboard.TryWriteText
+	adapter.openURL = browser.Open
 	return adapter
 }
 
@@ -464,8 +476,12 @@ func (a *LiveOperatorAdapter) ResolveProviderSetup(ctx context.Context, req port
 	}
 
 	if setup.RequiresBaseURL {
-		setup.CredentialLabel = "enter base URL"
-		setup.BlockReason = "enter base URL"
+		fieldLabel := profile.ProviderSetupPrimaryFieldForSpec(spec)
+		if fieldLabel == "" {
+			fieldLabel = "base URL"
+		}
+		setup.CredentialLabel = "enter " + fieldLabel
+		setup.BlockReason = "enter " + fieldLabel
 		setup.ReadyForCatalog = false
 		return setup, nil
 	}
@@ -499,19 +515,19 @@ func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports
 	var deployments []readmodel.ModelDeploymentReadModel
 	for _, d := range result.Deployments {
 		deployments = append(deployments, readmodel.ModelDeploymentReadModel{
-			ID:                         d.Name,
-			Name:                       d.Name,
-			ModelName:                  d.ModelName,
-			ModelPublisher:             d.ModelPublisher,
-			ModelVersion:               d.ModelVersion,
-			Family:                     d.Family,
-			DefaultProviderProtocol:    d.DefaultProviderProtocol,
+			ID:                      d.Name,
+			Name:                    d.Name,
+			ModelName:               d.ModelName,
+			ModelPublisher:          d.ModelPublisher,
+			ModelVersion:            d.ModelVersion,
+			Family:                  d.Family,
+			DefaultProviderProtocol: d.DefaultProviderProtocol,
 		})
 	}
 	return readmodel.ModelCatalogReadModel{
-		Deployments: deployments,
+		Deployments:              deployments,
 		ResolvedProviderProtocol: result.ResolvedProviderProtocol,
-		Error: result.Error,
+		Error:                    result.Error,
 	}, nil
 }
 
@@ -526,11 +542,11 @@ func (a *LiveOperatorAdapter) StartAuthSession(ctx context.Context, req ports.St
 		return readmodel.AuthSessionReadModel{}, adapterFailure("start auth session", err)
 	}
 	return readmodel.AuthSessionReadModel{
-		ProviderSpec:  result.ProviderSpec,
-		SessionID:     result.SessionID,
-		AuthorizeURL:  result.AuthorizeURL,
-		UserCode:      result.UserCode,
-		State:         result.State,
+		ProviderSpec: result.ProviderSpec,
+		SessionID:    result.SessionID,
+		AuthorizeURL: result.AuthorizeURL,
+		UserCode:     result.UserCode,
+		State:        result.State,
 	}, nil
 }
 
@@ -564,11 +580,11 @@ func (a *LiveOperatorAdapter) RetryAuthSession(ctx context.Context, sessionID st
 		return readmodel.AuthSessionReadModel{}, adapterFailure("retry auth session", err)
 	}
 	return readmodel.AuthSessionReadModel{
-		ProviderSpec:  "",
-		SessionID:     result.SessionID,
-		AuthorizeURL:  result.AuthorizeURL,
-		UserCode:      result.UserCode,
-		State:         result.State,
+		ProviderSpec: "",
+		SessionID:    result.SessionID,
+		AuthorizeURL: result.AuthorizeURL,
+		UserCode:     result.UserCode,
+		State:        result.State,
 	}, nil
 }
 

@@ -9,12 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
@@ -96,31 +98,39 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 		return canonical.BadRequest("websocket request body is invalid JSON")
 	}
 	requestID := requestIDFromRequest(r)
+	timing := trafficevidence.NewUnknownTiming()
+	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
 		EndpointName:    endpoint,
 		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), r.Header, payload),
+		ClientHandler:   trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingWebSocket,
+		Timing:          &timing,
 		ExchangeID:      requestID,
 	})
 	if err != nil {
+		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
+		finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, err)
 		return err
 	}
-	return writeResponsesWebsocketSuccess(conn, requestID, out.Response)
+	writeErr := writeResponsesWebsocketSuccess(conn, requestID, out.Response, &timing)
+	finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, writeErr)
+	return writeErr
 }
 
-func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, response exchange.TransportResponse) error {
+func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, response exchange.TransportResponse, timing *trafficevidence.Timing) error {
 	if response.Transport.Header.Get("Content-Type") != "application/json" {
 		return canonical.UnsupportedDelivery("websocket responses require websocket-framed streaming output")
 	}
 	if response.Transport.Body == nil {
 		return canonical.InternalError("streaming client response is missing transport body")
 	}
-	return writeResponsesWebsocketStream(conn, requestID, response.Transport)
+	return writeResponsesWebsocketStream(conn, requestID, response.Transport, timing)
 }
 
-func writeResponsesWebsocketStream(conn *websocket.Conn, requestID string, response transportpkg.TransportResponse) error {
-	stats, err := drainWebsocketBodyWithStats(response.Body, websocketFrameSink{conn: conn})
+func writeResponsesWebsocketStream(conn *websocket.Conn, requestID string, response transportpkg.TransportResponse, timing *trafficevidence.Timing) error {
+	stats, err := drainWebsocketBodyWithStats(response.Body, &websocketFrameSink{conn: conn, timing: timing})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -139,7 +149,7 @@ func writeResponsesWebsocketStream(conn *websocket.Conn, requestID string, respo
 	return nil
 }
 
-func drainWebsocketBodyWithStats(body io.ReadCloser, sink websocketFrameSink) (streamDrainCounters, error) {
+func drainWebsocketBodyWithStats(body io.ReadCloser, sink *websocketFrameSink) (streamDrainCounters, error) {
 	defer func() { _ = body.Close() }()
 	stats := streamDrainCounters{}
 	hash := sha256.New()
@@ -167,10 +177,16 @@ func drainWebsocketBodyWithStats(body io.ReadCloser, sink websocketFrameSink) (s
 }
 
 type websocketFrameSink struct {
-	conn *websocket.Conn
+	conn      *websocket.Conn
+	timing    *trafficevidence.Timing
+	firstByte bool
 }
 
-func (s websocketFrameSink) WriteFrame(frame []byte) error {
+func (s *websocketFrameSink) WriteFrame(frame []byte) error {
+	if s.timing != nil && !s.firstByte && len(frame) > 0 {
+		s.timing.MarkFirstByte(time.Now())
+		s.firstByte = true
+	}
 	if err := websocket.Message.Send(s.conn, string(frame)); err != nil {
 		return canonical.InternalError("websocket response write failed")
 	}

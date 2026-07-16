@@ -1,0 +1,24 @@
+new target · OpenAI                                                                                                     
+  model                                                                                                                 
+  search            _                                                                                                   
+> GPT-4.1                                   select ↵                                                                    
+  GPT-4.1 Mini                                                                                                          
+  GPT-4o                                                                                                                
+  GPT-4o Mini                                                                                                           
+  GPT-4                                                                                                                 
+  GPT-3.5                                                                                                               
+  6 of 6 shown                                   ↑↓ search                                                              
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

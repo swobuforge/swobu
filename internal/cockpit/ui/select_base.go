@@ -20,9 +20,9 @@ func RowArrow(active bool) string {
 // rows. It embeds into struct components that participate in the go-tui focus
 // graph.
 //
-// Focus repair (restoring focus after a render change that orphaned the old
-// focus target) is handled by FocusTrap, not here. SelectBase only holds the
-// ref and local state that FocusTrap consumes.
+// Focus repair (restoring focus after a mount/update transition that orphaned
+// the old focus target) is handled by FocusTraversal, not here. SelectBase
+// only holds the ref and local state that FocusTraversal consumes.
 type SelectBase struct {
 	// TODO why do we need ID? should we remove it? Or go-tui uses it?
 	ID      string
@@ -50,15 +50,18 @@ func (b *SelectBase) OnBlur(el *tui.Element) {
 	b.focused.Set(false)
 }
 
-// IsFocused returns true if the referenced go-tui element is focused,
-// falling back to the local cache if the ref is not resolved.
+// IsFocused returns true if the component has been seeded as focused or if
+// the resolved go-tui element currently owns focus.
 func (b *SelectBase) IsFocused() bool {
+	if b.focused != nil && b.focused.Get() {
+		return true
+	}
 	if b.Ref != nil {
 		if el := b.Ref.El(); el != nil {
 			return el.IsFocused()
 		}
 	}
-	return b.focused.Get()
+	return false
 }
 
 // Arrow returns the shared selection marker for the current focus state.
@@ -83,9 +86,19 @@ func (b *SelectBase) FocusedState() *tui.State[bool] {
 	return b.focused
 }
 
-// Focus moves focus back to the referenced element using FocusTrap traversal.
+// Focus seeds the local marker and uses FocusTraversal to repair the app
+// focus graph. Call this on a one-shot mount/update transition, not from
+// Render or BindApp loops.
 func (b *SelectBase) Focus(app *tui.App) {
+	if b.focused != nil {
+		b.focused.Set(true)
+	}
 	FocusRefByTraversal(app, b.Ref)
+}
+
+// App returns the cached app handle, or nil if not bound.
+func (b *SelectBase) App() *tui.App {
+	return b.app
 }
 
 // BindApp wires the component's state to the app.

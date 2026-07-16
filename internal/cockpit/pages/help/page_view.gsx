@@ -108,6 +108,11 @@ func (v *PageView) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
 		tui.OnStop(tui.KeyUp, ui.MovePrev),
 		tui.OnStop(tui.KeyDown, ui.MoveNext),
+		tui.OnStop(tui.KeyEscape, func(event tui.KeyEvent) {
+			if app := event.App(); app != nil {
+				app.Stop()
+			}
+		}),
 	}
 }
 
@@ -132,19 +137,21 @@ templ (v *PageView) Render() {
 			<span>help</span>
 		</div>
 		<br />
-		@HelpRow("version", v.currentModel().VersionValue(), "")
-		<br />
-		<div key={helpActionRowKey("docs")} class="w-full">
-			@HelpActionRow("docs", v.currentModel().DocsValue(), linkAction(v.currentModel().DocsURL), func() { v.OpenDocs() })
-		</div>
-		<div key={helpActionRowKey("community")} class="w-full">
-			@HelpActionRow("community", v.currentModel().CommunityValue(), linkAction(v.currentModel().CommunityURL), func() { v.OpenCommunity() })
-		</div>
-		<div key={helpActionRowKey("issue")} class="w-full">
-			@HelpActionRow("issue", v.currentModel().IssueValue(), linkAction(v.currentModel().IssueURL), func() { v.OpenIssue() })
-		</div>
-		<div key={helpActionRowKey("diagnostics")} class="w-full">
-			@HelpActionRow("diagnostics", v.currentModel().DiagnosticsValue(), v.currentModel().DiagnosticsAction(), func() { v.CopyDiagnostics() })
+		<div class="ml-3 w-full">
+			@HelpRow("version", v.currentModel().VersionValue(), "")
+			<br />
+			<div key={helpActionRowKey("docs")} class="w-full">
+				@HelpActionRow("docs", v.currentModel().DocsValue(), linkAction(v.currentModel().DocsURL), func() { v.OpenDocs() })
+			</div>
+			<div key={helpActionRowKey("community")} class="w-full">
+				@HelpActionRow("community", v.currentModel().CommunityValue(), linkAction(v.currentModel().CommunityURL), func() { v.OpenCommunity() })
+			</div>
+			<div key={helpActionRowKey("issue")} class="w-full">
+				@HelpActionRow("issue", v.currentModel().IssueValue(), linkAction(v.currentModel().IssueURL), func() { v.OpenIssue() })
+			</div>
+			<div key={helpActionRowKey("diagnostics")} class="w-full">
+				@HelpActionRow("diagnostics", v.currentModel().DiagnosticsValue(), v.currentModel().DiagnosticsAction(), func() { v.CopyDiagnostics() })
+			</div>
 		</div>
 		<br />
 		<br />
@@ -153,7 +160,7 @@ templ (v *PageView) Render() {
 
 templ HelpRow(label string, value string, action string) {
 	<div class="flex-row w-full">
-		<span class="w-5"></span>
+		<span class="w-2"></span>
 		<span class="w-18">{label}</span>
 		<span class="w-36">{value}</span>
 		<span>{action}</span>

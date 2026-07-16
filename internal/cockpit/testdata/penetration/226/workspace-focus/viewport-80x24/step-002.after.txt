@@ -1,21 +1,21 @@
-SWOBU    [dev] [› lab] [+] [?]
+⛉ SWOBU                                                    [dev] [› lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────
 > workspace ▾
-     endpoint                                              copy ↵
-     slug              lab                                 edit ↵
-     delete            workspace                           delete ↵
+     endpoint                                                     copy ↵
+
+     slug              lab                                        edit ↵
+     delete            workspace                                  delete ↵
 
   model routes ▾
      (no routes)
-     add model route                                       add ↵
+     add model route                                              add ↵
 
   activity ▾
      latest            no requests yet
 
 
 ────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ open   F1 help   esc back
-
+↑↓ move   ↵ action   ? help   esc back   tab switch
 
 
 

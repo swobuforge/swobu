@@ -21,20 +21,22 @@ type DeleteRouteFunc func(context.Context, ports.DeleteRouteRequest) error
 // SectionView owns the mutable route section workflow and renders the route
 // list. RouteSectionState stays data-only; the section owns all behavior.
 type SectionView struct {
-	Model              readmodel.WorkspaceReadModel
-	Expanded           *tui.State[bool]
-	State              *RouteSectionState
-	RouteDraft         *route_add.Draft
-	RouteDetailRows    map[readmodel.RouteID]*RouteDetailRow
-	TargetStringRows   map[string]*TargetStringRow
-	TargetAddWorkflows map[readmodel.RouteID]*target_add.Workflow
-	SaveRoute          SaveRouteFunc
-	DeleteRoute        DeleteRouteFunc
-	SaveTarget         func(context.Context, ports.SaveTargetRequest) (readmodel.TargetReadModel, error)
-	DeleteTarget       func(context.Context, ports.DeleteTargetRequest) error
-	ListProviders      func(context.Context) ([]readmodel.ProviderOptionReadModel, error)
-	TargetSetupQueries ports.TargetSetupQueries
-	TargetAuthCommands ports.TargetAuthCommands
+	Model                readmodel.WorkspaceReadModel
+	Expanded             *tui.State[bool]
+	State                *RouteSectionState
+	RouteDraft           *route_add.Draft
+	RouteDetailRows      map[readmodel.RouteID]*RouteDetailRow
+	TargetStringRows     map[string]*TargetStringRow
+	TargetAddWorkflows   map[readmodel.RouteID]*target_add.Workflow
+	AddRouteRow          *ui.SelectableRow
+	addRouteFocusPending bool
+	SaveRoute            SaveRouteFunc
+	DeleteRoute          DeleteRouteFunc
+	SaveTarget           func(context.Context, ports.SaveTargetRequest) (readmodel.TargetReadModel, error)
+	DeleteTarget         func(context.Context, ports.DeleteTargetRequest) error
+	ListProviders        func(context.Context) ([]readmodel.ProviderOptionReadModel, error)
+	TargetSetupQueries   ports.TargetSetupQueries
+	TargetAuthCommands   ports.TargetAuthCommands
 }
 
 // SectionDraftRouteRowView renders the inline draft route input row.
@@ -66,6 +68,15 @@ func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *
 		section.DeleteTarget = commands.DeleteTarget
 	}
 	return section
+}
+
+// RequestAddRouteFocus seeds the add-route row until the mounted row owns the
+// focus graph and can clear the seed itself.
+func (s *SectionView) RequestAddRouteFocus() {
+	s.addRouteFocusPending = true
+	if s.AddRouteRow != nil {
+		s.AddRouteRow.AutoFocus = true
+	}
 }
 
 func (s *SectionView) KeyMap() tui.KeyMap {
@@ -382,11 +393,6 @@ func renumberSteps(route *readmodel.RouteReadModel) {
 }
 
 func (s *SectionView) Back() bool {
-	for _, wf := range s.TargetAddWorkflows {
-		if wf.IsOpen() && wf.Back() {
-			return true
-		}
-	}
 	if s.State.DeleteConfirmTarget.Get() != "" {
 		s.State.DeleteConfirmTarget.Set("")
 		return true
@@ -397,9 +403,6 @@ func (s *SectionView) Back() bool {
 	}
 	if s.State.AddTargetRoute.Get() != "" {
 		s.State.AddTargetRoute.Set("")
-		return true
-	}
-	if s.RouteDraft.Back() {
 		return true
 	}
 	if s.State.ExpandedRoute.Get() != "" {
@@ -813,17 +816,13 @@ func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target r
 	if len(stepTargets) > 1 {
 		value = value + " · " + sharePercent(target, stepTargets) + "%"
 	}
-	row := ui.NewSelectableRow(
+	return ui.NewSelectableRow(
 		targetMountKey(route, target),
 		value,
 		"",
 		"edit ↵",
 		func() { s.openTarget(target) },
 	)
-	// ArrowPad=5 gives visual indent 10, matching RFC target row position
-	// (2 spaces under step header at width 8, plus arrow cell).
-	row.ArrowPad = 5
-	return row
 }
 
 // targetsAtRank returns all targets sharing the same rank.
@@ -863,27 +862,41 @@ func routeMountKey(route readmodel.RouteReadModel) string { return "route:" + st
 
 // AddTargetRowComponent mounts an "add target" selectable row.
 func AddTargetRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
-	row := ui.NewSelectableRow(
+	return ui.NewSelectableRow(
 		addTargetMountKey(route),
 		"add target",
 		"",
 		"add ↵",
 		func() { s.AddTarget(route) },
 	)
-	// ArrowPad=3 gives visual indent 8, same as step/contract rows.
-	row.ArrowPad = 3
-	return row
 }
 
 // AddRouteRowComponent mounts an "add model route" selectable row.
 func AddRouteRowComponent(s *SectionView) *ui.SelectableRow {
-	return ui.NewSelectableRow(
-		addRouteMountKey(),
-		"add model route",
-		"",
-		"add ↵",
-		func() { s.addRoute() },
-	)
+	row := s.AddRouteRow
+	if row == nil {
+		row = ui.NewSelectableRow(
+			addRouteMountKey(),
+			"add model route",
+			"",
+			"add ↵",
+			func() { s.addRoute() },
+		)
+		s.AddRouteRow = row
+	}
+	row.Label = "add model route"
+	row.Value = ""
+	row.Action = "add ↵"
+	row.Activate = func() { s.addRoute() }
+
+	if s.addRouteFocusPending {
+		row.AutoFocus = true
+	}
+	if row.AutoFocus && row.IsFocused() {
+		s.addRouteFocusPending = false
+		row.AutoFocus = false
+	}
+	return row
 }
 
 // SectionDraftRouteRow mounts the inline draft route input row.

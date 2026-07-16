@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestSection_FocusableRowsFollowExpansion(t *testing.T) {
@@ -67,6 +68,41 @@ func TestAddTargetRow_ActivationRecordsLocalIntent(t *testing.T) {
 	}
 }
 
+func TestAddRouteRowComponent_PreservesRequestedFocusSeed(t *testing.T) {
+	section := Section(routeSectionModel(), nil)
+	section.RequestAddRouteFocus()
+
+	row := AddRouteRowComponent(section)
+	if row == nil {
+		t.Fatal("expected add route row")
+	}
+	if !row.AutoFocus {
+		t.Fatal("requested add route row should autofocus")
+	}
+
+	next := AddRouteRowComponent(section)
+	if next != row {
+		t.Fatal("add route row should be cached while the seed is pending")
+	}
+	if !next.AutoFocus {
+		t.Fatal("add route row autofocus seed should persist until focus lands")
+	}
+}
+
+func TestAddRouteRowComponent_AppLoopShowsRequestedFocus(t *testing.T) {
+	section := Section(routeSectionModel(), nil)
+	section.RequestAddRouteFocus()
+
+	h, err := testkit.NewHarness(section)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+
+	h.Open()
+	testkit.AssertFocusedFrame(t, h.Frame(), "> add model route")
+}
+
 func TestAddTargetOpen_RendersInlineWorkflowHeader(t *testing.T) {
 	section := Section(routeSectionModel(), fakeRouteCommands{})
 	section.ListProviders = func(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
@@ -83,8 +119,14 @@ func TestAddTargetOpen_RendersInlineWorkflowHeader(t *testing.T) {
 
 	rendered := testkit.RenderMountedTrimmed(t, section, 220, 20)
 	assertSubstringsInOrder(t, rendered, "name", "client sends", "step 1", "openai/gpt-4.1", "step 2", "anthropic/claude-sonnet", "add target")
-	if strings.Contains(rendered, "base URL") || strings.Contains(rendered, "credential") || strings.Contains(rendered, "provider/model") || strings.Contains(rendered, "model _") {
-		t.Fatalf("provider picker should not leak provider-setup or raw input rows:\n%s", rendered)
+	expectedOpenAI := "OpenAI · " + profile.ProviderSetupFieldSummaryForSpec("openai")
+	expectedOpenRouter := "OpenRouter · " + profile.ProviderSetupFieldSummaryForSpec("openrouter")
+	expectedOpenAICompatible := "OpenAI Compatible · " + profile.ProviderSetupFieldSummaryForSpec("openai_compatible")
+	if !strings.Contains(rendered, expectedOpenAI) || !strings.Contains(rendered, expectedOpenRouter) || !strings.Contains(rendered, expectedOpenAICompatible) {
+		t.Fatalf("provider picker should render provider inventory labels:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "provider/model") || strings.Contains(rendered, "model _") || strings.Contains(rendered, "credential _") || strings.Contains(rendered, "base URL _") {
+		t.Fatalf("provider picker should not leak provider-setup input rows:\n%s", rendered)
 	}
 	testkit.AssertVisual("add_target_open").
 		Fixture("testdata/routes_section/fixture/add_target_open.txt").

@@ -78,11 +78,11 @@ func TestEditableRow_FocusShowsArrowActivateOpensInput(t *testing.T) {
 	h := makeEditableHarness(t, root)
 
 	frame := h.Frame()
-	testkit.AssertUnfocusedFrame(t, frame, ">    slug")
+	testkit.AssertUnfocusedFrame(t, frame, "> slug")
 
 	testkit.AssertFocusVisible(t, h, func() {
 		focusRow(t, h)
-	}, ">    slug")
+	}, "> slug")
 	frame = h.Frame()
 	if !strings.Contains(frame, "edit ↵") {
 		t.Fatalf("frame missing view action pre-activate:\n%s", frame)
@@ -92,7 +92,7 @@ func TestEditableRow_FocusShowsArrowActivateOpensInput(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 
 	frame = h.Frame()
-	testkit.AssertFocusedFrame(t, frame, ">    slug")
+	testkit.AssertFocusedFrame(t, frame, "> slug")
 	if !strings.Contains(frame, "save ↵") {
 		t.Fatalf("frame missing edit action post-activate:\n%s", frame)
 	}

@@ -10,12 +10,12 @@ import (
 
 // RouteDetailRow renders the inline detail rows for an expanded route:
 // name (editable), default toggle, and delete confirmation.
-// It is a struct component owned by the section, cached per route, and
-// mounts its own child rows as selectable rows with EditRowComponent.
+//
+// The name row uses InlineEditor so focus never leaves the row shell.
 type RouteDetailRow struct {
 	ui.SelectBase
 	RouteID      readmodel.RouteID
-	ModelName    string // canonical persisted value, seeds edit mode
+	ModelName    string
 	IsDefault    bool
 	OnSubmitName func(string)
 	OnSetDefault func()
@@ -25,6 +25,7 @@ type RouteDetailRow struct {
 	editingName   *tui.State[bool]
 	confirmDelete *tui.State[bool]
 	errorText     *tui.State[string]
+	editor        *ui.InlineEditor
 }
 
 func NewRouteDetailRow(id string, modelName string, isDefault bool, onSubmitName func(string), onSetDefault func(), onDelete func()) *RouteDetailRow {
@@ -46,6 +47,9 @@ func (r *RouteDetailRow) OpenNameEdit() {
 	r.editingName.Set(true)
 	r.rawName.Set(r.ModelName)
 	r.errorText.Set("")
+	if r.editor != nil {
+		r.editor.SetText(r.ModelName)
+	}
 }
 
 func (r *RouteDetailRow) CloseNameEdit() {
@@ -92,6 +96,9 @@ func (r *RouteDetailRow) BindApp(app *tui.App) {
 	if r.errorText != nil {
 		r.errorText.BindApp(app)
 	}
+	if r.editor != nil {
+		r.editor.BindApp(app)
+	}
 }
 
 func (r *RouteDetailRow) UpdateProps(fresh tui.Component) {
@@ -109,17 +116,14 @@ func (r *RouteDetailRow) UpdateProps(fresh tui.Component) {
 	r.OnDelete = f.OnDelete
 }
 
-func (r *RouteDetailRow) Render(app *tui.App) *tui.Element {
+func (r *RouteDetailRow) Render(_ *tui.App) *tui.Element {
 	root := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
 		tui.WithWidthPercent(100),
 	)
-	// Name row (editable)
-	root.AddChild(r.renderNameRow(app))
-	// Default row (selectable action)
-	root.AddChild(r.renderDefaultRow(app))
-	// Delete row (selectable action with confirm)
-	root.AddChild(r.renderDeleteRow(app))
+	root.AddChild(r.renderNameRow())
+	root.AddChild(r.renderDefaultRow())
+	root.AddChild(r.renderDeleteRow())
 	if r.errorText.Get() != "" {
 		root.AddChild(r.renderErrorRow(r.errorText.Get()))
 	}
@@ -129,89 +133,86 @@ func (r *RouteDetailRow) Render(app *tui.App) *tui.Element {
 	return root
 }
 
-func (r *RouteDetailRow) renderNameRow(app *tui.App) *tui.Element {
+func (r *RouteDetailRow) renderNameRow() *tui.Element {
 	if r.editingName.Get() {
-		return renderEditableRow(app,
-			targetDetailArrowWidth,
-			"name",
-			r.rawName,
-			func() { r.CloseNameEdit() },
-			func(val string) {
-				if strings.TrimSpace(val) == "" {
+		if r.editor == nil {
+			r.editor = ui.NewInlineEditor(r.rawName)
+			r.editor.Width = ui.ActionRowValueWidth
+			r.editor.OnSubmit = func(_ string) {
+				if strings.TrimSpace(r.rawName.Get()) == "" {
 					r.errorText.Set("enter a route model")
 					return
 				}
 				if r.OnSubmitName != nil {
-					r.OnSubmitName(val)
+					r.OnSubmitName(r.rawName.Get())
 				}
-			},
+			}
+			if app := r.App(); app != nil {
+				r.editor.BindApp(app)
+			}
+		}
+		return ui.EditRow("", "name", r.editor.Render(), "save ↵",
+			tui.WithFocusable(true),
+			tui.WithOnActivate(r.CloseNameEdit),
 		)
 	}
-	return renderSelectableRow(
-		targetDetailArrowWidth,
-		"name",
-		r.ModelName,
-		"edit ↵",
-		func() { r.OpenNameEdit() },
+	return ui.ActionRow("", "name", r.ModelName, "edit ↵",
+		tui.WithFocusable(true),
+		tui.WithOnActivate(r.OpenNameEdit),
 	)
 }
 
-func (r *RouteDetailRow) renderDefaultRow(app *tui.App) *tui.Element {
+func (r *RouteDetailRow) renderDefaultRow() *tui.Element {
 	value := "no"
 	action := "make default ↵"
 	if r.IsDefault {
 		value = "yes"
 		action = "current"
 	}
-	return renderSelectableRow(
-		targetDetailArrowWidth,
-		"default",
-		value,
-		action,
-		func() {
+	return ui.ActionRow("", "default", value, action,
+		tui.WithFocusable(true),
+		tui.WithOnActivate(func() {
 			if r.OnSetDefault != nil {
 				r.OnSetDefault()
 			}
-		},
+		}),
 	)
 }
 
-func (r *RouteDetailRow) renderDeleteRow(app *tui.App) *tui.Element {
+func (r *RouteDetailRow) renderDeleteRow() *tui.Element {
 	if r.confirmDelete.Get() {
-		return renderSelectableRow(
-			targetDetailArrowWidth,
-			"delete",
-			"delete "+r.ModelName+"?",
-			"confirm ↵",
-			func() {
+		return ui.ActionRow("", "delete", "delete "+r.ModelName+"?", "confirm ↵",
+			tui.WithFocusable(true),
+			tui.WithOnActivate(func() {
 				if r.OnDelete != nil {
 					r.OnDelete()
 				}
-			},
+			}),
 		)
 	}
-	return renderSelectableRow(
-		targetDetailArrowWidth,
-		"delete",
-		r.ModelName,
-		"delete ↵",
-		func() { r.OpenDeleteConfirm() },
+	return ui.ActionRow("", "delete", r.ModelName, "delete ↵",
+		tui.WithFocusable(true),
+		tui.WithOnActivate(r.OpenDeleteConfirm),
 	)
 }
 
 func (r *RouteDetailRow) renderErrorRow(msg string) *tui.Element {
-	row := tui.New(tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row), tui.WithWidthPercent(100))
-	row.AddChild(tui.New(tui.WithWidth(targetDetailArrowWidth)))
-	row.AddChild(tui.New(tui.WithText(msg), tui.WithWidth(ui.ActionRowValueWidth)))
-	return row
+	return ui.ActionRow("", "", msg, "")
 }
 
 func (r *RouteDetailRow) KeyMap() tui.KeyMap {
-	return r.WithTraversal(tui.KeyMap{
-		tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) {
-			r.CloseAll()
-		}),
-	})
+	if r.IsEditingName() {
+		km := tui.KeyMap{
+			tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { r.CloseNameEdit() }),
+		}
+		if r.editor == nil {
+			return km
+		}
+		return r.WithTraversal(append(km, r.editor.TypingKeyMap()...))
+	}
+	return r.WithTraversal(ui.ActivateFocused(func(tui.KeyEvent) {
+		r.OpenNameEdit()
+	}))
 }
 
 var (
@@ -220,54 +221,3 @@ var (
 	_ tui.PropsUpdater = (*RouteDetailRow)(nil)
 	_ tui.AppBinder    = (*RouteDetailRow)(nil)
 )
-
-// targetDetailArrowWidth gives the visual indent for route detail rows
-// (same level as step headers and contract rows).
-const targetDetailArrowWidth = 8
-
-// renderSelectableRow builds a static selectable row with the same layout
-// as ui.SelectableRow but without the SelectBase overhead for inert
-// action-only rows.
-func renderSelectableRow(arrowWidth int, label, value, action string, activate func()) *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-		tui.WithFocusable(true),
-		tui.WithOnActivate(activate),
-	)
-	row.AddChild(tui.New(tui.WithText(""), tui.WithWidth(arrowWidth)))
-	row.AddChild(tui.New(tui.WithText(label), tui.WithWidth(labelWidth)))
-	row.AddChild(tui.New(
-		tui.WithText(value),
-		tui.WithWidth(ui.ActionRowValueWidth),
-		tui.WithWrap(false),
-		tui.WithTruncate(true),
-	))
-	row.AddChild(tui.New(tui.WithWidth(gapWidth)))
-	row.AddChild(tui.New(tui.WithText(action)))
-	return row
-}
-
-// renderEditableRow builds a row with a mounted text input for editing.
-func renderEditableRow(app *tui.App, arrowWidth int, label string, value *tui.State[string], onCancel func(), onSubmit func(string)) *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-	)
-	row.AddChild(tui.New(tui.WithText(""), tui.WithWidth(arrowWidth)))
-	row.AddChild(tui.New(tui.WithText(label), tui.WithWidth(labelWidth)))
-
-	input := app.MountPersistent(nil, 0, func() tui.Component {
-		return tui.NewInput(
-			tui.WithInputValue(value),
-			tui.WithInputAutoFocus(true),
-			tui.WithInputOnSubmit(func(val string) {
-				onSubmit(val)
-			}),
-			tui.WithInputWidth(ui.ActionRowValueWidth),
-		)
-	})
-	row.AddChild(input)
-	row.AddChild(tui.New(tui.WithText("save ↵")))
-	return row
-}

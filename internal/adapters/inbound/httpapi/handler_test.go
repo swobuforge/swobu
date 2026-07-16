@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -42,6 +43,50 @@ func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	request := testDecodeCapturedRequest(t, capturing.got)
 	if request.Model() == "" {
 		t.Fatal("request was not forwarded")
+	}
+	if got, want := capturing.got.ClientHandler, trafficevidence.NormalizeClientHandler("Codex/1.2"); got != want {
+		t.Fatalf("client handler = %q, want %q", got, want)
+	}
+}
+
+func TestHandler_ThreadsTimingLifecycleThroughResponseCommit(t *testing.T) {
+	ingress := &timingCaptureIngress{}
+	handler := NewHandler(ingress)
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("User-Agent", "Codex/1.2")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if ingress.got.Timing == nil {
+		t.Fatal("request timing was not threaded into ingress")
+	}
+	if started, ok := ingress.got.Timing.StartedAt(); !ok || started.IsZero() {
+		t.Fatalf("request timing started_at = (%v,%v), want started", started, ok)
+	}
+	if !ingress.commitCalled {
+		t.Fatal("traffic evidence commit was not invoked")
+	}
+	if started, ok := ingress.commitTiming.StartedAt(); !ok || started.IsZero() {
+		t.Fatalf("commit timing started_at = (%v,%v), want started", started, ok)
+	}
+	if first, ok := ingress.commitTiming.FirstByteAt(); !ok || first.IsZero() {
+		t.Fatalf("commit timing first_byte_at = (%v,%v), want first byte", first, ok)
+	}
+	if ended, ok := ingress.commitTiming.EndedAt(); !ok || ended.IsZero() {
+		t.Fatalf("commit timing ended_at = (%v,%v), want ended", ended, ok)
+	}
+	started, _ := ingress.commitTiming.StartedAt()
+	first, _ := ingress.commitTiming.FirstByteAt()
+	ended, _ := ingress.commitTiming.EndedAt()
+	if first.Before(started) {
+		t.Fatalf("first_byte_at = %v, want at or after started_at = %v", first, started)
+	}
+	if ended.Before(first) {
+		t.Fatalf("ended_at = %v, want at or after first_byte_at = %v", ended, first)
 	}
 }
 
@@ -838,6 +883,34 @@ func (h *capturingRequestIngress) HandleRequest(_ context.Context, in exchange.R
 	return out, nil
 }
 
+type timingCaptureIngress struct {
+	got          exchange.RequestInput
+	commitTiming trafficevidence.Timing
+	commitCalled bool
+}
+
+func (h *timingCaptureIngress) HandleRequest(_ context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
+	h.got = in
+	return exchange.RequestOutput{
+		Response: exchange.TransportResponse{
+			Transport: transportpkg.TransportResponse{
+				Status: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+				},
+				Body: io.NopCloser(bytes.NewReader(nil)),
+			},
+		},
+		CommitTrafficEvent: func(context.Context, error) error {
+			h.commitCalled = true
+			if in.Timing != nil {
+				h.commitTiming = *in.Timing
+			}
+			return nil
+		},
+	}, nil
+}
+
 type staticRequestIngress struct {
 	out      exchange.RequestOutput
 	err      error
@@ -1043,6 +1116,7 @@ func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]excha
 		out = append(out, exchange.RequestInput{
 			EndpointName:    in.EndpointName,
 			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, raw),
+			ClientHandler:   in.ClientHandler,
 			ClientFamily:    in.ClientFamily,
 			ResponseFraming: in.ResponseFraming,
 			ExchangeID:      in.ExchangeID,

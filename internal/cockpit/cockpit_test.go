@@ -24,7 +24,6 @@ func TestCockpit_KeyMapOwnsGlobalNavigationOnly(t *testing.T) {
 	for _, event := range []tui.KeyEvent{
 		{Key: tui.KeyTab},
 		{Key: tui.KeyTab, Mod: tui.ModShift},
-		{Key: tui.KeyRune, Rune: 'q'},
 	} {
 		binding, ok := findRootBinding(keymap, event)
 		if !ok {
@@ -77,7 +76,7 @@ func TestApplyCockpitDefaultsInstallsHelpCopy(t *testing.T) {
 	if got, want := model.Help.DocsURL, "swobu.com/docs"; got != want {
 		t.Fatalf("docs url = %q, want %q", got, want)
 	}
-	if got, want := model.Help.CommunityURL, "https://discord.gg/swobu"; got != want {
+	if got, want := model.Help.CommunityURL, "https://discord.gg/UejYpMGmw"; got != want {
 		t.Fatalf("community url = %q, want %q", got, want)
 	}
 	if got, want := model.Help.IssueURL, "https://github.com/swobuforge/swobu/issues/new"; got != want {
@@ -213,6 +212,7 @@ func TestCockpit_WorkspaceSaveRefreshRemountsPromotedDraftPage(t *testing.T) {
 	if promotedDraftPage.OverviewSection.Model.Slug != "" {
 		t.Fatalf("draft page slug = %q, want empty", promotedDraftPage.OverviewSection.Model.Slug)
 	}
+	assertRenderContains(t, cockpit, "> add model route")
 }
 
 func TestCockpit_WorkspaceSaveRefreshPreservesActiveRouteEditor(t *testing.T) {
@@ -463,16 +463,12 @@ func TestCockpit_WorkspaceRefreshUsesCockpitContext(t *testing.T) {
 }
 
 func TestCockpit_QuitShortcutIsRootFallback(t *testing.T) {
+	// V0: Escape quits the cockpit from every page, delegated from page keymaps.
+	// The root does NOT own Escape; pages do.
 	cockpit := NewCockpit(DefaultFixtureReadModel())
-	binding, ok := findRootBinding(cockpit.KeyMap(), tui.KeyEvent{Key: tui.KeyRune, Rune: 'q'})
-	if !ok {
-		t.Fatal("missing q binding")
+	if _, ok := findRootBinding(cockpit.KeyMap(), tui.KeyEvent{Key: tui.KeyEscape}); ok {
+		t.Fatal("root must not own Escape; quit is delegated to page keymaps")
 	}
-	if !binding.Stop {
-		t.Fatal("q binding should stop propagation")
-	}
-
-	binding.Handler(tui.KeyEvent{Key: tui.KeyRune, Rune: 'q'})
 }
 
 func TestCockpit_DoesNotRetainSeparateWorkspacePageOwner(t *testing.T) {

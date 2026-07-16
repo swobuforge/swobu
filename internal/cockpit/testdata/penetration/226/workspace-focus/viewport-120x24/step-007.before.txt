@@ -1,22 +1,22 @@
-SWOBU    [› dev] [lab] [+] [?]
+⛉ SWOBU                                                                                            [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  workspace ▾
->    endpoint          http://127.0.0.1:7926/c/dev         copy ↵
-                       OpenAI · Anthropic
-     slug              dev                                 edit ↵
-     delete            workspace                           delete ↵
+> workspace ▾
+     endpoint          http://127.0.0.1:7926/c/dev                                                        copy ↵
+     OpenAI · Anthropic
+     slug              dev                                                                                edit ↵
+     delete            workspace                                                                          delete ↵
 
   model routes ▾
-     gpt               default · 2 fallback steps          expand ↵
-     local             1 target                            expand ↵
-     add model route                                       add ↵
+     gpt               default · 2 fallback steps                                                         expand ↵
+     local             1 target                                                                           expand ↵
+     add model route                                                                                      add ↵
 
   activity ▾
      latest            no requests yet
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ open   F1 help   esc back
+↑↓ move   ↵ action   ? help   esc back   tab switch
 
 
 

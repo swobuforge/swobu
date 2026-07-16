@@ -517,7 +517,7 @@ func TestResponsesRouteToProviderEncode_PreservesToolSurface(t *testing.T) {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
 
-	ref, err := endpointintent.ParseProviderConfigRef("primary")
+	ref, err := endpointintent.ParseProviderConfigRef("default")
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
@@ -601,7 +601,7 @@ func TestResponsesRouteToProviderEncode_PreservesCustomToolSurface(t *testing.T)
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
 
-	ref, err := endpointintent.ParseProviderConfigRef("primary")
+	ref, err := endpointintent.ParseProviderConfigRef("default")
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}
@@ -685,7 +685,7 @@ func TestChatRouteToResponsesProviderEncode_PreservesInstructions(t *testing.T) 
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
 
-	ref, err := endpointintent.ParseProviderConfigRef("primary")
+	ref, err := endpointintent.ParseProviderConfigRef("default")
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
 	}

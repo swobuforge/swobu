@@ -104,7 +104,7 @@ type ProviderConfig struct {
 
 var targetAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-const primaryTargetSelector = "primary"
+const defaultTargetSelector = "default"
 
 // NewProviderConfig validates the explicit provider-config declaration used by
 // endpoint intent. It does not guess provider family or protocol semantics.
@@ -325,7 +325,7 @@ func (c ProviderConfig) WithTargetAlias(targetAlias string) (ProviderConfig, err
 		c.targetAlias = ""
 		return c, nil
 	}
-	if targetAlias == primaryTargetSelector {
+	if targetAlias == defaultTargetSelector {
 		return ProviderConfig{}, fmt.Errorf("%w: target alias %q is reserved", ErrInvalidProviderConfig, targetAlias)
 	}
 	if !targetAliasPattern.MatchString(targetAlias) {

@@ -1,6 +1,6 @@
-     Codex run
-     model             gpt-4.1 default                     choose ↵
-        command        codex --model gpt-4.1              run ↵
+Codex run
+  model             gpt-4.1 default                                                   choose ↵
+command        codex --model gpt-4.1              run ↵
 
 
 

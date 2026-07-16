@@ -57,7 +57,7 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 		wireRequestResult.Value,
 		exchange.NewExecutionContract(d),
 		exchange.NewRoutableTarget(
-			"primary",
+			"default",
 			"azure",
 			"https://contact-8837-resource.services.ai.azure.com",
 			"keychain",

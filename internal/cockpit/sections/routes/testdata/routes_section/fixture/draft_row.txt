@@ -1,7 +1,7 @@
   model routes ▾
-     gpt               default · 2 fallback steps          expand ↵
-     local             1 target                            expand ↵
->    route-new         no targets                         create ↵
-     add model route                                       add ↵
+     gpt               default · 2 fallback steps                                     expand ↵
+     local             1 target                                                       expand ↵
+   > route-new         no targets                      create ↵
+     add model route                                                                  add ↵
 
 

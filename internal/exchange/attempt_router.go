@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/machine"
 	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -24,11 +25,13 @@ func runExchangeWithMachine(
 	runner Runner,
 	sink TrafficEventSink,
 	exchangeID string,
+	clientHandler trafficevidence.ClientHandler,
 	clientFamily canonical.ClientFamily,
 	clientDelivery delivery.Delivery,
 	request canonical.CanonicalRequest,
 	endpoint endpointintent.Endpoint,
-) (TransportResponse, RoutableTarget, error) {
+	timing *trafficevidence.Timing,
+) (RequestOutput, error) {
 	reg := machine.NewRegistry()
 	// Routing reducers
 	reg.Register(planRoute)
@@ -68,20 +71,22 @@ func runExchangeWithMachine(
 	})
 
 	if err := validateReplayRuntime(runner); err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 	replayInfo, err := allocateReplayState(ctx, exchangeID, runner.ResponseIDs)
 	if err != nil {
-		return TransportResponse{}, RoutableTarget{}, err
+		return RequestOutput{}, err
 	}
 
 	store := machine.NewStore(
 		machine.StateCell{Value: reflect.ValueOf(exchangeState{
 			ExchangeID:     exchangeID,
+			ClientHandler:  clientHandler,
 			ClientFamily:   clientFamily,
 			ClientDelivery: clientDelivery,
 			Request:        request,
 			Endpoint:       endpoint,
+			Timing:         timing,
 		})},
 		machine.StateCell{Value: reflect.ValueOf(outcomeState{})},
 		machine.StateCell{Value: reflect.ValueOf(attemptState{})},
@@ -103,17 +108,23 @@ func runExchangeWithMachine(
 	if err != nil && outcome.Err == nil {
 		outcome.Err = canonical.InternalError(err.Error())
 	}
-	return outcome.Response, outcome.Target, outcome.Err
+	return RequestOutput{
+		Response:           outcome.Response,
+		Target:             outcome.Target,
+		CommitTrafficEvent: outcome.CommitTrafficEvent,
+	}, outcome.Err
 }
 
 // ---- machine state (routing layer) ----
 
 type exchangeState struct {
 	ExchangeID     string
+	ClientHandler  trafficevidence.ClientHandler
 	ClientFamily   canonical.ClientFamily
 	ClientDelivery delivery.Delivery
 	Request        canonical.CanonicalRequest
 	Endpoint       endpointintent.Endpoint
+	Timing         *trafficevidence.Timing
 }
 
 type routeState struct {
@@ -126,10 +137,11 @@ type attemptState struct {
 }
 
 type outcomeState struct {
-	Response TransportResponse
-	Target   RoutableTarget
-	Err      error
-	Terminal bool
+	Response           TransportResponse
+	Target             RoutableTarget
+	CommitTrafficEvent func(context.Context, error) error
+	Err                error
+	Terminal           bool
 }
 
 // ---- events ----
@@ -304,8 +316,10 @@ func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner
 
 	input := ExchangeInput{
 		ExchangeID:       exchange.ExchangeID,
+		ClientHandler:    exchange.ClientHandler,
 		ClientFamily:     exchange.ClientFamily,
 		ClientDelivery:   exchange.ClientDelivery,
+		Timing:           exchange.Timing,
 		Request:          request,
 		ReplayScope:      replayScope,
 		NativeReplay:     nativeReplay,
@@ -330,9 +344,6 @@ func handleRecordEvidence(
 	sink TrafficEventSink,
 	endpoint endpointintent.Endpoint,
 ) ([]machine.Event, error) {
-	if sink == nil {
-		return nil, nil
-	}
 	var exchange exchangeState
 	if err := store.Get(&exchange); err != nil {
 		return nil, err
@@ -346,19 +357,28 @@ func handleRecordEvidence(
 	if err := store.Get(&attempt); err == nil {
 		attemptCount = attempt.Index + 1
 	}
-	event, buildErr := buildTerminalTrafficEvent(
-		endpoint,
-		exchange.ExchangeID,
-		exchange.ClientFamily,
-		exchange.Request,
-		outcome.Target,
-		outcome.Response,
-		outcome.Err,
-		attemptCount,
-	)
-	if buildErr != nil {
-		return nil, nil
+	outcome.CommitTrafficEvent = func(ctx context.Context, writeErr error) error {
+		if sink == nil {
+			return nil
+		}
+		event, buildErr := buildTerminalTrafficEvent(
+			endpoint,
+			exchange.ExchangeID,
+			exchange.ClientHandler,
+			exchange.ClientFamily,
+			exchange.Request,
+			outcome.Target,
+			outcome.Response,
+			writeErr,
+			attemptCount,
+			exchange.Timing,
+		)
+		if buildErr != nil {
+			return buildErr
+		}
+		sink.Append(ctx, event)
+		return nil
 	}
-	sink.Append(c, event)
+	store.Put(reflect.TypeOf(outcome), reflect.ValueOf(outcome))
 	return nil, nil
 }

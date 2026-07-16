@@ -264,22 +264,50 @@ func TestSearchPicker_AppLoop_KeyEnterSelects(t *testing.T) {
 	}
 }
 
+
 func TestSearchPicker_AppLoop_KeyEscapeCancels(t *testing.T) {
 	var cancelled bool
 	picker := NewSearchPicker("test", "title", sampleOptions(), nil, func() { cancelled = true })
-	h, err := testkit.NewHarness(picker)
+
+	// Wrap picker in a FocusableControl that delegates Escape to picker.OnCancel.
+	scope := NewFocusableControl("picker-scope")
+	scope.Open.Set(true)
+	scope.OnExit = func(_ ControlEvent) {
+		if picker.OnCancel != nil {
+			picker.OnCancel()
+		}
+	}
+
+	root := &pickerWithScope{picker: picker, scope: scope}
+	h, err := testkit.NewHarness(root)
 	if err != nil {
 		t.Fatalf("NewHarness: %v", err)
 	}
 	defer h.Close()
-	h.Open()
 
+	h.Open()
 	h.App().FocusNext()
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
 
 	if !cancelled {
-		t.Fatal("OnCancel not fired via Escape dispatch after focus")
+		t.Fatal("OnCancel not fired via Escape dispatch when parent scope handles it")
 	}
+}
+
+// pickerWithScope renders a FocusableControl shell wrapping a SearchPicker.
+type pickerWithScope struct {
+	picker *SearchPicker
+	scope  *FocusableControl
+}
+
+func (r *pickerWithScope) Render(app *tui.App) *tui.Element {
+	scopeEl := r.scope.Render(app)
+	scopeEl.AddChild(r.picker.Render(app))
+	return scopeEl
+}
+
+func (r *pickerWithScope) KeyMap() tui.KeyMap {
+	return r.scope.KeyMap()
 }
 
 func TestSearchPicker_AutoFocusHighlightsFirstOption(t *testing.T) {
@@ -294,7 +322,7 @@ func TestSearchPicker_AutoFocusHighlightsFirstOption(t *testing.T) {
 	h.Open()
 
 	rendered := h.Frame()
-	if !strings.Contains(rendered, ">    OpenAI") {
+	if !strings.Contains(rendered, "> OpenAI") {
 		t.Fatalf("expected focused first option after autofocus:\n%s", rendered)
 	}
 }

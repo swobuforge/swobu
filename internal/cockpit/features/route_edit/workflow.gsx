@@ -7,7 +7,6 @@ templ (w *Workflow) Render() {
 		@DeleteRowComponent(w)
 		if w.Error.Get() != "" {
 			<div class="flex-row w-full">
-				<span class="w-8"></span>
 				<span>{w.Error.Get()}</span>
 			</div>
 		}

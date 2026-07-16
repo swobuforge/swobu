@@ -3,6 +3,7 @@ package testkit
 import (
 	"reflect"
 	"unsafe"
+	"time"
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
@@ -59,6 +60,7 @@ func (h *MockAppHarness) Reader() *tui.MockEventReader { return h.reader }
 // a string. Focus must be established before rendering (FocusNext / traversal).
 func (h *MockAppHarness) Frame() string {
 	h.app.Render()
+	h.flushQueuedUpdates()
 	return h.app.Buffer().String()
 }
 
@@ -67,6 +69,7 @@ func (h *MockAppHarness) Frame() string {
 func (h *MockAppHarness) DispatchKey(keyEvent tui.KeyEvent) {
 	h.app.Dispatch(keyEvent)
 	h.app.Render()
+	h.flushQueuedUpdates()
 }
 
 // FocusNext focuses the next focusable element and renders the frame.
@@ -83,6 +86,7 @@ func (h *MockAppHarness) FocusPrev() {
 func (h *MockAppHarness) Open() {
 	h.app.MarkDirty()
 	h.app.Render()
+	h.flushQueuedUpdates()
 }
 
 // Close shuts down the harness.
@@ -90,6 +94,45 @@ func (h *MockAppHarness) Open() {
 func (h *MockAppHarness) Close() {
 	if h.app != nil {
 		_ = h.app.Close()
+	}
+}
+
+func (h *MockAppHarness) flushQueuedUpdates() {
+	if h.app == nil {
+		return
+	}
+
+	const settleWindow = 2 * time.Millisecond
+
+	for {
+		processed := false
+		for {
+			select {
+			case ev := <-h.app.Events():
+				processed = true
+				h.app.Dispatch(ev)
+				h.app.Render()
+			default:
+				goto settle
+			}
+		}
+
+	settle:
+		if processed {
+			continue
+		}
+
+		timer := time.NewTimer(settleWindow)
+		select {
+		case ev := <-h.app.Events():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			h.app.Dispatch(ev)
+			h.app.Render()
+		case <-timer.C:
+			return
+		}
 	}
 }
 

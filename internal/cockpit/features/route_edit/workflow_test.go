@@ -102,13 +102,13 @@ func TestWorkflow_FocusMarkersReachModelDefaultAndDelete(t *testing.T) {
 	h.Open()
 	t.Cleanup(h.Close)
 
-	testkit.AssertFocusVisible(t, h, h.FocusNext, ">       model")
+	testkit.AssertFocusVisible(t, h, h.FocusNext, "> model")
 	testkit.AssertFocusVisible(t, h, func() {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	}, ">       default")
+	}, "> default")
 	testkit.AssertFocusVisible(t, h, func() {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	}, ">       delete")
+	}, "> delete")
 }
 
 func routeEditRoute(defaultRoute bool) readmodel.RouteReadModel {

@@ -55,10 +55,6 @@ func (fakeActivityQueries) ListActivity(context.Context, ListActivityRequest) (r
 	return readmodel.ActivityReadModel{}, nil
 }
 
-func (fakeActivityQueries) GetActivity(context.Context, readmodel.ActivityID) (readmodel.ActivityRowReadModel, error) {
-	return readmodel.ActivityRowReadModel{}, nil
-}
-
 type fakeHelpActions struct{}
 
 func (fakeHelpActions) OpenDocs(context.Context) error {

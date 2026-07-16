@@ -7,8 +7,10 @@ type StatusProjection struct {
 }
 
 type RecentTrafficRow struct {
-	RequestID      string                       `json:"request_id"`
-	Endpoint       string                       `json:"endpoint"`
+	RequestID string `json:"request_id"`
+	Endpoint  string `json:"endpoint"`
+	// ClientHandler is the normalized client identifier derived from ingress
+	// metadata. It is the canonical label shown in Cockpit activity rows.
 	ClientHandler  string                       `json:"client_handler,omitempty"`
 	ClientProtocol string                       `json:"client_protocol,omitempty"`
 	ClientFamily   string                       `json:"client_family,omitempty"`
@@ -20,10 +22,11 @@ type RecentTrafficRow struct {
 	Timing         *RecentTrafficTimingRecord   `json:"timing,omitempty"`
 	TokenUsage     *RecentTrafficTokenUseRecord `json:"token_usage,omitempty"`
 
-	ModelRequested      string                `json:"model_requested,omitempty"`
-	ModelResolved       string                `json:"model_resolved,omitempty"`
-	ModelResolutionMode string                `json:"model_resolution_mode,omitempty"`
-	ExchangeDiagnostics []string              `json:"exchange_diagnostics,omitempty"`
+	ModelRequested        string                `json:"model_requested,omitempty"`
+	ModelResolved         string                `json:"model_resolved,omitempty"`
+	ModelResolutionMode   string                `json:"model_resolution_mode,omitempty"`
+	WorkspaceRouteModelID string                `json:"workspace_route_model,omitempty"`
+	ExchangeDiagnostics   []string              `json:"exchange_diagnostics,omitempty"`
 	StageReports        []ExchangeStageReport `json:"exchange_stage_reports,omitempty"`
 }
 

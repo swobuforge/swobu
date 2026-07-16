@@ -1,5 +1,5 @@
->    slug              dev-2                               invalid
-         name conflict
+> slug              dev▌-2                                                  duplicate
+name conflict
 
 
 

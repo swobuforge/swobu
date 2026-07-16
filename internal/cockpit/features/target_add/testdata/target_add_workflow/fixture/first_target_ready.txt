@@ -1,0 +1,24 @@
+new target · OpenAI                                                                                                     
+  provider          OpenAI                                                                                change ↵      
+  credential        env:OPENAI_API_KEY                                                                    ok            
+  model             gpt-4.1                                                                               change ↵      
+  placement         step 1                                                                                              
+> create                                                                                                  create ↵      
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

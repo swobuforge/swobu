@@ -23,19 +23,6 @@ func (a *LiveOperatorAdapter) ListActivity(ctx context.Context, request ports.Li
 	return activityFromProjection(projection, request.Limit), nil
 }
 
-func (a *LiveOperatorAdapter) GetActivity(ctx context.Context, id readmodel.ActivityID) (readmodel.ActivityRowReadModel, error) {
-	activity, err := a.ListActivity(ctx, ports.ListActivityRequest{})
-	if err != nil {
-		return readmodel.ActivityRowReadModel{}, adapterFailure(fmt.Sprintf("get activity %q", id), err)
-	}
-	for _, row := range activity.Rows {
-		if row.ID == id {
-			return row, nil
-		}
-	}
-	return readmodel.ActivityRowReadModel{}, fmt.Errorf("get activity %q: activity row could not be resolved", id)
-}
-
 func (a *LiveOperatorAdapter) activityForWorkspace(ctx context.Context, workspaceID readmodel.WorkspaceID) (readmodel.ActivityReadModel, error) {
 	return a.ListActivity(ctx, ports.ListActivityRequest{WorkspaceID: workspaceID, Limit: 5})
 }
@@ -58,19 +45,21 @@ func activityFromProjection(projection operatorclient.StatusProjection, limit in
 
 func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.ActivityRowReadModel {
 	return readmodel.ActivityRowReadModel{
-		ID:           readmodel.ActivityID(row.RequestID),
-		ObservedAt:   strings.TrimSpace(row.ObservedAt), // swobu:io-string source=boundary
-		ClientLabel:  firstNonEmpty(row.ClientHandler, row.ClientFamily, row.ClientProtocol),
-		RouteID:      readmodel.RouteID(row.Route),
-		RouteLabel:   row.Route,
-		Status:       activityStatus(row.Result, row.StatusCode),
-		HTTPStatus:   row.StatusCode,
-		Duration:     trafficDuration(row),
-		Error:        row.StatusCode >= 400 || row.Result == "backend_error" || row.Result == "swobu_error",
-		ResolvedName: row.ModelResolved,
-		Model:        firstNonEmpty(row.ModelResolved, row.ModelRequested),
-		TokensIn:     inputTokens(row.TokenUsage),
-		TokensOut:    outputTokens(row.TokenUsage),
+		ID:         readmodel.ActivityID(row.RequestID),
+		ObservedAt: strings.TrimSpace(row.ObservedAt), // swobu:io-string source=boundary
+		// The evidence layer owns client-handler normalization; Cockpit reads the
+		// canonical handler label directly and does not re-guess from other fields.
+		ClientLabel: row.ClientHandler,
+		RouteID:     readmodel.RouteID(row.Route),
+		// Prefer the workspace route model name (what the client sent) over the
+		// internal provider config ref so the Cockpit activity row is human readable.
+		RouteLabel: firstNonEmpty(row.WorkspaceRouteModelID, row.Route),
+		Status:     activityStatus(row.Result, row.StatusCode),
+		HTTPStatus: row.StatusCode,
+		Duration:   trafficDuration(row),
+		Error:      row.StatusCode >= 400 || row.Result == "backend_error" || row.Result == "swobu_error",
+		TokensIn:   inputTokens(row.TokenUsage),
+		TokensOut:  outputTokens(row.TokenUsage),
 	}
 }
 
@@ -89,6 +78,8 @@ func activityStatus(result string, statusCode int) readmodel.ActivityStatus {
 }
 
 func trafficDuration(row operatorclient.RecentTrafficRow) time.Duration {
+	// This is a projection of the evidence-layer duration summary, not a control
+	// input. Missing timing stays zero in the read model.
 	if row.Timing == nil || row.Timing.DurMillis == nil {
 		return 0
 	}

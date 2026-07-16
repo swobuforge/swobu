@@ -144,7 +144,7 @@ func TestSection_EnterActivatesEndpointRow(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
-	testkit.AssertFocusedFrame(t, frameBefore, ">    endpoint")
+	testkit.AssertFocusedFrame(t, frameBefore, "> endpoint")
 
 	testkit.AssertFocusVisible(t, h, func() {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
@@ -179,7 +179,7 @@ func TestSection_EnterActivatesSlugRow(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
-	testkit.AssertFocusedFrame(t, frameBefore, ">    slug")
+	testkit.AssertFocusedFrame(t, frameBefore, "> slug")
 
 	testkit.AssertFocusVisible(t, h, func() {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
@@ -197,7 +197,7 @@ func TestSection_DeleteRowShowsMarkerWhenFocused(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frame := h.Frame()
-	testkit.AssertFocusedFrame(t, frame, ">    delete")
+	testkit.AssertFocusedFrame(t, frame, "> delete")
 	if !strings.Contains(frame, "delete ↵") {
 		t.Fatalf("expected delete action label, got:\n%s", frame)
 	}

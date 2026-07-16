@@ -146,15 +146,15 @@ func TestSelectBase_FocusRepairUsesTraversal(t *testing.T) {
 	}
 
 	h.FocusNext()
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 
 	root.rows[1].Focus(h.App())
 	flushApp(t, h)
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    beta")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> beta")
 
 	FocusRefByTraversal(h.App(), root.rows[0].Ref)
 	flushApp(t, h)
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 }
 
 func TestFocusFirstByTraversal_SkipsNilRefs(t *testing.T) {
@@ -163,11 +163,11 @@ func TestFocusFirstByTraversal_SkipsNilRefs(t *testing.T) {
 
 	h.Frame()
 	h.FocusNext()
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 
 	focusFirstByTraversal(h.App(), root.rows[2].Ref, root.rows[1].Ref)
 	flushApp(t, h)
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    gamma")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> gamma")
 }
 
 func TestFocusRefByTraversal_IgnoresMissingRef(t *testing.T) {
@@ -176,12 +176,12 @@ func TestFocusRefByTraversal_IgnoresMissingRef(t *testing.T) {
 
 	h.Frame()
 	h.FocusNext()
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 
 	missing := tui.NewRef()
 	FocusRefByTraversal(h.App(), missing)
 	flushApp(t, h)
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 }
 
 func TestMoveNextAndPrev_AdvanceFocus(t *testing.T) {
@@ -189,13 +189,13 @@ func TestMoveNextAndPrev_AdvanceFocus(t *testing.T) {
 	h := makeSelectHarness(t, root)
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    beta")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> beta")
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    alpha")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 }
 
 func TestSelectGrammarConstants(t *testing.T) {
@@ -222,7 +222,7 @@ func TestSelectableRow_AutoFocusSeedsVisibleArrow(t *testing.T) {
 	root := newSelectHarnessRoot(row)
 	h := makeSelectHarness(t, root)
 
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    picker option")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> picker option")
 }
 
 func TestSelectableRow_ActivateUpdatesVisibleAction(t *testing.T) {
@@ -234,7 +234,7 @@ func TestSelectableRow_ActivateUpdatesVisibleAction(t *testing.T) {
 	h := makeSelectHarness(t, root)
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    client base URL")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> client base URL")
 	if !strings.Contains(h.Frame(), "copy ↵") {
 		t.Fatalf("frame missing initial action:\n%s", h.Frame())
 	}
@@ -258,7 +258,7 @@ func TestSelectableRow_LongValueKeepsActionSeparated(t *testing.T) {
 	h := makeSelectHarness(t, root)
 
 	h.FocusNext()
-	testkit.AssertFocusedFrame(t, h.Frame(), ">    client base URL")
+	testkit.AssertFocusedFrame(t, h.Frame(), "> client base URL")
 
 	frame := h.Frame()
 	if strings.Contains(frame, "acme-clientscopy") {

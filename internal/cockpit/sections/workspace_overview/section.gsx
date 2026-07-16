@@ -146,6 +146,9 @@ func workspaceIdentity(s *SectionView) string {
 func sectionHeaderKey(s *SectionView) string { return "section-header:" + workspaceIdentity(s) }
 
 func SectionHeaderComponent(s *SectionView) tui.Component {
+	if s.Model.IsDraft() {
+		return ui.NewTextComponent("  new workspace")
+	}
 	return ui.NewSectionDisclosure(sectionHeaderKey(s), "workspace", s.Expanded)
 }
 
@@ -192,50 +195,37 @@ func (r *endpointRowView) UpdateProps(fresh tui.Component) {
 }
 
 func (r *endpointRowView) Render(app *tui.App) *tui.Element {
+	_ = app
 	s := r.s
-	root := tui.New(
+
+	// Build both content rows as a single flex column so they share the same
+	// full width even inside a margin-shifted container.
+	col := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100.00),
+		tui.WithWidthPercent(100),
+	)
+
+	row1 := ui.ActionRow(r.Arrow(), "endpoint", s.Model.ClientBaseURL, endpointAction(s),
 		tui.WithFocusable(true),
 		tui.WithOnFocus(r.OnFocus),
 		tui.WithOnBlur(r.OnBlur),
 		tui.WithOnActivate(func() { s.copyEndpoint() }),
 	)
+	col.AddChild(row1)
 
-	// Row 1: arrow + endpoint label + URL + action
-	row1 := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
-	)
-	row1.AddChild(tui.New(tui.WithText(r.Arrow()), tui.WithWidth(5)))
-	row1.AddChild(tui.New(tui.WithText("endpoint"), tui.WithWidth(18)))
-	row1.AddChild(tui.New(
-		tui.WithText(s.Model.ClientBaseURL),
-		tui.WithWidth(ui.ActionRowValueWidth),
-		tui.WithWrap(false),
-		tui.WithTruncate(true),
-	))
-	row1.AddChild(tui.New(tui.WithWidth(1))) // action gap
-	row1.AddChild(tui.New(tui.WithText(endpointAction(s))))
-	root.AddChild(row1)
+	row2 := ui.ActionRow("", "", s.Model.CompatibleClients, "")
+	col.AddChild(row2)
 
-	// Row 2: arrow spacer + label spacer + compatibility badges
-	row2 := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
+	root := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
+		tui.WithWidthPercent(100),
 	)
-	row2.AddChild(tui.New(tui.WithWidth(5)))  // arrow spacer
-	row2.AddChild(tui.New(tui.WithWidth(18))) // label spacer
-	row2.AddChild(tui.New(
-		tui.WithText(s.Model.CompatibleClients),
-		tui.WithWidth(ui.ActionRowValueWidth),
-		tui.WithWrap(false),
-		tui.WithTruncate(true),
-	))
-	root.AddChild(row2)
+	root.AddChild(col)
 
 	if r.Ref != nil {
-		r.Ref.Set(root)
+		// The focusable element is row1 inside the wrapper; point Ref there
+		// so Arrow() and IsFocused() reflect the actual focus state.
+		r.Ref.Set(row1)
 	}
 	return root
 }
@@ -256,22 +246,24 @@ templ (s *SectionView) Render() {
 			@SectionHeaderComponent(s)
 		</div>
 		if s.Expanded.Get() {
-			if s.Model.IsDraft() {
-				<div key={workspaceEditKey(s)} class="w-full">
-					@WorkspaceEdit(s)
-				</div>
-				@InertRow("endpoint", WorkspaceEdit(s).ClientBaseURLPreview(), "")
-			} else {
-				<div key={endpointRowKey(s)} class="w-full">
-					@EndpointRowComponent(s)
-				</div>
-				<div key={workspaceEditKey(s)} class="w-full">
-					@WorkspaceEdit(s)
-				</div>
-				<div key={workspaceDeleteKey(s)} class="w-full">
-					@DeleteConfirmation(s)
-				</div>
-			}
+			<div class="ml-3 w-full">
+				if s.Model.IsDraft() {
+					<div key={workspaceEditKey(s)} class="w-full">
+						@WorkspaceEdit(s)
+					</div>
+					@InertRow("endpoint", WorkspaceEdit(s).ClientBaseURLPreview(), "")
+				} else {
+					<div key={endpointRowKey(s)} class="w-full">
+						@EndpointRowComponent(s)
+					</div>
+					<div key={workspaceEditKey(s)} class="w-full">
+						@WorkspaceEdit(s)
+					</div>
+					<div key={workspaceDeleteKey(s)} class="w-full">
+						@DeleteConfirmation(s)
+					</div>
+				}
+			</div>
 		}
 	</div>
 }
@@ -282,9 +274,9 @@ templ (s *SectionView) Render() {
 
 templ InertRow(label string, value string, action string) {
 	<div class="flex-row w-full">
-		<span class="w-5"></span>
+		<span class="w-2"></span>
 		<span class="w-18">{label}</span>
-		<span class="w-36">{value}</span>
+		<span class="w-32">{value}</span>
 		<span>{action}</span>
 	</div>
 }

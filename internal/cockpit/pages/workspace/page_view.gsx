@@ -12,22 +12,25 @@ import (
 )
 
 type PageView struct {
-	OverviewSection    *overviewsection.SectionView
-	RoutesSection      *routessection.SectionView
-	ActivitySection    *activitysection.SectionView
-	OnWorkspaceSaved   func(readmodel.WorkspaceReadModel)
-	OnWorkspaceDeleted func(readmodel.WorkspaceID)
+	OverviewSection *overviewsection.SectionView
+	RoutesSection   *routessection.SectionView
+	ActivitySection *activitysection.SectionView
+	OnWorkspaceSaved       func(readmodel.WorkspaceReadModel)
+	OnWorkspaceDeleted     func(readmodel.WorkspaceID)
 }
 
 // Page composes one workspace surface from explicit ports.
+//
+// Draft workspaces render only the overview/create flow until the workspace
+// exists. Existing workspaces render overview, routes, and activity.
 //
 // Target setup and auth capabilities are supplied separately so the page does
 // not have to rediscover optional adapter interfaces from WorkspaceCommands.
 func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceCommands, setupQueries ports.TargetSetupQueries, authCommands ports.TargetAuthCommands, ctx context.Context, activityQuery ports.ActivityQueries) *PageView {
 	page := &PageView{
-		OverviewSection:  overviewsection.Section(workspace, commands),
-		RoutesSection:    routessection.Section(workspace, routeCommandPort(commands)),
-		ActivitySection:  activitysection.Section(workspace, ctx, activityQuery),
+		OverviewSection: overviewsection.Section(workspace, commands),
+		RoutesSection:   routessection.Section(workspace, routeCommandPort(commands)),
+		ActivitySection: activitysection.Section(workspace, ctx, activityQuery),
 	}
 	if setupQueries != nil {
 		page.RoutesSection.ListProviders = setupQueries.ListTargetProviders
@@ -52,6 +55,7 @@ func routeCommandPort(commands ports.WorkspaceCommands) ports.RouteCommands {
 }
 
 func (v *PageView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
+	requestAddRouteFocusAfterSave(workspace)
 	if v.OnWorkspaceSaved != nil {
 		v.OnWorkspaceSaved(workspace)
 	}
@@ -92,16 +96,24 @@ func (v *PageView) backOut(event tui.KeyEvent) {
 	if v.RoutesSection.Back() {
 		return
 	}
-	v.ActivitySection.Back()
+	// swobu: Escape at top level of workspace page quits the cockpit.
+	if app := event.App(); app != nil {
+		app.Stop()
+	}
 }
 
 templ (v *PageView) Render() {
 	<div class="flex-col w-full">
 		@v.OverviewSection
-		<br />
-		@v.RoutesSection
-		<br />
-		@v.ActivitySection
+		if !v.OverviewSection.Model.IsDraft() {
+			if consumeAddRouteFocusAfterSave(v.OverviewSection.Model) {
+				v.RoutesSection.RequestAddRouteFocus()
+			}
+			<br />
+			@v.RoutesSection
+			<br />
+			@v.ActivitySection
+		}
 		<br />
 		<br />
 	</div>

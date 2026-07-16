@@ -1,26 +1,26 @@
-SWOBU    [› dev] [lab] [+] [?]
+⛉ SWOBU                                                    [› dev] [lab] [+] [?]
 ────────────────────────────────────────────────────────────────────────────────
   workspace ▾
-     endpoint          http://127.0.0.1:7926/c/dev         copy ↵
-                       OpenAI · Anthropic
-     slug              dev                                 edit ↵
-     delete            workspace                           delete ↵
+     endpoint          http://127.0.0.1:7926/c/dev                copy ↵
+     OpenAI · Anthropic
+     slug              dev                                        edit ↵
+     delete            workspace                                  delete ↵
 
   model routes ▾
-     gpt               default · 2 fallback steps          expand ↵
-     local             1 target                            expand ↵
-     add model route                                       add ↵
+     gpt               default · 2 fallback steps                 expand ↵
+     local             1 target                                   expand ↵
+     add model route                                              add ↵
 
   activity ▾
      latest            14:32:01 codex gpt 200 145ms
-        resolved       gpt
-        model          gpt-4.1
-        attempt 1      gpt-4.1 rank 1 — success
-
-        tokens in      1,200
-        tokens out     450
 
 
 ────────────────────────────────────────────────────────────────────────────────
-↑↓ move   ↵ open   F1 help   esc back
+↑↓ move   ↵ action   ? help   esc back   tab switch
+
+
+
+
+
+
 

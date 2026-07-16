@@ -2,10 +2,13 @@ package ui
 
 import tui "github.com/grindlemire/go-tui"
 
-// FocusTrap implements best-effort focus relocation via public tab-order
+// FocusTraversal implements best-effort focus relocation via public tab-order
 // traversal. go-tui does not expose a direct focus-by-ref API, so components
-// that need to restore focus after a local render change must walk the focus
-// ring. This is a workaround layer, not normal application logic.
+// that need to restore focus after a mount/update transition must walk the
+// focus ring. This is a workaround layer, not normal application logic.
+//
+// The repair runs through app.QueueUpdate, so callers and test harnesses must
+// drain queued updates before expecting the repaired focus to be visible.
 //
 // Callers should prefer the dispatched helpers (FocusRefByTraversal,
 // focusFirstByTraversal) over the raw internal routines.

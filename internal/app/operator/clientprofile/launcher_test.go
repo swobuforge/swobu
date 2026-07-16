@@ -29,7 +29,7 @@ func TestResolveRunCommand_RunnableProfiles(t *testing.T) {
 		{clientID: "codex", binary: "codex", contains: []string{`--dangerously-bypass-approvals-and-sandbox`, `model="gpt-5.5"`, `model_provider="swobu"`, `model_providers.swobu.base_url="http://127.0.0.1:7926/c/acme/v1"`}, envChecks: map[string]string{"OPENAI_API_KEY": "swobu-placeholder"}},
 		{clientID: "claude", binary: "claude", contains: []string{"--bare", "--add-dir", ".", "--tools", "Read", "--allowedTools", "Read", "--model", exchange.PublicModelIDSwobu}, envChecks: map[string]string{"ANTHROPIC_API_KEY": "swobu-placeholder", "ANTHROPIC_BASE_URL": "http://127.0.0.1:7926/c/acme/", "ANTHROPIC_MODEL": exchange.PublicModelIDSwobu}},
 		{clientID: "continue", binary: "cn", contains: []string{"--config", "./swobu.continue.yaml"}, preparePath: "./swobu.continue.yaml"},
-		{clientID: "opencode", binary: "opencode", contains: []string{"--provider", "swobu", "--model", "swobu/primary"}, envChecks: map[string]string{"OPENAI_API_KEY": "swobu-placeholder"}},
+		{clientID: "opencode", binary: "opencode", contains: []string{"--provider", "swobu", "--model", "swobu/default"}, envChecks: map[string]string{"OPENAI_API_KEY": "swobu-placeholder"}},
 		{clientID: "pi", binary: "pi", contains: []string{"--no-context-files", "--no-skills", "--provider", "swobu", "--model", "gpt-4.1-mini"}, envChecks: map[string]string{"OPENAI_API_KEY": "swobu-placeholder", "PI_CODING_AGENT_DIR": piConfigPath, "PI_OFFLINE": "1"}, preparePath: "./.pi/agent/models.json"},
 	}
 
@@ -148,7 +148,7 @@ func TestProfileActions_RunOnlyMatrix(t *testing.T) {
 		{profileID: "claude", contains: []string{"claude --bare --add-dir . --tools Read --allowedTools Read --model", "ANTHROPIC_API_KEY=swobu-placeholder", "ANTHROPIC_BASE_URL=http://127.0.0.1:7926/c/acme/"}},
 		{profileID: "aider", contains: []string{"aider --no-show-model-warnings --no-browser", "--model", "AIDER_OPENAI_API_BASE=http://127.0.0.1:7926/c/acme/v1"}},
 		{profileID: "continue", contains: []string{"cn --config ./swobu.continue.yaml"}},
-		{profileID: "opencode", contains: []string{"opencode --provider swobu --model swobu/primary", "OPENAI_API_KEY=swobu-placeholder"}},
+		{profileID: "opencode", contains: []string{"opencode --provider swobu --model swobu/default", "OPENAI_API_KEY=swobu-placeholder"}},
 		{profileID: "pi", contains: []string{"PI_CODING_AGENT_DIR=", "PI_OFFLINE=1", "pi --no-context-files --no-skills --provider swobu --model gpt-4.1-mini"}},
 	}
 

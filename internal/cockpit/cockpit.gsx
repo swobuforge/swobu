@@ -63,7 +63,6 @@ func (c *Cockpit) KeyMap() tui.KeyMap {
 		tui.OnPreemptStop(tui.KeyTab, c.activateNextTab),
 		tui.OnPreemptStop(tui.KeyTab.Shift(), c.activatePreviousTab),
 		tui.OnStop(tui.KeyF1, c.activateHelpTab),
-		tui.OnStop(tui.Rune('q'), c.quit),
 	}
 }
 
@@ -173,9 +172,6 @@ func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) 
 			if previousPage.RoutesSection != nil && freshPage.RoutesSection != nil {
 				previousPage.RoutesSection.UpdateProps(freshPage.RoutesSection)
 			}
-			if previousPage.ActivitySection != nil && freshPage.ActivitySection != nil {
-				previousPage.ActivitySection.UpdateProps(freshPage.ActivitySection)
-			}
 			c.WorkspacePages[saved.ID] = previousPage
 		}
 	}
@@ -270,8 +266,8 @@ templ RefreshNotice(notice readmodel.Notice) {
 
 templ ShellHeader(model readmodel.CockpitReadModel) {
 	<div class="flex-row w-full">
-		<span class="w-9 font-bold">SWOBU</span>
-		<div class="flex-row gap-1 grow">
+		<span class="w-9 font-bold">⛉ SWOBU</span>
+		<div class="flex-row gap-1 grow justify-end">
 			for _, tab := range model.Tabs {
 				if tab.Selected {
 					<span>{activeTabLabel(tab)}</span>
@@ -281,34 +277,19 @@ templ ShellHeader(model readmodel.CockpitReadModel) {
 			}
 		</div>
 		if model.HeaderRight != "" {
-			<span>{model.HeaderRight}</span>
+			<span class="ml-2">{model.HeaderRight}</span>
 		}
 	</div>
 }
 
 templ ShellFooter(model readmodel.CockpitReadModel) {
-	if model.ActivePage == readmodel.CockpitHelpPage {
-		<div class="flex-row gap-3">
-			<span>↑↓ move</span>
-			<span>↵ open/copy</span>
-			<span>Tab next</span>
-			<span>Shift+Tab prev</span>
-			<span>esc back</span>
-		</div>
-	} else if model.SelectedWorkspace.IsDraft() {
-		<div class="flex-row gap-3">
-			<span>Tab next</span>
-			<span>Shift+Tab prev</span>
-			<span>esc back</span>
-		</div>
-	} else {
-		<div class="flex-row gap-3">
-			<span>↑↓ move</span>
-			<span>↵ open</span>
-			<span>F1 help</span>
-			<span>esc back</span>
-		</div>
-	}
+	<div class="flex-row gap-3">
+		<span>↑↓ move</span>
+		<span>↵ action</span>
+		<span>? help</span>
+		<span>esc back</span>
+		<span>tab switch</span>
+	</div>
 }
 
 func activeTabLabel(tab readmodel.WorkspaceTabReadModel) string {

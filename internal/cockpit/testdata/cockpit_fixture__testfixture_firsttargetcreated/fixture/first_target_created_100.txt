@@ -1,0 +1,29 @@
+⛉ SWOBU                                                                        [› lab] [dev] [+] [?]
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  workspace ▾
+     endpoint          http://127.0.0.1:7926/c/lab                                    copy ↵
+     OpenAI · Anthropic
+     slug              lab                                                            edit ↵
+     delete            workspace                                                      delete ↵
+
+  model routes ▾
+     gpt               default · 1 target                                             collapse ↵
+        name              gpt                                                         edit ↵
+        default           yes                                                         current
+        delete            gpt                                                         delete ↵
+        client sends      model = gpt
+        step 1
+        openai/gpt-4.1                                                                edit ↵
+        add target                                                                    add ↵
+     add model route                                                                  add ↵
+
+  activity ▾
+     latest            no requests yet
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+↑↓ move   ↵ action   ? help   esc back   tab switch
+
+
+
+

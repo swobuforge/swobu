@@ -57,6 +57,7 @@ func TestFixture_StaticStates(t *testing.T) {
 		{name: "help_copied", height: 16, view: func() *Cockpit { return helpFixtureCockpit(readmodel.DiagnosticsCopied) }},
 		{name: "delete_confirm", height: 22, view: deleteConfirmFixtureCockpit},
 		{name: "all_collapsed", height: 16, view: collapsedFixtureCockpit},
+		{name: "first_target_created", height: 30, view: firstTargetCreatedFixtureCockpit},
 	}
 
 	for _, tt := range tests {
@@ -149,16 +150,14 @@ func exceptionalRoutesFixtureCockpit() *Cockpit {
 func activityLatestFixtureCockpit(errorRow bool, expanded bool) *Cockpit {
 	model := DefaultFixtureReadModel()
 	row := readmodel.ActivityRowReadModel{
-		ID:           "req-1",
-		ObservedAt:   "14:32:01",
-		ClientLabel:  "codex",
-		RouteID:      "gpt",
-		RouteLabel:   "gpt",
-		Status:       readmodel.ActivitySucceeded,
-		HTTPStatus:   200,
-		Duration:     145 * time.Millisecond,
-		ResolvedName: "gpt",
-		Model:        "gpt-4.1",
+		ID:          "req-1",
+		ObservedAt:  "14:32:01",
+		ClientLabel: "codex",
+		RouteID:     "gpt",
+		RouteLabel:  "gpt",
+		Status:      readmodel.ActivitySucceeded,
+		HTTPStatus:  200,
+		Duration:    145 * time.Millisecond,
 		Attempts: []readmodel.ActivityAttemptReadModel{{
 			Label:  "gpt-4.1",
 			Rank:   1,
@@ -174,11 +173,7 @@ func activityLatestFixtureCockpit(errorRow bool, expanded bool) *Cockpit {
 		row.Error = true
 	}
 	model.SelectedWorkspace.Activity = readmodel.ActivityReadModel{Latest: &row}
-	return newFixtureCockpit(model, func(c *Cockpit) {
-		if expanded {
-			c.currentWorkspacePage().ActivitySection.OpenActivity.Set(row.ID)
-		}
-	})
+	return newFixtureCockpit(model, func(c *Cockpit) {})
 }
 
 func draftWorkspaceFixtureCockpit() *Cockpit {
@@ -214,6 +209,50 @@ func deleteConfirmFixtureCockpit() *Cockpit {
 func collapsedFixtureCockpit() *Cockpit {
 	return newFixtureCockpit(DefaultFixtureReadModel(), func(c *Cockpit) {
 		c.currentWorkspacePage().RoutesSection.Expanded.Set(false)
-		c.currentWorkspacePage().ActivitySection.Expanded.Set(false)
+	})
+}
+
+func firstTargetCreatedFixtureCockpit() *Cockpit {
+	model := DefaultFixtureReadModel()
+	// Simulate: workspace "lab" with route "gpt" and one new target
+	// Route "gpt" has 1 target in step 1 (typical first-target outcome).
+	model.Tabs = []readmodel.WorkspaceTabReadModel{
+		{ID: "lab", Slug: "lab", Kind: readmodel.WorkspaceTabExisting, Selected: true},
+		{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting},
+		{ID: "+", Kind: readmodel.WorkspaceTabDraft},
+		{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+	}
+	model.SelectedWorkspaceID = "lab"
+	model.SelectedWorkspace = readmodel.WorkspaceReadModel{
+		ID:                "lab",
+		Slug:              "lab",
+		State:             readmodel.WorkspaceExisting,
+		CompatibleClients: "OpenAI · Anthropic",
+		ClientBaseURL:     "http://127.0.0.1:7926/c/lab",
+		Routes: []readmodel.RouteReadModel{
+			{
+				ID:        "gpt",
+				ModelName: "gpt",
+				State:     readmodel.RouteNormal,
+				Default:   true,
+				Enabled:   true,
+				Targets: []readmodel.TargetReadModel{
+					{
+						ID:            "t-new",
+						Name:          "openai/gpt-4.1",
+						Provider:      "openai",
+						Model:         "gpt-4.1",
+						BaseURL:       "https://api.openai.com/v1",
+						CredentialRef: "env:OPENAI_API_KEY",
+						Rank:          1,
+						Weight:        1,
+					},
+				},
+			},
+		},
+	}
+	return newFixtureCockpit(model, func(c *Cockpit) {
+		// Expand the route so the target is visible.
+		c.currentWorkspacePage().RoutesSection.OpenRoute(c.currentWorkspacePage().RoutesSection.State.Routes[0])
 	})
 }

@@ -2,12 +2,15 @@ package adapters
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/platform/browser"
+	"github.com/swobuforge/swobu/internal/platform/clipboard"
 )
 
 func (a *LiveOperatorAdapter) CopyDiagnostics(ctx context.Context) (ports.DiagnosticsCopyResult, error) {
@@ -16,22 +19,57 @@ func (a *LiveOperatorAdapter) CopyDiagnostics(ctx context.Context) (ports.Diagno
 		return ports.DiagnosticsCopyResult{Status: ports.DiagnosticsCopyFailed}, adapterFailure("copy diagnostics", err)
 	}
 	payload := diagnosticsPayloadFromEndpoints(a.baseDiagnosticsPayload(), endpoints, a.diagnosticsActivityCounts(ctx, endpoints))
+	text := payload.Text()
+
+	copy := a.copyText
+	if copy == nil {
+		copy = clipboard.TryWriteText
+	}
+	cpOk, cpErr := copy(text)
+	if cpOk {
+		return ports.DiagnosticsCopyResult{
+			Status: ports.DiagnosticsCopyCopied,
+			Text:   text,
+		}, nil
+	}
+
+	path, ferr := clipboard.WriteTempFileFallback("", "swobu-diagnostics-", text)
+	if ferr != nil {
+		return ports.DiagnosticsCopyResult{
+			Status: ports.DiagnosticsCopyFailed,
+			Text:   text,
+		}, fmt.Errorf("clipboard copy failed: %w; fallback file: %v", cpErr, ferr)
+	}
+
 	return ports.DiagnosticsCopyResult{
-		Status: ports.DiagnosticsCopyCopied,
-		Text:   payload.Text(),
+		Status: ports.DiagnosticsCopySaved,
+		Text:   text,
+		Path:   path,
 	}, nil
 }
 
 func (a *LiveOperatorAdapter) OpenDocs(context.Context) error {
-	return nil
+	open := a.openURL
+	if open == nil {
+		open = browser.Open
+	}
+	return open(a.helpDocsURL)
 }
 
 func (a *LiveOperatorAdapter) OpenCommunity(context.Context) error {
-	return nil
+	open := a.openURL
+	if open == nil {
+		open = browser.Open
+	}
+	return open(a.helpCommunityURL)
 }
 
 func (a *LiveOperatorAdapter) OpenIssue(context.Context) error {
-	return nil
+	open := a.openURL
+	if open == nil {
+		open = browser.Open
+	}
+	return open(a.helpIssueURL)
 }
 
 func (a *LiveOperatorAdapter) baseDiagnosticsPayload() readmodel.DiagnosticsPayload {
