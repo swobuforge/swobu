@@ -90,7 +90,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	}
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := applyBedrockAuth(ctx, req.Target.CredentialRef, httpReq, wireReqBody); err != nil {
+	if err := applyBedrockAuth(ctx, req.Target.AuthMode, req.Target.CredentialRef, httpReq, wireReqBody); err != nil {
 		return nil, err
 	}
 
@@ -148,7 +148,7 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
-	if err := applyBedrockAuth(ctx, target.CredentialRef, httpReq, nil); err != nil {
+	if err := applyBedrockAuth(ctx, target.AuthMode, target.CredentialRef, httpReq, nil); err != nil {
 		return nil, err
 	}
 	resp, err := e.client.Do(httpReq)

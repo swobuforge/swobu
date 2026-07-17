@@ -210,7 +210,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			defer srv.Close()
 
 			client := rewritingClientForServer(t, srv)
-			registry := NewProviderRegistry(client, testCredentialResolver{}, "")
+			registry := NewProviderRegistry(client, testCredentialResolver{})
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model: "m",
 				Items: []canonical.CanonicalItem{
@@ -321,7 +321,7 @@ func TestProviderIngress_AzurePromptContentFilterReturnsBackendError(t *testing.
 	defer srv.Close()
 
 	client := rewritingClientForServer(t, srv)
-	registry := NewProviderRegistry(client, testCredentialResolver{}, "")
+	registry := NewProviderRegistry(client, testCredentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},

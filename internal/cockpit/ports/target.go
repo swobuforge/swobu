@@ -1,20 +1,16 @@
 package ports
 
-import "github.com/swobuforge/swobu/internal/cockpit/readmodel"
+import (
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+)
 
 // SaveTargetRequest describes an add or edit request for one route target.
 type SaveTargetRequest struct {
-	WorkspaceID      readmodel.WorkspaceID
-	RouteID          readmodel.RouteID
-	TargetID         readmodel.TargetID
-	Name             string
-	Provider         string
-	Model            string
-	ProviderProtocol string
-	BaseURL          string
-	CredentialRef    string
-	Rank             int
-	Weight           int
+	WorkspaceID readmodel.WorkspaceID
+	RouteID     readmodel.RouteID
+	TargetID    readmodel.TargetID
+	Draft       endpointintent.TargetDraft
 }
 
 // DeleteTargetRequest names the target to remove from a route.

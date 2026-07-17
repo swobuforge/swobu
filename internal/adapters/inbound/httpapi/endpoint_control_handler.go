@@ -44,6 +44,8 @@ type providerConfigDocument struct {
 	Ref              string `json:"ref"`
 	ProviderSpec     string `json:"provider_spec"`
 	BaseURL          string `json:"base_url,omitempty"`
+	AuthMode         string `json:"auth_mode,omitempty"`
+	AuthHeader       string `json:"auth_header,omitempty"`
 	CredentialRef    string `json:"credential_ref,omitempty"`
 	RouteModelID     string `json:"route_model_id,omitempty"`
 	ModelID          string `json:"model_id,omitempty"`

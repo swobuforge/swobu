@@ -209,7 +209,7 @@ func TestApplyBedrockAuth_ProfileRefWithExplicitRegionUsesSigV4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	if err := applyBedrockAuth(context.Background(), "profile:swobu-bedrock@eu-west-2", req, []byte(`{"inputText":"ping"}`)); err != nil {
+	if err := applyBedrockAuth(context.Background(), "", "profile:swobu-bedrock@eu-west-2", req, []byte(`{"inputText":"ping"}`)); err != nil {
 		t.Fatalf("applyBedrockAuth error: %v", err)
 	}
 	auth := req.Header.Get("Authorization")
@@ -224,7 +224,7 @@ func TestApplyBedrockAuth_ProfileRefWithExplicitRegionUsesSigV4(t *testing.T) {
 func TestParseBedrockAuthMode_DefaultsToAWSProfile(t *testing.T) {
 	t.Parallel()
 
-	mode, value := parseBedrockAuthMode("")
+	mode, value := parseBedrockAuthMode("", "")
 	if mode != "aws_profile" || value != "" {
 		t.Fatalf("mode=%q value=%q", mode, value)
 	}
@@ -233,8 +233,17 @@ func TestParseBedrockAuthMode_DefaultsToAWSProfile(t *testing.T) {
 func TestParseBedrockAuthMode_ProfileRef(t *testing.T) {
 	t.Parallel()
 
-	mode, value := parseBedrockAuthMode("profile:work-prod")
+	mode, value := parseBedrockAuthMode("", "profile:work-prod")
 	if mode != "aws_profile" || value != "work-prod" {
+		t.Fatalf("mode=%q value=%q", mode, value)
+	}
+}
+
+func TestParseBedrockAuthMode_ExplicitAWSProfilePreservesProfileRef(t *testing.T) {
+	t.Parallel()
+
+	mode, value := parseBedrockAuthMode("aws_profile", "profile:work-prod@eu-west-2")
+	if mode != "aws_profile" || value != "work-prod@eu-west-2" {
 		t.Fatalf("mode=%q value=%q", mode, value)
 	}
 }
@@ -242,7 +251,7 @@ func TestParseBedrockAuthMode_ProfileRef(t *testing.T) {
 func TestParseBedrockAuthMode_APIKeyEnvRef(t *testing.T) {
 	t.Parallel()
 
-	mode, value := parseBedrockAuthMode("env:AWS_BEARER_TOKEN_BEDROCK")
+	mode, value := parseBedrockAuthMode("", "env:AWS_BEARER_TOKEN_BEDROCK")
 	if mode != "api_key_env" || value != "AWS_BEARER_TOKEN_BEDROCK" {
 		t.Fatalf("mode=%q value=%q", mode, value)
 	}
@@ -251,9 +260,99 @@ func TestParseBedrockAuthMode_APIKeyEnvRef(t *testing.T) {
 func TestParseBedrockAuthMode_AWSEnvSessionRef(t *testing.T) {
 	t.Parallel()
 
-	mode, value := parseBedrockAuthMode("aws_env_session")
-	if mode != "aws_profile" || value != "" {
+	mode, value := parseBedrockAuthMode("aws_env_session", "")
+	if mode != "aws_env_session" || value != "" {
 		t.Fatalf("mode=%q value=%q", mode, value)
+	}
+}
+
+func TestLoadBedrockAWSConfig_AWSEnvSessionUsesEnvCredentials(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", "env-access")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "env-secret")
+	t.Setenv("AWS_SESSION_TOKEN", "env-session")
+
+	cfg, err := loadBedrockAWSConfig(context.Background(), "us-east-1", bedrockAuthModeAWSEnvSession, "")
+	if err != nil {
+		t.Fatalf("loadBedrockAWSConfig returned error: %v", err)
+	}
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("Retrieve returned error: %v", err)
+	}
+	if creds.AccessKeyID != "env-access" || creds.SecretAccessKey != "env-secret" || creds.SessionToken != "env-session" {
+		t.Fatalf("credentials=%+v want env session credentials", creds)
+	}
+}
+
+// TestLoadBedrockAWSConfig_AWSEnvSessionResolvesSharedConfigDefault proves the
+// AWS env path uses the full AWS SDK default credential chain, not just env
+// vars: with no AWS_ACCESS_KEY_ID set, the shared-config default profile
+// resolves. This is the capability the static-env implementation lacked.
+func TestLoadBedrockAWSConfig_AWSEnvSessionResolvesSharedConfigDefault(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_DEFAULT_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	configPath := filepath.Join(tmp, "config")
+	if err := os.WriteFile(configPath, []byte("[default]\nregion = eu-west-2\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	credPath := filepath.Join(tmp, "credentials")
+	if err := os.WriteFile(credPath, []byte("[default]\naws_access_key_id = chain-access\naws_secret_access_key = chain-secret\n"), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", configPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath)
+
+	cfg, err := loadBedrockAWSConfig(context.Background(), "eu-west-2", bedrockAuthModeAWSEnvSession, "")
+	if err != nil {
+		t.Fatalf("loadBedrockAWSConfig returned error: %v", err)
+	}
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("Retrieve returned error: %v", err)
+	}
+	if creds.AccessKeyID != "chain-access" || creds.SecretAccessKey != "chain-secret" {
+		t.Fatalf("credentials=%+v want shared-config default profile credentials", creds)
+	}
+}
+
+// TestApplyBedrockAuth_AWSEnvSessionUsesSigV4 is the end-to-end proof for the
+// third Bedrock auth type: AWS env session signs an inference request with
+// SigV4 (service bedrock, region derived from the Mantle host). API key and
+// AWS profile already had this coverage; this closes the AWS env gap.
+func TestApplyBedrockAuth_AWSEnvSessionUsesSigV4(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", "env-access")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "env-secret")
+	t.Setenv("AWS_SESSION_TOKEN", "env-session")
+	t.Setenv("HOME", t.TempDir())
+
+	req, err := http.NewRequest(http.MethodPost, "https://bedrock-mantle.eu-west-2.api.aws/v1/responses", strings.NewReader(`{"inputText":"ping"}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if err := applyBedrockAuth(context.Background(), "aws_env_session", "", req, []byte(`{"inputText":"ping"}`)); err != nil {
+		t.Fatalf("applyBedrockAuth error: %v", err)
+	}
+	auth := req.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "AWS4-HMAC-SHA256 ") {
+		t.Fatalf("authorization=%q want SigV4 header", auth)
+	}
+	if !strings.Contains(auth, "/eu-west-2/bedrock/aws4_request") {
+		t.Fatalf("authorization=%q want eu-west-2 bedrock signing scope", auth)
 	}
 }
 

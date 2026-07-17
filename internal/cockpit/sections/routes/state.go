@@ -9,11 +9,12 @@ import (
 // SectionView owns the workflow behavior and mutates this projection after
 // route and target commands complete.
 type RouteSectionState struct {
-	Routes             []readmodel.RouteReadModel
-	ExpandedRoute      *tui.State[readmodel.RouteID]
-	OpenTarget         *tui.State[readmodel.TargetID]
-	AddTargetRoute     *tui.State[readmodel.RouteID]
+	Routes              []readmodel.RouteReadModel
+	ExpandedRoute       *tui.State[readmodel.RouteID]
+	OpenTarget          *tui.State[readmodel.TargetID]
+	AddTargetRoute      *tui.State[readmodel.RouteID]
 	DeleteConfirmTarget *tui.State[readmodel.TargetID]
+	FocusRoute          *tui.State[readmodel.RouteID]
 }
 
 func NewRouteSectionState(routes []readmodel.RouteReadModel) *RouteSectionState {
@@ -23,5 +24,6 @@ func NewRouteSectionState(routes []readmodel.RouteReadModel) *RouteSectionState 
 		OpenTarget:          tui.NewState(readmodel.TargetID("")),
 		AddTargetRoute:      tui.NewState(readmodel.RouteID("")),
 		DeleteConfirmTarget: tui.NewState(readmodel.TargetID("")),
+		FocusRoute:          tui.NewState(readmodel.RouteID("")),
 	}
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"time"
 	"unicode/utf8"
 
 	tui "github.com/grindlemire/go-tui"
@@ -66,7 +67,7 @@ func (inp *InlineInput) UnbindApp() {
 // these in its own Watchers() implementation so go-tui drives the blink.
 func (inp *InlineInput) Watchers() []tui.Watcher {
 	return []tui.Watcher{
-		tui.OnTimer(500, func() {
+		tui.OnTimer(500*time.Millisecond, func() {
 			inp.blink.Set(!inp.blink.Get())
 		}),
 	}

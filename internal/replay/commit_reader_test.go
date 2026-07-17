@@ -1,9 +1,12 @@
 package replay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -562,6 +565,79 @@ func TestCommitReader_UpstreamErrorAfterResponseStartEmitsTerminalFailure(t *tes
 	}
 	if len(store.calls) != 0 {
 		t.Fatalf("store calls = %v, want no commit attempts on upstream error", store.calls)
+	}
+}
+
+func TestCommitReader_UpstreamErrorAfterResponseStartLogsDiagnosticContext(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{})))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+	})
+
+	ctx := context.Background()
+	cr := NewCommitReader(&errorAfterStartReader{
+		events: []canonical.Event{
+			{
+				ExchangeID: "ex_log",
+				Seq:        0,
+				Kind:       canonical.EventEnvelopeStart,
+				EnvID:      "r1",
+				Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse},
+			},
+			{
+				ExchangeID: "ex_log",
+				Seq:        1,
+				Kind:       canonical.EventTextDelta,
+				EnvID:      "r1:item:text_0",
+				ParentID:   "r1",
+				Payload:    canonical.TextDeltaPayload{Text: "hello"},
+			},
+		},
+		err: errors.New("stream error: stream ID 81; CANCEL; received from peer"),
+	}, TerminalCommitConfig{
+		Scope:      Scope{Namespace: "ex_log", CallerKey: "local"},
+		ExchangeID: "ex_log",
+		ResponseID: "swobu_resp_log",
+		Store:      newSpyStore(),
+		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: "m",
+			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		}),
+	})
+
+	for i := 0; i < 3; i++ {
+		if _, err := cr.Next(ctx); err != nil {
+			t.Fatalf("next %d: %v", i, err)
+		}
+	}
+
+	logText := logs.String()
+	wantFields := []string{
+		"event=replay_terminal_failure",
+		"code=provider_stream_decode_failed",
+		"failure_origin=provider_stream_read_error",
+		"response_started=true",
+		"last_event_kind=text.delta",
+		"last_event_seq=1",
+		"last_env_id=r1:item:text_0",
+		"recorded_event_count=2",
+		"returned_event_count=2",
+		"replace_last_event=false",
+		"error_type=*errors.errorString",
+		`error="stream error: stream ID 81; CANCEL; received from peer"`,
+	}
+	for _, field := range wantFields {
+		if !strings.Contains(logText, field) {
+			t.Fatalf("log missing %q in %s", field, logText)
+		}
+	}
+}
+
+func TestTerminalFailureOriginUsesGenericReplayCommitOrigin(t *testing.T) {
+	if got := terminalFailureOrigin("replay_capture_failed"); got != "replay_commit" {
+		t.Fatalf("origin = %q, want replay_commit", got)
 	}
 }
 

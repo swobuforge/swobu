@@ -75,6 +75,12 @@ func TestRunner_InteractiveShowsNoticeBeforeAttachOrStart(t *testing.T) {
 	if stdout.String() == "" {
 		t.Fatal("stdout is empty, want first-run notice")
 	}
+	out := stdout.String()
+	if splash := bytes.Index([]byte(out), []byte("___.          ")); splash < 0 {
+		t.Fatalf("stdout missing splash; stdout=%q", out)
+	} else if notice := bytes.Index([]byte(out), []byte("╭─ telemetry disclosure ")); notice >= 0 && splash > notice {
+		t.Fatalf("splash must render before telemetry disclosure; stdout=%q", out)
+	}
 }
 
 func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testing.T) {

@@ -10,7 +10,7 @@ templ (s *SectionView) Render() {
 			@SectionHeaderComponent(s)
 		</div>
 		if s.Expanded.Get() {
-			<div class="ml-3 w-full">
+			<div class="pl-3 w-full">
 				// --- Routes list -----------------------------------------------
 				if len(s.State.Routes) == 0 {
 					@SectionInertRow("(no routes)", "", "")
@@ -21,85 +21,92 @@ templ (s *SectionView) Render() {
 							@RouteRowComponent(s, route)
 						</div>
 						if s.isExpanded(route) {
-							<div class="ml-3 w-full">
-								// --- Route detail rows (name, default, delete) --------
-								<div key={s.routeDetailRowKey(route)} class="w-full">
-									@RouteDetailRowComponent(s, route)
+							<div class="pl-3 w-full">
+								// --- Name (editable) ------------------------------------
+								<div key={s.routeNameRowKey(route)} class="w-full">
+									@RouteNameRowComponent(s, route)
 								</div>
-								// --- Contract row -------------------------------------
-								@ContractRow("client sends", contractRowValue(route))
-								// --- Target rows by step ------------------------------
+								// --- Default toggle -------------------------------------
+								if len(route.Targets) == 0 {
+									@SectionInertRow("default", "no", "target first")
+								} else {
+									<div key={s.routeDefaultRowKey(route)} class="w-full">
+										@RouteDefaultRowComponent(s, route)
+									</div>
+								}
+								// --- Target rows by step --------------------------------
 								for stepIdx, stepTargets := range groupedTargets(route) {
 									@StepHeaderRow(stepHeaderText(stepIdx+1, len(stepTargets) > 1))
-									for _, target := range stepTargets {
-										<div key={targetMountKey(route, target)} class="w-full">
-											@TargetRowComponent(s, route, target)
-										</div>
-										if s.State.OpenTarget.Get() == target.ID {
-											row := TargetStringRowComponent(s, route, target)
-											<div key={s.targetStringRowKey(route, target)} class="w-full">
-												@row
-											</div>
+									<div class="pl-3 w-full">
+										for _, target := range stepTargets {
+												if s.State.OpenTarget.Get() == target.ID {
+													config := s.targetEditConfig(route, target)
+													<div key={s.targetConfigKey(route, target.ID)} class="w-full">
+														@TargetConfigComponent(config)
+													</div>
+												} else {
+													<div key={targetMountKey(route, target)} class="w-full">
+														@TargetRowComponent(s, route, target)
+													</div>
+												}
+												// --- Delete confirmation for a target --------
+												if s.State.DeleteConfirmTarget.Get() == target.ID {
+													<div key={"del:" + string(target.ID)} class="w-full">
+														@TargetDeleteConfirmRow(s, route, target)
+													</div>
+												}
 										}
-										// --- Delete confirmation for a target --------
-										if s.State.DeleteConfirmTarget.Get() == target.ID {
-											<div key={"del:" + string(target.ID)} class="w-full">
-												@TargetDeleteConfirmRow(s, route, target)
-											</div>
-										}
-									}
+									</div>
 								}
-								// --- Add target trigger / workflow -------------------
+								// --- Add target trigger / config -------------------
 								if s.State.AddTargetRoute.Get() == route.ID {
-									wf := s.targetAddWorkflow(route)
-									<div key={targetAddMountKey(route)} class="w-full">
-										@TargetAddWorkflowComponent(wf)
+									config := s.targetAddConfig(route)
+									<div key={targetAddMountKey(route)} class="w-full mt-1">
+										@TargetConfigComponent(config)
 									</div>
 								} else {
-									<div key={addTargetMountKey(route)} class="w-full">
+									<div key={addTargetMountKey(route)} class="w-full mt-1">
 										@AddTargetRowComponent(s, route)
+									</div>
+									// --- Route-level delete --------------------------
+									// Hidden while the add-target workflow is active so the
+									// operator does not delete the route mid-edit.
+									<div key={s.routeDeleteRowKey(route)} class="w-full">
+										@RouteDeleteRowComponent(s, route)
 									</div>
 								}
 							</div>
 						}
 					}
 				}
+				<div class="w-full mt-1"/>
 				// --- Draft route -----------------------------------------------
-				if s.RouteDraft.IsOpen() {
-					@SectionDraftRouteRow(s)
+				if s.DraftRoute != nil && s.DraftRoute.IsExpanded() {
+					<div key={"draft-route"} class="w-full">
+						@DraftParentRowComponent(s)
+					</div>
+					<div class="pl-3 w-full">
+						<div key={"draft-name"} class="w-full">
+							@DraftNameRowComponent(s)
+						</div>
+						@SectionInertRow("client sends", "model = "+s.DraftRoute.ModelName(), "")
+					</div>
 				}
 				// --- Add route action ------------------------------------------
-				<div key={addRouteMountKey()} class="w-full">
-					@AddRouteRowComponent(s)
-				</div>
+				if s.DraftRoute == nil {
+					<div key={addRouteMountKey()} class="w-full">
+						@AddRouteRowComponent(s)
+					</div>
+				}
 			</div>
 		}
 	</div>
 }
 
-templ ContractRow(label string, value string) {
-	<div class="flex-row w-full">
-		<span class="w-2"></span>
-		<span class="w-18">{label}</span>
-		<span>{value}</span>
-	</div>
-}
-
 templ StepHeaderRow(label string) {
-	<div class="flex-row w-full">
+	<div class="flex-row w-full mt-1">
 		<span class="w-2"></span>
 		<span>{label}</span>
-	</div>
-}
-
-templ (r *SectionDraftRouteRowView) Render() {
-	<div class="flex-row w-full">
-		<span class="w-2">{r.Arrow()}</span>
-		<div class="w-18">
-			<input value={r.ModelName} autoFocus onSubmit={r.Submit} width={18} />
-		</div>
-		<span class="w-32">no targets</span>
-		<span>create ↵</span>
 	</div>
 }
 

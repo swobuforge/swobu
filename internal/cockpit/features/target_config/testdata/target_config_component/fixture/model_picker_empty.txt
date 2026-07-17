@@ -1,0 +1,24 @@
+  new target · OpenAI                                                                                     cancel ↵      
+     provider          OpenAI                                                                             change ↵      
+     credential        env:OPENAI_API_KEY                                                                 change ↵      
+     model             required                                                                           choose ↵      
+        model                                                                                                           
+        search            xyz_                                                                                          
+                                                                                                                        
+      > xyz                                                                                               use ↵         
+                                                                                                                        
+        0 of 47 shown                                                                                     ↑↓ search     
+     protocol          blocked                                                                            model first   
+     routing           fallback after step 1                                                              change ↵      
+     create                                                                                               model first   
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

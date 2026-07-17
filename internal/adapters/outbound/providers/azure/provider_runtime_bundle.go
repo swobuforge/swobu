@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	anthropicprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -24,21 +25,13 @@ const swobuCallerUAHeaderValue = "swobu/dev"
 const azureDeploymentListPath = "/deployments?api-version=v1&deploymentType=ModelDeployment"
 
 type azureProviderIngressResolver struct {
-	openAI          openaifamily.ProviderIngressResolverAdapter
-	anthropic       anthropicprovider.ProviderIngressResolverAdapter
-	projectEndpoint string
-}
-
-type authHeaderMappingRoundTripper struct {
-	base http.RoundTripper
-	from string
-	to   string
+	openAI    openaifamily.ProviderIngressResolverAdapter
+	anthropic anthropicprovider.ProviderIngressResolverAdapter
 }
 
 type azureProviderModelCatalogClient struct {
-	client          *http.Client
-	credentials     providersruntime.CredentialProvider
-	projectEndpoint string
+	client      *http.Client
+	credentials providersruntime.CredentialProvider
 }
 
 type azureDeploymentDocument struct {
@@ -74,64 +67,27 @@ type azureDeploymentCapabilityRecord struct {
 
 // NewRuntime builds the Azure provider runtime by routing concrete protocol
 // families to the shared OpenAI-compatible or Anthropic executors.
-//
-// The third argument is the project-scoped deployments endpoint used for live
-// discovery. Provider ingress still resolves the resource root from the
-// operator-selected locator and only uses the project endpoint as a fallback
-// input for that normalization.
-func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, azureProjectEndpoint string) providersruntime.ProviderRuntimeBundle {
+func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	projectEndpoint := strings.TrimSpace(azureProjectEndpoint) // swobu:io-string source=boundary
-	anthropicClient := cloneHTTPClientWithAuthHeaderMapping(client, "x-api-key", "api-key")
 	router := azureProviderIngressResolver{
-		openAI:          openaifamily.NewExecutor(client, credentials, NewPolicy()),
-		anthropic:       anthropicprovider.NewExecutor(anthropicClient, credentials),
-		projectEndpoint: projectEndpoint,
+		openAI:    openaifamily.NewExecutor(client, credentials, NewPolicy()),
+		anthropic: anthropicprovider.NewExecutor(client, credentials),
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,
 		ProviderExecutor:   router,
 		CredentialProvider: credentials,
 		Discovery: azureProviderModelCatalogClient{
-			client:          client,
-			credentials:     credentials,
-			projectEndpoint: projectEndpoint,
+			client:      client,
+			credentials: credentials,
 		},
 	}
 }
 
-func cloneHTTPClientWithAuthHeaderMapping(client *http.Client, from string, to string) *http.Client {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	clone := *client
-	clone.Transport = authHeaderMappingRoundTripper{
-		base: client.Transport,
-		from: from,
-		to:   to,
-	}
-	return &clone
-}
-
-func (rt authHeaderMappingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	if value := strings.TrimSpace(clone.Header.Get(rt.from)); value != "" { // swobu:io-string source=boundary
-		clone.Header.Del(rt.from)
-		if clone.Header.Get(rt.to) == "" {
-			clone.Header.Set(rt.to, value)
-		}
-	}
-	base := rt.base
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	return base.RoundTrip(clone)
-}
-
 func (r azureProviderIngressResolver) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
-	baseURL, err := resolveAzureResourceRoot(req.Target.BaseURL, r.projectEndpoint)
+	baseURL, err := resolveAzureResourceRoot(req.Target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure resource locator is required")
 	}
@@ -152,7 +108,7 @@ func (c azureProviderModelCatalogClient) ValidateCredentials(ctx context.Context
 }
 
 func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-	projectEndpoint, err := resolveAzureProjectEndpoint(c.projectEndpoint, target.BaseURL)
+	projectEndpoint, err := resolveAzureProjectEndpoint(target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure project endpoint is required")
 	}
@@ -190,9 +146,15 @@ func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context
 	if err != nil {
 		return nil, "", canonical.BadEndpoint("azure provider deployment inventory request failed before backend response")
 	}
+	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
+	if err != nil {
+		defer func() { _ = resp.Body.Close() }()
+		return nil, "", canonical.InternalError("backend response content encoding is unsupported or invalid")
+	}
+	resp = decodedResp
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, "", canonical.BadEndpoint("azure deployment inventory request failed")
+		return nil, "", httpedge.ReadBackendHTTPError(resp, target.BackendRef)
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -261,10 +223,9 @@ func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (profile.P
 	if modelName == "" {
 		modelName = name
 	}
-	capabilities := doc.Capabilities.facts()
-	family := deploymentFamilyForDeployment(doc.ModelPublisher, capabilities)
-	supportedProtocols := supportedProviderProtocolsForDeployment(doc.ModelPublisher, capabilities)
-	defaultProtocol := defaultProviderProtocolForDeployment(doc.ModelPublisher, capabilities)
+	family := deploymentFamilyForDeployment(doc.ModelPublisher)
+	supportedProtocols := supportedProviderProtocolsForDeployment(doc.ModelPublisher)
+	defaultProtocol := defaultProviderProtocolForDeployment(doc.ModelPublisher)
 	if defaultProtocol == "" && len(supportedProtocols) > 0 {
 		defaultProtocol = supportedProtocols[0]
 	}
@@ -298,11 +259,8 @@ func azureDeploymentName(doc azureDeploymentDocument) string {
 	return ""
 }
 
-func resolveAzureProjectEndpoint(raw string, fallback string) (string, error) {
+func resolveAzureProjectEndpoint(raw string) (string, error) {
 	candidate := strings.TrimSpace(raw) // swobu:io-string source=boundary
-	if candidate == "" {
-		candidate = strings.TrimSpace(fallback) // swobu:io-string source=boundary
-	}
 	if candidate == "" {
 		return "", fmt.Errorf("azure project endpoint is required")
 	}
@@ -351,29 +309,20 @@ func (c azureDeploymentCapabilitiesJSON) bool(key string) bool {
 	return false
 }
 
-// swobu:lint ignore string-switch because=azure deployment family string comes from external catalog JSON and must switch on raw wire value.
-func defaultProviderProtocolForDeployment(modelPublisher string, capabilities azureDeploymentCapabilityRecord) string {
-	family := deploymentFamilyForDeployment(modelPublisher, capabilities)
-	switch family {
-	case azureDeploymentFamilyAnthropic:
+func defaultProviderProtocolForDeployment(modelPublisher string) string {
+	if deploymentFamilyForDeployment(modelPublisher) == azureDeploymentFamilyAnthropic {
 		return azureSupportedProviderProtocolsAnthropic[0]
-	case azureDeploymentFamilyOpenAI:
-		if capabilities.Completion && !capabilities.ChatCompletion {
-			return "completions"
-		}
-		return azureSupportedProviderProtocolsOpenAI[0]
-	default:
-		return ""
 	}
+	return azureSupportedProviderProtocolsOpenAI[0]
 }
 
-func resolveAzureResourceRoot(raw string, fallback string) (string, error) {
+func resolveAzureResourceRoot(raw string) (string, error) {
 	candidate := strings.TrimSpace(raw) // swobu:io-string source=boundary
 	if candidate == "" {
-		candidate = strings.TrimSpace(fallback) // swobu:io-string source=boundary
-	}
-	if candidate == "" {
 		return "", fmt.Errorf("azure resource locator is required")
+	}
+	if root, err := endpointintent.AzureResourceRootFromProjectEndpoint(candidate); err == nil {
+		return root, nil
 	}
 	return endpointintent.NormalizeAzureResourceLocator(candidate)
 }

@@ -1,6 +1,9 @@
 package ui
 
-import tui "github.com/grindlemire/go-tui"
+import (
+	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/ui/interaction"
+)
 
 // SectionDisclosure is a focusable, collapsible section header.
 // Sections mount it and read Expanded state to conditionally render children.
@@ -8,9 +11,9 @@ import tui "github.com/grindlemire/go-tui"
 // Enter toggles expand/collapse. Escape collapses when the header is focused.
 // Escape from section children is handled by the containing section scope.
 type SectionDisclosure struct {
-	SelectBase
-	Label    string
-	Expanded *tui.State[bool]
+	disclosure *interaction.Disclosure
+	Label      string
+	Expanded   *tui.State[bool]
 	// OnToggle lets a section react to disclosure state changes without adding
 	// render-side effects.
 	OnToggle func(expanded bool)
@@ -19,11 +22,12 @@ type SectionDisclosure struct {
 // NewSectionDisclosure builds a mountable disclosure header with focus marker
 // and self-toggle activation. The caller owns Expanded state and child visibility.
 func NewSectionDisclosure(id, label string, expanded *tui.State[bool]) *SectionDisclosure {
-	return &SectionDisclosure{
-		SelectBase: NewSelectBase(id),
-		Label:      label,
-		Expanded:   expanded,
+	d := &SectionDisclosure{
+		Label:    label,
+		Expanded: expanded,
 	}
+	d.disclosure = interaction.NewDisclosure(d.propsWithID(id))
+	return d
 }
 
 func (d *SectionDisclosure) toggle() {
@@ -34,30 +38,55 @@ func (d *SectionDisclosure) toggle() {
 }
 
 func (d *SectionDisclosure) Render(app *tui.App) *tui.Element {
+	d.disclosure.SetRenderProps(d.props())
+	opts := append(d.disclosure.ShellOptions(), tui.WithOnActivate(d.toggle))
 	root := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithWidthPercent(100.00),
-		tui.WithFocusable(true),
-		tui.WithOnFocus(d.OnFocus),
-		tui.WithOnBlur(d.OnBlur),
-		tui.WithOnActivate(d.toggle),
 	)
-	root.AddChild(tui.New(tui.WithText(d.Arrow()), tui.WithWidth(2)))
+	for _, opt := range opts {
+		opt(root)
+	}
+	root.AddChild(tui.New(tui.WithText(d.disclosure.Marker()), tui.WithWidth(2)))
 	indicator := " ▾"
 	if !d.Expanded.Get() {
 		indicator = " ▸"
 	}
 	root.AddChild(tui.New(tui.WithText(d.Label + indicator)))
-	if d.Ref != nil {
-		d.Ref.Set(root)
-	}
+	d.disclosure.BindElement(root)
 	return root
 }
 
 func (d *SectionDisclosure) KeyMap() tui.KeyMap {
-	return d.WithTraversal(ActivateFocused(func(tui.KeyEvent) {
-		d.toggle()
-	}))
+	return d.disclosure.KeyMap()
+}
+
+func (d *SectionDisclosure) BindApp(app *tui.App) { d.disclosure.BindApp(app) }
+
+func (d *SectionDisclosure) UnbindApp() { d.disclosure.UnbindApp() }
+
+func (d *SectionDisclosure) IsFocused() bool { return d.disclosure.IsFocused() }
+
+func (d *SectionDisclosure) props() interaction.DisclosureProps {
+	return d.propsWithID(d.disclosure.Props().ID)
+}
+
+func (d *SectionDisclosure) propsWithID(id string) interaction.DisclosureProps {
+	return interaction.DisclosureProps{
+		ID:       id,
+		Label:    d.Label,
+		Expanded: d.Expanded,
+		OnExpand: func(interaction.Context) {
+			if d.OnToggle != nil {
+				d.OnToggle(true)
+			}
+		},
+		OnCollapse: func(interaction.Context) {
+			if d.OnToggle != nil {
+				d.OnToggle(false)
+			}
+		},
+	}
 }
 
 var (

@@ -1,5 +1,5 @@
 > slug              _dev                                                    invalid
-disk full
+                    disk full
 
 
 

@@ -26,6 +26,9 @@ func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
 		if got := r.URL.Query().Get("credential_ref"); got != "env:OPENAI_API_KEY" {
 			t.Fatalf("credential_ref = %q, want env:OPENAI_API_KEY", got)
 		}
+		if got := r.URL.Query().Get("auth_mode"); got != "env" {
+			t.Fatalf("auth_mode = %q, want env", got)
+		}
 		if got := r.URL.Query().Get("provider_protocol"); got != "responses" {
 			t.Fatalf("provider_protocol = %q, want responses", got)
 		}
@@ -33,7 +36,7 @@ func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"deployments":[
-				{"name":"gpt-4.1","model_name":"gpt-4.1","model_publisher":"openai","model_version":"2024-01","family":"gpt","default_provider_protocol":"responses"},
+				{"name":"gpt-4.1","model_name":"gpt-4.1","model_publisher":"openai","model_version":"2024-01","family":"gpt","supported_provider_protocols":["responses","chat_completions"],"default_provider_protocol":"responses"},
 				{"name":"gpt-4o","model_name":"gpt-4o","model_publisher":"openai","family":"gpt","default_provider_protocol":"responses"}
 			],
 			"resolved_provider_protocol":"responses"
@@ -42,7 +45,7 @@ func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	result, err := c.ProbeModelCatalog(context.Background(), "openai", "https://api.openai.com/v1", "Authorization", "env:OPENAI_API_KEY", "responses")
+	result, err := c.ProbeModelCatalog(context.Background(), "openai", "https://api.openai.com/v1", "Authorization", "env:OPENAI_API_KEY", "env", "responses")
 	if err != nil {
 		t.Fatalf("ProbeModelCatalog returned error: %v", err)
 	}
@@ -52,6 +55,9 @@ func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
 	d0 := result.Deployments[0]
 	if d0.Name != "gpt-4.1" || d0.ModelName != "gpt-4.1" || d0.ModelPublisher != "openai" || d0.ModelVersion != "2024-01" || d0.Family != "gpt" || d0.DefaultProviderProtocol != "responses" {
 		t.Fatalf("first deployment = %#v", d0)
+	}
+	if len(d0.SupportedProviderProtocols) != 2 || d0.SupportedProviderProtocols[0] != "responses" || d0.SupportedProviderProtocols[1] != "chat_completions" {
+		t.Fatalf("first deployment protocols = %v", d0.SupportedProviderProtocols)
 	}
 	d1 := result.Deployments[1]
 	if d1.Name != "gpt-4o" || d1.ModelName != "gpt-4o" {
@@ -71,7 +77,7 @@ func TestClientProbeModelCatalog404ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.ProbeModelCatalog(context.Background(), "unknown", "", "", "", "")
+	_, err := c.ProbeModelCatalog(context.Background(), "unknown", "", "", "", "", "")
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -89,7 +95,7 @@ func TestClientProbeModelCatalog500ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.ProbeModelCatalog(context.Background(), "openai", "", "", "", "")
+	_, err := c.ProbeModelCatalog(context.Background(), "openai", "", "", "", "", "")
 	if err == nil {
 		t.Fatal("expected error for 500")
 	}

@@ -24,9 +24,10 @@ import (
 type bedrockAuthMode string
 
 const (
-	bedrockAuthModeAWSProfile bedrockAuthMode = "aws_profile"
-	bedrockAuthModeAPIKeyEnv  bedrockAuthMode = "api_key_env"
-	bedrockSigningService                     = "bedrock"
+	bedrockAuthModeAWSProfile    bedrockAuthMode = "aws_profile"
+	bedrockAuthModeAWSEnvSession bedrockAuthMode = "aws_env_session"
+	bedrockAuthModeAPIKeyEnv     bedrockAuthMode = "api_key_env"
+	bedrockSigningService                        = "bedrock"
 )
 
 func mustParseURL(raw string) *url.URL {
@@ -37,8 +38,8 @@ func mustParseURL(raw string) *url.URL {
 	return u
 }
 
-func applyBedrockAuth(ctx context.Context, credentialRef string, req *http.Request, payload []byte) error {
-	mode, value := parseBedrockAuthMode(credentialRef)
+func applyBedrockAuth(ctx context.Context, authMode string, credentialRef string, req *http.Request, payload []byte) error {
+	mode, value := parseBedrockAuthMode(authMode, credentialRef)
 	switch mode {
 	case bedrockAuthModeAPIKeyEnv:
 		if value == "" {
@@ -51,21 +52,23 @@ func applyBedrockAuth(ctx context.Context, credentialRef string, req *http.Reque
 		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
 	case bedrockAuthModeAWSProfile:
-		return signBedrockRequestWithAWSProfile(ctx, value, req, payload)
+		return signBedrockRequest(ctx, mode, value, req, payload)
+	case bedrockAuthModeAWSEnvSession:
+		return signBedrockRequest(ctx, mode, value, req, payload)
 	default:
 		return canonical.BadEndpoint("bedrock auth mode is unsupported")
 	}
 }
 
-func signBedrockRequestWithAWSProfile(ctx context.Context, profile string, req *http.Request, payload []byte) error {
-	region, err := bedrockSigningRegion(ctx, req.URL, profile)
+func signBedrockRequest(ctx context.Context, mode bedrockAuthMode, value string, req *http.Request, payload []byte) error {
+	region, err := bedrockSigningRegion(ctx, req.URL, value)
 	if err != nil {
 		return err
 	}
 	// Credential refs may carry an explicit @region suffix so provider config
 	// can override ambient env and host defaults without a separate auth mode.
-	profileName, _ := splitBedrockProfileAndRegion(profile)
-	cfg, err := loadBedrockAWSConfig(ctx, region, bedrockAuthModeAWSProfile, profileName)
+	profileName, _ := splitBedrockProfileAndRegion(value)
+	cfg, err := loadBedrockAWSConfig(ctx, region, mode, profileName)
 	if err != nil {
 		return err
 	}
@@ -99,6 +102,11 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 		if trimBedrockInput(value) != "" {
 			loadOptions = append(loadOptions, config.WithSharedConfigProfile(trimBedrockInput(value)))
 		}
+	case bedrockAuthModeAWSEnvSession:
+		// AWS env resolves credentials through the AWS SDK environment/default
+		// chain (env vars, the shared-config default profile, IMDS, SSO, ...).
+		// No profile is pinned so ambient AWS_* env still applies; only the
+		// signing region is fixed so SigV4 scopes to the selected Mantle region.
 	case bedrockAuthModeAPIKeyEnv:
 		envKey := value
 		if envKey == "" {
@@ -131,11 +139,11 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 	}
 	if err != nil {
 		if trimBedrockInput(value) != "" {
-			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS profile %q could not be loaded", value))
+			return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS profile %q could not be loaded: %v", value, err))
 		}
-		return aws.Config{}, canonical.BadEndpoint("bedrock AWS default credential chain could not be loaded")
+		return aws.Config{}, canonical.BadEndpoint(fmt.Sprintf("bedrock AWS default credential chain could not be loaded: %v", err))
 	}
-	if mode == bedrockAuthModeAWSProfile {
+	if mode == bedrockAuthModeAWSProfile || mode == bedrockAuthModeAWSEnvSession {
 		// Bedrock Mantle execution for aws_profile/aws_env_session must use SigV4.
 		// Some shared config chains can surface bearer providers (for example SSO),
 		// which breaks local/http test endpoints and non-bearer Mantle flows.
@@ -150,13 +158,29 @@ func loadBedrockAWSConfig(ctx context.Context, region string, mode bedrockAuthMo
 	return cfg, nil
 }
 
-func parseBedrockAuthMode(credentialRef string) (mode bedrockAuthMode, value string) {
+func parseBedrockAuthMode(authMode string, credentialRef string) (mode bedrockAuthMode, value string) {
+	switch profile.AuthMode(trimBedrockInput(authMode)) {
+	case profile.AuthModeAWSProfile:
+		ref := trimBedrockInput(credentialRef)
+		if strings.HasPrefix(lowerBedrockInput(ref), "profile:") { // swobu:io-string source=boundary
+			return bedrockAuthModeAWSProfile, trimBedrockInput(ref[len("profile:"):])
+		}
+		return bedrockAuthModeAWSProfile, ""
+	case profile.AuthModeAWSEnvSession:
+		return bedrockAuthModeAWSEnvSession, ""
+	case profile.AuthModeEnv:
+		ref := trimBedrockInput(credentialRef)
+		if strings.HasPrefix(lowerBedrockInput(ref), "env:") {
+			return bedrockAuthModeAPIKeyEnv, trimBedrockInput(ref[len("env:"):])
+		}
+		return bedrockAuthModeAPIKeyEnv, "AWS_BEARER_TOKEN_BEDROCK"
+	}
 	ref := trimBedrockInput(credentialRef)
 	if ref == "" || strings.EqualFold(ref, string(profile.AuthModeAWSProfile)) {
 		return bedrockAuthModeAWSProfile, ""
 	}
 	if strings.EqualFold(ref, string(profile.AuthModeAWSEnvSession)) {
-		return bedrockAuthModeAWSProfile, ""
+		return bedrockAuthModeAWSEnvSession, ""
 	}
 	if strings.HasPrefix(lowerBedrockInput(ref), "profile:") { // swobu:io-string source=boundary
 		return bedrockAuthModeAWSProfile, trimBedrockInput(ref[len("profile:"):])

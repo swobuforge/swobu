@@ -60,9 +60,7 @@ func (w *Workflow) UpdateProps(fresh tui.Component) {
 }
 
 func (w *Workflow) KeyMap() tui.KeyMap {
-	return tui.KeyMap{
-		tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) { w.Back() }),
-	}
+	return ui.BackScope(func() bool { return true }, func() { w.Back() })
 }
 
 func (w *Workflow) Back() bool {

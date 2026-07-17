@@ -55,29 +55,10 @@ func (fakeActivityQueries) ListActivity(context.Context, ListActivityRequest) (r
 	return readmodel.ActivityReadModel{}, nil
 }
 
-type fakeHelpActions struct{}
-
-func (fakeHelpActions) OpenDocs(context.Context) error {
-	return nil
-}
-
-func (fakeHelpActions) OpenCommunity(context.Context) error {
-	return nil
-}
-
-func (fakeHelpActions) OpenIssue(context.Context) error {
-	return nil
-}
-
-func (fakeHelpActions) CopyDiagnostics(context.Context) (DiagnosticsCopyResult, error) {
-	return DiagnosticsCopyResult{Status: DiagnosticsCopyCopied}, nil
-}
-
 func TestPortInterfacesSeparateCockpitConcerns(t *testing.T) {
 	var _ WorkspaceQueries = fakeWorkspacePorts{}
 	var _ WorkspaceCommands = fakeWorkspacePorts{}
 	var _ RouteCommands = fakeRoutePorts{}
 	var _ RunExecutor = fakeRunExecutor{}
 	var _ ActivityQueries = fakeActivityQueries{}
-	var _ HelpActions = fakeHelpActions{}
 }

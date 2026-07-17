@@ -210,9 +210,19 @@ func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code stri
 	r.commitErr = err
 	slog.Warn("replay terminal failure",
 		"component", "replay",
+		"event", "replay_terminal_failure",
 		"code", code,
 		"exchange_id", base.ExchangeID,
 		"response_id", r.config.ResponseID,
+		"failure_origin", terminalFailureOrigin(code),
+		"response_started", r.startedResponse,
+		"last_event_kind", base.Kind,
+		"last_event_seq", base.Seq,
+		"last_env_id", base.EnvID,
+		"recorded_event_count", len(r.events),
+		"returned_event_count", r.returned,
+		"replace_last_event", replaceLast,
+		"error_type", fmt.Sprintf("%T", err),
 		"error", err.Error(),
 	)
 	errSeq := base.Seq
@@ -255,6 +265,19 @@ func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code stri
 	result := r.events[r.returned]
 	r.returned++
 	return result
+}
+
+func terminalFailureOrigin(code string) string {
+	switch code {
+	case "provider_stream_decode_failed":
+		return "provider_stream_read_error"
+	case "provider_stream_incomplete":
+		return "provider_stream_eof_before_terminal"
+	case "replay_capture_failed":
+		return "replay_commit"
+	default:
+		return "unknown"
+	}
 }
 
 func responseEnvelopeEndStatus(ev canonical.Event) (canonical.EnvelopeStatus, bool) {

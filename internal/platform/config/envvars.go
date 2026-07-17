@@ -17,7 +17,6 @@ const (
 	EnvTelemetryDebugStdoutSink       = "SWOBU_TELEMETRY_STDOUT_SINK_DEBUG"
 	EnvTelemetryDebugTraceStack       = "SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG"
 	EnvTelemetryErrorTraceMaxPerTick  = "SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK"
-	EnvAzureOpenAIProjectEndpoint     = "SWOBU_AZURE_OPENAI_PROJECT_ENDPOINT"
 	EnvDoNotTrack                     = "DO_NOT_TRACK"
 	EnvSkipVersionNotice              = "SWOBU_SKIP_VERSION_NOTICE"
 	EnvSkipTelemetryNotice            = "SWOBU_SKIP_TELEMETRY_NOTICE"

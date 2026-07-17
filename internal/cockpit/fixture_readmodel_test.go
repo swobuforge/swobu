@@ -20,18 +20,15 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 		},
 		SelectedWorkspaceID: dev,
 		Help: readmodel.HelpReadModel{
-			Version:        "swobu dev",
-			CockpitVersion: "cockpit v2",
-			Commit:         "",
-			DocsURL:        "swobu.com/docs",
-			CommunityURL:   "https://discord.gg/swobu",
-			IssueURL:       "https://github.com/swobuforge/swobu/issues/new",
+			Version:       "dev",
+			DaemonVersion: "dev",
 		},
 		SelectedWorkspace: readmodel.WorkspaceReadModel{
-			ID:            dev,
-			Slug:          "dev",
-			State:         readmodel.WorkspaceExisting,
-			ClientBaseURL: "http://127.0.0.1:7926/c/dev",
+			ID:              dev,
+			Slug:            "dev",
+			State:           readmodel.WorkspaceExisting,
+			ClientBaseURL:   "http://127.0.0.1:7926/c/dev",
+			ProviderOptions: fixtureProviderOptions(),
 			RunCommands: []readmodel.RunCommandReadModel{
 				{
 					ID:          "codex",
@@ -91,6 +88,19 @@ func DefaultFixtureReadModel() readmodel.CockpitReadModel {
 				},
 			},
 		},
+	}
+}
+
+func fixtureProviderOptions() []readmodel.ProviderOptionReadModel {
+	return []readmodel.ProviderOptionReadModel{
+		{ProviderSpec: "openai", DisplayName: "OpenAI"},
+		{ProviderSpec: "chatgpt", DisplayName: "ChatGPT"},
+		{ProviderSpec: "anthropic", DisplayName: "Anthropic"},
+		{ProviderSpec: "openrouter", DisplayName: "OpenRouter"},
+		{ProviderSpec: "ollama", DisplayName: "Ollama"},
+		{ProviderSpec: "azure", DisplayName: "Azure AI"},
+		{ProviderSpec: "openai_compatible", DisplayName: "OpenAI Compatible"},
+		{ProviderSpec: "bedrock", DisplayName: "AWS Bedrock"},
 	}
 }
 

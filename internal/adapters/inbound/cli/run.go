@@ -134,6 +134,7 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 	}
 	startupOut := spec.stdout
 	startupErr := spec.stderr
+	startupReporterFromWriter(startupOut).Report(daemonlifecycle.StartupEvent{Kind: daemonlifecycle.StartupEventSplash})
 	versionDecision := emitVersionNoticeIfConfigured(startupOut)
 	if versionDecision.show {
 		if err := waitForVersionNoticeContinue(spec.stdin, startupOut); err != nil {
@@ -375,7 +376,7 @@ func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, cl
 		DaemonURL:            platformconfig.DefaultDaemonURL(),
 		Client:               client,
 		ResolveDefaultConfig: platformconfig.EnsureDefaultConfigFile,
-		Report:               startupReporterFromWriter(stdout),
+		Report:               withoutStartupSplash(startupReporterFromWriter(stdout)),
 		ReadinessTimeout:     15 * time.Second,
 	})
 	return err

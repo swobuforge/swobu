@@ -8,7 +8,7 @@ import (
 )
 
 func init() {
-	providersruntime.RegisterRuntimeFactory(profile.ProviderSpecAnthropic, func(client *http.Client, credentials providersruntime.CredentialProvider, _ string) providersruntime.ProviderRuntimeBundle {
+	providersruntime.RegisterRuntimeFactory(profile.ProviderSpecAnthropic, func(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 		return NewRuntime(profile.ProviderSpecAnthropic, client, credentials)
 	})
 }

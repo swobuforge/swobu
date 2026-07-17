@@ -16,6 +16,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 const penetrationUpdateEnv = "SWOBU_UPDATE_FIXTURES"
@@ -95,7 +96,7 @@ func TestPenetrate_F1ActivatesHelpTab(t *testing.T) {
 
 			h.DispatchKey(tui.KeyEvent{Key: tui.KeyF1})
 			frame := h.Frame()
-			assertContainsFrame(t, frame, "⛉ SWOBU", "[› ?]", "help", "docs", "community", "issue", "diagnostics")
+			assertContainsFrame(t, frame, "⛉ SWOBU", "[› ?]", "help", "version", "community", "issue", "diagnostics")
 			assertContainsFrame(t, frame, "↑↓ move   ↵ action   ? help   esc back   tab switch")
 		})
 	}
@@ -112,7 +113,7 @@ func TestPenetrate_HelpTabFooterHints(t *testing.T) {
 			assertContainsFrame(t, frame, "⛉ SWOBU", "[› ?]", "↑↓ move   ↵ action   ? help   esc back   tab switch")
 
 			h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-			assertContainsFrame(t, h.Frame(), "> docs", "open ↵")
+			assertContainsFrame(t, h.Frame(), "> version", "dev")
 		})
 	}
 }
@@ -262,9 +263,10 @@ func writeJTBD10Trace(t *testing.T, w penetrationArtifactWriter, width, height i
 
 	steps := []traceStep{
 		{key: tui.KeyEvent{Key: tui.KeyF1}, want: []string{"[› ?]", "help"}, note: "F1 opens the help tab.", label: "f1"},
-		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{"> docs", "open ↵"}, note: "Down focuses the docs row.", label: "down"},
+		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{"> version", "dev"}, note: "Down focuses the version row.", label: "down"},
 		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{"> community", "open ↵"}, note: "Down moves to community.", label: "down"},
-		{key: tui.KeyEvent{Key: tui.KeyUp}, want: []string{"> docs", "open ↵"}, note: "Up returns to docs.", label: "up"},
+		{key: tui.KeyEvent{Key: tui.KeyDown}, want: []string{"> issue", "open ↵"}, note: "Down moves to issue.", label: "down"},
+		{key: tui.KeyEvent{Key: tui.KeyUp}, want: []string{"> community", "open ↵"}, note: "Up returns to community.", label: "up"},
 		{key: tui.KeyEvent{Key: tui.KeyTab}, want: []string{"[› dev]", "workspace ▾"}, note: "Tab returns to the prior workspace tab.", label: "tab"},
 	}
 
@@ -428,7 +430,12 @@ type penetrationHarness struct {
 
 func newPenetrationHarness(t *testing.T, root tui.Component, width, height int) *penetrationHarness {
 	t.Helper()
-	app, _, err := mountedrender.NewApp(width, height)
+	var app *tui.App
+	var opts []tui.AppOption
+	if cockpit, ok := root.(*Cockpit); ok {
+		opts = append(opts, ui.WithViewportFollow(cockpit.BodyViewport, func() *tui.App { return app }))
+	}
+	app, _, err := mountedrender.NewApp(width, height, opts...)
 	if err != nil {
 		t.Fatalf("mountedrender.NewApp(%d,%d): %v", width, height, err)
 	}

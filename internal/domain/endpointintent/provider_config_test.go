@@ -197,7 +197,22 @@ func TestNormalizeAzureResourceLocator(t *testing.T) {
 	}
 }
 
-func TestProviderConfig_NormalizesAzureResourceLocator(t *testing.T) {
+func TestNormalizeAzureProjectEndpoint(t *testing.T) {
+	t.Parallel()
+
+	got, err := NormalizeAzureProjectEndpoint("https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837")
+	if err != nil {
+		t.Fatalf("NormalizeAzureProjectEndpoint returned error: %v", err)
+	}
+	if want := "https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837"; got != want {
+		t.Fatalf("project endpoint = %q, want %q", got, want)
+	}
+	if _, err := NormalizeAzureProjectEndpoint("https://contact-8837-resource.openai.azure.com/openai/v1"); err == nil {
+		t.Fatal("NormalizeAzureProjectEndpoint accepted OpenAI execution endpoint")
+	}
+}
+
+func TestProviderConfig_NormalizesAzureProjectEndpoint(t *testing.T) {
 	ref, err := ParseProviderConfigRef("cfg-azure")
 	if err != nil {
 		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
@@ -206,12 +221,12 @@ func TestProviderConfig_NormalizesAzureResourceLocator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseProviderSpec returned error: %v", err)
 	}
-	cfg, err := NewProviderConfig(ref, spec, "contact-8837-resource", "cred-1")
+	cfg, err := NewProviderConfig(ref, spec, "https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837", "cred-1")
 	if err != nil {
 		t.Fatalf("NewProviderConfig returned error: %v", err)
 	}
-	if got := cfg.BaseURL(); got != "https://contact-8837-resource.services.ai.azure.com" {
-		t.Fatalf("base URL = %q, want normalized resource locator", got)
+	if got := cfg.BaseURL(); got != "https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837" {
+		t.Fatalf("base URL = %q, want normalized project endpoint", got)
 	}
 	if got := cfg.ProviderProtocol(); got != profile.ProviderProtocolAuto {
 		t.Fatalf("provider protocol = %q, want auto", got)

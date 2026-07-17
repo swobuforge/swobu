@@ -9,11 +9,10 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
-	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestPage_KeyMapOwnsSurfaceNavigationAndFallbackActivation(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	keymap := view.KeyMap()
 
 	for _, key := range []tui.Key{tui.KeyUp, tui.KeyDown, tui.KeyEscape, tui.KeyEnter} {
@@ -39,9 +38,25 @@ func TestPage_KeyMapOwnsSurfaceNavigationAndFallbackActivation(t *testing.T) {
 	}
 }
 
+func TestPage_DownSelectionMovesFocusedRow(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
+	h, err := testkit.NewHarness(view)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+
+	if !strings.Contains(h.Frame(), "> workspace") {
+		t.Fatalf("Down should move page selection through go-tui focus:\n%s", h.Frame())
+	}
+}
+
 func TestPage_DraftWorkspaceHidesRoutesAndActivity(t *testing.T) {
 	for _, width := range []int{80, 100, 120} {
-		view := Page(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, nil, nil, nil, context.Background(), nil)
+		view := Page(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft}, nil, nil, nil, context.Background(), nil, nil)
 		rendered := testkit.RenderMountedTrimmed(t, view, width, 12)
 		if strings.Contains(rendered, "workspace ▾") {
 			t.Fatalf("draft workspace should not render a disclosure header at width %d:\n%s", width, rendered)
@@ -62,7 +77,7 @@ func TestPage_DraftWorkspaceHidesRoutesAndActivity(t *testing.T) {
 }
 
 func TestPage_FocusableGraphFollowsExpandedRoute(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	collapsedFocusables := countFocusables(mountedRoot(t, view))
 	if collapsedFocusables == 0 {
 		t.Fatal("collapsed workspace should expose mounted focusables")
@@ -75,7 +90,7 @@ func TestPage_FocusableGraphFollowsExpandedRoute(t *testing.T) {
 }
 
 func TestPage_ActivationWalksExpandedRouteChildrenInRenderOrder(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	route := view.RoutesSection.State.Routes[0]
 
 	view.RoutesSection.OpenRoute(route)
@@ -99,73 +114,135 @@ func TestPage_ActivationWalksExpandedRouteChildrenInRenderOrder(t *testing.T) {
 	}
 }
 
-func TestPage_BackClosesLocalRouteStateWithoutFocusState(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+func TestPage_EscapeOnFocusedOpenTargetRowClosesTargetConfig(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	route := view.RoutesSection.State.Routes[0]
 	view.RoutesSection.OpenTargetEditor(route, route.Targets[0])
 
-	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
+	h, err := testkit.NewHarness(view)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	focusUntilFrameContains(t, h, "> edit target · OpenAI", 24)
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
 	if got := view.RoutesSection.State.OpenTarget.Get(); got != "" {
-		t.Fatalf("open target after first Esc = %q, want empty", got)
+		t.Fatalf("open target after Escape = %q, want empty", got)
 	}
 	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "gpt" {
-		t.Fatalf("expanded route after first Esc = %q, want gpt", got)
-	}
-
-	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "" {
-		t.Fatalf("expanded route after second Esc = %q, want empty", got)
+		t.Fatalf("expanded route after Escape = %q, want gpt", got)
 	}
 }
 
-func TestPage_BackLeavesFeatureOwnedDeleteConfirmationToFocusedFeature(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+func TestPage_OpenTargetConfigPreemptsEscapeSoInteriorRowsCannotLeakToQuit(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
+	route := view.RoutesSection.State.Routes[0]
+	target := route.Targets[0]
+	view.RoutesSection.OpenTargetEditor(route, target)
+
+	config := view.RoutesSection.TargetConfigs.Edit(route, target)
+	if !config.IsOpen() {
+		t.Fatal("target editor should be open after OpenTargetEditor")
+	}
+
+	// The page's Escape handler is a broadcast quit. An open target config must
+	// claim Escape as an active-scope preempt so a focused interior row (which
+	// owns no Escape binding of its own) cannot bubble Escape to the page quit.
+	// Preempt handlers fire before the page's normal broadcast Escape in
+	// go-tui dispatch, which is the durable guarantee against the quit leak.
+	var escapeBinding tui.KeyBinding
+	found := false
+	for _, binding := range config.KeyMap() {
+		if binding.Pattern.Key == tui.KeyEscape {
+			escapeBinding = binding
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("open target config must bind Escape")
+	}
+	if escapeBinding.Pattern.FocusRequired {
+		t.Fatal("target config Escape must not be focus-gated to the shell; interior rows would leak Escape to the page quit")
+	}
+	if !escapeBinding.Preempt {
+		t.Fatal("target config Escape must preempt so it consumes Escape before the page's broadcast quit handler")
+	}
+
+	pageEscape, ok := findBinding(view.KeyMap(), tui.KeyEscape)
+	if !ok {
+		t.Fatal("page should own a fallback Escape handler")
+	}
+	if pageEscape.Preempt {
+		t.Fatal("page Escape must remain a broadcast fallback so scope preempts win first")
+	}
+}
+
+func TestPage_EscapeOnFocusedExpandedRouteRowCollapsesRoute(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
+	route := view.RoutesSection.State.Routes[0]
+	view.RoutesSection.OpenRoute(route)
+
+	h, err := testkit.NewHarness(view)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	focusUntilFrameContains(t, h, "> gpt", 16)
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "" {
+		t.Fatalf("expanded route after Escape = %q, want empty", got)
+	}
+}
+
+func TestPage_EscapeOnFocusedWorkspaceDeleteConfirmationClosesConfirmation(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	view.OverviewSection.OpenDeleteConfirmation("dev")
 
-	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
+	h, err := testkit.NewHarness(view)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	focusUntilFrameContains(t, h, "> delete", 16)
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
 	if got := view.OverviewSection.PendingDeleteWorkspaceID.Get(); got != "" {
 		t.Fatalf("delete confirmation should close, got pending delete workspace id = %q", got)
 	}
 }
 
-func TestPage_BackOutDelegatesToRoutesWhenOverviewHasNothing(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+func TestPage_BackOutFallbackDoesNotScanChildSectionState(t *testing.T) {
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	route := view.RoutesSection.State.Routes[0]
 	view.RoutesSection.OpenRoute(route)
 
-	// Overview has nothing to back out; routes has an expanded route.
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
-	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != "" {
-		t.Fatalf("expanded route should close, got %q", got)
+	if got := view.RoutesSection.State.ExpandedRoute.Get(); got != route.ID {
+		t.Fatalf("page fallback should not close child route state, got %q want %q", got, route.ID)
 	}
 }
 
 func TestPage_BackOutDoesNotCrashAtTopLevel(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	// Nothing open in overview or routes; backOut should be a no-op
 	// without panicking (it attempts app.Stop but app is nil in this test).
 	view.backOut(tui.KeyEvent{Key: tui.KeyEscape})
 }
 
 func TestPage_AddTargetRowOpensWorkflow(t *testing.T) {
-	commands := fakeWorkspaceCommands{
-		listProviders: func(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
-			return []readmodel.ProviderOptionReadModel{
-				{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
-				{ProviderSpec: "openrouter", DisplayName: "OpenRouter", SetupHint: "API key"},
-			}, nil
-		},
-		resolveSetup: func(context.Context, ports.ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error) {
-			return readmodel.ProviderSetupReadModel{
-				ProviderSpec:    "openai",
-				DisplayName:     "OpenAI",
-				CredentialLabel: "env:OPENAI_API_KEY",
-				CredentialRef:   "env:OPENAI_API_KEY",
-				ReadyForCatalog: true,
-			}, nil
-		},
+	view := Page(workspacePageModel(), fakeWorkspaceCommands{}, fakeWorkspaceCommands{}, nil, context.Background(), nil, nil)
+	view.RoutesSection.TargetConfigs.ProviderOptions = []readmodel.ProviderOptionReadModel{
+		{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
+		{ProviderSpec: "openrouter", DisplayName: "OpenRouter", SetupHint: "API key"},
 	}
-	view := Page(workspacePageModel(), commands, commands, nil, context.Background(), nil)
 	route := readmodel.RouteReadModel{
 		ID:        "custom-route",
 		ModelName: "custom-route",
@@ -186,26 +263,65 @@ func TestPage_AddTargetRowOpensWorkflow(t *testing.T) {
 	// The target add workflow renders a provider picker with "provider" title.
 	focusUntilFrameContains(t, h, "provider", 20)
 	frame := h.Frame()
-	expectedOpenAI := "OpenAI · " + profile.ProviderSetupFieldSummaryForSpec("openai")
-	expectedOpenRouter := "OpenRouter · " + profile.ProviderSetupFieldSummaryForSpec("openrouter")
-	if !strings.Contains(frame, expectedOpenAI) || !strings.Contains(frame, expectedOpenRouter) {
+	if !strings.Contains(frame, "OpenAI") || !strings.Contains(frame, "OpenRouter") {
 		t.Fatalf("provider picker did not render provider options:\n%s", frame)
+	}
+	if strings.Contains(frame, "credential, model, protocol") {
+		t.Fatalf("provider picker should render labels, not setup inventory:\n%s", frame)
 	}
 	if strings.Contains(frame, "0 of 0 shown") {
 		t.Fatalf("provider picker still reports an empty option set:\n%s", frame)
 	}
 
-	wf := view.RoutesSection.TargetAddWorkflows[route.ID]
+	wf := view.RoutesSection.TargetConfigs.CachedAdd(route.ID)
 	if wf == nil {
 		t.Fatal("expected target add workflow")
 	}
 	wf.SelectProvider("openai")
 	frame = h.Frame()
-	if !strings.Contains(frame, "credential") || !strings.Contains(frame, "env:OPENAI_API_KEY") {
-		t.Fatalf("provider setup row did not render projected credential:\n%s", frame)
+	if !strings.Contains(frame, "credential") || !strings.Contains(frame, "required") || !strings.Contains(frame, "choose ↵") {
+		t.Fatalf("provider setup row did not render credential chooser:\n%s", frame)
 	}
-	if !strings.Contains(frame, "loading catalog…") {
-		t.Fatalf("provider setup did not advance to loading catalog state:\n%s", frame)
+	if strings.Contains(frame, "loading catalog…") {
+		t.Fatalf("provider setup should not advance to catalog without explicit credential:\n%s", frame)
+	}
+}
+
+func TestPage_EnterOnRouteDefaultRowMakesRouteDefault(t *testing.T) {
+	var request ports.SaveRouteRequest
+	view := Page(workspacePageModel(), fakeWorkspaceCommands{
+		saveRoute: func(_ context.Context, req ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+			request = req
+			for _, route := range workspacePageModel().Routes {
+				if route.ID == req.RouteID {
+					route.Default = req.Default
+					return route, nil
+				}
+			}
+			return readmodel.RouteReadModel{}, nil
+		},
+	}, nil, nil, context.Background(), nil, nil)
+	route := view.RoutesSection.State.Routes[1]
+	view.RoutesSection.OpenRoute(route)
+
+	h, err := testkit.NewHarness(view)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	focusUntilFrameContains(t, h, "> default", 16)
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	if request.RouteID != route.ID || !request.Default {
+		t.Fatalf("default activation request = %+v, want route %q default", request, route.ID)
+	}
+	if view.RoutesSection.State.Routes[0].Default {
+		t.Fatal("previous default route should no longer be default")
+	}
+	if !view.RoutesSection.State.Routes[1].Default {
+		t.Fatal("selected route should be default")
 	}
 }
 
@@ -220,7 +336,7 @@ func TestPage_DraftWorkspaceEnterSubmitsSlug(t *testing.T) {
 			}
 			return saved, nil
 		},
-	}, nil, nil, context.Background(), nil)
+	}, nil, nil, context.Background(), nil, nil)
 
 	h, err := testkit.NewHarness(view)
 	if err != nil {
@@ -255,7 +371,7 @@ func TestPage_DraftWorkspaceEnterSubmitsSlug(t *testing.T) {
 }
 
 func TestPage_RequestAddRouteFocusAfterSaveLandsOnAddRouteRow(t *testing.T) {
-	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil)
+	view := Page(workspacePageModel(), nil, nil, nil, context.Background(), nil, nil)
 	view.RoutesSection.RequestAddRouteFocus()
 
 	h, err := testkit.NewHarness(view)
@@ -333,9 +449,10 @@ func activate(t *testing.T, focusable tui.Focusable) {
 
 func workspacePageModel() readmodel.WorkspaceReadModel {
 	return readmodel.WorkspaceReadModel{
-		Slug:          "dev",
-		State:         readmodel.WorkspaceExisting,
-		ClientBaseURL: "http://127.0.0.1:7926/c/dev",
+		Slug:            "dev",
+		State:           readmodel.WorkspaceExisting,
+		ClientBaseURL:   "http://127.0.0.1:7926/c/dev",
+		ProviderOptions: workspaceFixtureProviderOptions(),
 		RunCommands: []readmodel.RunCommandReadModel{{
 			ID:    "codex",
 			Label: "Codex",
@@ -365,10 +482,22 @@ func workspacePageModel() readmodel.WorkspaceReadModel {
 	}
 }
 
+func workspaceFixtureProviderOptions() []readmodel.ProviderOptionReadModel {
+	return []readmodel.ProviderOptionReadModel{
+		{ProviderSpec: "openai", DisplayName: "OpenAI", SetupHint: "API key"},
+		{ProviderSpec: "chatgpt", DisplayName: "ChatGPT", SetupHint: "browser login"},
+		{ProviderSpec: "anthropic", DisplayName: "Anthropic", SetupHint: "API key"},
+		{ProviderSpec: "openrouter", DisplayName: "OpenRouter", SetupHint: "API key"},
+		{ProviderSpec: "ollama", DisplayName: "Ollama", SetupHint: "none"},
+		{ProviderSpec: "azure", DisplayName: "Azure AI", SetupHint: "endpoint"},
+		{ProviderSpec: "openai_compatible", DisplayName: "Custom Endpoint", SetupHint: "endpoint"},
+		{ProviderSpec: "bedrock", DisplayName: "AWS Bedrock", SetupHint: "endpoint"},
+	}
+}
+
 type fakeWorkspaceCommands struct {
-	save          func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error)
-	listProviders func(context.Context) ([]readmodel.ProviderOptionReadModel, error)
-	resolveSetup  func(context.Context, ports.ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error)
+	save      func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error)
+	saveRoute func(context.Context, ports.SaveRouteRequest) (readmodel.RouteReadModel, error)
 }
 
 func (f fakeWorkspaceCommands) SaveWorkspace(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
@@ -382,18 +511,23 @@ func (f fakeWorkspaceCommands) DeleteWorkspace(context.Context, ports.DeleteWork
 	return nil
 }
 
-func (f fakeWorkspaceCommands) ListTargetProviders(ctx context.Context) ([]readmodel.ProviderOptionReadModel, error) {
-	if f.listProviders != nil {
-		return f.listProviders(ctx)
+func (f fakeWorkspaceCommands) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+	if f.saveRoute != nil {
+		return f.saveRoute(ctx, request)
 	}
-	return nil, nil
+	return readmodel.RouteReadModel{}, nil
 }
 
-func (f fakeWorkspaceCommands) ResolveProviderSetup(ctx context.Context, req ports.ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error) {
-	if f.resolveSetup != nil {
-		return f.resolveSetup(ctx, req)
-	}
-	return readmodel.ProviderSetupReadModel{}, nil
+func (f fakeWorkspaceCommands) DeleteRoute(context.Context, ports.DeleteRouteRequest) error {
+	return nil
+}
+
+func (f fakeWorkspaceCommands) SaveTarget(context.Context, ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
+	return readmodel.TargetReadModel{}, nil
+}
+
+func (f fakeWorkspaceCommands) DeleteTarget(context.Context, ports.DeleteTargetRequest) error {
+	return nil
 }
 
 func (f fakeWorkspaceCommands) ProbeProviderModels(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {

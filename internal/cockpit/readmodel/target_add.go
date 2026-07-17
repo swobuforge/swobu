@@ -10,34 +10,7 @@ type ProviderOptionReadModel struct {
 	ProviderSpec string
 	DisplayName  string
 	// SetupHint is a short search hint for the provider picker.
-	SetupHint      string
-	DefaultBaseURL string
-}
-
-// ProviderSetupReadModel is the projected setup state for a selected provider.
-// The adapter derives this from the provider profile plus runtime credential/auth
-// state so the workflow does not branch on provider-specific facts.
-type ProviderSetupReadModel struct {
-	ProviderSpec       string
-	DisplayName        string
-	DefaultBaseURL     string
-	DefaultAuthHeader  string
-	CredentialLabel    string
-	CredentialRef      string
-	CredentialRequired bool
-	InteractiveAuth    bool
-	AuthModes          []AuthModeReadModel
-	RequiresBaseURL    bool
-	ReadyForCatalog    bool
-	BlockReason        string
-}
-
-// AuthModeReadModel describes one auth path available for the provider.
-type AuthModeReadModel struct {
-	Mode        string
-	Kind        string
-	Requirement string
-	Interactive bool
+	SetupHint string
 }
 
 // ModelCatalogReadModel is the result of probing the model catalog for a

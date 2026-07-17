@@ -42,62 +42,38 @@ func (s *SectionView) activityText() string {
 	return latest.RowValue()
 }
 
-func (s *SectionView) Render(_ *tui.App) *tui.Element {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100.00),
-	)
-	root.AddChild(inertHeader())
-	body := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100.00),
-		tui.WithPaddingTRBL(0, 0, 0, ui.RowIndent),
-	)
+func (s *SectionView) visibleActivityText() string {
 	if text := s.activityText(); text != "" {
-		body.AddChild(inertRow("latest", text))
-	} else if s.Workspace.IsDraft() {
-		body.AddChild(inertRow("latest", "(no activity)"))
-	} else {
-		body.AddChild(inertRow("latest", "no requests yet"))
+		return text
 	}
-	root.AddChild(body)
-	return root
-}
-
-// inertHeader renders the section header with thesame indentation used by
-// other section headers (2 spaces before label).
-func inertHeader() *tui.Element {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
-	)
-	root.AddChild(tui.New(tui.WithWidth(2)))
-	root.AddChild(tui.New(tui.WithText("activity ▾")))
-	return root
-}
-
-// inertRow renders a label/value pair at the padded boundary set by the
-// parent wrapper. Arrow spacer (RowIndent) aligns with selective row markers.
-func inertRow(label string, value string) *tui.Element {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100.00),
-	)
-	root.AddChild(tui.New(tui.WithWidth(2))) // arrow spacer
-	root.AddChild(tui.New(tui.WithText(label), tui.WithWidth(18)))
-	root.AddChild(tui.New(tui.WithText(value)))
-	return root
-}
-
-func (s *SectionView) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*SectionView)
-	if !ok {
-		return
+	if s.Workspace.IsDraft() {
+		return "(no activity)"
 	}
-	s.Workspace = f.Workspace
-	s.Ctx = f.Ctx
-	s.ActivityQuery = f.ActivityQuery
+	return "no requests yet"
 }
 
-var _ tui.PropsUpdater = (*SectionView)(nil)
 var _ tui.Component = (*SectionView)(nil)
+
+templ (s *SectionView) Render() {
+	<div class="flex-col w-full">
+		@ActivityHeader()
+		<div class="pl-3 flex-col w-full">
+			@ActivityRow("latest", s.visibleActivityText())
+		</div>
+	</div>
+}
+
+templ ActivityHeader() {
+	<div class="flex-row w-full">
+		<span class="w-2"></span>
+		<span>activity ▾</span>
+	</div>
+}
+
+templ ActivityRow(label string, value string) {
+	<div class="flex-row w-full">
+		<span class="w-2"></span>
+		<span class="w-18">{label}</span>
+		<span>{value}</span>
+	</div>
+}

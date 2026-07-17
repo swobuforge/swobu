@@ -85,21 +85,22 @@ func (s ProviderSpec) String() string {
 }
 
 type ProviderConfig struct {
-	ref              ProviderConfigRef
-	providerSpec     ProviderSpec
-	baseURL          string
+	ref          ProviderConfigRef
+	providerSpec ProviderSpec
+	baseURL      string
 	// credentialRef is a durable intent handle. Once bound, replay assumes it
 	// is not repointed to a different provider account in place.
 	credentialRef    string
+	authMode         string
 	authHeader       string
 	providerProtocol string
 	// routeModelID is the client-visible route model name. Legacy configs may
 	// leave it empty and fall back to modelID when projected.
-	routeModelID     string
-	modelID          string
-	targetAlias      string
-	targetRank       int
-	targetWeight     int
+	routeModelID string
+	modelID      string
+	targetAlias  string
+	targetRank   int
+	targetWeight int
 }
 
 var targetAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -129,7 +130,7 @@ func NewProviderConfig(
 	}
 	normalizedBaseURL := strings.TrimSpace(baseURL) // swobu:io-string source=boundary
 	if spec.value == "azure" && normalizedBaseURL != "" {
-		normalizedLocator, err := NormalizeAzureResourceLocator(normalizedBaseURL)
+		normalizedLocator, err := NormalizeAzureProjectEndpoint(normalizedBaseURL)
 		if err != nil {
 			return ProviderConfig{}, fmt.Errorf("%w: %v", ErrInvalidProviderConfig, err)
 		}
@@ -148,6 +149,7 @@ func NewProviderConfig(
 		providerSpec:     spec,
 		baseURL:          normalizedBaseURL,
 		credentialRef:    credentialRef,
+		authMode:         "",
 		authHeader:       "",
 		providerProtocol: providerProtocol,
 		modelID:          "",
@@ -179,6 +181,10 @@ func (c ProviderConfig) CredentialRef() string {
 	return c.credentialRef
 }
 
+func (c ProviderConfig) AuthMode() string {
+	return strings.TrimSpace(c.authMode)
+}
+
 func (c ProviderConfig) AuthHeader() string {
 	header := strings.TrimSpace(c.authHeader) // swobu:io-string source=boundary
 	if header != "" {
@@ -205,6 +211,27 @@ func isValidHTTPHeaderFieldName(name string) bool {
 		}
 	}
 	return true
+}
+
+func (c ProviderConfig) WithAuthMode(authMode string) (ProviderConfig, error) {
+	authMode = strings.TrimSpace(authMode) // swobu:io-string source=domain
+	if authMode == "" {
+		c.authMode = ""
+		return c, nil
+	}
+	if c.providerSpec.String() != string(profile.ProviderSpecBedrock) {
+		return ProviderConfig{}, fmt.Errorf("%w: auth mode is unsupported for provider %q", ErrInvalidProviderConfig, c.providerSpec.String())
+	}
+	if !profile.SupportsAuthMode(c.providerSpec.String(), profile.AuthMode(authMode)) {
+		return ProviderConfig{}, fmt.Errorf(
+			"%w: auth mode %q is unsupported for provider %q",
+			ErrInvalidProviderConfig,
+			authMode,
+			c.providerSpec.String(),
+		)
+	}
+	c.authMode = authMode
+	return c, nil
 }
 
 func (c ProviderConfig) ProtocolKind() protocolkind.ProtocolKind {

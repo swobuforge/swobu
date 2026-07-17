@@ -14,22 +14,58 @@ import (
 	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type fakeOperatorClient struct {
-	endpoints          []operatorclient.EndpointData
-	status             operatorclient.StatusProjection
-	statusErr          error
-	getErr             error
-	deleted            string
-	upserted           operatorclient.EndpointData
-	modelCatalogResult operatorclient.ModelCatalogResult
-	modelCatalogErr    error
+	endpoints            []operatorclient.EndpointData
+	status               operatorclient.StatusProjection
+	statusErr            error
+	getErr               error
+	deleted              string
+	upserted             operatorclient.EndpointData
+	modelCatalogResult   operatorclient.ModelCatalogResult
+	modelCatalogErr      error
+	modelCatalogAuthMode string
+	daemonVersion        string
+}
+
+func saveTargetRequest(workspaceID, routeID, targetID, provider, model, protocol, endpointValue, credentialRef string, rank, weight int) ports.SaveTargetRequest {
+	endpointSpec, _ := profile.EndpointSpecForProvider(provider)
+	endpointKind, _ := endpointintent.ProviderEndpointKindFromProfile(endpointSpec.Kind)
+	opts := endpointintent.ProviderOptionsDraft{}
+	if provider == string(profile.ProviderSpecOpenAICompatible) {
+		opts.OpenAICompatible.CredentialHeader = profile.DefaultAuthHeaderForSpec(provider)
+	}
+	return ports.SaveTargetRequest{
+		WorkspaceID: readmodel.WorkspaceID(workspaceID),
+		RouteID:     readmodel.RouteID(routeID),
+		TargetID:    readmodel.TargetID(targetID),
+		Draft: endpointintent.TargetDraft{
+			ProviderSpec: provider,
+			Endpoint: endpointintent.ProviderEndpointDraft{
+				Kind:  endpointKind,
+				Value: endpointValue,
+			},
+			CredentialRef:    credentialRef,
+			ProviderProtocol: protocol,
+			ModelID:          model,
+			RouteModelID:     routeID,
+			Rank:             rank,
+			Weight:           weight,
+			ProviderOptions:  opts,
+		},
+	}
 }
 
 func (f *fakeOperatorClient) ListEndpoints(context.Context) ([]operatorclient.EndpointData, error) {
 	return f.endpoints, nil
+}
+
+func (f *fakeOperatorClient) DaemonVersion(context.Context) (string, error) {
+	return f.daemonVersion, nil
 }
 
 func (f *fakeOperatorClient) GetEndpoint(_ context.Context, name string) (operatorclient.EndpointData, error) {
@@ -82,7 +118,8 @@ func (f *fakeOperatorClient) CancelAuthSession(context.Context, string) error { 
 func (f *fakeOperatorClient) RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error) {
 	return operatorclient.AuthSessionRetryResult{}, nil
 }
-func (f *fakeOperatorClient) ProbeModelCatalog(context.Context, string, string, string, string, string) (operatorclient.ModelCatalogResult, error) {
+func (f *fakeOperatorClient) ProbeModelCatalog(_ context.Context, _, _, _, _, authMode, _ string) (operatorclient.ModelCatalogResult, error) {
+	f.modelCatalogAuthMode = authMode
 	return f.modelCatalogResult, f.modelCatalogErr
 }
 
@@ -218,114 +255,6 @@ func TestRouteProjection_GroupsByRouteModelIDAndKeepsProviderModels(t *testing.T
 	}
 }
 
-func TestLiveOperatorAdapter_ResolveProviderSetupProjectsOpenAI(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-openai-key")
-
-	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{}, "http://127.0.0.1:7926")
-	setup, err := adapter.ResolveProviderSetup(context.Background(), ports.ResolveProviderSetupRequest{
-		ProviderSpec: "openai",
-	})
-	if err != nil {
-		t.Fatalf("ResolveProviderSetup returned error: %v", err)
-	}
-	if setup.DisplayName != "OpenAI" {
-		t.Fatalf("display name = %q, want OpenAI", setup.DisplayName)
-	}
-	if setup.DefaultBaseURL != "https://api.openai.com/v1" {
-		t.Fatalf("default base URL = %q, want OpenAI base URL", setup.DefaultBaseURL)
-	}
-	if setup.CredentialLabel != "env:OPENAI_API_KEY" {
-		t.Fatalf("credential label = %q, want env:OPENAI_API_KEY", setup.CredentialLabel)
-	}
-	if setup.CredentialRef != "env:OPENAI_API_KEY" {
-		t.Fatalf("credential ref = %q, want env:OPENAI_API_KEY", setup.CredentialRef)
-	}
-	if !setup.ReadyForCatalog {
-		t.Fatal("openai with credential should be ready for catalog")
-	}
-	if setup.BlockReason != "" {
-		t.Fatalf("block reason = %q, want empty", setup.BlockReason)
-	}
-}
-
-func TestLiveOperatorAdapter_ResolveProviderSetupProjectsOllama(t *testing.T) {
-	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{}, "http://127.0.0.1:7926")
-	setup, err := adapter.ResolveProviderSetup(context.Background(), ports.ResolveProviderSetupRequest{
-		ProviderSpec: "ollama",
-	})
-	if err != nil {
-		t.Fatalf("ResolveProviderSetup returned error: %v", err)
-	}
-	if setup.DisplayName != "Ollama" {
-		t.Fatalf("display name = %q, want Ollama", setup.DisplayName)
-	}
-	if setup.CredentialRequired {
-		t.Fatal("ollama should not require a credential")
-	}
-	if !setup.ReadyForCatalog {
-		t.Fatal("ollama should be ready for catalog without a credential")
-	}
-	if setup.BlockReason != "" {
-		t.Fatalf("block reason = %q, want empty", setup.BlockReason)
-	}
-}
-
-func TestLiveOperatorAdapter_ResolveProviderSetupRequiresBaseURLForOpenAICompatible(t *testing.T) {
-	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{}, "http://127.0.0.1:7926")
-	setup, err := adapter.ResolveProviderSetup(context.Background(), ports.ResolveProviderSetupRequest{
-		ProviderSpec: "openai_compatible",
-	})
-	if err != nil {
-		t.Fatalf("ResolveProviderSetup returned error: %v", err)
-	}
-	if setup.DisplayName != "OpenAI Compatible" {
-		t.Fatalf("display name = %q, want OpenAI Compatible", setup.DisplayName)
-	}
-	if !setup.RequiresBaseURL {
-		t.Fatal("openai-compatible should require an explicit base URL")
-	}
-	if setup.CredentialLabel != "enter backend URL" {
-		t.Fatalf("credential label = %q, want enter backend URL", setup.CredentialLabel)
-	}
-	if setup.BlockReason != "enter backend URL" {
-		t.Fatalf("block reason = %q, want enter backend URL", setup.BlockReason)
-	}
-	if setup.ReadyForCatalog {
-		t.Fatal("openai-compatible without a base URL should not be ready for catalog")
-	}
-	if setup.DefaultAuthHeader != "Authorization" {
-		t.Fatalf("default auth header = %q, want Authorization", setup.DefaultAuthHeader)
-	}
-}
-
-func TestLiveOperatorAdapter_ResolveProviderSetupReportsChatGPTInteractiveAuth(t *testing.T) {
-	adapter := newLiveOperatorAdapterWithClient(&fakeOperatorClient{}, "http://127.0.0.1:7926")
-	setup, err := adapter.ResolveProviderSetup(context.Background(), ports.ResolveProviderSetupRequest{
-		ProviderSpec: "chatgpt",
-	})
-	if err != nil {
-		t.Fatalf("ResolveProviderSetup returned error: %v", err)
-	}
-	if setup.DisplayName != "ChatGPT" {
-		t.Fatalf("display name = %q, want ChatGPT", setup.DisplayName)
-	}
-	if !setup.InteractiveAuth {
-		t.Fatal("chatgpt should require interactive auth")
-	}
-	if setup.CredentialLabel != "browser login" {
-		t.Fatalf("credential label = %q, want browser login", setup.CredentialLabel)
-	}
-	if setup.BlockReason != "auth first" {
-		t.Fatalf("block reason = %q, want auth first", setup.BlockReason)
-	}
-	if setup.ReadyForCatalog {
-		t.Fatal("chatgpt should not be ready for catalog before auth starts")
-	}
-	if len(setup.AuthModes) == 0 || !setup.AuthModes[0].Interactive {
-		t.Fatalf("auth modes = %#v, want interactive auth modes", setup.AuthModes)
-	}
-}
-
 func TestLiveOperatorAdapter_LoadCockpitWithDefaultDaemonHidesHeaderRight(t *testing.T) {
 	t.Parallel()
 
@@ -448,6 +377,24 @@ func TestLiveOperatorAdapter_LoadCockpitDegradesOnActivityFailure(t *testing.T) 
 	}
 }
 
+func TestTargetFromProviderConfigPreservesAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	target := targetFromProviderConfig(operatorclient.ProviderConfigData{
+		Ref:          "cfg-openai-compatible",
+		ProviderSpec: "openai_compatible",
+		BaseURL:      "https://lab.example/v1",
+		AuthHeader:   "X-API-Key",
+		ModelID:      "gpt-4.1",
+		TargetRank:   1,
+		TargetWeight: 1,
+	})
+
+	if target.AuthHeader != "X-API-Key" {
+		t.Fatalf("auth header = %q, want X-API-Key", target.AuthHeader)
+	}
+}
+
 func TestLiveOperatorAdapter_DiagnosticsPayloadIsRedacted(t *testing.T) {
 	t.Parallel()
 
@@ -494,18 +441,7 @@ func TestLiveOperatorAdapter_DiagnosticsPayloadIsRedacted(t *testing.T) {
 		}
 	}
 
-	result, err := adapter.CopyDiagnostics(context.Background())
-	if err != nil {
-		t.Fatalf("CopyDiagnostics returned error: %v", err)
-	}
-	if result.Status != ports.DiagnosticsCopyCopied {
-		t.Fatalf("copy status = %v, want copied", result.Status)
-	}
-	for _, unsafe := range []string{"sk-live-secret", "OPENAI_API_KEY", "secret-backend", "Authorization"} {
-		if strings.Contains(result.Text, unsafe) {
-			t.Fatalf("diagnostics copy leaked %q:\n%s", unsafe, result.Text)
-		}
-	}
+	// CopyDiagnostics is now handled directly by the help page view; no adapter method.
 }
 
 func assertDiagnosticsDoesNotContain(t *testing.T, payload readmodel.DiagnosticsPayload, values ...string) {
@@ -690,6 +626,35 @@ func TestLiveOperatorAdapter_SaveRouteCannotCreateEmptyRoute(t *testing.T) {
 	}
 }
 
+func TestLiveOperatorAdapter_LoadWorkspaceHydratesProviderOptions(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{
+				{Ref: "cfg-fast", ProviderSpec: "openai_compatible", RouteModelID: "gpt", ModelID: "gpt-4.1", BaseURL: "https://fast.example/v1"},
+			},
+		}},
+	}
+	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
+
+	workspace, err := adapter.LoadWorkspace(context.Background(), "dev")
+	if err != nil {
+		t.Fatalf("LoadWorkspace: %v", err)
+	}
+
+	var got []string
+	for _, opt := range workspace.ProviderOptions {
+		got = append(got, opt.DisplayName)
+	}
+	want := []string{"OpenAI", "ChatGPT", "Anthropic", "OpenRouter", "Ollama", "Azure AI", "Custom Endpoint", "AWS Bedrock"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("provider picker order = %v, want %v", got, want)
+	}
+}
+
 func TestLiveOperatorAdapter_DeleteRouteRemovesMatchingTargets(t *testing.T) {
 	t.Parallel()
 
@@ -738,23 +703,11 @@ func TestLiveOperatorAdapter_SaveTargetEditsAndAddsProviderConfigs(t *testing.T)
 	}
 	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
 
-	edited, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID:      "dev",
-		RouteID:          "gpt",
-		TargetID:         "cfg-fast",
-		Name:             "fast",
-		Provider:         "openai_compatible",
-		Model:            "gpt-4o",
-		ProviderProtocol: "responses",
-		BaseURL:          "https://new-fast.example/v1",
-		CredentialRef:    "env:FAST_KEY",
-		Rank:             2,
-		Weight:           4,
-	})
+	edited, err := adapter.SaveTarget(context.Background(), saveTargetRequest("dev", "gpt", "cfg-fast", "openai_compatible", "gpt-4o", "responses", "https://new-fast.example/v1", "env:FAST_KEY", 2, 4))
 	if err != nil {
 		t.Fatalf("SaveTarget edit returned error: %v", err)
 	}
-	if edited.ID != "cfg-fast" || edited.BaseURL != "https://new-fast.example/v1" || edited.Name != "fast" || edited.Model != "gpt-4o" || edited.Rank != 2 || edited.Weight != 4 {
+	if edited.ID != "cfg-fast" || edited.BaseURL != "https://new-fast.example/v1" || edited.Name != "cfg-fast" || edited.Model != "gpt-4o" || edited.Rank != 2 || edited.Weight != 4 {
 		t.Fatalf("edited target = %#v", edited)
 	}
 	if got, want := client.upserted.ProviderConfigs[0].RouteModelID, "gpt"; got != want {
@@ -764,37 +717,84 @@ func TestLiveOperatorAdapter_SaveTargetEditsAndAddsProviderConfigs(t *testing.T)
 		t.Fatalf("edited provider model = %q, want %q", got, want)
 	}
 
-	added, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID:      "dev",
-		RouteID:          "gpt",
-		Name:             "deep",
-		Provider:         "openai_compatible",
-		Model:            "gpt-4.1",
-		ProviderProtocol: "responses",
-		BaseURL:          "https://deep.example/v1",
-		CredentialRef:    "env:DEEP_KEY",
-		Rank:             1,
-		Weight:           2,
-	})
+	added, err := adapter.SaveTarget(context.Background(), saveTargetRequest("dev", "gpt", "", "openai_compatible", "gpt-4.1", "responses", "https://deep.example/v1", "env:DEEP_KEY", 1, 2))
 	if err != nil {
 		t.Fatalf("SaveTarget add returned error: %v", err)
 	}
-	if added.ID == "" || added.Name != "deep" || added.Model != "gpt-4.1" || added.Rank != 1 || added.Weight != 2 {
+	if added.ID == "" || added.Name != string(added.ID) || added.Model != "gpt-4.1" || added.Rank != 1 || added.Weight != 2 {
 		t.Fatalf("added target = %#v", added)
 	}
 	if got := len(client.upserted.ProviderConfigs); got != 2 {
 		t.Fatalf("saved configs = %d, want 2", got)
 	}
 	for _, config := range client.upserted.ProviderConfigs {
-		if config.TargetAlias == "deep" && (config.TargetRank != 1 || config.TargetWeight != 2) {
-			t.Fatalf("deep rank/weight = %d/%d, want 1/2", config.TargetRank, config.TargetWeight)
+		if config.ModelID == "gpt-4.1" && (config.TargetRank != 1 || config.TargetWeight != 2) {
+			t.Fatalf("added rank/weight = %d/%d, want 1/2", config.TargetRank, config.TargetWeight)
 		}
-		if config.TargetAlias == "deep" && config.ProviderProtocol != "responses" {
-			t.Fatalf("deep protocol = %q, want responses", config.ProviderProtocol)
+		if config.ModelID == "gpt-4.1" && config.ProviderProtocol != "responses" {
+			t.Fatalf("added protocol = %q, want responses", config.ProviderProtocol)
 		}
-		if config.TargetAlias == "deep" && config.RouteModelID != "gpt" {
-			t.Fatalf("deep route model = %q, want gpt", config.RouteModelID)
+		if config.ModelID == "gpt-4.1" && config.RouteModelID != "gpt" {
+			t.Fatalf("added route model = %q, want gpt", config.RouteModelID)
 		}
+		if config.ModelID == "gpt-4.1" && config.TargetAlias != "" {
+			t.Fatalf("added target alias = %q, want empty", config.TargetAlias)
+		}
+	}
+}
+
+func TestLiveOperatorAdapter_StorePastedCredentialPersistsGeneratedSlot(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+	t.Setenv("SWOBU_AUTH_CREDENTIAL_WRITE_POLICY", "file")
+
+	adapter := &LiveOperatorAdapter{}
+	result, err := adapter.StorePastedCredential(context.Background(), ports.StorePastedCredentialRequest{
+		ProviderSpec: "azure",
+		Name:         "cockpit/target/azure/dev/kimi-k2-6/target-1/abcd1234",
+		Secret:       "sk-test",
+	})
+	if err != nil {
+		t.Fatalf("StorePastedCredential returned error: %v", err)
+	}
+	if result.CredentialRef != "secretfile:cockpit/target/azure/dev/kimi-k2-6/target-1/abcd1234" {
+		t.Fatalf("credential ref = %q", result.CredentialRef)
+	}
+}
+
+func TestLiveOperatorAdapter_SaveTargetEditPreservesOpenAICompatibleAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeOperatorClient{
+		endpoints: []operatorclient.EndpointData{{
+			Name:        "dev",
+			SelectedRef: "cfg-fast",
+			ProviderConfigs: []operatorclient.ProviderConfigData{{
+				Ref:              "cfg-fast",
+				ProviderSpec:     "openai_compatible",
+				RouteModelID:     "gpt",
+				ModelID:          "gpt-4.1",
+				ProviderProtocol: "responses",
+				BaseURL:          "https://lab.example/v1",
+				AuthHeader:       "X-API-Key",
+				CredentialRef:    "env:LAB_API_KEY",
+				TargetRank:       1,
+				TargetWeight:     1,
+			}},
+		}},
+	}
+	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
+	request := saveTargetRequest("dev", "gpt", "cfg-fast", "openai_compatible", "gpt-4.1", "responses", "https://lab.example/v1", "env:LAB_API_KEY", 1, 1)
+	request.Draft.ProviderOptions.OpenAICompatible.CredentialHeader = "X-API-Key"
+
+	edited, err := adapter.SaveTarget(context.Background(), request)
+	if err != nil {
+		t.Fatalf("SaveTarget edit returned error: %v", err)
+	}
+	if got, want := edited.AuthHeader, "X-API-Key"; got != want {
+		t.Fatalf("edited readmodel auth header = %q, want %q", got, want)
+	}
+	if got, want := client.upserted.ProviderConfigs[0].AuthHeader, "X-API-Key"; got != want {
+		t.Fatalf("upserted auth header = %q, want %q", got, want)
 	}
 }
 
@@ -804,21 +804,11 @@ func TestLiveOperatorAdapter_SaveTargetCreatesEndpointForMissingWorkspace(t *tes
 	client := &fakeOperatorClient{}
 	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
 
-	added, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID:   "dev",
-		RouteID:       "gpt",
-		Name:          "deep",
-		Provider:      "openai_compatible",
-		Model:         "gpt-4.1",
-		BaseURL:       "https://deep.example/v1",
-		CredentialRef: "env:DEEP_KEY",
-		Rank:          1,
-		Weight:        2,
-	})
+	added, err := adapter.SaveTarget(context.Background(), saveTargetRequest("dev", "gpt", "", "openai_compatible", "gpt-4.1", "responses", "https://deep.example/v1", "env:DEEP_KEY", 1, 2))
 	if err != nil {
 		t.Fatalf("SaveTarget create returned error: %v", err)
 	}
-	if added.ID == "" || added.Name != "deep" || added.Model != "gpt-4.1" || added.Rank != 1 || added.Weight != 2 {
+	if added.ID == "" || added.Name != string(added.ID) || added.Model != "gpt-4.1" || added.Rank != 1 || added.Weight != 2 {
 		t.Fatalf("added target = %#v", added)
 	}
 	if got, want := client.upserted.Name, "dev"; got != want {
@@ -841,17 +831,7 @@ func TestLiveOperatorAdapter_SaveTargetRejectsEmptyWorkspaceID(t *testing.T) {
 	client := &fakeOperatorClient{}
 	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
 
-	_, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID:   " ",
-		RouteID:       "gpt",
-		Name:          "deep",
-		Provider:      "openai_compatible",
-		Model:         "gpt-4.1",
-		BaseURL:       "https://deep.example/v1",
-		CredentialRef: "env:DEEP_KEY",
-		Rank:          1,
-		Weight:        1,
-	})
+	_, err := adapter.SaveTarget(context.Background(), saveTargetRequest(" ", "gpt", "", "openai_compatible", "gpt-4.1", "", "https://deep.example/v1", "env:DEEP_KEY", 1, 1))
 	if err == nil || !strings.Contains(err.Error(), "workspace is required") {
 		t.Fatalf("SaveTarget error = %v, want workspace validation", err)
 	}
@@ -868,17 +848,7 @@ func TestLiveOperatorAdapter_SaveTargetOtherGetErrorFails(t *testing.T) {
 	}
 	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
 
-	_, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID:   "dev",
-		RouteID:       "gpt",
-		Name:          "deep",
-		Provider:      "openai_compatible",
-		Model:         "gpt-4.1",
-		BaseURL:       "https://deep.example/v1",
-		CredentialRef: "env:DEEP_KEY",
-		Rank:          1,
-		Weight:        1,
-	})
+	_, err := adapter.SaveTarget(context.Background(), saveTargetRequest("dev", "gpt", "", "openai_compatible", "gpt-4.1", "", "https://deep.example/v1", "env:DEEP_KEY", 1, 1))
 	if err == nil || !strings.Contains(err.Error(), "backend exploded") {
 		t.Fatalf("SaveTarget error = %v, want propagated get error", err)
 	}
@@ -890,15 +860,15 @@ func TestLiveOperatorAdapter_SaveTargetOtherGetErrorFails(t *testing.T) {
 func TestRouteProjection_ProviderConfigFromTargetRequestRejectsInvalidRankWeight(t *testing.T) {
 	t.Parallel()
 
-	_, err := providerConfigFromTargetRequest(ports.SaveTargetRequest{Rank: 0, Weight: 1}, "id")
+	_, err := providerConfigFromTargetRequest(saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "responses", "", "env:OPENAI_API_KEY", 0, 1), "id")
 	if err == nil {
 		t.Fatal("providerConfigFromTargetRequest expected error for rank < 1, got nil")
 	}
-	_, err = providerConfigFromTargetRequest(ports.SaveTargetRequest{Rank: 1, Weight: 0}, "id")
+	_, err = providerConfigFromTargetRequest(saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "responses", "", "env:OPENAI_API_KEY", 1, 0), "id")
 	if err == nil {
 		t.Fatal("providerConfigFromTargetRequest expected error for weight < 1, got nil")
 	}
-	_, err = providerConfigFromTargetRequest(ports.SaveTargetRequest{Rank: -1, Weight: 1}, "id")
+	_, err = providerConfigFromTargetRequest(saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "responses", "", "env:OPENAI_API_KEY", -1, 1), "id")
 	if err == nil {
 		t.Fatal("providerConfigFromTargetRequest expected error for negative rank, got nil")
 	}
@@ -907,7 +877,7 @@ func TestRouteProjection_ProviderConfigFromTargetRequestRejectsInvalidRankWeight
 func TestRouteProjection_ProviderConfigFromTargetRequestAcceptsValidRankWeight(t *testing.T) {
 	t.Parallel()
 
-	config, err := providerConfigFromTargetRequest(ports.SaveTargetRequest{Provider: "openai", BaseURL: "https://example.com/v1", ProviderProtocol: "responses", Rank: 2, Weight: 3, RouteID: "gpt", Model: "gpt-4", Name: "main"}, "id")
+	config, err := providerConfigFromTargetRequest(saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "responses", "", "env:OPENAI_API_KEY", 2, 3), "id")
 	if err != nil {
 		t.Fatalf("providerConfigFromTargetRequest returned error: %v", err)
 	}
@@ -923,29 +893,38 @@ func TestRouteProjection_ProviderConfigFromTargetRequestAcceptsValidRankWeight(t
 	if got, want := config.ProviderProtocol, "responses"; got != want {
 		t.Fatalf("protocol = %q, want %q", got, want)
 	}
+	if got := config.TargetAlias; got != "" {
+		t.Fatalf("target alias = %q, want empty", got)
+	}
 }
 
-func TestRouteProjection_ProviderConfigFromTargetRequestDefaultsEmptyProtocol(t *testing.T) {
+func TestRouteProjection_ProviderConfigFromTargetRequestRejectsEmptyProtocol(t *testing.T) {
 	t.Parallel()
 
-	config, err := providerConfigFromTargetRequest(ports.SaveTargetRequest{Provider: "openai", BaseURL: "https://example.com/v1", ProviderProtocol: "", Rank: 1, Weight: 1, RouteID: "gpt", Model: "gpt-4", Name: "main"}, "id")
-	if err != nil {
-		t.Fatalf("providerConfigFromTargetRequest returned error: %v", err)
-	}
-	if got, want := config.ProviderProtocol, "responses"; got != want {
-		t.Fatalf("defaulted protocol = %q, want %q", got, want)
-	}
-	if got, want := config.RouteModelID, "gpt"; got != want {
-		t.Fatalf("route model = %q, want %q", got, want)
+	_, err := providerConfigFromTargetRequest(saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "", "", "env:OPENAI_API_KEY", 1, 1), "id")
+	if err == nil || !strings.Contains(err.Error(), "provider protocol is required") {
+		t.Fatalf("providerConfigFromTargetRequest error = %v, want missing protocol", err)
 	}
 }
 
 func TestRouteProjection_ProviderConfigFromTargetRequestRejectsInvalidProtocol(t *testing.T) {
 	t.Parallel()
 
-	_, err := providerConfigFromTargetRequest(ports.SaveTargetRequest{Provider: "openai", BaseURL: "https://example.com/v1", ProviderProtocol: "invalid", Rank: 1, Weight: 1, RouteID: "gpt", Model: "gpt-4", Name: "main"}, "id")
+	_, err := providerConfigFromTargetRequest(saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "invalid", "", "env:OPENAI_API_KEY", 1, 1), "id")
 	if err == nil {
 		t.Fatal("providerConfigFromTargetRequest expected error for invalid protocol, got nil")
+	}
+}
+
+func TestRouteProjection_ProviderConfigFromTargetRequestRejectsOpenAICompatibleOptionsForNativeOpenAI(t *testing.T) {
+	t.Parallel()
+
+	req := saveTargetRequest("dev", "gpt", "", "openai", "gpt-4", "responses", "", "env:OPENAI_API_KEY", 1, 1)
+	req.Draft.ProviderOptions.OpenAICompatible.CredentialHeader = "X-API-Key"
+
+	_, err := providerConfigFromTargetRequest(req, "id")
+	if err == nil {
+		t.Fatal("providerConfigFromTargetRequest expected error for native OpenAI with OpenAI-compatible options, got nil")
 	}
 }
 
@@ -1227,6 +1206,9 @@ func (c *cancelAwareOperatorClient) DeleteEndpoint(context.Context, string) erro
 func (c *cancelAwareOperatorClient) Status(context.Context, string) (operatorclient.StatusProjection, error) {
 	return operatorclient.StatusProjection{}, errors.New("unexpected call")
 }
+func (c *cancelAwareOperatorClient) DaemonVersion(context.Context) (string, error) {
+	return "", errors.New("unexpected call")
+}
 func (c *cancelAwareOperatorClient) StartAuthSession(context.Context, string, string, string) (operatorclient.AuthSessionStartResult, error) {
 	return operatorclient.AuthSessionStartResult{}, errors.New("unexpected call")
 }
@@ -1239,26 +1221,19 @@ func (c *cancelAwareOperatorClient) CancelAuthSession(context.Context, string) e
 func (c *cancelAwareOperatorClient) RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error) {
 	return operatorclient.AuthSessionRetryResult{}, errors.New("unexpected call")
 }
-func (c *cancelAwareOperatorClient) ProbeModelCatalog(context.Context, string, string, string, string, string) (operatorclient.ModelCatalogResult, error) {
+func (c *cancelAwareOperatorClient) ProbeModelCatalog(context.Context, string, string, string, string, string, string) (operatorclient.ModelCatalogResult, error) {
 	return operatorclient.ModelCatalogResult{}, errors.New("unexpected call")
 }
 
 func newLiveOperatorAdapterWithClient(client operatorClient, daemonURL string) *LiveOperatorAdapter {
 	adapter := &LiveOperatorAdapter{
-		client:           client,
-		daemonURL:        strings.TrimRight(config.ResolveDaemonURL(daemonURL), "/"),
-		helpDocsURL:      "https://swobu.com/docs",
-		helpCommunityURL: "https://discord.gg/UejYpMGmw",
-		helpIssueURL:     "https://github.com/swobuforge/swobu/issues/new",
-		commandIO:        processRunCommandIO(),
+		client:    client,
+		daemonURL: strings.TrimRight(config.ResolveDaemonURL(daemonURL), "/"),
+		commandIO: processRunCommandIO(),
 	}
 	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
 		return executeClientRunCommand(ctx, command, adapter.commandIO)
 	}
-	// Inject no-op side effects for tests to avoid hanging on clipboard
-	// initialisation or firing browsers.
-	adapter.copyText = func(string) (bool, error) { return true, nil }
-	adapter.openURL = func(string) error { return nil }
 	return adapter
 }
 
@@ -1289,17 +1264,7 @@ func TestLiveOperatorAdapter_SaveTargetRejectsWrongRoute(t *testing.T) {
 	adapter := newLiveOperatorAdapterWithClient(client, "http://127.0.0.1:7926")
 
 	// cfg-fast exists but not in route "local".
-	_, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID:   "dev",
-		RouteID:       "local",
-		TargetID:      "cfg-fast",
-		Name:          "fast",
-		Provider:      "openai_compatible",
-		Rank:          1,
-		Weight:        1,
-		BaseURL:       "https://new.example/v1",
-		CredentialRef: "env:KEY",
-	})
+	_, err := adapter.SaveTarget(context.Background(), saveTargetRequest("dev", "local", "cfg-fast", "openai_compatible", "gpt-4.1", "responses", "https://new.example/v1", "env:KEY", 1, 1))
 	if err == nil || !strings.Contains(err.Error(), "target not found in route") {
 		t.Fatalf("SaveTarget error = %v, want route mismatch", err)
 	}
@@ -1368,6 +1333,7 @@ func TestLiveOperatorAdapter_ProbeProviderModelsMapsDeploymentsAndProtocol(t *te
 		BaseURL:          "https://api.openai.com/v1",
 		AuthHeader:       "Authorization",
 		CredentialRef:    "env:OPENAI_API_KEY",
+		AuthMode:         "env",
 		ProviderProtocol: "responses",
 	})
 	if err != nil {
@@ -1389,6 +1355,9 @@ func TestLiveOperatorAdapter_ProbeProviderModelsMapsDeploymentsAndProtocol(t *te
 
 	if result.ResolvedProviderProtocol != "responses" {
 		t.Fatalf("resolved protocol = %q, want responses", result.ResolvedProviderProtocol)
+	}
+	if client.modelCatalogAuthMode != "env" {
+		t.Fatalf("probe auth mode = %q, want env", client.modelCatalogAuthMode)
 	}
 }
 

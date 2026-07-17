@@ -12,7 +12,7 @@ import (
 func TestProviderRegistry_BuildsFacetRegistriesForSupportedSpecs(t *testing.T) {
 	t.Parallel()
 
-	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{}, "")
+	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{})
 	for _, spec := range profile.SupportedSpecs() {
 		providerID, ok := profile.ParseProviderID(spec)
 		if !ok {
@@ -34,7 +34,7 @@ func TestProviderRegistry_BuildsFacetRegistriesForSupportedSpecs(t *testing.T) {
 func TestProviderRegistry_RejectsUnknownProviderID(t *testing.T) {
 	t.Parallel()
 
-	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{}, "")
+	registry := NewProviderRegistry(http.DefaultClient, testCredentialResolver{})
 	if _, ok := registry.Manifest("unknown-provider"); ok {
 		t.Fatal("unknown provider manifest must be absent")
 	}

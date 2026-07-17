@@ -1,0 +1,24 @@
+  new target · Ollama                                                                                     cancel ↵      
+     provider          Ollama                                                                             change ↵      
+     model             required                                                                           choose ↵      
+        model                                                                                                           
+        search            _                                                                                             
+                                                                                                                        
+      > Llama 3.2 3B                                                                                      select ↵      
+        Qwen 2.5 72B                                                                                      select ↵      
+        DeepSeek R1 32B                                                                                   select ↵      
+                                                                                                                        
+        3 of 3 shown                                                                                      ↑↓ search     
+     protocol          blocked                                                                            model first   
+     routing           step 1                                                                                           
+     create                                                                                               model first   
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

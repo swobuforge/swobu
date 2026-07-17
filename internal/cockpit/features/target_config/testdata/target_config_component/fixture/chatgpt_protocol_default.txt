@@ -1,0 +1,40 @@
+  new target · ChatGPT                                                                                    cancel ↵      
+     provider          ChatGPT                                                                            change ↵      
+     auth              signed in                                                                          ok            
+     model             gpt-5.5                                                                            change ↵      
+     protocol          responses_stream                                                                   default       
+     routing           step 1                                                                                           
+   > create                                                                                               create ↵      
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

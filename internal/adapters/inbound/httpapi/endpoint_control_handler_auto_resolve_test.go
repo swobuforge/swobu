@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -16,7 +17,7 @@ import (
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
-func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirstSuccess(t *testing.T) {
+func TestEndpointAutoProtocolResolver_ResolveOne_UsesProviderOrderAndStopsOnFirstSuccess(t *testing.T) {
 	t.Parallel()
 
 	name, _ := endpointintent.ParseEndpointName("workspace")
@@ -31,13 +32,12 @@ func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirst
 		t.Fatalf("with model id: %v", err)
 	}
 	attempts := make([]string, 0, 2)
-	probe := func(_ context.Context, _ endpointintent.Endpoint, in exchange.RequestInput) (exchange.RequestOutput, error) {
+	probe := func(_ context.Context, candidate endpointintent.Endpoint, in exchange.RequestInput) (exchange.RequestOutput, error) {
 		_ = in
-		if len(attempts) == 0 {
-			attempts = append(attempts, "responses/http_json_body")
+		attempts = append(attempts, candidate.ProviderConfigs()[0].ProviderProtocol())
+		if len(attempts) == 1 {
 			return exchange.RequestOutput{}, errors.New("nope")
 		}
-		attempts = append(attempts, "responses/ndjson")
 		doc, _ := testResponseDocumentEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseDocument(canonical.NewConversationOutput("id", "m", []canonical.OutputItem{canonical.NewTextOutputItem("t", "ok")}, "stop"))
 		return exchange.RequestOutput{Response: exchange.NewTransportResponseFromDocument(doc)}, nil
 	}
@@ -47,11 +47,12 @@ func TestEndpointAutoProtocolResolver_ResolveOne_UsesCatalogOrderAndStopsOnFirst
 	if err != nil {
 		t.Fatalf("resolveOne error: %v", err)
 	}
-	if resolved != "responses_stream" {
-		t.Fatalf("resolved protocol=%q want responses_stream", resolved)
+	if resolved != "chat_completions_stream" {
+		t.Fatalf("resolved protocol=%q want chat_completions_stream", resolved)
 	}
-	if len(attempts) != 2 {
-		t.Fatalf("attempts=%d want 2", len(attempts))
+	wantAttempts := []string{"chat_completions", "chat_completions_stream"}
+	if !reflect.DeepEqual(attempts, wantAttempts) {
+		t.Fatalf("attempts=%v want %v", attempts, wantAttempts)
 	}
 }
 

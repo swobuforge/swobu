@@ -45,6 +45,65 @@ func TestDecodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	}
 }
 
+func TestDecodeEndpointDocument_PreservesOpenAICompatibleAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	doc := endpointDocument{
+		Name:                      "jobs",
+		SelectedProviderConfigRef: "cfg-main",
+		ProviderConfigs: []providerConfigDocument{
+			{
+				Ref:          "cfg-main",
+				ProviderSpec: "openai_compatible",
+				BaseURL:      "https://gateway.example.test/v1",
+				AuthHeader:   "X-API-Key",
+			},
+		},
+	}
+
+	endpoint, err := decodeEndpointDocument(doc)
+	if err != nil {
+		t.Fatalf("decodeEndpointDocument returned error: %v", err)
+	}
+	providers := endpoint.ProviderConfigs()
+	if len(providers) != 1 {
+		t.Fatalf("provider configs len=%d want=1", len(providers))
+	}
+	if got := providers[0].AuthHeader(); got != "X-API-Key" {
+		t.Fatalf("auth header=%q want X-API-Key", got)
+	}
+}
+
+func TestDecodeEndpointDocument_PreservesBedrockAuthMode(t *testing.T) {
+	t.Parallel()
+
+	doc := endpointDocument{
+		Name:                      "jobs",
+		SelectedProviderConfigRef: "cfg-main",
+		ProviderConfigs: []providerConfigDocument{
+			{
+				Ref:              "cfg-main",
+				ProviderSpec:     "bedrock",
+				BaseURL:          "https://bedrock-mantle.local",
+				AuthMode:         "aws_env_session",
+				ProviderProtocol: "messages_stream",
+			},
+		},
+	}
+
+	endpoint, err := decodeEndpointDocument(doc)
+	if err != nil {
+		t.Fatalf("decodeEndpointDocument returned error: %v", err)
+	}
+	providers := endpoint.ProviderConfigs()
+	if len(providers) != 1 {
+		t.Fatalf("provider configs len=%d want=1", len(providers))
+	}
+	if got := providers[0].AuthMode(); got != "aws_env_session" {
+		t.Fatalf("auth mode=%q want aws_env_session", got)
+	}
+}
+
 func TestEncodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -84,6 +143,66 @@ func TestEncodeEndpointDocument_PreservesProviderProtocol(t *testing.T) {
 	}
 	if got := doc.ProviderConfigs[0].ModelID; got != "gpt-5.4-mini" {
 		t.Fatalf("model id=%q want=%q", got, "gpt-5.4-mini")
+	}
+}
+
+func TestEncodeEndpointDocument_PreservesOpenAICompatibleAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	name, _ := endpointintent.ParseEndpointName("jobs")
+	ref, _ := endpointintent.ParseProviderConfigRef("cfg-main")
+	spec, _ := endpointintent.ParseProviderSpec("openai_compatible")
+	cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://gateway.example.test/v1", "")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	cfg, err = cfg.WithAuthHeader("X-API-Key")
+	if err != nil {
+		t.Fatalf("WithAuthHeader returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	doc := encodeEndpointDocument(endpoint)
+	if len(doc.ProviderConfigs) != 1 {
+		t.Fatalf("provider configs len=%d want=1", len(doc.ProviderConfigs))
+	}
+	if got := doc.ProviderConfigs[0].AuthHeader; got != "X-API-Key" {
+		t.Fatalf("auth header=%q want X-API-Key", got)
+	}
+}
+
+func TestEncodeEndpointDocument_PreservesBedrockAuthMode(t *testing.T) {
+	t.Parallel()
+
+	name, _ := endpointintent.ParseEndpointName("jobs")
+	ref, _ := endpointintent.ParseProviderConfigRef("cfg-main")
+	spec, _ := endpointintent.ParseProviderSpec("bedrock")
+	cfg, err := endpointintent.NewProviderConfig(ref, spec, "https://bedrock-mantle.local", "")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	cfg, err = cfg.WithAuthMode("aws_env_session")
+	if err != nil {
+		t.Fatalf("WithAuthMode returned error: %v", err)
+	}
+	cfg, err = cfg.WithProviderProtocol("messages_stream")
+	if err != nil {
+		t.Fatalf("WithProviderProtocol returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{cfg}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	doc := encodeEndpointDocument(endpoint)
+	if len(doc.ProviderConfigs) != 1 {
+		t.Fatalf("provider configs len=%d want=1", len(doc.ProviderConfigs))
+	}
+	if got := doc.ProviderConfigs[0].AuthMode; got != "aws_env_session" {
+		t.Fatalf("auth mode=%q want aws_env_session", got)
 	}
 }
 

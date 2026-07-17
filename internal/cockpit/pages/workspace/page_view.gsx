@@ -26,18 +26,20 @@ type PageView struct {
 //
 // Target setup and auth capabilities are supplied separately so the page does
 // not have to rediscover optional adapter interfaces from WorkspaceCommands.
-func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceCommands, setupQueries ports.TargetSetupQueries, authCommands ports.TargetAuthCommands, ctx context.Context, activityQuery ports.ActivityQueries) *PageView {
+func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceCommands, setupQueries ports.TargetSetupQueries, authCommands ports.TargetAuthCommands, ctx context.Context, activityQuery ports.ActivityQueries, credentialCommands ports.TargetCredentialCommands) *PageView {
 	page := &PageView{
 		OverviewSection: overviewsection.Section(workspace, commands),
 		RoutesSection:   routessection.Section(workspace, routeCommandPort(commands)),
 		ActivitySection: activitysection.Section(workspace, ctx, activityQuery),
 	}
 	if setupQueries != nil {
-		page.RoutesSection.ListProviders = setupQueries.ListTargetProviders
-		page.RoutesSection.TargetSetupQueries = setupQueries
+		page.RoutesSection.TargetConfigs.Commands.Setup = setupQueries
 	}
 	if authCommands != nil {
-		page.RoutesSection.TargetAuthCommands = authCommands
+		page.RoutesSection.TargetConfigs.Commands.Auth = authCommands
+	}
+	if credentialCommands != nil {
+		page.RoutesSection.TargetConfigs.Commands.Credentials = credentialCommands
 	}
 	page.OverviewSection.OnWorkspaceSaved = page.workspaceSaved
 	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
@@ -69,33 +71,22 @@ func (v *PageView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
 
 func (v *PageView) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
-		tui.OnStop(tui.KeyUp, v.focusPrevious),
-		tui.OnStop(tui.KeyDown, v.focusNext),
+		tui.OnStop(tui.KeyUp, v.selectPrevious),
+		tui.OnStop(tui.KeyDown, v.selectNext),
 		tui.OnStop(tui.KeyEscape, v.backOut),
-		tui.OnStop(tui.KeyEnter, ui.ActivateFocusedElement),
+		tui.OnStop(tui.KeyEnter, ui.ActivateCurrentSelection),
 	}
 }
 
-func (v *PageView) focusPrevious(event tui.KeyEvent) {
-	if app := event.App(); app != nil {
-		app.FocusPrev()
-	}
+func (v *PageView) selectPrevious(event tui.KeyEvent) {
+	ui.SelectPrevious(event)
 }
 
-func (v *PageView) focusNext(event tui.KeyEvent) {
-	if app := event.App(); app != nil {
-		app.FocusNext()
-	}
+func (v *PageView) selectNext(event tui.KeyEvent) {
+	ui.SelectNext(event)
 }
 
-// swobu:lint ignore tui-parent-calls-child-method because=staged refactor: replace imperative Back() with parent-owned ActiveInline state enum per go-tui-canons anti-pattern #7
 func (v *PageView) backOut(event tui.KeyEvent) {
-	if v.OverviewSection.Back() {
-		return
-	}
-	if v.RoutesSection.Back() {
-		return
-	}
 	// swobu: Escape at top level of workspace page quits the cockpit.
 	if app := event.App(); app != nil {
 		app.Stop()

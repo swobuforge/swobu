@@ -8,7 +8,7 @@ import (
 )
 
 func init() {
-	providersruntime.RegisterRuntimeFactory(profile.ProviderSpecAzure, func(client *http.Client, credentials providersruntime.CredentialProvider, azureProjectEndpoint string) providersruntime.ProviderRuntimeBundle {
-		return NewRuntime(client, credentials, azureProjectEndpoint)
+	providersruntime.RegisterRuntimeFactory(profile.ProviderSpecAzure, func(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
+		return NewRuntime(client, credentials)
 	})
 }

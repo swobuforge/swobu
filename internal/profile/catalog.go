@@ -9,12 +9,18 @@ import (
 var (
 	openAICompatibleAuthHeaders = []string{
 		"Authorization",
-		"X-API-Key",
+		"x-api-key",
 		"api-key",
 	}
 	providerProtocolsOpenAIFamily = []ProviderProtocolSpec{
 		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
+	}
+	providerProtocolsOllama = []ProviderProtocolSpec{
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
 		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
@@ -45,6 +51,20 @@ var (
 		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
+	// providerProtocolsCustomEndpoint carries the OpenAI-family protocols plus
+	// the Anthropic Messages protocols, because a Custom Endpoint can front an
+	// Anthropic-style backend. Native OpenAI/OpenRouter keep the narrower family
+	// list; only Custom Endpoint declares this cross-family surface.
+	providerProtocolsCustomEndpoint = []ProviderProtocolSpec{
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
+		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
+		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
+		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
+	}
 )
 
 func catalog() []Profile {
@@ -53,21 +73,29 @@ func catalog() []Profile {
 			ProviderID:          ProviderSpecOllama,
 			ProviderDisplayName: "Ollama",
 			SetupHint:           "local model catalog",
-			SetupFields:         []string{"model", "protocol"},
-			DefaultBaseURL:      "http://127.0.0.1:11434/v1",
+			SetupKeywords:       []string{"model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:       EndpointDefaultHTTPBaseURL,
+				DefaultURL: "http://127.0.0.1:11434/v1",
+				Label:      "base URL",
+			},
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
+			ProviderProtocols:   slices.Clone(providerProtocolsOllama),
 			AllowedAuthModes: []AuthModeSpec{
 				{Mode: "", Kind: AuthNone, Requirement: AuthModeRequirementNever},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:              ProviderSpecOpenAI,
-			ProviderDisplayName:     "OpenAI",
-			SetupHint:               "API key",
-			SetupFields:             []string{"credential", "model", "protocol"},
-			DefaultBaseURL:          "https://api.openai.com/v1",
+			ProviderID:          ProviderSpecOpenAI,
+			ProviderDisplayName: "OpenAI",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"credential", "model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:       EndpointDefaultHTTPBaseURL,
+				DefaultURL: "https://api.openai.com/v1",
+				Label:      "base URL",
+			},
 			DefaultCredentialEnvVar: "OPENAI_API_KEY",
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsOpenAIFamily),
@@ -82,8 +110,12 @@ func catalog() []Profile {
 			ProviderID:          ProviderSpecChatGPT,
 			ProviderDisplayName: "ChatGPT",
 			SetupHint:           "browser login",
-			SetupFields:         []string{"sign in", "model", "protocol"},
-			DefaultBaseURL:      "https://api.openai.com/v1",
+			SetupKeywords:       []string{"sign in", "model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:       EndpointDefaultHTTPBaseURL,
+				DefaultURL: "https://api.openai.com/v1",
+				Label:      "base URL",
+			},
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
 			AllowedAuthModes: []AuthModeSpec{
@@ -93,11 +125,15 @@ func catalog() []Profile {
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:              ProviderSpecAnthropic,
-			ProviderDisplayName:     "Anthropic",
-			SetupHint:               "API key",
-			SetupFields:             []string{"credential", "model", "protocol"},
-			DefaultBaseURL:          "https://api.anthropic.com/v1",
+			ProviderID:          ProviderSpecAnthropic,
+			ProviderDisplayName: "Anthropic",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"credential", "model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:       EndpointDefaultHTTPBaseURL,
+				DefaultURL: "https://api.anthropic.com/v1",
+				Label:      "base URL",
+			},
 			DefaultCredentialEnvVar: "ANTHROPIC_API_KEY",
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsAnthropic),
@@ -109,11 +145,15 @@ func catalog() []Profile {
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:              ProviderSpecOpenRouter,
-			ProviderDisplayName:     "OpenRouter",
-			SetupHint:               "API key",
-			SetupFields:             []string{"credential", "model", "protocol"},
-			DefaultBaseURL:          "https://openrouter.ai/api/v1",
+			ProviderID:          ProviderSpecOpenRouter,
+			ProviderDisplayName: "OpenRouter",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"credential", "model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:       EndpointDefaultHTTPBaseURL,
+				DefaultURL: "https://openrouter.ai/api/v1",
+				Label:      "base URL",
+			},
 			DefaultCredentialEnvVar: "OPENROUTER_API_KEY",
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsOpenAIFamily),
@@ -125,26 +165,51 @@ func catalog() []Profile {
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:              ProviderSpecBedrock,
-			ProviderDisplayName:     "AWS Bedrock",
-			SetupHint:               "base URL / AWS auth",
-			SetupFields:             []string{"base URL", "AWS profile", "AWS env session", "AWS bearer token", "model", "protocol"},
-			DefaultBaseURL:          "",
+			ProviderID:          ProviderSpecBedrock,
+			ProviderDisplayName: "AWS Bedrock",
+			SetupHint:           "region / auth",
+			SetupKeywords:       []string{"region", "Bedrock API key", "AWS credentials", "AWS profile", "AWS env", "AWS_BEARER_TOKEN_BEDROCK", "access keys", "model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:  EndpointRequiredHTTPBaseURL,
+				Label: "region",
+			},
+			DefaultCredentialEnvVar: "AWS_BEARER_TOKEN_BEDROCK",
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsBedrock),
 			AllowedAuthModes: []AuthModeSpec{
-				{Mode: AuthModeAWSProfile, Kind: AuthNone, Requirement: AuthModeRequirementNever},
-				{Mode: AuthModeAWSEnvSession, Kind: AuthNone, Requirement: AuthModeRequirementNever},
-				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},
+				{
+					Mode:        AuthModeEnv,
+					Kind:        AuthCredentialRef,
+					Requirement: AuthModeRequirementAlways,
+					Label:       "Bedrock API key",
+					Keywords:    []string{"bedrock", "api key", "aws_bearer_token_bedrock", "openai_api_key", "env", "file", "keychain"},
+				},
+				{
+					Mode:        AuthModeAWSEnvSession,
+					Kind:        AuthNone,
+					Requirement: AuthModeRequirementNever,
+					Label:       "AWS env",
+					Keywords:    []string{"aws", "credentials", "access keys", "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "sigv4"},
+				},
+				{
+					Mode:        AuthModeAWSProfile,
+					Kind:        AuthNone,
+					Requirement: AuthModeRequirementNever,
+					Label:       "AWS profile",
+					Keywords:    []string{"aws", "profile", "default", "shared config"},
+				},
 			},
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:              ProviderSpecAzure,
-			ProviderDisplayName:     "Azure AI Foundry",
-			SetupHint:               "resource locator",
-			SetupFields:             []string{"resource locator", "credential", "model", "protocol"},
-			DefaultBaseURL:          "",
+			ProviderID:          ProviderSpecAzure,
+			ProviderDisplayName: "Azure AI",
+			SetupHint:           "endpoint",
+			SetupKeywords:       []string{"endpoint", "credential", "deployment", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:  EndpointAzureResourceLocator,
+				Label: "project",
+			},
 			DefaultCredentialEnvVar: "AZURE_OPENAI_API_KEY",
 			VisibleInOperatorUI:     true,
 			ProviderProtocols:       slices.Clone(providerProtocolsAzure),
@@ -157,13 +222,16 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecOpenAICompatible,
-			ProviderDisplayName: "OpenAI Compatible",
+			ProviderDisplayName: "Custom Endpoint",
 			SetupHint:           "OpenAI-style URL",
-			SetupFields:         []string{"backend URL", "credential", "auth header", "model", "protocol"},
-			DefaultBaseURL:      "",
+			SetupKeywords:       []string{"backend URL", "credential", "credential header", "model", "protocol"},
+			Endpoint: EndpointSpec{
+				Kind:  EndpointRequiredHTTPBaseURL,
+				Label: "backend URL",
+			},
 			DefaultAuthHeader:   "Authorization",
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
+			ProviderProtocols:   slices.Clone(providerProtocolsCustomEndpoint),
 			AllowedAuthModes: []AuthModeSpec{
 				{Mode: "", Kind: AuthNone, Requirement: AuthModeRequirementExceptLoopbackExecute},
 				{Mode: AuthModeEnv, Kind: AuthCredentialRef, Requirement: AuthModeRequirementAlways},

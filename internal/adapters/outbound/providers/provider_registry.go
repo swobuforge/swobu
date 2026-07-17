@@ -44,7 +44,7 @@ func NewRegistryBuilder() providersruntime.Builder {
 
 // NewProviderRegistry composes concrete provider adapters once at the
 // composition edge.
-func NewProviderRegistry(client *http.Client, credentials providersruntime.CredentialProvider, azureProjectEndpoint string) ProviderRegistry {
+func NewProviderRegistry(client *http.Client, credentials providersruntime.CredentialProvider) ProviderRegistry {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -55,7 +55,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		if !ok {
 			panic("providers: missing runtime constructor for provider id " + string(manifest.ProviderID))
 		}
-		runtime := runtimeFactory(client, credentials, azureProjectEndpoint)
+		runtime := runtimeFactory(client, credentials)
 		builder.RegisterDiscovery(manifest.ProviderID, runtime.Discovery)
 		builder.RegisterIngress(manifest.ProviderID, runtime.ProviderExecutor)
 	}

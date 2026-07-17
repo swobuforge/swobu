@@ -3,12 +3,30 @@ package run_once
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
+
+func TestRunOnce_EscapeUsesSharedBackScopeGrammar(t *testing.T) {
+	src, err := os.ReadFile("workflow.go")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(src), "tui.OnFocused"+"(tui.KeyEscape") {
+		t.Fatal("run_once workflow must not bind Escape as a shell-focused handler")
+	}
+	if strings.Contains(string(src), "tui.OnPreemptStop"+"(tui.KeyEscape") {
+		t.Fatal("run_once workflow should express scope Escape through ui.BackScope, not bespoke preempt wiring")
+	}
+	if !strings.Contains(string(src), "ui.BackScope(") {
+		t.Fatal("run_once workflow must use the shared ui.BackScope grammar")
+	}
+}
 
 func TestRunOnce_DisclosureShowsCommandPreview(t *testing.T) {
 	workflow := NewWorkflow(runOnceWorkspace(), runOnceWorkspace().RunCommands[0], nil, nil)

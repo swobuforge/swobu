@@ -40,9 +40,8 @@ func TestDiagnosticsPayload_IncludesSafeNames(t *testing.T) {
 func diagnosticsPayloadFixture() DiagnosticsPayload {
 	return DiagnosticsPayload{
 		Version:       "swobu dev",
-		Cockpit:       "cockpit v2",
-		Commit:        "abc123",
-		Daemon:        "http://127.0.0.1:7926",
+		DaemonVersion: "dev",
+		ConfigPath:    "/home/test/.config/swobu/config.yaml",
 		ActivityCount: 3,
 		Workspaces: []DiagnosticsWorkspacePayload{{
 			Name:          "dev",
