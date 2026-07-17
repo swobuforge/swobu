@@ -284,46 +284,32 @@ func firstTargetReadyFixtureCockpit() *Cockpit {
 		},
 	}
 	return newFixtureCockpit(model, func(c *Cockpit) {
-		c.currentWorkspacePage().RoutesSection.TargetSetupQueries = readyTargetSetupQueries{}
+		c.currentWorkspacePage().RoutesSection.TargetConfigs.Commands.Setup = readyTargetSetupQueries{}
 		route := c.currentWorkspacePage().RoutesSection.State.Routes[0]
 		c.currentWorkspacePage().RoutesSection.OpenRoute(route)
 		c.currentWorkspacePage().RoutesSection.AddTarget(route)
-		wf := c.currentWorkspacePage().RoutesSection.TargetAddWorkflows[route.ID]
+		wf := c.currentWorkspacePage().RoutesSection.TargetConfigs.CachedAdd(route.ID)
 		if wf == nil {
 			panic("expected open target-add workflow")
 		}
 		wf.SelectProvider("openai")
+		wf.SetSetupReady("env:OPENAI_API_KEY", "")
 		wf.SetCatalogResult(readmodel.ModelCatalogReadModel{
 			Deployments: []readmodel.ModelDeploymentReadModel{
-				{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", DefaultProviderProtocol: "chat_completions"},
+				{ID: "gpt-4.1", Name: "GPT-4.1", ModelName: "gpt-4.1", SupportedProviderProtocols: []string{"chat_completions"}, DefaultProviderProtocol: "chat_completions"},
 			},
 		})
 		wf.SelectModel(readmodel.ModelDeploymentReadModel{
-			ID:                      "gpt-4.1",
-			Name:                    "GPT-4.1",
-			ModelName:               "gpt-4.1",
-			DefaultProviderProtocol: "chat_completions",
+			ID:                         "gpt-4.1",
+			Name:                       "GPT-4.1",
+			ModelName:                  "gpt-4.1",
+			SupportedProviderProtocols: []string{"chat_completions"},
+			DefaultProviderProtocol:    "chat_completions",
 		})
 	})
 }
 
 type readyTargetSetupQueries struct{}
-
-func (readyTargetSetupQueries) ListTargetProviders(context.Context) ([]readmodel.ProviderOptionReadModel, error) {
-	return nil, nil
-}
-
-func (readyTargetSetupQueries) ResolveProviderSetup(context.Context, ports.ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error) {
-	return readmodel.ProviderSetupReadModel{
-		ProviderSpec:       "openai",
-		DisplayName:        "OpenAI",
-		CredentialLabel:    "env:OPENAI_API_KEY",
-		CredentialRef:      "env:OPENAI_API_KEY",
-		CredentialRequired: true,
-		ReadyForCatalog:    true,
-		DefaultBaseURL:     "https://api.openai.com/v1",
-	}, nil
-}
 
 func (readyTargetSetupQueries) ProbeProviderModels(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
 	return readmodel.ModelCatalogReadModel{}, nil

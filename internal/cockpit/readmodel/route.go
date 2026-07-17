@@ -42,6 +42,8 @@ type TargetReadModel struct {
 	Model            string
 	ProviderProtocol string
 	BaseURL          string
+	AuthMode         string
+	AuthHeader       string
 	CredentialRef    string
 	Rank             int
 	Weight           int

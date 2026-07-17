@@ -170,6 +170,7 @@ func toRoutableTarget(pc endpointintent.ProviderConfig) RoutableTarget {
 		pc.SelectedFrame(),
 		pc.ProviderProtocol(),
 	)
+	t.AuthMode = pc.AuthMode()
 	t.AuthHeader = pc.AuthHeader()
 	return t
 }

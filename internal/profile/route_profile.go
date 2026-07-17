@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -25,18 +26,53 @@ func SupportedAuthHeadersForSpec(spec string) []string {
 	return nil
 }
 
-func RequiresCredential(spec, baseURL string) bool {
-	return requiresCredentialFromModes(AllowedAuthModesForSpec(spec), baseURL)
+// InferredCredentialHeaderForBackendURL returns the initial default credential
+// header inferred from a Custom Endpoint backend URL. It is a cheap heuristic
+// seed only: the operator can always change it, and no credential is ever
+// selected implicitly. Unknown or unparsable URLs fall back to the profile
+// default (Authorization).
+//
+// Rules (RFC: Custom Endpoint Credential Header):
+//   - path contains /anthropic/            -> x-api-key
+//   - Azure Foundry Anthropic-looking host -> x-api-key
+//   - Azure OpenAI-looking host            -> api-key
+//   - otherwise                            -> Authorization
+func InferredCredentialHeaderForBackendURL(baseURL string) string {
+	fallback := DefaultAuthHeaderForSpec(string(ProviderSpecOpenAICompatible))
+	raw := strings.TrimSpace(baseURL) // swobu:io-string source=boundary
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fallback
+	}
+	host := strings.ToLower(parsed.Hostname())
+	path := strings.ToLower(parsed.Path)
+	switch {
+	case strings.Contains(path, "/anthropic/"):
+		return "x-api-key"
+	case isAzureFoundryHost(host) && strings.Contains(path, "anthropic"):
+		return "x-api-key"
+	case isAzureOpenAIHost(host):
+		return "api-key"
+	default:
+		return fallback
+	}
 }
 
-// RequiresExplicitExecuteBaseURL reports whether the operator must set an
-// explicit non-default execute base URL for this provider spec.
-func RequiresExplicitExecuteBaseURL(spec string) bool {
-	normalized := strings.TrimSpace(spec) // swobu:io-string source=boundary
-	if normalized == string(ProviderSpecOpenAICompatible) || normalized == string(ProviderSpecBedrock) || normalized == string(ProviderSpecAzure) {
-		return true
-	}
-	return false
+func isAzureFoundryHost(host string) bool {
+	return strings.HasSuffix(host, ".services.ai.azure.com") ||
+		strings.HasSuffix(host, ".ai.azure.com")
+}
+
+func isAzureOpenAIHost(host string) bool {
+	return strings.HasSuffix(host, ".openai.azure.com") ||
+		strings.HasSuffix(host, ".cognitiveservices.azure.com")
+}
+
+func RequiresCredential(spec, baseURL string) bool {
+	return requiresCredentialFromModes(AllowedAuthModesForSpec(spec), baseURL)
 }
 
 func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {
@@ -51,7 +87,7 @@ func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {
 		case AuthModeRequirementNever:
 			hasNeverMode = true
 		case AuthModeRequirementAlways:
-			// Explicit always requirement: keep default credential requirement path.
+			// Explicit always requirement: keep credential-required path.
 		case AuthModeRequirementExceptLoopbackExecute:
 			hasLoopbackConditional = true
 		default:

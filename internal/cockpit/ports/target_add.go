@@ -12,17 +12,7 @@ import (
 // Adapter ownership: LiveOperatorAdapter must project from profile catalog
 // and operator client model-catalog probe.
 type TargetSetupQueries interface {
-	ListTargetProviders(ctx context.Context) ([]readmodel.ProviderOptionReadModel, error)
-	ResolveProviderSetup(ctx context.Context, req ResolveProviderSetupRequest) (readmodel.ProviderSetupReadModel, error)
 	ProbeProviderModels(ctx context.Context, req ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error)
-}
-
-// ResolveProviderSetupRequest names the provider and any current setup inputs
-// so the adapter can project the provider-setup state honestly.
-type ResolveProviderSetupRequest struct {
-	ProviderSpec  string
-	BaseURL       string
-	CredentialRef string
 }
 
 // ProbeProviderModelsRequest names the provider and any resolved setup facts
@@ -32,6 +22,7 @@ type ProbeProviderModelsRequest struct {
 	BaseURL          string
 	AuthHeader       string
 	CredentialRef    string
+	AuthMode         string
 	ProviderProtocol string
 }
 
@@ -54,6 +45,28 @@ type StartAuthSessionRequest struct {
 	ProviderSpec string
 	EndpointRef  string
 	AuthMode     string
+}
+
+// TargetCredentialCommands persists transient credential material entered from
+// target setup and returns a durable credential reference for target drafts.
+type TargetCredentialCommands interface {
+	StorePastedCredential(ctx context.Context, req StorePastedCredentialRequest) (StorePastedCredentialResult, error)
+}
+
+// StorePastedCredentialRequest carries pasted secret material across the
+// cockpit adapter boundary. UI components must keep only the returned ref.
+type StorePastedCredentialRequest struct {
+	ProviderSpec string
+	// Name is a generated storage slot, not user-facing input.
+	// Callers should include enough semantic context for diagnostics and a
+	// unique suffix to avoid overwriting another secret.
+	Name   string
+	Secret string
+}
+
+// StorePastedCredentialResult returns the persisted credential reference.
+type StorePastedCredentialResult struct {
+	CredentialRef string
 }
 
 // Compile assertions — use the adapter package instead (ports imports adapters

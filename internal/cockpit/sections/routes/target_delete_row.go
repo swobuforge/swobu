@@ -14,7 +14,7 @@ import (
 // The component mounts at a unique key derived from the target ID so it is
 // focusable and participates in tab order.
 func TargetDeleteConfirmRow(section *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel) *ui.SelectableRow {
-	return ui.NewSelectableRow(
+	row := ui.NewSelectableRow(
 		"confirm-del:"+string(route.ID)+":"+string(target.ID),
 		"delete "+targetValue(target),
 		"",
@@ -23,4 +23,6 @@ func TargetDeleteConfirmRow(section *SectionView, route readmodel.RouteReadModel
 			section.deleteTargetAndClose(route.ID, target.ID)
 		},
 	)
+	row.OnEscape = section.closeDeleteTargetConfirm
+	return row
 }

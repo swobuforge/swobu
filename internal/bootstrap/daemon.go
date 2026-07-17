@@ -108,7 +108,6 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		composition := providersadapter.NewProviderRegistry(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
-			config.ReadEnvTrim(config.EnvAzureOpenAIProjectEndpoint),
 		)
 		providers = composition
 		discovery = composition

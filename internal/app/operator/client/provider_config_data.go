@@ -22,6 +22,7 @@ type ProviderConfigData struct {
 	Ref              string
 	ProviderSpec     string
 	BaseURL          string
+	AuthMode         string
 	AuthHeader       string
 	CredentialRef    string
 	RouteModelID     string
@@ -144,6 +145,7 @@ func endpointDocumentToEndpointData(ed endpointDocument) EndpointData {
 			Ref:              pc.Ref,
 			ProviderSpec:     pc.ProviderSpec,
 			BaseURL:          pc.BaseURL,
+			AuthMode:         pc.AuthMode,
 			AuthHeader:       pc.AuthHeader,
 			CredentialRef:    pc.CredentialRef,
 			RouteModelID:     pc.RouteModelID,
@@ -166,6 +168,7 @@ func endpointDataToEndpointDocument(d EndpointData) endpointDocument {
 			Ref:              pc.Ref,
 			ProviderSpec:     pc.ProviderSpec,
 			BaseURL:          pc.BaseURL,
+			AuthMode:         pc.AuthMode,
 			AuthHeader:       pc.AuthHeader,
 			CredentialRef:    pc.CredentialRef,
 			RouteModelID:     pc.RouteModelID,

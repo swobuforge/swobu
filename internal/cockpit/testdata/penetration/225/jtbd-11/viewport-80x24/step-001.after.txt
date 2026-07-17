@@ -2,7 +2,7 @@
 ────────────────────────────────────────────────────────────────────────────────
   workspace ▾
      endpoint                                                     copy ↵
-
+                       OpenAI · Anthropic
      slug              lab                                        edit ↵
      delete            workspace                                  delete ↵
 

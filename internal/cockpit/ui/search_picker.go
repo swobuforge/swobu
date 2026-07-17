@@ -2,434 +2,150 @@ package ui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	tui "github.com/grindlemire/go-tui"
 )
+
+const searchPickerDefaultVisibleRows = 7
+
+// searchPickerQueryRowKey is the ChoiceItem key for the open-set picker's
+// virtual "use the typed query" row. It is never a real listed option.
+const searchPickerQueryRowKey = "__query__"
+
+// SearchPickerMode is the only semantic prop a SearchPicker needs. A closed
+// set picks from listed options. An open set additionally treats the typed
+// query itself as a selectable value.
+type SearchPickerMode int
+
+const (
+	// SearchPickerClosed is the default: the operator must pick a listed
+	// option. A non-matching query yields "no matches".
+	SearchPickerClosed SearchPickerMode = iota
+	// SearchPickerOpen lets the operator also use the typed query as the
+	// value: the query renders as a virtual first row with action "use ↵".
+	SearchPickerOpen
+)
+
+// SelectionSource tells the parent where a SearchPicker value came from.
+type SelectionSource int
+
+const (
+	// SelectionListed means the operator picked a backing SearchOption.
+	SelectionListed SelectionSource = iota
+	// SelectionQuery means the operator used the typed query as the value.
+	SelectionQuery
+)
+
+// Selection is the only thing a SearchPicker returns. The picker does not know
+// whether Value is a model id, a path, an env var, a header, or a profile —
+// the parent owns that meaning.
+type Selection struct {
+	Value  string
+	Source SelectionSource
+}
 
 // SearchOption is one choosable entry in a SearchPicker.
 type SearchOption struct {
 	ID       string
 	Label    string
+	Value    string
 	Keywords []string
 }
 
-// SearchPicker is a bounded, searchable list component.
-//
-// It is one mounted component with internal query and cursor state.
-// Options are filtered by case-insensitive prefix, substring, token-subsequence,
-// and keyword match. The picker renders only a bounded visible window with
-// a "N of M shown" footer and keyboard navigation (↑↓ PgUp PgDn Enter Esc).
-//
-// Escape is handled by the containing FocusableControl, which calls the
-// picker's OnCancel. SearchPicker does not claim Escape directly.
-//
-// SearchPicker does not own option semantics; callers provide the option slice
-// and OnSelect/OnCancel callbacks.
-type SearchPicker struct {
-	SelectBase
-	Title      string
-	Query      *tui.State[string]
-	Cursor     *tui.State[int]
-	Offset     *tui.State[int]
-	Options    []SearchOption
-	MaxVisible int
-	// AutoFocus seeds the picker as selected on mount, or on the first
-	// transition from false to true on an already-mounted picker.
-	AutoFocus  bool
-	OnSelect   func(SearchOption)
-	OnCancel   func()
+// valueOrID returns the canonical value, falling back to ID when unset so
+// closed-set callers need not set Value explicitly.
+func (o SearchOption) valueOrID() string {
+	if o.Value != "" {
+		return o.Value
+	}
+	return o.ID
 }
 
-const (
-	searchPickerDefaultMaxVisible = 7
-	searchPickerQueryWidth        = 18
+// SearchPicker is a searchable selectable-list scope.
+//
+// The picker owns query text and option filtering only. It is generic: the
+// Mode prop decides whether the typed query is itself a candidate (open set)
+// or not (closed set), and the parent decides what any returned Value means.
+// Options render as SelectableRow descendants so Cockpit keeps one operator
+// selection cursor.
+type SearchPicker struct {
+	ID        string
+	Title     string
+	Query     *tui.State[string]
+	Options   []SearchOption
+	Mode      SearchPickerMode
+	AutoFocus bool
+	OnSelect  func(Selection)
+	OnCancel  func()
+	list      *ChoiceList
+}
 
-	scorePrefix    = 400
-	scoreSubstring = 300
-	scoreKeyword   = 200
-	scoreToken     = 100
-	scoreLengthMax = 1000
-)
-
-// NewSearchPicker creates a SearchPicker with the given title and options.
-func NewSearchPicker(id, title string, options []SearchOption, onSelect func(SearchOption), onCancel func()) *SearchPicker {
-	return &SearchPicker{
-		SelectBase: NewSelectBase(id),
-		Title:      title,
-		Query:      tui.NewState(""),
-		Cursor:     tui.NewState(0),
-		Offset:     tui.NewState(0),
-		Options:    append([]SearchOption(nil), options...),
-		MaxVisible: searchPickerDefaultMaxVisible,
-		OnSelect:   onSelect,
-		OnCancel:   onCancel,
+// NewSearchPicker creates a SearchPicker with the given title and options. The
+// picker defaults to closed-set; set Mode to SearchPickerOpen for pickers that
+// also accept a free-form query value.
+func NewSearchPicker(id, title string, options []SearchOption, onSelect func(Selection), onCancel func()) *SearchPicker {
+	p := &SearchPicker{
+		ID:       id,
+		Title:    title,
+		Query:    tui.NewState(""),
+		Options:  append([]SearchOption(nil), options...),
+		OnSelect: onSelect,
+		OnCancel: onCancel,
 	}
+	p.list = NewChoiceList(p.Query)
+	p.configureList()
+	return p
 }
 
 // UpdateProps refreshes configurable fields from a fresh mount while
-// preserving local query/cursor state.
+// preserving local query state.
 func (p *SearchPicker) UpdateProps(fresh tui.Component) {
 	f, ok := fresh.(*SearchPicker)
 	if !ok {
 		return
 	}
-	prevAutoFocus := p.AutoFocus
+	p.ID = f.ID
 	p.Title = f.Title
 	p.Options = append([]SearchOption(nil), f.Options...)
-	p.MaxVisible = f.MaxVisible
+	p.Mode = f.Mode
 	p.AutoFocus = f.AutoFocus
 	p.OnSelect = f.OnSelect
 	p.OnCancel = f.OnCancel
-
-	if !prevAutoFocus && p.AutoFocus && !p.IsFocused() {
-		p.Focus(p.app)
-	}
-}
-
-// Init seeds the visible focus marker when the picker is configured to autofocus.
-func (p *SearchPicker) Init() func() {
-	if !p.AutoFocus || p.IsFocused() {
-		return nil
-	}
-
-	p.focused.Set(true)
-	if p.app != nil {
-		p.Focus(p.app)
-	}
-	return nil
+	p.configureList()
 }
 
 // BindApp wires component state to the app lifecycle.
 func (p *SearchPicker) BindApp(app *tui.App) {
-	p.SelectBase.BindApp(app)
-	if p.Query != nil {
-		p.Query.BindApp(app)
-	}
-	if p.Cursor != nil {
-		p.Cursor.BindApp(app)
-	}
-	if p.Offset != nil {
-		p.Offset.BindApp(app)
-	}
+	p.configureList()
+	p.list.BindApp(app)
 }
 
 // UnbindApp releases the app handle.
-func (p *SearchPicker) UnbindApp() {
-	p.SelectBase.UnbindApp()
-}
-
-// KeyMap returns the keyboard bindings for query editing, cursor movement,
-// and selection. All bindings are focus-gated on the picker.
-//
-// Escape is NOT listed here — the parent FocusableControl owns it and calls
-// OnCancel from OnExit.
-func (p *SearchPicker) KeyMap() tui.KeyMap {
-	return tui.KeyMap{
-		tui.OnFocused(tui.AnyRune, p.onType),
-		tui.OnFocused(tui.KeyBackspace, p.onBackspace),
-		tui.OnFocused(tui.KeyEnter, p.onEnter),
-		tui.OnFocused(tui.KeyUp, p.onUp),
-		tui.OnFocused(tui.KeyDown, p.onDown),
-		tui.OnFocused(tui.KeyPageUp, p.onPageUp),
-		tui.OnFocused(tui.KeyPageDown, p.onPageDown),
-	}
-}
-
-// Render builds the picker element tree: title, query, visible options, footer.
-func (p *SearchPicker) Render(app *tui.App) *tui.Element {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100),
-		tui.WithFocusable(true),
-		tui.WithAutoFocus(p.AutoFocus),
-		tui.WithOnFocus(p.OnFocus),
-		tui.WithOnBlur(p.OnBlur),
-	)
-
-	if p.Title != "" {
-		root.AddChild(p.renderTitle())
-	}
-	root.AddChild(p.renderQuery())
-
-	filtered := p.filteredOptions()
-	p.clampCursor(filtered)
-
-	visible, offset := p.computeWindow(filtered)
-	p.Offset.Set(offset)
-
-	for i, opt := range visible {
-		highlighted := offset+i == p.Cursor.Get()
-		root.AddChild(p.renderOption(opt, highlighted))
-	}
-
-	root.AddChild(p.renderFooter(len(visible), len(p.Options)))
-
-	if p.Ref != nil {
-		p.Ref.Set(root)
-	}
-	return root
-}
-
-// ---------------------------------------------------------------------------
-// Rendering helpers
-// ---------------------------------------------------------------------------
-
-func (p *SearchPicker) renderTitle() *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-	)
-	row.AddChild(tui.New(tui.WithWidth(2)))
-	row.AddChild(tui.New(tui.WithText(p.Title)))
-	return row
-}
-
-func (p *SearchPicker) renderQuery() *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-	)
-	row.AddChild(tui.New(tui.WithWidth(2)))
-	row.AddChild(tui.New(tui.WithText("search"), tui.WithWidth(searchPickerQueryWidth)))
-	row.AddChild(tui.New(tui.WithText(p.Query.Get())))
-	if p.IsFocused() {
-		row.AddChild(tui.New(tui.WithText("_")))
-	}
-	return row
-}
-
-func (p *SearchPicker) renderOption(opt SearchOption, highlighted bool) *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-	)
-
-	arrow := SelectArrowBlurred
-	if highlighted {
-		arrow = SelectArrowFocused
-	}
-	row.AddChild(tui.New(tui.WithText(arrow), tui.WithWidth(2)))
-	row.AddChild(tui.New(
-		tui.WithText(opt.Label),
-		tui.WithTruncate(true),
-		tui.WithWrap(false),
-	))
-	// Keep picker actions within a fixed single-line budget like other cockpit
-	// action rows; a flex spacer would overrun the footer/action text.
-	row.AddChild(tui.New(tui.WithWidth(ActionRowValueWidth)))
-
-	action := ""
-	if highlighted {
-		action = "select ↵"
-	}
-	row.AddChild(tui.New(tui.WithText(action)))
-	return row
-}
-
-func (p *SearchPicker) renderFooter(shown, total int) *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-	)
-	row.AddChild(tui.New(tui.WithWidth(2)))
-
-	row.AddChild(tui.New(tui.WithText(fmt.Sprintf("%d of %d shown", shown, total))))
-	row.AddChild(tui.New(tui.WithWidth(ActionRowValueWidth)))
-
-	hint := "↑↓ search"
-	if total > p.effectiveMaxVisible() {
-		hint = "↑↓ PgUp PgDn"
-	}
-	row.AddChild(tui.New(tui.WithText(hint)))
-	return row
-}
-
-// ---------------------------------------------------------------------------
-// Filtering
-// ---------------------------------------------------------------------------
+func (p *SearchPicker) UnbindApp() {}
 
 func (p *SearchPicker) filteredOptions() []SearchOption {
-	q := strings.TrimSpace(strings.ToLower(p.Query.Get()))
-	if q == "" {
-		return append([]SearchOption(nil), p.Options...)
-	}
-
-	type scoredOption struct {
-		option SearchOption
-		score  int
-		index  int
-	}
-
-	var scored []scoredOption
-	for i, opt := range p.Options {
-		score := p.scoreOption(opt, q)
-		if score > 0 {
-			scored = append(scored, scoredOption{option: opt, score: score, index: i})
+	filtered := make([]SearchOption, 0, len(p.Options))
+	for _, item := range p.choiceItems() {
+		if item.Virtual {
+			continue
+		}
+		if choiceItemMatches(item, p.Query.Get()) {
+			filtered = append(filtered, SearchOption{ID: item.Key, Label: item.Label, Keywords: item.Keywords})
 		}
 	}
-
-	sort.Slice(scored, func(i, j int) bool {
-		if scored[i].score != scored[j].score {
-			return scored[i].score > scored[j].score
-		}
-		return scored[i].index < scored[j].index // stable
-	})
-
-	result := make([]SearchOption, len(scored))
-	for i, s := range scored {
-		result[i] = s.option
-	}
-	return result
+	return filtered
 }
 
-func (p *SearchPicker) scoreOption(opt SearchOption, q string) int {
-	labelLower := strings.ToLower(opt.Label)
-	score := 0
-
-	switch {
-	case strings.HasPrefix(labelLower, q):
-		score = scorePrefix
-	case strings.Contains(labelLower, q):
-		score = scoreSubstring
-	default:
-		for _, kw := range opt.Keywords {
-			if strings.Contains(strings.ToLower(kw), q) {
-				score = scoreKeyword
-				break
-			}
-		}
-		if score == 0 && tokenSubsequenceMatch(labelLower, q) {
-			score = scoreToken
-		}
-	}
-
-	if score > 0 {
-		// Shorter label wins ties within the same score tier.
-		score += scoreLengthMax - len(opt.Label)
-	}
-	return score
+func searchPickerQueryValue(query string) string {
+	return query + "_"
 }
 
-func tokenSubsequenceMatch(label, query string) bool {
-	labelTokens := tokenize(label)
-	queryTokens := tokenize(query)
-	if len(queryTokens) == 0 {
-		return true
+func searchPickerOptionKey(opt SearchOption, index int) string {
+	if opt.ID != "" {
+		return opt.ID
 	}
-	if len(queryTokens) > len(labelTokens) {
-		return false
-	}
-
-	qIdx := 0
-	for _, t := range labelTokens {
-		if strings.HasPrefix(t, queryTokens[qIdx]) {
-			qIdx++
-			if qIdx >= len(queryTokens) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func tokenize(s string) []string {
-	var tokens []string
-	for _, word := range strings.FieldsFunc(s, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
-	}) {
-		if word != "" {
-			tokens = append(tokens, strings.ToLower(word))
-		}
-	}
-	return tokens
-}
-
-// ---------------------------------------------------------------------------
-// Cursor and window
-// ---------------------------------------------------------------------------
-
-func (p *SearchPicker) clampCursor(filtered []SearchOption) {
-	c := p.Cursor.Get()
-	if c < 0 {
-		c = 0
-	}
-	if len(filtered) > 0 && c >= len(filtered) {
-		c = len(filtered) - 1
-	}
-	if len(filtered) == 0 {
-		c = 0
-	}
-	p.Cursor.Set(c)
-}
-
-func (p *SearchPicker) computeWindow(filtered []SearchOption) (visible []SearchOption, offset int) {
-	max := p.effectiveMaxVisible()
-	cursor := p.Cursor.Get()
-
-	if len(filtered) <= max {
-		return filtered, 0
-	}
-
-	offset = p.Offset.Get()
-	if cursor < offset {
-		offset = cursor
-	} else if cursor >= offset+max {
-		offset = cursor - max + 1
-	}
-
-	end := offset + max
-	if end > len(filtered) {
-		end = len(filtered)
-		offset = end - max
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	return filtered[offset:end], offset
-}
-
-func (p *SearchPicker) effectiveMaxVisible() int {
-	if p.MaxVisible > 0 {
-		return p.MaxVisible
-	}
-	return searchPickerDefaultMaxVisible
-}
-
-// ---------------------------------------------------------------------------
-// Key handlers
-// ---------------------------------------------------------------------------
-
-func (p *SearchPicker) onType(ke tui.KeyEvent) {
-	if ke.Rune == 0 {
-		return
-	}
-	p.Query.Set(p.Query.Get() + string(ke.Rune))
-	p.Cursor.Set(0)
-}
-
-func (p *SearchPicker) onBackspace(ke tui.KeyEvent) {
-	q := p.Query.Get()
-	if len(q) == 0 {
-		return
-	}
-	_, size := utf8.DecodeLastRuneInString(q)
-	if size > 0 && len(q) >= size {
-		p.Query.Set(q[:len(q)-size])
-	}
-	p.Cursor.Set(0)
-}
-
-func (p *SearchPicker) onEnter(ke tui.KeyEvent) {
-	filtered := p.filteredOptions()
-	c := p.Cursor.Get()
-	if c >= 0 && c < len(filtered) && p.OnSelect != nil {
-		p.OnSelect(filtered[c])
-	}
+	return fmt.Sprintf("option-%d", index)
 }
 
 func (p *SearchPicker) onEscape(ke tui.KeyEvent) {
@@ -438,48 +154,102 @@ func (p *SearchPicker) onEscape(ke tui.KeyEvent) {
 	}
 }
 
-func (p *SearchPicker) onUp(ke tui.KeyEvent) {
-	c := p.Cursor.Get()
-	if c > 0 {
-		p.Cursor.Set(c - 1)
+// KeyMap lets the mounted picker scope own Escape even when the framework focus
+// and visible option marker temporarily diverge.
+func (p *SearchPicker) KeyMap() tui.KeyMap {
+	return tui.KeyMap{
+		tui.OnPreemptStop(tui.KeyEscape, p.onEscape),
 	}
 }
 
-func (p *SearchPicker) onDown(ke tui.KeyEvent) {
-	c := p.Cursor.Get()
-	last := len(p.filteredOptions()) - 1
-	if c < last {
-		p.Cursor.Set(c + 1)
+func (p *SearchPicker) configureList() {
+	if p.list == nil || p.list.Query != p.Query {
+		p.list = NewChoiceList(p.Query)
+	}
+	p.list.VisibleRows = searchPickerDefaultVisibleRows
+	p.list.CountFullSet = true
+	p.list.QueryItem = p.openSetQueryItem
+	p.list.AutoFocus = p.AutoFocus
+	p.list.EmptyLabel = "(no matches)"
+	p.list.OnEscape = p.onEscape
+	p.list.SetItems(p.choiceItems())
+}
+
+// choiceItems builds the listed-option rows only. The open-set query row is
+// injected at projection time (see openSetQueryItem) so it stays live with the
+// query.
+func (p *SearchPicker) choiceItems() []ChoiceItem {
+	items := make([]ChoiceItem, 0, len(p.Options))
+	for i, opt := range p.Options {
+		option := opt
+		items = append(items, ChoiceItem{
+			Key:      searchPickerOptionKey(option, i),
+			Label:    option.Label,
+			Value:    option.valueOrID(),
+			Action:   "select ↵",
+			Keywords: option.Keywords,
+			Choose: func() {
+				if p.OnSelect != nil {
+					p.OnSelect(Selection{Value: option.valueOrID(), Source: SelectionListed})
+				}
+			},
+		})
+	}
+	return items
+}
+
+// openSetQueryItem returns the virtual "use the typed query" row for an
+// open-set picker, or a zero ChoiceItem (empty Key) when it should not render.
+//
+// It renders only when Mode is Open, the query is non-empty, and the query is
+// not already an exact (case-insensitive) match for a listed option's value —
+// in that last case the listed option itself is the candidate, so duplicating
+// it as a query row would be noise.
+func (p *SearchPicker) openSetQueryItem(query string) ChoiceItem {
+	if p.Mode != SearchPickerOpen {
+		return ChoiceItem{}
+	}
+	value := strings.TrimSpace(query)
+	if value == "" {
+		return ChoiceItem{}
+	}
+	if p.queryEqualsListedValue(value) {
+		return ChoiceItem{}
+	}
+	candidate := value
+	return ChoiceItem{
+		Key:           searchPickerQueryRowKey,
+		Label:         candidate,
+		Value:         candidate,
+		Action:        "use ↵",
+		Virtual:       true,
+		AlwaysVisible: true,
+		Choose: func() {
+			if p.OnSelect != nil {
+				p.OnSelect(Selection{Value: candidate, Source: SelectionQuery})
+			}
+		},
 	}
 }
 
-func (p *SearchPicker) onPageUp(ke tui.KeyEvent) {
-	c := p.Cursor.Get()
-	p.Cursor.Set(maxInt(0, c-p.effectiveMaxVisible()))
-}
-
-func (p *SearchPicker) onPageDown(ke tui.KeyEvent) {
-	c := p.Cursor.Get()
-	last := len(p.filteredOptions()) - 1
-	p.Cursor.Set(minInt(last, c+p.effectiveMaxVisible()))
-}
-
-// ---------------------------------------------------------------------------
-// Int helpers
-// ---------------------------------------------------------------------------
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
+func (p *SearchPicker) queryEqualsListedValue(query string) bool {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return false
 	}
-	return b
+	for _, opt := range p.Options {
+		if strings.ToLower(opt.valueOrID()) == needle {
+			return true
+		}
+	}
+	return false
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
+func (p *SearchPicker) choiceList() *ChoiceList {
+	if p.list == nil {
+		p.configureList()
 	}
-	return b
+	return p.list
 }
 
 var (
@@ -487,5 +257,4 @@ var (
 	_ tui.KeyListener  = (*SearchPicker)(nil)
 	_ tui.PropsUpdater = (*SearchPicker)(nil)
 	_ tui.AppBinder    = (*SearchPicker)(nil)
-	_ tui.Initializer  = (*SearchPicker)(nil)
 )

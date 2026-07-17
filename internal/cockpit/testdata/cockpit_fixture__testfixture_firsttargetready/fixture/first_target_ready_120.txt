@@ -9,15 +9,17 @@
   model routes ▾
      gpt               default · incomplete · no targets                                                  collapse ↵
         name              gpt                                                                             edit ↵
+        client sends      model = gpt
         default           yes                                                                             current
         delete            gpt                                                                             delete ↵
-        client sends      model = gpt
-      new target · OpenAI
-        provider          OpenAI                                                                          change ↵
-        credential        env:OPENAI_API_KEY                                                              ok
-        model             gpt-4.1                                                                         change ↵
-        placement         step 1
-      > create                                                                                            create ↵
+
+        new target · OpenAI                                                                               cancel ↵
+           provider          OpenAI                                                                       change ↵
+           credential        env:OPENAI_API_KEY                                                           change ↵
+           model             gpt-4.1                                                                      change ↵
+           protocol          chat_completions                                                             default
+           routing           step 1
+         > create                                                                                         create ↵
      add model route                                                                                      add ↵
 
   activity ▾
@@ -26,4 +28,3 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
-

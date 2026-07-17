@@ -48,10 +48,19 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
 	}
+	if baseURL == "" && profile.RequiresExplicitEndpoint(providerSpec) {
+		label := profile.EndpointLabelForProvider(providerSpec)
+		if label == "" {
+			label = "endpoint"
+		}
+		http.Error(w, label+" is required for provider "+providerSpec, http.StatusBadRequest)
+		return
+	}
 	authHeader := strings.TrimSpace(query.Get("auth_header"))             // swobu:io-string source=boundary
 	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
+	authMode := strings.TrimSpace(query.Get("auth_mode"))                 // swobu:io-string source=boundary
 	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
-	deployments, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, providerProtocol)
+	deployments, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, authMode, providerProtocol)
 	result := modelCatalogProbeResult{}
 	if probeErr != nil {
 		slog.Warn("model catalog probe failed",
@@ -59,6 +68,7 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 			"base_url", baseURL,
 			"auth_header", authHeader,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
+			"auth_mode", authMode,
 			"provider_protocol", providerProtocol,
 			"error", probeErr.Error(),
 		)
@@ -69,6 +79,7 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 			"base_url", baseURL,
 			"auth_header", authHeader,
 			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
+			"auth_mode", authMode,
 			"provider_protocol", resolvedVariant,
 			"deployment_count", len(deployments),
 		)
@@ -90,6 +101,7 @@ func probeDeployments(
 	baseURL string,
 	authHeader string,
 	credentialRef string,
+	authMode string,
 	providerProtocol string,
 ) ([]profile.ProviderDeploymentRecord, string, error) {
 	routeProfile, ok := profile.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
@@ -115,6 +127,7 @@ func probeDeployments(
 			variant,
 		)
 		target.AuthHeader = strings.TrimSpace(authHeader) // swobu:io-string source=boundary
+		target.AuthMode = strings.TrimSpace(authMode)     // swobu:io-string source=boundary
 		deployments, err := providers.ListDeployments(ctx, target)
 		if err == nil {
 			return profile.CloneProviderDeployments(deployments), variant, nil

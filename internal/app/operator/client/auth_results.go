@@ -40,10 +40,11 @@ type ModelCatalogResult struct {
 
 // ModelCatalogDeployment is one deployment returned by the catalog probe.
 type ModelCatalogDeployment struct {
-	Name                    string `json:"name"`
-	ModelName               string `json:"model_name"`
-	ModelPublisher          string `json:"model_publisher,omitempty"`
-	ModelVersion            string `json:"model_version,omitempty"`
-	Family                  string `json:"family,omitempty"`
-	DefaultProviderProtocol string `json:"default_provider_protocol,omitempty"`
+	Name                       string   `json:"name"`
+	ModelName                  string   `json:"model_name"`
+	ModelPublisher             string   `json:"model_publisher,omitempty"`
+	ModelVersion               string   `json:"model_version,omitempty"`
+	Family                     string   `json:"family,omitempty"`
+	SupportedProviderProtocols []string `json:"supported_provider_protocols,omitempty"`
+	DefaultProviderProtocol    string   `json:"default_provider_protocol,omitempty"`
 }

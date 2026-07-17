@@ -137,7 +137,7 @@ func TestAssertVisual_CompareMissingFixture(t *testing.T) {
 	if !strings.Contains(report.Err.Error(), "missing visual fixture") {
 		t.Fatalf("expected 'missing visual fixture' error, got: %v", report.Err)
 	}
-	if !strings.Contains(report.Err.Error(), fixture.UpdateEnv+"=1") {
+	if !strings.Contains(report.Err.Error(), fixture.UpdateEnv+"=") {
 		t.Fatalf("expected shared fixture update env in error, got: %v", report.Err)
 	}
 }

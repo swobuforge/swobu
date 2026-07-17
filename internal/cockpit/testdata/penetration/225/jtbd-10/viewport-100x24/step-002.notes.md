@@ -1,1 +1,1 @@
-Down focuses the docs row.
+Down focuses the version row.

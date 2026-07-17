@@ -1,20 +1,29 @@
-// ui provides shared select-flow mechanics for cockpit.
+// ui provides shared selection and entry primitives for cockpit.
 //
 // This package is not a universal UI framework. It contains five categories of
-// reusable surface for a focused cockpit interaction model: focus markers,
-// selectable rows, inline text editing primitives, static text lines, and
-// focus repair.
+// reusable surface for a focused cockpit interaction model: product-facing
+// rows, disclosures, inline text editing primitives, choice/file controls,
+// static text lines, and viewport follow.
 //
-// go-tui provides the focus graph. Cockpit layers selection, entered/leaved
-// state, and typing semantics on top of that graph instead of inventing its
-// own cursor system.
+// go-tui provides the focus graph. Cockpit application code speaks semantic
+// selection: Up/Down selects an operator target, Enter/Space activates it, and
+// Escape backs out of the nearest entered state. This package hides the focus
+// graph behind row, picker, editor, and backout-scope primitives instead of
+// inventing a custom cursor system.
 //
 // The core ladder is:
 //
-//   SelectBase / SelectableRow / SectionDisclosure — selected shell and traversal
-//   EditableRow                                     — selected shell plus inline text edit
-//   SearchPicker                                    — selected shell plus bounded searchable choice
-//   FocusableControl                                — explicit enter/exit scope
+//	SelectableRow / SectionDisclosure — selected shell and activation
+//	EditableRow                       — selected shell plus inline text edit
+//	SearchPicker / FileBrowser        — domain wrappers over ChoiceList
+//	ChoiceList / ChoiceRow            — one searchable/clipped list runtime
+//	ActionTarget                      — custom shell behavior carrier
+//	interaction                       — low-level focus/key/traversal grammar
+//
+// Picker/file menus do not own private operator cursors. ChoiceList declares
+// selectable descendant rows and lets the root viewport follow the same
+// selection cursor used by the rest of Cockpit. Its projection state is
+// viewport state, not an independent selection model.
 //
 // Render stays pure. Autofocus seeds happen at mount/update boundaries only;
 // render may read the declarative seed to draw the marker, but it must not
@@ -27,37 +36,32 @@
 // Cockpit does NOT use go-tui's tui.Input. tui.Input mounts its own focusable
 // element, which creates two focus failure classes we cannot tolerate:
 //
-//   1. KeyEscape is swallowed by the input element before the parent row can
-//      act, because go-tui dispatches in BFS order (ancestors first) but the
-//      input also binds OnFocused(KeyEscape) and the framework does not allow
-//      bubbling.
-//   2. When the input element is removed from the tree without receiving Blur(),
-//      go-tui's refreshFromTree forgets to clear its focused state, leaving a
-//      stale cursor on the next render.
+//  1. KeyEscape is swallowed by the input element before the parent row can
+//     act, because go-tui dispatches in BFS order (ancestors first) but the
+//     input also binds OnFocused(KeyEscape) and the framework does not allow
+//     bubbling.
+//  2. When the input element is removed from the tree without receiving Blur(),
+//     go-tui's refreshFromTree forgets to clear its focused state, leaving a
+//     stale cursor on the next render.
 //
 // The cockpit replacement is a two-layer abstraction:
 //
-//   InlineInput  — visual text surface only. NOT a Component. NOT focusable.
-//                  Manages cursor position, scroll, and blink. Never used
-//                  directly by features/sections/pages.
+//	InlineInput  — visual text surface only. NOT a Component. NOT focusable.
+//	               Manages cursor position, scroll, and blink. Never used
+//	               directly by features/sections/pages.
 //
-//   InlineEditor — owns the InlineInput surface and the typing keymap.
-//                  NOT a Component. The parent Composite owns edit/view state.
-//                  Use this when the row is part of a larger Component that has
-//                  its own Phase/Mode state (e.g. workspace_edit.Workflow,
-//                  route_edit routeModelRowView).
+//	InlineEditor — owns the InlineInput surface and the typing keymap.
+//	               NOT a Component. The parent Composite owns edit/view state.
+//	               Use this when the row is part of a larger Component that has
+//	               its own Phase/Mode state (e.g. workspace_edit.Workflow).
 //
-//   EditableRow  — a Component that IS a selectable row with inline editing.
-//                  Use this when you only need a standard
-//                  arrow-label-value-action row that toggles into edit mode.
-//                  It wraps InlineEditor internally, owns the edit/view state
-//                  itself, and can project a small validation taxonomy for
-//                  create-mode rows (`required`, `invalid`, `duplicate`) plus
-//                  shared helper copy.
-//
-//   TextComponent — a minimal static text component for shared headers and
-//                  helper lines that still need to participate in templ
-//                  mounting.
+//	EditableRow  — a Component that IS a selectable row with inline editing.
+//	               Use this when you only need a standard
+//	               arrow-label-value-action row that toggles into edit mode.
+//	               It wraps InlineEditor internally, owns the edit/view state
+//	               itself, and can project a small validation taxonomy for
+//	               create-mode rows (`required`, `invalid`, `duplicate`) plus
+//	               caller-owned helper copy aligned under the value column.
 //
 // TOOWTDI: if you need a standard selectable row with inline text, use
 // EditableRow. If you have custom lifecycle or layout that doesn't fit,
@@ -66,32 +70,30 @@
 //
 // Example (EditableRow, the common case):
 //
-//     row := ui.NewEditableRow("id", "label", valueState)
-//     row.OnSubmit = func(s string) { ... }
-//     row.Validation = ui.EditableRowValidationRequired
-//     row.ValidationText = "enter a workspace slug"
+//	row := ui.NewEditableRow("id", "label", valueState)
+//	row.OnSubmit = func(s string) { ... }
+//	row.Validation = ui.EditableRowValidationRequired
+//	row.ValidationText = "enter a workspace slug"
 //
 // Example (InlineEditor, for custom Components):
 //
-//     type MyWorkflow struct { editor *ui.InlineEditor }
-//     w.editor = ui.NewInlineEditor(w.Slug)
-//     w.editor.OnSubmit = func(_ string) { w.Submit(...) }
-//     // in KeyMap() when editing:
-//     return append(EscapeBinding, w.editor.TypingKeyMap()...)
-//     // in Render() when editing:
-//     surface := ui.EditRow("_", "label", w.editor.Render(), "save ↵")
+//	type MyWorkflow struct { editor *ui.InlineEditor }
+//	w.editor = ui.NewInlineEditor(w.Slug)
+//	w.editor.OnSubmit = func(_ string) { w.Submit(...) }
+//	// in KeyMap() when editing:
+//	return append(EscapeBinding, w.editor.TypingKeyMap()...)
+//	// in Render() when editing:
+//	surface := ui.EditRow("_", "label", w.editor.Render(), "save ↵")
 //
 // ---------------------------------------------------------------------------
-// FocusableControl
+// Interaction Grammar
 // ---------------------------------------------------------------------------
 //
-// FocusableControl (focusable_control.go) is the canonical interaction
-// primitive that owns the full lifecycle: Focus/Blur, Activate (Enter/Space),
-// Enter (focus into interior), and Exit (Escape from open interior). Use it
-// for modal workflows, inline editors, expandable rows, pickers, and any
-// control that the operator can enter and must be able to exit.
+// The child interaction package is the low-level owner for focus cells,
+// selectable targets, disclosure behavior, choice lists, file choosers, and
+// viewport follow mechanics. New reusable controls should build on that grammar
+// instead of exposing low-level go-tui focus/ref/traversal behavior.
 //
-// ---------------------------------------------------------------------------
 // SelectableRow
 // ---------------------------------------------------------------------------
 //
@@ -103,10 +105,10 @@
 // FocusTraversal
 // ---------------------------------------------------------------------------
 //
-// FocusTraversal (focus_traversal.go) is a separate workaround layer. go-tui
-// does not expose direct focus-by-ref, so focus repair after a mount/update
-// transition walks the focus ring via public traversal. Use it once to repair
-// a declarative autofocus transition; do not turn it into a render loop.
+// Focus traversal is owned by the interaction package. go-tui does not expose
+// direct focus-by-ref, so mount/update focus repair walks the focus ring behind
+// product-facing primitives. Page, section, and feature code must not own that
+// workaround.
 //
 // ---------------------------------------------------------------------------
 // Package boundary

@@ -34,8 +34,8 @@ func (r *selectHarnessRoot) Render(app *tui.App) *tui.Element {
 
 func (r *selectHarnessRoot) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
-		tui.OnStop(tui.KeyDown, MoveNext),
-		tui.OnStop(tui.KeyUp, MovePrev),
+		tui.OnStop(tui.KeyDown, SelectNext),
+		tui.OnStop(tui.KeyUp, SelectPrevious),
 	}
 }
 
@@ -111,9 +111,9 @@ func flushApp(t *testing.T, h *testkit.MockAppHarness) {
 	}
 }
 
-func TestActivateFocused_BindsEnterAndSpace(t *testing.T) {
+func TestActivateSelected_BindsEnterAndSpace(t *testing.T) {
 	var calls int
-	keymap := ActivateFocused(func(tui.KeyEvent) {
+	keymap := ActivateSelected(func(tui.KeyEvent) {
 		calls++
 	})
 
@@ -137,7 +137,7 @@ func TestActivateFocused_BindsEnterAndSpace(t *testing.T) {
 	}
 }
 
-func TestSelectBase_FocusRepairUsesTraversal(t *testing.T) {
+func TestSelectableRow_FocusRepairUsesInteractionTraversal(t *testing.T) {
 	root := newSelectHarnessRoot(selectRows("alpha", "beta")...)
 	h := makeSelectHarness(t, root)
 
@@ -149,42 +149,13 @@ func TestSelectBase_FocusRepairUsesTraversal(t *testing.T) {
 	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 
 	root.rows[1].Focus(h.App())
-	flushApp(t, h)
 	testkit.AssertFocusedFrame(t, h.Frame(), "> beta")
 
-	FocusRefByTraversal(h.App(), root.rows[0].Ref)
-	flushApp(t, h)
+	root.rows[0].Focus(h.App())
 	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
 }
 
-func TestFocusFirstByTraversal_SkipsNilRefs(t *testing.T) {
-	root := newSelectHarnessRoot(selectRows("alpha", "beta", "gamma")...)
-	h := makeSelectHarness(t, root)
-
-	h.Frame()
-	h.FocusNext()
-	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
-
-	focusFirstByTraversal(h.App(), root.rows[2].Ref, root.rows[1].Ref)
-	flushApp(t, h)
-	testkit.AssertFocusedFrame(t, h.Frame(), "> gamma")
-}
-
-func TestFocusRefByTraversal_IgnoresMissingRef(t *testing.T) {
-	root := newSelectHarnessRoot(selectRows("alpha", "beta")...)
-	h := makeSelectHarness(t, root)
-
-	h.Frame()
-	h.FocusNext()
-	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
-
-	missing := tui.NewRef()
-	FocusRefByTraversal(h.App(), missing)
-	flushApp(t, h)
-	testkit.AssertFocusedFrame(t, h.Frame(), "> alpha")
-}
-
-func TestMoveNextAndPrev_AdvanceFocus(t *testing.T) {
+func TestSelectNextAndPrevious_AdvanceSelection(t *testing.T) {
 	root := newSelectHarnessRoot(selectRows("alpha", "beta")...)
 	h := makeSelectHarness(t, root)
 
@@ -271,7 +242,6 @@ func TestSelectableRow_LongValueKeepsActionSeparated(t *testing.T) {
 
 func TestSelectableRow_UpdatePropsRefreshesActionAndCallback(t *testing.T) {
 	row := NewSelectableRow("row.copy", "client base URL", "http://127.0.0.1:7926/c/dev", "copy ↵", func() {})
-	originalRef := row.Ref
 
 	called := false
 	fresh := NewSelectableRow("row.copy", "client base URL", "http://127.0.0.1:7926/c/dev", "copied", func() {
@@ -280,9 +250,6 @@ func TestSelectableRow_UpdatePropsRefreshesActionAndCallback(t *testing.T) {
 
 	row.UpdateProps(fresh)
 
-	if row.Ref != originalRef {
-		t.Fatal("UpdateProps should preserve focus refs on the cached row")
-	}
 	if got, want := row.Action, "copied"; got != want {
 		t.Fatalf("row.Action = %q, want %q", got, want)
 	}

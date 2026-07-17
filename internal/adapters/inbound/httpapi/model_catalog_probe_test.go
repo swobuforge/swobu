@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/exchange"
@@ -97,6 +98,25 @@ func TestModelCatalogProbeHandler_ReturnsRawError(t *testing.T) {
 	}
 }
 
+func TestModelCatalogProbeHandler_RequiresExplicitEndpoint(t *testing.T) {
+	stub := &stubModelCatalog{}
+	h := NewModelCatalogProbeHandler(stub)
+
+	query := url.Values{}
+	query.Set("provider_spec", "azure")
+	query.Set("credential_ref", "env:AZURE_OPENAI_API_KEY")
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "project is required") {
+		t.Fatalf("body = %q, want project required error", rec.Body.String())
+	}
+}
+
 func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirstSuccess(t *testing.T) {
 	attempts := make([]string, 0, 4)
 	stub := &stubModelCatalog{
@@ -182,5 +202,42 @@ func TestModelCatalogProbeHandler_PassesAuthHeaderToProviderCatalog(t *testing.T
 	}
 	if len(out.Deployments) != 1 || out.Deployments[0].Name != "gpt-4.1-mini" {
 		t.Fatalf("deployments=%v", out.Deployments)
+	}
+}
+
+func TestModelCatalogProbeHandler_PassesAuthModeToProviderCatalog(t *testing.T) {
+	stub := &stubModelCatalog{
+		listFn: func(target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
+			if target.AuthMode != "aws_profile" {
+				t.Fatalf("auth mode=%q want aws_profile", target.AuthMode)
+			}
+			if target.CredentialRef != "profile:default" {
+				t.Fatalf("credential ref=%q want profile:default", target.CredentialRef)
+			}
+			return []profile.ProviderDeploymentRecord{{Name: "anthropic.claude", Family: "anthropic", SupportedProviderProtocols: []string{"messages"}, DefaultProviderProtocol: "messages"}}, nil
+		},
+	}
+	h := NewModelCatalogProbeHandler(stub)
+
+	query := url.Values{}
+	query.Set("provider_spec", "bedrock")
+	query.Set("base_url", "https://bedrock-mantle.us-east-1.api.aws/v1")
+	query.Set("credential_ref", "profile:default")
+	query.Set("auth_mode", "aws_profile")
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200", rec.Code)
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if out.Error != "" {
+		t.Fatalf("probe error=%q", out.Error)
 	}
 }

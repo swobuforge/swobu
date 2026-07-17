@@ -4,14 +4,14 @@
      custom-route      1 target                                                                                                                                                                               collapse ↵
         name              custom-route                                                                                                                                                                        edit ↵
         default           no                                                                                                                                                                                  make default ↵
-        delete            custom-route                                                                                                                                                                        delete ↵
-        client sends      model = custom-route
+
         step 1
-        openai_compatible/custom-route                                                                                                                                                                                    ed
+           openai_compatible/custom-route                                                                                                                                                                     edit ↵
+
         add target                                                                                                                                                                                            add ↵
+        delete            model route                                                                                                                                                                         delete ↵
+
      add model route                                                                                                                                                                                          add ↵
-
-
 
 
 

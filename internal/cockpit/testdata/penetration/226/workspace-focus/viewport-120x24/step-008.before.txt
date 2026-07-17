@@ -2,7 +2,7 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   workspace ▾
    > endpoint          http://127.0.0.1:7926/c/dev                                                        copy ↵
-     OpenAI · Anthropic
+                       OpenAI · Anthropic
      slug              dev                                                                                edit ↵
      delete            workspace                                                                          delete ↵
 

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/ui/interaction"
 )
 
 // EditableRowValidation classifies the shared text-input row states used by
@@ -24,25 +25,35 @@ const (
 // typing keys (via InlineEditor.TypingKeyMap), the Escape lifecycle, and the
 // optional validation taxonomy used by create-mode fields.
 type EditableRow struct {
-	SelectBase
-	Label      string
-	Value      *tui.State[string]
-	ValueWidth int // zero means ActionRowValueWidth
-	ViewAction string
-	EditAction string
-	Validation EditableRowValidation
-	// ValidationText overrides the default helper copy for validation states.
-	// Use it for backend conflict text or any caller-specific guidance.
+	target      *interaction.Selectable
+	Label       string
+	Value       *tui.State[string]
+	Placeholder string
+	ViewValue   func(string) string
+	ValueWidth  int // zero means ActionRowValueWidth
+	ViewAction  string
+	EditAction  string
+	Validation  EditableRowValidation
+	// ValidationText is caller-owned helper copy for validation states.
+	// EditableRow owns taxonomy and row layout; feature workflows own field
+	// meaning such as workspace-slug guidance or backend conflict text.
 	ValidationText string
 	// AutoFocus seeds the shell as selected on mount, or on the first
 	// transition from false to true on an already-mounted row.
-	AutoFocus  bool
+	AutoFocus bool
+	// StartEditing seeds the row as already entered when it first mounts, or
+	// when a fresh mount asks an existing row to enter editing.
+	StartEditing bool
 	// OnActivate is called when the view-mode row is activated.
 	// If nil, the row auto-switches to edit mode.
 	OnActivate func()
 	// OnSubmit is called when the edit-mode input submits.
 	// The caller decides whether to Close or keep editing.
 	OnSubmit func(string)
+	// CloseAfterSubmit lets the mounted row close itself after a caller-owned
+	// submit succeeds. Use this when a render-built callback cannot safely hold
+	// the mounted row instance.
+	CloseAfterSubmit func() bool
 	// OnClose runs when Escape cancels the edit-mode shell.
 	OnClose func()
 
@@ -52,8 +63,7 @@ type EditableRow struct {
 
 // NewEditableRow builds a mountable editable row for a single text field.
 func NewEditableRow(id, label string, value *tui.State[string]) *EditableRow {
-	return &EditableRow{
-		SelectBase: NewSelectBase(id),
+	row := &EditableRow{
 		Label:      label,
 		Value:      value,
 		ValueWidth: ActionRowValueWidth,
@@ -62,19 +72,28 @@ func NewEditableRow(id, label string, value *tui.State[string]) *EditableRow {
 		editing:    tui.NewState(false),
 		editor:     NewInlineEditor(value),
 	}
+	row.target = interaction.NewSelectable(row.propsWithID(id))
+	return row
 }
 
 // Open switches the row to edit mode. The row remains the focus target; the
 // InlineEditor surface is rendered but is not focusable.
 func (r *EditableRow) Open() {
 	r.editing.Set(true)
-	r.focused.Set(true)
+	r.target.FocusedState().Set(true)
 	r.editor.Width = r.rowWidth()
 	r.editor.SetText(r.Value.Get())
-	// Wire submit dynamically so the caller's callback is always current.
-	r.editor.OnSubmit = func(_ string) {
+	r.target.Focus(r.target.App())
+	// Wire submit dynamically so the caller's callback is always current. Submit
+	// the value forwarded by the InlineEditor (what the operator typed), not
+	// r.Value: render reconciliation repoints r.Value to a fresh state seeded
+	// from props, so it can lag behind the editor's live input mid-edit.
+	r.editor.OnSubmit = func(submitted string) {
 		if r.OnSubmit != nil {
-			r.OnSubmit(r.Value.Get())
+			r.OnSubmit(submitted)
+		}
+		if r.CloseAfterSubmit != nil && r.CloseAfterSubmit() {
+			r.Close()
 		}
 	}
 }
@@ -92,16 +111,14 @@ func (r *EditableRow) Cancel() {
 // Init seeds focus when the harness or app mounts this component with
 // AutoFocus set, matching SelectableRow behavior.
 func (r *EditableRow) Init() func() {
+	if r.StartEditing && !r.IsEditing() {
+		r.Open()
+	}
 	if !r.AutoFocus && !r.IsEditing() {
 		return nil
 	}
-	if r.IsFocused() {
-		return nil
-	}
-	r.focused.Set(true)
-	if r.app != nil {
-		r.Focus(r.app)
-	}
+	r.target.FocusedState().Set(true)
+	r.target.Init()
 	return nil
 }
 
@@ -118,13 +135,13 @@ func (r *EditableRow) IsEditing() bool {
 
 // BindApp wires the component's state to the app, including the InlineEditor.
 func (r *EditableRow) BindApp(app *tui.App) {
-	r.SelectBase.BindApp(app)
+	r.target.BindApp(app)
 	r.editing.BindApp(app)
 	r.editor.BindApp(app)
 }
 
 func (r *EditableRow) UnbindApp() {
-	r.SelectBase.UnbindApp()
+	r.target.UnbindApp()
 }
 
 func (r *EditableRow) UpdateProps(fresh tui.Component) {
@@ -132,9 +149,11 @@ func (r *EditableRow) UpdateProps(fresh tui.Component) {
 	if !ok {
 		return
 	}
-	prevAutoFocus := r.AutoFocus
+	prevStartEditing := r.StartEditing
 	r.Label = f.Label
 	r.Value = f.Value
+	r.Placeholder = f.Placeholder
+	r.ViewValue = f.ViewValue
 	r.ValueWidth = f.ValueWidth
 	r.ViewAction = f.ViewAction
 	r.EditAction = f.EditAction
@@ -142,11 +161,14 @@ func (r *EditableRow) UpdateProps(fresh tui.Component) {
 	r.ValidationText = f.ValidationText
 	r.OnActivate = f.OnActivate
 	r.OnSubmit = f.OnSubmit
+	r.CloseAfterSubmit = f.CloseAfterSubmit
 	r.OnClose = f.OnClose
 	r.AutoFocus = f.AutoFocus
+	r.StartEditing = f.StartEditing
 
-	if !prevAutoFocus && r.AutoFocus && !r.IsFocused() {
-		r.Focus(r.App())
+	r.target.Update(r.props())
+	if !prevStartEditing && r.StartEditing && !r.IsEditing() {
+		r.Open()
 	}
 }
 
@@ -163,23 +185,27 @@ func (r *EditableRow) Render(app *tui.App) *tui.Element {
 }
 
 func (r *EditableRow) renderView() *tui.Element {
-	root := ActionRow(r.Arrow(), r.Label, r.Value.Get(), r.ActionLabel(),
-		tui.WithFocusable(true),
-		tui.WithAutoFocus(r.AutoFocus || r.IsEditing()),
-		tui.WithOnFocus(r.OnFocus),
-		tui.WithOnBlur(r.OnBlur),
-		tui.WithOnActivate(func() {
-			if r.OnActivate != nil {
-				r.OnActivate()
-			} else {
-				r.Open()
-			}
-		}),
-	)
-	if r.Ref != nil {
-		r.Ref.Set(root)
-	}
+	opts := append(r.shellOptions(), tui.WithOnActivate(func() {
+		if r.OnActivate != nil {
+			r.OnActivate()
+		} else {
+			r.Open()
+		}
+	}))
+	root := ActionRow(r.Arrow(), r.Label, r.viewValue(), r.ActionLabel(), opts...)
+	r.target.BindElement(root)
 	return r.wrapWithHint(root)
+}
+
+func (r *EditableRow) viewValue() string {
+	value := r.Value.Get()
+	if r.ViewValue != nil {
+		value = r.ViewValue(value)
+	}
+	if strings.TrimSpace(value) == "" && strings.TrimSpace(r.Placeholder) != "" {
+		return r.Placeholder
+	}
+	return value
 }
 
 func (r *EditableRow) renderEdit() *tui.Element {
@@ -189,21 +215,16 @@ func (r *EditableRow) renderEdit() *tui.Element {
 		r.Label,
 		r.editor.Render(),
 		r.ActionLabel(),
-		tui.WithFocusable(true),
-		tui.WithAutoFocus(r.AutoFocus || r.IsEditing()),
-		tui.WithOnFocus(r.OnFocus),
-		tui.WithOnBlur(r.OnBlur),
+		r.shellOptions()...,
 	)
-	if r.Ref != nil {
-		r.Ref.Set(root)
-	}
+	r.target.BindElement(root)
 	return r.wrapWithHint(root)
 }
 
 // Arrow returns the shared marker for the row's current visibility state.
 // Edit mode counts as active even while the inline input owns the interaction.
 func (r *EditableRow) Arrow() string {
-	return r.SelectBase.ArrowWithActiveDescendant(r.IsEditing())
+	return r.target.MarkerWithActiveDescendant(r.IsEditing())
 }
 
 func (r *EditableRow) KeyMap() tui.KeyMap {
@@ -212,16 +233,20 @@ func (r *EditableRow) KeyMap() tui.KeyMap {
 			tui.OnFocused(tui.KeyEscape, func(tui.KeyEvent) {
 				r.Cancel()
 			}),
+			tui.OnFocused(tui.KeyDown, func(tui.KeyEvent) {}),
+			tui.OnFocused(tui.KeyUp, func(tui.KeyEvent) {}),
+			tui.OnFocused(tui.AnyRune, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyBackspace, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyDelete, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyLeft, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyRight, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyHome, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyEnd, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
+			tui.OnFocused(tui.KeyEnter, func(e tui.KeyEvent) { r.editor.input.HandleKey(e) }),
 		}
-		return r.WithTraversal(append(km, r.editor.TypingKeyMap()...))
+		return km
 	}
-	return r.WithTraversal(ActivateFocused(func(tui.KeyEvent) {
-		if r.OnActivate != nil {
-			r.OnActivate()
-		} else {
-			r.Open()
-		}
-	}))
+	return r.target.KeyMap()
 }
 
 // ActionLabel returns the shared action grammar for this row's current state.
@@ -246,18 +271,9 @@ func (r *EditableRow) ActionLabel() string {
 	return "edit ↵"
 }
 
-// HelperText returns the optional helper line that follows the row.
+// HelperText returns the optional caller-owned helper line that follows the row.
 func (r *EditableRow) HelperText() string {
-	if msg := strings.TrimSpace(r.ValidationText); msg != "" {
-		return msg
-	}
-	switch r.Validation {
-	case EditableRowValidationRequired:
-		return "enter a workspace slug"
-	case EditableRowValidationInvalid:
-		return "use lowercase letters, numbers, and hyphens"
-	}
-	return ""
+	return strings.TrimSpace(r.ValidationText)
 }
 
 func (r *EditableRow) wrapWithHint(root *tui.Element) *tui.Element {
@@ -267,9 +283,25 @@ func (r *EditableRow) wrapWithHint(root *tui.Element) *tui.Element {
 	)
 	wrapper.AddChild(root)
 	if hint := r.HelperText(); hint != "" {
-		wrapper.AddChild(NewTextComponent(hint).Render(nil))
+		wrapper.AddChild(editableRowHelperLine(hint))
 	}
 	return wrapper
+}
+
+func editableRowHelperLine(text string) *tui.Element {
+	row := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
+		tui.WithWidthPercent(100),
+	)
+	row.AddChild(tui.New(tui.WithWidth(2)))
+	row.AddChild(tui.New(tui.WithWidth(18)))
+	row.AddChild(tui.New(
+		tui.WithText(text),
+		tui.WithFlexGrow(1),
+		tui.WithWrap(false),
+		tui.WithTruncate(true),
+	))
+	return row
 }
 
 func (r *EditableRow) rowWidth() int {
@@ -277,6 +309,38 @@ func (r *EditableRow) rowWidth() int {
 		return r.ValueWidth
 	}
 	return ActionRowValueWidth
+}
+
+func (r *EditableRow) IsFocused() bool { return r.target.IsFocused() }
+
+func (r *EditableRow) Focus(app *tui.App) { r.target.Focus(app) }
+
+func (r *EditableRow) Ref() *tui.Ref { return r.target.Ref() }
+
+func (r *EditableRow) shellOptions() []tui.Option {
+	props := r.props()
+	props.AutoFocus = r.AutoFocus || r.IsEditing()
+	r.target.SetRenderProps(props)
+	return r.target.ShellOptions()
+}
+
+func (r *EditableRow) props() interaction.SelectableProps {
+	return r.propsWithID(r.target.Props().ID)
+}
+
+func (r *EditableRow) propsWithID(id string) interaction.SelectableProps {
+	return interaction.SelectableProps{
+		ID:        id,
+		Label:     r.Label,
+		AutoFocus: r.AutoFocus || r.IsEditing(),
+		OnActivate: func(interaction.Context) {
+			if r.OnActivate != nil {
+				r.OnActivate()
+			} else {
+				r.Open()
+			}
+		},
+	}
 }
 
 var (

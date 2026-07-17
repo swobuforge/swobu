@@ -11,7 +11,7 @@ import (
 // NewApp returns a go-tui App backed by mock terminal/input objects.
 // It is for Cockpit mounted snapshots and app-loop tests; it does not prove
 // upstream raw-mode setup or the shipped PTY boundary.
-func NewApp(width, height int) (*tui.App, *tui.MockEventReader, error) {
+func NewApp(width, height int, opts ...tui.AppOption) (*tui.App, *tui.MockEventReader, error) {
 	app := &tui.App{}
 	reader := tui.NewMockEventReader()
 	terminal := tui.NewMockTerminal(width, height)
@@ -48,6 +48,14 @@ func NewApp(width, height int) (*tui.App, *tui.MockEventReader, error) {
 	}
 	if err := setAppField(app, "mounts", newMountState()); err != nil {
 		return nil, nil, err
+	}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(app); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	startUpdateBridge(app, stopCh, watcherQueue, updates, merged)

@@ -35,15 +35,6 @@ endpoints:
 	if got := loaded.Runtime.BindAddr; got != DefaultBindAddr() {
 		t.Fatalf("bind addr = %q, want %q", got, DefaultBindAddr())
 	}
-	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations; got != 2 {
-		t.Fatalf("min_repeated_decode_mutations = %d, want 2", got)
-	}
-	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation; got != 3 {
-		t.Fatalf("min_noop_ratio_population = %d, want 3", got)
-	}
-	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold; got != 80 {
-		t.Fatalf("noop_ratio_percent_threshold = %d, want 80", got)
-	}
 	if len(loaded.Endpoints) != 1 {
 		t.Fatalf("endpoint count = %d, want 1", len(loaded.Endpoints))
 	}
@@ -68,36 +59,19 @@ endpoints:
 	}
 }
 
-func TestLoad_OverridesPatchDiagnosticThresholdsConfig(t *testing.T) {
+func TestSave_OmitsPatchDiagnosticThresholdDefaults(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "swobu.yaml")
-	raw := `
-patch_diagnostic_thresholds:
-  min_repeated_decode_mutations: 4
-  min_noop_ratio_population: 6
-  noop_ratio_percent_threshold: 70
-endpoints:
-  - name: alpha
-    selected_provider_config_ref: backend-a
-    provider_configs:
-      - ref: backend-a
-        provider_spec: openai_compatible
-        base_url: https://example.test/v1
-`
-	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
-		t.Fatalf("WriteFile returned error: %v", err)
+	if err := Save(path, RuntimeConfig{BindAddr: DefaultBindAddr()}.WithDefaults(), nil); err != nil {
+		t.Fatalf("Save returned error: %v", err)
 	}
-	loaded, err := Load(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
+		t.Fatalf("ReadFile returned error: %v", err)
 	}
-	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinRepeatedDecodeMutations; got != 4 {
-		t.Fatalf("min_repeated_decode_mutations = %d, want 4", got)
-	}
-	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.MinNoopRatioPopulation; got != 6 {
-		t.Fatalf("min_noop_ratio_population = %d, want 6", got)
-	}
-	if got := loaded.Runtime.PatchDiagnosticThresholdsConfig.NoopRatioPercentThreshold; got != 70 {
-		t.Fatalf("noop_ratio_percent_threshold = %d, want 70", got)
+	if strings.Contains(string(raw), "patch_diagnostic_thresholds") {
+		t.Fatalf("saved config should not contain patch diagnostic thresholds:\n%s", string(raw))
 	}
 }
 
@@ -346,6 +320,54 @@ func TestSave_PersistsRouteModelID(t *testing.T) {
 	}
 	if got, want := selected.ModelID(), "gpt-4.1-mini"; got != want {
 		t.Fatalf("roundtrip model_id = %q, want %q", got, want)
+	}
+}
+
+func TestSaveLoad_RoundTripOpenAICompatibleAuthHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "swobu.yaml")
+	name, err := endpointintent.ParseEndpointName("alpha")
+	if err != nil {
+		t.Fatalf("ParseEndpointName returned error: %v", err)
+	}
+	ref, err := endpointintent.ParseProviderConfigRef("backend-a")
+	if err != nil {
+		t.Fatalf("ParseProviderConfigRef returned error: %v", err)
+	}
+	spec, err := endpointintent.ParseProviderSpec("openai_compatible")
+	if err != nil {
+		t.Fatalf("ParseProviderSpec returned error: %v", err)
+	}
+	providerConfig, err := endpointintent.NewProviderConfig(ref, spec, "https://example.test/v1", "")
+	if err != nil {
+		t.Fatalf("NewProviderConfig returned error: %v", err)
+	}
+	providerConfig, err = providerConfig.WithAuthHeader("X-API-Key")
+	if err != nil {
+		t.Fatalf("WithAuthHeader returned error: %v", err)
+	}
+	endpoint, err := endpointintent.NewEndpoint(name, []endpointintent.ProviderConfig{providerConfig}, ref)
+	if err != nil {
+		t.Fatalf("NewEndpoint returned error: %v", err)
+	}
+
+	if err := Save(path, RuntimeConfig{BindAddr: "127.0.0.1:7926"}, []endpointintent.Endpoint{endpoint}); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if text := string(raw); !strings.Contains(text, "auth_header: X-API-Key") {
+		t.Fatalf("saved config missing auth_header, got:\n%s", text)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	selected := loaded.Endpoints[0].SelectedProviderConfig()
+	if got := selected.AuthHeader(); got != "X-API-Key" {
+		t.Fatalf("roundtrip auth_header = %q, want X-API-Key", got)
 	}
 }
 

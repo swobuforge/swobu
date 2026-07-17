@@ -9,11 +9,13 @@
   model routes ▾
      gpt               default · 1 target                         collapse ↵
         name              gpt                                     edit ↵
+        client sends      model = gpt
         default           yes                                     current
         delete            gpt                                     delete ↵
-        client sends      model = gpt
+
         step 1
-        openai/gpt-4.1                                            edit ↵
+           openai/gpt-4.1                                         edit ↵
+
         add target                                                add ↵
      add model route                                              add ↵
 
@@ -23,7 +25,5 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
-
-
 
 

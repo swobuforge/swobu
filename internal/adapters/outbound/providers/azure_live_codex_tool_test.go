@@ -49,7 +49,7 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
 	}
-	registry := NewProviderRegistry(http.DefaultClient, outboundcredentials.NewResolver(), "")
+	registry := NewProviderRegistry(http.DefaultClient, outboundcredentials.NewResolver())
 	providerReq := exchange.NewProviderRequest(
 		"live-azure-codex-required-tool",
 		canonical.ClientFamilyResponses,

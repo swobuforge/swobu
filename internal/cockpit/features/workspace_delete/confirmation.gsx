@@ -11,52 +11,81 @@ import (
 
 type DeleteFunc func(context.Context, ports.DeleteWorkspaceRequest) error
 
-type Phase int
-
-const (
-	PhaseClosed Phase = iota
-	PhaseConfirming
-	PhaseSubmitting
-	PhaseFailed
-)
-
 type ConfirmationView struct {
 	Workspace readmodel.WorkspaceReadModel
-	Phase     *tui.State[Phase]
-	// PendingDeleteWorkspaceID is the local confirmation target. It survives the
-	// arm -> confirm flow so the feature can delete the armed workspace even if
-	// the parent snapshot rerenders underneath it.
+	Delete    DeleteFunc
+	OnDeleted func(readmodel.WorkspaceID)
+	OnArm     func(readmodel.WorkspaceID)
+	OnCancel  func(readmodel.WorkspaceID)
+
 	PendingDeleteWorkspaceID *tui.State[readmodel.WorkspaceID]
-	Error                    *tui.State[string]
-	Delete                   DeleteFunc
-	OnDeleted                func(readmodel.WorkspaceID)
-	// OnArm is called when the confirmation opens. Sink state here so the
-	// parent can track that a cancellation is pending without holding a
-	// persistent child reference.
-	OnArm func(readmodel.WorkspaceID)
-	// OnCancel is called before Close on Escape/Back so the parent can clear
-	// its own pending-delete state in the same render cycle.
-	OnCancel func(readmodel.WorkspaceID)
+	row                      *ui.ConfirmActionRow
 }
 
 func Confirmation(workspace readmodel.WorkspaceReadModel, delete DeleteFunc, onDeleted func(readmodel.WorkspaceID)) *ConfirmationView {
-	return &ConfirmationView{
-		Workspace:               workspace,
-		Phase:                   tui.NewState(PhaseClosed),
-		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
-		Error:                   tui.NewState(""),
-		Delete:                  delete,
-		OnDeleted:               onDeleted,
+	c := &ConfirmationView{
+		Workspace:                 workspace,
+		Delete:                    delete,
+		OnDeleted:                 onDeleted,
+		PendingDeleteWorkspaceID:  tui.NewState(readmodel.WorkspaceID("")),
+	}
+	c.row = ui.NewConfirmActionRow(c.rowID(), c.rowCopy(), c.confirmDelete)
+	c.row.OnArm = func() {
+		if c.OnArm != nil {
+			c.OnArm(c.pendingWorkspaceID())
+		}
+	}
+	c.row.OnCancel = func() {
+		if c.OnCancel != nil {
+			c.OnCancel(c.PendingDeleteWorkspaceID.Get())
+		}
+		c.PendingDeleteWorkspaceID.Set("")
+	}
+	return c
+}
+
+func (c *ConfirmationView) rowID() string {
+	id := "workspace-delete"
+	if c.Workspace.ID != "" {
+		id += ":" + string(c.Workspace.ID)
+	} else if c.Workspace.Slug != "" {
+		id += ":" + c.Workspace.Slug
+	}
+	return id
+}
+
+func (c *ConfirmationView) pendingWorkspaceID() readmodel.WorkspaceID {
+	if id := c.PendingDeleteWorkspaceID.Get(); id != "" {
+		return id
+	}
+	return c.Workspace.ID
+}
+
+func (c *ConfirmationView) confirmationSlug() string {
+	if c.PendingDeleteWorkspaceID.Get() != "" {
+		return string(c.PendingDeleteWorkspaceID.Get())
+	}
+	return c.Workspace.Slug
+}
+
+func (c *ConfirmationView) rowCopy() ui.ConfirmActionCopy {
+	return ui.ConfirmActionCopy{
+		Label:           "delete",
+		IdleValue:       "workspace",
+		IdleAction:      "delete ↵",
+		ConfirmValue:    "delete " + c.confirmationSlug() + "?",
+		ConfirmAction:   "confirm ↵",
+		SubmittingValue: "deleting " + c.confirmationSlug() + "…",
+		SubmittingHint:  "wait",
+		FailedValue:     "delete failed",
+		FailedAction:    "retry ↵",
 	}
 }
 
 func (c *ConfirmationView) Request(workspaceID readmodel.WorkspaceID) {
 	c.PendingDeleteWorkspaceID.Set(workspaceID)
-	c.Error.Set("")
-	c.Phase.Set(PhaseConfirming)
-	if c.OnArm != nil {
-		c.OnArm(workspaceID)
-	}
+	c.row.SetCopy(c.rowCopy())
+	c.row.OpenConfirm()
 }
 
 func (c *ConfirmationView) Back() bool {
@@ -67,62 +96,44 @@ func (c *ConfirmationView) Back() bool {
 	return true
 }
 
-func (c *ConfirmationView) Cancel() {
-	if c.OnCancel != nil {
-		c.OnCancel(c.PendingDeleteWorkspaceID.Get())
-	}
-	c.Close()
-}
+func (c *ConfirmationView) Cancel() { c.row.Cancel() }
 
-// KeyMap returns Escape preemptive-stop when open. Preemptive bindings run in
-// a separate pass and do not conflict with parent OnStop handlers, ensuring
-// the modal confirmation blocks parent Escape navigation.
 func (c *ConfirmationView) KeyMap() tui.KeyMap {
-	if !c.IsOpen() {
-		return nil
-	}
-	return tui.KeyMap{
-		tui.OnPreemptStop(tui.KeyEscape, func(tui.KeyEvent) { c.Cancel() }),
-	}
+	return ui.BackScope(c.IsOpen, c.Cancel)
 }
 
-func (c *ConfirmationView) Confirm(ctx context.Context) {
-	if !c.IsOpen() {
-		return
-	}
-	id := c.PendingDeleteWorkspaceID.Get()
-	// If the confirmation was armed from a fresh snapshot, the local state may
-	// still be empty. Fall back to the parent snapshot rather than failing the
-	// delete request.
-	if id == "" {
-		id = c.Workspace.ID
-	}
+func (c *ConfirmationView) confirmDelete() error {
+	id := c.pendingWorkspaceID()
 	if c.Delete == nil {
-		c.Error.Set("workspace delete is not wired yet")
-		c.Phase.Set(PhaseFailed)
-		return
+		return errWorkspaceDeleteNotWired
 	}
-
-	c.Error.Set("")
-	c.Phase.Set(PhaseSubmitting)
-	if err := c.Delete(ctx, ports.DeleteWorkspaceRequest{ID: id}); err != nil {
-		c.Error.Set(err.Error())
-		c.Phase.Set(PhaseFailed)
-		return
+	if err := c.Delete(context.Background(), ports.DeleteWorkspaceRequest{ID: id}); err != nil {
+		return err
 	}
 	if c.OnDeleted != nil {
 		c.OnDeleted(id)
 	}
 	c.Close()
+	return nil
 }
 
 func (c *ConfirmationView) Close() {
-	c.Error.Set("")
-	c.Phase.Set(PhaseClosed)
+	c.PendingDeleteWorkspaceID.Set("")
+	if c.row == nil {
+		return
+	}
+	c.row.OnCancel = nil
+	c.row.Cancel()
+	c.row.OnCancel = func() {
+		if c.OnCancel != nil {
+			c.OnCancel(c.PendingDeleteWorkspaceID.Get())
+		}
+		c.PendingDeleteWorkspaceID.Set("")
+	}
 }
 
 func (c *ConfirmationView) IsOpen() bool {
-	return c.Phase.Get() != PhaseClosed
+	return c.row != nil && c.row.IsOpen()
 }
 
 func (c *ConfirmationView) Activate() {
@@ -130,47 +141,34 @@ func (c *ConfirmationView) Activate() {
 		c.Request(c.Workspace.ID)
 		return
 	}
-	c.Confirm(context.Background())
+	c.row.Confirm()
 }
 
-func (c *ConfirmationView) confirmationSlug() string {
-	if c.PendingDeleteWorkspaceID.Get() != "" {
-		return string(c.PendingDeleteWorkspaceID.Get())
+// Confirm runs the delete directly. Kept for callers and tests that drive the
+// confirmation without a mounted key event.
+func (c *ConfirmationView) Confirm(context.Context) {
+	if !c.IsOpen() {
+		return
 	}
-	return c.Workspace.Slug
+	c.row.Confirm()
 }
 
-func (c *ConfirmationView) RowValue() string {
-	if c.IsOpen() {
-		return "delete " + c.confirmationSlug() + "?"
+func ConfirmationRowComponent(c *ConfirmationView) *ui.ConfirmActionRow {
+	if c.row == nil {
+		c.row = ui.NewConfirmActionRow(c.rowID(), c.rowCopy(), c.confirmDelete)
 	}
-	return "workspace"
-}
-
-func (c *ConfirmationView) ActionLabel() string {
-	if c.IsOpen() {
-		return "confirm ↵"
-	}
-	return "delete ↵"
-}
-
-func ConfirmationRowComponent(c *ConfirmationView) *ui.SelectableRow {
-	id := "workspace-delete"
-	if c.Workspace.ID != "" {
-		id += ":" + string(c.Workspace.ID)
-	} else if c.Workspace.Slug != "" {
-		id += ":" + c.Workspace.Slug
-	}
-	return ui.NewSelectableRow(id, "delete", c.RowValue(), c.ActionLabel(), c.Activate)
+	c.row.SetCopy(c.rowCopy())
+	return c.row
 }
 
 templ (c *ConfirmationView) Render() {
-	<div class="flex-col w-full" deps={c.Phase, c.PendingDeleteWorkspaceID, c.Error}>
+	<div class="flex-col w-full">
 		@ConfirmationRowComponent(c)
-		if c.Error.Get() != "" {
-			<div class="flex-row w-full">
-				<span>{c.Error.Get()}</span>
-			</div>
-		}
 	</div>
 }
+
+var errWorkspaceDeleteNotWired = errString("workspace delete is not wired yet")
+
+type errString string
+
+func (e errString) Error() string { return string(e) }

@@ -8,9 +8,9 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/adapters"
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
-	helppage "github.com/swobuforge/swobu/internal/cockpit/pages/help"
 	workspace_page "github.com/swobuforge/swobu/internal/cockpit/pages/workspace"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"golang.org/x/term"
 )
 
@@ -20,9 +20,6 @@ const (
 	cockpitSnapshotNewline = "\n"
 )
 
-// Run launches the go-tui Cockpit over the daemon-backed operator read model.
-// Non-interactive callers receive a deterministic rendered snapshot of the
-// loaded Cockpit screen so tests and transcript contexts do not enter raw mode.
 func Run(ctx context.Context, daemonURL string, stdin io.Reader, stdout, stderr io.Writer) error {
 	select {
 	case <-ctx.Done():
@@ -47,9 +44,11 @@ func Run(ctx context.Context, daemonURL string, stdin io.Reader, stdout, stderr 
 	}
 
 	cockpit := NewCockpitWithContext(model, ctx, adapter, adapter)
-	app, err := tui.NewApp(
+	var app *tui.App
+	app, err = tui.NewApp(
 		tui.WithRootComponent(cockpit),
 		tui.WithOnResume(func() {}),
+		ui.WithViewportFollow(cockpit.BodyViewport, func() *tui.App { return app }),
 		tui.WithLegacyKeyboard(),
 		tui.WithoutMouse(),
 	)
@@ -96,21 +95,8 @@ func renderCockpitSnapshot(stdout io.Writer, model readmodel.CockpitReadModel) e
 }
 
 func applyCockpitDefaults(model readmodel.CockpitReadModel) readmodel.CockpitReadModel {
-	defaultHelp := helppage.DefaultModel()
 	if model.Help.Version == "" {
-		model.Help.Version = defaultHelp.Version
-	}
-	if model.Help.CockpitVersion == "" {
-		model.Help.CockpitVersion = defaultHelp.CockpitVersion
-	}
-	if model.Help.DocsURL == "" {
-		model.Help.DocsURL = defaultHelp.DocsURL
-	}
-	if model.Help.CommunityURL == "" {
-		model.Help.CommunityURL = defaultHelp.CommunityURL
-	}
-	if model.Help.IssueURL == "" {
-		model.Help.IssueURL = defaultHelp.IssueURL
+		model.Help.Version = "unknown"
 	}
 	return model
 }

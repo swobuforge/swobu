@@ -3,6 +3,7 @@ package workspace_delete
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,7 +11,24 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
+
+func TestConfirmation_EscapeUsesSharedBackScopeGrammar(t *testing.T) {
+	src, err := os.ReadFile("confirmation.gsx")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(src), "tui.OnPreemptStop"+"(tui.KeyEscape") {
+		t.Fatal("confirmation must express scope Escape through ui.BackScope, not bespoke preempt wiring")
+	}
+	if strings.Contains(string(src), "tui.OnFocused"+"(tui.KeyEscape") {
+		t.Fatal("confirmation must not bind Escape as a shell-focused handler")
+	}
+	if !strings.Contains(string(src), "ui.BackScope(") {
+		t.Fatal("confirmation must use the shared ui.BackScope grammar")
+	}
+}
 
 func TestConfirmation_RequestBackAndCancel(t *testing.T) {
 	confirmation := Confirmation(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
@@ -103,12 +121,11 @@ func TestConfirmation_ConfirmFailureLeavesErrorVisible(t *testing.T) {
 
 	confirmation.Confirm(context.Background())
 
-	if confirmation.Phase.Get() != PhaseFailed {
-		t.Fatalf("phase = %v, want failed", confirmation.Phase.Get())
+	if got := ConfirmationRowComponent(confirmation).Phase(); got != ui.ConfirmFailed {
+		t.Fatalf("phase = %v, want failed", got)
 	}
-	if confirmation.Error.Get() != "permission denied" {
-		t.Fatalf("error = %q, want permission denied", confirmation.Error.Get())
-	}
+	got := testkit.RenderMountedString(t, confirmation, 90, 5)
+	assertRenderContains(t, got, "permission denied")
 }
 
 func TestConfirmation_RenderInlineStates(t *testing.T) {

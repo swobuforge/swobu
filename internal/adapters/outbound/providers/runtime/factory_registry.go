@@ -8,7 +8,7 @@ import (
 )
 
 // RuntimeFactory constructs one provider runtime bundle for one provider ID.
-type RuntimeFactory func(client *http.Client, credentials CredentialProvider, azureProjectEndpoint string) ProviderRuntimeBundle
+type RuntimeFactory func(client *http.Client, credentials CredentialProvider) ProviderRuntimeBundle
 
 var (
 	runtimeFactoryMu sync.RWMutex

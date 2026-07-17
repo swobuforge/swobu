@@ -79,6 +79,18 @@ func TestSection_UsesStableFeatureMountKeys(t *testing.T) {
 	}
 }
 
+func TestSection_DraftHeaderUsesLayoutGutter(t *testing.T) {
+	section := Section(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft})
+	rendered := testkit.RenderMountedString(t, section, 80, 6)
+
+	if !strings.Contains(rendered, "  new workspace") {
+		t.Fatalf("draft header should be indented by layout gutter:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "\nnew workspace") {
+		t.Fatalf("draft header should not rely on unstructured leading text:\n%s", rendered)
+	}
+}
+
 func TestSection_DoesNotStorePersistentFeatureRefs(t *testing.T) {
 	sectionType := reflect.TypeOf(SectionView{})
 	for i := 0; i < sectionType.NumField(); i++ {
@@ -268,11 +280,11 @@ func (w *workspaceSurfaceRoot) KeyMap() tui.KeyMap {
 			}
 		}),
 		tui.OnStop(tui.KeyEnter, func(event tui.KeyEvent) {
-			ui.ActivateFocusedElement(event)
+			ui.ActivateCurrentSelection(event)
 		}),
 		tui.OnStop(tui.KeyRune, func(event tui.KeyEvent) {
 			if event.Rune == ' ' {
-				ui.ActivateFocusedElement(event)
+				ui.ActivateCurrentSelection(event)
 			}
 		}),
 	}

@@ -1,1 +1,1 @@
-Tab returns to the prior workspace tab.
+Up returns to community.

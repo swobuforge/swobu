@@ -1,0 +1,16 @@
+package target_config
+
+import tui "github.com/grindlemire/go-tui"
+type httpProviderForm struct{ target *TargetConfig }
+func HTTPProviderForm(w *TargetConfig) tui.Component { return &httpProviderForm{target: w} }
+templ (f *httpProviderForm) Render() {
+	<div class="flex-col w-full" deps={f.target.Draft, f.target.BaseURL}>
+		if f.target.ShouldRenderEndpointRow() {
+			@EndpointInput(f.target, f.target.setupState().RequiresEndpoint)
+		}
+
+		if genericCredentialRowVisible(f.target) {
+			<div key={credentialRegionKey(f.target)} class="w-full">@CredentialControlRegion(f.target)</div>
+		}
+	</div>
+}

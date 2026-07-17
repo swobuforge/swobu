@@ -1,8 +1,10 @@
 package routes
 
 import (
+	"context"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 )
 
@@ -46,11 +48,15 @@ func TestRouteSectionState_ApplyTargetSavedUpdatesExpandedRouteAndClosesInlineSt
 }
 
 func TestRouteSectionState_ApplyTargetDeletedRemovesTargetAndClosesInlineState(t *testing.T) {
-	section := Section(routeSectionModel(), nil)
+	section := Section(routeSectionModel(), fakeRouteCommands{
+		deleteTarget: func(context.Context, ports.DeleteTargetRequest) error { return nil },
+	})
 	route := section.State.Routes[0]
 	section.OpenTargetEditor(route, route.Targets[0])
 
-	section.deleteTargetAndClose(route.ID, route.Targets[0].ID)
+	if err := section.deleteTargetAndClose(route.ID, route.Targets[0].ID); err != nil {
+		t.Fatalf("deleteTargetAndClose: %v", err)
+	}
 
 	if got := len(section.State.Routes[0].Targets); got != 1 {
 		t.Fatalf("targets after delete = %d, want 1", got)

@@ -53,10 +53,10 @@ func TestEditableRow_EscapeKeepsFocusOnRow(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
 
 	// The row ref should still point to the focused element
-	if row.Ref.El() == nil {
+	if row.Ref().El() == nil {
 		t.Fatal("row ref not resolved after Escape")
 	}
-	if !row.Ref.El().IsFocused() {
+	if !row.Ref().El().IsFocused() {
 		t.Fatal("row element should still be focused after Escape")
 	}
 }

@@ -1,113 +1,42 @@
 package help
 
 import (
-	"context"
+	"strings"
 
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
+const (
+	communityURL = "https://discord.gg/UejYpMGmw"
+	issueURL     = "https://github.com/swobuforge/swobu/issues/new"
+)
+
+// PageView renders the static help surface.
 type PageView struct {
-	Model             *tui.State[readmodel.HelpReadModel]
-	DiagnosticsStatus *tui.State[readmodel.DiagnosticsStatus]
-	Ctx               *tui.State[context.Context]
-	Actions           *tui.State[ports.HelpActions]
+	Version           string
+	DaemonVersion     string
+	DiagnosticsStatus readmodel.DiagnosticsStatus
 }
 
-func helpModelKey(model readmodel.HelpReadModel) string {
-	return model.Version + "\x1f" +
-		model.CockpitVersion + "\x1f" +
-		model.Commit + "\x1f" +
-		model.DocsURL + "\x1f" +
-		model.CommunityURL + "\x1f" +
-		model.IssueURL + "\x1f" +
-		model.Diagnostics.Text()
-}
-
-func normalizeDiagnosticsStatus(status readmodel.DiagnosticsStatus) readmodel.DiagnosticsStatus {
-	if status == 0 {
-		return readmodel.DiagnosticsReady
-	}
-	return status
-}
-
-func ViewWithContext(model readmodel.HelpReadModel, ctx context.Context, actions ports.HelpActions) *PageView {
-	model.DiagnosticsStatus = normalizeDiagnosticsStatus(model.DiagnosticsStatus)
-	if ctx == nil {
-		ctx = context.Background()
+// View builds the help page from a loaded readmodel.
+func View(model readmodel.HelpReadModel) *PageView {
+	ds := model.DiagnosticsStatus
+	if ds == 0 {
+		ds = readmodel.DiagnosticsReady
 	}
 	return &PageView{
-		Model:             tui.NewState(model),
-		DiagnosticsStatus: tui.NewState(model.DiagnosticsStatus),
-		Ctx:               tui.NewState(ctx),
-		Actions:           tui.NewState(actions),
-	}
-}
-
-func (v *PageView) OpenDocs() {
-	if actions := v.Actions.Get(); actions != nil {
-		_ = actions.OpenDocs(v.Ctx.Get())
-	}
-}
-
-func (v *PageView) OpenCommunity() {
-	if actions := v.Actions.Get(); actions != nil {
-		_ = actions.OpenCommunity(v.Ctx.Get())
-	}
-}
-
-func (v *PageView) OpenIssue() {
-	if actions := v.Actions.Get(); actions != nil {
-		_ = actions.OpenIssue(v.Ctx.Get())
-	}
-}
-
-func (v *PageView) CopyDiagnostics() {
-	actions := v.Actions.Get()
-	if actions == nil {
-		return
-	}
-	result, err := actions.CopyDiagnostics(v.Ctx.Get())
-	if err != nil {
-		v.DiagnosticsStatus.Set(readmodel.DiagnosticsFailed)
-		return
-	}
-	switch result.Status {
-	case ports.DiagnosticsCopyCopied:
-		v.DiagnosticsStatus.Set(readmodel.DiagnosticsCopied)
-	case ports.DiagnosticsCopySaved:
-		v.DiagnosticsStatus.Set(readmodel.DiagnosticsSaved)
-	default:
-		v.DiagnosticsStatus.Set(readmodel.DiagnosticsFailed)
-	}
-}
-
-func (v *PageView) currentModel() readmodel.HelpReadModel {
-	model := v.Model.Get()
-	model.DiagnosticsStatus = v.DiagnosticsStatus.Get()
-	return model
-}
-
-func (v *PageView) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*PageView)
-	if !ok {
-		return
-	}
-	identityChanged := helpModelKey(v.Model.Get()) != helpModelKey(f.Model.Get())
-	v.Model.Set(f.Model.Get())
-	v.Ctx.Set(f.Ctx.Get())
-	v.Actions.Set(f.Actions.Get())
-	if identityChanged {
-		v.DiagnosticsStatus.Set(readmodel.DiagnosticsReady)
+		Version:           model.Version,
+		DaemonVersion:     model.DaemonVersion,
+		DiagnosticsStatus: ds,
 	}
 }
 
 func (v *PageView) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
-		tui.OnStop(tui.KeyUp, ui.MovePrev),
-		tui.OnStop(tui.KeyDown, ui.MoveNext),
+		tui.OnStop(tui.KeyDown, ui.SelectNext),
+		tui.OnStop(tui.KeyUp, ui.SelectPrevious),
 		tui.OnStop(tui.KeyEscape, func(event tui.KeyEvent) {
 			if app := event.App(); app != nil {
 				app.Stop()
@@ -116,60 +45,96 @@ func (v *PageView) KeyMap() tui.KeyMap {
 	}
 }
 
-func helpActionRowKey(label string) string {
-	return "help-action:" + label
+func (v *PageView) versionValue() string {
+	version := strings.TrimSpace(v.Version)
+	if version == "" {
+		version = "unknown"
+	}
+	daemon := strings.TrimSpace(v.DaemonVersion)
+	if daemon == "" || daemon == version {
+		return "swobu " + version
+	}
+	return "swobu " + daemon + " / " + version
 }
 
-func HelpActionRow(label string, value string, action string, activate func()) *ui.SelectableRow {
-	return ui.NewSelectableRow(
-		helpActionRowKey(label),
-		label,
-		value,
-		action,
-		activate,
+func (v *PageView) diagnosticsValue() string {
+	switch v.DiagnosticsStatus {
+	case readmodel.DiagnosticsCopied:
+		return "copied · paste into issue/Discord"
+	case readmodel.DiagnosticsSaved:
+		return "saved to /tmp/swobu-diagnostics.txt"
+	case readmodel.DiagnosticsFailed:
+		return "failed · run swobu doctor --copy"
+	default:
+		return "copy report context"
+	}
+}
+
+func (v *PageView) diagnosticsAction() string {
+	if v.DiagnosticsStatus == readmodel.DiagnosticsSaved {
+		return "open \u21b5"
+	}
+	return "copy \u21b5"
+}
+
+func (v *PageView) diagnosticsPayloadText() string {
+	payload := readmodel.DiagnosticsPayload{Version: v.Version}
+	if v.DaemonVersion != "" {
+		payload.DaemonVersion = v.DaemonVersion
+	}
+	return payload.Text()
+}
+
+func (v *PageView) onDiagnosticsCopied(result ui.CopyResult) {
+	switch result.Status {
+	case ui.CopyOK:
+		v.DiagnosticsStatus = readmodel.DiagnosticsCopied
+	case ui.CopySavedFile:
+		v.DiagnosticsStatus = readmodel.DiagnosticsSaved
+	default:
+		v.DiagnosticsStatus = readmodel.DiagnosticsFailed
+	}
+}
+
+// VersionRow displays the version line.
+func VersionRowComponent(v *PageView) *ui.SelectableRow {
+	return ui.NewSelectableRow("help:version", "version", v.versionValue(), "", nil)
+}
+
+// CommunityRow opens the community Discord.
+func CommunityRowComponent(v *PageView) *ui.SelectableRow {
+	return ui.LinkRowComponent("help:community", "community", "Discord", communityURL)
+}
+
+// IssueRow opens the GitHub issue tracker.
+func IssueRowComponent(v *PageView) *ui.SelectableRow {
+	return ui.LinkRowComponent("help:issue", "issue", "GitHub issue", issueURL)
+}
+
+// DiagnosticsRow copies or saves diagnostics.
+func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
+	return ui.CopyPasteRowComponent(
+		"help:diagnostics",
+		"diagnostics",
+		v.diagnosticsValue(),
+		v.diagnosticsAction(),
+		func() ui.CopyResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
+		v.onDiagnosticsCopied,
 	)
 }
 
 templ (v *PageView) Render() {
-	<div class="flex-col w-full" deps={v.DiagnosticsStatus}>
-		<div class="flex-row">
-			<span class="w-2"></span>
-			<span>help</span>
+	<div class="flex-col w-full pl-2">
+		<div class="flex-row w-full">
+			<span>  help</span>
 		</div>
 		<br />
-		<div class="ml-3 w-full">
-			@HelpRow("version", v.currentModel().VersionValue(), "")
-			<br />
-			<div key={helpActionRowKey("docs")} class="w-full">
-				@HelpActionRow("docs", v.currentModel().DocsValue(), linkAction(v.currentModel().DocsURL), func() { v.OpenDocs() })
-			</div>
-			<div key={helpActionRowKey("community")} class="w-full">
-				@HelpActionRow("community", v.currentModel().CommunityValue(), linkAction(v.currentModel().CommunityURL), func() { v.OpenCommunity() })
-			</div>
-			<div key={helpActionRowKey("issue")} class="w-full">
-				@HelpActionRow("issue", v.currentModel().IssueValue(), linkAction(v.currentModel().IssueURL), func() { v.OpenIssue() })
-			</div>
-			<div key={helpActionRowKey("diagnostics")} class="w-full">
-				@HelpActionRow("diagnostics", v.currentModel().DiagnosticsValue(), v.currentModel().DiagnosticsAction(), func() { v.CopyDiagnostics() })
-			</div>
+		<div class="flex-col w-full">
+			@VersionRowComponent(v)
+			@CommunityRowComponent(v)
+			@IssueRowComponent(v)
+			@DiagnosticsRowComponent(v)
 		</div>
 		<br />
-		<br />
 	</div>
-}
-
-templ HelpRow(label string, value string, action string) {
-	<div class="flex-row w-full">
-		<span class="w-2"></span>
-		<span class="w-18">{label}</span>
-		<span class="w-36">{value}</span>
-		<span>{action}</span>
-	</div>
-}
-
-func linkAction(url string) string {
-	if url == "" {
-		return ""
-	}
-	return "open ↵"
 }

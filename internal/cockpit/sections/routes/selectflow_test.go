@@ -1,9 +1,12 @@
 package routes
 
 import (
+	"context"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
@@ -89,25 +92,59 @@ func TestRouteSection_SpaceActivatesRow(t *testing.T) {
 	}
 }
 
-func TestRouteAdd_InputSubmitCreatesDraftRoute(t *testing.T) {
-	section := Section(routeSectionModel(), nil)
-	section.addRoute()
+func TestRouteSection_EnterOnDefaultRowMakesRouteDefault(t *testing.T) {
+	var request ports.SaveRouteRequest
+	section := Section(routeSectionModel(), fakeRouteCommands{
+		saveRoute: func(_ context.Context, req ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+			request = req
+			for _, route := range routeSectionModel().Routes {
+				if route.ID == req.RouteID {
+					route.Default = req.Default
+					return route, nil
+				}
+			}
+			return readmodel.RouteReadModel{}, nil
+		},
+	})
+	route := section.State.Routes[1]
+	section.State.ExpandedRoute.Set(route.ID)
 	h := makeHarness(t, section)
 	defer h.Close()
 
-	h.Frame()
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'x'})
+	focusRouteFrameUntilContains(t, h, "> default", 12)
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 
-	if got := section.State.ExpandedRoute.Get(); got != "route-newx" {
-		t.Fatalf("expanded route = %q, want route-newx", got)
+	if request.RouteID != route.ID || !request.Default {
+		t.Fatalf("default activation request = %+v, want route %q default", request, route.ID)
 	}
-	// Add target form stays closed — operator must explicitly choose to add.
+	if section.State.Routes[0].Default {
+		t.Fatal("previous default route should no longer be default")
+	}
+	if !section.State.Routes[1].Default {
+		t.Fatal("selected route should be default")
+	}
+}
+
+func TestRouteAdd_InputSubmitCreatesDraftRoute(t *testing.T) {
+	section := Section(routeSectionModel(), nil)
+	section.addRoute()
+
+	// Draft route should exist and be expanded after addRoute().
+	if section.DraftRoute == nil || !section.DraftRoute.IsExpanded() {
+		t.Fatal("draft route should exist and be expanded")
+	}
+
+	// Submitting with empty name creates route with default "route-new".
+	section.createDraftRoute("")
+
+	if got := section.State.ExpandedRoute.Get(); got != "route-new" {
+		t.Fatalf("expanded route = %q, want route-new", got)
+	}
 	if got := section.State.AddTargetRoute.Get(); got != "" {
 		t.Fatalf("add target route = %q, want closed", got)
 	}
-	if section.RouteDraft.IsOpen() {
-		t.Fatal("draft row should close after submit")
+	if section.DraftRoute != nil {
+		t.Fatal("draft route should be removed after create")
 	}
 }
 

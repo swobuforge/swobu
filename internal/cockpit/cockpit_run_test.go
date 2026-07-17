@@ -30,6 +30,11 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 				t.Fatalf("status request method = %s", r.Method)
 			}
 			_, _ = w.Write([]byte(`{"state":"healthy","recent_traffic":[]}`))
+		case "/_swobu/status":
+			if r.Method != http.MethodGet {
+				t.Fatalf("daemon status request method = %s", r.Method)
+			}
+			_, _ = w.Write([]byte(`{"state":"healthy","endpoint_count":1,"control_plane_protocol":1,"swobu_version":"dev"}`))
 		default:
 			t.Fatalf("request path = %s", r.URL.Path)
 		}

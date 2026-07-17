@@ -3,7 +3,9 @@ package cockpit
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
@@ -71,16 +73,186 @@ func TestCockpit_ShiftTabNavigationWrapsBackward(t *testing.T) {
 	assertRenderContains(t, cockpit, "[› ?]", "help")
 }
 
+func TestCockpit_ShortViewportScrollsBodyAndKeepsFooterVisible(t *testing.T) {
+	cockpit := routeExpandedFixtureCockpit()
+	frame := testkit.RenderMountedString(t, cockpit, 100, 15)
+
+	if !strings.Contains(frame, "↑↓ move") {
+		t.Fatalf("short viewport lost shell footer:\n%s", frame)
+	}
+	if strings.Contains(frame, "pg scroll") {
+		t.Fatalf("footer should not advertise page scroll as a product mode:\n%s", frame)
+	}
+	if !strings.Contains(frame, "█") && !strings.Contains(frame, "│") {
+		t.Fatalf("short viewport did not expose a vertical scrollbar:\n%s", frame)
+	}
+	if strings.Contains(frame, "activity ▾") {
+		t.Fatalf("short viewport should clip overflow body content before the footer:\n%s", frame)
+	}
+}
+
+func TestCockpit_BodyScrollbarUsesDimTrackAndNormalThumb(t *testing.T) {
+	source, err := os.ReadFile("cockpit_body_viewport.go")
+	if err != nil {
+		t.Fatalf("read body viewport source: %v", err)
+	}
+	text := string(source)
+	for _, want := range []string{
+		"tui.WithScrollable(tui.ScrollVertical)",
+		"tui.WithScrollbarStyle(tui.NewStyle().Dim())",
+		"tui.WithScrollbarThumbStyle(tui.NewStyle())",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("body viewport source missing %q", want)
+		}
+	}
+}
+
+func TestCockpit_PageDownScrollsShortViewportBody(t *testing.T) {
+	cockpit := routeExpandedFixtureCockpit()
+	h := newPenetrationHarness(t, cockpit, 100, 15)
+	defer h.Close()
+
+	before := h.Frame()
+	if strings.Contains(before, "activity ▾") {
+		t.Fatalf("precondition failed: short viewport should start above activity:\n%s", before)
+	}
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyPageDown})
+	after := h.Frame()
+
+	if after == before {
+		t.Fatalf("PageDown did not change the short viewport frame:\n%s", after)
+	}
+	if !strings.Contains(after, "add model route") {
+		t.Fatalf("PageDown should scroll body to later route content:\n%s", after)
+	}
+	if strings.Contains(after, "workspace ▾") {
+		t.Fatalf("PageDown should move the body past the workspace section:\n%s", after)
+	}
+	if !strings.Contains(after, "↑↓ move") {
+		t.Fatalf("PageDown scroll lost shell footer:\n%s", after)
+	}
+	if strings.Contains(after, "pg scroll") {
+		t.Fatalf("optional PageDown accelerator should not be advertised:\n%s", after)
+	}
+}
+
+func TestCockpit_DownMovesSelectionAndViewportFollows(t *testing.T) {
+	cockpit := routeExpandedFixtureCockpit()
+	h := newPenetrationHarness(t, cockpit, 100, 15)
+	defer h.Close()
+
+	before := h.Frame()
+	if strings.Contains(before, "add model route") {
+		t.Fatalf("precondition failed: short viewport should start before add model route:\n%s", before)
+	}
+
+	for range 10 {
+		h.app.FocusNext()
+		cockpit.BodyViewport.FollowFocusedSelection(h.app)
+		h.app.Render()
+	}
+	after := h.Frame()
+
+	if after == before {
+		t.Fatalf("Down did not move selection or viewport:\n%s", after)
+	}
+	if !strings.Contains(after, ">") {
+		t.Fatalf("Down should preserve a visible selected row:\n%s", after)
+	}
+	if !strings.Contains(after, "step 1") || !strings.Contains(after, "> openai/gpt-4.1") {
+		t.Fatalf("viewport should follow Down movement to the selected later route row:\n%s", after)
+	}
+	if !strings.Contains(after, "↑↓ move") {
+		t.Fatalf("focus-follow scroll lost shell footer:\n%s", after)
+	}
+}
+
+func TestCockpit_NestedTargetEditorSelectionStaysVisibleInShortViewport(t *testing.T) {
+	cockpit := NewCockpit(DefaultFixtureReadModel())
+	page := cockpit.currentWorkspacePage()
+	route := page.RoutesSection.State.Routes[0]
+	page.RoutesSection.OpenRoute(route)
+	page.RoutesSection.OpenTargetEditor(route, route.Targets[0])
+
+	h := newPenetrationHarness(t, cockpit, 90, 24)
+	defer h.Close()
+
+	for range 21 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	frame := h.Frame()
+
+	if !strings.Contains(frame, "> protocol") && !strings.Contains(frame, "> routing") {
+		t.Fatalf("nested target editor selection escaped the visible body:\n%s", frame)
+	}
+	if !strings.Contains(frame, "↑↓ move") {
+		t.Fatalf("focus-follow scroll lost shell footer:\n%s", frame)
+	}
+}
+
+func TestCockpit_AddTargetProviderPickerEscapeClosesFromOption(t *testing.T) {
+	model := DefaultFixtureReadModel()
+	model.SelectedWorkspace.Routes = []readmodel.RouteReadModel{{
+		ID:        "z-glm",
+		ModelName: "z/glm",
+		State:     readmodel.RouteNormal,
+		Enabled:   true,
+	}}
+	cockpit := NewCockpit(model)
+	page := cockpit.currentWorkspacePage()
+	route := page.RoutesSection.State.Routes[0]
+	page.RoutesSection.OpenRoute(route)
+	page.RoutesSection.AddTarget(route)
+
+	h := newPenetrationHarness(t, cockpit, 100, 24)
+	defer h.Close()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	if frame := h.Frame(); !strings.Contains(frame, "> ChatGPT") {
+		t.Fatalf("test did not reach provider picker option focus:\n%s", frame)
+	}
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
+	if got := page.RoutesSection.State.AddTargetRoute.Get(); got != "" {
+		t.Fatalf("add target route after picker option escape = %q, want empty", got)
+	}
+	frame := h.Frame()
+	if !strings.Contains(frame, "add target") || !strings.Contains(frame, "add ↵") {
+		t.Fatalf("expected closed add target row after picker option escape:\n%s", frame)
+	}
+	if strings.Contains(frame, "search") || strings.Contains(frame, "select ↵") {
+		t.Fatalf("provider picker should close after picker option escape:\n%s", frame)
+	}
+}
+
+func TestCockpit_UpKeepsSelectionVisibleInShortViewport(t *testing.T) {
+	cockpit := NewCockpit(DefaultFixtureReadModel())
+	page := cockpit.currentWorkspacePage()
+	route := page.RoutesSection.State.Routes[0]
+	page.RoutesSection.OpenRoute(route)
+	page.RoutesSection.OpenTargetEditor(route, route.Targets[0])
+
+	h := newPenetrationHarness(t, cockpit, 90, 24)
+	defer h.Close()
+
+	for range 21 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	for i := range 21 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
+		frame := h.Frame()
+		if !strings.Contains(frame, ">") {
+			t.Fatalf("Up step %d left no selected row visible in the body:\n%s", i, frame)
+		}
+	}
+}
+
 func TestApplyCockpitDefaultsInstallsHelpCopy(t *testing.T) {
 	model := applyCockpitDefaults(readmodel.CockpitReadModel{})
-	if got, want := model.Help.DocsURL, "swobu.com/docs"; got != want {
-		t.Fatalf("docs url = %q, want %q", got, want)
-	}
-	if got, want := model.Help.CommunityURL, "https://discord.gg/UejYpMGmw"; got != want {
-		t.Fatalf("community url = %q, want %q", got, want)
-	}
-	if got, want := model.Help.IssueURL, "https://github.com/swobuforge/swobu/issues/new"; got != want {
-		t.Fatalf("issue url = %q, want %q", got, want)
+	if got, want := model.Help.Version, "unknown"; got != want {
+		t.Fatalf("version = %q, want %q", got, want)
 	}
 }
 
@@ -212,7 +384,7 @@ func TestCockpit_WorkspaceSaveRefreshRemountsPromotedDraftPage(t *testing.T) {
 	if promotedDraftPage.OverviewSection.Model.Slug != "" {
 		t.Fatalf("draft page slug = %q, want empty", promotedDraftPage.OverviewSection.Model.Slug)
 	}
-	assertRenderContains(t, cockpit, "> add model route")
+	assertRenderContains(t, cockpit, "add model route")
 }
 
 func TestCockpit_WorkspaceSaveRefreshPreservesActiveRouteEditor(t *testing.T) {
@@ -475,6 +647,22 @@ func TestCockpit_DoesNotRetainSeparateWorkspacePageOwner(t *testing.T) {
 	cockpitType := reflect.TypeOf(Cockpit{})
 	if _, ok := cockpitType.FieldByName("WorkspacePage"); ok {
 		t.Fatal("Cockpit must not retain separate WorkspacePage owner; use currentWorkspacePage() over WorkspacePages only")
+	}
+}
+
+func TestCockpit_UsesViewportPrimitiveForBodyScroll(t *testing.T) {
+	cockpitType := reflect.TypeOf(Cockpit{})
+	for _, name := range []string{"BodyScrollY", "BodyRef"} {
+		if _, ok := cockpitType.FieldByName(name); ok {
+			t.Fatalf("Cockpit must not own %s; compose ui.Viewport for body scroll behavior", name)
+		}
+	}
+	field, ok := cockpitType.FieldByName("BodyViewport")
+	if !ok {
+		t.Fatal("Cockpit must compose BodyViewport")
+	}
+	if field.Type.String() != "*ui.Viewport" {
+		t.Fatalf("BodyViewport type = %s, want *ui.Viewport", field.Type)
 	}
 }
 

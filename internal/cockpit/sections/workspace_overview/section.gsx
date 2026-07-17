@@ -145,95 +145,8 @@ func workspaceIdentity(s *SectionView) string {
 
 func sectionHeaderKey(s *SectionView) string { return "section-header:" + workspaceIdentity(s) }
 
-func SectionHeaderComponent(s *SectionView) tui.Component {
-	if s.Model.IsDraft() {
-		return ui.NewTextComponent("  new workspace")
-	}
+func WorkspaceDisclosureComponent(s *SectionView) tui.Component {
 	return ui.NewSectionDisclosure(sectionHeaderKey(s), "workspace", s.Expanded)
-}
-
-// ---------------------------------------------------------------------------
-// Endpoint row
-// ---------------------------------------------------------------------------
-
-func endpointRowKey(s *SectionView) string { return "endpoint:" + workspaceIdentity(s) }
-
-func endpointAction(s *SectionView) string {
-	if s.CopiedEndpoint.Get() {
-		return "copied"
-	}
-	return "copy ↵"
-}
-
-// EndpointRowComponent mounts the hero endpoint row: two visual lines
-// (compatibility badges + URL) as a single focusable component.
-func EndpointRowComponent(s *SectionView) tui.Component {
-	row := &endpointRowView{s: s}
-	row.SelectBase = ui.NewSelectBase(endpointRowKey(s))
-	return row
-}
-
-type endpointRowView struct {
-	ui.SelectBase
-	s *SectionView
-}
-
-func (r *endpointRowView) BindApp(app *tui.App) {
-	r.SelectBase.BindApp(app)
-}
-
-func (r *endpointRowView) UnbindApp() {
-	r.SelectBase.UnbindApp()
-}
-
-func (r *endpointRowView) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*endpointRowView)
-	if !ok {
-		return
-	}
-	r.s = f.s
-}
-
-func (r *endpointRowView) Render(app *tui.App) *tui.Element {
-	_ = app
-	s := r.s
-
-	// Build both content rows as a single flex column so they share the same
-	// full width even inside a margin-shifted container.
-	col := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100),
-	)
-
-	row1 := ui.ActionRow(r.Arrow(), "endpoint", s.Model.ClientBaseURL, endpointAction(s),
-		tui.WithFocusable(true),
-		tui.WithOnFocus(r.OnFocus),
-		tui.WithOnBlur(r.OnBlur),
-		tui.WithOnActivate(func() { s.copyEndpoint() }),
-	)
-	col.AddChild(row1)
-
-	row2 := ui.ActionRow("", "", s.Model.CompatibleClients, "")
-	col.AddChild(row2)
-
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100),
-	)
-	root.AddChild(col)
-
-	if r.Ref != nil {
-		// The focusable element is row1 inside the wrapper; point Ref there
-		// so Arrow() and IsFocused() reflect the actual focus state.
-		r.Ref.Set(row1)
-	}
-	return root
-}
-
-func (r *endpointRowView) KeyMap() tui.KeyMap {
-	return r.WithTraversal(ui.ActivateFocused(func(tui.KeyEvent) {
-		r.s.copyEndpoint()
-	}))
 }
 
 // ---------------------------------------------------------------------------
@@ -242,11 +155,15 @@ func (r *endpointRowView) KeyMap() tui.KeyMap {
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		<div key={sectionHeaderKey(s)} class="w-full">
-			@SectionHeaderComponent(s)
-		</div>
+		if s.Model.IsDraft() {
+			@DraftWorkspaceHeader()
+		} else {
+			<div key={sectionHeaderKey(s)} class="w-full">
+				@WorkspaceDisclosureComponent(s)
+			</div>
+		}
 		if s.Expanded.Get() {
-			<div class="ml-3 w-full">
+			<div class="pl-3 w-full">
 				if s.Model.IsDraft() {
 					<div key={workspaceEditKey(s)} class="w-full">
 						@WorkspaceEdit(s)
@@ -271,6 +188,13 @@ templ (s *SectionView) Render() {
 // ---------------------------------------------------------------------------
 // Layout helpers
 // ---------------------------------------------------------------------------
+
+templ DraftWorkspaceHeader() {
+	<div class="flex-row w-full">
+		<span class="w-2"></span>
+		<span>new workspace</span>
+	</div>
+}
 
 templ InertRow(label string, value string, action string) {
 	<div class="flex-row w-full">

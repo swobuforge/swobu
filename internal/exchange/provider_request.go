@@ -132,12 +132,13 @@ func ValidateProviderIngress(ingress ProviderIngress) error {
 }
 
 type RoutableTarget struct {
-	BackendRef       string
-	ProviderSpec     string
-	BaseURL          string
+	BackendRef   string
+	ProviderSpec string
+	BaseURL      string
 	// CredentialRef is the durable auth handle selected by endpoint intent.
 	// Replay equality assumes the control plane does not repoint it in place.
 	CredentialRef    string
+	AuthMode         string
 	AuthHeader       string
 	ProtocolKind     protocolkind.ProtocolKind
 	AuthKind         string
@@ -155,6 +156,7 @@ func NewRoutableTarget(backendRef string, targetSpec string, baseURL string, cre
 
 func (t RoutableTarget) Clone() RoutableTarget {
 	cloned := NewRoutableTarget(t.BackendRef, t.ProviderSpec, t.BaseURL, t.CredentialRef, t.ProtocolKind, t.AuthKind, t.SelectedFrame, t.ProviderProtocol)
+	cloned.AuthMode = t.AuthMode
 	cloned.AuthHeader = t.AuthHeader
 	return cloned
 }

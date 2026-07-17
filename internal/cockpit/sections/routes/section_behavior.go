@@ -3,69 +3,52 @@ package routes
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
-	"time"
 
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/cockpit/features/route_add"
-	"github.com/swobuforge/swobu/internal/cockpit/features/target_add"
+	"github.com/swobuforge/swobu/internal/cockpit/features/target_config"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
-// port function aliases so the section package no longer imports route_edit.
+// port function aliases keep route mutation behind the section boundary.
 type SaveRouteFunc func(context.Context, ports.SaveRouteRequest) (readmodel.RouteReadModel, error)
 type DeleteRouteFunc func(context.Context, ports.DeleteRouteRequest) error
 
 // SectionView owns the mutable route section workflow and renders the route
 // list. RouteSectionState stays data-only; the section owns all behavior.
 type SectionView struct {
-	Model                readmodel.WorkspaceReadModel
-	Expanded             *tui.State[bool]
-	State                *RouteSectionState
-	RouteDraft           *route_add.Draft
-	RouteDetailRows      map[readmodel.RouteID]*RouteDetailRow
-	TargetStringRows     map[string]*TargetStringRow
-	TargetAddWorkflows   map[readmodel.RouteID]*target_add.Workflow
+	Model      readmodel.WorkspaceReadModel
+	Expanded   *tui.State[bool]
+	State      *RouteSectionState
+	DraftRoute *DraftRoute
+	// TargetConfigs holds mounted add/edit target config instances in this section.
+	// ProviderOptions must be set from workspace readmodel before the section is
+	// mounted; mounts must not call out to query ports for static catalog data.
+	TargetConfigs        *TargetConfigMounts
 	AddRouteRow          *ui.SelectableRow
 	addRouteFocusPending bool
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
-	SaveTarget           func(context.Context, ports.SaveTargetRequest) (readmodel.TargetReadModel, error)
 	DeleteTarget         func(context.Context, ports.DeleteTargetRequest) error
-	ListProviders        func(context.Context) ([]readmodel.ProviderOptionReadModel, error)
-	TargetSetupQueries   ports.TargetSetupQueries
-	TargetAuthCommands   ports.TargetAuthCommands
-}
-
-// SectionDraftRouteRowView renders the inline draft route input row.
-type SectionDraftRouteRowView struct {
-	ModelName *tui.State[string]
-	Submit    func(string)
-}
-
-// Arrow returns the shared row marker for the active draft route row.
-func (r *SectionDraftRouteRowView) Arrow() string {
-	return ui.RowArrow(true)
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *SectionView {
-	draft := route_add.NewDraft()
 	section := &SectionView{
-		Model:              model,
-		Expanded:           tui.NewState(true),
-		State:              NewRouteSectionState(model.Routes),
-		RouteDraft:         draft,
-		RouteDetailRows:    make(map[readmodel.RouteID]*RouteDetailRow),
-		TargetStringRows:   make(map[string]*TargetStringRow),
-		TargetAddWorkflows: make(map[readmodel.RouteID]*target_add.Workflow),
+		Model:         model,
+		Expanded:      tui.NewState(true),
+		State:         NewRouteSectionState(model.Routes),
+		TargetConfigs: NewTargetConfigMounts(model.ID),
 	}
+	section.TargetConfigs.ProviderOptions = model.ProviderOptions
+	section.configureTargetConfigMounts()
 	if commands != nil {
 		section.SaveRoute = commands.SaveRoute
 		section.DeleteRoute = commands.DeleteRoute
-		section.SaveTarget = commands.SaveTarget
 		section.DeleteTarget = commands.DeleteTarget
+		section.TargetConfigs.Commands.SaveTarget = commands.SaveTarget
 	}
 	return section
 }
@@ -81,8 +64,8 @@ func (s *SectionView) RequestAddRouteFocus() {
 
 func (s *SectionView) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
-		tui.OnStop(tui.KeyEnter, ui.ActivateFocusedElement),
-		tui.OnStop(tui.Rune(' '), ui.ActivateFocusedElement),
+		tui.OnStop(tui.KeyEnter, ui.ActivateCurrentSelection),
+		tui.OnStop(tui.Rune(' '), ui.ActivateCurrentSelection),
 	}
 }
 
@@ -91,14 +74,10 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	if !ok {
 		return
 	}
-	oldID := s.Model.ID
-	newID := f.Model.ID
 	s.Model = f.Model
 	s.SaveRoute = f.SaveRoute
 	s.DeleteRoute = f.DeleteRoute
-	s.SaveTarget = f.SaveTarget
 	s.DeleteTarget = f.DeleteTarget
-	s.ListProviders = f.ListProviders
 	if s.State == nil {
 		s.State = f.State
 	} else if f.State != nil {
@@ -107,17 +86,27 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	if s.State != nil && s.State.DeleteConfirmTarget == nil {
 		s.State.DeleteConfirmTarget = tui.NewState(readmodel.TargetID(""))
 	}
+	if s.State != nil && s.State.FocusRoute == nil {
+		s.State.FocusRoute = tui.NewState(readmodel.RouteID(""))
+	}
 	if s.Expanded == nil {
 		s.Expanded = f.Expanded
 	}
-	if s.RouteDraft == nil {
-		s.RouteDraft = f.RouteDraft
+	if s.DraftRoute == nil && f.DraftRoute != nil {
+		s.DraftRoute = f.DraftRoute
 	}
-	if oldID != newID {
-		// Re-key cached TargetStringRows for workspace change.
-		s.TargetStringRows = migrateTargetStringRows(s.TargetStringRows, oldID, newID)
+	if s.TargetConfigs == nil {
+		s.TargetConfigs = NewTargetConfigMounts(s.Model.ID)
 	}
-	s.refreshTargetAddWorkflows()
+	s.TargetConfigs.UpdateFrom(f.TargetConfigs)
+	// ProviderOptions are readmodel-props, not query results. They must flow from
+	// the workspace model through Page → Section → Host. If the model itself
+	// changed, overwrite whatever the prior host held.
+	if f.Model.ProviderOptions != nil {
+		s.TargetConfigs.ProviderOptions = f.Model.ProviderOptions
+	}
+	s.configureTargetConfigMounts()
+	s.refreshTargetConfigs()
 }
 
 func sectionHeaderKey(s *SectionView) string {
@@ -134,10 +123,36 @@ func SectionHeaderComponent(s *SectionView) tui.Component {
 	return ui.NewSectionDisclosure(sectionHeaderKey(s), "model routes", s.Expanded)
 }
 
-// TargetAddWorkflowComponent is a mount shim so the add-target workflow itself
+// TargetConfigComponent is a mount shim so the target config itself
 // receives go-tui app binding instead of being rendered as a plain element tree.
-func TargetAddWorkflowComponent(wf *target_add.Workflow) *target_add.Workflow {
-	return wf
+func TargetConfigComponent(config *target_config.TargetConfig) *target_config.TargetConfig {
+	return config
+}
+
+func (s *SectionView) configureTargetConfigMounts() {
+	if s.TargetConfigs == nil {
+		s.TargetConfigs = NewTargetConfigMounts(s.Model.ID)
+	}
+	s.TargetConfigs.WorkspaceID = s.Model.ID
+	s.TargetConfigs.Callbacks.OnCreated = func(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
+		s.saveTarget(routeID, target)
+	}
+	s.TargetConfigs.Callbacks.OnSaved = func(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
+		s.updateTarget(routeID, target)
+	}
+	s.TargetConfigs.Callbacks.OnDeleteConfirmed = func(routeID readmodel.RouteID, targetID readmodel.TargetID) error {
+		return s.deleteTargetAndClose(routeID, targetID)
+	}
+	s.TargetConfigs.Callbacks.OnAddClose = func(routeID readmodel.RouteID) {
+		if s.State != nil && s.State.AddTargetRoute.Get() == routeID {
+			s.State.AddTargetRoute.Set("")
+		}
+	}
+	s.TargetConfigs.Callbacks.OnEditClose = func(targetID readmodel.TargetID) {
+		if s.State != nil && s.State.OpenTarget.Get() == targetID {
+			s.State.OpenTarget.Set("")
+		}
+	}
 }
 
 func (s *SectionView) isExpanded(route readmodel.RouteReadModel) bool {
@@ -147,9 +162,6 @@ func (s *SectionView) isExpanded(route readmodel.RouteReadModel) bool {
 func (s *SectionView) toggleRoute(route readmodel.RouteReadModel) {
 	if s.isExpanded(route) {
 		s.State.ExpandedRoute.Set("")
-		if row := s.RouteDetailRows[route.ID]; row != nil {
-			row.CloseAll()
-		}
 		return
 	}
 	s.OpenRoute(route)
@@ -169,64 +181,61 @@ func (s *SectionView) expandedRoute() (readmodel.RouteReadModel, bool) {
 }
 
 func (s *SectionView) addRoute() {
-	s.RouteDraft.OpenFor(s.State.Routes)
+	s.DraftRoute = NewDraftRoute(s.Model.ID)
+	s.DraftRoute.Open()
+	if s.AddRouteRow != nil {
+		s.AddRouteRow.AutoFocus = false
+		s.AddRouteRow.Blur()
+	}
 	s.State.OpenTarget.Set("")
 	s.State.AddTargetRoute.Set("")
 }
 
-func (s *SectionView) createDraftRoute() {
-	route := s.RouteDraft.Route(s.State.Routes)
+func (s *SectionView) closeDraftRoute() {
+	if s.DraftRoute == nil {
+		return
+	}
+	s.DraftRoute = nil
+}
+
+func (s *SectionView) createDraftRoute(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "route-new"
+	}
+	route := readmodel.RouteReadModel{
+		ID:        readmodel.RouteID(name),
+		ModelName: name,
+		Enabled:   true,
+	}
 	s.applyRouteUpsert(route)
 	s.OpenRoute(route)
 	s.State.OpenTarget.Set("")
 	s.State.AddTargetRoute.Set("")
-	s.RouteDraft.Close()
-}
-
-// The input owns submission; this callback bridges the mounted input back to
-// the section-owned draft route lifecycle.
-func (s *SectionView) createDraftRouteFromInput(modelName string) {
-	s.RouteDraft.ModelName.Set(modelName)
-	s.createDraftRoute()
+	s.DraftRoute = nil
 }
 
 func (s *SectionView) saveRoute(previousID readmodel.RouteID, route readmodel.RouteReadModel) {
 	s.applyRouteSaved(previousID, route)
 	if route.ID != previousID {
-		if row := s.RouteDetailRows[previousID]; row != nil {
-			delete(s.RouteDetailRows, previousID)
-			s.RouteDetailRows[route.ID] = row
-			row.RouteID = route.ID
-		}
-		if wf := s.TargetAddWorkflows[previousID]; wf != nil {
-			delete(s.TargetAddWorkflows, previousID)
-			s.TargetAddWorkflows[route.ID] = wf
-			wf.UpdateProps(s.newTargetAddWorkflow(route))
-		}
+		s.TargetConfigs.MoveRoute(previousID, route)
 		if s.State.AddTargetRoute.Get() == previousID {
 			s.State.AddTargetRoute.Set(route.ID)
 		}
 		return
 	}
-	if wf := s.TargetAddWorkflows[route.ID]; wf != nil {
-		wf.UpdateProps(s.newTargetAddWorkflow(route))
-	}
+	s.TargetConfigs.RefreshAdd(route)
 }
 
 func (s *SectionView) deleteRoute(routeID readmodel.RouteID) {
 	s.applyRouteDeleted(routeID)
-	delete(s.RouteDetailRows, routeID)
 }
 
 func (s *SectionView) OpenTargetEditor(route readmodel.RouteReadModel, target readmodel.TargetReadModel) {
-	// Legacy API — sets OpenTarget directly for external callers.
 	s.State.ExpandedRoute.Set(route.ID)
 	s.State.OpenTarget.Set(target.ID)
 	s.State.AddTargetRoute.Set("")
-	row := s.targetStringRow(route, target)
-	if row != nil {
-		row.Open()
-	}
+	s.TargetConfigs.OpenEdit(route, target)
 }
 
 func (s *SectionView) openTarget(target readmodel.TargetReadModel) {
@@ -235,95 +244,60 @@ func (s *SectionView) openTarget(target readmodel.TargetReadModel) {
 		return
 	}
 	s.State.OpenTarget.Set(target.ID)
-	row := s.targetStringRow(route, target)
-	if row != nil {
-		row.Open()
-	}
+	s.State.AddTargetRoute.Set("")
+	s.TargetConfigs.OpenEdit(route, target)
 }
 
 func (s *SectionView) AddTarget(route readmodel.RouteReadModel) {
 	s.State.AddTargetRoute.Set(route.ID)
 	s.State.OpenTarget.Set("")
-	wf := s.targetAddWorkflow(route)
-	wf.Open()
+	s.TargetConfigs.OpenAdd(route)
 }
 
-func (s *SectionView) targetAddWorkflow(route readmodel.RouteReadModel) *target_add.Workflow {
-	wf := s.TargetAddWorkflows[route.ID]
-	if wf == nil {
-		wf = s.newTargetAddWorkflow(route)
-		s.TargetAddWorkflows[route.ID] = wf
-	}
-	return wf
+func (s *SectionView) targetAddConfig(route readmodel.RouteReadModel) *target_config.TargetConfig {
+	return s.TargetConfigs.Add(route)
 }
 
-func (s *SectionView) newTargetAddWorkflow(route readmodel.RouteReadModel) *target_add.Workflow {
-	var opts []readmodel.ProviderOptionReadModel
-	if s.ListProviders != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), portCallTimeout)
-		defer cancel()
-		if loaded, err := s.ListProviders(ctx); err == nil {
-			opts = loaded
-		}
-	}
-	wf := target_add.NewWorkflow(
-		s.Model.ID,
-		route,
-		func(ctx context.Context, req ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
-			if s.SaveTarget == nil {
-				return readmodel.TargetReadModel{}, errTargetSaveNotWired
-			}
-			return s.SaveTarget(ctx, req)
-		},
-		func() { s.State.AddTargetRoute.Set("") },
-		target_add.WithProviderOptions(opts),
-	)
-	wf.TargetSetupQueries = s.TargetSetupQueries
-	wf.TargetAuthCommands = s.TargetAuthCommands
-	// OnCreated saves the target into section state before OnClose clears AddTargetRoute.
-	wf.OnCreated = func(t readmodel.TargetReadModel) { s.saveTarget(route.ID, t) }
-	return wf
+func (s *SectionView) targetEditConfig(route readmodel.RouteReadModel, target readmodel.TargetReadModel) *target_config.TargetConfig {
+	return s.TargetConfigs.Edit(route, target)
 }
 
-func (s *SectionView) refreshTargetAddWorkflows() {
-	if len(s.TargetAddWorkflows) == 0 {
+func (s *SectionView) refreshTargetConfigs() {
+	if s.TargetConfigs == nil || s.State == nil {
 		return
 	}
-	routesByID := make(map[readmodel.RouteID]readmodel.RouteReadModel, len(s.State.Routes))
-	for _, route := range s.State.Routes {
-		routesByID[route.ID] = route
-	}
-	for routeID, wf := range s.TargetAddWorkflows {
-		route, found := routesByID[routeID]
-		if !found {
-			delete(s.TargetAddWorkflows, routeID)
-			if s.State.AddTargetRoute.Get() == routeID {
-				s.State.AddTargetRoute.Set("")
-			}
-			continue
+	s.TargetConfigs.Refresh(s.State.Routes, func(routeID readmodel.RouteID) {
+		if s.State.AddTargetRoute.Get() == routeID {
+			s.State.AddTargetRoute.Set("")
 		}
-		wf.UpdateProps(s.newTargetAddWorkflow(route))
-	}
+	})
 }
-
-const portCallTimeout = 5 * time.Second
 
 func (s *SectionView) saveTarget(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
 	s.applyTargetSaved(routeID, target)
 }
 
-func (s *SectionView) deleteTargetAndClose(routeID readmodel.RouteID, targetID readmodel.TargetID) {
-	if s.DeleteTarget != nil {
-		_ = s.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
-			WorkspaceID: s.Model.ID,
-			RouteID:     routeID,
-			TargetID:    targetID,
-		})
+func (s *SectionView) updateTarget(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
+	s.applyTargetUpdated(routeID, target)
+}
+
+func (s *SectionView) deleteTargetAndClose(routeID readmodel.RouteID, targetID readmodel.TargetID) error {
+	if s.DeleteTarget == nil {
+		return errTargetDeleteNotWired
 	}
-	s.applyDeleteConfirmed(routeID, targetID)
+	if err := s.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
+		WorkspaceID: s.Model.ID,
+		RouteID:     routeID,
+		TargetID:    targetID,
+	}); err != nil {
+		return err
+	}
+	s.applyTargetDeleted(routeID, targetID)
+	return nil
 }
 
 func (s *SectionView) confirmDeleteTarget(targetID readmodel.TargetID) {
+	s.State.OpenTarget.Set("")
 	s.State.DeleteConfirmTarget.Set(targetID)
 }
 
@@ -331,58 +305,19 @@ func (s *SectionView) closeDeleteTargetConfirm() {
 	s.State.DeleteConfirmTarget.Set("")
 }
 
-func (s *SectionView) applyDeleteConfirmed(routeID readmodel.RouteID, targetID readmodel.TargetID) {
-	for i, route := range s.State.Routes {
-		if route.ID != routeID {
-			continue
-		}
-		next := make([]readmodel.TargetReadModel, 0, len(route.Targets))
-		for _, target := range route.Targets {
-			if target.ID == targetID {
-				continue
-			}
-			next = append(next, target)
-		}
-		s.State.Routes[i].Targets = next
-		// Renumber steps after removal so ranks stay contiguous.
-		renumberSteps(&s.State.Routes[i])
-		syncRouteSummary(&s.State.Routes[i])
-		s.State.OpenTarget.Set("")
-		s.State.DeleteConfirmTarget.Set("")
-		s.State.AddTargetRoute.Set("")
-		return
-	}
-}
-
-// renumberSteps collapses ranks so they are 1,2,3... and removes empty steps
-// except step 1 which is kept as an empty affordance.
+// renumberSteps collapses ranks so deleting the last target in a step cannot
+// leave a hole such as step 1, step 3.
 func renumberSteps(route *readmodel.RouteReadModel) {
 	if len(route.Targets) == 0 {
 		return
 	}
-	// Sort by current rank.
-	// Build unique rank list, assign new contiguous 1-based ranks.
-	seen := make([]int, 0)
+	seen := make([]int, 0, len(route.Targets))
 	for _, t := range route.Targets {
-		found := false
-		for _, r := range seen {
-			if r == t.Rank {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !intSliceContains(seen, t.Rank) {
 			seen = append(seen, t.Rank)
 		}
 	}
-	// Sort ascending.
-	for i := 0; i < len(seen)-1; i++ {
-		for j := i + 1; j < len(seen); j++ {
-			if seen[j] < seen[i] {
-				seen[i], seen[j] = seen[j], seen[i]
-			}
-		}
-	}
+	sort.Ints(seen)
 	rankMap := make(map[int]int, len(seen))
 	for i, old := range seen {
 		rankMap[old] = i + 1
@@ -390,6 +325,15 @@ func renumberSteps(route *readmodel.RouteReadModel) {
 	for i := range route.Targets {
 		route.Targets[i].Rank = rankMap[route.Targets[i].Rank]
 	}
+}
+
+func intSliceContains(values []int, value int) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SectionView) Back() bool {
@@ -405,6 +349,10 @@ func (s *SectionView) Back() bool {
 		s.State.AddTargetRoute.Set("")
 		return true
 	}
+	if s.DraftRoute != nil {
+		s.closeDraftRoute()
+		return true
+	}
 	if s.State.ExpandedRoute.Get() != "" {
 		s.State.ExpandedRoute.Set("")
 		return true
@@ -412,130 +360,28 @@ func (s *SectionView) Back() bool {
 	return false
 }
 
-func (s *SectionView) targetWorkflowKey(route readmodel.RouteReadModel, targetID readmodel.TargetID) string {
-	return "target-edit:" + string(s.Model.ID) + ":" + string(route.ID) + ":" + string(targetID)
+func (s *SectionView) targetConfigKey(route readmodel.RouteReadModel, targetID readmodel.TargetID) string {
+	return s.TargetConfigs.MountKey(route, targetID)
 }
 
-// TargetCreateRow helpers ---------------------------------------------------
-
-func (s *SectionView) targetCreateRowMountKey(route readmodel.RouteReadModel) string {
-	return "target-create:" + string(s.Model.ID) + ":" + string(route.ID)
+func (s *SectionView) targetConfigMountKey(route readmodel.RouteReadModel, targetID readmodel.TargetID) string {
+	return s.targetConfigKey(route, targetID)
 }
 
-func (s *SectionView) targetCreateRow(route readmodel.RouteReadModel) *TargetStringRow {
-	key := "target-create:" + string(s.Model.ID) + ":" + string(route.ID)
-	row := s.TargetStringRows[key]
-	if row == nil {
-		row = NewTargetCreateRow(
-			key,
-			func(raw string) { s.submitTargetCreate(route.ID, raw) },
-			func() { s.State.AddTargetRoute.Set("") },
-		)
-		s.TargetStringRows[key] = row
-	}
-	return row
-}
-
-func (s *SectionView) submitTargetCreate(routeID readmodel.RouteID, raw string) {
-	provider, model, err := ParseTarget(raw)
-	if err != nil {
-		s.setTargetCreateError(routeID, err)
-		return
-	}
-
-	var route readmodel.RouteReadModel
-	for _, r := range s.State.Routes {
-		if r.ID == routeID {
-			route = r
-			break
+func (s *SectionView) applyRouteUpsert(route readmodel.RouteReadModel) {
+	for i, existing := range s.State.Routes {
+		if existing.ID != route.ID {
+			continue
 		}
-	}
-	if route.ID == "" {
-		s.State.AddTargetRoute.Set("")
+		s.State.Routes[i] = route
 		return
 	}
-
-	if s.SaveTarget == nil {
-		s.setTargetCreateError(routeID, errTargetSaveNotWired)
-		return
-	}
-
-	saved, err := s.SaveTarget(context.Background(), ports.SaveTargetRequest{
-		WorkspaceID: s.Model.ID,
-		RouteID:     routeID,
-		Provider:    provider,
-		Model:       model,
-		Rank:        nextRankForRoute(route),
-		Weight:      1,
-	})
-	if err != nil {
-		s.setTargetCreateError(routeID, err)
-		return
-	}
-
-	key := "target-create:" + string(s.Model.ID) + ":" + string(routeID)
-	if row := s.TargetStringRows[key]; row != nil {
-		row.Close()
-	}
-	s.saveTarget(routeID, saved)
-}
-
-// nextRankForRoute returns a new rank higher than any existing target rank.
-func nextRankForRoute(route readmodel.RouteReadModel) int {
-	maxRank := 0
-	for _, t := range route.Targets {
-		if t.Rank > maxRank {
-			maxRank = t.Rank
-		}
-	}
-	return maxRank + 1
-}
-
-func (s *SectionView) setTargetCreateError(routeID readmodel.RouteID, err error) {
-	if err == nil {
-		return
-	}
-	key := "target-create:" + string(s.Model.ID) + ":" + string(routeID)
-	if row := s.TargetStringRows[key]; row != nil {
-		row.errorText.Set(err.Error())
-	}
-}
-
-// RouteDetailRow helpers ----------------------------------------------------
-
-func (s *SectionView) routeDetailRowKey(route readmodel.RouteReadModel) string {
-	return "route-detail:" + string(s.Model.ID) + ":" + string(route.ID)
-}
-
-func RouteDetailRowComponent(s *SectionView, route readmodel.RouteReadModel) *RouteDetailRow {
-	return s.routeDetailRow(route)
-}
-
-func (s *SectionView) routeDetailRow(route readmodel.RouteReadModel) *RouteDetailRow {
-	row := s.RouteDetailRows[route.ID]
-	if row == nil {
-		row = NewRouteDetailRow(
-			s.routeDetailRowKey(route),
-			route.ModelName,
-			route.Default,
-			func(name string) { s.submitRouteName(route.ID, name) },
-			func() { s.setRouteDefault(route.ID) },
-			func() { s.confirmDeleteRoute(route.ID) },
-		)
-		s.RouteDetailRows[route.ID] = row
-	}
-	row.RouteID = route.ID
-	row.SetModelName(route.ModelName)
-	row.IsDefault = route.Default
-	return row
+	s.State.Routes = append(s.State.Routes, route)
 }
 
 func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		if row := s.RouteDetailRows[routeID]; row != nil {
-			row.errorText.Set("enter a route model")
-		}
 		return
 	}
 	var existing readmodel.RouteReadModel
@@ -549,9 +395,6 @@ func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 		return
 	}
 	if s.SaveRoute == nil {
-		if row := s.RouteDetailRows[routeID]; row != nil {
-			row.errorText.Set("route save is not wired yet")
-		}
 		return
 	}
 	saved, err := s.SaveRoute(context.Background(), ports.SaveRouteRequest{
@@ -561,13 +404,7 @@ func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 		Enabled:     existing.Enabled,
 	})
 	if err != nil {
-		if row := s.RouteDetailRows[routeID]; row != nil {
-			row.errorText.Set(err.Error())
-		}
 		return
-	}
-	if row := s.RouteDetailRows[routeID]; row != nil {
-		row.CloseNameEdit()
 	}
 	s.saveRoute(routeID, saved)
 }
@@ -594,46 +431,136 @@ func (s *SectionView) setRouteDefault(routeID readmodel.RouteID) {
 		Default:     true,
 	})
 	if err != nil {
-		if row := s.RouteDetailRows[routeID]; row != nil {
-			row.errorText.Set(err.Error())
-		}
 		return
 	}
 	saved.Default = true
 	s.saveRoute(routeID, saved)
 }
 
-func (s *SectionView) confirmDeleteRoute(routeID readmodel.RouteID) {
+func (s *SectionView) confirmDeleteRoute(routeID readmodel.RouteID) error {
 	if s.DeleteRoute == nil {
-		if row := s.RouteDetailRows[routeID]; row != nil {
-			row.errorText.Set("route delete is not wired yet")
-		}
-		return
+		return nil
 	}
 	if err := s.DeleteRoute(context.Background(), ports.DeleteRouteRequest{
 		WorkspaceID: s.Model.ID,
 		RouteID:     routeID,
 	}); err != nil {
-		if row := s.RouteDetailRows[routeID]; row != nil {
-			row.errorText.Set(err.Error())
-		}
-		return
-	}
-	if row := s.RouteDetailRows[routeID]; row != nil {
-		row.CloseDeleteConfirm()
+		return err
 	}
 	s.deleteRoute(routeID)
+	return nil
 }
 
-func (s *SectionView) applyRouteUpsert(route readmodel.RouteReadModel) {
-	for i, existing := range s.State.Routes {
-		if existing.ID != route.ID {
-			continue
-		}
-		s.State.Routes[i] = route
-		return
+func contractRowValue(route readmodel.RouteReadModel) string {
+	return "model = " + route.ModelName
+}
+
+// RouteNameRowComponent mounts an editable row for the route model name.
+func RouteNameRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.EditableRow {
+	value := tui.NewState(route.ModelName)
+	row := ui.NewEditableRow(s.routeNameRowKey(route), "name", value)
+	row.ViewAction = "edit ↵"
+	row.EditAction = "save ↵"
+	row.OnSubmit = func(name string) {
+		s.submitRouteName(route.ID, name)
 	}
-	s.State.Routes = append(s.State.Routes, route)
+	row.OnClose = func() {
+		for _, r := range s.State.Routes {
+			if r.ID == route.ID {
+				value.Set(r.ModelName)
+				break
+			}
+		}
+	}
+	return row
+}
+
+func (s *SectionView) routeNameRowKey(route readmodel.RouteReadModel) string {
+	return "route-name:" + string(s.Model.ID) + ":" + string(route.ID)
+}
+
+// DraftParentRowComponent mounts the selectable parent row for draft route creation.
+func DraftParentRowComponent(s *SectionView) *ui.SelectableRow {
+	draft := s.DraftRoute
+	if draft == nil {
+		draft = NewDraftRoute(s.Model.ID)
+	}
+	label := draft.ModelName()
+	if label == "" {
+		label = "draft"
+	}
+	return ui.NewSelectableRow(
+		"draft-parent",
+		label,
+		"incomplete",
+		"collapse ↵",
+		func() {
+			s.closeDraftRoute()
+		},
+	)
+}
+
+// DraftNameRowComponent mounts the editable row for draft route name input.
+func DraftNameRowComponent(s *SectionView) *ui.EditableRow {
+	draft := s.DraftRoute
+	if draft == nil {
+		draft = NewDraftRoute(s.Model.ID)
+	}
+	value := draft.Name
+	row := ui.NewEditableRow("draft-name", "name", value)
+	row.ViewAction = "create ↵"
+	row.EditAction = "create ↵"
+	row.OnSubmit = func(name string) {
+		s.createDraftRoute(name)
+	}
+	return row
+}
+
+func (s *SectionView) routeDeleteRowKey(route readmodel.RouteReadModel) string {
+	return "route-delete:" + string(s.Model.ID) + ":" + string(route.ID)
+}
+
+// RouteDeleteRowComponent mounts the route-level delete row inside the expanded
+// route capsule using the shared ui.ConfirmActionRow. It deletes the route
+// object and all its targets.
+func RouteDeleteRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.ConfirmActionRow {
+	modelName := route.ModelName
+	copy := ui.ConfirmActionCopy{
+		Label:           "delete",
+		IdleValue:       "model route",
+		IdleAction:      "delete ↵",
+		ConfirmValue:    "delete " + modelName + "?",
+		ConfirmAction:   "confirm ↵",
+		SubmittingValue: "deleting " + modelName + "…",
+		SubmittingHint:  "wait",
+		FailedValue:     "delete failed",
+		FailedAction:    "retry ↵",
+	}
+	return ui.NewConfirmActionRow(
+		s.routeDeleteRowKey(route),
+		copy,
+		func() error { return s.confirmDeleteRoute(route.ID) },
+	)
+}
+
+func (s *SectionView) routeDefaultRowKey(route readmodel.RouteReadModel) string {
+	return "route-default:" + string(s.Model.ID) + ":" + string(route.ID)
+}
+
+func RouteDefaultRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
+	action := "make default ↵"
+	value := "no"
+	if route.Default {
+		action = "current"
+		value = "yes"
+	}
+	return ui.NewSelectableRow(
+		s.routeDefaultRowKey(route),
+		"default",
+		value,
+		action,
+		func() { s.setRouteDefault(route.ID) },
+	)
 }
 
 func (s *SectionView) applyRouteSaved(previousID readmodel.RouteID, route readmodel.RouteReadModel) {
@@ -653,21 +580,64 @@ func (s *SectionView) applyRouteSaved(previousID readmodel.RouteID, route readmo
 }
 
 func (s *SectionView) applyRouteDeleted(routeID readmodel.RouteID) {
+	deletedIdx := -1
+	deletedDefault := false
 	next := make([]readmodel.RouteReadModel, 0, len(s.State.Routes))
-	for _, route := range s.State.Routes {
+	for i, route := range s.State.Routes {
 		if route.ID == routeID {
+			deletedIdx = i
+			deletedDefault = route.Default
 			continue
 		}
 		next = append(next, route)
 	}
 	s.State.Routes = next
+	if deletedDefault {
+		s.ensureDefaultAfterDeletion()
+	}
+	if deletedIdx >= 0 {
+		s.requestRouteDeleteFocus(deletedIdx)
+	}
 	if s.State.ExpandedRoute.Get() == routeID {
 		s.State.ExpandedRoute.Set("")
 	}
 	s.State.OpenTarget.Set("")
 	s.State.AddTargetRoute.Set("")
-	delete(s.TargetAddWorkflows, routeID)
-	delete(s.RouteDetailRows, routeID)
+	s.State.DeleteConfirmTarget.Set("")
+	s.TargetConfigs.DeleteRoute(routeID)
+}
+
+func (s *SectionView) ensureDefaultAfterDeletion() {
+	for _, route := range s.State.Routes {
+		if route.Default {
+			return
+		}
+	}
+	for _, route := range s.State.Routes {
+		if len(route.Targets) == 0 {
+			continue
+		}
+		s.markOnlyDefault(route.ID)
+		return
+	}
+}
+
+func (s *SectionView) requestRouteDeleteFocus(deletedIdx int) {
+	if s.State == nil {
+		return
+	}
+	if deletedIdx >= 0 && deletedIdx < len(s.State.Routes) {
+		s.State.FocusRoute.Set(s.State.Routes[deletedIdx].ID)
+		s.addRouteFocusPending = false
+		return
+	}
+	if deletedIdx-1 >= 0 && deletedIdx-1 < len(s.State.Routes) {
+		s.State.FocusRoute.Set(s.State.Routes[deletedIdx-1].ID)
+		s.addRouteFocusPending = false
+		return
+	}
+	s.State.FocusRoute.Set("")
+	s.RequestAddRouteFocus()
 }
 
 func (s *SectionView) applyTargetSaved(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
@@ -689,7 +659,24 @@ func (s *SectionView) applyTargetSaved(routeID readmodel.RouteID, target readmod
 		syncRouteSummary(&s.State.Routes[i])
 		s.State.OpenTarget.Set("")
 		s.State.AddTargetRoute.Set("")
+		s.TargetConfigs.DeleteEdit(route, target.ID)
 		return
+	}
+}
+
+func (s *SectionView) applyTargetUpdated(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
+	for i, route := range s.State.Routes {
+		if route.ID != routeID {
+			continue
+		}
+		for j, existing := range route.Targets {
+			if existing.ID != target.ID {
+				continue
+			}
+			s.State.Routes[i].Targets[j] = target
+			syncRouteSummary(&s.State.Routes[i])
+			return
+		}
 	}
 }
 
@@ -699,22 +686,33 @@ func (s *SectionView) applyTargetDeleted(routeID readmodel.RouteID, targetID rea
 			continue
 		}
 		next := make([]readmodel.TargetReadModel, 0, len(route.Targets))
+		removed := false
 		for _, target := range route.Targets {
 			if target.ID == targetID {
+				removed = true
 				continue
 			}
 			next = append(next, target)
 		}
+		if !removed {
+			return
+		}
+		if len(next) == 0 {
+			s.applyRouteDeleted(routeID)
+			return
+		}
 		s.State.Routes[i].Targets = next
+		renumberSteps(&s.State.Routes[i])
 		syncRouteSummary(&s.State.Routes[i])
 		s.State.OpenTarget.Set("")
+		s.State.DeleteConfirmTarget.Set("")
 		s.State.AddTargetRoute.Set("")
+		s.TargetConfigs.DeleteEdit(route, targetID)
 		return
 	}
 }
 
 // syncRouteSummary keeps the row status aligned with the current target slice.
-// Zero-target rows stay ordinary route rows; the draft row owns the create-only grammar.
 func syncRouteSummary(route *readmodel.RouteReadModel) {
 	route.State = routeStateFromTargets(route.Targets)
 }
@@ -756,9 +754,13 @@ func targetValue(target readmodel.TargetReadModel) string {
 // groupedTargets returns targets grouped by Rank, sorted by Rank ascending.
 // Each inner slice is one step.
 func groupedTargets(route readmodel.RouteReadModel) [][]readmodel.TargetReadModel {
+	targets := append([]readmodel.TargetReadModel(nil), route.Targets...)
+	sort.SliceStable(targets, func(i, j int) bool {
+		return targets[i].Rank < targets[j].Rank
+	})
 	order := make(map[int]int) // rank -> step index
 	var steps [][]readmodel.TargetReadModel
-	for _, t := range route.Targets {
+	for _, t := range targets {
 		idx, ok := order[t.Rank]
 		if !ok {
 			idx = len(steps)
@@ -768,10 +770,6 @@ func groupedTargets(route readmodel.RouteReadModel) [][]readmodel.TargetReadMode
 		steps[idx] = append(steps[idx], t)
 	}
 	return steps
-}
-
-func contractRowValue(route readmodel.RouteReadModel) string {
-	return "model = " + route.ModelName
 }
 
 func stepHeaderText(stepNum int, balanced bool) string {
@@ -799,13 +797,24 @@ func addRouteMountKey() string { return "add-route" }
 
 // RouteRowComponent mounts a selectable route disclosure row.
 func RouteRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
-	return ui.NewSelectableRow(
+	row := ui.NewSelectableRow(
 		routeMountKey(route),
 		route.ModelName,
 		route.RowValue(),
 		routeActionLabel(s.isExpanded(route)),
 		func() { s.toggleRoute(route) },
 	)
+	if s.State != nil && s.State.FocusRoute != nil && s.State.FocusRoute.Get() == route.ID {
+		row.AutoFocus = true
+	}
+	if row.AutoFocus && row.IsFocused() && s.State != nil && s.State.FocusRoute != nil {
+		s.State.FocusRoute.Set("")
+		row.AutoFocus = false
+	}
+	if s.isExpanded(route) {
+		row.OnEscape = func() { s.State.ExpandedRoute.Set("") }
+	}
+	return row
 }
 
 // TargetRowComponent mounts a selectable target row indented as a route child.
@@ -816,13 +825,17 @@ func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target r
 	if len(stepTargets) > 1 {
 		value = value + " · " + sharePercent(target, stepTargets) + "%"
 	}
-	return ui.NewSelectableRow(
+	row := ui.NewSelectableRow(
 		targetMountKey(route, target),
-		value,
 		"",
+		value,
 		"edit ↵",
 		func() { s.openTarget(target) },
 	)
+	if s.State.OpenTarget.Get() == target.ID {
+		row.OnEscape = func() { s.State.OpenTarget.Set("") }
+	}
+	return row
 }
 
 // targetsAtRank returns all targets sharing the same rank.
@@ -899,143 +912,10 @@ func AddRouteRowComponent(s *SectionView) *ui.SelectableRow {
 	return row
 }
 
-// SectionDraftRouteRow mounts the inline draft route input row.
-func SectionDraftRouteRow(s *SectionView) *SectionDraftRouteRowView {
-	return &SectionDraftRouteRowView{
-		ModelName: s.RouteDraft.ModelName,
-		Submit:    s.createDraftRouteFromInput,
-	}
-}
-
-// migrateTargetStringRows re-keys cached string rows when the workspace ID
-// changes.
-func migrateTargetStringRows(rows map[string]*TargetStringRow, oldID, newID readmodel.WorkspaceID) map[string]*TargetStringRow {
-	if len(rows) == 0 {
-		return rows
-	}
-	next := make(map[string]*TargetStringRow, len(rows))
-	oldPrefix := "target-string:" + string(oldID) + ":"
-	newPrefix := "target-string:" + string(newID) + ":"
-	for key, row := range rows {
-		if strings.HasPrefix(key, oldPrefix) {
-			key = newPrefix + strings.TrimPrefix(key, oldPrefix)
-		}
-		next[key] = row
-	}
-	return next
-}
-
-// TargetStringRow helpers ---------------------------------------------------
-
-func (s *SectionView) targetStringRowKey(route readmodel.RouteReadModel, target readmodel.TargetReadModel) string {
-	return "target-string:" + string(s.Model.ID) + ":" + string(route.ID) + ":" + string(target.ID)
-}
-
-// TargetStringRowComponent returns the cached or newly created
-// TargetStringRow for a target. The row is cached by
-// workspace:route:target so its editing state survives re-renders.
-func TargetStringRowComponent(s *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel) *TargetStringRow {
-	return s.targetStringRow(route, target)
-}
-
-func (s *SectionView) targetStringRow(route readmodel.RouteReadModel, target readmodel.TargetReadModel) *TargetStringRow {
-	key := s.targetStringRowKey(route, target)
-	row := s.TargetStringRows[key]
-	if row == nil {
-		row = NewTargetStringRow(
-			targetMountKey(route, target),
-			targetLabel(route, target),
-			FormatTarget(target.Provider, target.Model),
-			func(raw string) {
-				s.submitTargetEdit(route.ID, target.ID, raw)
-			},
-			func() {
-				s.confirmDeleteTarget(target.ID)
-			},
-		)
-		s.TargetStringRows[key] = row
-	}
-	row.SetSaved(FormatTarget(target.Provider, target.Model))
-	row.Label = targetLabel(route, target)
-	return row
-}
-
-// submitTargetEdit validates the raw string, builds a request that preserves
-// all existing target fields, and calls the port.
-func (s *SectionView) submitTargetEdit(routeID readmodel.RouteID, targetID readmodel.TargetID, raw string) {
-	provider, model, err := ParseTarget(raw)
-	if err != nil {
-		s.setTargetStringError(routeID, targetID, err)
-		return
-	}
-
-	var existing readmodel.TargetReadModel
-	found := false
-	for _, route := range s.State.Routes {
-		if route.ID != routeID {
-			continue
-		}
-		for _, t := range route.Targets {
-			if t.ID == targetID {
-				existing = t
-				found = true
-				break
-			}
-		}
-		break
-	}
-	if !found {
-		s.State.OpenTarget.Set("")
-		return
-	}
-
-	if s.SaveTarget == nil {
-		s.setTargetStringError(routeID, targetID, errTargetSaveNotWired)
-		return
-	}
-
-	req := ports.SaveTargetRequest{
-		WorkspaceID:      s.Model.ID,
-		RouteID:          routeID,
-		TargetID:         targetID,
-		Name:             existing.Name,
-		Provider:         provider,
-		Model:            model,
-		ProviderProtocol: existing.ProviderProtocol,
-		BaseURL:          existing.BaseURL,
-		CredentialRef:    existing.CredentialRef,
-		Rank:             existing.Rank,
-		Weight:           existing.Weight,
-	}
-
-	saved, err := s.SaveTarget(context.Background(), req)
-	if err != nil {
-		s.setTargetStringError(routeID, targetID, err)
-		return
-	}
-
-	s.closeTargetStringRow(routeID, targetID)
-	s.saveTarget(routeID, saved)
-}
-
-func (s *SectionView) closeTargetStringRow(routeID readmodel.RouteID, targetID readmodel.TargetID) {
-	key := "target-string:" + string(s.Model.ID) + ":" + string(routeID) + ":" + string(targetID)
-	if row := s.TargetStringRows[key]; row != nil {
-		row.Close()
-	}
-}
-
-func (s *SectionView) setTargetStringError(routeID readmodel.RouteID, targetID readmodel.TargetID, err error) {
-	if err == nil {
-		return
-	}
-	key := "target-string:" + string(s.Model.ID) + ":" + string(routeID) + ":" + string(targetID)
-	if row := s.TargetStringRows[key]; row != nil {
-		row.errorText.Set(err.Error())
-	}
-}
-
-var errTargetSaveNotWired = errStr("target save is not wired")
+var (
+	errTargetSaveNotWired   = errStr("target save is not wired")
+	errTargetDeleteNotWired = errStr("target delete is not wired")
+)
 
 type errStr string
 

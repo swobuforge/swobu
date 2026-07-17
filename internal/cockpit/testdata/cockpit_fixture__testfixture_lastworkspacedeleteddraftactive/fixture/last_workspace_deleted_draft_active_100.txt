@@ -2,7 +2,7 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 new workspace
    > slug              _                                                              required
-   enter a workspace slug
+                       enter a workspace slug
      endpoint          after create
 
 

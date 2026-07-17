@@ -4,43 +4,15 @@ import "testing"
 
 func TestProviderOptionReadModel_FieldAccess(t *testing.T) {
 	o := ProviderOptionReadModel{
-		ProviderSpec:   "openai",
-		DisplayName:    "OpenAI",
-		SetupHint:      "openai",
-		DefaultBaseURL: "https://api.openai.com/v1",
+		ProviderSpec: "openai",
+		DisplayName:  "OpenAI",
+		SetupHint:    "openai",
 	}
 	if o.ProviderSpec != "openai" {
 		t.Fatalf("ProviderSpec = %q", o.ProviderSpec)
 	}
 	if o.DisplayName != "OpenAI" {
 		t.Fatalf("DisplayName = %q", o.DisplayName)
-	}
-}
-
-func TestProviderSetupReadModel_ReadyForCatalog(t *testing.T) {
-	// Ollama: no credential required, ready immediately.
-	ollama := ProviderSetupReadModel{
-		ProviderSpec:       "ollama",
-		CredentialRequired: false,
-		ReadyForCatalog:    true,
-	}
-	if !ollama.ReadyForCatalog {
-		t.Fatal("ollama should be ready for catalog")
-	}
-
-	// OpenAI: credential required but not resolved yet.
-	openai := ProviderSetupReadModel{
-		ProviderSpec:       "openai",
-		CredentialRequired: true,
-		CredentialRef:      "",
-		ReadyForCatalog:    false,
-		BlockReason:        "missing OPENAI_API_KEY",
-	}
-	if openai.ReadyForCatalog {
-		t.Fatal("openai without credential should not be ready")
-	}
-	if openai.BlockReason == "" {
-		t.Fatal("openai should report a block reason")
 	}
 }
 

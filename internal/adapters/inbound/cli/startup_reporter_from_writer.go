@@ -12,8 +12,23 @@ type writerStartupReporter struct {
 	out io.Writer
 }
 
+type startupReporterWithoutSplash struct {
+	next daemonlifecycle.StartupReporter
+}
+
 func startupReporterFromWriter(out io.Writer) daemonlifecycle.StartupReporter {
 	return writerStartupReporter{out: out}
+}
+
+func withoutStartupSplash(next daemonlifecycle.StartupReporter) daemonlifecycle.StartupReporter {
+	return startupReporterWithoutSplash{next: next}
+}
+
+func (r startupReporterWithoutSplash) Report(event daemonlifecycle.StartupEvent) {
+	if event.Kind == daemonlifecycle.StartupEventSplash || r.next == nil {
+		return
+	}
+	r.next.Report(event)
 }
 
 func (r writerStartupReporter) Report(event daemonlifecycle.StartupEvent) {
@@ -25,13 +40,13 @@ func (r writerStartupReporter) Report(event daemonlifecycle.StartupEvent) {
 	case daemonlifecycle.StartupEventSplash:
 		writeRawLines(r.out, splashLines())
 	case daemonlifecycle.StartupEventDaemonNotReachable:
-		_, _ = fmt.Fprintf(r.out, "checking: daemon not reachable at %s\n", event.DaemonURL)
+		writeStartupLine(r.out, "checking: daemon not reachable at "+event.DaemonURL)
 	case daemonlifecycle.StartupEventStartingDaemon:
-		_, _ = io.WriteString(r.out, "starting: starting daemon\n")
+		writeStartupLine(r.out, "starting: starting daemon")
 	case daemonlifecycle.StartupEventWaitingReadiness:
-		_, _ = io.WriteString(r.out, "waiting: waiting for daemon readiness\n")
+		writeStartupLine(r.out, "waiting: waiting for daemon readiness")
 	case daemonlifecycle.StartupEventDaemonReady:
-		_, _ = fmt.Fprintf(r.out, "ready: daemon ready (%s)\n", event.State)
+		writeStartupLine(r.out, fmt.Sprintf("ready: daemon ready (%s)", event.State))
 	case daemonlifecycle.StartupEventStartupFailed:
 		writeNoticeBlock(r.out, "startup failed", noticeRows(event.Text, event.NextAction))
 	case daemonlifecycle.StartupEventStartupTimedOut:
@@ -43,13 +58,13 @@ func writeNoticeBlock(out io.Writer, title string, rows []string) {
 	if out == nil {
 		return
 	}
-	_, _ = fmt.Fprintf(out, "╭─ %s \n", title)
+	writeStartupLine(out, fmt.Sprintf("╭─ %s ", title))
 	for _, row := range rows {
 		trimmed := strings.TrimSpace(row) // swobu:io-string source=boundary
 		if trimmed == "" {
 			continue
 		}
-		_, _ = fmt.Fprintln(out, trimmed)
+		writeStartupLine(out, trimmed)
 	}
 }
 
@@ -62,7 +77,7 @@ func writePlainLines(out io.Writer, rows []string) {
 		if trimmed == "" {
 			continue
 		}
-		_, _ = fmt.Fprintln(out, trimmed)
+		writeStartupLine(out, trimmed)
 	}
 }
 
@@ -71,8 +86,15 @@ func writeRawLines(out io.Writer, rows []string) {
 		return
 	}
 	for _, row := range rows {
-		_, _ = fmt.Fprintln(out, row)
+		writeStartupLine(out, row)
 	}
+}
+
+func writeStartupLine(out io.Writer, line string) {
+	if out == nil {
+		return
+	}
+	_, _ = io.WriteString(out, line+"\r\n")
 }
 
 func noticeRows(text string, nextActions []string) []string {

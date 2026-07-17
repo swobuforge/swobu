@@ -4,15 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/profile"
 )
 
 // routesFromEndpoint projects daemon provider configs into Cockpit route rows.
@@ -105,6 +104,8 @@ func targetFromProviderConfig(config operatorclient.ProviderConfigData) readmode
 		Model:            config.ModelID,
 		ProviderProtocol: config.ProviderProtocol,
 		BaseURL:          config.BaseURL,
+		AuthMode:         config.AuthMode,
+		AuthHeader:       config.AuthHeader,
 		CredentialRef:    config.CredentialRef,
 		Rank:             targetRank(config),
 		Weight:           targetWeight(config),
@@ -112,51 +113,36 @@ func targetFromProviderConfig(config operatorclient.ProviderConfigData) readmode
 }
 
 func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID string) (operatorclient.ProviderConfigData, error) {
-	if request.Rank < 1 {
-		return operatorclient.ProviderConfigData{}, fmt.Errorf("target rank must be at least 1")
+	ref, err := endpointintent.ParseProviderConfigRef(targetID)
+	if err != nil {
+		return operatorclient.ProviderConfigData{}, err
 	}
-	if request.Weight < 1 {
-		return operatorclient.ProviderConfigData{}, fmt.Errorf("target weight must be at least 1")
+	draft := request.Draft
+	if strings.TrimSpace(draft.RouteModelID) == "" {
+		draft.RouteModelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
 	}
-	modelID := strings.TrimSpace(request.Model) // swobu:io-string source=boundary
-	if modelID == "" {
-		modelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
+	if strings.TrimSpace(draft.ModelID) == "" {
+		draft.ModelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
 	}
-	protocol := strings.TrimSpace(request.ProviderProtocol)
-	if protocol == "" {
-		protocol = defaultProtocolForProvider(strings.TrimSpace(request.Provider))
-	}
-	if protocol != "" && !validProtocol(strings.TrimSpace(request.Provider), protocol) {
-		return operatorclient.ProviderConfigData{}, fmt.Errorf("provider protocol %q is unsupported for provider %q", protocol, request.Provider)
+	config, err := endpointintent.NewProviderConfigFromTargetDraft(ref, draft)
+	if err != nil {
+		return operatorclient.ProviderConfigData{}, err
 	}
 
 	return operatorclient.ProviderConfigData{
-		Ref:              targetID,
-		ProviderSpec:     strings.TrimSpace(request.Provider),      // swobu:io-string source=boundary
-		BaseURL:          strings.TrimSpace(request.BaseURL),       // swobu:io-string source=boundary
-		CredentialRef:    strings.TrimSpace(request.CredentialRef), // swobu:io-string source=boundary
-		RouteModelID:     strings.TrimSpace(string(request.RouteID)), // swobu:io-string source=boundary
-		ModelID:          modelID,
-		ProviderProtocol: protocol,
-		TargetAlias:      strings.TrimSpace(request.Name), // swobu:io-string source=boundary
-		TargetRank:       request.Rank,
-		TargetWeight:     request.Weight,
+		Ref:              config.Ref().String(),
+		ProviderSpec:     config.ProviderSpec().String(),
+		BaseURL:          config.BaseURL(),
+		AuthMode:         config.AuthMode(),
+		AuthHeader:       config.AuthHeader(),
+		CredentialRef:    config.CredentialRef(),
+		RouteModelID:     config.RouteModelID(),
+		ModelID:          config.ModelID(),
+		ProviderProtocol: config.ProviderProtocol(),
+		TargetAlias:      "",
+		TargetRank:       config.TargetRank(),
+		TargetWeight:     config.TargetWeight(),
 	}, nil
-}
-
-func validProtocol(spec, protocol string) bool {
-	if protocol == "" {
-		return true
-	}
-	return profile.SupportsProviderProtocolForSpec(spec, protocol)
-}
-
-func defaultProtocolForProvider(spec string) string {
-	protocol, ok := profile.ResolveConcreteProtocolForAutoAtBoundary(spec)
-	if !ok {
-		return ""
-	}
-	return protocol
 }
 
 // targetMatchesRoute reports whether a provider config belongs to the given

@@ -1,17 +1,17 @@
 ⛉ SWOBU                                                                                            [dev] [lab] [+] [› ?]
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  help
+help
 
-     version           swobu dev · cockpit v2 · commit unavailable
-
-   > docs              swobu.com/docs                                                                     open ↵
-     community         Discord                                                                            open ↵
-     issue             GitHub issue                                                                       open ↵
-     diagnostics       copy report context                                                                copy ↵
-
+> version           swobu dev
+  community         Discord                                                                               open ↵
+  issue             GitHub issue                                                                          open ↵
+  diagnostics       copy report context                                                                   copy ↵
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
+
+
+
 
 
 

@@ -1,0 +1,40 @@
+  new target · ChatGPT                                                                                    cancel ↵      
+     provider          ChatGPT                                                                            change ↵      
+     auth              browser login                                                                      pending       
+     open              https://auth.openai.com/device                                                     open ↵        
+     code              ABCD-1234                                                                          copy ↵        
+   > status            waiting for login                                                                  refresh ↵     
+     cancel                                                                                               cancel ↵      
+     model             blocked                                                                            auth first    
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

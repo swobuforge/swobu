@@ -45,6 +45,8 @@ type AuthModeSpec struct {
 	Kind        AuthKind
 	Requirement AuthModeRequirement
 	Interactive bool
+	Label       string
+	Keywords    []string
 }
 
 type Capability string
@@ -63,6 +65,22 @@ const (
 	CapabilityStreaming    Capability = "streaming"
 )
 
+type ProviderEndpointKind string
+
+const (
+	EndpointDefaultHTTPBaseURL   ProviderEndpointKind = "default_http_base_url"
+	EndpointRequiredHTTPBaseURL  ProviderEndpointKind = "required_http_base_url"
+	EndpointAzureResourceLocator ProviderEndpointKind = "azure_resource_locator"
+)
+
+// EndpointSpec declares the executable endpoint fact a provider needs before a
+// durable target can be finalized.
+type EndpointSpec struct {
+	Kind       ProviderEndpointKind
+	DefaultURL string
+	Label      string
+}
+
 // Profile is one canonical provider declaration.
 //
 // Add/remove/evolve provider specs in this catalog only.
@@ -70,10 +88,10 @@ type Profile struct {
 	ProviderID          ProviderID
 	ProviderDisplayName string
 	SetupHint           string
-	// SetupFields names the operator-facing fields that the add-target picker
-	// should surface for this provider.
-	SetupFields             []string
-	DefaultBaseURL          string
+	// SetupKeywords are search/copy hints only. Endpoint owns connection
+	// semantics; these keywords must not drive setup behavior.
+	SetupKeywords           []string
+	Endpoint                EndpointSpec
 	DefaultCredentialEnvVar string
 	DefaultAuthHeader       string
 	VisibleInOperatorUI     bool
@@ -161,6 +179,44 @@ func SupportsAuthMode(spec string, mode AuthMode) bool {
 	return false
 }
 
+func AuthModeSpecForProvider(spec string, mode AuthMode) (AuthModeSpec, bool) {
+	for _, supported := range AllowedAuthModesForSpec(spec) {
+		if supported.Mode == mode {
+			return supported, true
+		}
+	}
+	return AuthModeSpec{}, false
+}
+
+func AuthModeRequiresCredentialForSpec(spec string, mode AuthMode, baseURL string) (bool, bool) {
+	supported, ok := AuthModeSpecForProvider(spec, mode)
+	if !ok {
+		return true, false
+	}
+	return requiresCredentialFromModes([]AuthModeSpec{supported}, baseURL), true
+}
+
+func AuthModeDisplayLabel(mode AuthMode) string {
+	switch mode {
+	case AuthModeEnv:
+		return "env credential"
+	case AuthModeFile:
+		return "file credential"
+	case AuthModeKeychain:
+		return "keychain credential"
+	case AuthModeAWSProfile:
+		return "AWS profile"
+	case AuthModeAWSEnvSession:
+		return "AWS env"
+	case AuthModeChatGPTLogin:
+		return "browser login"
+	case AuthModeChatGPTDeviceAuth:
+		return "device auth"
+	default:
+		return strings.TrimSpace(string(mode))
+	}
+}
+
 func IsInteractiveAuthMode(mode AuthMode) bool {
 	switch mode {
 	case AuthModeChatGPTLogin, AuthModeChatGPTDeviceAuth:
@@ -188,7 +244,26 @@ func DefaultExecuteBaseURL(spec string) string {
 	if !ok {
 		return ""
 	}
-	return profile.DefaultBaseURL
+	if profile.Endpoint.Kind != EndpointDefaultHTTPBaseURL {
+		return ""
+	}
+	return profile.Endpoint.DefaultURL
+}
+
+func EndpointSpecForProvider(spec string) (EndpointSpec, bool) {
+	profile, ok := profileFor(spec)
+	if !ok {
+		return EndpointSpec{}, false
+	}
+	return profile.Endpoint, true
+}
+
+func RequiresExplicitEndpoint(spec string) bool {
+	endpoint, ok := EndpointSpecForProvider(spec)
+	if !ok {
+		return false
+	}
+	return endpoint.Kind == EndpointRequiredHTTPBaseURL || endpoint.Kind == EndpointAzureResourceLocator
 }
 
 // DefaultEnvKeyForSpec returns the canonical environment variable name for a

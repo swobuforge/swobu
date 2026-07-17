@@ -10,26 +10,27 @@ import (
 	workspace_page "github.com/swobuforge/swobu/internal/cockpit/pages/workspace"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 const cockpitRefreshTimeout = 5 * time.Second
 
 // Cockpit composes the operator shell, active page, and static global frame.
 //
-// It owns shell composition and selected top-level readmodel data. It does not
-// own feature drafts, submit lifecycle, route mutation, target mutation, run
-// execution, or model refresh policy.
+// It owns shell composition, body viewport clipping, and selected top-level
+// readmodel data. It does not own feature drafts, submit lifecycle, route
+// mutation, target mutation, run execution, or model refresh policy.
 type Cockpit struct {
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]
 	RefreshNotice  *tui.State[readmodel.Notice]
+	BodyViewport   *ui.Viewport
 	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
 	HelpPage       *help_page.PageView
 	Context        context.Context
 	WorkspacePorts ports.WorkspaceCommands
 	WorkspaceQuery ports.WorkspaceQueries
-	HelpActions    ports.HelpActions
 }
 
 // NewCockpit constructs the root shell from an already-loaded readmodel.
@@ -42,17 +43,16 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 		ctx = context.Background()
 	}
 	activeTab := selectedTabIndex(model.Tabs)
-	helpActions, _ := any(commands).(ports.HelpActions)
 	cockpit := &Cockpit{
 		Model:           model,
 		ActiveTabIndex:  tui.NewState(activeTab),
 		RefreshNotice:   tui.NewState(readmodel.Notice{}),
+		BodyViewport:    &ui.Viewport{Ref: tui.NewRef(), ScrollY: tui.NewState(0), FollowFocused: true, MarginRows: 2},
 		Reloader:        NewModelReloader(ctx, query, cockpitRefreshTimeout),
-		HelpPage:        help_page.ViewWithContext(model.Help, ctx, helpActions),
+		HelpPage:        help_page.View(model.Help),
 		Context:         ctx,
 		WorkspacePorts:  commands,
 		WorkspaceQuery:  query,
-		HelpActions:     helpActions,
 	}
 	cockpit.WorkspacePages = cockpit.workspacePagesByTab(model)
 	return cockpit
@@ -63,6 +63,8 @@ func (c *Cockpit) KeyMap() tui.KeyMap {
 		tui.OnPreemptStop(tui.KeyTab, c.activateNextTab),
 		tui.OnPreemptStop(tui.KeyTab.Shift(), c.activatePreviousTab),
 		tui.OnStop(tui.KeyF1, c.activateHelpTab),
+		tui.OnStop(tui.KeyPageUp, func(event tui.KeyEvent) { c.BodyViewport.Page(-1) }),
+		tui.OnStop(tui.KeyPageDown, func(event tui.KeyEvent) { c.BodyViewport.Page(1) }),
 	}
 }
 
@@ -81,6 +83,11 @@ func (c *Cockpit) activateHelpTab(event tui.KeyEvent) {
 	if index, ok := helpTabIndex(c.Model.Tabs); ok {
 		c.activateTab(index)
 	}
+}
+
+func (c *Cockpit) BindApp(app *tui.App) {
+	c.bindAppFields(app)
+	c.BodyViewport.BindApp(app)
 }
 
 func (c *Cockpit) currentWorkspacePage() *workspace_page.PageView {
@@ -103,6 +110,7 @@ func (c *Cockpit) activateTab(index int) {
 	}
 	index = wrapTabIndex(index, len(c.Model.Tabs))
 	c.ActiveTabIndex.Set(index)
+	c.BodyViewport.Reset()
 }
 
 func (c *Cockpit) activeTabIndex() int {
@@ -188,11 +196,12 @@ func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel, preserveDraftPa
 	previousPages := c.WorkspacePages
 	c.Model = model
 	c.ActiveTabIndex.Set(activeTab)
+	c.BodyViewport.Reset()
 	c.WorkspacePages = c.workspacePagesByTab(model)
 	if preserveDraftPages {
 		c.preserveDraftWorkspacePages(previousPages, model)
 	}
-	c.HelpPage = help_page.ViewWithContext(model.Help, c.Context, c.HelpActions)
+	c.HelpPage = help_page.View(model.Help)
 }
 
 // preserveDraftWorkspacePages carries unsaved [+] workflow state across a
@@ -242,13 +251,7 @@ templ (c *Cockpit) Render() {
 			@RefreshNotice(c.RefreshNotice.Get())
 		}
 		<hr />
-		if c.activeModel().ActivePage == readmodel.CockpitHelpPage {
-			@ActiveHelpPage(c)
-		} else if c.activeModel().ActivePage == readmodel.CockpitWorkspacePage {
-			<div key={activeWorkspaceMountKey(c.activeModel())} class="w-full">
-				@ActiveWorkspacePage(c, c.activeModel())
-			</div>
-		}
+		@CockpitBodyViewport(c)
 		<hr />
 		@ShellFooter(c.activeModel())
 	</div>
@@ -331,6 +334,7 @@ func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspa
 		targetAuthCommandsPort(c.WorkspacePorts),
 		c.Context,
 		activityQueryPort(c.WorkspaceQuery),
+		targetCredentialCommandsPort(c.WorkspacePorts),
 	)
 	page.OnWorkspaceSaved = c.refreshAfterWorkspaceSave
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
@@ -355,6 +359,16 @@ func targetAuthCommandsPort(commands ports.WorkspaceCommands) ports.TargetAuthCo
 	}
 	if authCommands, ok := any(commands).(ports.TargetAuthCommands); ok {
 		return authCommands
+	}
+	return nil
+}
+
+func targetCredentialCommandsPort(commands ports.WorkspaceCommands) ports.TargetCredentialCommands {
+	if commands == nil {
+		return nil
+	}
+	if credentialCommands, ok := any(commands).(ports.TargetCredentialCommands); ok {
+		return credentialCommands
 	}
 	return nil
 }

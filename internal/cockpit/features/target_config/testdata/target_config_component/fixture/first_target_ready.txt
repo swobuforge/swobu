@@ -1,0 +1,24 @@
+  new target · OpenAI                                                                                     cancel ↵      
+     provider          OpenAI                                                                             change ↵      
+     credential        env:OPENAI_API_KEY                                                                 change ↵      
+     model             gpt-4.1                                                                            change ↵      
+     protocol          chat_completions                                                                   default       
+     routing           step 1                                                                                           
+   > create                                                                                               create ↵      
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

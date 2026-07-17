@@ -195,6 +195,29 @@ func (c *Client) Status(ctx context.Context, scope string) (StatusProjection, er
 	return projection, nil
 }
 
+// DaemonVersion returns the daemon's version from the /_swobu/status endpoint.
+func (c *Client) DaemonVersion(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/status", nil)
+	if err != nil {
+		return "", fmt.Errorf("operator client: status request could not be built")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("operator client: status is unavailable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", errorFromResponse(resp, "operator client: status failed")
+	}
+	var payload struct {
+		SwobuVersion string `json:"swobu_version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("operator client: status could not be decoded")
+	}
+	return strings.TrimSpace(payload.SwobuVersion), nil
+}
+
 func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endpointRef string, authMode string) (AuthSessionStartResult, error) {
 	body, err := json.Marshal(map[string]string{
 		"provider_spec": strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
@@ -330,12 +353,13 @@ func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSe
 	}, nil
 }
 
-func (c *Client) ProbeModelCatalog(ctx context.Context, providerSpec, baseURL, authHeader, credentialRef, providerProtocol string) (ModelCatalogResult, error) {
+func (c *Client) ProbeModelCatalog(ctx context.Context, providerSpec, baseURL, authHeader, credentialRef, authMode, providerProtocol string) (ModelCatalogResult, error) {
 	q := make(url.Values)
-	q.Set("provider_spec", strings.TrimSpace(providerSpec))       // swobu:io-string source=boundary
-	q.Set("base_url", strings.TrimSpace(baseURL))                 // swobu:io-string source=boundary
-	q.Set("auth_header", strings.TrimSpace(authHeader))           // swobu:io-string source=boundary
-	q.Set("credential_ref", strings.TrimSpace(credentialRef))     // swobu:io-string source=boundary
+	q.Set("provider_spec", strings.TrimSpace(providerSpec))         // swobu:io-string source=boundary
+	q.Set("base_url", strings.TrimSpace(baseURL))                   // swobu:io-string source=boundary
+	q.Set("auth_header", strings.TrimSpace(authHeader))             // swobu:io-string source=boundary
+	q.Set("credential_ref", strings.TrimSpace(credentialRef))       // swobu:io-string source=boundary
+	q.Set("auth_mode", strings.TrimSpace(authMode))                 // swobu:io-string source=boundary
 	q.Set("provider_protocol", strings.TrimSpace(providerProtocol)) // swobu:io-string source=boundary
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/model-catalog?"+q.Encode(), nil)
