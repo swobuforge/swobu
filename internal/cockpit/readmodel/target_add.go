@@ -18,7 +18,32 @@ type ProviderOptionReadModel struct {
 type ModelCatalogReadModel struct {
 	Deployments              []ModelDeploymentReadModel
 	ResolvedProviderProtocol string
-	Error                    string
+	BedrockAuthentication    BedrockAuthenticationEvidence
+}
+
+// BedrockAuthenticationKind is the closed Cockpit read-model vocabulary for
+// authentication evidence decoded at the operator adapter boundary.
+type BedrockAuthenticationKind string
+
+const (
+	BedrockAuthenticationExplicitAPIKey BedrockAuthenticationKind = "explicit_api_key"
+	BedrockAuthenticationAWSIdentity    BedrockAuthenticationKind = "aws_identity"
+)
+
+// BedrockAuthenticationEvidence is typed provider evidence consumed by the
+// Cockpit feature; GSX never parses transport JSON.
+type BedrockAuthenticationEvidence struct {
+	Authentication BedrockAuthenticationKind `json:"authentication"`
+	FailureStage   string                    `json:"failure_stage,omitempty"`
+	Error          string                    `json:"error,omitempty"`
+	AWSIdentity    *AWSIdentityReadModel     `json:"aws_identity,omitempty"`
+}
+
+type AWSIdentityReadModel struct {
+	State   string
+	Account string
+	ARN     string
+	Error   string
 }
 
 // ModelDeploymentReadModel is one selectable model option from a catalog probe.
@@ -68,9 +93,9 @@ func (p PlacementOptionReadModel) Summary() string {
 	}
 	switch p.Kind {
 	case PlacementFallback:
-		return "new fallback tier"
+		return "fallback after current steps"
 	case PlacementBalance:
-		return fmt.Sprintf("same tier as %s", p.PeerTargetID)
+		return fmt.Sprintf("balance with %s", p.PeerTargetID)
 	default:
 		return p.Label
 	}

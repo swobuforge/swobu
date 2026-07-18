@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,10 +29,10 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 		baseURL,
 		credentialRef,
 		kind,
+
 		"",
-		"",
-		string(kind),
-	)
+		string(kind))
+
 }
 
 func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) exchange.ProviderRequest {
@@ -60,6 +59,17 @@ func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind
 
 type recordingEffectSink struct {
 	effects []effect.Effect
+}
+
+type testCredentialProvider struct {
+	token string
+}
+
+func (p testCredentialProvider) ResolveCredential(context.Context, string, string) (string, error) {
+	if p.token != "" {
+		return p.token, nil
+	}
+	return "test-token", nil
 }
 
 func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
@@ -114,289 +124,9 @@ func TestValidateBedrockMantleEndpoint_AcceptsMantleAndLocalHosts(t *testing.T) 
 	}
 }
 
-func TestBedrockSigningRegion_FromEnv(t *testing.T) {
-	t.Setenv("AWS_REGION", "us-west-2")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-
-	u, _ := url.Parse("https://bedrock-mantle.eu-central-1.api.aws/openai/v1")
-	got, err := bedrockSigningRegion(context.Background(), u, "")
-	if err != nil {
-		t.Fatalf("bedrockSigningRegion error: %v", err)
-	}
-	if got != "us-west-2" {
-		t.Fatalf("bedrockSigningRegion=%q want us-west-2", got)
-	}
-}
-
-func TestBedrockSigningRegion_FromHost(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-
-	u, _ := url.Parse("https://bedrock-mantle.eu-central-1.api.aws/openai/v1")
-	got, err := bedrockSigningRegion(context.Background(), u, "")
-	if err != nil {
-		t.Fatalf("bedrockSigningRegion error: %v", err)
-	}
-	if got != "eu-central-1" {
-		t.Fatalf("bedrockSigningRegion=%q want eu-central-1", got)
-	}
-}
-
-func TestBedrockSigningRegion_RejectsUnknownHostWithoutEnv(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "missing-config"))
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "missing-credentials"))
-	t.Setenv("AWS_PROFILE", "swobu-bedrock-missing")
-
-	u, _ := url.Parse("https://example.test/openai/v1")
-	_, err := bedrockSigningRegion(context.Background(), u, "")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestBedrockSigningRegion_FromSDKProfileConfig(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	tmp := t.TempDir()
-	configPath := filepath.Join(tmp, "config")
-	contents := "[profile swobu-bedrock-test]\nregion = eu-west-2\n"
-	if err := os.WriteFile(configPath, []byte(contents), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	t.Setenv("AWS_CONFIG_FILE", configPath)
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(tmp, "credentials"))
-
-	u, _ := url.Parse("https://example.test/openai/v1")
-	got, err := bedrockSigningRegion(context.Background(), u, "swobu-bedrock-test")
-	if err != nil {
-		t.Fatalf("bedrockSigningRegion error: %v", err)
-	}
-	if got != "eu-west-2" {
-		t.Fatalf("bedrockSigningRegion=%q want eu-west-2", got)
-	}
-}
-
-func TestApplyBedrockAuth_ProfileRefWithExplicitRegionUsesSigV4(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-
-	tmp := t.TempDir()
-	awsDir := filepath.Join(tmp, ".aws")
-	if err := os.MkdirAll(awsDir, 0o755); err != nil {
-		t.Fatalf("mkdir ~/.aws: %v", err)
-	}
-	configPath := filepath.Join(awsDir, "config")
-	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = us-east-1\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	credPath := filepath.Join(awsDir, "credentials")
-	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
-		t.Fatalf("write credentials: %v", err)
-	}
-	t.Setenv("HOME", tmp)
-	t.Setenv("AWS_CONFIG_FILE", configPath)
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath)
-
-	req, err := http.NewRequest(http.MethodPost, "https://example.test/v1/responses", strings.NewReader(`{"inputText":"ping"}`))
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	if err := applyBedrockAuth(context.Background(), "", "profile:swobu-bedrock@eu-west-2", req, []byte(`{"inputText":"ping"}`)); err != nil {
-		t.Fatalf("applyBedrockAuth error: %v", err)
-	}
-	auth := req.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "AWS4-HMAC-SHA256 ") {
-		t.Fatalf("authorization=%q want SigV4 header", auth)
-	}
-	if !strings.Contains(auth, "/eu-west-2/bedrock/aws4_request") {
-		t.Fatalf("authorization=%q want eu-west-2 signing scope", auth)
-	}
-}
-
-func TestParseBedrockAuthMode_DefaultsToAWSProfile(t *testing.T) {
-	t.Parallel()
-
-	mode, value := parseBedrockAuthMode("", "")
-	if mode != "aws_profile" || value != "" {
-		t.Fatalf("mode=%q value=%q", mode, value)
-	}
-}
-
-func TestParseBedrockAuthMode_ProfileRef(t *testing.T) {
-	t.Parallel()
-
-	mode, value := parseBedrockAuthMode("", "profile:work-prod")
-	if mode != "aws_profile" || value != "work-prod" {
-		t.Fatalf("mode=%q value=%q", mode, value)
-	}
-}
-
-func TestParseBedrockAuthMode_ExplicitAWSProfilePreservesProfileRef(t *testing.T) {
-	t.Parallel()
-
-	mode, value := parseBedrockAuthMode("aws_profile", "profile:work-prod@eu-west-2")
-	if mode != "aws_profile" || value != "work-prod@eu-west-2" {
-		t.Fatalf("mode=%q value=%q", mode, value)
-	}
-}
-
-func TestParseBedrockAuthMode_APIKeyEnvRef(t *testing.T) {
-	t.Parallel()
-
-	mode, value := parseBedrockAuthMode("", "env:AWS_BEARER_TOKEN_BEDROCK")
-	if mode != "api_key_env" || value != "AWS_BEARER_TOKEN_BEDROCK" {
-		t.Fatalf("mode=%q value=%q", mode, value)
-	}
-}
-
-func TestParseBedrockAuthMode_AWSEnvSessionRef(t *testing.T) {
-	t.Parallel()
-
-	mode, value := parseBedrockAuthMode("aws_env_session", "")
-	if mode != "aws_env_session" || value != "" {
-		t.Fatalf("mode=%q value=%q", mode, value)
-	}
-}
-
-func TestLoadBedrockAWSConfig_AWSEnvSessionUsesEnvCredentials(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("AWS_ACCESS_KEY_ID", "env-access")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "env-secret")
-	t.Setenv("AWS_SESSION_TOKEN", "env-session")
-
-	cfg, err := loadBedrockAWSConfig(context.Background(), "us-east-1", bedrockAuthModeAWSEnvSession, "")
-	if err != nil {
-		t.Fatalf("loadBedrockAWSConfig returned error: %v", err)
-	}
-	creds, err := cfg.Credentials.Retrieve(context.Background())
-	if err != nil {
-		t.Fatalf("Retrieve returned error: %v", err)
-	}
-	if creds.AccessKeyID != "env-access" || creds.SecretAccessKey != "env-secret" || creds.SessionToken != "env-session" {
-		t.Fatalf("credentials=%+v want env session credentials", creds)
-	}
-}
-
-// TestLoadBedrockAWSConfig_AWSEnvSessionResolvesSharedConfigDefault proves the
-// AWS env path uses the full AWS SDK default credential chain, not just env
-// vars: with no AWS_ACCESS_KEY_ID set, the shared-config default profile
-// resolves. This is the capability the static-env implementation lacked.
-func TestLoadBedrockAWSConfig_AWSEnvSessionResolvesSharedConfigDefault(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("AWS_PROFILE", "")
-	t.Setenv("AWS_DEFAULT_PROFILE", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
-	t.Setenv("AWS_SESSION_TOKEN", "")
-
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	configPath := filepath.Join(tmp, "config")
-	if err := os.WriteFile(configPath, []byte("[default]\nregion = eu-west-2\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	credPath := filepath.Join(tmp, "credentials")
-	if err := os.WriteFile(credPath, []byte("[default]\naws_access_key_id = chain-access\naws_secret_access_key = chain-secret\n"), 0o600); err != nil {
-		t.Fatalf("write credentials: %v", err)
-	}
-	t.Setenv("AWS_CONFIG_FILE", configPath)
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath)
-
-	cfg, err := loadBedrockAWSConfig(context.Background(), "eu-west-2", bedrockAuthModeAWSEnvSession, "")
-	if err != nil {
-		t.Fatalf("loadBedrockAWSConfig returned error: %v", err)
-	}
-	creds, err := cfg.Credentials.Retrieve(context.Background())
-	if err != nil {
-		t.Fatalf("Retrieve returned error: %v", err)
-	}
-	if creds.AccessKeyID != "chain-access" || creds.SecretAccessKey != "chain-secret" {
-		t.Fatalf("credentials=%+v want shared-config default profile credentials", creds)
-	}
-}
-
-// TestApplyBedrockAuth_AWSEnvSessionUsesSigV4 is the end-to-end proof for the
-// third Bedrock auth type: AWS env session signs an inference request with
-// SigV4 (service bedrock, region derived from the Mantle host). API key and
-// AWS profile already had this coverage; this closes the AWS env gap.
-func TestApplyBedrockAuth_AWSEnvSessionUsesSigV4(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
-	t.Setenv("AWS_DEFAULT_REGION", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("AWS_ACCESS_KEY_ID", "env-access")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "env-secret")
-	t.Setenv("AWS_SESSION_TOKEN", "env-session")
-	t.Setenv("HOME", t.TempDir())
-
-	req, err := http.NewRequest(http.MethodPost, "https://bedrock-mantle.eu-west-2.api.aws/v1/responses", strings.NewReader(`{"inputText":"ping"}`))
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	if err := applyBedrockAuth(context.Background(), "aws_env_session", "", req, []byte(`{"inputText":"ping"}`)); err != nil {
-		t.Fatalf("applyBedrockAuth error: %v", err)
-	}
-	auth := req.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "AWS4-HMAC-SHA256 ") {
-		t.Fatalf("authorization=%q want SigV4 header", auth)
-	}
-	if !strings.Contains(auth, "/eu-west-2/bedrock/aws4_request") {
-		t.Fatalf("authorization=%q want eu-west-2 bedrock signing scope", auth)
-	}
-}
-
-func TestLoadBedrockAWSConfig_ProfileFallbackToDefaultSharedFiles(t *testing.T) {
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("HOME", t.TempDir())
-	home := os.Getenv("HOME")
-	awsDir := filepath.Join(home, ".aws")
-	if err := os.MkdirAll(awsDir, 0o755); err != nil {
-		t.Fatalf("mkdir ~/.aws: %v", err)
-	}
-	configPath := filepath.Join(awsDir, "config")
-	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = us-east-1\n"), 0o600); err != nil {
-		t.Fatalf("write ~/.aws/config: %v", err)
-	}
-	credPath := filepath.Join(awsDir, "credentials")
-	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
-		t.Fatalf("write ~/.aws/credentials: %v", err)
-	}
-
-	injectedDir := t.TempDir()
-	injectedConfigPath := filepath.Join(injectedDir, "config")
-	injectedCredsPath := filepath.Join(injectedDir, "credentials")
-	if err := os.WriteFile(injectedConfigPath, []byte("[default]\nregion = us-west-2\n"), 0o600); err != nil {
-		t.Fatalf("write injected config: %v", err)
-	}
-	if err := os.WriteFile(injectedCredsPath, []byte("[default]\naws_access_key_id = injected\naws_secret_access_key = injected\n"), 0o600); err != nil {
-		t.Fatalf("write injected credentials: %v", err)
-	}
-	t.Setenv("AWS_CONFIG_FILE", injectedConfigPath)
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", injectedCredsPath)
-
-	cfg, err := loadBedrockAWSConfig(context.Background(), "us-east-1", bedrockAuthModeAWSProfile, "swobu-bedrock")
-	if err != nil {
-		t.Fatalf("loadBedrockAWSConfig error: %v", err)
-	}
-	creds, credErr := cfg.Credentials.Retrieve(context.Background())
-	if credErr != nil {
-		t.Fatalf("retrieve creds error: %v", credErr)
-	}
-	if creds.AccessKeyID != "test" {
-		t.Fatalf("access key id=%q want test", creds.AccessKeyID)
-	}
-}
-
-func TestListModels_AWSProfileMode_UsesMantleHTTP(t *testing.T) {
-	t.Setenv("AWS_REGION", "")
+func TestListModels_AbsentCredentialReferenceIgnoresAmbientBearer(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "ambient-token")
+	t.Setenv("AWS_REGION", "eu-central-1")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	t.Setenv("AWS_PROFILE", "")
@@ -411,11 +141,11 @@ func TestListModels_AWSProfileMode_UsesMantleHTTP(t *testing.T) {
 		t.Fatalf("mkdir ~/.aws: %v", err)
 	}
 	configPath := filepath.Join(awsDir, "config")
-	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = eu-central-1\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[default]\nregion = eu-central-1\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	credPath := filepath.Join(awsDir, "credentials")
-	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
+	if err := os.WriteFile(credPath, []byte("[default]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
 		t.Fatalf("write credentials: %v", err)
 	}
 	t.Setenv("HOME", tmp)
@@ -429,14 +159,14 @@ func TestListModels_AWSProfileMode_UsesMantleHTTP(t *testing.T) {
 			t.Fatalf("path=%q want /models", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "AWS4-HMAC-SHA256 ") {
-			t.Fatalf("authorization=%q want SigV4 header", got)
+			t.Fatalf("authorization=%q want SigV4", got)
 		}
 		_, _ = w.Write([]byte(`{"data":[{"id":"anthropic.claude-3-5-sonnet"},{"id":"amazon.nova-lite-v1"}]}`))
 	}))
 	defer upstream.Close()
 
 	exec := NewExecutor(nil)
-	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "profile:swobu-bedrock@eu-central-1", protocolkind.Responses))
+	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "", protocolkind.Responses))
 	if err != nil {
 		t.Fatalf("ListDeployments error: %v", err)
 	}
@@ -448,7 +178,35 @@ func TestListModels_AWSProfileMode_UsesMantleHTTP(t *testing.T) {
 	}
 }
 
-func TestListModels_AWSProfileMode_DoesNotSetAcceptEncodingHeader(t *testing.T) {
+func TestListModels_TargetCredential_PrecedesAmbientBearerToken(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "ambient-token")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer target-token" {
+			t.Fatalf("authorization=%q want target credential", got)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}]}`))
+	}))
+	defer upstream.Close()
+
+	exec := NewExecutor(nil)
+	exec.credentials = testCredentialProvider{token: "target-token"}
+	if _, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "secret:target", protocolkind.Responses)); err != nil {
+		t.Fatalf("ListDeployments error: %v", err)
+	}
+}
+
+func TestBedrockSigningRegion_DoesNotFallBackToEnvironment(t *testing.T) {
+	t.Setenv("AWS_REGION", "eu-central-1")
+	t.Setenv("AWS_DEFAULT_REGION", "eu-west-1")
+
+	if _, err := bedrockSigningRegion(mustParseURL("http://127.0.0.1:1234/v1")); err == nil {
+		t.Fatal("expected local endpoint without persisted region to be rejected")
+	}
+}
+
+func TestListModels_AmbientAWS_DoesNotSetAcceptEncodingHeader(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
@@ -464,11 +222,11 @@ func TestListModels_AWSProfileMode_DoesNotSetAcceptEncodingHeader(t *testing.T) 
 		t.Fatalf("mkdir ~/.aws: %v", err)
 	}
 	configPath := filepath.Join(awsDir, "config")
-	if err := os.WriteFile(configPath, []byte("[profile swobu-bedrock]\nregion = eu-central-1\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("[default]\nregion = eu-central-1\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	credPath := filepath.Join(awsDir, "credentials")
-	if err := os.WriteFile(credPath, []byte("[swobu-bedrock]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
+	if err := os.WriteFile(credPath, []byte("[default]\naws_access_key_id = test\naws_secret_access_key = test\n"), 0o600); err != nil {
 		t.Fatalf("write credentials: %v", err)
 	}
 	t.Setenv("HOME", tmp)
@@ -477,7 +235,7 @@ func TestListModels_AWSProfileMode_DoesNotSetAcceptEncodingHeader(t *testing.T) 
 
 	capture := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: capture})
-	if _, err := exec.ListDeployments(context.Background(), newBedrockTarget("https://bedrock-mantle.eu-central-1.api.aws/v1", "profile:swobu-bedrock@eu-central-1", protocolkind.Responses)); err != nil {
+	if _, err := exec.ListDeployments(context.Background(), newBedrockTarget("https://bedrock-mantle.eu-central-1.api.aws/v1", "", protocolkind.Responses)); err != nil {
 		t.Fatalf("ListDeployments error: %v", err)
 	}
 	if capture.request == nil {
@@ -505,6 +263,7 @@ func TestListModels_EnvMode_UsesMantleHTTP(t *testing.T) {
 	defer upstream.Close()
 
 	exec := NewExecutor(nil)
+	exec.credentials = testCredentialProvider{}
 	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Responses))
 	if err != nil {
 		t.Fatalf("ListDeployments error: %v", err)
@@ -573,6 +332,7 @@ func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T
 	defer upstream.Close()
 
 	exec := NewExecutor(upstream.Client())
+	exec.credentials = testCredentialProvider{}
 	ingress, err := exec.ResolveProviderIngress(context.Background(), newBedrockProviderRequest(
 		t,
 		upstream.URL,
@@ -619,6 +379,7 @@ func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T
 	defer upstream.Close()
 
 	exec := NewExecutor(upstream.Client())
+	exec.credentials = testCredentialProvider{}
 	ingress, err := exec.ResolveProviderIngress(context.Background(), newBedrockProviderRequest(
 		t,
 		upstream.URL,
@@ -696,7 +457,7 @@ func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *t
 		"test-ex", protocolkind.Responses, request,
 		wireRequestResult.Value,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages),
+		newBedrockTarget(upstream.URL, "", protocolkind.Messages),
 		sink,
 	)
 	req.ExchangeID = "ex-bedrock-cache-breakpoint"

@@ -1,243 +1,128 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-type stubModelCatalog struct {
-	deployments  []profile.ProviderDeploymentRecord
-	err          error
-	validateUsed bool
-	listFn       func(target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error)
+type stubTargetProber struct {
+	result   exchange.TargetProbeResult
+	err      error
+	probeFn  func(exchange.RoutableTarget) (exchange.TargetProbeResult, error)
+	attempts []exchange.RoutableTarget
 }
 
-func (s *stubModelCatalog) ListDeployments(_ context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-	if s.listFn != nil {
-		return s.listFn(target)
+func (s *stubTargetProber) ProbeTarget(_ context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+	s.attempts = append(s.attempts, target)
+	if s.probeFn != nil {
+		return s.probeFn(target)
 	}
-	if s.err != nil {
-		return nil, s.err
+	return s.result, s.err
+}
+
+func postTargetProbe(t *testing.T, handler TargetProbeHandler, connection workspaceapi.Connection, protocol string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(targetProbeRequest{Connection: connection, ProviderProtocol: protocol})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return profile.CloneProviderDeployments(s.deployments), nil
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }
 
-func (s *stubModelCatalog) ValidateCredentials(context.Context, exchange.RoutableTarget) error {
-	s.validateUsed = true
-	return nil
+func TestModelCatalogProbeHandlerRequiresTypedPOST(t *testing.T) {
+	h := NewTargetProbeHandler(&stubTargetProber{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/_swobu/target-probe?provider_spec=openai", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d", rec.Code)
+	}
 }
 
-func TestModelCatalogProbeHandler_LoadsModelIDsFromCatalogPath(t *testing.T) {
-	stub := &stubModelCatalog{deployments: []profile.ProviderDeploymentRecord{
-		{Name: "m1", Family: "openai", SupportedProviderProtocols: []string{"responses"}, DefaultProviderProtocol: "responses"},
-		{Name: "m2", Family: "openai", SupportedProviderProtocols: []string{"responses_stream"}, DefaultProviderProtocol: "responses_stream"},
+func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testing.T) {
+	diagnostics := json.RawMessage(`{"authentication":"aws_identity"}`)
+	stub := &stubTargetProber{result: exchange.TargetProbeResult{
+		Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}},
+		Diagnostics: diagnostics,
 	}}
-	h := NewModelCatalogProbeHandler(stub)
-
-	query := url.Values{}
-	query.Set("provider_spec", "bedrock")
-	query.Set("base_url", "https://bedrock-mantle.us-east-1.api.aws/v1")
-	query.Set("credential_ref", "env:AWS_BEARER_TOKEN_BEDROCK")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
+		Bedrock: &workspaceapi.BedrockConnection{Region: "eu-west-2", Credential: "env:AWS_BEARER_TOKEN_BEDROCK"},
+	}, "responses")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200", rec.Code)
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var out struct {
-		Deployments []profile.ProviderDeploymentRecord `json:"deployments"`
-		Error       string                             `json:"error"`
+	if len(stub.attempts) != 1 || stub.attempts[0].ProviderSpec != "bedrock" || stub.attempts[0].CredentialRef != "env:AWS_BEARER_TOKEN_BEDROCK" {
+		t.Fatalf("attempts = %#v", stub.attempts)
 	}
+	var out TargetProbeResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode error: %v", err)
+		t.Fatal(err)
 	}
-	if out.Error != "" {
-		t.Fatalf("probe error=%q", out.Error)
-	}
-	if len(out.Deployments) != 2 {
-		t.Fatalf("deployments len=%d want 2", len(out.Deployments))
-	}
-	if stub.validateUsed {
-		t.Fatal("probe should not call ValidateCredentials")
+	if string(out.Diagnostics) != string(diagnostics) || len(out.Deployments) != 1 {
+		t.Fatalf("result = %#v", out)
 	}
 }
 
-func TestModelCatalogProbeHandler_ReturnsRawError(t *testing.T) {
-	stub := &stubModelCatalog{err: errors.New("BAD_ENDPOINT: credential reference could not be resolved")}
-	h := NewModelCatalogProbeHandler(stub)
-
-	query := url.Values{}
-	query.Set("provider_spec", "bedrock")
-	query.Set("base_url", "https://bedrock-mantle.us-east-1.api.aws/v1")
-	query.Set("credential_ref", "env:AWS_BEARER_TOKEN_BEDROCK")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
+func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.T) {
+	stub := &stubTargetProber{result: exchange.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}}
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
+		Custom: &workspaceapi.CustomConnection{BaseURL: "https://example.test/v1", Header: &workspaceapi.CustomHeader{Name: "X-Custom-Auth", Credential: "env:CUSTOM_KEY"}},
+	}, "responses")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200", rec.Code)
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var out struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if out.Error == "" {
-		t.Fatal("expected probe error")
+	if len(stub.attempts) != 1 || stub.attempts[0].ProviderSpec != "openai_compatible" || stub.attempts[0].AuthHeader != "X-Custom-Auth" {
+		t.Fatalf("attempt = %#v", stub.attempts)
 	}
 }
 
-func TestModelCatalogProbeHandler_RequiresExplicitEndpoint(t *testing.T) {
-	stub := &stubModelCatalog{}
-	h := NewModelCatalogProbeHandler(stub)
-
-	query := url.Values{}
-	query.Set("provider_spec", "azure")
-	query.Set("credential_ref", "env:AZURE_OPENAI_API_KEY")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d want 400", rec.Code)
+func TestModelCatalogProbeHandlerAutoProbeUsesProtocolCapabilities(t *testing.T) {
+	stub := &stubTargetProber{probeFn: func(target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+		if target.ProviderProtocol == "responses_stream" {
+			return exchange.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}, nil
+		}
+		return exchange.TargetProbeResult{}, errors.New("try next protocol")
+	}}
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
+		OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"},
+	}, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "project is required") {
-		t.Fatalf("body = %q, want project required error", rec.Body.String())
+	var out TargetProbeResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ResolvedProviderProtocol != "responses_stream" || len(stub.attempts) < 2 {
+		t.Fatalf("result=%#v attempts=%d", out, len(stub.attempts))
 	}
 }
 
-func TestModelCatalogProbeHandler_AutoProbeTriesCapabilitiesOrderAndReturnsFirstSuccess(t *testing.T) {
-	attempts := make([]string, 0, 4)
-	stub := &stubModelCatalog{
-		listFn: func(target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-			key := target.ProtocolKind.String() + "/" + target.SelectedFrame
-			attempts = append(attempts, key)
-			if key == "responses/sse_event" {
-				return []profile.ProviderDeploymentRecord{{Name: "gpt-4.1-mini", Family: "openai", SupportedProviderProtocols: []string{"responses_stream"}, DefaultProviderProtocol: "responses_stream"}}, nil
-			}
-			return nil, errors.New("probe failed for " + key)
-		},
-	}
-	h := NewModelCatalogProbeHandler(stub)
-
-	query := url.Values{}
-	query.Set("provider_spec", "openai")
-	query.Set("base_url", "https://api.openai.com/v1")
-	query.Set("credential_ref", "env:OPENAI_API_KEY")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200", rec.Code)
-	}
-	var out struct {
-		Deployments              []profile.ProviderDeploymentRecord `json:"deployments"`
-		Error                    string                             `json:"error"`
-		ResolvedProviderProtocol string                             `json:"resolved_provider_protocol"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if out.Error != "" {
-		t.Fatalf("unexpected probe error=%q", out.Error)
-	}
-	if out.ResolvedProviderProtocol != "responses_stream" {
-		t.Fatalf("resolved provider variant=%q want responses_stream", out.ResolvedProviderProtocol)
-	}
-	if len(attempts) == 0 {
-		t.Fatal("expected at least one probe attempt")
-	}
-	if attempts[0] != "responses/http_json_body" {
-		t.Fatalf("first auto attempt=%q want responses/http_json_body", attempts[0])
-	}
-	if len(out.Deployments) != 1 || out.Deployments[0].Name != "gpt-4.1-mini" {
-		t.Fatalf("deployments=%v", out.Deployments)
+func TestModelCatalogProbeHandlerRejectsInvalidConnectionUnion(t *testing.T) {
+	rec := postTargetProbe(t, NewTargetProbeHandler(&stubTargetProber{}), workspaceapi.Connection{}, "responses")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "exactly one provider variant") {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 
-func TestModelCatalogProbeHandler_PassesAuthHeaderToProviderCatalog(t *testing.T) {
-	stub := &stubModelCatalog{
-		listFn: func(target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-			if target.AuthHeader != "X-Custom-Auth" {
-				t.Fatalf("auth header=%q want X-Custom-Auth", target.AuthHeader)
-			}
-			return []profile.ProviderDeploymentRecord{{Name: "gpt-4.1-mini", Family: "openai", SupportedProviderProtocols: []string{"responses"}, DefaultProviderProtocol: "responses"}}, nil
-		},
-	}
-	h := NewModelCatalogProbeHandler(stub)
-
-	query := url.Values{}
-	query.Set("provider_spec", "openai_compatible")
-	query.Set("base_url", "https://example.test/v1")
-	query.Set("credential_ref", "env:OPENAI_API_KEY")
-	query.Set("auth_header", "X-Custom-Auth")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200", rec.Code)
-	}
-	var out struct {
-		Deployments []profile.ProviderDeploymentRecord `json:"deployments"`
-		Error       string                             `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if out.Error != "" {
-		t.Fatalf("probe error=%q", out.Error)
-	}
-	if len(out.Deployments) != 1 || out.Deployments[0].Name != "gpt-4.1-mini" {
-		t.Fatalf("deployments=%v", out.Deployments)
-	}
-}
-
-func TestModelCatalogProbeHandler_PassesAuthModeToProviderCatalog(t *testing.T) {
-	stub := &stubModelCatalog{
-		listFn: func(target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-			if target.AuthMode != "aws_profile" {
-				t.Fatalf("auth mode=%q want aws_profile", target.AuthMode)
-			}
-			if target.CredentialRef != "profile:default" {
-				t.Fatalf("credential ref=%q want profile:default", target.CredentialRef)
-			}
-			return []profile.ProviderDeploymentRecord{{Name: "anthropic.claude", Family: "anthropic", SupportedProviderProtocols: []string{"messages"}, DefaultProviderProtocol: "messages"}}, nil
-		},
-	}
-	h := NewModelCatalogProbeHandler(stub)
-
-	query := url.Values{}
-	query.Set("provider_spec", "bedrock")
-	query.Set("base_url", "https://bedrock-mantle.us-east-1.api.aws/v1")
-	query.Set("credential_ref", "profile:default")
-	query.Set("auth_mode", "aws_profile")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/model-catalog?"+query.Encode(), nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200", rec.Code)
-	}
-	var out struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if out.Error != "" {
-		t.Fatalf("probe error=%q", out.Error)
+func TestModelCatalogProbeHandlerNormalizesFileCredentialResolutionError(t *testing.T) {
+	stub := &stubTargetProber{err: errors.New("BAD_ENDPOINT: credential reference could not be resolved")}
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
+		OpenAI: &workspaceapi.CredentialConnection{Credential: "file:/missing/key"},
+	}, "responses")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "credential file could not be resolved") {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }

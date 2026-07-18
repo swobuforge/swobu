@@ -1,5 +1,7 @@
 package operatorclient
 
+import "encoding/json"
+
 // Runtime lane: auth/session result DTOs returned by daemon HTTP APIs.
 type AccessCheckResult struct {
 	Status  string
@@ -31,11 +33,12 @@ type AuthSessionRetryResult struct {
 	State        string
 }
 
-// ModelCatalogResult is the response from GET /_swobu/model-catalog.
+// ModelCatalogResult is the response from POST /_swobu/target-probe.
 type ModelCatalogResult struct {
 	Deployments              []ModelCatalogDeployment `json:"deployments,omitempty"`
 	Error                    string                   `json:"error,omitempty"`
 	ResolvedProviderProtocol string                   `json:"resolved_provider_protocol,omitempty"`
+	Diagnostics              json.RawMessage          `json:"diagnostics,omitempty"`
 }
 
 // ModelCatalogDeployment is one deployment returned by the catalog probe.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 )
 
@@ -12,8 +13,8 @@ import (
 // selected provider route cannot truthfully carry one semantic feature. It
 // keeps support decisions at the provider edge rather than inside wire syntax
 // adapters.
-func GateRouteFeatureSupport(ctx context.Context, sink effect.Sink, exchangeID string, providerID string, protocol string, request canonical.CanonicalRequest) error {
-	routeSubject := RouteSubject(providerID, protocol)
+func GateRouteFeatureSupport(ctx context.Context, sink effect.Sink, exchangeID string, providerID string, protocol protocolkind.ProtocolKind, request canonical.CanonicalRequest) error {
+	routeSubject := RouteSubject(providerID, string(protocol))
 	model := request.Model()
 	require := func(feature compat.Feature, unsupported error) error {
 		support := compat.SupportsFeature(providerID, protocol, model, feature)

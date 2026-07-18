@@ -7,29 +7,37 @@ import (
 	"net/http"
 	"strings"
 
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
-type modelCatalogProbeResult struct {
+type TargetProbeResult struct {
 	Deployments              []profile.ProviderDeploymentRecord `json:"deployments,omitempty"`
 	Error                    string                             `json:"error,omitempty"`
 	ResolvedProviderProtocol string                             `json:"resolved_provider_protocol,omitempty"`
+	Diagnostics              json.RawMessage                    `json:"diagnostics,omitempty"`
 }
 
-// ModelCatalogProbeHandler probes provider-backed deployments for one draft route.
-type ModelCatalogProbeHandler struct {
-	providers exchange.ProviderModelCatalog
+type targetProbeRequest struct {
+	Connection       workspaceapi.Connection `json:"connection"`
+	ProviderProtocol string                  `json:"provider_protocol,omitempty"`
 }
 
-func NewModelCatalogProbeHandler(providers exchange.ProviderModelCatalog) ModelCatalogProbeHandler {
-	return ModelCatalogProbeHandler{providers: providers}
+// TargetProbeHandler probes provider-backed deployments for one draft route.
+type TargetProbeHandler struct {
+	providers exchange.ProviderDiscovery
 }
 
-func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
+func NewTargetProbeHandler(providers exchange.ProviderDiscovery) TargetProbeHandler {
+	return TargetProbeHandler{providers: providers}
+}
+
+func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
@@ -38,52 +46,38 @@ func (h ModelCatalogProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Req
 		return
 	}
 
-	query := req.URL.Query()
-	providerSpec := strings.TrimSpace(strings.ToLower(query.Get("provider_spec"))) // swobu:io-string source=boundary
-	if providerSpec == "" {
-		http.Error(w, "provider_spec is required", http.StatusBadRequest)
+	var input targetProbeRequest
+	if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
+		http.Error(w, "target probe request is invalid", http.StatusBadRequest)
 		return
 	}
-	baseURL := strings.TrimSpace(query.Get("base_url")) // swobu:io-string source=boundary
-	if baseURL == "" {
-		baseURL = strings.TrimSpace(profile.DefaultExecuteBaseURL(providerSpec)) // swobu:io-string source=boundary
-	}
-	if baseURL == "" && profile.RequiresExplicitEndpoint(providerSpec) {
-		label := profile.EndpointLabelForProvider(providerSpec)
-		if label == "" {
-			label = "endpoint"
-		}
-		http.Error(w, label+" is required for provider "+providerSpec, http.StatusBadRequest)
+	connection, err := input.Connection.RoutingConnection()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	authHeader := strings.TrimSpace(query.Get("auth_header"))             // swobu:io-string source=boundary
-	credentialRef := strings.TrimSpace(query.Get("credential_ref"))       // swobu:io-string source=boundary
-	authMode := strings.TrimSpace(query.Get("auth_mode"))                 // swobu:io-string source=boundary
-	providerProtocol := strings.TrimSpace(query.Get("provider_protocol")) // swobu:io-string source=boundary
-	deployments, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, providerSpec, baseURL, authHeader, credentialRef, authMode, providerProtocol)
-	result := modelCatalogProbeResult{}
+	providerSpec := string(connection.Provider())
+	if connection.Provider() == routing.ProviderCustom {
+		providerSpec = string(profile.ProviderSpecOpenAICompatible)
+	}
+	result := TargetProbeResult{}
+	probe, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, connection, input.ProviderProtocol)
 	if probeErr != nil {
 		slog.Warn("model catalog probe failed",
 			"provider_spec", providerSpec,
-			"base_url", baseURL,
-			"auth_header", authHeader,
-			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
-			"auth_mode", authMode,
-			"provider_protocol", providerProtocol,
+			"provider_protocol", input.ProviderProtocol,
 			"error", probeErr.Error(),
 		)
-		result.Error = normalizeModelCatalogProbeError(probeErr.Error(), credentialRef)
+		result.Error = normalizeModelCatalogProbeError(probeErr.Error(), connectionCredentialRef(connection))
+		result.Diagnostics = json.RawMessage(probe.Diagnostics)
 	} else {
 		slog.Debug("model catalog probe succeeded",
 			"provider_spec", providerSpec,
-			"base_url", baseURL,
-			"auth_header", authHeader,
-			"credential_ref_kind", credentialRefKindForProbe(credentialRef),
-			"auth_mode", authMode,
 			"provider_protocol", resolvedVariant,
-			"deployment_count", len(deployments),
+			"deployment_count", len(probe.Deployments),
 		)
-		result.Deployments = deployments
+		result.Deployments = probe.Deployments
+		result.Diagnostics = json.RawMessage(probe.Diagnostics)
 		result.ResolvedProviderProtocol = resolvedVariant
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -96,48 +90,67 @@ func credentialRefKindForProbe(credentialRef string) string {
 
 func probeDeployments(
 	ctx context.Context,
-	providers exchange.ProviderModelCatalog,
-	providerSpec string,
-	baseURL string,
-	authHeader string,
-	credentialRef string,
-	authMode string,
+	providers exchange.ProviderDiscovery,
+	connection routing.Connection,
 	providerProtocol string,
-) ([]profile.ProviderDeploymentRecord, string, error) {
-	routeProfile, ok := profile.ResolveRouteProfile(providerSpec, baseURL, credentialRef)
-	if !ok {
-		return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
+) (exchange.TargetProbeResult, string, error) {
+	providerSpec := string(connection.Provider())
+	if connection.Provider() == routing.ProviderCustom {
+		providerSpec = string(profile.ProviderSpecOpenAICompatible)
+	}
+	if !profile.SupportsSpec(providerSpec) {
+		return exchange.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
 	variants := modelCatalogProbeVariants(providerSpec, providerProtocol)
 	var lastErr error
+	var lastProbe exchange.TargetProbeResult
 	for _, variant := range variants {
 		protocol, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, variant)
 		if !ok {
 			continue
 		}
-		target := exchange.NewRoutableTarget(
-			"draft",
-			providerSpec,
-			baseURL,
-			credentialRef,
-			protocol,
-			string(routeProfile.AuthKind),
-			frame,
-			variant,
-		)
-		target.AuthHeader = strings.TrimSpace(authHeader) // swobu:io-string source=boundary
-		target.AuthMode = strings.TrimSpace(authMode)     // swobu:io-string source=boundary
-		deployments, err := providers.ListDeployments(ctx, target)
+		_ = protocol
+		_ = frame
+		target, err := exchange.RoutableTargetFromConnection("draft", connection, variant)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		probe, err := providers.ProbeTarget(ctx, target)
 		if err == nil {
-			return profile.CloneProviderDeployments(deployments), variant, nil
+			probe.Deployments = profile.CloneProviderDeployments(probe.Deployments)
+			return probe, variant, nil
 		}
 		lastErr = err
+		lastProbe = probe
 	}
 	if lastErr != nil {
-		return nil, "", lastErr
+		return lastProbe, "", lastErr
 	}
-	return nil, "", canonical.BadEndpoint("selected provider route is unsupported")
+	return exchange.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
+}
+
+func connectionCredentialRef(connection routing.Connection) string {
+	switch c := connection.(type) {
+	case routing.OpenAIConnection:
+		return c.Credential().String()
+	case routing.AnthropicConnection:
+		return c.Credential().String()
+	case routing.OpenRouterConnection:
+		return c.Credential().String()
+	case routing.ChatGPTConnection:
+		return c.Credential().String()
+	case routing.AzureConnection:
+		return c.Credential().String()
+	case routing.BedrockConnection:
+		return c.Credential().String()
+	case routing.CustomConnection:
+		if auth, ok := c.Auth().(routing.CustomHeaderAuth); ok {
+			return auth.Credential().String()
+		}
+	}
+	return ""
 }
 
 func modelCatalogProbeVariants(providerSpec string, providerProtocol string) []string {

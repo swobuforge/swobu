@@ -80,10 +80,9 @@ func TestResolveProviderIngress_UsesContractDeliveryForStreamingRequests(t *test
 			server.URL,
 			"env:ANTHROPIC_API_KEY",
 			protocolkind.Messages,
-			"credential_ref",
+
 			"",
-			"messages",
-		),
+			"messages"),
 	)
 
 	ingress, err := adapter.ResolveProviderIngress(context.Background(), req)
@@ -158,10 +157,10 @@ func TestResolveProviderIngress_DoesNotEmitCacheBreakpoints(t *testing.T) {
 			server.URL,
 			"env:ANTHROPIC_API_KEY",
 			protocolkind.Messages,
-			"credential_ref",
+
 			"",
-			"messages",
-		),
+			"messages"),
+
 		sink,
 	)
 	req.ExchangeID = "ex-anthropic-cache-breakpoint"

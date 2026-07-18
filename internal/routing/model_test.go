@@ -103,19 +103,28 @@ func TestCommandIdentifiersUseURLSegmentGrammar(t *testing.T) {
 			t.Errorf("ParseTargetID(%q) unexpectedly succeeded", raw)
 		}
 	}
+	if _, err := ParseRouteName("swobu"); err != nil {
+		t.Errorf("ParseRouteName(\"swobu\"): %v", err)
+	}
+	if _, err := ParseRouteName(PublicDefaultRouteID); err == nil {
+		t.Errorf("ParseRouteName(%q) unexpectedly accepted the reserved default-model ID", PublicDefaultRouteID)
+	}
+	if _, err := ParseTargetID(PublicDefaultRouteID); err != nil {
+		t.Errorf("ParseTargetID(%q): %v", PublicDefaultRouteID, err)
+	}
 }
 
-func TestWorkspaceResolveRouteIsExactAndDefaultSentinelOnly(t *testing.T) {
+func TestWorkspaceResolveRouteUsesDefaultForUnknownNonEmptyModel(t *testing.T) {
 	config := testConfig(t, testTarget(t, "a"))
 	slug, _ := ParseWorkspaceSlug("dev")
 	workspace, _ := config.Workspace(slug)
-	for _, requested := range []string{"chat", PublicDefaultRouteID} {
+	for _, requested := range []string{"chat", PublicDefaultRouteID, "upstream-a", "missing"} {
 		route, err := workspace.ResolveRoute(requested)
 		if err != nil || route.Name().String() != "chat" {
 			t.Fatalf("ResolveRoute(%q) = %q, %v", requested, route.Name().String(), err)
 		}
 	}
-	for _, requested := range []string{"", "upstream-a", "missing"} {
+	for _, requested := range []string{"", " \t"} {
 		if _, err := workspace.ResolveRoute(requested); err == nil {
 			t.Fatalf("ResolveRoute(%q) unexpectedly succeeded", requested)
 		}

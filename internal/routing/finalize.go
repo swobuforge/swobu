@@ -36,17 +36,10 @@ type AzureConnectionDraft struct {
 	Credential      string
 }
 
-// BedrockConnectionDraft carries region and one raw authentication arm.
+// BedrockConnectionDraft carries only the durable Bedrock region.
 type BedrockConnectionDraft struct {
-	Region string
-	Auth   BedrockAuthDraft
-}
-
-// BedrockAuthDraft is a raw tagged union validated during finalization.
-type BedrockAuthDraft struct {
-	Profile     *string
-	Environment bool
-	BearerToken *string
+	Region     string
+	Credential string
 }
 
 // CustomConnectionDraft carries explicit non-hosted endpoint and header auth.
@@ -80,7 +73,7 @@ func FinalizeTarget(draft TargetDraft, capabilities TargetCapabilities) (Target,
 	if err != nil {
 		return Target{}, err
 	}
-	connection, err := finalizeConnection(draft.Connection, capabilities)
+	connection, err := FinalizeConnection(draft.Connection, capabilities)
 	if err != nil {
 		return Target{}, err
 	}
@@ -91,7 +84,9 @@ func FinalizeTarget(draft TargetDraft, capabilities TargetCapabilities) (Target,
 	return NewTarget(id, model, protocol, connection)
 }
 
-func finalizeConnection(draft ConnectionDraft, capabilities TargetCapabilities) (Connection, error) {
+// FinalizeConnection validates one raw transport connection union without
+// requiring unrelated target identity, model, or protocol fields.
+func FinalizeConnection(draft ConnectionDraft, capabilities TargetCapabilities) (Connection, error) {
 	count := 0
 	for _, present := range []bool{draft.OpenAI != nil, draft.Anthropic != nil, draft.OpenRouter != nil, draft.ChatGPT != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
 		if present {
@@ -134,31 +129,7 @@ func finalizeConnection(draft ConnectionDraft, capabilities TargetCapabilities) 
 		if err != nil {
 			return nil, err
 		}
-		authCount := 0
-		if draft.Bedrock.Auth.Profile != nil {
-			authCount++
-		}
-		if draft.Bedrock.Auth.Environment {
-			authCount++
-		}
-		if draft.Bedrock.Auth.BearerToken != nil {
-			authCount++
-		}
-		if authCount != 1 {
-			return nil, pathError("connection.bedrock.auth", "exactly one auth variant is required")
-		}
-		var auth BedrockAuth
-		if draft.Bedrock.Auth.Profile != nil {
-			auth, err = NewBedrockProfileAuth(*draft.Bedrock.Auth.Profile)
-		} else if draft.Bedrock.Auth.Environment {
-			auth = BedrockEnvironmentAuth{}
-		} else {
-			auth, err = NewBedrockBearerTokenAuth(*draft.Bedrock.Auth.BearerToken)
-		}
-		if err != nil {
-			return nil, err
-		}
-		return NewBedrockConnection(region, auth)
+		return NewBedrockConnection(region, draft.Bedrock.Credential)
 	}
 	var auth CustomAuth
 	if draft.Custom.Header != nil {

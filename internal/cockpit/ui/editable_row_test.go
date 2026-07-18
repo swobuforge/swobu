@@ -244,7 +244,7 @@ func receiverTypeName(expr ast.Expr) string {
 	}
 }
 
-func TestEditableRow_TypingUpdatesValueState(t *testing.T) {
+func TestEditableRow_TypingStaysDraftUntilSubmit(t *testing.T) {
 	value := tui.NewState("")
 	row := NewEditableRow("slug", "slug", value)
 
@@ -256,8 +256,8 @@ func TestEditableRow_TypingUpdatesValueState(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'x'})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'y'})
 
-	if got := value.Get(); got != "xy" {
-		t.Fatalf("value after typing = %q, want xy", got)
+	if got := value.Get(); got != "" {
+		t.Fatalf("durable value changed before submit: %q", got)
 	}
 }
 
@@ -278,6 +278,9 @@ func TestEditableRow_SubmitFiresOnSubmit(t *testing.T) {
 
 	if submitted != "dev" {
 		t.Fatalf("submitted = %q, want dev", submitted)
+	}
+	if got := value.Get(); got != "dev" {
+		t.Fatalf("published value = %q, want dev", got)
 	}
 }
 
@@ -324,9 +327,9 @@ func TestEditableRow_SubmitSendsTypedValueAcrossRenders(t *testing.T) {
 	h := makeEditableHarness(t, &freshEditableRowRoot{build: build})
 
 	focusRow(t, h)
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})               // open editor
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'x'})     // type
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})               // submit
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})           // open editor
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'x'}) // type
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})           // submit
 
 	if submitted != "devx" {
 		t.Fatalf("submitted = %q, want %q (typed value must survive render reconciliation)", submitted, "devx")

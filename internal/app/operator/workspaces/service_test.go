@@ -45,22 +45,19 @@ func TestNewServiceRejectsNilStore(t *testing.T) {
 }
 
 func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
-	profileName := "work"
-	bearer := "env:AWS_BEARER_TOKEN_BEDROCK"
 	for name, test := range map[string]struct {
 		protocol   string
 		connection Connection
 		provider   routing.Provider
 	}{
-		"openai":          {"responses", Connection{OpenAI: &CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, routing.ProviderOpenAI},
-		"anthropic":       {"messages", Connection{Anthropic: &CredentialConnection{Credential: "env:ANTHROPIC_API_KEY"}}, routing.ProviderAnthropic},
-		"openrouter":      {"chat_completions", Connection{OpenRouter: &CredentialConnection{Credential: "env:OPENROUTER_API_KEY"}}, routing.ProviderOpenRouter},
-		"chatgpt":         {"responses_stream", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
-		"ollama":          {"chat_completions", Connection{Ollama: &OllamaConnection{}}, routing.ProviderOllama},
-		"azure":           {"responses", Connection{Azure: &AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/prod", Credential: "env:AZURE_KEY"}}, routing.ProviderAzure},
-		"bedrock profile": {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2", Auth: BedrockAuth{Profile: &profileName}}}, routing.ProviderBedrock},
-		"bedrock bearer":  {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2", Auth: BedrockAuth{BearerToken: &bearer}}}, routing.ProviderBedrock},
-		"custom":          {"chat_completions", Connection{Custom: &CustomConnection{BaseURL: "https://example.test/v1", Header: &CustomHeader{Name: "Authorization", Credential: "env:CUSTOM_KEY"}}}, routing.ProviderCustom},
+		"openai":     {"responses", Connection{OpenAI: &CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, routing.ProviderOpenAI},
+		"anthropic":  {"messages", Connection{Anthropic: &CredentialConnection{Credential: "env:ANTHROPIC_API_KEY"}}, routing.ProviderAnthropic},
+		"openrouter": {"chat_completions", Connection{OpenRouter: &CredentialConnection{Credential: "env:OPENROUTER_API_KEY"}}, routing.ProviderOpenRouter},
+		"chatgpt":    {"responses_stream", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
+		"ollama":     {"chat_completions", Connection{Ollama: &OllamaConnection{}}, routing.ProviderOllama},
+		"azure":      {"responses", Connection{Azure: &AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/prod", Credential: "env:AZURE_KEY"}}, routing.ProviderAzure},
+		"bedrock":    {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2"}}, routing.ProviderBedrock},
+		"custom":     {"chat_completions", Connection{Custom: &CustomConnection{BaseURL: "https://example.test/v1", Header: &CustomHeader{Name: "Authorization", Credential: "env:CUSTOM_KEY"}}}, routing.ProviderCustom},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target, err := (TargetDraft{ID: "target", Model: "model", Protocol: test.protocol, Connection: test.connection}).routingTarget()

@@ -15,7 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-func TestLiveBedrockMantleCatalogAuthModes(t *testing.T) {
+func TestLiveBedrockMantleCatalogAuthenticationPrecedence(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_BEDROCK_DOGFOOD")) != "1" {
 		t.Skip("set SWOBU_LIVE_BEDROCK_DOGFOOD=1 to probe live Bedrock Mantle auth modes")
 	}
@@ -28,27 +28,13 @@ func TestLiveBedrockMantleCatalogAuthModes(t *testing.T) {
 	defer cancel()
 	exec := NewExecutor(http.DefaultClient)
 
-	if strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")) == "" {
-		t.Run("api_key_env", func(t *testing.T) {
-			t.Skip("AWS_BEARER_TOKEN_BEDROCK is not set")
-		})
-	} else {
-		t.Run("api_key_env", func(t *testing.T) {
-			assertLiveCatalog(t, ctx, exec, endpoint, string(profile.AuthModeEnv), "env:AWS_BEARER_TOKEN_BEDROCK")
+	if strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")) != "" {
+		t.Run("explicit_api_key", func(t *testing.T) {
+			assertLiveCatalog(t, ctx, exec, endpoint, "explicit_api_key", "env:AWS_BEARER_TOKEN_BEDROCK")
 		})
 	}
-	if strings.TrimSpace(os.Getenv("AWS_ACCESS_KEY_ID")) == "" || strings.TrimSpace(os.Getenv("AWS_SECRET_ACCESS_KEY")) == "" {
-		t.Run("aws_env_session", func(t *testing.T) {
-			t.Skip("AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY are not set")
-		})
-	} else {
-		t.Run("aws_env_session", func(t *testing.T) {
-			assertLiveCatalog(t, ctx, exec, endpoint, string(profile.AuthModeAWSEnvSession), "")
-		})
-	}
-	profileName := firstNonEmpty(os.Getenv("AWS_PROFILE"), "default")
-	t.Run("aws_profile", func(t *testing.T) {
-		assertLiveCatalog(t, ctx, exec, endpoint, string(profile.AuthModeAWSProfile), profile.BedrockProfileCredentialRef(profileName))
+	t.Run("aws_identity", func(t *testing.T) {
+		assertLiveCatalog(t, ctx, exec, endpoint, "aws_identity", "")
 	})
 }
 
@@ -60,11 +46,10 @@ func assertLiveCatalog(t *testing.T, ctx context.Context, exec ProviderIngressRe
 		endpoint,
 		credentialRef,
 		protocolkind.Responses,
-		string(profile.AuthCredentialRef),
+
 		profile.FrameHTTPJSONBody,
-		"responses",
-	)
-	target.AuthMode = authMode
+		"responses")
+
 	models, err := exec.ListDeployments(ctx, target)
 	if err != nil {
 		t.Fatalf("%s catalog probe failed: %v", authMode, err)

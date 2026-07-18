@@ -22,11 +22,12 @@ import (
 //     TypingKeyMap and forwarded into InlineInput.
 //   - The parent must include the InlineEditor in BindApp and Watchers.
 type InlineEditor struct {
-	Value    *tui.State[string]
-	Width    int
-	OnSubmit func(string)
-	OnChange func(string)
-	OnClose  func()
+	Value     *tui.State[string]
+	Width     int
+	Sensitive bool
+	OnSubmit  func(string)
+	OnChange  func(string)
+	OnClose   func()
 
 	input *InlineInput
 }
@@ -60,6 +61,7 @@ func (ed *InlineEditor) Render() *tui.Element {
 	if ed.input == nil {
 		return tui.New(tui.WithWidth(0))
 	}
+	ed.input.Sensitive = ed.Sensitive
 	return ed.input.Render()
 }
 
@@ -97,6 +99,7 @@ func (ed *InlineEditor) ensureInput() {
 	}
 	ed.input = NewInlineInput(ed.Value)
 	ed.input.Width = ed.Width
+	ed.input.Sensitive = ed.Sensitive
 	ed.input.OnSubmit = func(_ string) {
 		if ed.OnSubmit != nil {
 			ed.OnSubmit(ed.Value.Get())

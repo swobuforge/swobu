@@ -9,7 +9,6 @@
   model routes ▾
      gpt               default · incomplete · no targets                                                  collapse ↵
         name              gpt                                                                             edit ↵
-        client sends      model = gpt
         default           yes                                                                             current
         delete            gpt                                                                             delete ↵
 

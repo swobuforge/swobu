@@ -12,7 +12,6 @@ var (
 	ErrLastTarget                 = errors.New("last target")
 	ErrLastRoute                  = errors.New("last route")
 	ErrDefaultReplacementRequired = errors.New("default replacement required")
-	ErrUnknownRoute               = errors.New("unknown route")
 	ErrEmptyRequestedRoute        = errors.New("requested route is empty")
 	ErrCredentialUnsupported      = errors.New("connection does not carry a credential")
 )

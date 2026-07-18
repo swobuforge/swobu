@@ -51,7 +51,7 @@ func buildDaemonServeMux(
 		go func() { _ = daemon.Close(context.Background()) }()
 		return nil
 	}))
-	mux.Handle("/_swobu/model-catalog", httpapi.NewModelCatalogProbeHandler(runtime))
+	mux.Handle("/_swobu/target-probe", httpapi.NewTargetProbeHandler(runtime))
 	workspaceService, err := workspaces.NewService(daemon.configStore)
 	if err != nil {
 		return nil, nil, err

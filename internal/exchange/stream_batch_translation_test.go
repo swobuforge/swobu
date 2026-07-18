@@ -24,7 +24,7 @@ func TestRunnerRun_StreamToBatchResponseProjectsProviderEventsInternally(t *test
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
 		Contract:         NewExecutionContractForDeliveries(delivery.BufferedDelivery(), delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -56,7 +56,7 @@ func TestRunnerRun_BatchToStreamResponseWithoutSourceIncrementality(t *testing.T
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingSSE), delivery.BufferedDelivery()),
 	})
 	if err != nil {

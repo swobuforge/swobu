@@ -24,14 +24,28 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	}
 }
 
+func TestCustomEndpointLoopbackCredentialPolicyParsesHostname(t *testing.T) {
+	spec := string(ProviderSpecOpenAICompatible)
+	for _, raw := range []string{"http://localhost:8080/v1", "http://127.0.0.1:8080/v1", "http://[::1]:8080/v1"} {
+		if RequiresCredential(spec, raw) {
+			t.Errorf("RequiresCredential(%q) = true, want false", raw)
+		}
+	}
+	for _, raw := range []string{"http://localhost.evil.example/v1", "http://127.0.0.1.evil.example/v1", "https://localhost/v1", "not a url"} {
+		if !RequiresCredential(spec, raw) {
+			t.Errorf("RequiresCredential(%q) = false, want true", raw)
+		}
+	}
+}
+
 func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	t.Parallel()
 
 	if got := DefaultExecuteBaseURL("chatgpt"); got != "https://api.openai.com/v1" {
 		t.Fatalf("chatgpt default base URL = %q", got)
 	}
-	if !RequiresCredential("chatgpt", DefaultExecuteBaseURL("chatgpt")) {
-		t.Fatal("chatgpt should require credential")
+	if RequiresCredential("chatgpt", DefaultExecuteBaseURL("chatgpt")) {
+		t.Fatal("chatgpt login is not a generic credential requirement")
 	}
 	if got := DefaultExecuteBaseURL("openrouter"); got != "https://openrouter.ai/api/v1" {
 		t.Fatalf("openrouter default base URL = %q", got)
@@ -48,10 +62,10 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if !RequiresCredential("openai_compatible", "https://lab.example/v1") {
 		t.Fatal("remote OpenAI-compatible URL should require credential")
 	}
-	if !RequiresExplicitEndpoint("azure") {
+	if !RequiresLocator("azure") {
 		t.Fatal("azure should require an explicit endpoint")
 	}
-	if !RequiresExplicitEndpoint("bedrock") {
+	if !RequiresLocator("bedrock") {
 		t.Fatal("bedrock should require an explicit endpoint")
 	}
 	if got := DefaultEnvKeyForSpec("azure"); got != "AZURE_OPENAI_API_KEY" {
@@ -92,44 +106,6 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 		t.Fatal("bedrock profile layer should allow ambient AWS auth without credential_ref")
 	}
 
-	chatgptModes := SupportedAuthModesForSpec("chatgpt")
-	if len(chatgptModes) < 2 {
-		t.Fatalf("chatgpt auth modes=%v want at least 2", chatgptModes)
-	}
-	if chatgptModes[0] != AuthModeChatGPTLogin {
-		t.Fatalf("chatgpt first listed auth mode=%q want=%q", chatgptModes[0], AuthModeChatGPTLogin)
-	}
-
-	openAIModes := SupportedAuthModesForSpec("openai")
-	if len(openAIModes) != 3 {
-		t.Fatalf("openai auth modes=%v want exactly 3", openAIModes)
-	}
-	if openAIModes[0] != AuthModeEnv || openAIModes[1] != AuthModeFile || openAIModes[2] != AuthModeKeychain {
-		t.Fatalf("openai auth modes=%v want env/file/keychain", openAIModes)
-	}
-
-	modes := AllowedAuthModesForSpec("chatgpt")
-	if len(modes) < 2 {
-		t.Fatalf("chatgpt allowed auth modes=%v want at least 2", modes)
-	}
-	if modes[0].Mode != AuthModeChatGPTLogin || !modes[0].Interactive {
-		t.Fatalf("chatgpt mode[0]=%+v", modes[0])
-	}
-
-	bedrockModes := AllowedAuthModesForSpec("bedrock")
-	if len(bedrockModes) != 3 {
-		t.Fatalf("bedrock allowed auth modes=%v want exactly 3", bedrockModes)
-	}
-	if bedrockModes[0].Mode != AuthModeEnv || bedrockModes[0].Label != "Bedrock API key" {
-		t.Fatalf("bedrock mode[0]=%+v", bedrockModes[0])
-	}
-	if bedrockModes[1].Mode != AuthModeAWSEnvSession || bedrockModes[1].Label != "AWS env" {
-		t.Fatalf("bedrock mode[1]=%+v", bedrockModes[1])
-	}
-	if bedrockModes[2].Mode != AuthModeAWSProfile || bedrockModes[2].Label != "AWS profile" {
-		t.Fatalf("bedrock mode[2]=%+v", bedrockModes[2])
-	}
-
 	bedrockProtocols := ConcreteProviderProtocolsForSpec("bedrock")
 	if len(bedrockProtocols) != 6 {
 		t.Fatalf("bedrock concrete protocols=%v want exactly 6", bedrockProtocols)
@@ -147,16 +123,6 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 		t.Fatalf("bedrock auto protocol=%q ok=%v want responses", got, ok)
 	}
 
-	azureModes := AllowedAuthModesForSpec("azure")
-	if len(azureModes) != 3 {
-		t.Fatalf("azure allowed auth modes=%v want exactly 3", azureModes)
-	}
-	if azureModes[0].Mode != AuthModeEnv || azureModes[1].Mode != AuthModeFile {
-		t.Fatalf("azure allowed auth modes=%v want env/file/keychain prefix", azureModes)
-	}
-	if azureModes[2].Mode != AuthModeKeychain {
-		t.Fatalf("azure allowed auth modes=%v want keychain third", azureModes)
-	}
 	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("azure"); ok || got != "" {
 		t.Fatalf("azure auto protocol=%q ok=%v want unresolved", got, ok)
 	}
@@ -171,7 +137,7 @@ func TestCatalog_ProviderSetupKeywordsAreSearchOnly(t *testing.T) {
 		"chatgpt":           "sign in, model, protocol",
 		"anthropic":         "credential, model, protocol",
 		"openrouter":        "credential, model, protocol",
-		"bedrock":           "region, Bedrock API key, AWS credentials, AWS profile, AWS env, AWS_BEARER_TOKEN_BEDROCK, access keys, model, protocol",
+		"bedrock":           "region, Bedrock API key, AWS credentials, model, protocol",
 		"azure":             "endpoint, credential, deployment, protocol",
 		"openai_compatible": "backend URL, credential, credential header, model, protocol",
 	}
@@ -183,53 +149,41 @@ func TestCatalog_ProviderSetupKeywordsAreSearchOnly(t *testing.T) {
 	}
 }
 
-func TestCatalog_EndpointSpecForProvider(t *testing.T) {
+func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]struct {
-		kind       ProviderEndpointKind
-		label      string
-		defaultURL string
+		locator    LocatorSpec
+		credential CredentialSpec
+		noun       string
 	}{
-		"ollama":            {kind: EndpointDefaultHTTPBaseURL, label: "base URL", defaultURL: "http://127.0.0.1:11434/v1"},
-		"openai":            {kind: EndpointDefaultHTTPBaseURL, label: "base URL", defaultURL: "https://api.openai.com/v1"},
-		"chatgpt":           {kind: EndpointDefaultHTTPBaseURL, label: "base URL", defaultURL: "https://api.openai.com/v1"},
-		"anthropic":         {kind: EndpointDefaultHTTPBaseURL, label: "base URL", defaultURL: "https://api.anthropic.com/v1"},
-		"openrouter":        {kind: EndpointDefaultHTTPBaseURL, label: "base URL", defaultURL: "https://openrouter.ai/api/v1"},
-		"bedrock":           {kind: EndpointRequiredHTTPBaseURL, label: "region"},
-		"azure":             {kind: EndpointAzureResourceLocator, label: "project"},
-		"openai_compatible": {kind: EndpointRequiredHTTPBaseURL, label: "backend URL"},
+		"ollama":            {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:11434/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
+		"openai":            {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
+		"chatgpt":           {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
+		"anthropic":         {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
+		"openrouter":        {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
+		"bedrock":           {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK"}, "model"},
+		"azure":             {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
+		"openai_compatible": {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback}, "model"},
 	}
 	for spec, want := range cases {
-		got, ok := EndpointSpecForProvider(spec)
+		got, ok := LocatorSpecForProvider(spec)
 		if !ok {
-			t.Fatalf("endpoint spec for %q missing", spec)
+			t.Fatalf("locator spec for %q missing", spec)
 		}
-		if got.Kind != want.kind {
-			t.Fatalf("endpoint kind for %q = %q, want %q", spec, got.Kind, want.kind)
+		if got != want.locator {
+			t.Fatalf("locator for %q = %+v, want %+v", spec, got, want.locator)
 		}
-		if got.Label != want.label {
-			t.Fatalf("endpoint label for %q = %q, want %q", spec, got.Label, want.label)
+		provider, ok := profileFor(spec)
+		if !ok {
+			t.Fatalf("profile for %q missing", spec)
 		}
-		if got.DefaultURL != want.defaultURL {
-			t.Fatalf("endpoint default URL for %q = %q, want %q", spec, got.DefaultURL, want.defaultURL)
+		if provider.Credential != want.credential {
+			t.Fatalf("credential for %q = %+v, want %+v", spec, provider.Credential, want.credential)
 		}
-	}
-}
-
-func TestCatalog_ResolveRouteProfile(t *testing.T) {
-	t.Parallel()
-
-	profile, ok := ResolveRouteProfile("openai", "https://api.openai.com/v1", "cred-1")
-	if !ok {
-		t.Fatal("openai route profile should resolve")
-	}
-	if profile.AuthKind != AuthCredentialRef {
-		t.Fatalf("auth kind = %q", profile.AuthKind)
-	}
-
-	if _, ok := ResolveRouteProfile("claude", "https://api.anthropic.com/v1", "cred-1"); ok {
-		t.Fatal("claude provider spec must be rejected; use anthropic")
+		if got := CatalogItemLabelForSpec(spec); got != want.noun {
+			t.Fatalf("catalog noun for %q = %q, want %q", spec, got, want.noun)
+		}
 	}
 }
 
@@ -287,5 +241,14 @@ func TestCatalog_ConcreteProviderProtocolsForSpec_OrderIsCanonical(t *testing.T)
 	chatgpt := ConcreteProviderProtocolsForSpec("chatgpt")
 	if len(chatgpt) != 1 || chatgpt[0] != "responses_stream" {
 		t.Fatalf("chatgpt concrete protocols=%v want [responses_stream]", chatgpt)
+	}
+}
+
+func TestCustomEndpointDoesNotPromiseModelCatalog(t *testing.T) {
+	if SupportsCapability(string(ProviderSpecOpenAICompatible), CapabilityModelCatalog) {
+		t.Fatal("Custom Endpoint cannot promise /models support for arbitrary compatible backends")
+	}
+	if !SupportsCapability(string(ProviderSpecOpenAICompatible), CapabilityStreaming) {
+		t.Fatal("Custom Endpoint lost its declared streaming capability")
 	}
 }

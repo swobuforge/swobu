@@ -19,24 +19,36 @@ type BedrockMantleRegionSpec struct {
 }
 
 var bedrockMantleRegionCatalog = []BedrockMantleRegionSpec{
-	{ID: "ap-northeast-1", Label: "ap-northeast-1", Keywords: []string{"Tokyo"}},
-	{ID: "ap-south-1", Label: "ap-south-1", Keywords: []string{"Mumbai"}},
-	{ID: "ap-southeast-2", Label: "ap-southeast-2", Keywords: []string{"Sydney"}},
-	{ID: "ap-southeast-3", Label: "ap-southeast-3", Keywords: []string{"Jakarta"}},
-	{ID: "eu-central-1", Label: "eu-central-1", Keywords: []string{"Frankfurt"}},
-	{ID: "eu-north-1", Label: "eu-north-1", Keywords: []string{"Stockholm"}},
-	{ID: "eu-south-1", Label: "eu-south-1", Keywords: []string{"Milan"}},
-	{ID: "eu-west-1", Label: "eu-west-1", Keywords: []string{"Ireland"}},
-	{ID: "eu-west-2", Label: "eu-west-2", Keywords: []string{"London"}},
-	{ID: "sa-east-1", Label: "sa-east-1", Keywords: []string{"Sao Paulo"}},
-	{ID: "us-east-1", Label: "us-east-1", Keywords: []string{"N. Virginia"}},
-	{ID: "us-east-2", Label: "us-east-2", Keywords: []string{"Ohio"}},
-	{ID: "us-west-2", Label: "us-west-2", Keywords: []string{"Oregon"}},
+	{ID: "ap-northeast-1", Label: "Asia Pacific (Tokyo) · ap-northeast-1", Keywords: []string{"Tokyo"}},
+	{ID: "ap-south-1", Label: "Asia Pacific (Mumbai) · ap-south-1", Keywords: []string{"Mumbai"}},
+	{ID: "ap-southeast-2", Label: "Asia Pacific (Sydney) · ap-southeast-2", Keywords: []string{"Sydney"}},
+	{ID: "ap-southeast-3", Label: "Asia Pacific (Jakarta) · ap-southeast-3", Keywords: []string{"Jakarta"}},
+	{ID: "eu-central-1", Label: "Europe (Frankfurt) · eu-central-1", Keywords: []string{"Frankfurt"}},
+	{ID: "eu-north-1", Label: "Europe (Stockholm) · eu-north-1", Keywords: []string{"Stockholm"}},
+	{ID: "eu-south-1", Label: "Europe (Milan) · eu-south-1", Keywords: []string{"Milan"}},
+	{ID: "eu-west-1", Label: "Europe (Ireland) · eu-west-1", Keywords: []string{"Ireland"}},
+	{ID: "eu-west-2", Label: "Europe (London) · eu-west-2", Keywords: []string{"London"}},
+	{ID: "sa-east-1", Label: "South America (São Paulo) · sa-east-1", Keywords: []string{"Sao Paulo", "São Paulo"}},
+	{ID: "us-east-1", Label: "US East (N. Virginia) · us-east-1", Keywords: []string{"N. Virginia"}},
+	{ID: "us-east-2", Label: "US East (Ohio) · us-east-2", Keywords: []string{"Ohio"}},
+	{ID: "us-west-2", Label: "US West (Oregon) · us-west-2", Keywords: []string{"Oregon"}},
 }
 
 // BedrockMantleRegions returns the canonical region catalog in stable order.
 func BedrockMantleRegions() []BedrockMantleRegionSpec {
 	return slices.Clone(bedrockMantleRegionCatalog)
+}
+
+// BedrockMantleRegionLabel returns the operator-facing geography plus its
+// durable region ID, or the trimmed ID when the catalog does not contain it.
+func BedrockMantleRegionLabel(region string) string {
+	normalized := strings.TrimSpace(strings.ToLower(region))
+	for _, entry := range bedrockMantleRegionCatalog {
+		if entry.ID == normalized {
+			return entry.Label
+		}
+	}
+	return strings.TrimSpace(region)
 }
 
 // SupportsBedrockMantleRegion reports whether a region is in the canonical

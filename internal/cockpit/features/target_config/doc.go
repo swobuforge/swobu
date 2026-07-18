@@ -3,16 +3,27 @@
 //
 // TargetConfig is mounted by the routes section when the operator activates
 // "add target" on an expanded route. It is not a global modal; it renders
-// inline under the route row. Provider setup, auth, model catalog probing, and
+// inline under the route row. Provider setup, model catalog probing, and
 // routing choices backed by placement ranks are all internal to this package.
 // Once a provider is selected, provider-specific GSX components render the
 // visible row sequence below provider selection. The route section only knows
 // whether a target config is open for a given route. Empty
 // routes skip the routing chooser and create their first target at step 1.
-// The Bedrock component renders only the fixed Mantle connection; native Bedrock
-// Runtime is not a Cockpit target-creation path.
+// Provider forms author one locator value whose meaning comes from profile
+// facts. One pure connection projection builds the routing.Connection used by
+// catalog probing. The Cockpit adapter decodes opaque probe diagnostics before
+// this feature receives typed Bedrock authentication evidence. Catalog success
+// controls creation validity while optional STS identity enriches the Bedrock
+// form. Bedrock has one authentication field: an absent credential reference
+// selects AWS identity, while a present reference selects a bearer API key and
+// embeds the shared credential chooser. ChatGPT retains its genuine
+// login-session workflow.
+// Custom Endpoint treats catalog discovery as best-effort and uses the shared
+// open-set model picker so an operator-authored model ID remains sufficient.
 //
-// GSX files own visible template hierarchy only. Target-config transitions and
-// state-derived helpers live in semantically named Go sources; pure projections
-// accept concrete values rather than reading reactive component state.
+// GSX files own visible template hierarchy. Target-config transitions live in
+// effects.go, and pure projections accept concrete values rather than reading
+// reactive component state. Azure alone retains a narrow *_component.go adapter
+// because its mounted receiver owns endpoint-draft continuity that go-tui cannot
+// yet express directly; the adapter is deleted when the generator supports it.
 package target_config

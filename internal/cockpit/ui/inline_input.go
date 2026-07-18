@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -27,6 +28,7 @@ type InlineInput struct {
 	OnChange        func(string)
 	Width           int // zero means ActionRowValueWidth
 	Placeholder     string
+	Sensitive       bool
 	CursorRune      rune
 	CursorBlinkRune rune
 
@@ -131,6 +133,8 @@ func (inp *InlineInput) Render() *tui.Element {
 	text := inp.Value.Get()
 	if text == "" && inp.Placeholder != "" {
 		text = inp.Placeholder
+	} else if inp.Sensitive {
+		text = strings.Repeat("•", utf8.RuneCountInString(text))
 	}
 
 	display := inp.displayText(text)

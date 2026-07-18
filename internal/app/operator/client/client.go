@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 )
 
 // Client talks to the daemon's semantic operator control plane.
@@ -249,19 +251,19 @@ func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSe
 	}, nil
 }
 
-func (c *Client) ProbeModelCatalog(ctx context.Context, providerSpec, baseURL, authHeader, credentialRef, authMode, providerProtocol string) (ModelCatalogResult, error) {
-	q := make(url.Values)
-	q.Set("provider_spec", strings.TrimSpace(providerSpec))         // swobu:io-string source=boundary
-	q.Set("base_url", strings.TrimSpace(baseURL))                   // swobu:io-string source=boundary
-	q.Set("auth_header", strings.TrimSpace(authHeader))             // swobu:io-string source=boundary
-	q.Set("credential_ref", strings.TrimSpace(credentialRef))       // swobu:io-string source=boundary
-	q.Set("auth_mode", strings.TrimSpace(authMode))                 // swobu:io-string source=boundary
-	q.Set("provider_protocol", strings.TrimSpace(providerProtocol)) // swobu:io-string source=boundary
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/model-catalog?"+q.Encode(), nil)
+func (c *Client) ProbeTarget(ctx context.Context, connection workspaceapi.Connection, providerProtocol string) (ModelCatalogResult, error) {
+	body, err := json.Marshal(struct {
+		Connection       workspaceapi.Connection `json:"connection"`
+		ProviderProtocol string                  `json:"provider_protocol,omitempty"`
+	}{Connection: connection, ProviderProtocol: strings.TrimSpace(providerProtocol)})
+	if err != nil {
+		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog payload could not be encoded")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/target-probe", bytes.NewReader(body))
 	if err != nil {
 		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog request could not be built")
 	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog is unavailable")

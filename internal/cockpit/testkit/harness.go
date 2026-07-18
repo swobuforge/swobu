@@ -2,8 +2,8 @@ package testkit
 
 import (
 	"reflect"
-	"unsafe"
 	"time"
+	"unsafe"
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
@@ -28,13 +28,25 @@ type MockAppHarness struct {
 
 // NewHarness creates an interactive test fixture for the given root component.
 func NewHarness(root tui.Component) (*MockAppHarness, error) {
-	app, reader, err := mountedrender.NewApp(120, 40)
+	return NewHarnessAt(root, 120, 40)
+}
+
+// NewHarnessAt creates an interactive fixture at an explicit viewport. Use it
+// when one keyboard path must produce width-specific visual evidence.
+func NewHarnessAt(root tui.Component, width, height int) (*MockAppHarness, error) {
+	app, reader, err := mountedrender.NewApp(width, height)
 	if err != nil {
 		return nil, err
 	}
 
 	app.SetRootComponent(root)
 	return &MockAppHarness{app: app, reader: reader}, nil
+}
+
+// FrameTrimmed renders and returns the current buffer without trailing cells.
+func (h *MockAppHarness) FrameTrimmed() string {
+	h.Frame()
+	return h.app.Buffer().StringTrimmed()
 }
 
 // NewFuncHarness creates a MockAppHarness from a bare element tree instead of a

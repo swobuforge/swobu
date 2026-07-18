@@ -35,7 +35,7 @@ func TestClientGetAuthSessionStatus(t *testing.T) {
 			t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"provider_spec":"chatgpt","session_id":"sess-1","state":"succeeded","credential_ref":"keychain:chatgpt/default","error":""}`))
+		_, _ = w.Write([]byte(`{"provider_spec":"chatgpt","session_id":"sess-1","state":"succeeded","credential_ref":"secret:chatgpt/default","error":""}`))
 	}))
 	defer server.Close()
 
@@ -44,7 +44,7 @@ func TestClientGetAuthSessionStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAuthSessionStatus returned error: %v", err)
 	}
-	if out.ProviderSpec != "chatgpt" || out.CredentialRef != "keychain:chatgpt/default" || out.State != "succeeded" {
+	if out.ProviderSpec != "chatgpt" || out.CredentialRef != "secret:chatgpt/default" || out.State != "succeeded" {
 		t.Fatalf("unexpected output: %#v", out)
 	}
 }

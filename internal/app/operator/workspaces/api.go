@@ -74,13 +74,8 @@ type AzureConnection struct {
 	Credential      string `json:"credential"`
 }
 type BedrockConnection struct {
-	Region string      `json:"region"`
-	Auth   BedrockAuth `json:"auth"`
-}
-type BedrockAuth struct {
-	Profile     *string   `json:"profile,omitempty"`
-	Environment *struct{} `json:"environment,omitempty"`
-	BearerToken *string   `json:"bearer_token,omitempty"`
+	Region     string `json:"region"`
+	Credential string `json:"credential,omitempty"`
 }
 type CustomConnection struct {
 	BaseURL string        `json:"base_url"`
@@ -111,40 +106,37 @@ func projectWorkspace(workspace routing.Workspace) Workspace {
 
 func projectTarget(target routing.Target) Target {
 	out := Target{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String(), Provider: string(target.Provider())}
-	switch c := target.Connection().(type) {
+	out.Connection = ConnectionFromRouting(target.Connection())
+	return out
+}
+
+// ConnectionFromRouting is the shared routing-to-operator transport codec used
+// by both target persistence and target probing.
+func ConnectionFromRouting(connection routing.Connection) Connection {
+	out := Connection{}
+	switch c := connection.(type) {
 	case routing.OpenAIConnection:
-		out.Connection.OpenAI = &CredentialConnection{Credential: c.Credential().String()}
+		out.OpenAI = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.AnthropicConnection:
-		out.Connection.Anthropic = &CredentialConnection{Credential: c.Credential().String()}
+		out.Anthropic = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.OpenRouterConnection:
-		out.Connection.OpenRouter = &CredentialConnection{Credential: c.Credential().String()}
+		out.OpenRouter = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.ChatGPTConnection:
-		out.Connection.ChatGPT = &CredentialConnection{Credential: c.Credential().String()}
+		out.ChatGPT = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.OllamaConnection:
 		value, _ := c.BaseURL()
-		out.Connection.Ollama = &OllamaConnection{BaseURL: value.String()}
+		out.Ollama = &OllamaConnection{BaseURL: value.String()}
 	case routing.AzureConnection:
-		out.Connection.Azure = &AzureConnection{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
+		out.Azure = &AzureConnection{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
 	case routing.BedrockConnection:
-		auth := BedrockAuth{}
-		switch a := c.Auth().(type) {
-		case routing.BedrockProfileAuth:
-			value := a.Profile()
-			auth.Profile = &value
-		case routing.BedrockEnvironmentAuth:
-			auth.Environment = &struct{}{}
-		case routing.BedrockBearerTokenAuth:
-			value := a.Credential().String()
-			auth.BearerToken = &value
-		}
-		out.Connection.Bedrock = &BedrockConnection{Region: c.Region().String(), Auth: auth}
+		out.Bedrock = &BedrockConnection{Region: c.Region().String(), Credential: c.Credential().String()}
 	case routing.CustomConnection:
 		custom := &CustomConnection{BaseURL: c.BaseURL().String()}
 		if c.Auth() != nil {
 			header := c.Auth().(routing.CustomHeaderAuth)
 			custom.Header = &CustomHeader{Name: header.Name(), Credential: header.Credential().String()}
 		}
-		out.Connection.Custom = custom
+		out.Custom = custom
 	}
 	return out
 }
@@ -184,12 +176,7 @@ func (c Connection) routingDraft() routing.ConnectionDraft {
 		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: c.Azure.ProjectEndpoint, Credential: c.Azure.Credential}
 	}
 	if c.Bedrock != nil {
-		draft.Bedrock = &routing.BedrockConnectionDraft{
-			Region: c.Bedrock.Region,
-			Auth: routing.BedrockAuthDraft{
-				Profile: c.Bedrock.Auth.Profile, Environment: c.Bedrock.Auth.Environment != nil, BearerToken: c.Bedrock.Auth.BearerToken,
-			},
-		}
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: c.Bedrock.Region, Credential: c.Bedrock.Credential}
 	}
 	if c.Custom != nil {
 		draft.Custom = &routing.CustomConnectionDraft{BaseURL: c.Custom.BaseURL}
@@ -198,6 +185,12 @@ func (c Connection) routingDraft() routing.ConnectionDraft {
 		}
 	}
 	return draft
+}
+
+// RoutingConnection parses the operator connection union through the routing
+// domain's single connection finalizer.
+func (c Connection) RoutingConnection() (routing.Connection, error) {
+	return routing.FinalizeConnection(c.routingDraft(), profile.RoutingCapabilities())
 }
 
 func normalize(raw string) string { return strings.TrimSpace(raw) }

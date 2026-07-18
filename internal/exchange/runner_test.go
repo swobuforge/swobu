@@ -59,7 +59,7 @@ func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -90,7 +90,7 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestRunnerRun_StreamingWebSocketPreservesJsonTransport(t *testing.T) {
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestRunnerRun_StreamingEndToEnd_DisablesProgressiveWhenWrapperBuffersRespon
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -186,7 +186,7 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -232,7 +232,7 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -253,7 +253,7 @@ func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -283,7 +283,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		ReplayScope:      testReplayScope(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses_stream"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {

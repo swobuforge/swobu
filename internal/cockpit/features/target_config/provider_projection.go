@@ -1,0 +1,137 @@
+package target_config
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/routing"
+)
+
+// connectionFromDraft is the single authoring boundary from an incomplete
+// Cockpit draft to the durable provider-specific connection sum type.
+func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error) {
+	credential := strings.TrimSpace(draft.CredentialRef)
+	locator := strings.TrimSpace(draft.Locator)
+	switch profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) {
+	case profile.ProviderSpecOpenAI:
+		return routing.NewOpenAIConnection(credential)
+	case profile.ProviderSpecAnthropic:
+		return routing.NewAnthropicConnection(credential)
+	case profile.ProviderSpecOpenRouter:
+		return routing.NewOpenRouterConnection(credential)
+	case profile.ProviderSpecChatGPT:
+		return routing.NewChatGPTConnection(credential)
+	case profile.ProviderSpecOllama:
+		return routing.NewOllamaConnection(locator)
+	case profile.ProviderSpecAzure:
+		return routing.NewAzureConnection(locator, credential)
+	case profile.ProviderSpecBedrock:
+		region, err := routing.ParseBedrockRegion(locator)
+		if err != nil {
+			return nil, err
+		}
+		return routing.NewBedrockConnection(region, credential)
+	case profile.ProviderSpecOpenAICompatible:
+		var auth routing.CustomAuth
+		if credential != "" {
+			header, err := routing.NewCustomHeaderAuth(
+				resolvedCredentialHeader(draft.ProviderSpec, draft.ProviderOptions.OpenAICompatible.CredentialHeader),
+				credential,
+			)
+			if err != nil {
+				return nil, err
+			}
+			auth = header
+		}
+		return routing.NewCustomConnection(locator, auth)
+	default:
+		return nil, fmt.Errorf("unsupported provider %q", draft.ProviderSpec)
+	}
+}
+
+// TargetDraftFromReadModel projects the persisted read shape into the typed
+// draft used by both create and edit authoring.
+func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.TargetReadModel) readmodel.TargetDraft {
+	spec := strings.TrimSpace(target.Provider)   // swobu:io-string source=boundary
+	locator := strings.TrimSpace(target.BaseURL) // swobu:io-string source=boundary
+	if profile.ProviderID(spec) == profile.ProviderSpecBedrock {
+		locator = profile.BedrockMantleRegionFromEndpoint(target.BaseURL)
+	}
+	draft := readmodel.TargetDraft{
+		ProviderSpec:     spec,
+		Locator:          locator,
+		CredentialRef:    strings.TrimSpace(target.CredentialRef),    // swobu:io-string source=boundary
+		ProviderProtocol: strings.TrimSpace(target.ProviderProtocol), // swobu:io-string source=boundary
+		ModelID:          strings.TrimSpace(target.Model),            // swobu:io-string source=boundary
+		RouteModelID:     strings.TrimSpace(string(routeID)),         // swobu:io-string source=boundary
+	}
+	if profile.ProviderID(spec) == profile.ProviderSpecOpenAICompatible {
+		draft.ProviderOptions.OpenAICompatible.CredentialHeader = strings.TrimSpace(target.AuthHeader) // swobu:io-string source=boundary
+	}
+	return draft
+}
+
+// currentTargetDraft applies the transient authoring spine to the durable
+// draft without interpreting provider-specific option arms.
+func currentTargetDraft(draft readmodel.TargetDraft, locator, modelID, protocol string, routeID readmodel.RouteID) readmodel.TargetDraft {
+	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock {
+		draft.Locator = strings.TrimSpace(locator) // swobu:io-string source=boundary
+	}
+	draft.ProviderProtocol = strings.TrimSpace(protocol)    // swobu:io-string source=boundary
+	draft.ModelID = strings.TrimSpace(modelID)              // swobu:io-string source=boundary
+	draft.RouteModelID = strings.TrimSpace(string(routeID)) // swobu:io-string source=boundary
+	return draft
+}
+
+func providerPickerLabel(providerSpec, displayName string) string {
+	if label := strings.TrimSpace(displayName); label != "" {
+		return label
+	}
+	return strings.TrimSpace(providerSpec)
+}
+
+func providerPickerKeywords(p readmodel.ProviderOptionReadModel) []string {
+	keywords := make([]string, 0, 4)
+	if spec := strings.TrimSpace(p.ProviderSpec); spec != "" {
+		keywords = append(keywords, spec)
+	}
+	if hint := strings.TrimSpace(p.SetupHint); hint != "" {
+		keywords = append(keywords, hint)
+	}
+	if summary := strings.TrimSpace(profile.ProviderSetupKeywordSummaryForSpec(p.ProviderSpec)); summary != "" {
+		keywords = append(keywords, summary)
+	}
+	return keywords
+}
+
+func defaultPlacementForRoute(route readmodel.RouteReadModel) readmodel.PlacementOptionReadModel {
+	var anchor readmodel.TargetID
+	if len(route.Tiers) > 0 && len(route.Tiers[len(route.Tiers)-1].Targets) > 0 {
+		anchor = route.Tiers[len(route.Tiers)-1].Targets[0].ID
+	}
+	return readmodel.PlacementOptionReadModel{
+		Label:        fmt.Sprintf("fallback after step %d", len(route.Tiers)),
+		PeerTargetID: anchor,
+		Kind:         readmodel.PlacementFallback,
+	}
+}
+
+func placementOptions(route readmodel.RouteReadModel, mode targetConfigMode, editedTargetID readmodel.TargetID) []readmodel.PlacementOptionReadModel {
+	opts := make([]readmodel.PlacementOptionReadModel, 0, len(route.Tiers)+1)
+	for tierIndex, tier := range route.Tiers {
+		for _, target := range tier.Targets {
+			if mode == targetConfigModeEdit && target.ID == editedTargetID {
+				continue
+			}
+			opts = append(opts, readmodel.PlacementOptionReadModel{Label: "balance with " + fmt.Sprintf("step %d", tierIndex+1), PeerTargetID: target.ID, Kind: readmodel.PlacementBalance})
+			break
+		}
+	}
+	return append(opts, defaultPlacementForRoute(route))
+}
+
+func placementOptionID(opt readmodel.PlacementOptionReadModel) string {
+	return fmt.Sprintf("placement-%s-%d", opt.PeerTargetID, opt.Kind)
+}

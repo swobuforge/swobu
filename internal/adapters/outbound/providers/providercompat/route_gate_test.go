@@ -49,7 +49,7 @@ func TestGateRouteFeatureSupport_EmitsSupportedCompatibilityDecisions(t *testing
 		},
 	})
 
-	if err := GateRouteFeatureSupport(context.Background(), sink, "ex-supported", "anthropic", string(protocolkind.Messages), request); err != nil {
+	if err := GateRouteFeatureSupport(context.Background(), sink, "ex-supported", "anthropic", protocolkind.Messages, request); err != nil {
 		t.Fatalf("anthropic messages support failed: %v", err)
 	}
 	if len(sink.effects) != 7 {
@@ -99,7 +99,7 @@ func TestGateRouteFeatureSupport_RejectsUnsupportedStructuredOutput(t *testing.T
 		OutputFormat: outputFormat,
 	})
 
-	gateErr := GateRouteFeatureSupport(context.Background(), sink, "ex-unsupported", "anthropic", string(protocolkind.Messages), request)
+	gateErr := GateRouteFeatureSupport(context.Background(), sink, "ex-unsupported", "anthropic", protocolkind.Messages, request)
 	if gateErr == nil || !strings.Contains(gateErr.Error(), "structured JSON schema output") {
 		t.Fatalf("unsupported structured output must fail closed, got err=%v", gateErr)
 	}

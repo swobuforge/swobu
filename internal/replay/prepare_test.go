@@ -316,6 +316,34 @@ func TestPrepareDifferentTargetReturnsFullRequestAndNilNative(t *testing.T) {
 	}
 }
 
+func TestPrepareProviderProtocolChangeMaterializesAndRejectsNativeRef(t *testing.T) {
+	spy := newSpyStore()
+	previousRequest := makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{})
+	previousResponse := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
+	nativeRef := &NativeRef{
+		ReplayID: "resp_prev",
+		Target:   testTarget(),
+		Kind:     NativeRefProviderResponseID,
+		Value:    "provider_prev_id",
+	}
+	spy.Put(context.Background(), testScope, makeRecord("resp_prev", testTarget(), previousRequest, previousResponse, nativeRef))
+
+	changed := testTarget()
+	changed.ProviderProtocol = "responses_stream"
+	current := makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_prev"))
+	got, native, err := Prepare(context.Background(), spy, testScope, &changed, current)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if native != nil {
+		t.Fatalf("native ref survived provider protocol change: %+v", native)
+	}
+	items := got.Items()
+	if len(items) != 3 || items[0].Text != "turn1" || items[1].Text != "assistant1" || items[2].Text != "turn2" {
+		t.Fatalf("materialized items=%+v want prior request + response + current turn", items)
+	}
+}
+
 func TestPrepareAllowsMultiItemCurrentTurnWithPreviousResponseID(t *testing.T) {
 	spy := newSpyStore()
 	prevReq := makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{})

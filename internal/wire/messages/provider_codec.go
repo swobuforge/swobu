@@ -8,9 +8,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
-	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {

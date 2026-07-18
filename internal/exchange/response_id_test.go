@@ -42,7 +42,7 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -94,7 +94,7 @@ func TestRunner_SwobuResponseIDPassedByInput(t *testing.T) {
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func TestRunnerWithoutReplayStoreRejectsBeforeProviderIngress(t *testing.T) {
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -203,7 +203,7 @@ func TestRunnerRejectsEmptyReplayScopeNamespaceBeforeProviderIngress(t *testing.
 		ClientDelivery:   delivery.BufferedDelivery(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -238,7 +238,7 @@ func TestRunnerRejectsEmptyReplayScopeCallerKeyBeforeProviderIngress(t *testing.
 		ClientDelivery:   delivery.BufferedDelivery(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -266,7 +266,7 @@ func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) 
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -312,7 +312,7 @@ func TestRunnerReplayCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {

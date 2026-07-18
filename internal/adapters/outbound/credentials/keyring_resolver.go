@@ -9,7 +9,6 @@ import (
 	keyringcommodity "github.com/zalando/go-keyring"
 )
 
-const keychainCredentialRefPrefix = "keychain:"
 const secretCredentialRefPrefix = "secret:"
 const secretFileCredentialRefPrefix = "secretfile:"
 const keyringNamespace = "swobu"
@@ -30,24 +29,24 @@ func (OSKeyringClient) Get(scope, user string) (string, error) {
 	return keyringcommodity.Get(scope, user)
 }
 
-// KeyringCredentialSourceResolver resolves keychain credential refs against OS
+// StoredSecretResolver resolves stored-secret credential refs against the OS
 // keyring and falls back to the file-backed secret store when keyring lookup
 // fails or returns unusable data.
-type KeyringCredentialSourceResolver struct {
+type StoredSecretResolver struct {
 	client KeyringClient
 }
 
-func NewKeyringResolver(client KeyringClient) KeyringCredentialSourceResolver {
+func NewStoredSecretResolver(client KeyringClient) StoredSecretResolver {
 	if client == nil {
 		client = OSKeyringClient{}
 	}
-	return KeyringCredentialSourceResolver{client: client}
+	return StoredSecretResolver{client: client}
 }
 
-// ResolveCredential returns the access token stored behind a keychain ref.
+// ResolveCredential returns the access token stored behind a stored-secret ref.
 // The keyring client is the primary lookup path; file-backed fallback keeps the
 // canonical credential ref usable when the OS keyring is unavailable.
-func (r KeyringCredentialSourceResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
+func (r StoredSecretResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
 	_ = ctx
 	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	keyName, parseErr := secretCredentialName(providerSpec, ref)
@@ -109,7 +108,7 @@ func KeyringScopeForProvider(providerSpec string) string {
 	return keyringNamespace + "/" + spec
 }
 
-func CanonicalKeychainCredentialName(providerSpec string) string {
+func CanonicalStoredSecretName(providerSpec string) string {
 	spec := strings.TrimSpace(strings.ToLower(providerSpec)) // swobu:io-string source=boundary
 	if spec == "" {
 		return "default"
@@ -119,20 +118,13 @@ func CanonicalKeychainCredentialName(providerSpec string) string {
 
 func secretCredentialName(providerSpec, credentialRef string) (string, error) {
 	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
-	if ref == "keychain" || ref == "secret" {
-		return CanonicalKeychainCredentialName(providerSpec), nil
+	if ref == "secret" {
+		return CanonicalStoredSecretName(providerSpec), nil
 	}
 	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // swobu:io-string source=boundary
 		name := strings.TrimSpace(ref[len(secretCredentialRefPrefix):]) // swobu:io-string source=boundary
 		if name == "" {
 			return "", fmt.Errorf("secret credential name must not be empty")
-		}
-		return name, nil
-	}
-	if strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // swobu:io-string source=boundary
-		name := strings.TrimSpace(ref[len(keychainCredentialRefPrefix):]) // swobu:io-string source=boundary
-		if name == "" {
-			return "", fmt.Errorf("keychain credential name must not be empty")
 		}
 		return name, nil
 	}

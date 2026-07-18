@@ -61,8 +61,8 @@ func TestEditableRow_EscapeKeepsFocusOnRow(t *testing.T) {
 	}
 }
 
-// Verify that typing while in edit mode updates the value state.
-func TestEditableRow_TypingInEditModeUpdatesValue(t *testing.T) {
+// Verify that typing renders the private edit draft without publishing it.
+func TestEditableRow_TypingInEditModeKeepsDurableValueStable(t *testing.T) {
 	value := tui.NewState("")
 	row := NewEditableRow("slug", "slug", value)
 
@@ -74,8 +74,8 @@ func TestEditableRow_TypingInEditModeUpdatesValue(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'x'})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'y'})
 
-	if got := value.Get(); got != "xy" {
-		t.Fatalf("value after typing = %q, want xy", got)
+	if got := value.Get(); got != "" {
+		t.Fatalf("durable value changed before submit: %q", got)
 	}
 	frame := h.Frame()
 	if !strings.Contains(frame, "xy_") && !strings.Contains(frame, "xy ") {

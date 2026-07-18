@@ -6,7 +6,6 @@ type Kind string
 
 const (
 	KindEmpty      Kind = "empty"
-	KindKeychain   Kind = "keychain"
 	KindSecret     Kind = "secret"
 	KindSecretFile Kind = "secretfile"
 	KindEnv        Kind = "env"
@@ -35,8 +34,6 @@ func Parse(raw string) Ref {
 		return Ref{raw: raw, norm: normalized, kind: KindSecretFile}
 	case normalized == "secret" || normalized == "secret:" || strings.HasPrefix(normalized, "secret:"):
 		return Ref{raw: raw, norm: normalized, kind: KindSecret}
-	case normalized == "keychain" || normalized == "keychain:" || strings.HasPrefix(normalized, "keychain:"):
-		return Ref{raw: raw, norm: normalized, kind: KindKeychain}
 	default:
 		return Ref{raw: raw, norm: normalized, kind: KindOther}
 	}

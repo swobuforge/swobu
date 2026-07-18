@@ -54,12 +54,18 @@ func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 		t.Fatalf("attempted targets=%v", refs)
 	}
 }
-func TestRequestPathUnknownRouteFailsWithoutDefaultFallback(t *testing.T) {
+func TestRequestPathUnknownModelAttemptsDefaultRoute(t *testing.T) {
 	workspace := requestpathWorkspace(t)
-	calls := 0
-	ingress := RequestIngress{runner: withRuntime(func(context.Context, ProviderRequest) (ProviderIngress, error) { calls++; return nil, nil })}
+	var refs []string
+	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+		refs = append(refs, req.Target.BackendRef)
+		return carrier.NewCarrierDocument(carrier.StageProviderIngressIn, req.Target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{}), nil
+	})}
 	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "unknown", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"missing","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
-	if err == nil || calls != 0 {
-		t.Fatalf("error=%v provider calls=%d", err, calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0] != "target-a" {
+		t.Fatalf("attempted targets=%v", refs)
 	}
 }

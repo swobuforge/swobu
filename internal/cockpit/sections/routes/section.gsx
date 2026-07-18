@@ -89,7 +89,6 @@ templ (s *SectionView) Render() {
 						<div key={"draft-name"} class="w-full">
 							@DraftNameRowComponent(s)
 						</div>
-						@SectionInertRow("client sends", "model = "+s.DraftRoute.ModelName(), "")
 					</div>
 				}
 				// --- Add route action ------------------------------------------

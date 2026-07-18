@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"net"
 	"net/url"
 	"slices"
 	"strings"
@@ -72,64 +73,32 @@ func isAzureOpenAIHost(host string) bool {
 }
 
 func RequiresCredential(spec, baseURL string) bool {
-	return requiresCredentialFromModes(AllowedAuthModesForSpec(spec), baseURL)
-}
-
-func requiresCredentialFromModes(modes []AuthModeSpec, baseURL string) bool {
-	if len(modes) == 0 {
+	provider, ok := profileFor(spec)
+	if !ok {
 		return false
 	}
-	normalizedBaseURL := baseURL
-	hasNeverMode := false
-	hasLoopbackConditional := false
-	for _, mode := range modes {
-		switch mode.Requirement {
-		case AuthModeRequirementNever:
-			hasNeverMode = true
-		case AuthModeRequirementAlways:
-			// Explicit always requirement: keep credential-required path.
-		case AuthModeRequirementExceptLoopbackExecute:
-			hasLoopbackConditional = true
-		default:
-			// Unknown requirements fall back to requiring credentials.
-		}
+	switch provider.Credential.Requirement {
+	case CredentialUnsupported, CredentialOptional:
+		return false
+	case CredentialRequiredOutsideLoopback:
+		return !isLoopbackHTTP(baseURL)
+	case CredentialRequired:
+		return true
+	default:
+		// Unknown policy fails closed.
+		return true
 	}
-	if hasNeverMode {
+}
+
+func isLoopbackHTTP(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "http" || u.Host == "" {
 		return false
 	}
-	if hasLoopbackConditional {
-		return !(strings.HasPrefix(normalizedBaseURL, "http://127.0.0.1") || strings.HasPrefix(normalizedBaseURL, "http://localhost"))
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
 	}
-	return true
-}
-
-func InferAuthKind(spec, baseURL, credentialRef string) AuthKind {
-	if strings.TrimSpace(credentialRef) != "" { // swobu:io-string source=domain
-		return AuthCredentialRef
-	}
-	if RequiresCredential(spec, baseURL) {
-		return AuthCredentialRef
-	}
-	return AuthNone
-}
-
-type RouteProfile struct {
-	ProviderSpec string
-	AuthKind     AuthKind
-}
-
-// ResolveRouteProfile resolves one execution-route profile from durable target
-// intent.
-func ResolveRouteProfile(spec string, baseURL, credentialRef string) (RouteProfile, bool) {
-	if !SupportsSpec(spec) {
-		return RouteProfile{}, false
-	}
-	authKind := InferAuthKind(spec, baseURL, credentialRef)
-	if !SupportsAuth(spec, authKind) {
-		return RouteProfile{}, false
-	}
-	return RouteProfile{
-		ProviderSpec: spec,
-		AuthKind:     authKind,
-	}, true
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

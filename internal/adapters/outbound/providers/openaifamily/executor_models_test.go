@@ -34,10 +34,9 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 		srv.URL+"/v1",
 		"env:OPENROUTER_API_KEY",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		"",
-	))
+		""))
 	if err == nil {
 		t.Fatal("expected backend error for non-chatgpt provider")
 	}
@@ -60,10 +59,9 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 		srv.URL+"/v1",
 		"",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		"",
-	))
+		""))
 	if err == nil {
 		t.Fatal("expected missing credential ref error")
 	}
@@ -93,10 +91,9 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 		srv.URL+"/v1",
 		"",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		"",
-	))
+		""))
 	if err == nil {
 		t.Fatal("expected missing credential ref error")
 	}
@@ -145,10 +142,10 @@ func TestListModels_OpenAICompatibleUsesSelectedAuthHeader(t *testing.T) {
 				srv.URL+"/v1",
 				"env:OPENAI_API_KEY",
 				protocolkind.ChatCompletions,
-				"credential_ref",
+
 				"",
-				"",
-			)
+				"")
+
 			target.AuthHeader = tt.authHeader
 			models, err := exec.ListDeployments(context.Background(), target)
 			if err != nil {

@@ -107,34 +107,22 @@ func (r ProviderRegistry) ResolveProviderIngress(ctx context.Context, req exchan
 	if !ok {
 		return nil, canonical.InternalError("provider ingress facet is missing")
 	}
-	if err := providercompat.GateRouteFeatureSupport(ctx, req.EffectSink, req.ExchangeID, string(providerID), string(req.Target.ProtocolKind), req.Request); err != nil {
+	if err := providercompat.GateRouteFeatureSupport(ctx, req.EffectSink, req.ExchangeID, string(providerID), req.Target.ProtocolKind, req.Request); err != nil {
 		return nil, err
 	}
 	return ingress.ResolveProviderIngress(ctx, req)
 }
 
-func (r ProviderRegistry) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
+func (r ProviderRegistry) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
 	providerID, err := providerIDFromTarget(target.ProviderID())
 	if err != nil {
-		return nil, err
+		return exchange.TargetProbeResult{}, err
 	}
 	discovery, ok := r.Discovery(providerID)
 	if !ok {
-		return nil, canonical.InternalError("provider discovery facet is missing")
+		return exchange.TargetProbeResult{}, canonical.InternalError("provider discovery facet is missing")
 	}
-	return discovery.ListDeployments(ctx, target)
-}
-
-func (r ProviderRegistry) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	providerID, err := providerIDFromTarget(target.ProviderID())
-	if err != nil {
-		return err
-	}
-	discovery, ok := r.Discovery(providerID)
-	if !ok {
-		return canonical.InternalError("provider discovery facet is missing")
-	}
-	return discovery.ValidateCredentials(ctx, target)
+	return discovery.ProbeTarget(ctx, target)
 }
 
 func (r ProviderRegistry) Manifest(providerID profile.ProviderID) (profile.Profile, bool) {
@@ -209,5 +197,5 @@ func cloneIngressRegistry(src map[profile.ProviderID]providersruntime.ProviderEx
 }
 
 var _ exchange.ProviderIngressResolver = ProviderRegistry{}
-var _ exchange.ProviderModelCatalog = ProviderRegistry{}
+var _ exchange.ProviderDiscovery = ProviderRegistry{}
 var _ providersruntime.Registry = ProviderRegistry{}

@@ -34,14 +34,14 @@ func (f fakeKeyringClient) Get(scope, user string) (string, error) {
 	return f.values[scope+"|"+user], nil
 }
 
-func TestKeyringResolver_ResolveCredential_ExplicitKeyName(t *testing.T) {
+func TestStoredSecretResolver_ResolveCredential_ExplicitSecretName(t *testing.T) {
 	client := fakeKeyringClient{
 		values: map[string]string{
 			KeyringScopeForProvider("openrouter") + "|openrouter/default": mustBundle(t, "token-1"),
 		},
 	}
-	resolver := NewKeyringResolver(client)
-	token, err := resolver.ResolveCredential(context.Background(), "openrouter", "keychain:openrouter/default")
+	resolver := NewStoredSecretResolver(client)
+	token, err := resolver.ResolveCredential(context.Background(), "openrouter", "secret:openrouter/default")
 	if err != nil {
 		t.Fatalf("ResolveCredential returned error: %v", err)
 	}
@@ -50,14 +50,14 @@ func TestKeyringResolver_ResolveCredential_ExplicitKeyName(t *testing.T) {
 	}
 }
 
-func TestKeyringResolver_ResolveCredential_BareKeychainUsesDefaultName(t *testing.T) {
+func TestStoredSecretResolver_ResolveCredential_BareSecretUsesDefaultName(t *testing.T) {
 	client := fakeKeyringClient{
 		values: map[string]string{
 			KeyringScopeForProvider("openai") + "|openai/default": mustBundle(t, "token-2"),
 		},
 	}
-	resolver := NewKeyringResolver(client)
-	token, err := resolver.ResolveCredential(context.Background(), "openai", "keychain")
+	resolver := NewStoredSecretResolver(client)
+	token, err := resolver.ResolveCredential(context.Background(), "openai", "secret")
 	if err != nil {
 		t.Fatalf("ResolveCredential returned error: %v", err)
 	}
@@ -66,17 +66,17 @@ func TestKeyringResolver_ResolveCredential_BareKeychainUsesDefaultName(t *testin
 	}
 }
 
-func TestKeyringResolver_ResolveCredential_LookupFailure(t *testing.T) {
-	resolver := NewKeyringResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
-	_, err := resolver.ResolveCredential(context.Background(), "openai", "keychain:openai/default")
+func TestStoredSecretResolver_ResolveCredential_LookupFailure(t *testing.T) {
+	resolver := NewStoredSecretResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
+	_, err := resolver.ResolveCredential(context.Background(), "openai", "secret:openai/default")
 	if err == nil {
 		t.Fatalf("ResolveCredential returned nil error, want failure")
 	}
 }
 
-func TestKeyringResolver_ResolveCredential_LookupTimeout(t *testing.T) {
-	resolver := NewKeyringResolver(fakeKeyringClient{delay: keyringLookupTimeout + 100*time.Millisecond})
-	_, err := resolver.ResolveCredential(context.Background(), "openai", "keychain:openai/default")
+func TestStoredSecretResolver_ResolveCredential_LookupTimeout(t *testing.T) {
+	resolver := NewStoredSecretResolver(fakeKeyringClient{delay: keyringLookupTimeout + 100*time.Millisecond})
+	_, err := resolver.ResolveCredential(context.Background(), "openai", "secret:openai/default")
 	if err == nil {
 		t.Fatalf("ResolveCredential returned nil error, want timeout failure")
 	}
@@ -100,13 +100,13 @@ func TestResolver_ResolvesSecretFileLocatorFromFileStore(t *testing.T) {
 	}
 }
 
-func TestResolver_ResolveCredential_KeychainFallsBackToFileStore(t *testing.T) {
+func TestResolver_ResolveCredential_StoredSecretFallsBackToFileStore(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	if _, err := StoreMaterializedCredential("openai", "openai/default", "token-fallback", CredentialWritePolicyFile); err != nil {
 		t.Fatalf("store file mode: %v", err)
 	}
-	resolver := NewKeyringResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
-	token, err := resolver.ResolveCredential(context.Background(), "openai", "keychain:openai/default")
+	resolver := NewStoredSecretResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
+	token, err := resolver.ResolveCredential(context.Background(), "openai", "secret:openai/default")
 	if err != nil {
 		t.Fatalf("ResolveCredential returned error: %v", err)
 	}

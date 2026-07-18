@@ -19,7 +19,7 @@ workspaces:
                     credential: env:OPENAI_API_KEY
 ```
 
-Clients use `/c/dev/...` and request the route name (`chat`) as `model`. The exact model value `swobu` selects `default_route`; unknown names fail. The first tier is primary, later tiers are fallbacks, and targets within one tier are equally balanced.
+Clients use `/c/dev/...` and request the route name (`chat`) as `model`. The model value `default`, or any other non-empty model name without a matching route, selects `default_route`; missing or blank model values fail. The first tier is primary, later tiers are fallbacks, and targets within one tier are equally balanced.
 
 Swobu listens on `127.0.0.1:7926` by default. Override it with `--addr` or
 `SWOBU_ADDR`. The address is restart-bound startup configuration, not routing

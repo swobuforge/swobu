@@ -44,7 +44,7 @@ func parseCredential(path, raw string) (credentialref.Ref, error) {
 		if !filepath.IsAbs(filePath) && !strings.HasPrefix(filePath, "~/") {
 			return credentialref.Ref{}, pathError(path, "credential file path must be absolute or home-relative")
 		}
-	case credentialref.KindKeychain, credentialref.KindSecret, credentialref.KindSecretFile:
+	case credentialref.KindSecret, credentialref.KindSecretFile:
 		if !credentialNamePattern.MatchString(payload) {
 			return credentialref.Ref{}, pathError(path, "credential name must contain URL-safe non-empty path segments")
 		}
@@ -152,50 +152,34 @@ func ParseBedrockRegion(raw string) (BedrockRegion, error) {
 }
 func (r BedrockRegion) String() string { return r.value }
 
-type BedrockAuth interface{ isBedrockAuth() }
-type BedrockProfileAuth struct{ profile string }
-
-func NewBedrockProfileAuth(profile string) (BedrockProfileAuth, error) {
-	profile = strings.TrimSpace(profile)
-	if profile == "" {
-		return BedrockProfileAuth{}, pathError("connection.bedrock.auth.profile", "profile is required")
-	}
-	return BedrockProfileAuth{profile}, nil
-}
-func (BedrockProfileAuth) isBedrockAuth()    {}
-func (a BedrockProfileAuth) Profile() string { return a.profile }
-
-type BedrockEnvironmentAuth struct{}
-
-func (BedrockEnvironmentAuth) isBedrockAuth() {}
-
-type BedrockBearerTokenAuth struct{ credential credentialref.Ref }
-
-func NewBedrockBearerTokenAuth(raw string) (BedrockBearerTokenAuth, error) {
-	ref, err := parseCredential("connection.bedrock.auth.bearer_token", raw)
-	return BedrockBearerTokenAuth{ref}, err
-}
-func (BedrockBearerTokenAuth) isBedrockAuth()                  {}
-func (a BedrockBearerTokenAuth) Credential() credentialref.Ref { return a.credential }
-
 type BedrockConnection struct {
-	region BedrockRegion
-	auth   BedrockAuth
+	region     BedrockRegion
+	credential *credentialref.Ref
 }
 
-func NewBedrockConnection(region BedrockRegion, auth BedrockAuth) (BedrockConnection, error) {
+func NewBedrockConnection(region BedrockRegion, rawCredential string) (BedrockConnection, error) {
 	if region.value == "" {
 		return BedrockConnection{}, pathError("connection.bedrock.region", "region is required")
 	}
-	if auth == nil {
-		return BedrockConnection{}, pathError("connection.bedrock.auth", "exactly one auth variant is required")
+	var ref *credentialref.Ref
+	if strings.TrimSpace(rawCredential) != "" { // swobu:io-string source=boundary
+		parsed, err := parseCredential("connection.bedrock.credential", rawCredential)
+		if err != nil {
+			return BedrockConnection{}, err
+		}
+		ref = &parsed
 	}
-	return BedrockConnection{region, auth}, nil
+	return BedrockConnection{region: region, credential: ref}, nil
 }
 func (BedrockConnection) Provider() Provider      { return ProviderBedrock }
 func (BedrockConnection) isConnection()           {}
 func (c BedrockConnection) Region() BedrockRegion { return c.region }
-func (c BedrockConnection) Auth() BedrockAuth     { return c.auth }
+func (c BedrockConnection) Credential() credentialref.Ref {
+	if c.credential == nil {
+		return credentialref.Ref{}
+	}
+	return *c.credential
+}
 
 var headerNamePattern = regexp.MustCompile(`^[!#$%&'*+.^_` + "`" + `|~0-9A-Za-z-]+$`)
 
@@ -206,7 +190,7 @@ type CustomHeaderAuth struct {
 }
 
 func NewCustomHeaderAuth(name, raw string) (CustomHeaderAuth, error) {
-	name = strings.TrimSpace(name)
+	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if !headerNamePattern.MatchString(name) {
 		return CustomHeaderAuth{}, pathError("connection.custom.auth.header.name", "invalid HTTP header name")
 	}
@@ -255,15 +239,7 @@ func setConnectionCredential(connection Connection, raw string) (Connection, err
 		c.credential = ref
 		return c, nil
 	case BedrockConnection:
-		if _, ok := c.auth.(BedrockBearerTokenAuth); !ok {
-			return nil, fmt.Errorf("%w: Bedrock auth mode has no credential ref", ErrCredentialUnsupported)
-		}
-		auth, err := NewBedrockBearerTokenAuth(raw)
-		if err != nil {
-			return nil, err
-		}
-		c.auth = auth
-		return c, nil
+		return NewBedrockConnection(c.region, raw)
 	case CustomConnection:
 		header, ok := c.auth.(CustomHeaderAuth)
 		if !ok {

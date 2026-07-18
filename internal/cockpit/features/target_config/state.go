@@ -11,17 +11,11 @@ import (
 // chatGPTReadiness is the ChatGPT arm of the feature's derived form status.
 func chatGPTReadiness(w *TargetConfig, base providerSetupState) providerSetupState {
 	setup := base
-	setup.InteractiveAuth = true
-	if label := interactiveAuthLabel(setup.AuthModes); label != "" {
-		setup.CredentialLabel = label
-	} else {
-		setup.CredentialLabel = "browser login"
-	}
 	if strings.TrimSpace(setup.CredentialRef) == "" {
-		setup.BlockReason = "auth first"
+		setup.Status = setupMissingInteractiveAuth
 		return setup
 	}
-	setup.ReadyForCatalog = true
+	setup.Status = setupReady
 	return setup
 }
 
@@ -30,24 +24,31 @@ func chatGPTReadiness(w *TargetConfig, base providerSetupState) providerSetupSta
 // baseline then applies the explicit provider readiness projection. Pure: no
 // ports, no go-tui; recomputed every read, never stored.
 
-// providerSetupState is the readiness projection consumed across the form:
-// whether an endpoint/credential/auth-mode is required, whether the catalog is
-// ready to probe, and what blocks it.
+type setupStatus uint8
+
+const (
+	setupMissingLocator setupStatus = iota
+	setupMissingCredential
+	setupMissingInteractiveAuth
+	setupReady
+)
+
+// providerSetupState is semantic setup readiness, independent from operation
+// phase, loading, and errors. Provider forms explain the missing owning field;
+// generic tail rows consume only Ready.
 type providerSetupState struct {
 	ProviderSpec       string
 	DisplayName        string
-	EndpointKind       profile.ProviderEndpointKind
+	LocatorKind        profile.LocatorKind
 	EndpointLabel      string
-	CredentialLabel    string
 	CredentialRef      string
 	CredentialRequired bool
-	AuthModeRequired   bool
-	InteractiveAuth    bool
-	AuthModes          []profile.AuthModeSpec
-	RequiresEndpoint   bool
-	ReadyForCatalog    bool
-	BlockReason        string
+	Status             setupStatus
 }
+
+func (s providerSetupState) RequiresLocator() bool    { return s.Status == setupMissingLocator }
+func (s providerSetupState) RequiresCredential() bool { return s.Status == setupMissingCredential }
+func (s providerSetupState) Ready() bool              { return s.Status == setupReady }
 
 // setupState computes the current provider-readiness projection. It builds the
 // provider-metadata baseline then applies the provider-specific projection.
@@ -67,8 +68,8 @@ func (w *TargetConfig) setupState() providerSetupState {
 
 func (w *TargetConfig) baseSetupState(provider profile.Profile, endpointValue string) providerSetupState {
 	spec := string(provider.ProviderID)
-	endpoint := provider.Endpoint
-	label := strings.TrimSpace(endpoint.Label)
+	locator := provider.Locator
+	label := strings.TrimSpace(locator.Label)
 	if label == "" {
 		label = "endpoint"
 	}
@@ -76,18 +77,21 @@ func (w *TargetConfig) baseSetupState(provider profile.Profile, endpointValue st
 	return providerSetupState{
 		ProviderSpec:       spec,
 		DisplayName:        provider.ProviderDisplayName,
-		EndpointKind:       endpoint.Kind,
+		LocatorKind:        locator.Kind,
 		EndpointLabel:      label,
 		CredentialRef:      credentialRef,
 		CredentialRequired: profile.RequiresCredential(spec, endpointValue),
-		AuthModes:          provider.AllowedAuthModes,
+		Status:             setupMissingLocator,
 	}
 }
 
 func (w *TargetConfig) endpointValueFor(provider profile.Profile) string {
+	if provider.ProviderID == profile.ProviderSpecBedrock {
+		return strings.TrimSpace(w.Draft.Get().Locator)
+	}
 	endpointValue := strings.TrimSpace(w.BaseURL.Get()) // swobu:io-string source=boundary
-	if endpointValue == "" && !profile.RequiresExplicitEndpoint(string(provider.ProviderID)) {
-		endpointValue = strings.TrimSpace(provider.Endpoint.DefaultURL)
+	if endpointValue == "" && !profile.RequiresLocator(string(provider.ProviderID)) {
+		endpointValue = strings.TrimSpace(provider.Locator.Default)
 	}
 	return endpointValue
 }
@@ -101,58 +105,18 @@ func providerProfileForSpec(spec string) (profile.Profile, bool) {
 	return profile.Profile{}, false
 }
 
-func interactiveAuthLabel(modes []profile.AuthModeSpec) string {
-	for _, mode := range modes {
-		if !mode.Interactive {
-			continue
-		}
-		return authModeLabel(mode.Mode)
-	}
-	return ""
-}
-
-// RequiresInteractiveAuth reports whether the current provider uses interactive
-// (browser/device) auth. Derives from the readiness projection when a provider
-// is set, else from the supported auth modes for the draft spec.
+// RequiresInteractiveAuth reports the one provider-specific login exception.
+// Interactive login is ChatGPT workflow policy, not generic setup metadata.
 func (w *TargetConfig) RequiresInteractiveAuth() bool {
-	setup := w.setupState()
-	if setup.ProviderSpec != "" {
-		return setup.InteractiveAuth
-	}
-	mode, _ := w.interactiveAuthMode()
-	return mode != ""
+	return profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecChatGPT
 }
 
-// interactiveAuthMode resolves the interactive auth mode + its display label for
-// the current draft spec (preferring the readiness projection's allowed modes).
-func (w *TargetConfig) interactiveAuthMode() (profile.AuthMode, string) {
-	setup := w.setupState()
-	if setup.ProviderSpec != "" && len(setup.AuthModes) > 0 {
-		for _, mode := range setup.AuthModes {
-			if !mode.Interactive {
-				continue
-			}
-			return mode.Mode, authModeLabel(mode.Mode)
-		}
-	}
-	for _, mode := range profile.SupportedAuthModesForSpec(w.Draft.Get().ProviderSpec) {
-		if !profile.IsInteractiveAuthMode(mode) {
-			continue
-		}
-		return mode, authModeLabel(mode)
+// interactiveAuthMode is ChatGPT workflow policy, not a provider-catalog fact.
+func (w *TargetConfig) interactiveAuthMode() (string, string) {
+	if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecChatGPT {
+		return "browser", "browser login"
 	}
 	return "", ""
-}
-
-func authModeLabel(mode profile.AuthMode) string {
-	switch mode {
-	case profile.AuthModeChatGPTLogin:
-		return "browser login"
-	case profile.AuthModeChatGPTDeviceAuth:
-		return "device auth"
-	default:
-		return strings.TrimSpace(string(mode)) // swobu:io-string source=boundary
-	}
 }
 
 func providerReadiness(w *TargetConfig, base providerSetupState) providerSetupState {
@@ -164,7 +128,7 @@ func providerReadiness(w *TargetConfig, base providerSetupState) providerSetupSt
 	case profile.ProviderSpecAzure:
 		return azureReadiness(w, base)
 	case profile.ProviderSpecOpenAICompatible:
-		return openAICompatibleReadiness(w, base)
+		return customReadiness(w, base)
 	default:
 		return httpReadiness(w, base)
 	}
@@ -174,7 +138,7 @@ func providerReadiness(w *TargetConfig, base providerSetupState) providerSetupSt
 // for HTTP-style forms. Provider forms own their exceptional visibility rules.
 func genericCredentialRowVisible(w *TargetConfig) bool {
 	setup := w.setupState()
-	if setup.RequiresEndpoint || setup.AuthModeRequired {
+	if setup.RequiresLocator() {
 		return false
 	}
 	if strings.TrimSpace(w.Draft.Get().CredentialRef) != "" {
@@ -189,7 +153,7 @@ func providerAllowsNoCredential(w *TargetConfig) bool {
 		return false
 	}
 	setup := w.setupState()
-	if setup.AuthModeRequired || setup.CredentialRequired {
+	if setup.CredentialRequired {
 		return false
 	}
 	baseURL := strings.TrimSpace(w.BaseURL.Get())
@@ -202,15 +166,10 @@ func providerAllowsNoCredential(w *TargetConfig) bool {
 func httpReadiness(w *TargetConfig, base providerSetupState) providerSetupState {
 	setup := base
 	if setup.CredentialRequired && strings.TrimSpace(setup.CredentialRef) == "" {
-		setup.CredentialLabel = "enter credential"
-		setup.BlockReason = setup.CredentialLabel
+		setup.Status = setupMissingCredential
 		return setup
 	}
-	setup.CredentialLabel = strings.TrimSpace(setup.CredentialRef)
-	if setup.CredentialLabel == "" && !profile.RequiresCredential(setup.ProviderSpec, w.endpointValueForProfile()) {
-		setup.CredentialLabel = "none"
-	}
-	setup.ReadyForCatalog = true
+	setup.Status = setupReady
 	return setup
 }
 
@@ -218,8 +177,8 @@ func (w *TargetConfig) endpointValueForProfile() string {
 	if endpoint := strings.TrimSpace(w.BaseURL.Get()); endpoint != "" {
 		return endpoint
 	}
-	if provider, ok := providerProfileForSpec(w.Draft.Get().ProviderSpec); ok && !profile.RequiresExplicitEndpoint(w.Draft.Get().ProviderSpec) {
-		return strings.TrimSpace(provider.Endpoint.DefaultURL)
+	if provider, ok := providerProfileForSpec(w.Draft.Get().ProviderSpec); ok && !profile.RequiresLocator(w.Draft.Get().ProviderSpec) {
+		return strings.TrimSpace(provider.Locator.Default)
 	}
 	return ""
 }
@@ -232,23 +191,86 @@ func (w *TargetConfig) CurrentProtocolOptions() []protocolOption {
 	return resolveProtocolOptions(w.Draft.Get().ProviderSpec, w.SelectedModel.Get())
 }
 
-// Phase is the target-config workflow's durable state machine.
-type Phase int
+func (w *TargetConfig) catalogResult() readmodel.ModelCatalogReadModel { return w.Catalog.Get().Result }
+func (w *TargetConfig) catalogLoading() bool                           { return w.Catalog.Get().Loading }
+func (w *TargetConfig) catalogFailed() bool                            { return w.Catalog.Get().Err != "" }
+func (w *TargetConfig) createFailed() bool                             { return w.SaveOperation.Get().Err != "" }
+func (w *TargetConfig) readyToCreate() bool {
+	return w.setupState().Ready() &&
+		w.modelSelectionValidated() &&
+		strings.TrimSpace(w.Draft.Get().ProviderProtocol) != ""
+}
+
+// modelSelectionValidated makes Custom Endpoint discovery optional: its
+// operator-authored model is authoritative when /models is unsupported.
+// Catalog-backed providers still require current discovery evidence.
+func (w *TargetConfig) modelSelectionValidated() bool {
+	if w.IsCustomFlow() {
+		return strings.TrimSpace(w.SelectedModel.Get().ModelName) != ""
+	}
+	return w.catalogValidated() && w.selectedModelIsInCurrentCatalog()
+}
+
+// catalogValidated requires current, successful probe evidence. Retained
+// deployments from an earlier connection never authorize persistence.
+func (w *TargetConfig) catalogValidated() bool {
+	operation := w.Catalog.Get()
+	return !operation.Loading && strings.TrimSpace(operation.Err) == "" && len(operation.Result.Deployments) > 0
+}
+
+func (w *TargetConfig) selectedModelIsInCurrentCatalog() bool {
+	selected := w.SelectedModel.Get()
+	if strings.TrimSpace(selected.ModelName) == "" {
+		return false
+	}
+	for _, deployment := range w.catalogResult().Deployments {
+		if deployment.ID == selected.ID || deployment.ModelName == selected.ModelName {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *TargetConfig) authSessionPending() bool {
+	return strings.EqualFold(strings.TrimSpace(w.AuthSession.Get().State), "pending")
+}
+
+func (w *TargetConfig) authSessionFailed() bool {
+	state := strings.ToLower(strings.TrimSpace(w.AuthSession.Get().State))
+	return state == "failed" || state == "expired"
+}
+
+func setupRequiresLocator(w *TargetConfig) bool      { return w.setupState().RequiresLocator() }
+func setupRequiresCredential(w *TargetConfig) bool   { return w.setupState().RequiresCredential() }
+func targetUsesInteractiveAuth(w *TargetConfig) bool { return w.RequiresInteractiveAuth() }
+func targetCatalogLoading(w *TargetConfig) bool      { return w.catalogLoading() }
+func targetCatalogFailed(w *TargetConfig) bool       { return w.catalogFailed() }
+func targetCreateFailed(w *TargetConfig) bool        { return w.createFailed() }
+func targetAuthPending(w *TargetConfig) bool         { return w.authSessionPending() }
+func targetAuthFailed(w *TargetConfig) bool          { return w.authSessionFailed() }
+
+// Lifecycle is the target form's independent open/closed/completed lifecycle.
+// Catalog, save, and ChatGPT login operations have their own state below.
+type Lifecycle int
 
 const (
-	PhaseClosed Phase = iota
-	PhaseConfiguring
-	PhaseAuthPending
-	PhaseLoadingCatalog
-	PhaseReadyToCreate
-	PhaseCreated
-	PhaseCatalogFailed
-	PhaseAuthFailed
-	PhaseCreateFailed
+	LifecycleClosed Lifecycle = iota
+	LifecycleOpen
+	LifecycleCreated
 )
 
-func (p Phase) IsTerminal() bool {
-	return p == PhaseCreated
+func (l Lifecycle) IsTerminal() bool {
+	return l == LifecycleCreated
+}
+
+type catalogOperationState struct {
+	Loading bool
+	Result  readmodel.ModelCatalogReadModel
+	Err     string
+}
+
+type createOperationState struct {
+	Err string
 }
 
 // state.go owns the target_config reactive state shape: the appState struct
@@ -263,7 +285,7 @@ func (p Phase) IsTerminal() bool {
 // state field means adding it here once — the constructor, resetFlowState, and
 // BindApp all derive from this list.
 type appState struct {
-	Phase       *tui.State[Phase]
+	Lifecycle   *tui.State[Lifecycle]
 	DeleteArmed *tui.State[bool]
 	Error       *tui.State[string]
 
@@ -276,8 +298,8 @@ type appState struct {
 	CredentialHeaderEdited *tui.State[bool]
 	AuthSession            *tui.State[readmodel.AuthSessionReadModel]
 
-	Catalog        *tui.State[readmodel.ModelCatalogReadModel]
-	CatalogLoading *tui.State[bool]
+	Catalog       *tui.State[catalogOperationState]
+	SaveOperation *tui.State[createOperationState]
 
 	SelectedModel *tui.State[readmodel.ModelDeploymentReadModel]
 
@@ -288,7 +310,7 @@ type appState struct {
 // (*State[T] has no shared non-generic interface), so the field list is expressed
 // as bind closures — one source of truth shared with newStates/resetState.
 func (s appState) bindApp(app *tui.App) {
-	s.Phase.BindApp(app)
+	s.Lifecycle.BindApp(app)
 	s.DeleteArmed.BindApp(app)
 	s.Error.BindApp(app)
 	s.Draft.BindApp(app)
@@ -296,7 +318,7 @@ func (s appState) bindApp(app *tui.App) {
 	s.CredentialHeaderEdited.BindApp(app)
 	s.AuthSession.BindApp(app)
 	s.Catalog.BindApp(app)
-	s.CatalogLoading.BindApp(app)
+	s.SaveOperation.BindApp(app)
 	s.SelectedModel.BindApp(app)
 	s.Placement.BindApp(app)
 }
@@ -305,7 +327,7 @@ func (s appState) bindApp(app *tui.App) {
 // caller (route/target-derived) to set.
 func newStates() appState {
 	return appState{
-		Phase:       tui.NewState(PhaseClosed),
+		Lifecycle:   tui.NewState(LifecycleClosed),
 		DeleteArmed: tui.NewState(false),
 		Error:       tui.NewState(""),
 		Draft:       tui.NewState(readmodel.TargetDraft{}),
@@ -314,8 +336,8 @@ func newStates() appState {
 		CredentialHeaderEdited: tui.NewState(false),
 		AuthSession:            tui.NewState(readmodel.AuthSessionReadModel{}),
 
-		Catalog:        tui.NewState(readmodel.ModelCatalogReadModel{}),
-		CatalogLoading: tui.NewState(false),
+		Catalog:       tui.NewState(catalogOperationState{}),
+		SaveOperation: tui.NewState(createOperationState{}),
 
 		SelectedModel: tui.NewState(readmodel.ModelDeploymentReadModel{}),
 
@@ -326,7 +348,7 @@ func newStates() appState {
 // resetFlowState clears provider/setup/catalog state to switch providers or
 // cancel. It delegates the bulk reactive-state reset to resetSetupState (single
 // source of truth), then re-derives the route/target-dependent placement and
-// drops non-state caches. Phase/Provider/Error are left for the caller to set.
+// drops non-state caches. Lifecycle, provider, and form error are caller-owned.
 func (w *TargetConfig) resetFlowState() {
 	w.resetSetupState()
 	w.Placement.Set(defaultPlacementForRoute(w.Route))
@@ -341,8 +363,8 @@ func (w *TargetConfig) resetSetupState() {
 	w.BaseURL.Set("")
 	w.CredentialHeaderEdited.Set(false)
 	w.AuthSession.Set(readmodel.AuthSessionReadModel{})
-	w.Catalog.Set(readmodel.ModelCatalogReadModel{})
-	w.CatalogLoading.Set(false)
+	w.Catalog.Set(catalogOperationState{})
+	w.SaveOperation.Set(createOperationState{})
 	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ProviderProtocol = ""

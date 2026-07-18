@@ -11,7 +11,7 @@ type ProviderExecutor = exchange.ProviderIngressResolver
 
 // Discovery is the provider-target discovery facet. It validates credentials
 // and lists deployments for one provider target.
-type Discovery = exchange.ProviderModelCatalog
+type Discovery = exchange.ProviderDiscovery
 
 // ProviderRuntimeBundle groups one provider's runtime facets.
 type ProviderRuntimeBundle struct {

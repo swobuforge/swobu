@@ -7,46 +7,20 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-type AuthKind string
+// CredentialRequirement states whether a durable credential reference is a
+// valid or required target fact. It does not describe where credentials live.
+type CredentialRequirement uint8
 
 const (
-	AuthNone          AuthKind = "none"
-	AuthCredentialRef AuthKind = "credential_ref"
+	CredentialUnsupported CredentialRequirement = iota
+	CredentialRequired
+	CredentialOptional
+	CredentialRequiredOutsideLoopback
 )
 
-// AuthMode names one provider auth path in the catalog.
-//
-// It is the canonical selector for credential-ref sources (env/file/keychain),
-// ambient AWS auth, and interactive login/device flows. It is not a storage
-// source type.
-type AuthMode string
-
-const (
-	AuthModeEnv               AuthMode = "env"
-	AuthModeFile              AuthMode = "file"
-	AuthModeKeychain          AuthMode = "keychain"
-	AuthModeAWSProfile        AuthMode = "aws_profile"
-	AuthModeAWSEnvSession     AuthMode = "aws_env_session"
-	AuthModeChatGPTLogin      AuthMode = "chatgpt_login"
-	AuthModeChatGPTDeviceAuth AuthMode = "chatgpt_device_auth"
-)
-
-type AuthModeRequirement string
-
-const (
-	AuthModeRequirementAlways                AuthModeRequirement = "always"
-	AuthModeRequirementNever                 AuthModeRequirement = "never"
-	AuthModeRequirementExceptLoopbackExecute AuthModeRequirement = "except_loopback_execute_origin"
-)
-
-// AuthModeSpec declares one allowed auth path for a provider.
-type AuthModeSpec struct {
-	Mode        AuthMode
-	Kind        AuthKind
-	Requirement AuthModeRequirement
-	Interactive bool
-	Label       string
-	Keywords    []string
+type CredentialSpec struct {
+	Requirement     CredentialRequirement
+	SuggestedEnvVar string
 }
 
 type Capability string
@@ -65,20 +39,21 @@ const (
 	CapabilityStreaming    Capability = "streaming"
 )
 
-type ProviderEndpointKind string
+type LocatorKind uint8
 
 const (
-	EndpointDefaultHTTPBaseURL   ProviderEndpointKind = "default_http_base_url"
-	EndpointRequiredHTTPBaseURL  ProviderEndpointKind = "required_http_base_url"
-	EndpointAzureResourceLocator ProviderEndpointKind = "azure_resource_locator"
+	LocatorFixed LocatorKind = iota
+	LocatorBaseURL
+	LocatorAzureProject
+	LocatorAWSRegion
 )
 
-// EndpointSpec declares the executable endpoint fact a provider needs before a
-// durable target can be finalized.
-type EndpointSpec struct {
-	Kind       ProviderEndpointKind
-	DefaultURL string
-	Label      string
+// LocatorSpec declares the provider-specific connection fact authored by an
+// operator. Fixed providers may carry a runtime default without exposing input.
+type LocatorSpec struct {
+	Kind    LocatorKind
+	Label   string
+	Default string
 }
 
 // Profile is one canonical provider declaration.
@@ -88,16 +63,15 @@ type Profile struct {
 	ProviderID          ProviderID
 	ProviderDisplayName string
 	SetupHint           string
-	// SetupKeywords are search/copy hints only. Endpoint owns connection
+	// SetupKeywords are search/copy hints only. Locator owns connection
 	// semantics; these keywords must not drive setup behavior.
-	SetupKeywords           []string
-	Endpoint                EndpointSpec
-	DefaultCredentialEnvVar string
-	DefaultAuthHeader       string
-	VisibleInOperatorUI     bool
-	ProviderProtocols       []ProviderProtocolSpec
-	// AllowedAuthModes lists the auth paths this provider declares.
-	AllowedAuthModes     []AuthModeSpec
+	SetupKeywords        []string
+	Locator              LocatorSpec
+	Credential           CredentialSpec
+	CatalogItemLabel     string
+	DefaultAuthHeader    string
+	VisibleInOperatorUI  bool
+	ProviderProtocols    []ProviderProtocolSpec
 	DeclaredCapabilities []Capability
 }
 
@@ -139,93 +113,6 @@ func SupportsSpec(spec string) bool {
 	return ok
 }
 
-func SupportsAuth(spec string, authKind AuthKind) bool {
-	for _, mode := range AllowedAuthModesForSpec(spec) {
-		supported := mode.Kind
-		if supported == authKind {
-			return true
-		}
-	}
-	return false
-}
-
-func AllowedAuthModesForSpec(spec string) []AuthModeSpec {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return nil
-	}
-	return slices.Clone(profile.AllowedAuthModes)
-}
-
-func SupportedAuthModesForSpec(spec string) []AuthMode {
-	modes := AllowedAuthModesForSpec(spec)
-	out := make([]AuthMode, 0, len(modes))
-	for _, mode := range modes {
-		threadingMode := mode.Mode
-		if strings.TrimSpace(string(threadingMode)) == "" { // swobu:io-string source=domain
-			continue
-		}
-		out = append(out, threadingMode)
-	}
-	return slices.Compact(out)
-}
-
-func SupportsAuthMode(spec string, mode AuthMode) bool {
-	for _, supported := range SupportedAuthModesForSpec(spec) {
-		if supported == mode {
-			return true
-		}
-	}
-	return false
-}
-
-func AuthModeSpecForProvider(spec string, mode AuthMode) (AuthModeSpec, bool) {
-	for _, supported := range AllowedAuthModesForSpec(spec) {
-		if supported.Mode == mode {
-			return supported, true
-		}
-	}
-	return AuthModeSpec{}, false
-}
-
-func AuthModeRequiresCredentialForSpec(spec string, mode AuthMode, baseURL string) (bool, bool) {
-	supported, ok := AuthModeSpecForProvider(spec, mode)
-	if !ok {
-		return true, false
-	}
-	return requiresCredentialFromModes([]AuthModeSpec{supported}, baseURL), true
-}
-
-func AuthModeDisplayLabel(mode AuthMode) string {
-	switch mode {
-	case AuthModeEnv:
-		return "env credential"
-	case AuthModeFile:
-		return "file credential"
-	case AuthModeKeychain:
-		return "keychain credential"
-	case AuthModeAWSProfile:
-		return "AWS profile"
-	case AuthModeAWSEnvSession:
-		return "AWS env"
-	case AuthModeChatGPTLogin:
-		return "browser login"
-	case AuthModeChatGPTDeviceAuth:
-		return "device auth"
-	default:
-		return strings.TrimSpace(string(mode))
-	}
-}
-
-func IsInteractiveAuthMode(mode AuthMode) bool {
-	switch mode {
-	case AuthModeChatGPTLogin, AuthModeChatGPTDeviceAuth:
-		return true
-	default:
-		return false
-	}
-}
-
 func SupportsCapability(spec string, capability Capability) bool {
 	profile, ok := profileFor(spec)
 	if !ok {
@@ -244,26 +131,23 @@ func DefaultExecuteBaseURL(spec string) string {
 	if !ok {
 		return ""
 	}
-	if profile.Endpoint.Kind != EndpointDefaultHTTPBaseURL {
-		return ""
-	}
-	return profile.Endpoint.DefaultURL
+	return profile.Locator.Default
 }
 
-func EndpointSpecForProvider(spec string) (EndpointSpec, bool) {
+func LocatorSpecForProvider(spec string) (LocatorSpec, bool) {
 	profile, ok := profileFor(spec)
 	if !ok {
-		return EndpointSpec{}, false
+		return LocatorSpec{}, false
 	}
-	return profile.Endpoint, true
+	return profile.Locator, true
 }
 
-func RequiresExplicitEndpoint(spec string) bool {
-	endpoint, ok := EndpointSpecForProvider(spec)
+func RequiresLocator(spec string) bool {
+	locator, ok := LocatorSpecForProvider(spec)
 	if !ok {
 		return false
 	}
-	return endpoint.Kind == EndpointRequiredHTTPBaseURL || endpoint.Kind == EndpointAzureResourceLocator
+	return locator.Kind != LocatorFixed && strings.TrimSpace(locator.Default) == ""
 }
 
 // DefaultEnvKeyForSpec returns the canonical environment variable name for a
@@ -273,5 +157,13 @@ func DefaultEnvKeyForSpec(spec string) string {
 	if !ok {
 		return ""
 	}
-	return profile.DefaultCredentialEnvVar
+	return profile.Credential.SuggestedEnvVar
+}
+
+func CatalogItemLabelForSpec(spec string) string {
+	provider, ok := profileFor(spec)
+	if !ok || strings.TrimSpace(provider.CatalogItemLabel) == "" {
+		return "model"
+	}
+	return provider.CatalogItemLabel
 }

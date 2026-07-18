@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -23,6 +24,8 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 )
+
+const maxBackendEvidence = 64 << 10
 
 type ProviderIngressResolverAdapter struct {
 	client      *http.Client
@@ -147,6 +150,24 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		return nil, classifiedErr
 	}
 	if req.Contract.ProviderDelivery.IsStreaming() {
+		if !isSSEContentType(resp.Header.Get("Content-Type")) {
+			defer func() {
+				_ = resp.Body.Close()
+			}()
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxBackendEvidence+1))
+			if len(raw) > maxBackendEvidence {
+				raw = raw[:maxBackendEvidence]
+			}
+			// A document cannot satisfy a streaming execution contract. Keep the
+			// provider body as backend evidence, but use a gateway status because
+			// the backend's HTTP-success status contradicts its representation.
+			return nil, canonical.NewBackendError(
+				req.Target.BackendRef,
+				http.StatusBadGateway,
+				strings.TrimSpace(string(raw)),                    // swobu:io-string source=boundary
+				strings.TrimSpace(resp.Header.Get("Retry-After")), // swobu:io-string source=boundary
+			)
+		}
 		return carrier.CarrierStream{
 			Stage:   carrier.StageProviderIngressIn,
 			Family:  req.Target.ProtocolKind,
@@ -168,6 +189,11 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		raw,
 		carrier.Meta{},
 	), nil
+}
+
+func isSSEContentType(raw string) bool {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(raw)) // swobu:io-string source=boundary
+	return err == nil && strings.EqualFold(mediaType, "text/event-stream")
 }
 
 // applyCredential keeps auth resolution at the provider edge so canonicals and

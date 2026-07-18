@@ -56,16 +56,21 @@ func buildPathRecord(ctx context.Context, exchangeID string, target routing.Targ
 // toRoutableTarget is the single adapter from durable connection intent to
 // provider execution data. Derived URLs and auth modes never enter persistence.
 func toRoutableTarget(target routing.Target) (RoutableTarget, error) {
-	providerID := string(target.Provider())
+	return RoutableTargetFromConnection(target.ID().String(), target.Connection(), target.Protocol().String())
+}
+
+// RoutableTargetFromConnection derives provider execution data from the typed
+// routing connection at the single exchange boundary.
+func RoutableTargetFromConnection(backendRef string, connection routing.Connection, providerProtocol string) (RoutableTarget, error) {
+	providerID := string(connection.Provider())
 	providerSpec := providerID
-	if target.Provider() == routing.ProviderCustom {
+	if connection.Provider() == routing.ProviderCustom {
 		providerSpec = "openai_compatible"
 	}
 	baseURL := profile.DefaultExecuteBaseURL(providerSpec)
 	credential := ""
-	authMode := ""
 	authHeader := ""
-	switch connection := target.Connection().(type) {
+	switch connection := connection.(type) {
 	case routing.OpenAIConnection:
 		credential = connection.Credential().String()
 	case routing.AnthropicConnection:
@@ -83,18 +88,7 @@ func toRoutableTarget(target routing.Target) (RoutableTarget, error) {
 		credential = connection.Credential().String()
 	case routing.BedrockConnection:
 		baseURL = profile.BedrockMantleEndpointForRegion(connection.Region().String())
-		switch auth := connection.Auth().(type) {
-		case routing.BedrockProfileAuth:
-			authMode = string(profile.AuthModeAWSProfile)
-			credential = "profile:" + auth.Profile() + "@" + connection.Region().String()
-		case routing.BedrockEnvironmentAuth:
-			authMode = string(profile.AuthModeAWSEnvSession)
-		case routing.BedrockBearerTokenAuth:
-			authMode = string(profile.AuthModeEnv)
-			credential = auth.Credential().String()
-		default:
-			return RoutableTarget{}, fmt.Errorf("unsupported Bedrock auth %T", connection.Auth())
-		}
+		credential = connection.Credential().String()
 	case routing.CustomConnection:
 		baseURL = connection.BaseURL().String()
 		if connection.Auth() != nil {
@@ -103,14 +97,13 @@ func toRoutableTarget(target routing.Target) (RoutableTarget, error) {
 			authHeader = header.Name()
 		}
 	default:
-		return RoutableTarget{}, fmt.Errorf("unsupported routing connection %T", target.Connection())
+		return RoutableTarget{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}
-	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, target.Protocol().String())
+	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
 	if !ok {
 		return RoutableTarget{}, canonical.BadEndpoint("selected provider protocol is unsupported")
 	}
-	routable := NewRoutableTarget(target.ID().String(), providerSpec, baseURL, credential, protocolKind, "", frame, target.Protocol().String())
-	routable.AuthMode = authMode
+	routable := NewRoutableTarget(backendRef, providerSpec, baseURL, credential, protocolKind, frame, providerProtocol)
 	routable.AuthHeader = authHeader
 	return routable, nil
 }

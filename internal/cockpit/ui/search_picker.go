@@ -141,6 +141,13 @@ func searchPickerQueryValue(query string) string {
 	return query + "_"
 }
 
+func (p *SearchPicker) countLabel(win ChoiceWindow) string {
+	if p.Mode == SearchPickerOpen && strings.TrimSpace(p.Query.Get()) != "" && win.ShownRows == 0 {
+		return "1 custom value"
+	}
+	return p.choiceList().CountLabel(win)
+}
+
 func searchPickerOptionKey(opt SearchOption, index int) string {
 	if opt.ID != "" {
 		return opt.ID

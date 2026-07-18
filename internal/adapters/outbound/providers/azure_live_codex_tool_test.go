@@ -60,12 +60,11 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 			"default",
 			"azure",
 			"https://contact-8837-resource.services.ai.azure.com",
-			"keychain",
+			"secret:azure-live",
 			protocolkind.Responses,
-			"credential_ref",
+
 			"",
-			"responses_stream",
-		),
+			"responses_stream"),
 	)
 
 	ingress, err := registry.ResolveProviderIngress(ctx, providerReq)

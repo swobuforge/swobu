@@ -15,11 +15,11 @@ func TestModelSelectionAdvancesSelectionToRequiredProtocol(t *testing.T) {
 		ProviderSpec:  "openai",
 		CredentialRef: "env:OPENAI_API_KEY",
 	})
-	config.Catalog.Set(readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{
+	config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{
 		ID:        "gpt-5.6",
 		Name:      "gpt-5.6",
 		ModelName: "gpt-5.6",
-	}}})
+	}}}})
 	config.Open()
 
 	h, err := testkit.NewHarness(config)

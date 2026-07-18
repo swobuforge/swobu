@@ -8,6 +8,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 func TestCommitEditReplacesStateFromCommittedResponseAndPreservesItOnFailure(t *testing.T) {
@@ -17,8 +18,10 @@ func TestCommitEditReplacesStateFromCommittedResponseAndPreservesItOnFailure(t *
 	committedRoute := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{committedTarget}}}}
 
 	saves := 0
-	save := func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+	var savedConnection routing.Connection
+	save := func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
 		saves++
+		savedConnection = request.Connection
 		if saves == 1 {
 			return ports.SaveTargetResult{Target: committedTarget, Route: committedRoute}, nil
 		}
@@ -26,6 +29,10 @@ func TestCommitEditReplacesStateFromCommittedResponseAndPreservesItOnFailure(t *
 	}
 	config := NewEditTargetConfig("dev", originalRoute, originalTarget, save, nil)
 	config.CommitEdit(context.Background())
+	connection, ok := savedConnection.(routing.OpenAIConnection)
+	if !ok || connection.Credential().String() != "env:OLD" {
+		t.Fatalf("save connection = %#v; want typed OpenAI connection", savedConnection)
+	}
 	if !reflect.DeepEqual(config.Target, committedTarget) || !reflect.DeepEqual(config.Route, committedRoute) {
 		t.Fatalf("state after success = target %#v route %#v; want committed response", config.Target, config.Route)
 	}

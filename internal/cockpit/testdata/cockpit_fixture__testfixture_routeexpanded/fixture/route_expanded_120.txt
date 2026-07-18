@@ -9,7 +9,6 @@
   model routes ▾
      gpt               default · 2 fallback steps                                                         collapse ↵
         name              gpt                                                                             edit ↵
-        client sends      model = gpt
         default           yes                                                                             current
         delete            gpt                                                                             delete ↵
 
@@ -29,5 +28,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
-
 

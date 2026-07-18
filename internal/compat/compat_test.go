@@ -1,6 +1,10 @@
 package compat
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+)
 
 func TestValidateFeature(t *testing.T) {
 	t.Parallel()
@@ -64,26 +68,34 @@ func TestValidateSubject(t *testing.T) {
 func TestSupportsFeature(t *testing.T) {
 	t.Parallel()
 
-	if got := SupportsFeature("openai", "responses", "", ToolDeclaration); got != Supported {
+	if got := SupportsFeature("openai", protocolkind.Responses, "", ToolDeclaration); got != Supported {
 		t.Fatalf("openai responses tool declaration support = %q want %q", got, Supported)
 	}
-	if got := SupportsFeature("openai", "chat_completions", "", GenerationStopSequences); got != Supported {
+	if got := SupportsFeature("openai", protocolkind.ChatCompletions, "", GenerationStopSequences); got != Supported {
 		t.Fatalf("openai chat_completions stop sequence support = %q want %q", got, Supported)
 	}
-	if got := SupportsFeature("anthropic", "messages", "", RequestStructuredOutput); got != Unsupported {
+	if got := SupportsFeature("anthropic", protocolkind.Messages, "", RequestStructuredOutput); got != Unsupported {
 		t.Fatalf("anthropic messages structured output support = %q want %q", got, Unsupported)
 	}
-	if got := SupportsFeature("azure", "messages", "claude-haiku-4-5-20251001", ToolDeclaration); got != Supported {
+	if got := SupportsFeature("azure", protocolkind.Messages, "claude-haiku-4-5-20251001", ToolDeclaration); got != Supported {
 		t.Fatalf("azure claude messages tool declaration support = %q want %q", got, Supported)
 	}
-	if got := SupportsFeature("ollama", "responses", "", ToolDeclaration); got != Unknown {
+	if got := SupportsFeature("ollama", protocolkind.Responses, "", ToolDeclaration); got != Unknown {
 		t.Fatalf("ollama responses support = %q want %q", got, Unknown)
 	}
-	if got := SupportsFeature("ollama", "chat_completions", "", ToolDeclaration); got != Supported {
+	if got := SupportsFeature("ollama", protocolkind.ChatCompletions, "", ToolDeclaration); got != Supported {
 		t.Fatalf("ollama chat_completions support = %q want %q", got, Supported)
 	}
-	if got := SupportsFeature("missing", "responses", "", ToolDeclaration); got != Unknown {
+	if got := SupportsFeature("missing", protocolkind.Responses, "", ToolDeclaration); got != Unknown {
 		t.Fatalf("unknown route support = %q want %q", got, Unknown)
+	}
+	for _, feature := range featureSetMessages {
+		if got := SupportsFeature("openai_compatible", protocolkind.Messages, "glm-5.2", feature); got != Supported {
+			t.Fatalf("custom messages feature %q support = %q want %q", feature, got, Supported)
+		}
+	}
+	if got := SupportsFeature("openai_compatible", protocolkind.Messages, "glm-5.2", RequestStructuredOutput); got != Unsupported {
+		t.Fatalf("custom messages structured output support = %q want %q", got, Unsupported)
 	}
 }
 

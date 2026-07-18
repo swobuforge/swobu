@@ -19,7 +19,9 @@ const (
 )
 
 // EditableRow is a selectable row that reveals an inline text input on
-// activation. Focus never leaves the row shell: the text surface is rendered
+// activation. Typed text stays in a private draft and is published to Value
+// only on submit, so dependent UI cannot react to a half-entered field. Focus
+// never leaves the row shell: the text surface is rendered
 // by an owned InlineEditor that is itself NOT a Component. The row Component
 // owns the edit/view state (the InlineEditor is stateless about edit/view),
 // typing keys (via InlineEditor.TypingKeyMap), the Escape lifecycle, and the
@@ -29,11 +31,13 @@ type EditableRow struct {
 	Label       string
 	Value       *tui.State[string]
 	Placeholder string
-	ViewValue   func(string) string
-	ValueWidth  int // zero means ActionRowValueWidth
-	ViewAction  string
-	EditAction  string
-	Validation  EditableRowValidation
+	// Sensitive masks the edit surface without changing the underlying value.
+	Sensitive  bool
+	ViewValue  func(string) string
+	ValueWidth int // zero means ActionRowValueWidth
+	ViewAction string
+	EditAction string
+	Validation EditableRowValidation
 	// ValidationText is caller-owned helper copy for validation states.
 	// EditableRow owns taxonomy and row layout; feature workflows own field
 	// meaning such as workspace-slug guidance or backend conflict text.
@@ -44,6 +48,10 @@ type EditableRow struct {
 	// StartEditing seeds the row as already entered when it first mounts, or
 	// when a fresh mount asks an existing row to enter editing.
 	StartEditing bool
+	// PublishWhileEditing mirrors the private edit draft into Value on each
+	// keystroke. Use only when Value is itself control-local draft state and
+	// live validation must react while typing.
+	PublishWhileEditing bool
 	// OnActivate is called when the view-mode row is activated.
 	// If nil, the row auto-switches to edit mode.
 	OnActivate func()
@@ -57,12 +65,14 @@ type EditableRow struct {
 	// OnClose runs when Escape cancels the edit-mode shell.
 	OnClose func()
 
-	editing *tui.State[bool]
-	editor  *InlineEditor
+	editing   *tui.State[bool]
+	editValue *tui.State[string]
+	editor    *InlineEditor
 }
 
 // NewEditableRow builds a mountable editable row for a single text field.
 func NewEditableRow(id, label string, value *tui.State[string]) *EditableRow {
+	editValue := tui.NewState("")
 	row := &EditableRow{
 		Label:      label,
 		Value:      value,
@@ -70,7 +80,8 @@ func NewEditableRow(id, label string, value *tui.State[string]) *EditableRow {
 		ViewAction: "edit ↵",
 		EditAction: "save ↵",
 		editing:    tui.NewState(false),
-		editor:     NewInlineEditor(value),
+		editValue:  editValue,
+		editor:     NewInlineEditor(editValue),
 	}
 	row.target = interaction.NewSelectable(row.propsWithID(id))
 	return row
@@ -82,13 +93,31 @@ func (r *EditableRow) Open() {
 	r.editing.Set(true)
 	r.target.FocusedState().Set(true)
 	r.editor.Width = r.rowWidth()
-	r.editor.SetText(r.Value.Get())
+	seed := r.Value.Get()
+	if r.PublishWhileEditing {
+		r.editor.Value = r.Value
+	} else {
+		r.editValue.Set(seed)
+		r.editor.Value = r.editValue
+	}
+	r.editor.input = nil
+	r.editor.OnChange = func(value string) {
+		if r.PublishWhileEditing {
+			r.Value.Set(value)
+		}
+	}
+	r.editor.SetText(seed)
+	r.editor.input.OnChange = r.editor.OnChange
+	if app := r.target.App(); app != nil {
+		r.editor.BindApp(app)
+	}
 	r.target.Focus(r.target.App())
 	// Wire submit dynamically so the caller's callback is always current. Submit
 	// the value forwarded by the InlineEditor (what the operator typed), not
 	// r.Value: render reconciliation repoints r.Value to a fresh state seeded
 	// from props, so it can lag behind the editor's live input mid-edit.
 	r.editor.OnSubmit = func(submitted string) {
+		r.Value.Set(submitted)
 		if r.OnSubmit != nil {
 			r.OnSubmit(submitted)
 		}
@@ -137,6 +166,7 @@ func (r *EditableRow) IsEditing() bool {
 func (r *EditableRow) BindApp(app *tui.App) {
 	r.target.BindApp(app)
 	r.editing.BindApp(app)
+	r.editValue.BindApp(app)
 	r.editor.BindApp(app)
 }
 
@@ -153,6 +183,7 @@ func (r *EditableRow) UpdateProps(fresh tui.Component) {
 	r.Label = f.Label
 	r.Value = f.Value
 	r.Placeholder = f.Placeholder
+	r.Sensitive = f.Sensitive
 	r.ViewValue = f.ViewValue
 	r.ValueWidth = f.ValueWidth
 	r.ViewAction = f.ViewAction
@@ -165,6 +196,7 @@ func (r *EditableRow) UpdateProps(fresh tui.Component) {
 	r.OnClose = f.OnClose
 	r.AutoFocus = f.AutoFocus
 	r.StartEditing = f.StartEditing
+	r.PublishWhileEditing = f.PublishWhileEditing
 
 	r.target.Update(r.props())
 	if !prevStartEditing && r.StartEditing && !r.IsEditing() {
@@ -210,6 +242,7 @@ func (r *EditableRow) viewValue() string {
 
 func (r *EditableRow) renderEdit() *tui.Element {
 	r.editor.Width = r.rowWidth()
+	r.editor.Sensitive = r.Sensitive
 	root := EditRow(
 		r.Arrow(),
 		r.Label,

@@ -23,6 +23,20 @@ func TestInlineInput_RenderShowsText(t *testing.T) {
 	}
 }
 
+func TestInlineInput_SensitiveRenderingMasksValueButPreservesInput(t *testing.T) {
+	value := tui.NewState("secret")
+	inp := NewInlineInput(value)
+	inp.Sensitive = true
+
+	rendered := renderElementTrimmed(t, inp.Render(), 20, 1)
+	if strings.Contains(rendered, "secret") || !strings.Contains(rendered, "••••••_") {
+		t.Fatalf("sensitive render = %q", rendered)
+	}
+	if got := value.Get(); got != "secret" {
+		t.Fatalf("value = %q, want unmodified input", got)
+	}
+}
+
 func TestInlineInput_TypingInserts(t *testing.T) {
 	value := tui.NewState("")
 	inp := NewInlineInput(value)

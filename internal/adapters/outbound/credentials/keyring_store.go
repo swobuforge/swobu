@@ -12,8 +12,8 @@ import (
 var keyringSet = keyringcommodity.Set
 var keyringGet = keyringcommodity.Get
 
-// StoreKeychainCredential writes a provider-scoped keychain secret.
-func StoreKeychainCredential(providerSpec string, keyName string, secret string) error {
+// StoreStoredSecret writes a provider-scoped stored secret.
+func StoreStoredSecret(providerSpec string, keyName string, secret string) error {
 	_, err := StoreMaterializedCredential(providerSpec, keyName, secret, CredentialWritePolicyAuto)
 	return err
 }
@@ -26,10 +26,10 @@ func StoreMaterializedCredential(providerSpec string, keyName string, secret str
 		return "", fmt.Errorf("provider spec is required")
 	}
 	if name == "" {
-		return "", fmt.Errorf("keychain key name is required")
+		return "", fmt.Errorf("stored secret name is required")
 	}
 	if token == "" {
-		return "", fmt.Errorf("keychain key value is required")
+		return "", fmt.Errorf("stored secret value is required")
 	}
 	encoded := token
 	if _, _, decodeErr := DecodeTokenBundle(token); decodeErr != nil {
@@ -121,8 +121,8 @@ func ResolveStoredSecretByRef(providerSpec string, credentialRef string) (string
 }
 
 func parseStoredSecretRef(providerSpec string, credentialRef string) (name string, kind string, err error) {
-	ref := strings.TrimSpace(credentialRef)                                                                                                         // swobu:io-string source=boundary
-	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) || strings.HasPrefix(strings.ToLower(ref), keychainCredentialRefPrefix) { // swobu:io-string source=boundary
+	ref := strings.TrimSpace(credentialRef)                                 // swobu:io-string source=boundary
+	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // swobu:io-string source=boundary
 		name, err := secretCredentialName(providerSpec, ref)
 		return name, "secret", err
 	}
