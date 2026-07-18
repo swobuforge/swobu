@@ -95,9 +95,6 @@ func TestProviderRequestPathForProtocol_MantleFamiliesOnly(t *testing.T) {
 			}
 		})
 	}
-	if _, err := profile.ProviderRequestPath(string(profile.ProviderSpecBedrock), protocolkind.Completions); err == nil {
-		t.Fatal("expected unsupported protocol to fail")
-	}
 }
 
 func TestValidateBedrockMantleEndpoint_AcceptsMantleAndLocalHosts(t *testing.T) {

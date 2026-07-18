@@ -2,7 +2,6 @@
      provider          Ollama                                                                             change ↵      
    > model             loading catalog…                                                                   wait          
      protocol          blocked                                                                            model first   
-     routing           step 1                                                                                           
      create                                                                                               model first   
                                                                                                                         
                                                                                                                         

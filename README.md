@@ -123,7 +123,6 @@ OpenAI-style:
 
 - `/v1/chat/completions`
 - `/v1/responses`
-- `/v1/completions`
 
 Anthropic-style:
 

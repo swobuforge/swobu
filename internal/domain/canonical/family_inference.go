@@ -7,7 +7,6 @@ type ClientFamily = protocolkind.ProtocolKind
 const (
 	ClientFamilyChatCompletions ClientFamily = protocolkind.ChatCompletions
 	ClientFamilyResponses       ClientFamily = protocolkind.Responses
-	ClientFamilyCompletions     ClientFamily = protocolkind.Completions
 	ClientFamilyMessages        ClientFamily = protocolkind.Messages
 )
 
@@ -17,8 +16,6 @@ func InferClientFamily(method string, normalizedPath NormalizedPath, hasMessages
 		return ClientFamilyChatCompletions, nil
 	case method == "POST" && normalizedPath == NormalizedPathResponses:
 		return ClientFamilyResponses, nil
-	case method == "POST" && normalizedPath == NormalizedPathCompletions:
-		return ClientFamilyCompletions, nil
 	case method == "POST" && normalizedPath == NormalizedPathMessages && hasMessagesProtocolMarker:
 		return ClientFamilyMessages, nil
 	default:

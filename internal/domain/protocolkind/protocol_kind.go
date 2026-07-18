@@ -9,7 +9,6 @@ type Kind = ProtocolKind
 const (
 	ChatCompletions ProtocolKind = "chat_completions"
 	Responses       ProtocolKind = "responses"
-	Completions     ProtocolKind = "completions"
 	Messages        ProtocolKind = "messages"
 )
 
@@ -19,7 +18,7 @@ func (k ProtocolKind) String() string {
 
 func ParseProtocolKind(raw string) (ProtocolKind, error) {
 	switch ProtocolKind(raw) {
-	case ChatCompletions, Responses, Completions, Messages:
+	case ChatCompletions, Responses, Messages:
 		return ProtocolKind(raw), nil
 	default:
 		return "", fmt.Errorf("unsupported protocol kind %q", raw)

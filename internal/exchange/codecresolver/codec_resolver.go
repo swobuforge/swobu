@@ -13,7 +13,6 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/wire/completions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
@@ -27,12 +26,10 @@ import (
 type RuntimeCodecResolver struct {
 	chatCompletionsClient wire.ClientCodec
 	responsesClient       wire.ClientCodec
-	completionsClient     wire.ClientCodec
 	messagesClient        wire.ClientCodec
 
 	chatCompletionsProvider protocolBundle
 	responsesProvider       protocolBundle
-	completionsProvider     protocolBundle
 	messagesProvider        protocolBundle
 }
 
@@ -49,11 +46,6 @@ func NewRuntimeCodecResolver() RuntimeCodecResolver {
 			document: responses.ResponseDocumentEncoder{},
 			stream:   responses.ResponseStreamEncoder{},
 		},
-		completionsClient: clientCodecBundle{
-			request:  completions.ClientRequestDecoder{},
-			document: completions.ResponseDocumentEncoder{},
-			stream:   completions.ResponseStreamEncoder{},
-		},
 		messagesClient: clientCodecBundle{
 			request:  messages.ClientRequestDecoder{},
 			document: messages.ResponseDocumentEncoder{},
@@ -68,11 +60,6 @@ func NewRuntimeCodecResolver() RuntimeCodecResolver {
 			requestEncoder:  responses.ProviderRequestDocumentEncoder{},
 			streamDecoder:   responses.ProviderEnvelopeDecoder{},
 			documentDecoder: responses.ProviderDocumentDecoder{},
-		},
-		completionsProvider: protocolBundle{
-			requestEncoder:  completions.ProviderRequestDocumentEncoder{},
-			streamDecoder:   completions.ProviderEnvelopeDecoder{},
-			documentDecoder: completions.ProviderDocumentDecoder{},
 		},
 		messagesProvider: protocolBundle{
 			requestEncoder:  messages.ProviderRequestDocumentEncoder{},
@@ -89,8 +76,6 @@ func (r RuntimeCodecResolver) ClientCodec(f canonical.ClientFamily) wire.ClientC
 		return r.chatCompletionsClient
 	case canonical.ClientFamilyResponses:
 		return r.responsesClient
-	case canonical.ClientFamilyCompletions:
-		return r.completionsClient
 	case canonical.ClientFamilyMessages:
 		return r.messagesClient
 	default:
@@ -125,8 +110,6 @@ func (r RuntimeCodecResolver) providerBundle(kind protocolkind.ProtocolKind) pro
 		return r.chatCompletionsProvider
 	case protocolkind.Responses:
 		return r.responsesProvider
-	case protocolkind.Completions:
-		return r.completionsProvider
 	case protocolkind.Messages:
 		return r.messagesProvider
 	default:

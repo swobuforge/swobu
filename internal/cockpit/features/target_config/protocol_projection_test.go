@@ -19,19 +19,17 @@ func TestResolveProtocolOptions_ProviderManifestProductOrder(t *testing.T) {
 			provider: "openai",
 			model:    readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", ModelName: "gpt-4.1"},
 			want: []string{
-				"responses_stream",
 				"responses",
-				"chat_completions_stream",
+				"responses_stream",
 				"chat_completions",
-				"completions_stream",
-				"completions",
+				"chat_completions_stream",
 			},
 		},
 		{
 			name:     "anthropic",
 			provider: "anthropic",
 			model:    readmodel.ModelDeploymentReadModel{ID: "claude-sonnet-4-5", ModelName: "claude-sonnet-4-5"},
-			want:     []string{"messages_stream", "messages"},
+			want:     []string{"messages", "messages_stream"},
 		},
 		{
 			name:     "chatgpt",
@@ -43,28 +41,26 @@ func TestResolveProtocolOptions_ProviderManifestProductOrder(t *testing.T) {
 			name:     "ollama",
 			provider: "ollama",
 			model:    readmodel.ModelDeploymentReadModel{ID: "llama3.2", ModelName: "llama3.2"},
-			want:     []string{"chat_completions_stream", "chat_completions", "completions_stream", "completions"},
+			want:     []string{"chat_completions", "chat_completions_stream"},
 		},
 		{
 			name:     "azure sparse catalog uses provider manifest",
 			provider: "azure",
 			model:    readmodel.ModelDeploymentReadModel{ID: "prod-claude-sonnet", ModelName: "prod-claude-sonnet"},
 			want: []string{
-				"responses_stream",
 				"responses",
-				"chat_completions_stream",
+				"responses_stream",
 				"chat_completions",
-				"messages_stream",
+				"chat_completions_stream",
 				"messages",
-				"completions_stream",
-				"completions",
+				"messages_stream",
 			},
 		},
 		{
 			name:     "bedrock sparse catalog uses provider manifest",
 			provider: "bedrock",
 			model:    readmodel.ModelDeploymentReadModel{ID: "anthropic.claude-3-5-sonnet", ModelName: "anthropic.claude-3-5-sonnet"},
-			want:     []string{"responses_stream", "responses", "chat_completions_stream", "chat_completions", "messages_stream", "messages"},
+			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
 		},
 	}
 	for _, tt := range tests {
@@ -86,7 +82,7 @@ func TestResolveProtocolOptions_DeploymentMetadataNarrows(t *testing.T) {
 		SupportedProviderProtocols: []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"},
 		DefaultProviderProtocol:    "responses",
 	}))
-	want := []string{"responses_stream", "responses", "chat_completions_stream", "chat_completions"}
+	want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("protocol options = %v, want %v", got, want)
 	}
@@ -166,14 +162,37 @@ func TestDefaultProtocolForModelUsesResolvedDeploymentDefault(t *testing.T) {
 }
 
 func TestResolveProtocolOptions_LabelsIncludeProtocolHints(t *testing.T) {
-	options := resolveProtocolOptions("anthropic", readmodel.ModelDeploymentReadModel{
-		ID:        "claude-sonnet-4-5",
-		ModelName: "claude-sonnet-4-5",
-	})
-	got := protocolOptionLabels(options)
-	want := []string{"messages_stream · Anthropic", "messages · Anthropic"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("protocol labels = %v, want %v", got, want)
+	tests := []struct {
+		name     string
+		provider string
+		model    readmodel.ModelDeploymentReadModel
+		want     []string
+	}{
+		{
+			name:     "openai uses provider first display labels",
+			provider: "openai",
+			model:    readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", ModelName: "gpt-4.1"},
+			want: []string{
+				"OpenAI · Responses",
+				"OpenAI · Responses · stream",
+				"OpenAI · Chat Completions",
+				"OpenAI · Chat Completions · stream",
+			},
+		},
+		{
+			name:     "anthropic keeps its provider first display labels",
+			provider: "anthropic",
+			model:    readmodel.ModelDeploymentReadModel{ID: "claude-sonnet-4-5", ModelName: "claude-sonnet-4-5"},
+			want:     []string{"Anthropic · Messages", "Anthropic · Messages · stream"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := protocolOptionLabels(resolveProtocolOptions(tt.provider, tt.model))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("protocol labels = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

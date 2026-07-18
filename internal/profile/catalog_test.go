@@ -263,7 +263,7 @@ func TestCatalog_OllamaProviderProtocols_ExcludeResponses(t *testing.T) {
 			t.Fatalf("ollama must not declare %q protocol", unsupported)
 		}
 	}
-	for _, supported := range []string{"chat_completions", "chat_completions_stream", "completions", "completions_stream"} {
+	for _, supported := range []string{"chat_completions", "chat_completions_stream"} {
 		if !SupportsProviderProtocolForSpec("ollama", supported) {
 			t.Fatalf("ollama must declare %q protocol; protocols=%v", supported, protocols)
 		}

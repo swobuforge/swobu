@@ -90,38 +90,6 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			wantWireContains: []string{`"status":"incomplete"`, `"incomplete_details":{"reason":"content_filter"}`},
 		},
 		{
-			name:             "openaicompat completions content filter",
-			providerID:       string(profile.ProviderSpecOpenAICompatible),
-			protocolKind:     protocolkind.Completions,
-			providerProtocol: "completions",
-			clientFamily:     canonical.ClientFamilyCompletions,
-			basePath:         "/v1",
-			credentialRef:    "cred-1",
-			providerDelivery: delivery.BufferedDelivery(),
-			responseStatus:   http.StatusOK,
-			responseHeaders:  map[string]string{"Content-Type": "application/json"},
-			responseBody:     `{"id":"cmpl_1","model":"m","choices":[{"text":"","finish_reason":"content_filter"}],"usage":{"prompt_tokens":12,"completion_tokens":0}}`,
-			wantPath:         "/v1/completions",
-			wantOutputReason: "content_filter",
-			wantWireContains: []string{`"finish_reason":"content_filter"`},
-		},
-		{
-			name:             "ollama completions stop",
-			providerID:       string(profile.ProviderSpecOllama),
-			protocolKind:     protocolkind.Completions,
-			providerProtocol: "completions",
-			clientFamily:     canonical.ClientFamilyCompletions,
-			basePath:         "/v1",
-			credentialRef:    "cred-1",
-			providerDelivery: delivery.BufferedDelivery(),
-			responseStatus:   http.StatusOK,
-			responseHeaders:  map[string]string{"Content-Type": "application/json"},
-			responseBody:     `{"id":"cmpl_1","model":"m","choices":[{"text":"ok","finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":2}}`,
-			wantPath:         "/v1/completions",
-			wantOutputReason: "stop",
-			wantWireContains: []string{`"finish_reason":"stop"`},
-		},
-		{
 			name:             "azure responses incomplete content filter",
 			providerID:       string(profile.ProviderSpecAzure),
 			protocolKind:     protocolkind.Responses,
@@ -355,8 +323,6 @@ func clientFamilyForProtocol(kind protocolkind.ProtocolKind) canonical.ClientFam
 		return canonical.ClientFamilyChatCompletions
 	case protocolkind.Responses:
 		return canonical.ClientFamilyResponses
-	case protocolkind.Completions:
-		return canonical.ClientFamilyCompletions
 	case protocolkind.Messages:
 		return canonical.ClientFamilyMessages
 	default:

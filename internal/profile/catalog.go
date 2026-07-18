@@ -17,14 +17,10 @@ var (
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 	}
 	providerProtocolsOllama = []ProviderProtocolSpec{
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 	}
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
@@ -46,8 +42,6 @@ var (
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
@@ -60,8 +54,6 @@ var (
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "completions", Kind: protocolkind.Completions, Frame: FrameHTTPJSONBody},
-		{Name: "completions_stream", Kind: protocolkind.Completions, Frame: FrameSSEEvent},
 		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
