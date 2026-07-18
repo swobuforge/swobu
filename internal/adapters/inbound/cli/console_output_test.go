@@ -121,7 +121,7 @@ func TestWriteNoticeBlock_DaemonRuntimeGolden(t *testing.T) {
 func TestWriteNoticeBlock_StartupFailedGolden(t *testing.T) {
 	rows := []string{
 		"listen tcp 127.0.0.1:7926: bind: address already in use",
-		"next: stop existing daemon or run `swobu down`",
+		"next: stop existing daemon or run `swobu daemon down`",
 		"next: run `swobu status`",
 	}
 	var out strings.Builder

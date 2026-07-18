@@ -36,7 +36,7 @@ swobu status
 Stop Swobu:
 
 ```sh
-swobu down
+swobu daemon down
 ```
 
 ---
@@ -166,7 +166,7 @@ Cockpit is the primary local operator surface.
 swobu                         # launch cockpit
 swobu daemon                  # run daemon in foreground
 swobu status                  # inspect daemon health
-swobu down                    # stop daemon
+swobu daemon down             # stop daemon
 swobu telemetry status        # inspect telemetry setting
 swobu telemetry on            # enable telemetry
 swobu telemetry off           # disable telemetry
@@ -212,7 +212,7 @@ Health semantics:
 Shutdown:
 
 ```sh
-swobu down
+swobu daemon down
 ```
 
 ---
