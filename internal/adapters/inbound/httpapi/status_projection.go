@@ -54,15 +54,15 @@ func parseProjectionScope(req *http.Request) (trafficevidencestore.ProjectionSco
 	if raw == string(trafficevidencestore.ProjectionScopeAll) {
 		return trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll}, nil
 	}
-	const endpointPrefix = "endpoint:"
-	if strings.HasPrefix(raw, endpointPrefix) {
-		endpoint := strings.TrimSpace(strings.TrimPrefix(raw, endpointPrefix)) // swobu:io-string source=boundary
-		if endpoint == "" {
-			return trafficevidencestore.ProjectionScope{}, fmt.Errorf("status projection endpoint scope requires endpoint name")
+	const workspacePrefix = "workspace:"
+	if strings.HasPrefix(raw, workspacePrefix) {
+		workspace := strings.TrimSpace(strings.TrimPrefix(raw, workspacePrefix)) // swobu:io-string source=boundary
+		if workspace == "" {
+			return trafficevidencestore.ProjectionScope{}, fmt.Errorf("status projection workspace scope requires workspace name")
 		}
 		return trafficevidencestore.ProjectionScope{
-			Kind:     trafficevidencestore.ProjectionScopeEndpoint,
-			Endpoint: endpoint,
+			Kind:      trafficevidencestore.ProjectionScopeWorkspace,
+			Workspace: workspace,
 		}, nil
 	}
 	return trafficevidencestore.ProjectionScope{}, fmt.Errorf("status projection scope %q is invalid", raw)

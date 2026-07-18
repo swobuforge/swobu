@@ -25,7 +25,7 @@ func TestStartupTranscript_EventRendering(t *testing.T) {
 
 	var out bytes.Buffer
 	tr := NewStartupConsolePresenter(&out)
-	tr.Emit(StartupEvent{Kind: StartupEventDaemonNotReachable, DaemonURL: "http://127.0.0.1:8080"})
+	tr.Emit(StartupEvent{Kind: StartupEventDaemonNotReachable, Addr: "127.0.0.1:8080"})
 	tr.Emit(StartupEvent{Kind: StartupEventVersionNotice, Text: "current version: v0.1.0\nupdate now: curl -fsSL https://swobu.com/install.sh | sh"})
 	tr.Emit(StartupEvent{Kind: StartupEventDaemonRuntimeStart, ConfigPath: "/tmp/swobu.yaml"})
 	tr.Emit(StartupEvent{Kind: StartupEventDaemonReady, State: "healthy"})

@@ -56,10 +56,9 @@ const (
 // PlacementOptionReadModel is one available placement choice before target
 // creation.
 type PlacementOptionReadModel struct {
-	Label  string
-	Rank   int
-	Weight int
-	Kind   PlacementKind
+	Label        string
+	PeerTargetID TargetID
+	Kind         PlacementKind
 }
 
 // PlacementSummary returns a compact display string for the placement option.
@@ -69,9 +68,9 @@ func (p PlacementOptionReadModel) Summary() string {
 	}
 	switch p.Kind {
 	case PlacementFallback:
-		return "fallback after last step"
+		return "new fallback tier"
 	case PlacementBalance:
-		return fmt.Sprintf("balance with step %d", p.Rank)
+		return fmt.Sprintf("same tier as %s", p.PeerTargetID)
 	default:
 		return p.Label
 	}

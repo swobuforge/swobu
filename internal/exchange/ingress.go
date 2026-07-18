@@ -7,19 +7,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/effect"
 	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/routing"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -29,7 +28,7 @@ const (
 
 // RequestIngress runs one client request lifecycle at the exchange boundary.
 type RequestIngress struct {
-	endpoints       EndpointReader
+	workspaces      WorkspaceLookup
 	runner          Runner
 	trafficEvidence TrafficEventSink
 }
@@ -62,7 +61,7 @@ type ExecutionRuntime interface {
 	ProviderIngressResolver
 }
 
-func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
+func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
 	if policies.ReplayStore == nil {
 		policies.ReplayStore = replay.NewMemoryStore()
 	}
@@ -80,7 +79,7 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 		}
 	}
 	return RequestIngress{
-		endpoints:       endpoints,
+		workspaces:      workspaces,
 		trafficEvidence: policies.TrafficEventSink,
 		runner: Runner{
 			Runtime:        runtime,
@@ -93,7 +92,7 @@ func NewIngress(endpoints EndpointReader, runtime ExecutionRuntime, policies Run
 }
 
 type RequestInput struct {
-	EndpointName    endpointintent.EndpointName
+	Workspace       routing.WorkspaceSlug
 	Request         transportpkg.TransportRequest
 	ClientHandler   trafficevidence.ClientHandler
 	ClientFamily    canonical.ClientFamily
@@ -113,23 +112,23 @@ type RequestOutput struct {
 // HandleRequest resolves the endpoint name, derives client semantics from the
 // transport request, and runs one exchange lifecycle.
 func (h RequestIngress) HandleRequest(ctx context.Context, in RequestInput) (RequestOutput, error) {
-	if in.EndpointName.IsZero() {
-		return RequestOutput{}, canonical.BadEndpoint("endpoint name is required")
+	if in.Workspace.String() == "" {
+		return RequestOutput{}, canonical.BadEndpoint("workspace slug is required")
 	}
-	if h.endpoints == nil {
-		return RequestOutput{}, canonical.InternalError("endpoint reader is not configured")
+	if h.workspaces == nil {
+		return RequestOutput{}, canonical.InternalError("workspace lookup is not configured")
 	}
-	endpoint, err := h.endpoints.GetEndpoint(ctx, in.EndpointName)
+	workspace, err := h.workspaces.GetWorkspace(ctx, in.Workspace)
 	if err != nil {
-		return RequestOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
+		return RequestOutput{}, canonical.BadEndpoint("workspace could not be resolved")
 	}
-	return h.HandleRequestWithEndpoint(ctx, endpoint, in)
+	return h.HandleRequestWithWorkspace(ctx, workspace, in)
 }
 
-// HandleRequestWithEndpoint reuses the same request lifecycle when the caller
-// already owns endpoint resolution truth, such as control-plane probes.
-func (h RequestIngress) HandleRequestWithEndpoint(ctx context.Context, endpoint endpointintent.Endpoint, in RequestInput) (RequestOutput, error) {
-	out, err := h.runExchangeResponse(ctx, endpoint, in)
+// HandleRequestWithWorkspace reuses the request lifecycle when the caller
+// already owns workspace resolution truth, such as control-plane probes.
+func (h RequestIngress) HandleRequestWithWorkspace(ctx context.Context, workspace routing.Workspace, in RequestInput) (RequestOutput, error) {
+	out, err := h.runExchangeResponse(ctx, workspace, in)
 	if in.Timing == nil && out.CommitTrafficEvent != nil {
 		_ = out.CommitTrafficEvent(ctx, err)
 	}
@@ -139,7 +138,7 @@ func (h RequestIngress) HandleRequestWithEndpoint(ctx context.Context, endpoint 
 	return out, nil
 }
 
-func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpointintent.Endpoint, in RequestInput) (RequestOutput, error) {
+func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routing.Workspace, in RequestInput) (RequestOutput, error) {
 	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
 	if err != nil {
 		return RequestOutput{}, err
@@ -191,14 +190,14 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, endpoint endpoi
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	out, err := runExchangeWithMachine(ctx, h.runner, h.trafficEvidence, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, endpoint, in.Timing)
+	out, err := runExchangeWithMachine(ctx, h.runner, h.trafficEvidence, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, workspace, in.Timing)
 	if err != nil {
 		return out, err
 	}
 	return out, nil
 }
 
-func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID string, clientHandler trafficevidence.ClientHandler, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error, attemptCount int, timing *trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
+func buildTerminalTrafficEvent(workspace routing.Workspace, routeName routing.RouteName, exchangeID string, clientHandler trafficevidence.ClientHandler, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error, attemptCount int, timing *trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
 	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(exchangeID))
 	if parseErr != nil {
 		return trafficevidence.TrafficEvent{}, parseErr
@@ -211,16 +210,10 @@ func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID stri
 		return trafficevidence.TrafficEvent{}, routeErr
 	}
 
-	// Derive the actual workspace route model from the resolved provider config,
-	// not from the requested route model. The client may send "default" or an
-	// unknown route name, and routing resolves it to a concrete target.
-	pc := findProviderConfig(endpoint, target.BackendRef)
-	workspaceRouteModel := projectedRouteModel(pc)
-
 	result, statusCode := requestOutcomeEvidence(err, response)
 	input := trafficevidence.TrafficEventInput{
 		RequestID:             requestID,
-		Endpoint:              endpoint.Name().String(),
+		Workspace:             workspace.Slug().String(),
 		ClientHandler:         clientHandler,
 		ClientFamily:          trafficevidence.ClientFamily(clientFamily),
 		Route:                 route,
@@ -230,7 +223,7 @@ func buildTerminalTrafficEvent(endpoint endpointintent.Endpoint, exchangeID stri
 		AttemptCount:          max(attemptCount, 1),
 		ModelRequested:        request.Model(),
 		ModelResolved:         request.Model(),
-		WorkspaceRouteModelID: workspaceRouteModel,
+		WorkspaceRouteModelID: routeName.String(),
 		ExchangeDiagnostics:   requestOutcomeDiagnostics(err),
 	}
 	return trafficevidence.NewTerminalTrafficEvent(input)
@@ -352,7 +345,7 @@ func normalizeClientDelivery(decoded delivery.Delivery, framing delivery.Framing
 }
 
 type ListModelsInput struct {
-	EndpointName endpointintent.EndpointName
+	Workspace routing.WorkspaceSlug
 }
 
 type ModelOption struct {
@@ -368,36 +361,28 @@ type ListModelsOutput struct {
 }
 
 func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (ListModelsOutput, error) {
-	if in.EndpointName.IsZero() {
-		return ListModelsOutput{}, canonical.BadEndpoint("endpoint name is required")
+	if in.Workspace.String() == "" {
+		return ListModelsOutput{}, canonical.BadEndpoint("workspace slug is required")
 	}
-	if h.endpoints == nil {
-		return ListModelsOutput{}, canonical.InternalError("endpoint reader is not configured")
+	if h.workspaces == nil {
+		return ListModelsOutput{}, canonical.InternalError("workspace lookup is not configured")
 	}
-	endpoint, err := h.endpoints.GetEndpoint(ctx, in.EndpointName)
+	workspace, err := h.workspaces.GetWorkspace(ctx, in.Workspace)
 	if err != nil {
 		return ListModelsOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
-	wr := endpointToWorkspaceRouting(endpoint)
-	modelIDs := make([]string, 0, len(wr.Routes))
-	for modelID := range wr.Routes {
-		modelIDs = append(modelIDs, modelID)
-	}
-	sort.Strings(modelIDs)
-
 	out := ListModelsOutput{
-		DefaultModelID: wr.DefaultModel,
-		Models:         make([]ModelOption, 0, len(modelIDs)),
+		DefaultModelID: workspace.DefaultRoute().String(),
+		Models:         make([]ModelOption, 0, len(workspace.Routes())),
 	}
-	for _, modelID := range modelIDs {
-		route := wr.Routes[modelID]
+	for _, route := range workspace.Routes() {
 		option := ModelOption{
-			ID:      route.ModelName,
-			ModelID: route.ModelName,
+			ID:      route.Name().String(),
+			ModelID: route.Name().String(),
 		}
-		if len(route.Targets) > 0 {
-			option.ProviderSpec = route.Targets[0].Provider
-			option.BackendRef = route.Targets[0].ID
+		if tiers := route.Tiers(); len(tiers) > 0 && len(tiers[0].Targets()) > 0 {
+			option.ProviderSpec = string(tiers[0].Targets()[0].Provider())
+			option.BackendRef = tiers[0].Targets()[0].ID().String()
 		}
 		out.Models = append(out.Models, option)
 	}

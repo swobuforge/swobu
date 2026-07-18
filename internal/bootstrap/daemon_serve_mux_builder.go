@@ -11,22 +11,20 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
-	operatorendpoints "github.com/swobuforge/swobu/internal/app/operator/endpoints"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
+	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/observation"
-	"github.com/swobuforge/swobu/internal/platform/config"
 )
 
 func buildDaemonServeMux(
 	daemon *Daemon,
-	runtimeCfg config.RuntimeConfig,
+	addr string,
 	runtime daemonProviderModelCatalogComposition,
 	trafficEventSink observation.TrafficEventSink,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
 ) (*http.ServeMux, *chatgptlogin.LoginService, error) {
 	exchangeIngress := exchange.NewIngress(
-		daemon.endpoints,
+		daemon.configStore,
 		runtime,
 		exchange.RuntimePoliciesSpec{
 			TrafficEventSink: trafficEventSink,
@@ -41,7 +39,7 @@ func buildDaemonServeMux(
 		}
 		return httpapi.StatusDocument{
 			State:                string(status.State),
-			EndpointCount:        status.EndpointCount,
+			WorkspaceCount:       status.WorkspaceCount,
 			ControlPlaneProtocol: controlplane.Protocol,
 			SwobuVersion:         controlplane.SwobuVersion(),
 		}, nil
@@ -54,9 +52,15 @@ func buildDaemonServeMux(
 		return nil
 	}))
 	mux.Handle("/_swobu/model-catalog", httpapi.NewModelCatalogProbeHandler(runtime))
-	endpointIntent := operatorendpoints.NewOperatorEndpointStore(daemon.endpoints)
+	workspaceService, err := workspaces.NewService(daemon.configStore)
+	if err != nil {
+		return nil, nil, err
+	}
+	workspaceControl := httpapi.NewWorkspaceControlHandler(workspaceService)
+	mux.Handle("/_swobu/workspaces", workspaceControl)
+	mux.Handle("/_swobu/workspaces/", workspaceControl)
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
-		PublicBaseURL: daemonPublicBaseURLFromBindAddr(runtimeCfg.BindAddr),
+		PublicBaseURL: daemonPublicBaseURLFromAddr(addr),
 		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) (string, error) {
 			return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
 		}),
@@ -65,39 +69,15 @@ func buildDaemonServeMux(
 	if err != nil {
 		return nil, nil, fmt.Errorf("auth session driver: %w", err)
 	}
-	authStore := authplane.NewEndpointCredentialStore(endpointIntent)
+	mux.HandleFunc("/_swobu/auth/chatgpt/callback", chatGPTLogin.HandleCallback)
+	authStore := authplane.NewTargetCredentialStore(workspaceService)
 	authManager, err := authplane.NewAuthSessionManager(authDriver, authStore)
 	if err != nil {
 		return nil, nil, fmt.Errorf("auth session manager: %w", err)
 	}
-	authSessionHandler := httpapi.NewAuthSessionHandler(
-		func(ctx context.Context, in authplane.StartInput) (authplane.StartOutput, error) {
-			return authManager.Start(ctx, in)
-		},
-		func(ctx context.Context, sessionID string) (authplane.SessionOutput, error) {
-			return authManager.Poll(ctx, sessionID)
-		},
-		func(ctx context.Context, sessionID string) error { return authManager.Cancel(ctx, sessionID) },
-		func(ctx context.Context, sessionID string) (authplane.StartOutput, error) {
-			return authManager.Retry(ctx, sessionID)
-		},
-	)
+	authSessionHandler := httpapi.NewAuthSessionHandler(authManager.Start, authManager.Poll, authManager.Cancel, authManager.Retry)
 	mux.Handle("/_swobu/auth/sessions", authSessionHandler)
 	mux.Handle("/_swobu/auth/sessions/", authSessionHandler)
-	mux.HandleFunc("/_swobu/auth/chatgpt/callback", chatGPTLogin.HandleCallback)
-	controlHandler := httpapi.NewEndpointControlHandler(
-		func(ctx context.Context) ([]endpointintent.Endpoint, error) { return endpointIntent.List(ctx) },
-		func(ctx context.Context, name string) (endpointintent.Endpoint, error) {
-			return endpointIntent.Get(ctx, name)
-		},
-		func(ctx context.Context, endpoint endpointintent.Endpoint) (endpointintent.Endpoint, error) {
-			return endpointIntent.Put(ctx, endpoint)
-		},
-		func(ctx context.Context, name string) error { return endpointIntent.Delete(ctx, name) },
-		exchangeIngress.HandleRequestWithEndpoint,
-	)
-	mux.Handle("/_swobu/endpoints", controlHandler)
-	mux.Handle("/_swobu/endpoints/", controlHandler)
 
 	return mux, chatGPTLogin, nil
 }

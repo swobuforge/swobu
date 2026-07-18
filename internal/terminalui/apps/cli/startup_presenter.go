@@ -84,7 +84,7 @@ func isStartupPhaseLogEvent(kind StartupEventKind) bool {
 func logStartupPhaseEvent(event StartupEvent) {
 	switch event.Kind {
 	case StartupEventDaemonNotReachable:
-		slog.Info("startup phase", "phase", "checking", "message", "daemon not reachable", "daemon_url", event.DaemonURL)
+		slog.Info("startup phase", "phase", "checking", "message", "daemon not reachable", "addr", event.Addr)
 	case StartupEventStartingDaemon:
 		slog.Info("startup phase", "phase", "starting", "message", "starting daemon")
 	case StartupEventWaitingReadiness:
@@ -114,7 +114,7 @@ func (t *StartupConsolePresenter) EmitDaemonLifecycle(event daemonlifecycle.Star
 	t.Emit(StartupEvent{
 		Kind:       event.Kind,
 		State:      event.State,
-		DaemonURL:  event.DaemonURL,
+		Addr:       event.Addr,
 		Text:       event.Text,
 		NextAction: append([]string(nil), event.NextAction...),
 	})

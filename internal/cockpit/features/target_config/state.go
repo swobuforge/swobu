@@ -5,7 +5,6 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -225,6 +224,14 @@ func (w *TargetConfig) endpointValueForProfile() string {
 	return ""
 }
 
+// CurrentProtocolOptions resolves the operator-facing protocol choices for the
+// current draft + selected model. It is a derived accessor that reads reactive
+// state, not a pure projection, so it lives in state.go rather than
+// catalog_projection.go (projections must take plain values only).
+func (w *TargetConfig) CurrentProtocolOptions() []protocolOption {
+	return resolveProtocolOptions(w.Draft.Get().ProviderSpec, w.SelectedModel.Get())
+}
+
 // Phase is the target-config workflow's durable state machine.
 type Phase int
 
@@ -263,7 +270,7 @@ type appState struct {
 	// Draft is the durable value under edit — the object we persist. Single
 	// source of truth for the target; create starts from a zero draft, edit from
 	// one seeded by TargetDraftFromReadModel. Same type either way.
-	Draft *tui.State[endpointintent.TargetDraft]
+	Draft *tui.State[readmodel.TargetDraft]
 
 	BaseURL                *tui.State[string]
 	CredentialHeaderEdited *tui.State[bool]
@@ -301,7 +308,7 @@ func newStates() appState {
 		Phase:       tui.NewState(PhaseClosed),
 		DeleteArmed: tui.NewState(false),
 		Error:       tui.NewState(""),
-		Draft:       tui.NewState(endpointintent.TargetDraft{}),
+		Draft:       tui.NewState(readmodel.TargetDraft{}),
 		BaseURL:     tui.NewState(""),
 
 		CredentialHeaderEdited: tui.NewState(false),
@@ -322,18 +329,14 @@ func newStates() appState {
 // drops non-state caches. Phase/Provider/Error are left for the caller to set.
 func (w *TargetConfig) resetFlowState() {
 	w.resetSetupState()
-	if w.mode == targetConfigModeEdit {
-		w.Placement.Set(placementForTarget(w.Target))
-	} else {
-		w.Placement.Set(defaultPlacementForRoute(w.Route))
-	}
+	w.Placement.Set(defaultPlacementForRoute(w.Route))
 	w.catalogProbeSeq++
 }
 
 func (w *TargetConfig) resetSetupState() {
 	d := w.Draft.Get()
 	d.CredentialRef = ""
-	d.ProviderOptions = endpointintent.ProviderOptionsDraft{}
+	d.ProviderOptions = readmodel.ProviderOptionsDraft{}
 	w.Draft.Set(d)
 	w.BaseURL.Set("")
 	w.CredentialHeaderEdited.Set(false)
@@ -341,7 +344,7 @@ func (w *TargetConfig) resetSetupState() {
 	w.Catalog.Set(readmodel.ModelCatalogReadModel{})
 	w.CatalogLoading.Set(false)
 	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft {
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ProviderProtocol = ""
 		return d
 	})

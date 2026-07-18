@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
 type StatusPayload struct {
 	State                string `json:"state"`
-	EndpointCount        int    `json:"endpoint_count,omitempty"`
+	WorkspaceCount       int    `json:"workspace_count,omitempty"`
 	ControlPlaneProtocol *int   `json:"control_plane_protocol,omitempty"`
 	SwobuVersion         string `json:"swobu_version,omitempty"`
 }
@@ -42,7 +44,7 @@ const (
 type StartupEvent struct {
 	Kind       StartupEventKind
 	State      string
-	DaemonURL  string
+	Addr       string
 	Text       string
 	NextAction []string
 }
@@ -61,25 +63,25 @@ func (f startupReporterFunc) Report(ev StartupEvent) {
 }
 
 type AttachOrStartInput struct {
-	DaemonURL             string
+	Addr                  string
 	Client                *http.Client
 	ReadinessTimeout      time.Duration
-	ResolveDefaultConfig  func() (string, error)
+	ResolveConfigPath     func() string
 	SpawnForegroundDaemon func(ctx context.Context, configPath string) error
 	Report                StartupReporter
 }
 
 type DownInput struct {
-	DaemonURL string
-	Client    *http.Client
-	Timeout   time.Duration
+	Addr    string
+	Client  *http.Client
+	Timeout time.Duration
 }
 
 type RestartInput struct {
-	DaemonURL             string
+	Addr                  string
 	Client                *http.Client
 	ReadinessTimeout      time.Duration
-	ResolveDefaultConfig  func() (string, error)
+	ResolveConfigPath     func() string
 	SpawnForegroundDaemon func(ctx context.Context, configPath string) error
 	Report                StartupReporter
 }
@@ -91,8 +93,8 @@ const (
 	DownResultStopped        DownResult = "stopped"
 )
 
-func FetchStatus(ctx context.Context, client *http.Client, daemonURL string) (StatusPayload, StatusClass) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, daemonURL+"/_swobu/status", nil)
+func FetchStatus(ctx context.Context, client *http.Client, addr string) (StatusPayload, StatusClass) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, platformconfig.BaseURL(addr)+"/_swobu/status", nil)
 	if err != nil {
 		return StatusPayload{State: string(StatusClassDown)}, StatusClassDown
 	}
@@ -126,9 +128,9 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Second}
 	}
-	daemonURL := in.DaemonURL
-	if daemonURL == "" {
-		return StatusPayload{}, errors.New("daemon URL is required")
+	addr := in.Addr
+	if addr == "" {
+		return StatusPayload{}, errors.New("daemon address is required")
 	}
 	report := in.Report
 	if report == nil {
@@ -136,29 +138,18 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	}
 	report.Report(StartupEvent{Kind: StartupEventSplash})
 
-	payload, class := FetchStatus(ctx, client, daemonURL)
+	payload, class := FetchStatus(ctx, client, addr)
 	if class != StatusClassDown {
 		report.Report(StartupEvent{Kind: StartupEventDaemonReady, State: payload.State})
 		return payload, nil
 	}
-	report.Report(StartupEvent{Kind: StartupEventDaemonNotReachable, DaemonURL: daemonURL})
+	report.Report(StartupEvent{Kind: StartupEventDaemonNotReachable, Addr: addr})
 
-	resolveConfig := in.ResolveDefaultConfig
+	resolveConfig := in.ResolveConfigPath
 	if resolveConfig == nil {
 		return StatusPayload{}, errors.New("resolve daemon config function is required")
 	}
-	configPath, err := resolveConfig()
-	if err != nil {
-		report.Report(StartupEvent{
-			Kind: StartupEventStartupFailed,
-			Text: fmt.Sprintf("resolve daemon config: %v", err),
-			NextAction: []string{
-				"check local config path and permissions",
-				"run `swobu status`",
-			},
-		})
-		return StatusPayload{}, fmt.Errorf("resolve daemon config: %w", err)
-	}
+	configPath := resolveConfig()
 
 	spawn := in.SpawnForegroundDaemon
 	if spawn == nil {
@@ -184,7 +175,7 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	}
 	readinessCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	status, err := waitForDaemonReadiness(readinessCtx, client, daemonURL)
+	status, err := waitForDaemonReadiness(readinessCtx, client, addr)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			report.Report(StartupEvent{
@@ -216,25 +207,25 @@ func Down(ctx context.Context, in DownInput) (DownResult, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Second}
 	}
-	daemonURL := in.DaemonURL
-	if daemonURL == "" {
-		return "", errors.New("daemon URL is required")
+	addr := in.Addr
+	if addr == "" {
+		return "", errors.New("daemon address is required")
 	}
 	timeout := in.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	if _, class := FetchStatus(ctx, client, daemonURL); class == StatusClassDown {
+	if _, class := FetchStatus(ctx, client, addr); class == StatusClassDown {
 		return DownResultAlreadyStopped, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, daemonURL+"/_swobu/down", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, platformconfig.BaseURL(addr)+"/_swobu/down", nil)
 	if err != nil {
 		return "", err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		if _, class := FetchStatus(ctx, client, daemonURL); class == StatusClassDown {
+		if _, class := FetchStatus(ctx, client, addr); class == StatusClassDown {
 			return DownResultAlreadyStopped, nil
 		}
 		return "", err
@@ -249,7 +240,7 @@ func Down(ctx context.Context, in DownInput) (DownResult, error) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if _, class := FetchStatus(waitCtx, client, daemonURL); class == StatusClassDown {
+		if _, class := FetchStatus(waitCtx, client, addr); class == StatusClassDown {
 			return DownResultStopped, nil
 		}
 		select {
@@ -265,33 +256,33 @@ func Restart(ctx context.Context, in RestartInput) error {
 	if client == nil {
 		client = &http.Client{Timeout: 2 * time.Second}
 	}
-	daemonURL := in.DaemonURL
-	if daemonURL == "" {
-		return errors.New("daemon URL is required")
+	addr := in.Addr
+	if addr == "" {
+		return errors.New("daemon address is required")
 	}
 	if _, err := Down(ctx, DownInput{
-		DaemonURL: daemonURL,
-		Client:    client,
-		Timeout:   5 * time.Second,
+		Addr:    addr,
+		Client:  client,
+		Timeout: 5 * time.Second,
 	}); err != nil {
 		return err
 	}
 	_, err := AttachOrStart(ctx, AttachOrStartInput{
-		DaemonURL:             daemonURL,
+		Addr:                  addr,
 		Client:                client,
 		ReadinessTimeout:      in.ReadinessTimeout,
-		ResolveDefaultConfig:  in.ResolveDefaultConfig,
+		ResolveConfigPath:     in.ResolveConfigPath,
 		SpawnForegroundDaemon: in.SpawnForegroundDaemon,
 		Report:                in.Report,
 	})
 	return err
 }
 
-func waitForDaemonReadiness(ctx context.Context, client *http.Client, daemonURL string) (StatusPayload, error) {
+func waitForDaemonReadiness(ctx context.Context, client *http.Client, addr string) (StatusPayload, error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		payload, class := FetchStatus(ctx, client, daemonURL)
+		payload, class := FetchStatus(ctx, client, addr)
 		if class != StatusClassDown && isReadinessState(payload.State) {
 			return payload, nil
 		}

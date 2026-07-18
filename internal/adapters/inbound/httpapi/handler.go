@@ -15,10 +15,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
+	"github.com/swobuforge/swobu/internal/routing"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -55,7 +55,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	endpoint, err := endpointintent.ParseEndpointName(endpointName)
+	workspace, err := routing.ParseWorkspaceSlug(endpointName)
 	if err != nil {
 		writeSwobuError(writer, canonical.BadEndpoint("endpoint name is invalid"))
 		return
@@ -75,7 +75,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if normalizedPath == canonical.NormalizedPathModels {
-		h.serveModelsEndpoint(writer, r, endpoint)
+		h.serveModelsEndpoint(writer, r, workspace)
 		return
 	}
 	if err := canonical.ValidateClientTransport(r.Method, normalizedPath, false); err != nil {
@@ -101,7 +101,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writer.timing = &timing
 
 	requestID := requestIDFromRequest(r)
-	logClientRequestShape(requestID, endpoint.String(), family, normalizedPath)
+	logClientRequestShape(requestID, workspace.String(), family, normalizedPath)
 
 	if h.requestIngress == nil {
 		writeSwobuError(writer, canonical.InternalError("exchange ingress is not configured"))
@@ -109,7 +109,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
-		EndpointName:    endpoint,
+		Workspace:       workspace,
 		Request:         newTransportRequest(r.Method, operationPath, r.Header, requestBody),
 		ClientHandler:   clientHandler,
 		ClientFamily:    family,
@@ -118,13 +118,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExchangeID:      requestID,
 	})
 	if err != nil {
-		logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, err)
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, err)
 		writeExchangeError(writer, err)
-		finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, err)
+		finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, err)
 		return
 	}
 	writeModelResolutionHeaders(writer)
-	logRequestOutcome(requestID, endpoint.String(), family, normalizedPath, nil)
+	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, nil)
 
 	if err := writeSuccessResponse(r.Context(), writer, requestID, family, out); err != nil {
 		if writer.committed {
@@ -132,22 +132,22 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"component", "httpapi",
 				"event", "response_write_after_commit_failed",
 				"request_id", requestID,
-				"endpoint", endpoint.String(),
+				"workspace", workspace.String(),
 				"ingress_family", string(family),
 				"normalized_op", string(normalizedPath),
 				"error", err,
 			)
-			finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, err)
+			finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, err)
 			return
 		}
 		writeExchangeError(writer, err)
-		finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, err)
+		finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, err)
 		return
 	}
-	finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), family, normalizedPath, out, &timing, nil)
+	finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, nil)
 }
 
-func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, endpoint endpointintent.EndpointName) {
+func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, workspace routing.WorkspaceSlug) {
 	if r.Method != http.MethodGet {
 		writeSwobuError(w, canonical.UnsupportedOperation("models endpoint only supports GET"))
 		return
@@ -161,7 +161,7 @@ func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, end
 		writeSwobuError(w, canonical.InternalError("models query is not configured"))
 		return
 	}
-	out, err := m.ListModels(r.Context(), exchange.ListModelsInput{EndpointName: endpoint})
+	out, err := m.ListModels(r.Context(), exchange.ListModelsInput{Workspace: workspace})
 	if err != nil {
 		writeExchangeError(w, err)
 		return

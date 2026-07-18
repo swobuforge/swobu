@@ -27,7 +27,7 @@ templ (s *SectionView) Render() {
 									@RouteNameRowComponent(s, route)
 								</div>
 								// --- Default toggle -------------------------------------
-								if len(route.Targets) == 0 {
+								if route.TargetCount() == 0 {
 									@SectionInertRow("default", "no", "target first")
 								} else {
 									<div key={s.routeDefaultRowKey(route)} class="w-full">
@@ -35,10 +35,10 @@ templ (s *SectionView) Render() {
 									</div>
 								}
 								// --- Target rows by step --------------------------------
-								for stepIdx, stepTargets := range groupedTargets(route) {
-									@StepHeaderRow(stepHeaderText(stepIdx+1, len(stepTargets) > 1))
+								for tierIdx, tierTargets := range groupedTargets(route) {
+									@StepHeaderRow(tierHeaderText(tierIdx, len(tierTargets) > 1))
 									<div class="pl-3 w-full">
-										for _, target := range stepTargets {
+										for _, target := range tierTargets {
 												if s.State.OpenTarget.Get() == target.ID {
 													config := s.targetEditConfig(route, target)
 													<div key={s.targetConfigKey(route, target.ID)} class="w-full">

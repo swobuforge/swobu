@@ -8,7 +8,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -19,26 +18,22 @@ import (
 
 // TargetDraftFromReadModel un-flattens the system wire/read shape into the typed
 // draft the cockpit edits and persists. It is the read-boundary reverse of
-// adapters.targetFromProviderConfig (route_projection.go): that flattens a
-// ProviderConfig into TargetReadModel; this rebuilds the typed TargetDraft a
-// cockpit edit session starts from.
+// the workspace command projection into the local draft an edit session starts
+// from.
 //
 // Provider-specific options return to their typed arm: AuthHeader is the
 // OpenAI-compatible arm, AuthMode/Region/ProfileName are the Bedrock arm.
 // Azure/ChatGPT/default carry everything on the spine and contribute no arm.
-func TargetDraftFromReadModel(routeID readmodel.RouteID, t readmodel.TargetReadModel) endpointintent.TargetDraft {
+func TargetDraftFromReadModel(routeID readmodel.RouteID, t readmodel.TargetReadModel) readmodel.TargetDraft {
 	spec := strings.TrimSpace(t.Provider) // swobu:io-string source=boundary
 	endpointSpec, _ := profile.EndpointSpecForProvider(spec)
-	endpointKind, _ := endpointintent.ProviderEndpointKindFromProfile(endpointSpec.Kind)
-	d := endpointintent.TargetDraft{
+	d := readmodel.TargetDraft{
 		ProviderSpec:     spec,
-		Endpoint:         endpointintent.ProviderEndpointDraft{Kind: endpointKind, Value: strings.TrimSpace(t.BaseURL)},
+		Endpoint:         readmodel.ProviderEndpointDraft{Kind: endpointSpec.Kind, Value: strings.TrimSpace(t.BaseURL)},
 		CredentialRef:    strings.TrimSpace(t.CredentialRef),
 		ProviderProtocol: strings.TrimSpace(t.ProviderProtocol),
 		ModelID:          strings.TrimSpace(t.Model),
 		RouteModelID:     strings.TrimSpace(string(routeID)),
-		Rank:             t.Rank,
-		Weight:           t.Weight,
 	}
 	switch profile.ProviderID(spec) {
 	case profile.ProviderSpecOpenAICompatible:
@@ -55,17 +50,15 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, t readmodel.TargetReadM
 // applying only the spine fields still held as UI state (endpoint value,
 // selected model, placement). Provider arms are opaque to this projection —
 // each provider writes its own arm directly, so it rides through unchanged.
-func (w *TargetConfig) currentTargetDraft(modelID string, providerProtocol string, placement readmodel.PlacementOptionReadModel) endpointintent.TargetDraft {
+func (w *TargetConfig) currentTargetDraft(modelID string, providerProtocol string, placement readmodel.PlacementOptionReadModel) readmodel.TargetDraft {
 	draft := w.Draft.Get() // provider arms ride through, owned by their providers
 	endpointSpec, _ := profile.EndpointSpecForProvider(draft.ProviderSpec)
-	endpointKind, _ := endpointintent.ProviderEndpointKindFromProfile(endpointSpec.Kind)
-	draft.Endpoint.Kind = endpointKind
+	draft.Endpoint.Kind = endpointSpec.Kind
 	draft.Endpoint.Value = strings.TrimSpace(w.BaseURL.Get()) // swobu:io-string source=boundary
 	draft.ProviderProtocol = strings.TrimSpace(providerProtocol)
 	draft.ModelID = strings.TrimSpace(modelID)
 	draft.RouteModelID = strings.TrimSpace(string(w.Route.ID)) // swobu:io-string source=boundary
-	draft.Rank = placement.Rank
-	draft.Weight = placement.Weight
+	_ = placement
 	return draft
 }
 
@@ -130,7 +123,7 @@ func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploym
 // decision required before target creation.
 func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 	w.SelectedModel.Set(model)
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft { d.ProviderProtocol = ""; return d })
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
 	options := resolveProtocolOptions(w.Draft.Get().ProviderSpec, model)
 	w.Error.Set("")
 	switch len(options) {
@@ -138,7 +131,7 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 		w.Error.Set("no supported protocol for selected model")
 		w.Phase.Set(PhaseReadyToCreate)
 	case 1:
-		w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft {
+		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 			d.ProviderProtocol = options[0].ID
 			return d
 		})
@@ -177,7 +170,7 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 	if baseURL == "" {
 		baseURL = profile.DefaultExecuteBaseURL(w.Draft.Get().ProviderSpec)
 	}
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft {
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.CredentialRef = credentialRef
 		return d
 	})
@@ -244,7 +237,7 @@ func (w *TargetConfig) ChangeProvider() {
 		return
 	}
 	w.resetFlowState()
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft { d.ProviderSpec = ""; return d })
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderSpec = ""; return d })
 	w.Phase.Set(PhaseConfiguring)
 }
 
@@ -288,7 +281,7 @@ func (w *TargetConfig) RetryCatalog() {
 	w.ContinueSetup()
 }
 
-func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries, draft endpointintent.TargetDraft) readmodel.ModelCatalogReadModel {
+func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries, draft readmodel.TargetDraft) readmodel.ModelCatalogReadModel {
 	provider := strings.TrimSpace(draft.ProviderSpec)
 	if queries != nil {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -369,8 +362,16 @@ func (w *TargetConfig) startInteractiveAuth() {
 	}
 	session, err := w.TargetAuthCommands.StartAuthSession(ctx, ports.StartAuthSessionRequest{
 		ProviderSpec: w.Draft.Get().ProviderSpec,
-		EndpointRef:  authSubjectLocator(w),
-		AuthMode:     authModeDaemonName(mode),
+		Workspace:    string(w.WorkspaceID),
+		Route:        string(w.Route.ID),
+		TargetID:     string(w.Target.ID),
+		DraftSubject: func() string {
+			if w.Target.ID == "" {
+				return authSubjectLocator(w)
+			}
+			return ""
+		}(),
+		AuthMode: authModeDaemonName(mode),
 	})
 	if err != nil {
 		w.Error.Set(err.Error())
@@ -473,6 +474,7 @@ func (w *TargetConfig) Create(ctx context.Context) {
 		RouteID:     w.Route.ID,
 		TargetID:    w.Target.ID,
 		Draft:       w.currentTargetDraft(model.ModelName, protocol, placement),
+		Placement:   placement,
 	}
 	saved, err := w.SaveTarget(ctx, req)
 	if err != nil {
@@ -511,12 +513,14 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 		RouteID:     w.Route.ID,
 		TargetID:    w.Target.ID,
 		Draft:       w.currentTargetDraft(modelID, protocol, w.Placement.Get()),
+		Placement:   w.Placement.Get(),
 	})
 	if err != nil {
 		w.Error.Set(err.Error())
 		return
 	}
-	w.Target = saved
+	w.Target = saved.Target
+	w.Route = saved.Route
 	w.Error.Set("")
 	if w.OnSaved != nil {
 		w.OnSaved(saved)

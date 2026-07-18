@@ -28,17 +28,17 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"healthy","endpoint_count":1}`)
+		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
 	}))
 	defer srv.Close()
 
 	var stdout bytes.Buffer
 	status, err := AttachOrStart(context.Background(), AttachOrStartInput{
-		DaemonURL: srv.URL,
-		Client:    &http.Client{Timeout: 200 * time.Millisecond},
-		Report:    startupReporterForTests(&stdout),
-		ResolveDefaultConfig: func() (string, error) {
-			return "/tmp/swobu-test-config.yaml", nil
+		Addr:   strings.TrimPrefix(srv.URL, "http://"),
+		Client: &http.Client{Timeout: 200 * time.Millisecond},
+		Report: startupReporterForTests(&stdout),
+		ResolveConfigPath: func() string {
+			return "/tmp/swobu-test-config.yaml"
 		},
 		SpawnForegroundDaemon: func(context.Context, string) error {
 			return nil
@@ -83,15 +83,15 @@ func TestAttachOrStart_AcceptsReachableDegradedState(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"degraded","endpoint_count":1}`)
+		_, _ = io.WriteString(w, `{"state":"degraded","workspace_count":1}`)
 	}))
 	defer srv.Close()
 
 	calledSpawn := false
 	status, err := AttachOrStart(context.Background(), AttachOrStartInput{
-		DaemonURL: srv.URL,
-		Client:    &http.Client{Timeout: 500 * time.Millisecond},
-		Report:    startupReporterForTests(io.Discard),
+		Addr:   strings.TrimPrefix(srv.URL, "http://"),
+		Client: &http.Client{Timeout: 500 * time.Millisecond},
+		Report: startupReporterForTests(io.Discard),
 		SpawnForegroundDaemon: func(context.Context, string) error {
 			calledSpawn = true
 			return nil
@@ -112,9 +112,9 @@ func TestDown_AlreadyStoppedReturnsResult(t *testing.T) {
 	t.Parallel()
 
 	result, err := Down(context.Background(), DownInput{
-		DaemonURL: "http://127.0.0.1:1",
-		Client:    &http.Client{Timeout: 50 * time.Millisecond},
-		Timeout:   100 * time.Millisecond,
+		Addr:    "127.0.0.1:1",
+		Client:  &http.Client{Timeout: 50 * time.Millisecond},
+		Timeout: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("Down returned error: %v", err)
@@ -134,7 +134,7 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 		case "/_swobu/status":
 			if downRequested.Load() && started.Load() {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"state":"healthy","endpoint_count":1}`)
+				_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
 				return
 			}
 			if downRequested.Load() {
@@ -143,7 +143,7 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","endpoint_count":1}`)
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
 		case "/_swobu/down":
 			downRequested.Store(true)
 			w.WriteHeader(http.StatusOK)
@@ -154,10 +154,10 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	err := Restart(context.Background(), RestartInput{
-		DaemonURL: srv.URL,
-		Client:    &http.Client{Timeout: 500 * time.Millisecond},
-		ResolveDefaultConfig: func() (string, error) {
-			return "/tmp/swobu-test-config.json", nil
+		Addr:   strings.TrimPrefix(srv.URL, "http://"),
+		Client: &http.Client{Timeout: 500 * time.Millisecond},
+		ResolveConfigPath: func() string {
+			return "/tmp/swobu-test-config.json"
 		},
 		SpawnForegroundDaemon: func(context.Context, string) error {
 			if !downRequested.Load() {
@@ -186,7 +186,7 @@ func TestRestart_PropagatesDownFailure(t *testing.T) {
 		switch r.URL.Path {
 		case "/_swobu/status":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","endpoint_count":1}`)
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
 		case "/_swobu/down":
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
@@ -196,8 +196,8 @@ func TestRestart_PropagatesDownFailure(t *testing.T) {
 	defer srv.Close()
 
 	err := Restart(context.Background(), RestartInput{
-		DaemonURL: srv.URL,
-		Client:    &http.Client{Timeout: 500 * time.Millisecond},
+		Addr:   strings.TrimPrefix(srv.URL, "http://"),
+		Client: &http.Client{Timeout: 500 * time.Millisecond},
 	})
 	if err == nil {
 		t.Fatal("Restart returned nil error, want down failure")
@@ -217,7 +217,7 @@ func TestRestart_PropagatesAttachStartFailureAfterDown(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","endpoint_count":1}`)
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
 		case "/_swobu/down":
 			downRequested.Store(true)
 			w.WriteHeader(http.StatusOK)
@@ -228,10 +228,10 @@ func TestRestart_PropagatesAttachStartFailureAfterDown(t *testing.T) {
 	defer srv.Close()
 
 	err := Restart(context.Background(), RestartInput{
-		DaemonURL: srv.URL,
-		Client:    &http.Client{Timeout: 500 * time.Millisecond},
-		ResolveDefaultConfig: func() (string, error) {
-			return "/tmp/swobu-test-config.json", nil
+		Addr:   strings.TrimPrefix(srv.URL, "http://"),
+		Client: &http.Client{Timeout: 500 * time.Millisecond},
+		ResolveConfigPath: func() string {
+			return "/tmp/swobu-test-config.json"
 		},
 		SpawnForegroundDaemon: func(context.Context, string) error {
 			return errors.New("spawn failed")
@@ -248,10 +248,13 @@ func TestAttachOrStart_StartupFailureRendersNextActions(t *testing.T) {
 
 	var stdout bytes.Buffer
 	_, err := AttachOrStart(context.Background(), AttachOrStartInput{
-		DaemonURL:            "http://127.0.0.1:1",
-		Client:               &http.Client{Timeout: 50 * time.Millisecond},
-		Report:               startupReporterForTests(&stdout),
-		ResolveDefaultConfig: func() (string, error) { return "", errors.New("bad config") },
+		Addr:              "127.0.0.1:1",
+		Client:            &http.Client{Timeout: 50 * time.Millisecond},
+		Report:            startupReporterForTests(&stdout),
+		ResolveConfigPath: func() string { return "/tmp/swobu-test-config.yaml" },
+		SpawnForegroundDaemon: func(context.Context, string) error {
+			return errors.New("bad config")
+		},
 	})
 	if err == nil {
 		t.Fatal("AttachOrStart returned nil error, want failure")
@@ -279,11 +282,11 @@ func TestAttachOrStart_StartupTimeoutRendersNextActions(t *testing.T) {
 
 	var stdout bytes.Buffer
 	_, err := AttachOrStart(context.Background(), AttachOrStartInput{
-		DaemonURL: srv.URL,
-		Client:    &http.Client{Timeout: 100 * time.Millisecond},
-		Report:    startupReporterForTests(&stdout),
-		ResolveDefaultConfig: func() (string, error) {
-			return "/tmp/swobu-test-config.yaml", nil
+		Addr:   strings.TrimPrefix(srv.URL, "http://"),
+		Client: &http.Client{Timeout: 100 * time.Millisecond},
+		Report: startupReporterForTests(&stdout),
+		ResolveConfigPath: func() string {
+			return "/tmp/swobu-test-config.yaml"
 		},
 		SpawnForegroundDaemon: func(context.Context, string) error {
 			return nil
@@ -308,7 +311,7 @@ func startupReporterForTests(out io.Writer) StartupReporter {
 		case StartupEventSplash:
 			_, _ = io.WriteString(out, " ___ ___ ___   __ _____ ___\n")
 		case StartupEventDaemonNotReachable:
-			_, _ = io.WriteString(out, fmt.Sprintf("checking: daemon not reachable at %s\n", ev.DaemonURL))
+			_, _ = io.WriteString(out, fmt.Sprintf("checking: daemon not reachable at %s\n", ev.Addr))
 		case StartupEventStartingDaemon:
 			_, _ = io.WriteString(out, "starting: starting daemon\n")
 		case StartupEventWaitingReadiness:

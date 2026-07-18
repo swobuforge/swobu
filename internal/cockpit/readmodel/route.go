@@ -19,7 +19,7 @@ type RouteReadModel struct {
 	State       RouteState
 	Default     bool
 	Enabled     bool
-	Targets     []TargetReadModel
+	Tiers       []TierReadModel
 	Diagnostics []RouteDiagnosticReadModel
 	ActivityID  ActivityID
 }
@@ -45,8 +45,35 @@ type TargetReadModel struct {
 	AuthMode         string
 	AuthHeader       string
 	CredentialRef    string
-	Rank             int
-	Weight           int
+}
+
+// TierReadModel is one structural fallback tier. Position, not a persisted
+// ordinal, determines whether it is primary or fallback.
+type TierReadModel struct{ Targets []TargetReadModel }
+
+func (r RouteReadModel) TargetCount() int {
+	total := 0
+	for _, tier := range r.Tiers {
+		total += len(tier.Targets)
+	}
+	return total
+}
+func (r RouteReadModel) AllTargets() []TargetReadModel {
+	var out []TargetReadModel
+	for _, tier := range r.Tiers {
+		out = append(out, tier.Targets...)
+	}
+	return out
+}
+func (r RouteReadModel) TargetTier(id TargetID) (int, bool) {
+	for i, tier := range r.Tiers {
+		for _, target := range tier.Targets {
+			if target.ID == id {
+				return i, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // RouteDiagnosticReadModel is a typed exceptional-state detail for a route.
@@ -70,25 +97,15 @@ const (
 
 // IsClientVisible reports the design-system rule for routes visible to clients.
 func (r RouteReadModel) IsClientVisible() bool {
-	return r.Enabled && len(r.Targets) > 0
+	return r.Enabled && r.TargetCount() > 0
 }
 
-// StepCount returns the number of distinct ranks (steps) in the route.
-// Targets with the same Rank are part of the same step.
-func (r RouteReadModel) StepCount() int {
-	seen := make(map[int]struct{})
-	for _, t := range r.Targets {
-		seen[t.Rank] = struct{}{}
-	}
-	return len(seen)
-}
+func (r RouteReadModel) TierCount() int { return len(r.Tiers) }
 
 // HasBalancedStep reports whether any step has more than one target.
-func (r RouteReadModel) HasBalancedStep() bool {
-	counts := make(map[int]int)
-	for _, t := range r.Targets {
-		counts[t.Rank]++
-		if counts[t.Rank] > 1 {
+func (r RouteReadModel) HasBalancedTier() bool {
+	for _, tier := range r.Tiers {
+		if len(tier.Targets) > 1 {
 			return true
 		}
 	}
@@ -104,21 +121,21 @@ func (r RouteReadModel) HasBalancedStep() bool {
 //	steps > 1 && one target/step     → "N fallback steps"
 //	steps > 1                         → "N steps · M targets"
 func (r RouteReadModel) RowValue() string {
-	targets := len(r.Targets)
-	steps := r.StepCount()
+	targets := r.TargetCount()
+	tiers := r.TierCount()
 
 	var base string
 	switch {
 	case targets == 0:
 		base = "incomplete · no targets"
-	case steps == 1 && targets == 1:
+	case tiers == 1 && targets == 1:
 		base = "1 target"
-	case steps == 1 && targets > 1:
+	case tiers == 1 && targets > 1:
 		base = fmt.Sprintf("%d balanced targets", targets)
-	case steps > 1 && !r.HasBalancedStep():
-		base = fmt.Sprintf("%d fallback steps", steps)
+	case tiers > 1 && !r.HasBalancedTier():
+		base = fmt.Sprintf("%d fallback tiers", tiers-1)
 	default:
-		base = fmt.Sprintf("%d steps · %d targets", steps, targets)
+		base = fmt.Sprintf("%d tiers · %d targets", tiers, targets)
 	}
 
 	switch r.State {

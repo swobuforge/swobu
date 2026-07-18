@@ -6,6 +6,9 @@
 // semantics (env/file/interactive/AWS chain) used by runtime and proof lanes.
 // Route capability facts for request features now live in internal/compat so
 // provider dispatch can consult one shared vocabulary.
+// Routing construction boundaries obtain provider/protocol, Azure endpoint,
+// and Bedrock region predicates through RoutingCapabilities; adapters must not
+// reconstruct that catalog mapping independently.
 //
 // Static manifest truth still lives here until the provider namespace registry
 // fully rehomes those declarations.

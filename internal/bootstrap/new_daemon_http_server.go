@@ -2,9 +2,9 @@ package bootstrap
 
 import "net/http"
 
-func newDaemonHTTPServer(bindAddr string, handler http.Handler) *http.Server {
+func newDaemonHTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
-		Addr:              bindAddr,
+		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: daemonReadHeaderTimeout,
 		ReadTimeout:       daemonReadTimeout,

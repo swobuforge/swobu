@@ -7,7 +7,6 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -24,19 +23,21 @@ func AzureProviderForm(w *TargetConfig) tui.Component {
 func (f *azureProviderForm) BindApp(app *tui.App) { f.endpointDraft.BindApp(app) }
 
 func (f *azureProviderForm) UpdateProps(fresh tui.Component) {
-	if next, ok := fresh.(*azureProviderForm); ok { f.target = next.target }
+	if next, ok := fresh.(*azureProviderForm); ok {
+		f.target = next.target
+	}
 }
 
 // azureReadiness requires an explicit project endpoint, then a credential.
 func azureReadiness(w *TargetConfig, base providerSetupState) providerSetupState {
 	setup := base
 	endpointValue := strings.TrimSpace(w.BaseURL.Get()) // swobu:io-string source=boundary
-	_, endpointErr := endpointintent.NormalizeAzureProjectEndpoint(endpointValue)
+	_, endpointErr := profile.NormalizeAzureProjectEndpoint(endpointValue)
 	if endpointErr != nil && w.mode == targetConfigModeEdit {
 		// Older persisted Azure targets contain the runtime resource root rather
 		// than a Foundry project locator. It remains a valid edit subject even
 		// though new targets require a project locator before catalog probing.
-		_, endpointErr = endpointintent.NormalizeAzureResourceLocator(endpointValue)
+		_, endpointErr = profile.NormalizeAzureResourceLocator(endpointValue)
 	}
 	setup.RequiresEndpoint = endpointValue == "" || endpointErr != nil
 	if setup.RequiresEndpoint {
@@ -94,7 +95,7 @@ func AzureProjectEndpointDraftInput(w *TargetConfig, value *tui.State[string], a
 	row.EditAction = "save ↵"
 	row.AutoFocus = autoFocus
 	row.OnSubmit = func(raw string) {
-		projectEndpoint, err := endpointintent.NormalizeAzureProjectEndpoint(strings.TrimSpace(raw))
+		projectEndpoint, err := profile.NormalizeAzureProjectEndpoint(strings.TrimSpace(raw))
 		if err != nil {
 			w.Error.Set(azureProjectEndpointError(err))
 			value.Set(raw)
@@ -114,7 +115,7 @@ func AzureProjectEndpointDraftInput(w *TargetConfig, value *tui.State[string], a
 }
 
 func azureProjectEndpointDisplay(raw string) string {
-	projectEndpoint, err := endpointintent.NormalizeAzureProjectEndpoint(raw)
+	projectEndpoint, err := profile.NormalizeAzureProjectEndpoint(raw)
 	if err != nil {
 		return strings.TrimSpace(raw) // swobu:io-string source=boundary
 	}

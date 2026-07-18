@@ -62,14 +62,17 @@ func (h ChatGPTLoginHandler) serveGenericStart(w http.ResponseWriter, req *http.
 	}
 	var body struct {
 		ProviderSpec string `json:"provider_spec"`
-		EndpointRef  string `json:"endpoint_ref"`
+		Workspace    string `json:"workspace"`
+		Route        string `json:"route"`
+		TargetID     string `json:"target_id"`
+		DraftSubject string `json:"draft_subject"`
 		AuthMode     string `json:"auth_mode"`
 	}
 	_ = json.NewDecoder(req.Body).Decode(&body)
 	slog.Debug("auth session start HTTP request",
 		"component", "httpapi",
 		"provider_spec", strings.TrimSpace(strings.ToLower(body.ProviderSpec)), // swobu:io-string source=boundary
-		"has_endpoint_ref", strings.TrimSpace(body.EndpointRef) != "", // swobu:io-string source=boundary
+		"has_target", strings.TrimSpace(body.TargetID) != "", // swobu:io-string source=boundary
 		"auth_mode", strings.TrimSpace(body.AuthMode), // swobu:io-string source=boundary
 	)
 	if strings.TrimSpace(body.AuthMode) == "" { // swobu:io-string source=boundary
@@ -78,8 +81,8 @@ func (h ChatGPTLoginHandler) serveGenericStart(w http.ResponseWriter, req *http.
 	}
 	out, err := h.authStart(req.Context(), authplane.StartInput{
 		ProviderSpec: strings.TrimSpace(body.ProviderSpec), // swobu:io-string source=boundary
-		EndpointRef:  strings.TrimSpace(body.EndpointRef),  // swobu:io-string source=boundary
-		AuthMode:     strings.TrimSpace(body.AuthMode),     // swobu:io-string source=boundary
+		Workspace:    strings.TrimSpace(body.Workspace), Route: strings.TrimSpace(body.Route), TargetID: strings.TrimSpace(body.TargetID), DraftSubject: strings.TrimSpace(body.DraftSubject),
+		AuthMode: strings.TrimSpace(body.AuthMode), // swobu:io-string source=boundary
 	})
 	if err != nil {
 		slog.Warn("auth session start HTTP failed",

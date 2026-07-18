@@ -1114,7 +1114,7 @@ func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]excha
 	out := make([]exchange.RequestInput, 0, copies)
 	for range copies {
 		out = append(out, exchange.RequestInput{
-			EndpointName:    in.EndpointName,
+			Workspace:       in.Workspace,
 			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, raw),
 			ClientHandler:   in.ClientHandler,
 			ClientFamily:    in.ClientFamily,

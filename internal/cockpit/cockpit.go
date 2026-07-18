@@ -20,7 +20,7 @@ const (
 	cockpitSnapshotNewline = "\n"
 )
 
-func Run(ctx context.Context, daemonURL string, stdin io.Reader, stdout, stderr io.Writer) error {
+func Run(ctx context.Context, addr string, stdin io.Reader, stdout, stderr io.Writer) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -32,7 +32,7 @@ func Run(ctx context.Context, daemonURL string, stdin io.Reader, stdout, stderr 
 	if stdout == nil {
 		stdout = os.Stdout
 	}
-	adapter := adapters.NewLiveOperatorAdapter(nil, daemonURL)
+	adapter := adapters.NewLiveOperatorAdapter(nil, addr)
 	model, err := adapter.LoadCockpit(ctx)
 	if err != nil {
 		return err

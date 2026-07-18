@@ -14,11 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 )
 
-// Client talks to the daemon's operator control plane at /_swobu/endpoints.
+// Client talks to the daemon's semantic operator control plane.
 type Client struct {
 	http    *http.Client
 	baseURL string
@@ -28,108 +26,6 @@ type Client struct {
 // (e.g. "http://127.0.0.1:9876").
 func New(httpClient *http.Client, baseURL string) *Client {
 	return &Client{http: httpClient, baseURL: strings.TrimRight(baseURL, "/")}
-}
-
-// List returns all endpoint intents from the daemon.
-func (c *Client) List(ctx context.Context) ([]endpointintent.Endpoint, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/endpoints", nil)
-	if err != nil {
-		return nil, fmt.Errorf("operator client: list request could not be built")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("operator client: endpoint list is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errorFromResponse(resp, "operator client: endpoint list failed")
-	}
-	var doc endpointListDocument
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return nil, fmt.Errorf("operator client: endpoint list could not be decoded")
-	}
-	result := make([]endpointintent.Endpoint, 0, len(doc.Endpoints))
-	for _, ed := range doc.Endpoints {
-		ep, err := ed.toDomain()
-		if err != nil {
-			return nil, fmt.Errorf("operator client: endpoint decode failed: %w", err)
-		}
-		result = append(result, ep)
-	}
-	return result, nil
-}
-
-// Get returns a single endpoint intent by name.
-func (c *Client) Get(ctx context.Context, name string) (endpointintent.Endpoint, error) {
-	name = strings.TrimSpace(name) // swobu:io-string source=boundary
-	if name == "" {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: name is required")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/endpoints/"+name, nil)
-	if err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: get request could not be built")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: endpoint get is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return endpointintent.Endpoint{}, errorFromResponse(resp, "operator client: endpoint get failed")
-	}
-	var ed endpointDocument
-	if err := json.NewDecoder(resp.Body).Decode(&ed); err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: endpoint could not be decoded")
-	}
-	return ed.toDomain()
-}
-
-// Put upserts an endpoint intent. The daemon persists the change.
-func (c *Client) Put(ctx context.Context, ep endpointintent.Endpoint) (endpointintent.Endpoint, error) {
-	ed := endpointDocumentFromDomain(ep)
-	raw, err := json.Marshal(ed)
-	if err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: endpoint save payload could not be encoded")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/_swobu/endpoints/"+ep.Name().String(), bytes.NewReader(raw))
-	if err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: endpoint save request could not be built")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: endpoint save is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return endpointintent.Endpoint{}, errorFromResponse(resp, "operator client: endpoint save failed")
-	}
-	var saved endpointDocument
-	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
-		return endpointintent.Endpoint{}, fmt.Errorf("operator client: endpoint save response could not be decoded")
-	}
-	return saved.toDomain()
-}
-
-// Delete removes an endpoint intent by name.
-func (c *Client) Delete(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name) // swobu:io-string source=boundary
-	if name == "" {
-		return fmt.Errorf("operator client: name is required")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/_swobu/endpoints/"+name, nil)
-	if err != nil {
-		return fmt.Errorf("operator client: delete request could not be built")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("operator client: endpoint delete is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		return errorFromResponse(resp, "operator client: endpoint delete failed")
-	}
-	return nil
 }
 
 // CheckClientAccess sends a minimal client-access probe through one endpoint.
@@ -218,11 +114,11 @@ func (c *Client) DaemonVersion(ctx context.Context) (string, error) {
 	return strings.TrimSpace(payload.SwobuVersion), nil
 }
 
-func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, endpointRef string, authMode string) (AuthSessionStartResult, error) {
+func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, workspace string, route string, targetID string, draftSubject string, authMode string) (AuthSessionStartResult, error) {
 	body, err := json.Marshal(map[string]string{
 		"provider_spec": strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
-		"endpoint_ref":  strings.TrimSpace(endpointRef),  // swobu:io-string source=boundary
-		"auth_mode":     strings.TrimSpace(authMode),     // swobu:io-string source=boundary
+		"workspace":     strings.TrimSpace(workspace), "route": strings.TrimSpace(route), "target_id": strings.TrimSpace(targetID), "draft_subject": strings.TrimSpace(draftSubject),
+		"auth_mode": strings.TrimSpace(authMode), // swobu:io-string source=boundary
 	})
 	if err != nil {
 		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session payload could not be encoded")

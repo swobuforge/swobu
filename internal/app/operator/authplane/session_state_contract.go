@@ -14,8 +14,18 @@ const (
 
 type StartInput struct {
 	ProviderSpec string
-	EndpointRef  string
+	Workspace    string
+	Route        string
+	TargetID     string
+	DraftSubject string
 	AuthMode     string
+}
+
+type CredentialSubject struct {
+	Workspace    string
+	Route        string
+	TargetID     string
+	DraftSubject string
 }
 
 type StartOutput struct {
@@ -54,5 +64,5 @@ type AuthMethodDriver interface {
 }
 
 type CredentialStore interface {
-	UpsertCredentialRef(ctx context.Context, providerSpec string, endpointRef string, credentialRef string) (string, error)
+	SetCredential(ctx context.Context, subject CredentialSubject, credentialRef string) (string, error)
 }

@@ -4,199 +4,139 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"sort"
 	"strings"
 
-	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
-	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
-// routesFromEndpoint projects daemon provider configs into Cockpit route rows.
-//
-// This is not a daemon route entity. A Cockpit route is the group of provider
-// configs that share the same client-visible model name; mutations against a
-// route rewrite or remove the configs in that projected group.
-func routesFromEndpoint(endpoint operatorclient.EndpointData) []readmodel.RouteReadModel {
-	groups := map[string][]operatorclient.ProviderConfigData{}
-	for _, target := range endpoint.ProviderConfigs {
-		modelName := projectedRouteModel(target)
-		if modelName == "" {
-			modelName = exchange.PublicModelIDSwobu
+func routesFromWorkspace(workspace workspaceapi.Workspace) []readmodel.RouteReadModel {
+	out := make([]readmodel.RouteReadModel, 0, len(workspace.Routes))
+	for _, route := range workspace.Routes {
+		out = append(out, routeFromWorkspaceRoute(workspace.DefaultRoute, route))
+	}
+	return out
+}
+func routeFromWorkspaceRoute(defaultRoute string, route workspaceapi.Route) readmodel.RouteReadModel {
+	out := readmodel.RouteReadModel{ID: readmodel.RouteID(route.Name), ModelName: route.Name, State: readmodel.RouteNormal, Default: route.Name == defaultRoute, Enabled: true}
+	for _, tier := range route.Tiers {
+		projected := readmodel.TierReadModel{}
+		for _, target := range tier.Targets {
+			projected.Targets = append(projected.Targets, targetFromWorkspaceTarget(target))
 		}
-		groups[modelName] = append(groups[modelName], target)
+		out.Tiers = append(out.Tiers, projected)
 	}
-	modelNames := make([]string, 0, len(groups))
-	for modelName := range groups {
-		modelNames = append(modelNames, modelName)
+	return out
+}
+func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadModel {
+	out := readmodel.TargetReadModel{ID: readmodel.TargetID(target.ID), Name: target.ID, Provider: target.Provider, Model: target.Model, ProviderProtocol: target.Protocol}
+	switch {
+	case target.Connection.OpenAI != nil:
+		out.CredentialRef = target.Connection.OpenAI.Credential
+	case target.Connection.Anthropic != nil:
+		out.CredentialRef = target.Connection.Anthropic.Credential
+	case target.Connection.OpenRouter != nil:
+		out.CredentialRef = target.Connection.OpenRouter.Credential
+	case target.Connection.ChatGPT != nil:
+		out.CredentialRef = target.Connection.ChatGPT.Credential
+	case target.Connection.Ollama != nil:
+		out.BaseURL = target.Connection.Ollama.BaseURL
+	case target.Connection.Azure != nil:
+		out.BaseURL = target.Connection.Azure.ProjectEndpoint
+		out.CredentialRef = target.Connection.Azure.Credential
+	case target.Connection.Bedrock != nil:
+		out.BaseURL = profile.BedrockMantleEndpointForRegion(target.Connection.Bedrock.Region)
+		if target.Connection.Bedrock.Auth.Profile != nil {
+			out.AuthMode = string(profile.AuthModeAWSProfile)
+			out.CredentialRef = "profile:" + *target.Connection.Bedrock.Auth.Profile + "@" + target.Connection.Bedrock.Region
+		} else if target.Connection.Bedrock.Auth.Environment != nil {
+			out.AuthMode = string(profile.AuthModeAWSEnvSession)
+		} else if target.Connection.Bedrock.Auth.BearerToken != nil {
+			out.AuthMode = string(profile.AuthModeEnv)
+			out.CredentialRef = *target.Connection.Bedrock.Auth.BearerToken
+		}
+	case target.Connection.Custom != nil:
+		out.Provider = "openai_compatible"
+		out.BaseURL = target.Connection.Custom.BaseURL
+		if target.Connection.Custom.Header != nil {
+			out.AuthHeader = target.Connection.Custom.Header.Name
+			out.CredentialRef = target.Connection.Custom.Header.Credential
+		}
 	}
-	sort.Strings(modelNames)
-
-	routes := make([]readmodel.RouteReadModel, 0, len(modelNames))
-	selectedModel := selectedModelName(endpoint)
-	for _, modelName := range modelNames {
-		targets := targetsFromProviderConfigs(groups[modelName], endpoint.SelectedRef)
-		routes = append(routes, readmodel.RouteReadModel{
-			ID:        readmodel.RouteID(modelName),
-			ModelName: modelName,
-			State:     routeState(targets),
-			Default:   modelName == selectedModel,
-			Enabled:   len(targets) > 0,
-			Targets:   targets,
-		})
+	return out
+}
+func targetFromWorkspace(workspace workspaceapi.Workspace, id string) (readmodel.TargetReadModel, error) {
+	for _, route := range workspace.Routes {
+		for _, tier := range route.Tiers {
+			for _, target := range tier.Targets {
+				if target.ID == id {
+					return targetFromWorkspaceTarget(target), nil
+				}
+			}
+		}
 	}
-	return routes
+	return readmodel.TargetReadModel{}, errors.New("committed target missing from workspace response")
 }
 
-func routeFromEndpoint(endpoint operatorclient.EndpointData, modelName string) (readmodel.RouteReadModel, error) {
-	for _, route := range routesFromEndpoint(endpoint) {
-		if route.ModelName == modelName {
-			return route, nil
-		}
-	}
-	return readmodel.RouteReadModel{}, errors.New("route could not be resolved after save")
-}
-
-// projectedRouteModel returns the client-visible model name used to group one
-// provider config into a Cockpit route projection.
-func projectedRouteModel(config operatorclient.ProviderConfigData) string {
-	modelName := strings.TrimSpace(config.RouteModelID) // swobu:io-string source=boundary
-	if modelName == "" {
-		modelName = strings.TrimSpace(config.ModelID) // swobu:io-string source=boundary
-	}
-	if modelName == "" {
-		return exchange.PublicModelIDSwobu
-	}
-	return modelName
-}
-
-func targetsFromProviderConfigs(configs []operatorclient.ProviderConfigData, selectedRef string) []readmodel.TargetReadModel {
-	sort.Slice(configs, func(i, j int) bool {
-		if targetRank(configs[i]) != targetRank(configs[j]) {
-			return targetRank(configs[i]) < targetRank(configs[j])
-		}
-		if configs[i].Ref == selectedRef && configs[j].Ref != selectedRef {
-			return true
-		}
-		if configs[j].Ref == selectedRef && configs[i].Ref != selectedRef {
-			return false
-		}
-		return configs[i].Ref < configs[j].Ref
-	})
-	targets := make([]readmodel.TargetReadModel, 0, len(configs))
-	for _, config := range configs {
-		targets = append(targets, targetFromProviderConfig(config))
-	}
-	return targets
-}
-
-func targetFromProviderConfig(config operatorclient.ProviderConfigData) readmodel.TargetReadModel {
-	name := strings.TrimSpace(config.TargetAlias) // swobu:io-string source=boundary
-	if name == "" {
-		name = config.Ref
-	}
-	return readmodel.TargetReadModel{
-		ID:               readmodel.TargetID(config.Ref),
-		Name:             name,
-		Provider:         config.ProviderSpec,
-		Model:            config.ModelID,
-		ProviderProtocol: config.ProviderProtocol,
-		BaseURL:          config.BaseURL,
-		AuthMode:         config.AuthMode,
-		AuthHeader:       config.AuthHeader,
-		CredentialRef:    config.CredentialRef,
-		Rank:             targetRank(config),
-		Weight:           targetWeight(config),
-	}
-}
-
-func providerConfigFromTargetRequest(request ports.SaveTargetRequest, targetID string) (operatorclient.ProviderConfigData, error) {
-	ref, err := endpointintent.ParseProviderConfigRef(targetID)
-	if err != nil {
-		return operatorclient.ProviderConfigData{}, err
-	}
+func targetFromSaveRequest(request ports.SaveTargetRequest, id string) (workspaceapi.TargetDraft, error) {
 	draft := request.Draft
-	if strings.TrimSpace(draft.RouteModelID) == "" {
-		draft.RouteModelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
+	target := workspaceapi.TargetDraft{ID: id, Model: strings.TrimSpace(draft.ModelID), Protocol: strings.TrimSpace(draft.ProviderProtocol)}
+	credential := strings.TrimSpace(draft.CredentialRef)
+	baseURL := strings.TrimSpace(draft.Endpoint.Value)
+	switch profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) {
+	case profile.ProviderSpecOpenAI:
+		target.Connection.OpenAI = &workspaceapi.CredentialConnection{Credential: credential}
+	case profile.ProviderSpecAnthropic:
+		target.Connection.Anthropic = &workspaceapi.CredentialConnection{Credential: credential}
+	case profile.ProviderSpecOpenRouter:
+		target.Connection.OpenRouter = &workspaceapi.CredentialConnection{Credential: credential}
+	case profile.ProviderSpecChatGPT:
+		target.Connection.ChatGPT = &workspaceapi.CredentialConnection{Credential: credential}
+	case profile.ProviderSpecOllama:
+		target.Connection.Ollama = &workspaceapi.OllamaConnection{BaseURL: baseURL}
+	case profile.ProviderSpecAzure:
+		target.Connection.Azure = &workspaceapi.AzureConnection{ProjectEndpoint: baseURL, Credential: credential}
+	case profile.ProviderSpecBedrock:
+		auth := workspaceapi.BedrockAuth{}
+		switch draft.ProviderOptions.Bedrock.AuthMode {
+		case string(profile.AuthModeAWSProfile):
+			value := draft.ProviderOptions.Bedrock.ProfileName
+			auth.Profile = &value
+		case string(profile.AuthModeAWSEnvSession):
+			auth.Environment = &struct{}{}
+		default:
+			value := credential
+			auth.BearerToken = &value
+		}
+		target.Connection.Bedrock = &workspaceapi.BedrockConnection{Region: draft.ProviderOptions.Bedrock.Region, Auth: auth}
+	case profile.ProviderSpecOpenAICompatible:
+		custom := &workspaceapi.CustomConnection{BaseURL: baseURL}
+		if credential != "" {
+			header := strings.TrimSpace(draft.ProviderOptions.OpenAICompatible.CredentialHeader)
+			if header == "" {
+				header = "Authorization"
+			}
+			custom.Header = &workspaceapi.CustomHeader{Name: header, Credential: credential}
+		}
+		target.Connection.Custom = custom
+	default:
+		return workspaceapi.TargetDraft{}, errors.New("unsupported provider for target save")
 	}
-	if strings.TrimSpace(draft.ModelID) == "" {
-		draft.ModelID = strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
-	}
-	config, err := endpointintent.NewProviderConfigFromTargetDraft(ref, draft)
-	if err != nil {
-		return operatorclient.ProviderConfigData{}, err
-	}
-
-	return operatorclient.ProviderConfigData{
-		Ref:              config.Ref().String(),
-		ProviderSpec:     config.ProviderSpec().String(),
-		BaseURL:          config.BaseURL(),
-		AuthMode:         config.AuthMode(),
-		AuthHeader:       config.AuthHeader(),
-		CredentialRef:    config.CredentialRef(),
-		RouteModelID:     config.RouteModelID(),
-		ModelID:          config.ModelID(),
-		ProviderProtocol: config.ProviderProtocol(),
-		TargetAlias:      "",
-		TargetRank:       config.TargetRank(),
-		TargetWeight:     config.TargetWeight(),
-	}, nil
+	return target, nil
 }
-
-// targetMatchesRoute reports whether a provider config belongs to the given
-// route and target identity pair. This is the canonical route-invariant
-// check for all target mutations.
-func targetMatchesRoute(config operatorclient.ProviderConfigData, targetID, routeID string) bool {
-	return config.Ref == targetID && projectedRouteModel(config) == routeID
-}
-
-func targetRank(config operatorclient.ProviderConfigData) int {
-	return positiveOrDefault(config.TargetRank, 1)
-}
-
-func targetWeight(config operatorclient.ProviderConfigData) int {
-	return positiveOrDefault(config.TargetWeight, 1)
-}
-
-func positiveOrDefault(value int, fallback int) int {
-	if value > 0 {
-		return value
-	}
-	return fallback
-}
-
-func newProviderConfigRef(existing []operatorclient.ProviderConfigData) (string, error) {
-	used := make(map[string]struct{}, len(existing))
-	for _, config := range existing {
-		used[config.Ref] = struct{}{}
-	}
+func newTargetID() (string, error) {
 	var raw [8]byte
-	for attempts := 0; attempts < 64; attempts++ {
-		if _, err := rand.Read(raw[:]); err != nil {
-			return "", err
-		}
-		ref := hex.EncodeToString(raw[:])
-		if _, exists := used[ref]; exists {
-			continue
-		}
-		return ref, nil
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
 	}
-	return "", errors.New("provider config ref could not be allocated")
+	return hex.EncodeToString(raw[:]), nil
 }
-
-func selectedModelName(endpoint operatorclient.EndpointData) string {
-	for _, config := range endpoint.ProviderConfigs {
-		if config.Ref == endpoint.SelectedRef {
-			return projectedRouteModel(config)
-		}
+func placementFromReadModel(p readmodel.PlacementOptionReadModel) workspaceapi.Placement {
+	if p.Kind == readmodel.PlacementBalance && p.PeerTargetID != "" {
+		id := string(p.PeerTargetID)
+		return workspaceapi.Placement{BalanceWith: &id}
 	}
-	return ""
-}
-
-// Cockpit does not model a separate zero-target route state; row copy handles
-// that case directly in the routes surface.
-func routeState(targets []readmodel.TargetReadModel) readmodel.RouteState {
-	return readmodel.RouteNormal
+	return workspaceapi.Placement{}
 }

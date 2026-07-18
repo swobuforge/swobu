@@ -11,28 +11,28 @@ import (
 // Route identifies the chosen execution destination in traffic-evidence form.
 // Model remains optional until the runtime path carries model identity end to end.
 type Route struct {
-	providerConfigRef string
-	model             string
+	targetID string
+	model    string
 }
 
-func NewRoute(providerConfigRef string, model string) (Route, error) {
-	if strings.TrimSpace(providerConfigRef) == "" { // swobu:io-string source=domain
-		return Route{}, fmt.Errorf("route provider config ref must not be empty")
+func NewRoute(targetID string, model string) (Route, error) {
+	if strings.TrimSpace(targetID) == "" { // swobu:io-string source=domain
+		return Route{}, fmt.Errorf("route target ID must not be empty")
 	}
 	return Route{
-		providerConfigRef: providerConfigRef,
-		model:             strings.TrimSpace(model), // swobu:io-string source=domain
+		targetID: targetID,
+		model:    strings.TrimSpace(model), // swobu:io-string source=domain
 	}, nil
 }
 
-func (r Route) ProviderConfigRef() string { return r.providerConfigRef }
-func (r Route) Model() string             { return r.model }
+func (r Route) TargetID() string { return r.targetID }
+func (r Route) Model() string    { return r.model }
 
 func (r Route) String() string {
 	if r.model == "" {
-		return r.providerConfigRef
+		return r.targetID
 	}
-	return r.providerConfigRef + ":" + r.model
+	return r.targetID + ":" + r.model
 }
 
 // Timing records request-lifecycle marks and derives latency summaries when
@@ -150,7 +150,7 @@ func (t Timing) DurationMillis() (int, bool) {
 type TrafficEvent struct {
 	requestID                 RequestID
 	eventKind                 EventKind
-	endpoint                  string
+	workspace                 string
 	clientProtocol            ClientProtocol
 	clientHandler             ClientHandler
 	clientFamily              ClientFamily
@@ -177,7 +177,7 @@ type TrafficEvent struct {
 
 type TrafficEventInput struct {
 	RequestID                 RequestID
-	Endpoint                  string
+	Workspace                 string
 	ClientProtocol            ClientProtocol
 	ClientHandler             ClientHandler
 	ClientFamily              ClientFamily
@@ -267,7 +267,7 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 	return TrafficEvent{
 		requestID:                 normalizedInput.RequestID,
 		eventKind:                 kind,
-		endpoint:                  normalizedInput.Endpoint,
+		workspace:                 normalizedInput.Workspace,
 		clientProtocol:            normalizedInput.ClientProtocol,
 		clientHandler:             normalizedInput.ClientHandler,
 		clientFamily:              normalizedInput.ClientFamily,
@@ -297,10 +297,10 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 	if input.RequestID.IsZero() {
 		return TrafficEventInput{}, fmt.Errorf("request id is required")
 	}
-	if strings.TrimSpace(input.Endpoint) == "" { // swobu:io-string source=domain
+	if strings.TrimSpace(input.Workspace) == "" { // swobu:io-string source=domain
 		return TrafficEventInput{}, fmt.Errorf("endpoint is required")
 	}
-	if input.Route.ProviderConfigRef() == "" {
+	if input.Route.TargetID() == "" {
 		return TrafficEventInput{}, fmt.Errorf("route is required")
 	}
 	if input.StatusCode < 0 {
@@ -342,9 +342,9 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 	if input.AttemptCount <= 0 {
 		input.AttemptCount = 1
 	}
-	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode) // swobu:io-string source=domain
-	input.ModelRequested = strings.TrimSpace(input.ModelRequested)           // swobu:io-string source=domain
-	input.ModelResolved = strings.TrimSpace(input.ModelResolved)             // swobu:io-string source=domain
+	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode)     // swobu:io-string source=domain
+	input.ModelRequested = strings.TrimSpace(input.ModelRequested)               // swobu:io-string source=domain
+	input.ModelResolved = strings.TrimSpace(input.ModelResolved)                 // swobu:io-string source=domain
 	input.WorkspaceRouteModelID = strings.TrimSpace(input.WorkspaceRouteModelID) // swobu:io-string source=domain
 	input.Mutations = normalizeTrafficEventMutations(input.Mutations)
 	input.ExchangeDiagnostics = normalizeTrafficEventStrings(input.ExchangeDiagnostics)
@@ -425,7 +425,7 @@ func normalizeTrafficEventUniqueStrings(src []string) []string {
 
 func (e TrafficEvent) RequestID() RequestID              { return e.requestID }
 func (e TrafficEvent) EventKind() EventKind              { return e.eventKind }
-func (e TrafficEvent) Endpoint() string                  { return e.endpoint }
+func (e TrafficEvent) Workspace() string                 { return e.workspace }
 func (e TrafficEvent) ClientProtocol() ClientProtocol    { return e.clientProtocol }
 func (e TrafficEvent) ClientHandler() ClientHandler      { return e.clientHandler }
 func (e TrafficEvent) ClientFamily() ClientFamily        { return e.clientFamily }
@@ -443,8 +443,8 @@ func (e TrafficEvent) ContinuityRecoveryTrigger() string { return e.continuityRe
 func (e TrafficEvent) ModelResolutionMode() string       { return e.modelResolutionMode }
 func (e TrafficEvent) ModelRequested() string            { return e.modelRequested }
 func (e TrafficEvent) ModelResolved() string             { return e.modelResolved }
-func (e TrafficEvent) WorkspaceRouteModelID() string          { return e.workspaceRouteModelID }
-func (e TrafficEvent) TokenUsage() TokenUsage                  { return e.tokenUsage }
+func (e TrafficEvent) WorkspaceRouteModelID() string     { return e.workspaceRouteModelID }
+func (e TrafficEvent) TokenUsage() TokenUsage            { return e.tokenUsage }
 func (e TrafficEvent) Mutations() []Mutation {
 	return cloneMutations(e.wireMutations)
 }

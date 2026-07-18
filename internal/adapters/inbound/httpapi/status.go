@@ -11,7 +11,7 @@ import (
 // field rather than growing decorative operability detail.
 type StatusDocument struct {
 	State                string `json:"state"`
-	EndpointCount        int    `json:"endpoint_count"`
+	WorkspaceCount       int    `json:"workspace_count"`
 	ControlPlaneProtocol int    `json:"control_plane_protocol"`
 	SwobuVersion         string `json:"swobu_version"`
 }

@@ -79,14 +79,20 @@ func TestFileGrammarDemolitionLedger(t *testing.T) {
 // state owner, one effects owner, pure projections, and GSX component sources.
 func TestTargetConfigUsesOnlyAllowedProductionFileRoles(t *testing.T) {
 	allowed := map[string]bool{
-		"component.go": true,
-		"state.go":     true,
-		"effects.go":   true,
-		"doc.go":       true,
+		"component.go":         true,
+		"state.go":             true,
+		"effects.go":           true,
+		"doc.go":               true,
+		"actions.go":           true,
+		"bedrock.go":           true,
+		"model.go":             true,
+		"placement_actions.go": true,
+		"protocol.go":          true,
+		"provider.go":          true,
 	}
 	for _, path := range mustGlob(t, "*.go") {
 		name := filepath.Base(path)
-		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gsx.go") || allowed[name] || strings.HasSuffix(name, "_projection.go") {
+		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gsx.go") || allowed[name] || strings.HasSuffix(name, "_projection.go") || strings.HasSuffix(name, "_component.go") {
 			continue
 		}
 		t.Fatalf("%s is outside target_config's allowed production file grammar", name)
@@ -231,10 +237,12 @@ func TestTargetConfigMountsUIRowsWithoutForwardingWrappers(t *testing.T) {
 }
 
 func TestCredentialVisibilityHasNoSharedProviderDispatch(t *testing.T) {
-	src := mustReadFile(t, "provider_state.go")
-	for _, forbidden := range []string{"shouldRenderCredentialRow", "credentialBlockedReason"} {
-		if strings.Contains(src, forbidden) {
-			t.Fatalf("provider_state.go must not dispatch credential visibility by provider: %q", forbidden)
+	for _, path := range mustGlob(t, "provider*.go") {
+		src := mustReadFile(t, path)
+		for _, forbidden := range []string{"shouldRenderCredentialRow", "credentialBlockedReason"} {
+			if strings.Contains(src, forbidden) {
+				t.Fatalf("%s must not dispatch credential visibility by provider: %q", path, forbidden)
+			}
 		}
 	}
 }

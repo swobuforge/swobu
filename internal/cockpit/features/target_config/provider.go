@@ -5,7 +5,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -48,7 +47,7 @@ func providerPickerKeywords(p readmodel.ProviderOptionReadModel) []string {
 func (w *TargetConfig) SelectProvider(spec string) {
 	spec = strings.TrimSpace(spec) // swobu:io-string source=boundary
 	w.resetFlowState()
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft { d.ProviderSpec = spec; return d })
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderSpec = spec; return d })
 	w.Error.Set("")
 	w.seedSetupDefaults()
 	seedProviderDefaults(w)
@@ -61,7 +60,7 @@ func (w *TargetConfig) SetSetupReady(credentialRef, baseURL string) {
 	if baseURL == "" {
 		baseURL = profile.DefaultExecuteBaseURL(w.Draft.Get().ProviderSpec)
 	}
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft {
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.CredentialRef = credentialRef
 		return d
 	})

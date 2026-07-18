@@ -120,7 +120,7 @@ func mustTerminalTrafficEvent(t *testing.T, requestID string, result trafficevid
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{RequestID: id, Endpoint: "default",
+	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{RequestID: id, Workspace: "default",
 		ClientProtocol: trafficevidence.ClientProtocol("responses"),
 		ClientHandler:  trafficevidence.ClientHandler("http"),
 		ClientFamily:   trafficevidence.ClientFamily("openai"),

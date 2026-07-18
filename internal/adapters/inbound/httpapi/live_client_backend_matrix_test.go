@@ -24,11 +24,11 @@ func TestLiveClientBackendHelloMatrix(t *testing.T) {
 		t.Skip("set SWOBU_LIVE_SMOKE=1 to run live client/backend smoke matrix") // swobu:lint ignore no-test-skip because=live smoke requires opt-in environment
 	}
 
-	daemonURL := strings.TrimSpace(os.Getenv("SWOBU_LIVE_DAEMON_URL")) // swobu:io-string source=domain
-	if daemonURL == "" {
-		daemonURL = "http://127.0.0.1:7926"
+	addr := strings.TrimSpace(os.Getenv("SWOBU_LIVE_ADDR")) // swobu:io-string source=domain
+	if addr == "" {
+		addr = "127.0.0.1:7926"
 	}
-	daemonURL = strings.TrimRight(daemonURL, "/")
+	baseURL := "http://" + addr
 
 	backends := []string{
 		envOrDefault(t, "SWOBU_LIVE_ENDPOINT_OPENROUTER", "openrouter"),
@@ -78,7 +78,7 @@ func TestLiveClientBackendHelloMatrix(t *testing.T) {
 			t.Run(testName, func(t *testing.T) {
 				t.Parallel()
 				reqID := fmt.Sprintf("live_%s_%s_%d", client.id, backendLabel[bi], time.Now().UnixNano())
-				statusCode, body := postClientHello(t, httpClient, daemonURL, endpoint, client.path, client.payload, client.ua, reqID)
+				statusCode, body := postClientHello(t, httpClient, baseURL, endpoint, client.path, client.payload, client.ua, reqID)
 				if statusCode != http.StatusOK {
 					var errBody liveMatrixResponse
 					_ = json.Unmarshal(body, &errBody)
@@ -95,10 +95,10 @@ func TestLiveClientBackendHelloMatrix(t *testing.T) {
 func postClientHello(
 	t *testing.T,
 	client *http.Client,
-	daemonURL, endpoint, path, payload, userAgent, requestID string,
+	baseURL, endpoint, path, payload, userAgent, requestID string,
 ) (int, []byte) {
 	t.Helper()
-	url := daemonURL + "/c/" + endpoint + path
+	url := baseURL + "/c/" + endpoint + path
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)

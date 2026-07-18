@@ -7,7 +7,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/machine"
 	"github.com/swobuforge/swobu/internal/replay"
@@ -29,7 +28,7 @@ func runExchangeWithMachine(
 	clientFamily canonical.ClientFamily,
 	clientDelivery delivery.Delivery,
 	request canonical.CanonicalRequest,
-	endpoint endpointintent.Endpoint,
+	workspace routing.Workspace,
 	timing *trafficevidence.Timing,
 ) (RequestOutput, error) {
 	reg := machine.NewRegistry()
@@ -64,7 +63,7 @@ func runExchangeWithMachine(
 		case EncodeClientOutputAction:
 			return runRunnerInterpret(c, store, cmd, runner)
 		case recordEvidence:
-			return handleRecordEvidence(c, store, sink, endpoint)
+			return handleRecordEvidence(c, store, sink, workspace)
 		default:
 			return nil, nil
 		}
@@ -85,7 +84,7 @@ func runExchangeWithMachine(
 			ClientFamily:   clientFamily,
 			ClientDelivery: clientDelivery,
 			Request:        request,
-			Endpoint:       endpoint,
+			Workspace:      workspace,
 			Timing:         timing,
 		})},
 		machine.StateCell{Value: reflect.ValueOf(outcomeState{})},
@@ -123,7 +122,7 @@ type exchangeState struct {
 	ClientFamily   canonical.ClientFamily
 	ClientDelivery delivery.Delivery
 	Request        canonical.CanonicalRequest
-	Endpoint       endpointintent.Endpoint
+	Workspace      routing.Workspace
 	Timing         *trafficevidence.Timing
 }
 
@@ -167,9 +166,12 @@ type recordEvidence struct{}
 // ---- routing reducers ----
 
 func planRoute(s exchangeState, e RoutePlannedEvent) (routeState, []machine.Event, []machine.Command, error) {
-	wr := endpointToWorkspaceRouting(s.Endpoint)
-	trace := &routing.Trace{ExchangeID: s.ExchangeID, Workspace: wr.WorkspaceSlug}
-	plan := routing.BuildPlan(s.ExchangeID, wr.WorkspaceSlug, s.Request.Model(), routeTargets(wr), trace)
+	route, err := s.Workspace.ResolveRoute(s.Request.Model())
+	if err != nil {
+		return routeState{}, []machine.Event{machine.Event(ExchangeTerminalEvent{})}, nil, canonical.BadRequest(err.Error())
+	}
+	trace := &routing.Trace{ExchangeID: s.ExchangeID, Workspace: s.Workspace.Slug().String()}
+	plan := routing.BuildPlan(s.ExchangeID, s.Workspace.Slug(), route, trace)
 	return routeState{Plan: plan}, []machine.Event{machine.Event(AttemptSelectedEvent{})}, nil, nil
 }
 
@@ -271,21 +273,10 @@ func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner
 		return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: outcome.Err})}, nil
 	}
 
-	providerConfig := findProviderConfig(exchange.Endpoint, attempt.Current.Target.ID)
-	if providerConfig.Ref().String() == "" {
-		err := errors.New("provider config not found for target")
-		var outcome outcomeState
-		_ = store.Get(&outcome)
-		outcome.Err = err
-		store.Put(reflect.TypeOf(outcome), reflect.ValueOf(outcome))
-		return []machine.Event{machine.Event(providerFailed{Class: routing.FailureUnknown, Err: err})}, nil
-	}
-
 	pathRecord, err := buildPathRecord(
 		ctx,
 		exchange.ExchangeID,
-		exchange.Endpoint.Name(),
-		providerConfig,
+		attempt.Current.Target,
 		exchange.ClientDelivery,
 		exchange.Request,
 	)
@@ -301,7 +292,7 @@ func handleSendProvider(ctx context.Context, store *machine.Store, runner Runner
 	request := pathRecord.Request
 	var nativeReplay *replay.NativeRef
 	var replayScope replay.Scope
-	replayScope = unsafeLocalReplayScope(exchange.Endpoint.Name().String())
+	replayScope = unsafeLocalReplayScope(exchange.Workspace.Slug().String())
 	targetKey := replayTargetKey(pathRecord.Target, pathRecord.ProtocolKind, pathRecord.Request.Model())
 	preparedRequest, native, prepErr := replay.Prepare(ctx, runner.ReplayStore, replayScope, targetKey, pathRecord.Request)
 	if prepErr != nil {
@@ -342,7 +333,7 @@ func handleRecordEvidence(
 	c context.Context,
 	store *machine.Store,
 	sink TrafficEventSink,
-	endpoint endpointintent.Endpoint,
+	workspace routing.Workspace,
 ) ([]machine.Event, error) {
 	var exchange exchangeState
 	if err := store.Get(&exchange); err != nil {
@@ -362,7 +353,8 @@ func handleRecordEvidence(
 			return nil
 		}
 		event, buildErr := buildTerminalTrafficEvent(
-			endpoint,
+			workspace,
+			attempt.Current.Route,
 			exchange.ExchangeID,
 			exchange.ClientHandler,
 			exchange.ClientFamily,

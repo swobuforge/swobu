@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/bootstrap"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
 func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {
@@ -29,8 +30,12 @@ func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte(stateDoc), 0o600); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	configPath := filepath.Join(t.TempDir(), "swobu.yaml")
-	configYAML := "bind_addr: 127.0.0.1:0\nendpoints:\n  []\n"
+	configDir := t.TempDir()
+	if err := os.Chmod(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "swobu.yaml")
+	configYAML := "schema_version: 1\nworkspaces: {}\n"
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
@@ -43,7 +48,7 @@ func TestDaemonTelemetryDebug_SwapsSinkToStdout(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = origStdout })
 
-	daemon, err := bootstrap.Start(context.Background(), bootstrap.StartInput{ConfigPath: configPath})
+	daemon, err := bootstrap.Start(context.Background(), bootstrap.StartInput{ConfigPath: configPath, StartupConfig: platformconfig.StartupConfig{Addr: "127.0.0.1:0"}})
 	if err != nil {
 		t.Fatalf("bootstrap.Start returned error: %v", err)
 	}

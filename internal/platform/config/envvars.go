@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	EnvDaemonURL                 = "SWOBU_DAEMON_URL"
+	EnvAddr                      = "SWOBU_ADDR"
 	EnvConfigPath                = "SWOBU_CONFIG_PATH"
 	EnvSwobuHome                 = "SWOBU_HOME"
 	EnvXDGStateHome              = "XDG_STATE_HOME"

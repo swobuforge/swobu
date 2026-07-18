@@ -20,10 +20,12 @@ templ (t *targetTail) Render() {
 
 		@ProtocolSelect(t.root)
 
-		if t.root.CanChangePlacement() {
-			@PlacementSelect(t.root)
-		} else {
-			@FixedPlacementControl(t.root)
+		if t.root.mode != targetConfigModeEdit {
+			if t.root.CanChangePlacement() {
+				@PlacementSelect(t.root)
+			} else {
+				@FixedPlacementControl(t.root)
+			}
 		}
 
 		if t.root.mode == targetConfigModeEdit {

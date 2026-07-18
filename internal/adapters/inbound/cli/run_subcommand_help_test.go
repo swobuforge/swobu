@@ -19,6 +19,9 @@ func TestRunner_DaemonHelp_PrintsConfigResolution(t *testing.T) {
 	if !strings.Contains(stderr.String(), "root daemon config path (env: SWOBU_CONFIG_PATH) (default:") {
 		t.Fatalf("daemon help missing env/default metadata; stderr=%q", stderr.String())
 	}
+	if !strings.Contains(stderr.String(), "address (env: SWOBU_ADDR) (default: 127.0.0.1:7926)") {
+		t.Fatalf("daemon help missing address metadata; stderr=%q", stderr.String())
+	}
 }
 
 func TestRunner_TelemetryStatusHelp_DoesNotExposeStatePathKnobs(t *testing.T) {

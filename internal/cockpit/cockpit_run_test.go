@@ -19,12 +19,14 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/_swobu/endpoints":
+		case "/_swobu/workspaces":
 			if r.Method != http.MethodGet {
 				t.Fatalf("endpoint request method = %s", r.Method)
 			}
 			called = true
-			_, _ = w.Write([]byte(`{"endpoints":[{"name":"dev","selected_provider_config_ref":"cfg-1","provider_configs":[{"ref":"cfg-1","provider_spec":"openai_compatible","base_url":"https://api.example/v1","model_id":"gpt-4.1"}]}]}`))
+			_, _ = w.Write([]byte(`[{"slug":"dev","default_route":"gpt","route_count":1}]`))
+		case "/_swobu/workspaces/dev":
+			_, _ = w.Write([]byte(`{"slug":"dev","default_route":"gpt","routes":[{"name":"gpt","tiers":[{"targets":[{"id":"cfg-1","model":"gpt-4.1","protocol":"responses","provider":"custom","connection":{"custom":{"base_url":"https://api.example/v1"}}}]}]}]}`))
 		case "/_swobu/status-projection":
 			if r.Method != http.MethodGet {
 				t.Fatalf("status request method = %s", r.Method)
@@ -34,7 +36,7 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 			if r.Method != http.MethodGet {
 				t.Fatalf("daemon status request method = %s", r.Method)
 			}
-			_, _ = w.Write([]byte(`{"state":"healthy","endpoint_count":1,"control_plane_protocol":1,"swobu_version":"dev"}`))
+			_, _ = w.Write([]byte(`{"state":"healthy","workspace_count":1,"control_plane_protocol":1,"swobu_version":"dev"}`))
 		default:
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
@@ -42,14 +44,14 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 	defer server.Close()
 
 	var out bytes.Buffer
-	err := Run(context.Background(), server.URL, nil, &out, nil)
+	err := Run(context.Background(), strings.TrimPrefix(server.URL, "http://"), nil, &out, nil)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	if !called {
 		t.Fatal("Run did not call endpoint control plane")
 	}
-	for _, want := range []string{"⛉ SWOBU", "[› dev]", server.URL + "/c/dev", "gpt-4.1", "default · 1 target"} {
+	for _, want := range []string{"⛉ SWOBU", "[› dev]", server.URL + "/c/dev", "default · 1 target"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, out.String())
 		}

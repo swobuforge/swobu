@@ -3,12 +3,11 @@ package exchange
 import (
 	"context"
 	"errors"
-	"sort"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -17,8 +16,7 @@ import (
 func mapErrorToFailureClass(err error) routing.FailureClass {
 	var backendErr canonical.BackendError
 	if errors.As(err, &backendErr) {
-		status := backendErr.StatusCode
-		switch {
+		switch status := backendErr.StatusCode; {
 		case status == 404:
 			return routing.FailureNotFound
 		case status == 400:
@@ -36,176 +34,104 @@ func mapErrorToFailureClass(err error) routing.FailureClass {
 	return routing.FailureUnknown
 }
 
-func endpointToWorkspaceRouting(e endpointintent.Endpoint) routing.WorkspaceRouting {
-	routes := map[string]routing.Route{}
-	for _, pc := range e.ProviderConfigs() {
-		routeModelID := projectedRouteModel(pc)
-		if routeModelID == "" {
-			continue
-		}
-		mod := routes[routeModelID]
-		mod.ModelName = routeModelID
-		mod.Targets = append(mod.Targets, providerConfigToTarget(pc))
-		routes[routeModelID] = mod
-	}
-
-	var defaultModel string
-	if sel := e.SelectedProviderConfig(); sel.Ref().String() != "" {
-		defaultModel = projectedRouteModel(sel)
-	}
-
-	return routing.WorkspaceRouting{
-		WorkspaceSlug: e.Name().String(),
-		DefaultModel:  defaultModel,
-		Routes:        routes,
-	}
-}
-
-// projectedRouteModel returns the client-visible route model name for request
-// routing. Legacy configs without an explicit route model fall back to the
-// provider-side model id.
-func projectedRouteModel(pc endpointintent.ProviderConfig) string {
-	routeModelID := strings.TrimSpace(pc.RouteModelID()) // swobu:io-string source=boundary
-	if routeModelID != "" {
-		return routeModelID
-	}
-	return strings.TrimSpace(pc.ModelID()) // swobu:io-string source=boundary
-}
-
-func providerConfigToTarget(pc endpointintent.ProviderConfig) routing.Target {
-	return routing.Target{
-		ID:            pc.Ref().String(),
-		Provider:      pc.ProviderSpec().String(),
-		CredentialRef: pc.CredentialRef(),
-		Model:         pc.ModelID(),
-		Protocol:      routing.ProtocolOverride(pc.ProviderProtocol()),
-		Enabled:       true,
-	}
-}
-
-func routeTargets(wr routing.WorkspaceRouting) []routing.Target {
-	var all []routing.Target
-	for _, r := range wr.Routes {
-		all = append(all, r.Targets...)
-	}
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].ID < all[j].ID
-	})
-	return all
-}
-
-func findProviderConfig(endpoint endpointintent.Endpoint, targetID string) endpointintent.ProviderConfig {
-	for _, pc := range endpoint.ProviderConfigs() {
-		if pc.Ref().String() == targetID {
-			return pc
-		}
-	}
-	return endpointintent.ProviderConfig{}
-}
-
-func buildPathRecord(
-	ctx context.Context,
-	exchangeID string,
-	endpointName endpointintent.EndpointName,
-	providerConfig endpointintent.ProviderConfig,
-	clientDelivery delivery.Delivery,
-	request canonical.CanonicalRequest,
-) (exchangePathRecord, error) {
-	routeProfile, ok := profile.ResolveRouteProfile(
-		providerConfig.ProviderSpec().String(),
-		providerConfig.BaseURL(),
-		providerConfig.CredentialRef(),
-	)
-	if !ok {
-		return exchangePathRecord{}, canonical.BadEndpoint("selected provider route is unsupported")
-	}
-	_ = routeProfile
-
-	target := toRoutableTarget(providerConfig)
-	providerDelivery := clientDelivery
-
-	protocolKind, err := resolveProviderProtocolKind(
-		providerConfig.ProviderSpec().String(),
-		providerConfig.ProviderProtocol(),
-		providerConfig.ProtocolKind(),
-		request,
-	)
+func buildPathRecord(ctx context.Context, exchangeID string, target routing.Target, clientDelivery delivery.Delivery, request canonical.CanonicalRequest) (exchangePathRecord, error) {
+	_ = ctx
+	_ = exchangeID
+	routable, err := toRoutableTarget(target)
 	if err != nil {
 		return exchangePathRecord{}, err
 	}
-	target.ProtocolKind = protocolKind
-
-	modelID := providerConfig.ModelID()
+	protocol, _, ok := profile.ProviderProtocolKindAndFrame(routable.ProviderSpec, target.Protocol().String())
+	if !ok {
+		return exchangePathRecord{}, canonical.BadEndpoint("selected provider protocol is unsupported")
+	}
+	modelID := target.Model().String()
 	if modelID == "" {
 		return exchangePathRecord{}, canonical.BadRequest("selected provider model is not configured")
 	}
-	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         modelID,
-		Instructions:  request.Instructions(),
-		Items:         request.Items(),
-		Tools:         request.Tools(),
-		Turn:          request.Turn(),
-		ToolPolicy:    request.ToolPolicy(),
-		ToolCallBatch: request.ToolCallBatch(),
-		Controls:      request.Controls(),
-		OutputFormat:  request.OutputFormat(),
-	})
-
-	return exchangePathRecord{
-		Request:          req,
-		Target:           target,
-		ProviderDelivery: providerDelivery,
-		ProtocolKind:     protocolKind,
-	}, nil
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: modelID, Instructions: request.Instructions(), Items: request.Items(), Tools: request.Tools(), Turn: request.Turn(), ToolPolicy: request.ToolPolicy(), ToolCallBatch: request.ToolCallBatch(), Controls: request.Controls(), OutputFormat: request.OutputFormat()})
+	return exchangePathRecord{Request: req, Target: routable, ProviderDelivery: clientDelivery, ProtocolKind: protocol}, nil
 }
 
-func toRoutableTarget(pc endpointintent.ProviderConfig) RoutableTarget {
-	t := NewRoutableTarget(
-		pc.Ref().String(),
-		pc.ProviderSpec().String(),
-		pc.BaseURL(),
-		pc.CredentialRef(),
-		pc.ProtocolKind(),
-		"",
-		pc.SelectedFrame(),
-		pc.ProviderProtocol(),
-	)
-	t.AuthMode = pc.AuthMode()
-	t.AuthHeader = pc.AuthHeader()
-	return t
+// toRoutableTarget is the single adapter from durable connection intent to
+// provider execution data. Derived URLs and auth modes never enter persistence.
+func toRoutableTarget(target routing.Target) (RoutableTarget, error) {
+	providerID := string(target.Provider())
+	providerSpec := providerID
+	if target.Provider() == routing.ProviderCustom {
+		providerSpec = "openai_compatible"
+	}
+	baseURL := profile.DefaultExecuteBaseURL(providerSpec)
+	credential := ""
+	authMode := ""
+	authHeader := ""
+	switch connection := target.Connection().(type) {
+	case routing.OpenAIConnection:
+		credential = connection.Credential().String()
+	case routing.AnthropicConnection:
+		credential = connection.Credential().String()
+	case routing.OpenRouterConnection:
+		credential = connection.Credential().String()
+	case routing.ChatGPTConnection:
+		credential = connection.Credential().String()
+	case routing.OllamaConnection:
+		if configured, ok := connection.BaseURL(); ok {
+			baseURL = configured.String()
+		}
+	case routing.AzureConnection:
+		baseURL = connection.ProjectEndpoint().String()
+		credential = connection.Credential().String()
+	case routing.BedrockConnection:
+		baseURL = profile.BedrockMantleEndpointForRegion(connection.Region().String())
+		switch auth := connection.Auth().(type) {
+		case routing.BedrockProfileAuth:
+			authMode = string(profile.AuthModeAWSProfile)
+			credential = "profile:" + auth.Profile() + "@" + connection.Region().String()
+		case routing.BedrockEnvironmentAuth:
+			authMode = string(profile.AuthModeAWSEnvSession)
+		case routing.BedrockBearerTokenAuth:
+			authMode = string(profile.AuthModeEnv)
+			credential = auth.Credential().String()
+		default:
+			return RoutableTarget{}, fmt.Errorf("unsupported Bedrock auth %T", connection.Auth())
+		}
+	case routing.CustomConnection:
+		baseURL = connection.BaseURL().String()
+		if connection.Auth() != nil {
+			header := connection.Auth().(routing.CustomHeaderAuth)
+			credential = header.Credential().String()
+			authHeader = header.Name()
+		}
+	default:
+		return RoutableTarget{}, fmt.Errorf("unsupported routing connection %T", target.Connection())
+	}
+	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, target.Protocol().String())
+	if !ok {
+		return RoutableTarget{}, canonical.BadEndpoint("selected provider protocol is unsupported")
+	}
+	routable := NewRoutableTarget(target.ID().String(), providerSpec, baseURL, credential, protocolKind, "", frame, target.Protocol().String())
+	routable.AuthMode = authMode
+	routable.AuthHeader = authHeader
+	return routable, nil
 }
 
-func resolveProviderProtocolKind(
-	targetSpec string,
-	targetProtocol string,
-	configured protocolkind.ProtocolKind,
-	request canonical.CanonicalRequest,
-) (protocolkind.ProtocolKind, error) {
+func resolveProviderProtocolKind(targetSpec, targetProtocol string, configured protocolkind.ProtocolKind, request canonical.CanonicalRequest) (protocolkind.ProtocolKind, error) {
 	if !profile.SupportsSpec(targetSpec) {
 		return "", canonical.BadEndpoint("provider id is unsupported")
 	}
-	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=boundary
+	if strings.TrimSpace(request.Model()) == "" {
 		return "", canonical.BadRequest("canonical request is required")
 	}
-	targetProtocol = strings.TrimSpace(targetProtocol) // swobu:io-string source=boundary
-	autoProtocol := profile.ProviderProtocolAuto
-	if targetProtocol == "" || targetProtocol == autoProtocol {
-		if configured != "" {
-			return configured, nil
-		}
+	if targetProtocol == "" || targetProtocol == profile.ProviderProtocolAuto {
 		return "", canonical.BadEndpoint("provider protocol must be concrete")
 	}
 	protocol, _, ok := profile.ProviderProtocolKindAndFrame(targetSpec, targetProtocol)
-	if ok {
-		if configured != "" && protocol != configured {
-			return "", canonical.BadEndpoint("selected provider protocol is inconsistent with configured protocol kind")
-		}
-		return protocol, nil
+	if !ok || (configured != "" && protocol != configured) {
+		return "", canonical.BadEndpoint("selected provider protocol is unsupported")
 	}
-	return "", canonical.BadEndpoint("selected provider protocol is unsupported")
+	return protocol, nil
 }
 
-// exchangePathRecord is the bridge carrier from routing decision to Runner.Run.
 type exchangePathRecord struct {
 	Request          canonical.CanonicalRequest
 	Target           RoutableTarget

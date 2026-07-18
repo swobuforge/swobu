@@ -3,28 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
-
-func ResolveConfigPath(flagValue string) string {
-	if trimmed := strings.TrimSpace(flagValue); trimmed != "" { // swobu:io-string source=boundary
-		return trimmed
-	}
-	return DefaultConfigPath()
-}
-
-func TestResolveDaemonURL_Preference(t *testing.T) {
-	t.Setenv(EnvDaemonURL, "http://env.test:7777")
-
-	if got := ResolveDaemonURL("http://flag.test:8888"); got != "http://flag.test:8888" {
-		t.Fatalf("flag daemon url = %q, want %q", got, "http://flag.test:8888")
-	}
-	if got := ResolveDaemonURL(""); got != "http://env.test:7777" {
-		t.Fatalf("env daemon url = %q, want %q", got, "http://env.test:7777")
-	}
-}
 
 func TestResolveConfigPath_Preference(t *testing.T) {
 	envPath := filepath.Join(t.TempDir(), "env-swobu.yaml")
@@ -107,44 +88,24 @@ func TestResolveTelemetryExportInterval_InvalidFallsBackToDefault(t *testing.T) 
 	}
 }
 
-func TestResolveDaemonRuntimeConfigPath_Preference(t *testing.T) {
+func TestResolveConfigPath_PrefersExplicitPath(t *testing.T) {
 	flagPath := filepath.Join(t.TempDir(), "flag-swobu.yaml")
-	resolved, err := ResolveDaemonRuntimeConfigPath(flagPath)
-	if err != nil {
-		t.Fatalf("ResolveDaemonRuntimeConfigPath returned error: %v", err)
-	}
+	resolved := ResolveConfigPath(flagPath)
 	if resolved != flagPath {
 		t.Fatalf("resolved path = %q, want %q", resolved, flagPath)
 	}
 }
 
-func TestResolveDaemonRuntimeConfigPath_EnsuresDefaultWhenFlagOmitted(t *testing.T) {
+func TestResolveConfigPathDoesNotCreateDefaultWhenFlagOmitted(t *testing.T) {
 	envPath := filepath.Join(t.TempDir(), "nested-config", "default-swobu.yaml")
 	t.Setenv(EnvConfigPath, envPath)
 
-	resolved, err := ResolveDaemonRuntimeConfigPath("")
-	if err != nil {
-		t.Fatalf("ResolveDaemonRuntimeConfigPath returned error: %v", err)
-	}
+	resolved := ResolveConfigPath("")
 	if resolved != envPath {
 		t.Fatalf("resolved path = %q, want %q", resolved, envPath)
 	}
-	if _, statErr := os.Stat(envPath); statErr != nil {
-		t.Fatalf("resolved config file not created: %v", statErr)
-	}
-	dirInfo, err := os.Stat(filepath.Dir(envPath))
-	if err != nil {
-		t.Fatalf("stat config dir: %v", err)
-	}
-	if dirInfo.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("config dir permissions = %o want no group/other bits", dirInfo.Mode().Perm())
-	}
-	fileInfo, err := os.Stat(envPath)
-	if err != nil {
-		t.Fatalf("stat config file: %v", err)
-	}
-	if fileInfo.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("config file permissions = %o want no group/other bits", fileInfo.Mode().Perm())
+	if _, statErr := os.Stat(envPath); !os.IsNotExist(statErr) {
+		t.Fatalf("path resolution mutated filesystem: %v", statErr)
 	}
 }
 

@@ -44,7 +44,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 		Applied: []string{"p.encode"},
 		Mutated: true,
 	}}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		ClientProtocol:      "openai_compat",
 		ClientHandler:       "codex",
 		ClientFamily:        "chat_completions",
@@ -130,7 +130,7 @@ func TestTrafficEvent_RejectsTerminalInProgressResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	if _, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	if _, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassInProgress,
 		StatusCode: 200,
@@ -182,7 +182,7 @@ func TestTrafficEvent_RejectsDuplicateStageReports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
@@ -205,7 +205,7 @@ func TestTrafficEvent_RejectsMutatedStageReportWithoutAppliedPatches(t *testing.
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
@@ -227,7 +227,7 @@ func TestTrafficEvent_RejectsStageReportWithEmptyStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
@@ -249,7 +249,7 @@ func TestTrafficEvent_RejectsStageReportWithEmptyCarrier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
@@ -271,7 +271,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
@@ -316,7 +316,7 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,
@@ -356,7 +356,7 @@ func TestTrafficEvent_DetectsDuplicateStageReportsAfterNormalization(t *testing.
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Endpoint: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		Route:      route,
 		Result:     ResultClassSuccess,
 		StatusCode: 200,

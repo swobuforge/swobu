@@ -1,16 +1,21 @@
-// Package routing owns route resolution, attempt plan construction, monotonic
-// execution walk, failure classification, cooldown management, and trace
-// emission.
+// Package routing owns the immutable workspace/route/tier/target aggregate,
+// whole-value invariants, semantic edits, exact route resolution, and
+// deterministic monotonic attempt-plan construction. Daemon startup
+// preferences, including daemon address, remain outside this aggregate.
 //
-// Routing is a workspace-owned bounded context. It sits above the exchange
-// runner and below the client ingress decode/encode layer.
+// Routing is the product-domain boundary below operator and request-path
+// adapters. It contains no persistence, transport, UI, exchange, or provider
+// catalog mechanism. Construction edges supply catalog predicates to the one
+// TargetDraft finalizer; runtime consumers receive immutable values and never
+// reconstruct routes from DTOs.
 //
-// The canonical model lives in docs/03-architecture/system-shape-and-request-flow/monotonic-routing-boundary-and-attempt-semantics.md
-// and docs/02-domain/glossary/canonical-terms.md.
+// The canonical model lives in
+// docs/03-architecture/system-shape-and-request-flow/workspace-routing-configuration-and-local-persistence.md
+// and docs/03-architecture/system-shape-and-request-flow/monotonic-routing-boundary-and-attempt-semantics.md.
 //
 // Boundary rules:
 //   - No dependency on internal/exchange.
 //   - No dependency on provider catalog (internal/profile).
-//   - Minimal dependency on internal/delivery (RequestFacts may use streaming bool).
-//   - canonical.CanonicalRequest is the only request shape consumed.
+//   - No dependency on internal/profile, configstore, transport, or Cockpit.
+//   - No mutable collection storage crosses the package boundary.
 package routing

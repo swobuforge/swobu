@@ -18,8 +18,8 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 			if in.ProviderSpec != "chatgpt" {
 				t.Fatalf("provider spec = %q", in.ProviderSpec)
 			}
-			if in.EndpointRef != "main/chatgpt" {
-				t.Fatalf("endpoint ref = %q", in.EndpointRef)
+			if in.Workspace != "main" || in.Route != "chat" || in.TargetID != "target" {
+				t.Fatalf("target subject = %#v", in)
 			}
 			return authplane.StartOutput{
 				SessionID:    "sess-g1",
@@ -32,7 +32,7 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 		nil,
 		nil,
 	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","endpoint_ref":"main/chatgpt","auth_mode":"browser"}`))
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","workspace":"main","route":"chat","target_id":"target","auth_mode":"browser"}`))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
