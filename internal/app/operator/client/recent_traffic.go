@@ -27,7 +27,7 @@ type RecentTrafficRow struct {
 	ModelResolutionMode   string                `json:"model_resolution_mode,omitempty"`
 	WorkspaceRouteModelID string                `json:"workspace_route_model,omitempty"`
 	ExchangeDiagnostics   []string              `json:"exchange_diagnostics,omitempty"`
-	StageReports        []ExchangeStageReport `json:"exchange_stage_reports,omitempty"`
+	StageReports          []ExchangeStageReport `json:"exchange_stage_reports,omitempty"`
 }
 
 type RecentTrafficTimingRecord struct {

@@ -6,24 +6,24 @@ import (
 	"testing"
 )
 
-func TestStoreKeychainCredential_ValidatesInputs(t *testing.T) {
-	err := StoreKeychainCredential("", "openrouter/default", "token")
+func TestStoreStoredSecret_ValidatesInputs(t *testing.T) {
+	err := StoreStoredSecret("", "openrouter/default", "token")
 	if err == nil || !strings.Contains(err.Error(), "provider spec is required") {
 		t.Fatalf("err = %v, want provider-spec validation", err)
 	}
 
-	err = StoreKeychainCredential("openrouter", "", "token")
-	if err == nil || !strings.Contains(err.Error(), "keychain key name is required") {
+	err = StoreStoredSecret("openrouter", "", "token")
+	if err == nil || !strings.Contains(err.Error(), "stored secret name is required") {
 		t.Fatalf("err = %v, want key-name validation", err)
 	}
 
-	err = StoreKeychainCredential("openrouter", "openrouter/default", "")
-	if err == nil || !strings.Contains(err.Error(), "keychain key value is required") {
+	err = StoreStoredSecret("openrouter", "openrouter/default", "")
+	if err == nil || !strings.Contains(err.Error(), "stored secret value is required") {
 		t.Fatalf("err = %v, want key-value validation", err)
 	}
 }
 
-func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
+func TestStoreStoredSecret_WritesProviderScopedScope(t *testing.T) {
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
 
@@ -46,15 +46,15 @@ func TestStoreKeychainCredential_WritesProviderScopedScope(t *testing.T) {
 		return nil
 	}
 
-	if err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123"); err != nil {
-		t.Fatalf("StoreKeychainCredential returned error: %v", err)
+	if err := StoreStoredSecret("openrouter", "openrouter/default", "token-123"); err != nil {
+		t.Fatalf("StoreStoredSecret returned error: %v", err)
 	}
 	if !called {
 		t.Fatal("expected keyring write to be called")
 	}
 }
 
-func TestStoreKeychainCredential_FallsBackToFileWhenKeyringUnavailable(t *testing.T) {
+func TestStoreStoredSecret_FallsBackToFileWhenKeyringUnavailable(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
@@ -68,10 +68,10 @@ func TestStoreKeychainCredential_FallsBackToFileWhenKeyringUnavailable(t *testin
 		return "", fmt.Errorf("backend unavailable")
 	}
 
-	if err := StoreKeychainCredential("openrouter", "openrouter/default", "token-123"); err != nil {
-		t.Fatalf("StoreKeychainCredential returned error: %v", err)
+	if err := StoreStoredSecret("openrouter", "openrouter/default", "token-123"); err != nil {
+		t.Fatalf("StoreStoredSecret returned error: %v", err)
 	}
-	raw, err := ResolveStoredSecretByRef("openrouter", "keychain:openrouter/default")
+	raw, err := ResolveStoredSecretByRef("openrouter", "secret:openrouter/default")
 	if err != nil {
 		t.Fatalf("ResolveStoredSecretByRef returned error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestStoreMaterializedCredential_FileWritesWithoutKeyring(t *testing.T) {
 	}
 }
 
-func TestStoreSecretByRef_KeychainFallsBackToFileWhenKeyringUnavailable(t *testing.T) {
+func TestStoreSecretByRef_StoredSecretFallsBackToFileWhenKeyringUnavailable(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	origSet := keyringSet
 	t.Cleanup(func() { keyringSet = origSet })
@@ -137,10 +137,10 @@ func TestStoreSecretByRef_KeychainFallsBackToFileWhenKeyringUnavailable(t *testi
 	if err != nil {
 		t.Fatalf("encode bundle: %v", err)
 	}
-	if err := StoreSecretByRef("openrouter", "keychain:openrouter/default", raw); err != nil {
+	if err := StoreSecretByRef("openrouter", "secret:openrouter/default", raw); err != nil {
 		t.Fatalf("StoreSecretByRef returned error: %v", err)
 	}
-	got, err := ResolveStoredSecretByRef("openrouter", "keychain:openrouter/default")
+	got, err := ResolveStoredSecretByRef("openrouter", "secret:openrouter/default")
 	if err != nil {
 		t.Fatalf("ResolveStoredSecretByRef returned error: %v", err)
 	}

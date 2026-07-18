@@ -48,15 +48,7 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadM
 		out.CredentialRef = target.Connection.Azure.Credential
 	case target.Connection.Bedrock != nil:
 		out.BaseURL = profile.BedrockMantleEndpointForRegion(target.Connection.Bedrock.Region)
-		if target.Connection.Bedrock.Auth.Profile != nil {
-			out.AuthMode = string(profile.AuthModeAWSProfile)
-			out.CredentialRef = "profile:" + *target.Connection.Bedrock.Auth.Profile + "@" + target.Connection.Bedrock.Region
-		} else if target.Connection.Bedrock.Auth.Environment != nil {
-			out.AuthMode = string(profile.AuthModeAWSEnvSession)
-		} else if target.Connection.Bedrock.Auth.BearerToken != nil {
-			out.AuthMode = string(profile.AuthModeEnv)
-			out.CredentialRef = *target.Connection.Bedrock.Auth.BearerToken
-		}
+		out.CredentialRef = target.Connection.Bedrock.Credential
 	case target.Connection.Custom != nil:
 		out.Provider = "openai_compatible"
 		out.BaseURL = target.Connection.Custom.BaseURL
@@ -81,50 +73,13 @@ func targetFromWorkspace(workspace workspaceapi.Workspace, id string) (readmodel
 }
 
 func targetFromSaveRequest(request ports.SaveTargetRequest, id string) (workspaceapi.TargetDraft, error) {
-	draft := request.Draft
-	target := workspaceapi.TargetDraft{ID: id, Model: strings.TrimSpace(draft.ModelID), Protocol: strings.TrimSpace(draft.ProviderProtocol)}
-	credential := strings.TrimSpace(draft.CredentialRef)
-	baseURL := strings.TrimSpace(draft.Endpoint.Value)
-	switch profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) {
-	case profile.ProviderSpecOpenAI:
-		target.Connection.OpenAI = &workspaceapi.CredentialConnection{Credential: credential}
-	case profile.ProviderSpecAnthropic:
-		target.Connection.Anthropic = &workspaceapi.CredentialConnection{Credential: credential}
-	case profile.ProviderSpecOpenRouter:
-		target.Connection.OpenRouter = &workspaceapi.CredentialConnection{Credential: credential}
-	case profile.ProviderSpecChatGPT:
-		target.Connection.ChatGPT = &workspaceapi.CredentialConnection{Credential: credential}
-	case profile.ProviderSpecOllama:
-		target.Connection.Ollama = &workspaceapi.OllamaConnection{BaseURL: baseURL}
-	case profile.ProviderSpecAzure:
-		target.Connection.Azure = &workspaceapi.AzureConnection{ProjectEndpoint: baseURL, Credential: credential}
-	case profile.ProviderSpecBedrock:
-		auth := workspaceapi.BedrockAuth{}
-		switch draft.ProviderOptions.Bedrock.AuthMode {
-		case string(profile.AuthModeAWSProfile):
-			value := draft.ProviderOptions.Bedrock.ProfileName
-			auth.Profile = &value
-		case string(profile.AuthModeAWSEnvSession):
-			auth.Environment = &struct{}{}
-		default:
-			value := credential
-			auth.BearerToken = &value
-		}
-		target.Connection.Bedrock = &workspaceapi.BedrockConnection{Region: draft.ProviderOptions.Bedrock.Region, Auth: auth}
-	case profile.ProviderSpecOpenAICompatible:
-		custom := &workspaceapi.CustomConnection{BaseURL: baseURL}
-		if credential != "" {
-			header := strings.TrimSpace(draft.ProviderOptions.OpenAICompatible.CredentialHeader)
-			if header == "" {
-				header = "Authorization"
-			}
-			custom.Header = &workspaceapi.CustomHeader{Name: header, Credential: credential}
-		}
-		target.Connection.Custom = custom
-	default:
-		return workspaceapi.TargetDraft{}, errors.New("unsupported provider for target save")
+	if request.Connection == nil {
+		return workspaceapi.TargetDraft{}, errors.New("validated target connection is required")
 	}
-	return target, nil
+	return workspaceapi.TargetDraft{
+		ID: id, Model: strings.TrimSpace(request.ModelID), Protocol: strings.TrimSpace(request.Protocol),
+		Connection: workspaceapi.ConnectionFromRouting(request.Connection),
+	}, nil
 }
 func newTargetID() (string, error) {
 	var raw [8]byte

@@ -74,6 +74,7 @@ func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved 
 		OnSaved:     onSaved,
 	}
 	w.row = ui.NewEditableRow(workflowKey(workspace), "slug", w.Slug)
+	w.row.PublishWhileEditing = true
 	w.row.ValueWidth = 32
 	w.row.OnActivate = func() { w.Activate() }
 	w.row.OnSubmit = func(_ string) { w.Submit(context.Background()) }

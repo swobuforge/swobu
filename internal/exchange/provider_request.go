@@ -138,25 +138,22 @@ type RoutableTarget struct {
 	// CredentialRef is the durable auth handle selected by endpoint intent.
 	// Replay equality assumes the control plane does not repoint it in place.
 	CredentialRef    string
-	AuthMode         string
 	AuthHeader       string
 	ProtocolKind     protocolkind.ProtocolKind
-	AuthKind         string
 	SelectedFrame    string
 	ProviderProtocol string
 }
 
-func NewRoutableTarget(backendRef string, targetSpec string, baseURL string, credentialRef string, protocolKind protocolkind.ProtocolKind, authKind string, selectedFrame string, targetProtocol ...string) RoutableTarget {
+func NewRoutableTarget(backendRef string, targetSpec string, baseURL string, credentialRef string, protocolKind protocolkind.ProtocolKind, selectedFrame string, targetProtocol ...string) RoutableTarget {
 	resolvedProviderProtocol := ""
 	if len(targetProtocol) > 0 {
 		resolvedProviderProtocol = targetProtocol[0]
 	}
-	return RoutableTarget{BackendRef: backendRef, ProviderSpec: targetSpec, BaseURL: baseURL, CredentialRef: credentialRef, AuthHeader: "", ProtocolKind: protocolKind, AuthKind: authKind, SelectedFrame: selectedFrame, ProviderProtocol: resolvedProviderProtocol}
+	return RoutableTarget{BackendRef: backendRef, ProviderSpec: targetSpec, BaseURL: baseURL, CredentialRef: credentialRef, ProtocolKind: protocolKind, SelectedFrame: selectedFrame, ProviderProtocol: resolvedProviderProtocol}
 }
 
 func (t RoutableTarget) Clone() RoutableTarget {
-	cloned := NewRoutableTarget(t.BackendRef, t.ProviderSpec, t.BaseURL, t.CredentialRef, t.ProtocolKind, t.AuthKind, t.SelectedFrame, t.ProviderProtocol)
-	cloned.AuthMode = t.AuthMode
+	cloned := NewRoutableTarget(t.BackendRef, t.ProviderSpec, t.BaseURL, t.CredentialRef, t.ProtocolKind, t.SelectedFrame, t.ProviderProtocol)
 	cloned.AuthHeader = t.AuthHeader
 	return cloned
 }

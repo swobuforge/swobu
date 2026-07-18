@@ -521,8 +521,8 @@ func TestSearchPicker_OpenSet_QueryRowRendersWithValue(t *testing.T) {
 	if strings.Contains(rendered, "select ↵") {
 		t.Fatalf("open-set picker with no backing options should not render listed rows:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "0 of 0 shown") {
-		t.Fatalf("open-set footer should exclude the virtual query row from the count:\n%s", rendered)
+	if !strings.Contains(rendered, "1 custom value") {
+		t.Fatalf("open-set footer should name the virtual query candidate:\n%s", rendered)
 	}
 }
 

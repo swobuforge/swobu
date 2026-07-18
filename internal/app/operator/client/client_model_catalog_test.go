@@ -2,35 +2,30 @@ package operatorclient
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 )
 
-func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
+func TestClientProbeTargetEncodesTypedConnectionBody(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/_swobu/model-catalog" {
+		if r.Method != http.MethodPost || r.URL.Path != "/_swobu/target-probe" {
 			t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.URL.Query().Get("provider_spec"); got != "openai" {
-			t.Fatalf("provider_spec = %q, want openai", got)
+		var input struct {
+			Connection       workspaceapi.Connection `json:"connection"`
+			ProviderProtocol string                  `json:"provider_protocol"`
 		}
-		if got := r.URL.Query().Get("base_url"); got != "https://api.openai.com/v1" {
-			t.Fatalf("base_url = %q, want https://api.openai.com/v1", got)
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatal(err)
 		}
-		if got := r.URL.Query().Get("auth_header"); got != "Authorization" {
-			t.Fatalf("auth_header = %q, want Authorization", got)
-		}
-		if got := r.URL.Query().Get("credential_ref"); got != "env:OPENAI_API_KEY" {
-			t.Fatalf("credential_ref = %q, want env:OPENAI_API_KEY", got)
-		}
-		if got := r.URL.Query().Get("auth_mode"); got != "env" {
-			t.Fatalf("auth_mode = %q, want env", got)
-		}
-		if got := r.URL.Query().Get("provider_protocol"); got != "responses" {
-			t.Fatalf("provider_protocol = %q, want responses", got)
+		if input.Connection.OpenAI == nil || input.Connection.OpenAI.Credential != "env:OPENAI_API_KEY" || input.ProviderProtocol != "responses" {
+			t.Fatalf("probe input = %#v", input)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -45,9 +40,9 @@ func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	result, err := c.ProbeModelCatalog(context.Background(), "openai", "https://api.openai.com/v1", "Authorization", "env:OPENAI_API_KEY", "env", "responses")
+	result, err := c.ProbeTarget(context.Background(), workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, "responses")
 	if err != nil {
-		t.Fatalf("ProbeModelCatalog returned error: %v", err)
+		t.Fatalf("ProbeTarget returned error: %v", err)
 	}
 	if len(result.Deployments) != 2 {
 		t.Fatalf("deployments = %d, want 2", len(result.Deployments))
@@ -68,7 +63,7 @@ func TestClientProbeModelCatalogEncodesQueryParams(t *testing.T) {
 	}
 }
 
-func TestClientProbeModelCatalog404ReturnsError(t *testing.T) {
+func TestClientProbeTarget404ReturnsError(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -77,7 +72,7 @@ func TestClientProbeModelCatalog404ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.ProbeModelCatalog(context.Background(), "unknown", "", "", "", "", "")
+	_, err := c.ProbeTarget(context.Background(), workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, "")
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -86,7 +81,7 @@ func TestClientProbeModelCatalog404ReturnsError(t *testing.T) {
 	}
 }
 
-func TestClientProbeModelCatalog500ReturnsError(t *testing.T) {
+func TestClientProbeTarget500ReturnsError(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -95,7 +90,7 @@ func TestClientProbeModelCatalog500ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.ProbeModelCatalog(context.Background(), "openai", "", "", "", "", "")
+	_, err := c.ProbeTarget(context.Background(), workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, "")
 	if err == nil {
 		t.Fatal("expected error for 500")
 	}

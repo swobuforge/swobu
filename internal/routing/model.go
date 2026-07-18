@@ -10,7 +10,7 @@ import (
 
 const (
 	SchemaVersion        = 1
-	PublicDefaultRouteID = "swobu"
+	PublicDefaultRouteID = "default"
 )
 
 var (
@@ -230,11 +230,11 @@ func (w Workspace) ResolveRoute(requested string) (Route, error) {
 	}
 	name, err := ParseRouteName(requested)
 	if err != nil {
-		return Route{}, fmt.Errorf("%w: %s", ErrUnknownRoute, requested)
+		return w.routes[w.defaultRoute].clone(), nil
 	}
 	route, ok := w.routes[name]
 	if !ok {
-		return Route{}, fmt.Errorf("%w: %s", ErrUnknownRoute, requested)
+		return w.routes[w.defaultRoute].clone(), nil
 	}
 	return route.clone(), nil
 }

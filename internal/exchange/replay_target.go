@@ -21,7 +21,6 @@ func replayTargetKey(target RoutableTarget, protocol protocolkind.ProtocolKind, 
 		ProviderProtocol: target.ProviderProtocol,
 		BaseURL:          target.BaseURL,
 		AuthScope:        authScope,
-		AuthKind:         target.AuthKind,
 		ModelID:          modelID,
 	}
 	return &key

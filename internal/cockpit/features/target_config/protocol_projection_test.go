@@ -88,13 +88,13 @@ func TestResolveProtocolOptions_DeploymentMetadataNarrows(t *testing.T) {
 	}
 }
 
-func TestResolveProtocolOptions_DefaultProtocolNarrowsSparseReadModel(t *testing.T) {
+func TestResolveProtocolOptions_DefaultProtocolDoesNotNarrowSparseReadModel(t *testing.T) {
 	got := protocolOptionIDs(resolveProtocolOptions("openai", readmodel.ModelDeploymentReadModel{
 		ID:                      "gpt-4.1",
 		ModelName:               "gpt-4.1",
 		DefaultProviderProtocol: "chat_completions",
 	}))
-	want := []string{"chat_completions"}
+	want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("protocol options = %v, want %v", got, want)
 	}
@@ -145,19 +145,6 @@ func TestResolveProtocolOptions_DeploymentMetadataCannotWidenProviderRules(t *te
 				t.Fatalf("protocol options = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestDefaultProtocolForModelUsesResolvedDeploymentDefault(t *testing.T) {
-	model := readmodel.ModelDeploymentReadModel{
-		ID:                         "Kimi-K2.6",
-		ModelName:                  "Kimi-K2.6",
-		SupportedProviderProtocols: []string{"responses", "responses_stream", "chat_completions"},
-		DefaultProviderProtocol:    "responses",
-	}
-	options := resolveProtocolOptions("azure", model)
-	if got := defaultProtocolForModel("azure", model, options); got != "responses" {
-		t.Fatalf("default protocol = %q, want responses", got)
 	}
 }
 

@@ -57,13 +57,8 @@ type azureConnectionDTO struct {
 	Credential      string `yaml:"credential"`
 }
 type bedrockConnectionDTO struct {
-	Region string         `yaml:"region"`
-	Auth   bedrockAuthDTO `yaml:"auth"`
-}
-type bedrockAuthDTO struct {
-	Profile     *string   `yaml:"profile,omitempty"`
-	Environment *struct{} `yaml:"environment,omitempty"`
-	BearerToken *string   `yaml:"bearer_token,omitempty"`
+	Region     string `yaml:"region"`
+	Credential string `yaml:"credential,omitempty"`
 }
 type customConnectionDTO struct {
 	BaseURL string         `yaml:"base_url"`
@@ -176,14 +171,7 @@ func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: dto.Azure.ProjectEndpoint, Credential: dto.Azure.Credential}
 	}
 	if dto.Bedrock != nil {
-		draft.Bedrock = &routing.BedrockConnectionDraft{
-			Region: dto.Bedrock.Region,
-			Auth: routing.BedrockAuthDraft{
-				Profile:     dto.Bedrock.Auth.Profile,
-				Environment: dto.Bedrock.Auth.Environment != nil,
-				BearerToken: dto.Bedrock.Auth.BearerToken,
-			},
-		}
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: dto.Bedrock.Region, Credential: dto.Bedrock.Credential}
 	}
 	if dto.Custom != nil {
 		if dto.Custom.Auth != nil && dto.Custom.Auth.Header == nil {
@@ -249,20 +237,7 @@ func encodeTarget(target routing.Target) (targetDTO, error) {
 	case routing.AzureConnection:
 		dto.Connection.Azure = &azureConnectionDTO{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
 	case routing.BedrockConnection:
-		auth := bedrockAuthDTO{}
-		switch a := c.Auth().(type) {
-		case routing.BedrockProfileAuth:
-			value := a.Profile()
-			auth.Profile = &value
-		case routing.BedrockEnvironmentAuth:
-			auth.Environment = &struct{}{}
-		case routing.BedrockBearerTokenAuth:
-			value := a.Credential().String()
-			auth.BearerToken = &value
-		default:
-			return targetDTO{}, fmt.Errorf("encode target %s: unsupported Bedrock auth", target.ID().String())
-		}
-		dto.Connection.Bedrock = &bedrockConnectionDTO{Region: c.Region().String(), Auth: auth}
+		dto.Connection.Bedrock = &bedrockConnectionDTO{Region: c.Region().String(), Credential: c.Credential().String()}
 	case routing.CustomConnection:
 		encoded := &customConnectionDTO{BaseURL: c.BaseURL().String()}
 		if c.Auth() != nil {

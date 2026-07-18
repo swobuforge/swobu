@@ -87,7 +87,13 @@ func (v *PageView) selectNext(event tui.KeyEvent) {
 }
 
 func (v *PageView) backOut(event tui.KeyEvent) {
-	// swobu: Escape at top level of workspace page quits the cockpit.
+	if v.OverviewSection != nil && v.OverviewSection.Back() {
+		return
+	}
+	if v.RoutesSection != nil && v.RoutesSection.Back() {
+		return
+	}
+	// No workspace-owned semantic state consumed Escape, so it closes the app.
 	if app := event.App(); app != nil {
 		app.Stop()
 	}

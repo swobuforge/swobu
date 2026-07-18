@@ -1,0 +1,23 @@
+  new target · Azure AI                                                               cancel ↵
+     provider          Azure AI                                                       change ↵
+   > project           required                                                       edit ↵
+                       Paste https://.../api/projects/...
+     credential        waiting for project endpoint
+     deployment        waiting for setup
+     protocol          waiting for deployment
+     routing           fallback after step 1                                          change ↵
+     create                                                                           complete setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+

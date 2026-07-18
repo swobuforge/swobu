@@ -17,8 +17,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
-	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	"github.com/swobuforge/swobu/internal/wire"
+	messages "github.com/swobuforge/swobu/internal/wire/messages"
 )
 
 const (
@@ -184,9 +184,9 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 	return out, nil
 }
 
-func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	_, err := e.ListDeployments(ctx, target)
-	return err
+func (e ProviderIngressResolverAdapter) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+	deployments, err := e.ListDeployments(ctx, target)
+	return exchange.TargetProbeResult{Deployments: deployments}, err
 }
 
 func validateAnthropicProviderProtocol(providerProtocol string) error {

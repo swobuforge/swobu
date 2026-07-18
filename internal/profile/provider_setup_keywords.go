@@ -26,10 +26,10 @@ func ProviderSetupKeywordSummaryForSpec(spec string) string {
 	return strings.Join(keywords, ", ")
 }
 
-func EndpointLabelForProvider(spec string) string {
-	endpoint, ok := EndpointSpecForProvider(spec)
+func LocatorLabelForProvider(spec string) string {
+	locator, ok := LocatorSpecForProvider(spec)
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(endpoint.Label)
+	return strings.TrimSpace(locator.Label)
 }

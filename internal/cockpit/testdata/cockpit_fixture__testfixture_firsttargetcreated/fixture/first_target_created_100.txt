@@ -9,7 +9,6 @@
   model routes ▾
      gpt               default · 1 target                                             collapse ↵
         name              gpt                                                         edit ↵
-        client sends      model = gpt
         default           yes                                                         current
         delete            gpt                                                         delete ↵
 
@@ -25,5 +24,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
-
 

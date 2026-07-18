@@ -63,7 +63,7 @@ func TestStreamingCommitsReaderEffects(t *testing.T) {
 		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
 		Request:          testCanonicalRequest("m"),
 		ReplayScope:      unsafeLocalReplayScope("alpha"),
-		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "", "responses"),
+		Target:           NewRoutableTarget("backend-a", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),

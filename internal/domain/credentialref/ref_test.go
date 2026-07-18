@@ -10,7 +10,7 @@ func TestParseKind(t *testing.T) {
 		want Kind
 	}{
 		{"", KindEmpty},
-		{"keychain:openai/default", KindKeychain},
+		{"secret:openai/default", KindSecret},
 		{"env:OPENAI_API_KEY", KindEnv},
 		{"file:/tmp/token", KindFile},
 		{"/tmp/token", KindFile},

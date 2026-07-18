@@ -64,7 +64,7 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 			if sessionID != "sess-1" {
 				t.Fatalf("session id = %q", sessionID)
 			}
-			return DriverPollResult{State: SessionStateSucceeded, CredentialRef: "keychain:chatgpt/default"}, nil
+			return DriverPollResult{State: SessionStateSucceeded, CredentialRef: "secret:chatgpt/default"}, nil
 		},
 	}, store)
 	if err != nil {
@@ -86,10 +86,10 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 	if session.State != SessionStateSucceeded {
 		t.Fatalf("session state = %q", session.State)
 	}
-	if session.CredentialRef != "keychain:chatgpt/default" {
+	if session.CredentialRef != "secret:chatgpt/default" {
 		t.Fatalf("session credential ref = %q", session.CredentialRef)
 	}
-	if store.subject.DraftSubject != "subject:acme" || store.ref != "keychain:chatgpt/default" {
+	if store.subject.DraftSubject != "subject:acme" || store.ref != "secret:chatgpt/default" {
 		t.Fatalf("store write mismatch subject=%#v ref=%q", store.subject, store.ref)
 	}
 }
@@ -102,7 +102,7 @@ func TestManagerPollUsesPersistedCredentialRefOverride(t *testing.T) {
 			return DriverStartResult{SessionID: "sess-2"}, nil
 		},
 		pollFn: func(_ context.Context, _ string) (DriverPollResult, error) {
-			return DriverPollResult{State: SessionStateSucceeded, CredentialRef: "keychain:chatgpt/default"}, nil
+			return DriverPollResult{State: SessionStateSucceeded, CredentialRef: "secret:chatgpt/default"}, nil
 		},
 	}, store)
 	if err != nil {

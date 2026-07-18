@@ -12,6 +12,7 @@ type SelectProps struct {
 	Label     string
 	Value     string // committed value shown in the row
 	Action    string // optional row action; defaults from state if empty
+	Detail    string // optional committed-value detail shown only while closed
 	AutoFocus bool
 
 	// CanEnter determines if the select can be entered. If nil, always allows entry.
@@ -33,8 +34,8 @@ type SelectProps struct {
 // SelectableRow and, when entered, the Body beneath it. Entered state lives
 // here — callers compose selects without a shared "which is open" enum.
 type Select struct {
-	props    SelectProps
-	entered  *tui.State[bool]
+	props   SelectProps
+	entered *tui.State[bool]
 }
 
 func NewSelect(props SelectProps) *Select {
@@ -85,11 +86,11 @@ func SelectBodyComponent(s *Select) tui.Component {
 }
 
 func (s *Select) actionLabel() string {
-	if s.props.Action != "" {
-		return s.props.Action
-	}
 	if s.entered.Get() {
 		return "close ↵"
+	}
+	if s.props.Action != "" {
+		return s.props.Action
 	}
 	if strings.TrimSpace(s.props.Value) == "" {
 		return "choose ↵"

@@ -1,0 +1,23 @@
+  new target · ChatGPT                                                                cancel ↵
+     provider          ChatGPT                                                        change ↵
+   > authentication    signed in                                                      reconnect ↵
+     model             GPT-5.2                                                        change ↵
+     protocol          OpenAI · Responses · stream                                    fixed
+     routing           fallback after step 1                                          change ↵
+   > create                                                                           create ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

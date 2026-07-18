@@ -44,7 +44,7 @@ func TestProviderRegistry_RejectsUnknownProviderID(t *testing.T) {
 	if _, ok := registry.Discovery("unknown-provider"); ok {
 		t.Fatal("unknown provider discovery must be absent")
 	}
-	if _, err := registry.ListDeployments(context.Background(), exchange.RoutableTarget{}); err == nil {
+	if _, err := registry.ProbeTarget(context.Background(), exchange.RoutableTarget{}); err == nil {
 		t.Fatal("unknown provider id must fail")
 	}
 }

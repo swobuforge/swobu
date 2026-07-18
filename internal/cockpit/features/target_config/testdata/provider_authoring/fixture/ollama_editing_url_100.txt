@@ -1,0 +1,23 @@
+  new target · Ollama                                                                 cancel ↵
+     provider          Ollama                                                         change ↵
+     base URL          http://192.168.1.20:11434                                      edit ↵
+     model             waiting for setup
+     protocol          waiting for model
+     routing           fallback after step 1                                          change ↵
+     create                                                                           complete setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

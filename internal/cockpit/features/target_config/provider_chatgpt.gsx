@@ -12,9 +12,7 @@ type chatGPTProviderForm struct{ target *TargetConfig }
 func ChatGPTProviderForm(w *TargetConfig) tui.Component { return &chatGPTProviderForm{target: w} }
 
 func ChatGPTAuthControl(w *TargetConfig) *ui.SelectableRow {
-	_, label := w.interactiveAuthMode()
-	if label == "" { label = "browser login" }
-	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-start"), "auth", label, "start ↵", w.ContinueSetup)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-start"), "authentication", "signed out", "sign in ↵", w.ContinueSetup)
 	row.AutoFocus = true
 	return row
 }
@@ -22,7 +20,7 @@ func ChatGPTAuthControl(w *TargetConfig) *ui.SelectableRow {
 func ChatGPTAuthSummary(w *TargetConfig) *ui.SelectableRow {
 	_, label := w.interactiveAuthMode()
 	if label == "" { label = "browser login" }
-	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-pending"), "auth", label, "pending", nil)
+	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-pending"), "authentication", label, "pending", nil)
 }
 
 func ChatGPTAuthOpenBrowser(w *TargetConfig) *ui.SelectableRow {
@@ -44,15 +42,15 @@ func ChatGPTAuthCancel(w *TargetConfig) *ui.SelectableRow {
 }
 
 func ChatGPTAuthSignedIn(w *TargetConfig) *ui.SelectableRow {
-	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-signed-in"), "auth", "signed in", "ok", nil)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-signed-in"), "authentication", "signed in", "reconnect ↵", w.startInteractiveAuth)
+	row.AutoFocus = true
+	return row
 }
 
 func ChatGPTAuthFailed(w *TargetConfig) *ui.SelectableRow {
-	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-failed"), "auth", "failed", "back ↵", func() { w.Back() })
-}
-
-func ChatGPTAuthRetry(w *TargetConfig) *ui.SelectableRow {
-	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-retry"), "retry", "", "retry ↵", w.startInteractiveAuth)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-failed"), "authentication", "failed", "retry ↵", w.startInteractiveAuth)
+	row.AutoFocus = true
+	return row
 }
 
 func ChatGPTAuthUserCode(w *TargetConfig) *ui.SelectableRow {
@@ -67,7 +65,7 @@ func ChatGPTAuthUserCode(w *TargetConfig) *ui.SelectableRow {
 
 templ (f *chatGPTProviderForm) Render() {
 	<div class="flex-col w-full" deps={f.target.Draft, f.target.BaseURL}>
-		if f.target.Phase.Get() == PhaseAuthPending {
+		if targetAuthPending(f.target) {
 			<div deps={f.target.AuthSession, f.target.Error}>
 				@ChatGPTAuthSummary(f.target)
 				@ChatGPTAuthOpenBrowser(f.target)
@@ -77,17 +75,13 @@ templ (f *chatGPTProviderForm) Render() {
 				@ChatGPTAuthStatus(f.target)
 				@ChatGPTAuthCancel(f.target)
 			</div>
-			@ModelSelectRow(f.target)
-		} else if f.target.Phase.Get() == PhaseAuthFailed {
+		} else if targetAuthFailed(f.target) {
 			@ChatGPTAuthFailed(f.target)
-			@ChatGPTAuthRetry(f.target)
 		} else {
-			if f.target.RequiresInteractiveAuth() && strings.TrimSpace(f.target.Draft.Get().CredentialRef) == "" {
+			if targetUsesInteractiveAuth(f.target) && strings.TrimSpace(f.target.Draft.Get().CredentialRef) == "" {
 				@ChatGPTAuthControl(f.target)
-			} else if f.target.AuthSession.Get().State == "succeeded" {
+			} else if strings.TrimSpace(f.target.Draft.Get().CredentialRef) != "" {
 				@ChatGPTAuthSignedIn(f.target)
-			} else if genericCredentialRowVisible(f.target) {
-				<div key={credentialRegionKey(f.target)} class="w-full">@CredentialControlRegion(f.target)</div>
 			}
 		}
 	</div>

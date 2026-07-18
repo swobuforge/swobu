@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/domain/credentialref"
 )
 
 func targetConfigTitle(w *TargetConfig) string {
@@ -34,27 +33,6 @@ func targetConfigParentAction(w *TargetConfig) string {
 		return "collapse ↵"
 	}
 	return "cancel ↵"
-}
-
-func credentialDisplay(w *TargetConfig) string {
-	setup := w.setupState()
-	if setup.CredentialLabel != "" && setup.ReadyForCatalog {
-		if setup.CredentialLabel == setup.CredentialRef {
-			return credentialRefDisplay(setup.CredentialRef)
-		}
-		return setup.CredentialLabel
-	}
-	return credentialRefDisplay(w.Draft.Get().CredentialRef)
-}
-
-func credentialRefDisplay(raw string) string {
-	ref := strings.TrimSpace(raw)
-	switch credentialref.Parse(ref).Kind() {
-	case credentialref.KindSecret, credentialref.KindSecretFile:
-		return "secret"
-	default:
-		return ref
-	}
 }
 
 func TargetAddMountKey(w *TargetConfig, suffix string) string {
@@ -111,10 +89,20 @@ type TargetConfig struct {
 	// All disclosure regions are gone: model + placement + provider are fresh
 	// ui.Selects / reset-to-empty, and the credential drill-down lives on the
 	// local component state (no disclosure control structs remain).
-	app              *tui.App
-	catalogProbeSeq  int64
-	operationContext context.Context
-	cancelOperations context.CancelFunc
+	app                   *tui.App
+	catalogProbeSeq       int64
+	operationContext      context.Context
+	cancelOperations      context.CancelFunc
+	credentialReadDir     func(string) ([]ui.FileBrowserEntry, error)
+	credentialInitialPath string
+	credentialSlot        string
+}
+
+func (w *TargetConfig) actionContext() context.Context {
+	if w.operationContext == nil {
+		w.operationContext, w.cancelOperations = context.WithCancel(context.Background())
+	}
+	return w.operationContext
 }
 
 // NewTargetConfig builds an idle (closed) target config. Mount it by calling Open().
@@ -130,6 +118,7 @@ func NewTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.RouteRea
 		OnClose:          onClose,
 		operationContext: operationContext,
 		cancelOperations: cancelOperations,
+		credentialSlot:   newCredentialSlot(workspaceID, route.ID, ""),
 	}
 }
 
@@ -140,14 +129,10 @@ func NewEditTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.Rout
 	w := NewTargetConfig(workspaceID, route, save, onClose)
 	w.mode = targetConfigModeEdit
 	w.Target = target
+	w.credentialSlot = newCredentialSlot(workspaceID, route.ID, target.ID)
 	w.Draft.Set(TargetDraftFromReadModel(route.ID, target))
 	w.BaseURL.Set(strings.TrimSpace(target.BaseURL))
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{
-		ID:                      target.Model,
-		Name:                    target.Model,
-		ModelName:               target.Model,
-		DefaultProviderProtocol: target.ProviderProtocol,
-	})
+	w.SelectedModel.Set(selectedModelSeedFromTarget(target))
 	w.Placement.Set(defaultPlacementForRoute(route))
 	if w.Draft.Get().ProviderSpec != "" {
 		w.refreshSetup()
@@ -155,9 +140,9 @@ func NewEditTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.Rout
 	return w
 }
 
-// Open transitions from Closed to ChoosingProvider.
+// Open transitions the form from closed to open.
 func (w *TargetConfig) Open() {
-	if w.Phase.Get() != PhaseClosed {
+	if w.Lifecycle.Get() != LifecycleClosed {
 		return
 	}
 	if w.operationContext == nil || w.operationContext.Err() != nil {
@@ -165,34 +150,40 @@ func (w *TargetConfig) Open() {
 	}
 	w.Error.Set("")
 	if w.mode == targetConfigModeEdit && w.Draft.Get().ProviderSpec != "" && w.SelectedModel.Get().ModelName != "" {
-		w.Phase.Set(PhaseReadyToCreate)
+		if w.IsBedrockFlow() || w.IsAzureFlow() {
+			w.Lifecycle.Set(LifecycleOpen)
+			setup := w.refreshSetup()
+			w.ReadyAndProbe(setup.CredentialRef, w.BaseURL.Get())
+			return
+		}
+		w.Lifecycle.Set(LifecycleOpen)
 		return
 	}
-	w.Phase.Set(PhaseConfiguring)
+	w.Lifecycle.Set(LifecycleOpen)
 }
 
 // IsOpen reports whether the target config has left the Closed phase.
 func (w *TargetConfig) IsOpen() bool {
-	return w.Phase.Get() != PhaseClosed
+	return w.Lifecycle.Get() != LifecycleClosed
 }
 
 // ShouldRenderTargetTail keeps the one global tail out of provider-owned auth
 // stages, where model/protocol/create controls would misrepresent readiness.
 func (w *TargetConfig) ShouldRenderTargetTail() bool {
-	return w.Phase.Get() != PhaseAuthPending && w.Phase.Get() != PhaseAuthFailed
+	return !w.authSessionPending() && !w.authSessionFailed()
 }
 
 // Back handles only feature-owned state. Entered rows and pickers own their
 // local Escape behavior through ui primitives.
 func (w *TargetConfig) Back() bool {
-	if w.Phase.Get() == PhaseClosed || w.Phase.Get() == PhaseCreated {
+	if w.Lifecycle.Get() == LifecycleClosed || w.Lifecycle.Get() == LifecycleCreated {
 		return false
 	}
 	if w.DeleteArmed.Get() {
 		w.DeleteArmed.Set(false)
 		return true
 	}
-	if w.Phase.Get() == PhaseAuthPending {
+	if w.authSessionPending() {
 		w.CancelAuthSession()
 		return true
 	}
@@ -202,7 +193,7 @@ func (w *TargetConfig) Back() bool {
 
 // Close forcibly closes the target config from any phase.
 func (w *TargetConfig) Close() {
-	w.Phase.Set(PhaseClosed)
+	w.Lifecycle.Set(LifecycleClosed)
 	w.DeleteArmed.Set(false)
 	if w.cancelOperations != nil {
 		w.cancelOperations()
@@ -260,16 +251,23 @@ func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route rea
 	if strings.TrimSpace(w.Draft.Get().ProviderSpec) == "" {
 		w.Draft.Set(TargetDraftFromReadModel(route.ID, target))
 		w.BaseURL.Set(strings.TrimSpace(target.BaseURL))
-		w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{
-			ID:                      target.Model,
-			Name:                    target.Model,
-			ModelName:               target.Model,
-			DefaultProviderProtocol: target.ProviderProtocol,
-		})
+		w.SelectedModel.Set(selectedModelSeedFromTarget(target))
 		w.Placement.Set(defaultPlacementForRoute(route))
 		if w.Draft.Get().ProviderSpec != "" {
 			w.refreshSetup()
 		}
+	}
+}
+
+// selectedModelSeedFromTarget keeps persisted selection distinct from model
+// capability evidence. The target protocol is a default selection only;
+// supported protocols remain sparse for profile resolution to own.
+func selectedModelSeedFromTarget(target readmodel.TargetReadModel) readmodel.ModelDeploymentReadModel {
+	return readmodel.ModelDeploymentReadModel{
+		ID:                      target.Model,
+		Name:                    target.Model,
+		ModelName:               target.Model,
+		DefaultProviderProtocol: target.ProviderProtocol,
 	}
 }
 

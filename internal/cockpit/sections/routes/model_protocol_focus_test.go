@@ -19,9 +19,9 @@ func TestAddTargetModelSelectionStaysLocalOnRequiredProtocol(t *testing.T) {
 	section.AddTarget(route)
 	config := section.TargetConfigs.CachedAdd(route.ID)
 	config.Draft.Set(readmodel.TargetDraft{ProviderSpec: "openai", CredentialRef: "env:OPENAI_API_KEY"})
-	config.Catalog.Set(readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{
+	config.SetCatalogResult(readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{
 		ID: "gpt-5.6", Name: "gpt-5.6", ModelName: "gpt-5.6",
-	}}})
+	}}}, nil)
 
 	h, err := testkit.NewHarness(section)
 	if err != nil {

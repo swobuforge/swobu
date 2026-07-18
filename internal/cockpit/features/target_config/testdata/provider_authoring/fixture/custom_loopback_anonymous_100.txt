@@ -1,0 +1,23 @@
+  new target · Custom Endpoint                                                        cancel ↵
+     provider          Custom Endpoint                                                change ↵
+     backend URL       http://127.0.0.1:8080/v1                                       edit ↵
+     credential        none                                                           add ↵
+     model             local-model                                                    change ↵
+     protocol          OpenAI · Chat Completions · stream                             change ↵
+     routing           fallback after step 1                                          change ↵
+   > create                                                                           create ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

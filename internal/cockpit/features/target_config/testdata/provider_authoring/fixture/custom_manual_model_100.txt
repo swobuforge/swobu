@@ -1,0 +1,23 @@
+  new target · Custom Endpoint                                                        cancel ↵
+     provider          Custom Endpoint                                                change ↵
+     backend URL       https://api.z.ai/api/anthropic                                 edit ↵
+     credential        stored credential                                              change ↵
+     credential header Authorization                                                  change ↵
+   > model             required                                                       choose ↵
+     protocol          waiting for model
+     routing           fallback after step 1                                          change ↵
+     create                                                                           complete setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+

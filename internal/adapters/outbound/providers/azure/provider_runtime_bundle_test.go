@@ -68,19 +68,19 @@ func TestNewRuntime_UsesAzureProjectDeploymentsEndpointOnProjectEndpoint(t *test
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	deployments, err := bundle.Discovery.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	probe, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		string(protocolkind.ChatCompletions),
-	))
+		string(protocolkind.ChatCompletions)))
 	if err != nil {
 		t.Fatalf("ListDeployments returned error: %v", err)
 	}
+	deployments := probe.Deployments
 	if len(deployments) != 2 {
 		t.Fatalf("deployments=%v want 2", deployments)
 	}
@@ -118,19 +118,19 @@ func TestListDeployments_UsesTargetProjectEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	deployments, err := bundle.Discovery.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	probe, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		string(protocolkind.ChatCompletions),
-	))
+		string(protocolkind.ChatCompletions)))
 	if err != nil {
 		t.Fatalf("ListDeployments returned error: %v", err)
 	}
+	deployments := probe.Deployments
 	if len(deployments) != 1 {
 		t.Fatalf("deployments=%v want 1", deployments)
 	}
@@ -152,16 +152,15 @@ func TestListDeployments_PreservesBackendErrorOrigin(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	_, err := bundle.Discovery.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	_, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		string(protocolkind.ChatCompletions),
-	))
+		string(protocolkind.ChatCompletions)))
 	if err == nil {
 		t.Fatal("ListDeployments returned nil error, want backend error")
 	}
@@ -209,10 +208,9 @@ func TestResolveProviderIngress_UsesAnthropicPathForMessages(t *testing.T) {
 			"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 			"env:AZURE_OPENAI_API_KEY",
 			protocolkind.Messages,
-			"credential_ref",
+
 			"",
-			"messages",
-		),
+			"messages"),
 	)
 	if _, err := bundle.ProviderExecutor.ResolveProviderIngress(context.Background(), req); err != nil {
 		t.Fatalf("ResolveProviderIngress returned error: %v", err)
@@ -235,19 +233,19 @@ func TestNewRuntime_PreservesAzureDeploymentsWithoutMetadata(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	deployments, err := bundle.Discovery.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	probe, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
 		protocolkind.ChatCompletions,
-		"credential_ref",
+
 		"",
-		"",
-	))
+		""))
 	if err != nil {
 		t.Fatalf("ListDeployments returned error: %v", err)
 	}
+	deployments := probe.Deployments
 	if len(deployments) != 1 {
 		t.Fatalf("deployments=%v want 1", deployments)
 	}

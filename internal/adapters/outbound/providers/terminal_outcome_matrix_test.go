@@ -195,7 +195,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				request,
 				wireRequestResult.Value,
 				exchange.NewExecutionContract(tc.providerDelivery),
-				exchange.NewRoutableTarget("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "credential_ref", "", tc.providerProtocol),
+				exchange.NewRoutableTarget("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "", tc.providerProtocol),
 			)
 
 			ingress, err := registry.ResolveProviderIngress(context.Background(), req)
@@ -305,7 +305,7 @@ func TestProviderIngress_AzurePromptContentFilterReturnsBackendError(t *testing.
 		request,
 		wireRequestResult.Value,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-a", string(profile.ProviderSpecAzure), "contact-8837-resource", "cred-1", protocolkind.Responses, "credential_ref", "", "responses"),
+		exchange.NewRoutableTarget("backend-a", string(profile.ProviderSpecAzure), "contact-8837-resource", "cred-1", protocolkind.Responses, "", "responses"),
 	)
 
 	_, err = registry.ResolveProviderIngress(context.Background(), req)

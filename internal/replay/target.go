@@ -15,7 +15,6 @@ type TargetKey struct {
 	// AuthScope is the stable auth namespace. Replay relies on the control
 	// plane to treat the credential ref as immutable once bound.
 	AuthScope string
-	AuthKind  string
 	ModelID   string
 }
 
@@ -27,7 +26,6 @@ func TargetKeyFromRoutableTarget(
 	providerProtocol string,
 	baseURL string,
 	authScope string,
-	authKind string,
 	modelID string,
 ) TargetKey {
 	return TargetKey{
@@ -36,7 +34,6 @@ func TargetKeyFromRoutableTarget(
 		ProviderProtocol: providerProtocol,
 		BaseURL:          baseURL,
 		AuthScope:        authScope,
-		AuthKind:         authKind,
 		ModelID:          modelID,
 	}
 }

@@ -20,7 +20,7 @@ func TestDiagnosticsPayload_OmitsBodies(t *testing.T) {
 func TestDiagnosticsPayload_OmitsCredentials(t *testing.T) {
 	payload := diagnosticsPayloadFixture()
 
-	assertDiagnosticsDoesNotContain(t, payload, "OPENAI_API_KEY", "env:", "credential", "keychain:")
+	assertDiagnosticsDoesNotContain(t, payload, "OPENAI_API_KEY", "env:", "credential", "secret:")
 }
 
 func TestDiagnosticsPayload_IncludesSafeNames(t *testing.T) {

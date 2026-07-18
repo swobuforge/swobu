@@ -250,6 +250,9 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	if !strings.Contains(body, `"name":"openai_compatible:gpt-4o"`) {
 		t.Fatalf("body = %q, want model name", body)
 	}
+	if !strings.Contains(body, `"id":"default"`) || !strings.Contains(body, `"name":"default"`) {
+		t.Fatalf("body = %q, want public default-route model", body)
+	}
 	if strings.Contains(body, `"swobu_model"`) || strings.Contains(body, `"swobu_default"`) || strings.Contains(body, `"swobu_backend"`) || strings.Contains(body, `"swobu_provider"`) {
 		t.Fatalf("body = %q, want OpenAI-shaped model entries without swobu_* fields", body)
 	}
@@ -878,7 +881,7 @@ func (h *capturingRequestIngress) HandleRequest(_ context.Context, in exchange.R
 	if err != nil {
 		return exchange.RequestOutput{}, err
 	}
-	out.Target = exchange.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "", "")
+	out.Target = exchange.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "")
 	return out, nil
 }
 

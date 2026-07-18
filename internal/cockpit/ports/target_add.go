@@ -4,25 +4,22 @@ import (
 	"context"
 
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 // TargetSetupQueries reads provider options and model catalogs for the
 // add-target workflow.
 //
 // Adapter ownership: LiveOperatorAdapter must project from profile catalog
-// and operator client model-catalog probe.
+// and operator client target probe.
 type TargetSetupQueries interface {
 	ProbeProviderModels(ctx context.Context, req ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error)
 }
 
-// ProbeProviderModelsRequest names the provider and any resolved setup facts
-// so the adapter can probe the model catalog.
+// ProbeProviderModelsRequest carries the same valid connection meaning used by
+// target persistence and execution.
 type ProbeProviderModelsRequest struct {
-	ProviderSpec     string
-	BaseURL          string
-	AuthHeader       string
-	CredentialRef    string
-	AuthMode         string
+	Connection       routing.Connection
 	ProviderProtocol string
 }
 
@@ -59,9 +56,8 @@ type TargetCredentialCommands interface {
 // cockpit adapter boundary. UI components must keep only the returned ref.
 type StorePastedCredentialRequest struct {
 	ProviderSpec string
-	// Name is a generated storage slot, not user-facing input.
-	// Callers should include enough semantic context for diagnostics and a
-	// unique suffix to avoid overwriting another secret.
+	// Name is a stable form-owned storage slot, not user-facing input. Repeated
+	// paste operations for one target overwrite it instead of leaking entries.
 	Name   string
 	Secret string
 }

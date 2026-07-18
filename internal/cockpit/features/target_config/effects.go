@@ -2,71 +2,104 @@ package target_config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-// draft_projection.go projects between the durable TargetDraft the cockpit
-// edits/persists and the read/working shapes around it. Pure: no ports, no
-// go-tui. Provider arms are opaque to these projections — each provider writes
-// its own arm directly, so arms ride through unchanged.
-
-// TargetDraftFromReadModel un-flattens the system wire/read shape into the typed
-// draft the cockpit edits and persists. It is the read-boundary reverse of
-// the workspace command projection into the local draft an edit session starts
-// from.
-//
-// Provider-specific options return to their typed arm: AuthHeader is the
-// OpenAI-compatible arm, AuthMode/Region/ProfileName are the Bedrock arm.
-// Azure/ChatGPT/default carry everything on the spine and contribute no arm.
-func TargetDraftFromReadModel(routeID readmodel.RouteID, t readmodel.TargetReadModel) readmodel.TargetDraft {
-	spec := strings.TrimSpace(t.Provider) // swobu:io-string source=boundary
-	endpointSpec, _ := profile.EndpointSpecForProvider(spec)
-	d := readmodel.TargetDraft{
-		ProviderSpec:     spec,
-		Endpoint:         readmodel.ProviderEndpointDraft{Kind: endpointSpec.Kind, Value: strings.TrimSpace(t.BaseURL)},
-		CredentialRef:    strings.TrimSpace(t.CredentialRef),
-		ProviderProtocol: strings.TrimSpace(t.ProviderProtocol),
-		ModelID:          strings.TrimSpace(t.Model),
-		RouteModelID:     strings.TrimSpace(string(routeID)),
-	}
-	switch profile.ProviderID(spec) {
-	case profile.ProviderSpecOpenAICompatible:
-		d.ProviderOptions.OpenAICompatible.CredentialHeader = strings.TrimSpace(t.AuthHeader)
-	case profile.ProviderSpecBedrock:
-		d.ProviderOptions.Bedrock.AuthMode = strings.TrimSpace(t.AuthMode)
-		d.ProviderOptions.Bedrock.Region = profile.BedrockMantleRegionFromEndpoint(t.BaseURL)
-		d.ProviderOptions.Bedrock.ProfileName = profile.BedrockProfileNameFromCredentialRef(t.CredentialRef)
-	}
-	return d
+func credentialDisplay(w *TargetConfig) string {
+	return credentialRefDisplay(w.Draft.Get().CredentialRef)
 }
 
-// currentTargetDraft projects the working Draft into the save-boundary draft,
-// applying only the spine fields still held as UI state (endpoint value,
-// selected model, placement). Provider arms are opaque to this projection —
-// each provider writes its own arm directly, so it rides through unchanged.
-func (w *TargetConfig) currentTargetDraft(modelID string, providerProtocol string, placement readmodel.PlacementOptionReadModel) readmodel.TargetDraft {
-	draft := w.Draft.Get() // provider arms ride through, owned by their providers
-	endpointSpec, _ := profile.EndpointSpecForProvider(draft.ProviderSpec)
-	draft.Endpoint.Kind = endpointSpec.Kind
-	draft.Endpoint.Value = strings.TrimSpace(w.BaseURL.Get()) // swobu:io-string source=boundary
-	draft.ProviderProtocol = strings.TrimSpace(providerProtocol)
-	draft.ModelID = strings.TrimSpace(modelID)
-	draft.RouteModelID = strings.TrimSpace(string(w.Route.ID)) // swobu:io-string source=boundary
-	_ = placement
-	return draft
+// CredentialControlRegion is the narrow feature adapter: it resolves provider
+// policy and effects into props, then mounts the provider-neutral field.
+func CredentialControlRegion(w *TargetConfig, autoFocus ...bool) tui.Component {
+	focus := len(autoFocus) > 0 && autoFocus[0]
+	return newCredentialRow(w, focus)
 }
 
-func (w *TargetConfig) actionContext() context.Context {
-	if w.operationContext == nil {
-		w.operationContext, w.cancelOperations = context.WithCancel(context.Background())
+func credentialRegionKey(w *TargetConfig) string {
+	return TargetAddMountKey(w, "credential:"+strings.TrimSpace(w.Draft.Get().ProviderSpec))
+}
+
+func newCredentialRow(target *TargetConfig, autoFocus bool) *credentialRow {
+	provider, _ := providerProfileForSpec(target.Draft.Get().ProviderSpec)
+	props := CredentialFieldProps{
+		ID: credentialRegionKey(target), Optional: providerAllowsNoCredential(target),
+		SuggestedEnvVar: provider.Credential.SuggestedEnvVar,
+		Ref:             target.Draft.Get().CredentialRef, AutoFocus: autoFocus,
 	}
-	return w.operationContext
+	props.Apply = func(ref string) { target.changeCredentialRef(strings.TrimSpace(ref)) }
+	props.Store = func(secret string) (string, error) {
+		return target.storePastedCredential(target.actionContext(), secret)
+	}
+	row := newCredentialField(props)
+	if target.credentialReadDir != nil {
+		row.readDir = target.credentialReadDir
+	}
+	if target.credentialInitialPath != "" {
+		row.filePath.Set(target.credentialInitialPath)
+	}
+	return row
+}
+
+func (w *TargetConfig) changeCredentialRef(ref string) {
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.CredentialRef = strings.TrimSpace(ref)
+		return d
+	})
+	w.invalidateCatalogSelection()
+	w.advanceFromSetup()
+	w.CommitEdit(w.actionContext())
+}
+
+func (w *TargetConfig) storePastedCredential(ctx context.Context, secret string) (string, error) {
+	if w.CredentialCommands == nil {
+		return "", errors.New("credential store is not wired yet")
+	}
+	result, err := w.CredentialCommands.StorePastedCredential(ctx, ports.StorePastedCredentialRequest{ProviderSpec: w.Draft.Get().ProviderSpec, Name: w.credentialSlot, Secret: secret})
+	if err != nil {
+		return "", err
+	}
+	ref := strings.TrimSpace(result.CredentialRef)
+	if ref == "" {
+		return "", errors.New("credential store returned empty ref")
+	}
+	return ref, nil
+}
+
+func newCredentialSlot(workspaceID readmodel.WorkspaceID, routeID readmodel.RouteID, targetID readmodel.TargetID) string {
+	targetPart := string(targetID)
+	if strings.TrimSpace(targetPart) == "" {
+		targetPart = fmt.Sprintf("draft-%d", time.Now().UTC().UnixNano())
+	}
+	return strings.Join([]string{"cockpit", "target", safeCredentialSlotPart(string(workspaceID), "workspace"), safeCredentialSlotPart(string(routeID), "route"), safeCredentialSlotPart(targetPart, "target")}, "/")
+}
+
+func safeCredentialSlotPart(raw, fallback string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw)) // swobu:io-string source=boundary
+	var out []rune
+	lastDash := false
+	for _, r := range raw {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			out = append(out, r)
+			lastDash = false
+		} else if !lastDash {
+			out = append(out, '-')
+			lastDash = true
+		}
+	}
+	if cleaned := strings.Trim(string(out), "-_"); cleaned != "" {
+		return cleaned
+	}
+	return fallback
 }
 
 // effects.go owns target_config product transitions and all calls to cockpit
@@ -74,28 +107,44 @@ func (w *TargetConfig) actionContext() context.Context {
 
 // SetCatalogResult updates the catalog result and transitions to ChoosingModel
 // or CatalogFailed.
-func (w *TargetConfig) SetCatalogResult(result readmodel.ModelCatalogReadModel) {
-	if w.IsAzureFlow() {
-		result.Error = azureCatalogOperatorError(result)
+func (w *TargetConfig) SetCatalogResult(result readmodel.ModelCatalogReadModel, probeErr error) {
+	errText := ""
+	if probeErr != nil {
+		errText = strings.TrimSpace(probeErr.Error())
+		if w.IsAzureFlow() {
+			errText = azureCatalogOperatorError(errText)
+		}
 	}
-	w.Catalog.Set(result)
-	w.CatalogLoading.Set(false)
-	if result.Error != "" {
-		w.Error.Set(result.Error)
-		w.Phase.Set(PhaseCatalogFailed)
+	state := catalogOperationState{Result: result, Err: errText}
+	if errText != "" {
+		w.Catalog.Set(state)
 		return
 	}
-	w.Error.Set("")
-	if w.mode == targetConfigModeEdit && w.hydrateSelectedModel(result.Deployments) {
-		w.Phase.Set(PhaseReadyToCreate)
+	w.Catalog.Set(state)
+	if w.reconcileSelectedModel(result.Deployments) {
 		return
 	}
 	if w.IsAzureFlow() && len(result.Deployments) == 0 {
-		w.Error.Set("none found")
-		w.Phase.Set(PhaseCatalogFailed)
+		state.Err = "none found"
+		w.Catalog.Set(state)
 		return
 	}
-	w.Phase.Set(PhaseConfiguring)
+}
+
+// reconcileSelectedModel preserves a selection only while the refreshed
+// provider catalog still contains it; protocol truth is cleared with a stale
+// model so creation cannot proceed on evidence from an earlier probe.
+func (w *TargetConfig) reconcileSelectedModel(deployments []readmodel.ModelDeploymentReadModel) bool {
+	selected := w.SelectedModel.Get()
+	if strings.TrimSpace(selected.ModelName) == "" {
+		return false
+	}
+	if w.hydrateSelectedModel(deployments) {
+		return true
+	}
+	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ModelID = ""; d.ProviderProtocol = ""; return d })
+	return false
 }
 
 func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploymentReadModel) bool {
@@ -114,7 +163,8 @@ func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploym
 				return true
 			}
 		}
-		return false
+		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
+		return true
 	}
 	return false
 }
@@ -129,18 +179,72 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 	switch len(options) {
 	case 0:
 		w.Error.Set("no supported protocol for selected model")
-		w.Phase.Set(PhaseReadyToCreate)
 	case 1:
 		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 			d.ProviderProtocol = options[0].ID
 			return d
 		})
-		w.Phase.Set(PhaseReadyToCreate)
 		w.CommitEdit(w.actionContext())
 	default:
 		// Multiple protocols: the protocol ui.Select row becomes enterable; the
 		// operator opens it manually (no auto-open).
-		w.Phase.Set(PhaseReadyToCreate)
+	}
+}
+
+func (w *TargetConfig) selectModelByID(id string) {
+	for _, deployment := range w.catalogResult().Deployments {
+		if deployment.ID == id {
+			w.SelectModel(deployment)
+			return
+		}
+	}
+	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: id, Name: id, ModelName: id})
+}
+
+func (w *TargetConfig) selectProtocol(protocol string) {
+	protocol = strings.TrimSpace(protocol)
+	for _, option := range w.CurrentProtocolOptions() {
+		if option.ID != protocol {
+			continue
+		}
+		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = protocol; return d })
+		w.Error.Set("")
+		w.CommitEdit(w.actionContext())
+		return
+	}
+	if protocol != "" {
+		w.Error.Set("unsupported protocol " + protocol)
+	}
+}
+
+func (w *TargetConfig) SelectProvider(spec string) {
+	spec = strings.TrimSpace(spec) // swobu:io-string source=boundary
+	w.resetFlowState()
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderSpec = spec; return d })
+	w.Error.Set("")
+	w.seedSetupDefaults()
+	seedProviderDefaults(w)
+	w.refreshSetup()
+	w.Lifecycle.Set(LifecycleOpen)
+}
+
+func (w *TargetConfig) SetSetupReady(credentialRef, baseURL string) {
+	credentialRef, baseURL = strings.TrimSpace(credentialRef), strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		baseURL = profile.DefaultExecuteBaseURL(w.Draft.Get().ProviderSpec)
+	}
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.CredentialRef = credentialRef
+		return d
+	})
+	w.BaseURL.Set(baseURL)
+	w.Error.Set("")
+	w.advanceFromSetup()
+}
+
+func seedProviderDefaults(w *TargetConfig) {
+	if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecOpenAICompatible {
+		w.reseedInferredCredentialHeader()
 	}
 }
 
@@ -148,16 +252,16 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 // the phase. If TargetSetupQueries is set it calls the daemon; otherwise
 // it falls back to the static catalog for Tier 1-2 providers.
 func (w *TargetConfig) ProbeCatalog() {
-	if w.Phase.Get() != PhaseLoadingCatalog {
+	if !w.catalogLoading() {
 		return
 	}
-	draft := w.currentTargetDraft("", "", w.Placement.Get())
-	result := probeCatalogSnapshot(
+	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), "", "", w.Route.ID)
+	result, err := probeCatalogSnapshot(
 		w.actionContext(),
 		w.TargetSetupQueries,
 		draft,
 	)
-	w.SetCatalogResult(result)
+	w.SetCatalogResult(result, err)
 }
 
 // ReadyAndProbe commits the projected setup inputs, enters LoadingCatalog,
@@ -175,32 +279,35 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 		return d
 	})
 	w.BaseURL.Set(baseURL)
-	setup := w.refreshSetup()
-	if !setup.ReadyForCatalog {
-		w.CatalogLoading.Set(false)
-		w.Phase.Set(PhaseConfiguring)
+	w.invalidateCatalogSelection()
+	w.startCatalogProbe()
+}
+
+// startCatalogProbe owns both the loading transition and probe execution.
+func (w *TargetConfig) startCatalogProbe() {
+	if !w.refreshSetup().Ready() {
+		w.Catalog.Set(catalogOperationState{})
 		return
 	}
-	w.CatalogLoading.Set(true)
+	w.invalidateCatalogEvidence()
+	w.Catalog.Set(catalogOperationState{Loading: true})
 	w.Error.Set("")
-	w.Phase.Set(PhaseLoadingCatalog)
 	if w.hasLiveApp() {
-		w.catalogProbeSeq++
 		seq := w.catalogProbeSeq
 		app := w.app
-		draft := w.currentTargetDraft("", "", w.Placement.Get())
+		draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), "", "", w.Route.ID)
 		queries := w.TargetSetupQueries
 		ctx := w.actionContext()
 		go func() {
-			result := probeCatalogSnapshot(ctx, queries, draft)
+			result, probeErr := probeCatalogSnapshot(ctx, queries, draft)
 			if app == nil {
 				return
 			}
 			app.QueueUpdate(func() {
-				if seq != w.catalogProbeSeq || w.Phase.Get() != PhaseLoadingCatalog {
+				if seq != w.catalogProbeSeq || !w.catalogLoading() {
 					return
 				}
-				w.SetCatalogResult(result)
+				w.SetCatalogResult(result, probeErr)
 			})
 		}()
 		return
@@ -210,22 +317,52 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 // ContinueSetup advances from provider-specific setup when the current draft
 // snapshot is ready, or starts an interactive auth branch such as ChatGPT.
 func (w *TargetConfig) ContinueSetup() {
-	if w.Phase.Get() != PhaseConfiguring {
+	if w.Lifecycle.Get() != LifecycleOpen {
 		return
 	}
 	setup := w.refreshSetup()
-	if setup.InteractiveAuth {
+	if w.RequiresInteractiveAuth() {
 		w.startInteractiveAuth()
 		return
 	}
-	if setup.ReadyForCatalog {
+	if setup.Ready() {
 		w.ReadyAndProbe(setup.CredentialRef, w.BaseURL.Get())
 		return
 	}
-	w.Phase.Set(PhaseConfiguring)
 }
 
-// ChangeProvider returns to the empty provider picker (RFC Phase 8). Changing
+// SelectPlacement commits the routing choice selected by the placement picker.
+func (w *TargetConfig) SelectPlacement(p readmodel.PlacementOptionReadModel) {
+	w.Placement.Set(p)
+	w.CommitEdit(w.actionContext())
+}
+
+func (w *TargetConfig) SelectBedrockRegion(region string) {
+	region = strings.TrimSpace(region)
+	if region == "" || !profile.SupportsBedrockMantleRegion(region) {
+		return
+	}
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.Locator = region
+		return d
+	})
+	w.invalidateCatalogSelection()
+	w.Error.Set("")
+	w.advanceFromSetup()
+}
+
+func (w *TargetConfig) RefreshBedrockIdentity() {
+	w.startCatalogProbe()
+}
+
+// invalidateCatalogEvidence makes the previous probe non-authoritative without
+// destroying the visible selection. The next result reconciles that selection.
+func (w *TargetConfig) invalidateCatalogEvidence() {
+	w.Catalog.Set(catalogOperationState{})
+	w.catalogProbeSeq++
+}
+
+// ChangeProvider returns to the empty provider picker. Changing
 // provider is a reset, not a disclosure toggle: the draft provider clears, setup
 // state resets, and the view shows the provider picker (ProviderEmpty). Picking
 // a new provider re-seeds defaults; Escape from the empty picker abandons.
@@ -238,7 +375,7 @@ func (w *TargetConfig) ChangeProvider() {
 	}
 	w.resetFlowState()
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderSpec = ""; return d })
-	w.Phase.Set(PhaseConfiguring)
+	w.Lifecycle.Set(LifecycleOpen)
 }
 
 // seedSetupDefaults seeds only parent-owned lifecycle trivia: the default
@@ -250,7 +387,7 @@ func (w *TargetConfig) seedSetupDefaults() {
 	if spec == "" {
 		return
 	}
-	if w.BaseURL.Get() == "" && !profile.RequiresExplicitEndpoint(spec) {
+	if w.BaseURL.Get() == "" && !profile.RequiresLocator(spec) {
 		if defaultBaseURL := profile.DefaultExecuteBaseURL(spec); defaultBaseURL != "" {
 			w.BaseURL.Set(defaultBaseURL)
 		}
@@ -264,96 +401,93 @@ func (w *TargetConfig) refreshSetup() providerSetupState {
 func (w *TargetConfig) advanceFromSetup() {
 	seedProviderDefaults(w)
 	setup := w.refreshSetup()
-	if setup.ReadyForCatalog {
+	if setup.Ready() {
 		w.ReadyAndProbe(setup.CredentialRef, w.BaseURL.Get())
 		return
 	}
-	w.Phase.Set(PhaseConfiguring)
 }
 
-// RetryCatalog re-enters LoadingCatalog from CatalogFailed, reusing setup inputs.
+// invalidateCatalogSelection severs every value derived from the previous
+// connection before a new probe begins. A successful new catalog may then be
+// selected normally; stale evidence is never actionable while loading/failed.
+func (w *TargetConfig) invalidateCatalogSelection() {
+	w.Catalog.Set(catalogOperationState{})
+	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.ModelID = ""
+		d.ProviderProtocol = ""
+		return d
+	})
+}
+
+// RetryCatalog clears the failed catalog operation and reuses setup inputs.
 func (w *TargetConfig) RetryCatalog() {
-	if w.Phase.Get() != PhaseCatalogFailed {
+	if !w.catalogFailed() {
 		return
 	}
 	w.Error.Set("")
-	w.Phase.Set(PhaseConfiguring)
+	w.Catalog.Set(catalogOperationState{})
 	w.ContinueSetup()
 }
 
-func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries, draft readmodel.TargetDraft) readmodel.ModelCatalogReadModel {
+func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries, draft readmodel.TargetDraft) (readmodel.ModelCatalogReadModel, error) {
 	provider := strings.TrimSpace(draft.ProviderSpec)
 	if queries != nil {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		providerProtocol, _ := profile.ResolveConcreteProtocolForAutoAtBoundary(provider)
+		connection, err := connectionFromDraft(draft)
+		if err != nil {
+			return readmodel.ModelCatalogReadModel{}, err
+		}
 		result, err := queries.ProbeProviderModels(ctx, ports.ProbeProviderModelsRequest{
-			ProviderSpec:     provider,
-			BaseURL:          strings.TrimSpace(draft.Endpoint.Value),
-			AuthHeader:       resolvedCredentialHeader(provider, draft.ProviderOptions.OpenAICompatible.CredentialHeader),
-			CredentialRef:    strings.TrimSpace(draft.CredentialRef),
-			AuthMode:         strings.TrimSpace(draft.ProviderOptions.Bedrock.AuthMode),
+			Connection:       connection,
 			ProviderProtocol: providerProtocol,
 		})
 		if err != nil {
-			return readmodel.ModelCatalogReadModel{Error: err.Error()}
+			return result, err
 		}
-		return result
+		return result, nil
 	}
-	// Static catalog fallback: tier 1-2 providers only.
-	deployments := staticCatalogFallback(provider)
-	if len(deployments) == 0 {
-		return readmodel.ModelCatalogReadModel{
-			Error: "no model catalog for provider " + provider + ". try manual entry.",
-		}
-	}
-	return readmodel.ModelCatalogReadModel{
-		Deployments:              deployments,
-		ResolvedProviderProtocol: deployments[0].DefaultProviderProtocol,
-	}
+	return readmodel.ModelCatalogReadModel{}, errors.New("model catalog queries are unavailable")
 }
 
 // ---------------------------------------------------------------------------
 // Interactive auth (browser/device) — e.g. ChatGPT. The target config drives
 // the daemon auth session through ports.TargetAuthCommands and projects session
-// state onto Phase/Error.
+// state onto the ChatGPT-owned session and shared form error.
 // ---------------------------------------------------------------------------
-
-func authModeDaemonName(mode profile.AuthMode) string {
-	switch mode {
-	case profile.AuthModeChatGPTLogin:
-		return "browser"
-	case profile.AuthModeChatGPTDeviceAuth:
-		return "device"
-	default:
-		return strings.TrimSpace(string(mode)) // swobu:io-string source=boundary
-	}
-}
 
 func authSubjectLocator(w *TargetConfig) string {
 	return fmt.Sprintf("subject:%s#%s", strings.TrimSpace(string(w.WorkspaceID)), strings.TrimSpace(string(w.Route.ID)))
 }
 
+func (w *TargetConfig) setAuthFailure(message string) {
+	message = strings.TrimSpace(message)
+	session := w.AuthSession.Get()
+	session.State = "failed"
+	session.ErrorMessage = message
+	w.AuthSession.Set(session)
+	w.Error.Set(message)
+}
+
 func (w *TargetConfig) startInteractiveAuth() {
 	mode, _ := w.interactiveAuthMode()
 	if mode == "" {
-		w.Error.Set("interactive auth is unavailable for provider " + w.Draft.Get().ProviderSpec)
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure("interactive auth is unavailable for provider " + w.Draft.Get().ProviderSpec)
 		return
 	}
 	if w.TargetAuthCommands == nil {
-		w.Error.Set("auth session commands are not wired yet")
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure("auth session commands are not wired yet")
 		return
 	}
 	ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
 	defer cancel()
-	if w.Phase.Get() == PhaseAuthFailed {
+	if w.authSessionFailed() {
 		if sessionID := strings.TrimSpace(w.AuthSession.Get().SessionID); sessionID != "" {
 			session, err := w.TargetAuthCommands.RetryAuthSession(ctx, sessionID)
 			if err != nil {
-				w.Error.Set(err.Error())
-				w.Phase.Set(PhaseAuthFailed)
+				w.setAuthFailure(err.Error())
 				return
 			}
 			w.applyAuthSessionResult(session)
@@ -371,18 +505,17 @@ func (w *TargetConfig) startInteractiveAuth() {
 			}
 			return ""
 		}(),
-		AuthMode: authModeDaemonName(mode),
+		AuthMode: mode,
 	})
 	if err != nil {
-		w.Error.Set(err.Error())
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure(err.Error())
 		return
 	}
 	w.applyAuthSessionResult(session)
 }
 
 func (w *TargetConfig) RefreshAuthSession() {
-	if w.Phase.Get() != PhaseAuthPending {
+	if !w.authSessionPending() {
 		return
 	}
 	session := w.AuthSession.Get()
@@ -390,16 +523,14 @@ func (w *TargetConfig) RefreshAuthSession() {
 		return
 	}
 	if w.TargetAuthCommands == nil {
-		w.Error.Set("auth session commands are not wired yet")
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure("auth session commands are not wired yet")
 		return
 	}
 	ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
 	defer cancel()
 	result, err := w.TargetAuthCommands.PollAuthSession(ctx, session.SessionID)
 	if err != nil {
-		w.Error.Set(err.Error())
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure(err.Error())
 		return
 	}
 	w.applyAuthSessionResult(result)
@@ -413,7 +544,7 @@ func (w *TargetConfig) CancelAuthSession() {
 		cancel()
 	}
 	w.resetFlowState()
-	w.Phase.Set(PhaseConfiguring)
+	w.Lifecycle.Set(LifecycleOpen)
 }
 
 func (w *TargetConfig) applyAuthSessionResult(result readmodel.AuthSessionReadModel) {
@@ -421,32 +552,28 @@ func (w *TargetConfig) applyAuthSessionResult(result readmodel.AuthSessionReadMo
 	switch strings.ToLower(strings.TrimSpace(result.State)) {
 	case "", "pending":
 		w.Error.Set("")
-		w.Phase.Set(PhaseAuthPending)
 	case "succeeded":
 		credentialRef := strings.TrimSpace(result.CredentialRef)
 		if credentialRef == "" {
-			w.Error.Set("auth session succeeded without credential ref")
-			w.Phase.Set(PhaseAuthFailed)
+			w.setAuthFailure("auth session succeeded without credential ref")
 			return
 		}
 		w.SetSetupReady(credentialRef, "")
 	case "canceled":
 		w.resetFlowState()
-		w.Phase.Set(PhaseConfiguring)
+		w.Lifecycle.Set(LifecycleOpen)
 	case "expired", "failed":
 		msg := strings.TrimSpace(result.ErrorMessage)
 		if msg == "" {
 			msg = "auth session " + strings.TrimSpace(result.State)
 		}
-		w.Error.Set(msg)
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure(msg)
 	default:
 		msg := strings.TrimSpace(result.ErrorMessage)
 		if msg == "" {
 			msg = "auth session " + strings.TrimSpace(result.State)
 		}
-		w.Error.Set(msg)
-		w.Phase.Set(PhaseAuthFailed)
+		w.setAuthFailure(msg)
 	}
 }
 
@@ -456,40 +583,63 @@ func (w *TargetConfig) applyAuthSessionResult(result readmodel.AuthSessionReadMo
 
 // Create attempts to persist the target.
 func (w *TargetConfig) Create(ctx context.Context) {
+	if !w.readyToCreate() {
+		w.Error.Set("complete setup")
+		return
+	}
 	if w.SaveTarget == nil {
-		w.Error.Set("target save is not wired yet")
-		w.Phase.Set(PhaseCreateFailed)
+		message := "target save is not wired yet"
+		w.Error.Set(message)
+		w.SaveOperation.Set(createOperationState{Err: message})
 		return
 	}
 	model := w.SelectedModel.Get()
 	placement := w.Placement.Get()
 	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol)
 	if protocol == "" {
-		w.Error.Set("protocol first")
-		w.Phase.Set(PhaseReadyToCreate)
+		w.Error.Set("complete setup")
+		return
+	}
+	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), model.ModelName, protocol, w.Route.ID)
+	connection, err := connectionFromDraft(draft)
+	if err != nil {
+		w.Error.Set(err.Error())
+		w.SaveOperation.Set(createOperationState{Err: err.Error()})
 		return
 	}
 	req := ports.SaveTargetRequest{
 		WorkspaceID: w.WorkspaceID,
 		RouteID:     w.Route.ID,
 		TargetID:    w.Target.ID,
-		Draft:       w.currentTargetDraft(model.ModelName, protocol, placement),
+		ModelID:     draft.ModelID,
+		Protocol:    draft.ProviderProtocol,
+		Connection:  connection,
 		Placement:   placement,
 	}
 	saved, err := w.SaveTarget(ctx, req)
 	if err != nil {
 		w.Error.Set(err.Error())
-		w.Phase.Set(PhaseCreateFailed)
+		w.SaveOperation.Set(createOperationState{Err: err.Error()})
 		return
 	}
 	w.Error.Set("")
-	w.Phase.Set(PhaseCreated)
+	w.SaveOperation.Set(createOperationState{})
+	w.Lifecycle.Set(LifecycleCreated)
 	if w.OnCreated != nil {
 		w.OnCreated(saved)
 	}
 	if w.OnClose != nil {
 		w.OnClose()
 	}
+}
+
+// RetryCreate repeats the failed save with the current validated draft. Retry
+// is an operation, not error dismissal.
+func (w *TargetConfig) RetryCreate() {
+	if !w.createFailed() {
+		return
+	}
+	w.Create(w.actionContext())
 }
 
 // CommitEdit persists the current row-level target facts for an existing target.
@@ -508,13 +658,22 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 	if modelID == "" || protocol == "" {
 		return
 	}
-	saved, err := w.SaveTarget(ctx, ports.SaveTargetRequest{
+	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), modelID, protocol, w.Route.ID)
+	connection, err := connectionFromDraft(draft)
+	if err != nil {
+		w.Error.Set(err.Error())
+		return
+	}
+	req := ports.SaveTargetRequest{
 		WorkspaceID: w.WorkspaceID,
 		RouteID:     w.Route.ID,
 		TargetID:    w.Target.ID,
-		Draft:       w.currentTargetDraft(modelID, protocol, w.Placement.Get()),
+		ModelID:     draft.ModelID,
+		Protocol:    draft.ProviderProtocol,
+		Connection:  connection,
 		Placement:   w.Placement.Get(),
-	})
+	}
+	saved, err := w.SaveTarget(ctx, req)
 	if err != nil {
 		w.Error.Set(err.Error())
 		return

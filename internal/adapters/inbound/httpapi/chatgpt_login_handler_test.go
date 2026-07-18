@@ -84,7 +84,7 @@ func TestChatGPTLoginHandlerGenericSession(t *testing.T) {
 				ProviderSpec:  "chatgpt",
 				SessionID:     "sess-g1",
 				State:         authplane.SessionStateSucceeded,
-				CredentialRef: "keychain:chatgpt/default",
+				CredentialRef: "secret:chatgpt/default",
 			}, nil
 		},
 		nil,

@@ -1,0 +1,23 @@
+  new target · Azure AI                                                               cancel ↵
+     provider          Azure AI                                                       change ↵
+     project           example/demo                                                   edit ↵
+     credential        environment · AZURE_OPENAI_API_KEY                             change ↵
+     deployment        claude-opus-4-8                                                change ↵
+     protocol          Anthropic · Messages · stream                                  change ↵
+     routing           fallback after step 1                                          change ↵
+   > create                                                                           create ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

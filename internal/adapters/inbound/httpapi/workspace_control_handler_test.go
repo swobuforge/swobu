@@ -162,11 +162,11 @@ func TestWorkspaceCommandsRoundTripProviderArmsAcrossStoreReopen(t *testing.T) {
 
 	routes := map[string]string{
 		"anthropic":  `{"id":"anthropic","model":"claude","protocol":"messages","connection":{"anthropic":{"credential":"env:ANTHROPIC_API_KEY"}}}`,
-		"openrouter": `{"id":"openrouter","model":"openai/gpt-5","protocol":"chat_completions","connection":{"openrouter":{"credential":"keychain:openrouter/default"}}}`,
+		"openrouter": `{"id":"openrouter","model":"openai/gpt-5","protocol":"chat_completions","connection":{"openrouter":{"credential":"secret:openrouter/default"}}}`,
 		"chatgpt":    `{"id":"chatgpt","model":"gpt-5","protocol":"responses_stream","connection":{"chatgpt":{"credential":"secretfile:chatgpt/default"}}}`,
 		"ollama":     `{"id":"ollama","model":"llama","protocol":"chat_completions","connection":{"ollama":{}}}`,
 		"azure":      `{"id":"azure","model":"deployment","protocol":"responses","connection":{"azure":{"project_endpoint":"https://example.services.ai.azure.com/api/projects/prod","credential":"env:AZURE_KEY"}}}`,
-		"bedrock":    `{"id":"bedrock","model":"openai.gpt","protocol":"responses_stream","connection":{"bedrock":{"region":"eu-west-2","auth":{"environment":{}}}}}`,
+		"bedrock":    `{"id":"bedrock","model":"openai.gpt","protocol":"responses_stream","connection":{"bedrock":{"region":"eu-west-2"}}}`,
 		"custom":     `{"id":"custom","model":"local","protocol":"chat_completions","connection":{"custom":{"base_url":"https://example.test/v1","header":{"name":"Authorization","credential":"env:CUSTOM_KEY"}}}}`,
 	}
 	for route, target := range routes {

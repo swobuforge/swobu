@@ -3,6 +3,8 @@ package compat
 import (
 	"fmt"
 	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 // Capability describes one route-scoped support fact for one feature.
@@ -124,7 +126,7 @@ func CapabilitiesForRoute(provider string, protocol string, model string) []Capa
 	model = strings.TrimSpace(model)
 	features, ok := routeFeatures(routeKey{
 		Provider: provider,
-		Protocol: protocol,
+		Protocol: protocolkind.ProtocolKind(protocol),
 		Model:    model,
 	})
 	if !ok {

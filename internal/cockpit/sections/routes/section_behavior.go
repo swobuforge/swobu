@@ -68,6 +68,20 @@ func (s *SectionView) KeyMap() tui.KeyMap {
 	}
 }
 
+// BindApp binds the route section's semantic state so route backout redraws
+// the mounted section immediately instead of leaving stale inline detail on
+// screen.
+func (s *SectionView) BindApp(app *tui.App) {
+	if s == nil || s.State == nil {
+		return
+	}
+	s.State.ExpandedRoute.BindApp(app)
+	s.State.OpenTarget.BindApp(app)
+	s.State.AddTargetRoute.BindApp(app)
+	s.State.DeleteConfirmTarget.BindApp(app)
+	s.State.FocusRoute.BindApp(app)
+}
+
 func (s *SectionView) UpdateProps(fresh tui.Component) {
 	f, ok := fresh.(*SectionView)
 	if !ok {

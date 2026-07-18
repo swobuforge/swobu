@@ -14,7 +14,7 @@ type CredentialSourceResolver interface {
 var (
 	_ CredentialSourceResolver = EnvCredentialSourceResolver{}
 	_ CredentialSourceResolver = FileCredentialSourceResolver{}
-	_ CredentialSourceResolver = KeyringCredentialSourceResolver{}
+	_ CredentialSourceResolver = StoredSecretResolver{}
 )
 
 // secretFileCredentialSourceResolver adapts secretfile references onto secret-file storage.
@@ -36,10 +36,9 @@ var _ CredentialSourceResolver = secretFileCredentialSourceResolver{}
 
 func newSourceResolverRegistry() map[credentialref.Kind]CredentialSourceResolver {
 	return map[credentialref.Kind]CredentialSourceResolver{
-		credentialref.KindEnv:      NewEnvResolver(),
-		credentialref.KindFile:     NewFileResolver(),
-		credentialref.KindSecret:   NewKeyringResolver(nil),
-		credentialref.KindKeychain: NewKeyringResolver(nil),
+		credentialref.KindEnv:    NewEnvResolver(),
+		credentialref.KindFile:   NewFileResolver(),
+		credentialref.KindSecret: NewStoredSecretResolver(nil),
 		credentialref.KindSecretFile: secretFileCredentialSourceResolver{
 			store: &secretFileStore{},
 		},

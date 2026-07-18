@@ -3,7 +3,7 @@ package ui
 templ (p *SearchPicker) Render() {
 	list := p.choiceList()
 	win := list.Window()
-	countLabel, hint := list.CountLabel(win), "↑↓ search"
+	countLabel, hint := p.countLabel(win), "↑↓ search"
 	<div class="flex-col w-full" deps={p.Query}>
 		if p.Title != "" {
 			@SearchPickerTitleRow(p.Title)

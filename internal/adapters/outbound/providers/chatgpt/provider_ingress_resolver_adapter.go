@@ -296,6 +296,11 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 	return out, nil
 }
 
+func (e ProviderIngressResolverAdapter) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+	deployments, err := e.ListDeployments(ctx, target)
+	return exchange.TargetProbeResult{Deployments: deployments}, err
+}
+
 func (e ProviderIngressResolverAdapter) resolveChatGPTSubscriptionTier(_ context.Context, providerSpec string, credentialRef string) (string, bool) {
 	raw, err := outboundcredentials.ResolveStoredSecretByRef(providerSpec, credentialRef)
 	if err != nil {
@@ -306,11 +311,6 @@ func (e ProviderIngressResolverAdapter) resolveChatGPTSubscriptionTier(_ context
 		return "", false
 	}
 	return parseChatGPTSubscriptionTierFromIDToken(bundle.IDToken)
-}
-
-func (e ProviderIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	_, err := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, false)
-	return err
 }
 
 func parseChatGPTSubscriptionTierFromIDToken(idToken string) (string, bool) {

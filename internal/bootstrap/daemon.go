@@ -63,7 +63,7 @@ type StartInput struct {
 	ConfigPath       string
 	StartupConfig    config.StartupConfig
 	Providers        exchange.ProviderIngressResolver
-	ModelCatalog     exchange.ProviderModelCatalog
+	ModelCatalog     exchange.ProviderDiscovery
 	TrafficEventSink observation.TrafficEventSink
 	Logger           *slog.Logger
 }

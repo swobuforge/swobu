@@ -101,11 +101,6 @@ func (r azureProviderIngressResolver) ResolveProviderIngress(ctx context.Context
 	}
 }
 
-func (c azureProviderModelCatalogClient) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	_, err := c.ListDeployments(ctx, target)
-	return err
-}
-
 func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	projectEndpoint, err := resolveAzureProjectEndpoint(target.BaseURL)
 	if err != nil {
@@ -128,6 +123,11 @@ func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, ta
 		nextURL = resolveAzureNextLink(projectEndpoint, nextLink)
 	}
 	return out, nil
+}
+
+func (c azureProviderModelCatalogClient) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+	deployments, err := c.ListDeployments(ctx, target)
+	return exchange.TargetProbeResult{Deployments: deployments}, err
 }
 
 func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target exchange.RoutableTarget, requestURL string) ([]profile.ProviderDeploymentRecord, string, error) {

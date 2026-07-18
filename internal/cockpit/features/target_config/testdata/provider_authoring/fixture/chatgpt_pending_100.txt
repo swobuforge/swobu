@@ -1,0 +1,23 @@
+  new target · ChatGPT                                                                cancel ↵
+     provider          ChatGPT                                                        change ↵
+     authentication    browser login                                                  pending
+     open              https://auth.openai.com/device                                 open ↵
+     code              ABCD-EFGH                                                      copy ↵
+   > status            waiting for login                                              refresh ↵
+     cancel                                                                           cancel ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

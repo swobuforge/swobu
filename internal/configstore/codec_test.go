@@ -15,11 +15,11 @@ workspaces:
           - targets:
               - {id: openai, model: gpt-5, protocol: responses, connection: {openai: {credential: env:OPENAI_API_KEY}}}
               - {id: anthropic, model: claude, protocol: messages, connection: {anthropic: {credential: env:ANTHROPIC_API_KEY}}}
-              - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: keychain:openrouter/default}}}
+              - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
               - {id: chatgpt, model: gpt-5, protocol: responses_stream, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
               - {id: ollama, model: llama, protocol: chat_completions, connection: {ollama: {}}}
               - {id: azure, model: deployment, protocol: responses, connection: {azure: {project_endpoint: https://example.services.ai.azure.com/api/projects/prod, credential: env:AZURE_OPENAI_API_KEY}}}
-              - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, auth: {profile: work}}}}
+              - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, credential: env:BEDROCK_API_KEY}}}
               - {id: custom, model: local, protocol: chat_completions, connection: {custom: {base_url: http://127.0.0.1:8080/v1, auth: {header: {name: x-api-key, credential: env:CUSTOM_KEY}}}}}
 `
 

@@ -1,6 +1,9 @@
 package target_config
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,23 +82,66 @@ func TestFileGrammarDemolitionLedger(t *testing.T) {
 // state owner, one effects owner, pure projections, and GSX component sources.
 func TestTargetConfigUsesOnlyAllowedProductionFileRoles(t *testing.T) {
 	allowed := map[string]bool{
-		"component.go":         true,
-		"state.go":             true,
-		"effects.go":           true,
-		"doc.go":               true,
-		"actions.go":           true,
-		"bedrock.go":           true,
-		"model.go":             true,
-		"placement_actions.go": true,
-		"protocol.go":          true,
-		"provider.go":          true,
+		"component.go": true, "state.go": true, "effects.go": true, "doc.go": true,
+		"catalog_projection.go": true, "provider_projection.go": true,
+		"provider_azure_component.go": true,
 	}
 	for _, path := range mustGlob(t, "*.go") {
 		name := filepath.Base(path)
-		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gsx.go") || allowed[name] || strings.HasSuffix(name, "_projection.go") || strings.HasSuffix(name, "_component.go") {
+		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gsx.go") || allowed[name] {
 			continue
 		}
 		t.Fatalf("%s is outside target_config's allowed production file grammar", name)
+	}
+}
+
+func TestTargetConfigGeneratorAdaptersStayNarrow(t *testing.T) {
+	want := map[string][]string{
+		"provider_azure_component.go": {"target            *TargetConfig", "endpointCommitted bool", "endpointDraft     *tui.State[string]"},
+	}
+	for path, fields := range want {
+		src := mustReadFile(t, path)
+		for _, field := range fields {
+			if !strings.Contains(src, field) {
+				t.Fatalf("%s must retain only its generator-required receiver shape; missing %q", path, field)
+			}
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual []string
+		ast.Inspect(file, func(node ast.Node) bool {
+			decl, ok := node.(*ast.TypeSpec)
+			if !ok || decl.Name.Name != "azureProviderForm" {
+				return true
+			}
+			st, ok := decl.Type.(*ast.StructType)
+			if !ok {
+				t.Fatal("azureProviderForm must be a struct")
+			}
+			for _, field := range st.Fields.List {
+				for _, name := range field.Names {
+					actual = append(actual, name.Name)
+				}
+			}
+			return false
+		})
+		sort.Strings(actual)
+		expected := []string{"endpointCommitted", "endpointDraft", "target"}
+		if strings.Join(actual, ",") != strings.Join(expected, ",") {
+			t.Fatalf("%s fields = %v, want exactly %v", path, actual, expected)
+		}
+		for _, forbidden := range []string{"setupState", "catalogResult", "profile.", "providerReadiness", "ReadyAndProbe", "ProbeCatalog"} {
+			if strings.Contains(src, forbidden) {
+				t.Fatalf("%s contains forbidden policy dependency %q", path, forbidden)
+			}
+		}
+	}
+	for _, removed := range []string{"tail_component.go", "view_component.go", "provider_bedrock_component.go", "provider_custom_component.go"} {
+		if _, err := os.Stat(removed); !os.IsNotExist(err) {
+			t.Fatalf("unnecessary generator adapter survives: %s", removed)
+		}
 	}
 }
 
@@ -207,7 +253,7 @@ func TestTargetConfigViewHasExplicitProviderHierarchy(t *testing.T) {
 	src := mustReadFile(t, "view.gsx")
 	for _, required := range []string{
 		"@AzureProviderForm(w)",
-		"@OpenAICompatibleProviderForm(w)",
+		"@CustomProviderForm(w)",
 		"@BedrockProviderForm(w)",
 		"@ChatGPTProviderForm(w)",
 		"@HTTPProviderForm(w)",
@@ -254,7 +300,7 @@ func TestViewOwnsTheOnlyTargetTailAndError(t *testing.T) {
 			t.Fatalf("view.gsx must own global form structure: %q", required)
 		}
 	}
-	for _, path := range []string{"provider_http.gsx", "provider_azure.gsx", "provider_bedrock.gsx", "provider_chatgpt.gsx", "provider_openai_compatible.gsx"} {
+	for _, path := range []string{"provider_http.gsx", "provider_azure.gsx", "provider_bedrock.gsx", "provider_chatgpt.gsx", "provider_custom.gsx"} {
 		src := mustReadFile(t, path)
 		for _, forbidden := range []string{"TargetConfigTail", "TargetConfigError"} {
 			if strings.Contains(src, forbidden) {
@@ -354,6 +400,73 @@ func TestTargetConfigHasNoPickerLifecyclePhases(t *testing.T) {
 			t.Fatalf("feature phase must not encode picker or local UI state: %s", forbidden)
 		}
 	}
+}
+
+func TestTargetConfigOperationStateIsIndependentFromLifecycle(t *testing.T) {
+	for _, path := range []string{"state.go", "component.go", "effects.go", "provider_chatgpt.gsx", "tail.gsx"} {
+		src := mustReadFile(t, path)
+		for _, forbidden := range []string{
+			"PhaseAuthPending", "PhaseAuthFailed", "PhaseLoadingCatalog",
+			"PhaseCatalogFailed", "PhaseCreateFailed",
+		} {
+			if strings.Contains(src, forbidden) {
+				t.Fatalf("%s couples operation state to lifecycle through %s", path, forbidden)
+			}
+		}
+	}
+}
+
+func TestAzureAuthoringRejectsLegacyResourceRootFallback(t *testing.T) {
+	src := mustReadFile(t, "provider_azure_component.go")
+	if strings.Contains(src, "NormalizeAzureResourceLocator") {
+		t.Fatal("Azure authoring must accept project endpoints only; legacy resource-root compatibility is forbidden")
+	}
+}
+
+func TestSharedTargetFieldsContainNoProviderWorkflowPolicy(t *testing.T) {
+	credential := mustReadFile(t, "credential.gsx")
+	for _, forbidden := range []string{"providerSpec string", "providerAllowsNoCredential(r.target)"} {
+		if strings.Contains(credential, forbidden) {
+			t.Fatalf("credential field must be props-driven; found %q", forbidden)
+		}
+	}
+	tail := mustReadFile(t, "tail.gsx")
+	for _, forbidden := range []string{"IsAzureFlow()", "targetUsesInteractiveAuth", `"model", "loading catalog…"`} {
+		if strings.Contains(tail, forbidden) {
+			t.Fatalf("generic target tail contains provider policy %q", forbidden)
+		}
+	}
+	bedrock := mustReadFile(t, "provider_bedrock.gsx")
+	for _, forbidden := range []string{"BedrockMantleRegionFromEndpoint", "target.BaseURL"} {
+		if strings.Contains(bedrock, forbidden) {
+			t.Fatalf("Bedrock form must author region directly; found %q", forbidden)
+		}
+	}
+}
+
+func TestCredentialFieldImplementationHasNoWorkflowDependencies(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "credential_gsx.go", nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, imported := range file.Imports {
+		path := strings.Trim(imported.Path.Value, `"`)
+		for _, forbidden := range []string{"/profile", "/cockpit/ports", "/cockpit/readmodel"} {
+			if strings.HasSuffix(path, forbidden) {
+				t.Fatalf("reusable credential field imports workflow dependency %q", path)
+			}
+		}
+	}
+	file, err = parser.ParseFile(token.NewFileSet(), "credential_gsx.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		if ident, ok := node.(*ast.Ident); ok && ident.Name == "TargetConfig" {
+			t.Fatal("reusable credential field references TargetConfig")
+		}
+		return true
+	})
 }
 
 func mustGlob(t *testing.T, pattern string) []string {

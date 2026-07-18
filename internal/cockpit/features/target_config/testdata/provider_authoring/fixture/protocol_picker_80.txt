@@ -1,0 +1,23 @@
+  new target · Custom Endpoint                                    cancel ↵
+     provider          Custom Endpoint                            change ↵
+     backend URL       https://api.example.com/v1                 edit ↵
+     credential        environment · CUSTOM_API_KEY               change ↵
+     credential header Authorization                              change ↵
+     model             model-x                                    change ↵
+     protocol          OpenAI · Responses · stream                close ↵
+        protocol
+        search            _
+
+      > OpenAI · Responses                                        select ↵
+        OpenAI · Responses · stream                               select ↵
+        OpenAI · Chat Completions                                 select ↵
+        OpenAI · Chat Completions · stream                        select ↵
+        Anthropic · Messages                                      select ↵
+        Anthropic · Messages · stream                             select ↵
+
+        6 of 6 shown                                              ↑↓ search
+     routing           fallback after step 1                      change ↵
+     create                                                       create ↵
+
+
+

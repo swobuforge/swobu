@@ -8,12 +8,11 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
-	"github.com/swobuforge/swobu/internal/profile"
 )
 
 type providerIngressResolverAdapter struct {
 	ingress   exchange.ProviderIngressResolver
-	discovery exchange.ProviderModelCatalog
+	discovery exchange.ProviderDiscovery
 }
 
 func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
@@ -30,14 +29,6 @@ func (a providerIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	return ingress, err
 }
 
-func (a providerIngressResolverAdapter) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	return a.discovery.ValidateCredentials(ctx, target)
-}
-
-func (a providerIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-	return a.discovery.ListDeployments(ctx, target)
-}
-
 // daemonProviderModelCatalogComposition is the explicit runtime composition root for
 // the daemon live path. It owns the one codec lookup surface and the one
 // provider lookup surface without introducing a registry layer.
@@ -46,7 +37,7 @@ type daemonProviderModelCatalogComposition struct {
 	providers providerIngressResolverAdapter
 }
 
-func newDaemonProviderModelCatalogComposition(wire codecresolver.RuntimeCodecResolver, ingress exchange.ProviderIngressResolver, discovery exchange.ProviderModelCatalog) daemonProviderModelCatalogComposition {
+func newDaemonProviderModelCatalogComposition(wire codecresolver.RuntimeCodecResolver, ingress exchange.ProviderIngressResolver, discovery exchange.ProviderDiscovery) daemonProviderModelCatalogComposition {
 	return daemonProviderModelCatalogComposition{
 		wire: wire,
 		providers: providerIngressResolverAdapter{
@@ -76,10 +67,6 @@ func (r daemonProviderModelCatalogComposition) ResolveProviderIngress(ctx contex
 	return r.providers.ResolveProviderIngress(ctx, req)
 }
 
-func (r daemonProviderModelCatalogComposition) ValidateCredentials(ctx context.Context, target exchange.RoutableTarget) error {
-	return r.providers.ValidateCredentials(ctx, target)
-}
-
-func (r daemonProviderModelCatalogComposition) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
-	return r.providers.ListDeployments(ctx, target)
+func (r daemonProviderModelCatalogComposition) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+	return r.providers.discovery.ProbeTarget(ctx, target)
 }

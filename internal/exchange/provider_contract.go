@@ -15,9 +15,15 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
-// ProviderModelCatalog reads operator-support model catalogs for one selected
-// provider target. It is separate from protocol-path semantic execution.
-type ProviderModelCatalog interface {
-	ValidateCredentials(ctx context.Context, target RoutableTarget) error
-	ListDeployments(ctx context.Context, target RoutableTarget) ([]profile.ProviderDeploymentRecord, error)
+// TargetProbeResult keeps provider-specific authoring diagnostics opaque to
+// generic dispatch and transport layers. Diagnostics is an optional JSON
+// object owned and decoded only by the selected provider's operator surface.
+type TargetProbeResult struct {
+	Deployments []profile.ProviderDeploymentRecord
+	Diagnostics []byte
+}
+
+// ProviderDiscovery performs one truthful provider-owned catalog probe.
+type ProviderDiscovery interface {
+	ProbeTarget(ctx context.Context, target RoutableTarget) (TargetProbeResult, error)
 }

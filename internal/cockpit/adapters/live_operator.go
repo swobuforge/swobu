@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/platform/browser"
 	"github.com/swobuforge/swobu/internal/platform/clipboard"
 	"github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 type operatorClient interface {
@@ -39,7 +40,7 @@ type operatorClient interface {
 	GetAuthSessionStatus(context.Context, string) (operatorclient.AuthSessionStatusResult, error)
 	CancelAuthSession(context.Context, string) error
 	RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error)
-	ProbeModelCatalog(context.Context, string, string, string, string, string, string) (operatorclient.ModelCatalogResult, error)
+	ProbeTarget(context.Context, workspaceapi.Connection, string) (operatorclient.ModelCatalogResult, error)
 }
 type LiveOperatorAdapter struct {
 	client     operatorClient
@@ -299,7 +300,10 @@ func (a *LiveOperatorAdapter) StorePastedCredential(_ context.Context, req ports
 	return ports.StorePastedCredentialResult{CredentialRef: ref}, nil
 }
 func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-	result, err := a.client.ProbeModelCatalog(ctx, req.ProviderSpec, req.BaseURL, req.AuthHeader, req.CredentialRef, req.AuthMode, req.ProviderProtocol)
+	if req.Connection == nil {
+		return readmodel.ModelCatalogReadModel{}, errors.New("model catalog connection is required")
+	}
+	result, err := a.client.ProbeTarget(ctx, workspaceapi.ConnectionFromRouting(req.Connection), req.ProviderProtocol)
 	if err != nil {
 		return readmodel.ModelCatalogReadModel{}, err
 	}
@@ -307,8 +311,20 @@ func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports
 	for _, d := range result.Deployments {
 		deployments = append(deployments, readmodel.ModelDeploymentReadModel{ID: d.Name, Name: d.Name, ModelName: d.ModelName, ModelPublisher: d.ModelPublisher, ModelVersion: d.ModelVersion, Family: d.Family, SupportedProviderProtocols: d.SupportedProviderProtocols, DefaultProviderProtocol: d.DefaultProviderProtocol})
 	}
-	return readmodel.ModelCatalogReadModel{Deployments: deployments, ResolvedProviderProtocol: result.ResolvedProviderProtocol, Error: result.Error}, nil
+	model := readmodel.ModelCatalogReadModel{Deployments: deployments, ResolvedProviderProtocol: result.ResolvedProviderProtocol}
+	if _, ok := req.Connection.(routing.BedrockConnection); ok && len(result.Diagnostics) > 0 {
+		evidence, err := decodeBedrockAuthenticationDiagnostics(result.Diagnostics)
+		if err != nil {
+			return readmodel.ModelCatalogReadModel{}, err
+		}
+		model.BedrockAuthentication = evidence
+	}
+	if strings.TrimSpace(result.Error) != "" {
+		return model, errors.New(result.Error)
+	}
+	return model, nil
 }
+
 func (a *LiveOperatorAdapter) StartAuthSession(ctx context.Context, req ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
 	result, err := a.client.StartAuthSession(ctx, req.ProviderSpec, req.Workspace, req.Route, req.TargetID, req.DraftSubject, req.AuthMode)
 	if err != nil {

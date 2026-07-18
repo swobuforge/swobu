@@ -8,6 +8,7 @@ import (
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 type workspaceClientStub struct {
@@ -41,15 +42,19 @@ func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 	after := workspaceView("server-normalized-model", "env:COMMITTED")
 	stub := &workspaceClientStub{getResponses: []workspaceapi.Workspace{before}, updateResponse: after}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
+	connection, err := routing.NewOpenAIConnection("env:CLIENT")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
 		WorkspaceID: "dev",
 		RouteID:     "chat",
 		TargetID:    "a",
-		Draft: readmodel.TargetDraft{
-			ProviderSpec: "openai", ProviderProtocol: "responses", ModelID: "client-model", CredentialRef: "env:CLIENT",
-		},
-		Placement: readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementBalance, PeerTargetID: "a"},
+		ModelID:     "client-model",
+		Protocol:    "responses",
+		Connection:  connection,
+		Placement:   readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementBalance, PeerTargetID: "a"},
 	})
 	if err != nil {
 		t.Fatal(err)
