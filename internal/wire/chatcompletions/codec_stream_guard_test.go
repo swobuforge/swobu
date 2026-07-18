@@ -18,7 +18,7 @@ func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T)
 		wire        carrier.CarrierStream
 		reasonMatch string
 	}{
-		{name: "wrong protocol", wire: carrier.CarrierStream{Family: protocolkind.Completions, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingSSE}, reasonMatch: "protocol must be"},
+		{name: "wrong protocol", wire: carrier.CarrierStream{Family: protocolkind.Responses, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingSSE}, reasonMatch: "protocol must be"},
 		{name: "wrong framing", wire: carrier.CarrierStream{Family: protocolkind.ChatCompletions, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingNDJSON}, reasonMatch: "framing must be"},
 		{name: "missing frames", wire: carrier.CarrierStream{Family: protocolkind.ChatCompletions, Framing: carrier.FramingSSE}, reasonMatch: "frames must be configured"},
 	}

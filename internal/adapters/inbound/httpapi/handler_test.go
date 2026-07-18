@@ -22,7 +22,6 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/wire/completions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
@@ -1066,12 +1065,6 @@ func decodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
 		return result.Value.Request, normalizeStreamingDeliveryForTest(result.Value.Delivery, in.ResponseFraming), nil
-	case canonical.ClientFamilyCompletions:
-		result, err := completions.ClientRequestDecoder{}.DecodeClientRequest(doc)
-		if err != nil {
-			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
-		}
-		return result.Value.Request, normalizeStreamingDeliveryForTest(result.Value.Delivery, in.ResponseFraming), nil
 	case canonical.ClientFamilyMessages:
 		result, err := messages.ClientRequestDecoder{}.DecodeClientRequest(doc)
 		if err != nil {
@@ -1160,11 +1153,6 @@ func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) respons
 			result, err := responses.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Value, err
 		}}
-	case canonical.ClientFamilyCompletions:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
-			result, err := completions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
-			return result.Value, err
-		}}
 	case canonical.ClientFamilyMessages:
 		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
 			result, err := messages.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
@@ -1193,11 +1181,6 @@ func testResponseStreamEncoderForFamily(family canonical.ClientFamily) responseS
 	case canonical.ClientFamilyResponses:
 		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
 			result, err := responses.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
-			return result.Value, err
-		}}
-	case canonical.ClientFamilyCompletions:
-		return responseStreamEncoderForTest{encode: func(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
-			result, err := completions.ResponseStreamEncoder{}.EncodeResponseStream(events, d)
 			return result.Value, err
 		}}
 	case canonical.ClientFamilyMessages:

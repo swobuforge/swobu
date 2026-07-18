@@ -23,8 +23,6 @@ templ (t *targetTail) Render() {
 		if t.root.mode != targetConfigModeEdit {
 			if t.root.CanChangePlacement() {
 				@PlacementSelect(t.root)
-			} else {
-				@FixedPlacementControl(t.root)
 			}
 		}
 

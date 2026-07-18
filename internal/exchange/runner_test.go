@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
-	completions "github.com/swobuforge/swobu/internal/wire/completions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
@@ -399,12 +398,6 @@ func (testRuntimeResolver) ClientCodec(f canonical.ClientFamily) ClientCodec {
 			doc:    responses.ResponseDocumentEncoder{},
 			stream: responses.ResponseStreamEncoder{},
 		}
-	case canonical.ClientFamilyCompletions:
-		return testClientCodec{
-			req:    completions.ClientRequestDecoder{},
-			doc:    completions.ResponseDocumentEncoder{},
-			stream: completions.ResponseStreamEncoder{},
-		}
 	case canonical.ClientFamilyMessages:
 		return testClientCodec{
 			req:    messages.ClientRequestDecoder{},
@@ -422,8 +415,6 @@ func (testRuntimeResolver) ProviderRequestDocumentEncoder(kind protocolkind.Prot
 		return chatcompletions.ProviderRequestDocumentEncoder{}
 	case protocolkind.Responses:
 		return responses.ProviderRequestDocumentEncoder{}
-	case protocolkind.Completions:
-		return completions.ProviderRequestDocumentEncoder{}
 	case protocolkind.Messages:
 		return messages.ProviderRequestDocumentEncoder{}
 	default:
@@ -440,8 +431,6 @@ func (testRuntimeResolver) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKin
 		return chatcompletions.ProviderEnvelopeDecoder{}
 	case protocolkind.Responses:
 		return responses.ProviderEnvelopeDecoder{}
-	case protocolkind.Completions:
-		return completions.ProviderEnvelopeDecoder{}
 	case protocolkind.Messages:
 		return messages.ProviderEnvelopeDecoder{}
 	default:
@@ -458,8 +447,6 @@ func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKin
 		return chatcompletions.ProviderDocumentDecoder{}
 	case protocolkind.Responses:
 		return responses.ProviderDocumentDecoder{}
-	case protocolkind.Completions:
-		return completions.ProviderDocumentDecoder{}
 	case protocolkind.Messages:
 		return messages.ProviderDocumentDecoder{}
 	default:

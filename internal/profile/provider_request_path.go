@@ -31,8 +31,6 @@ func ProviderRequestPath(providerSpec string, kind protocolkind.ProtocolKind) (s
 			return "/chat/completions", nil
 		case protocolkind.Responses:
 			return "/responses", nil
-		case protocolkind.Completions:
-			return "/completions", nil
 		case protocolkind.Messages:
 			return "/messages", nil
 		default:

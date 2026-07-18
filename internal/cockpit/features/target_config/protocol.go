@@ -71,9 +71,11 @@ func protocolBlockedAction(w *TargetConfig) string {
 }
 
 func ProtocolSelect(w *TargetConfig) *ui.Select {
-	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol)
+	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol) // swobu:io-string source=domain
 	options := w.CurrentProtocolOptions()
 	hydrating := w.mode == targetConfigModeEdit && w.IsAzureFlow() && len(w.Catalog.Get().Deployments) == 0
+	modelSelected := strings.TrimSpace(w.SelectedModel.Get().ModelName) != "" // swobu:io-string source=domain
+	protocolChoiceRequired := modelSelected && protocol == "" && len(options) > 1
 	value, action, enterable := protocol, "change ↵", true
 	switch {
 	case hydrating:
@@ -88,7 +90,7 @@ func ProtocolSelect(w *TargetConfig) *ui.Select {
 	case len(options) == 1:
 		value, action, enterable = protocol, "default", false
 	}
-	props := ui.SelectProps{ID: TargetAddMountKey(w, "protocol-display"), Label: "protocol", Value: value, Action: action, AutoFocus: hydrating, CanEnter: func() bool { return enterable }}
+	props := ui.SelectProps{ID: TargetAddMountKey(w, "protocol-display"), Label: "protocol", Value: value, Action: action, AutoFocus: hydrating || protocolChoiceRequired, CanEnter: func() bool { return enterable }}
 	if enterable {
 		if hydrating {
 			props.OnEnter = func() { w.ReadyAndProbe(w.Draft.Get().CredentialRef, w.BaseURL.Get()) }

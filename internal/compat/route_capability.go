@@ -39,12 +39,6 @@ var (
 		GenerationTopP,
 		GenerationStopSequences,
 	}
-	featureSetCompletions = []Feature{
-		GenerationMaxTokens,
-		GenerationTemperature,
-		GenerationTopP,
-		GenerationStopSequences,
-	}
 )
 
 var routeFeatureMatrix = buildRouteFeatureMatrix()
@@ -60,8 +54,6 @@ func buildRouteFeatureMatrix() map[routeKey][]Feature {
 		addRouteFeatures(provider, "responses_stream", featureSetResponses)
 		addRouteFeatures(provider, "chat_completions", featureSetChatCompletions)
 		addRouteFeatures(provider, "chat_completions_stream", featureSetChatCompletions)
-		addRouteFeatures(provider, "completions", featureSetCompletions)
-		addRouteFeatures(provider, "completions_stream", featureSetCompletions)
 	}
 	addFamily("openai")
 	addFamily("openrouter")
@@ -70,8 +62,6 @@ func buildRouteFeatureMatrix() map[routeKey][]Feature {
 	addFamily("azure")
 	addRouteFeatures("ollama", "chat_completions", featureSetChatCompletions)
 	addRouteFeatures("ollama", "chat_completions_stream", featureSetChatCompletions)
-	addRouteFeatures("ollama", "completions", featureSetCompletions)
-	addRouteFeatures("ollama", "completions_stream", featureSetCompletions)
 	addRouteFeatures("chatgpt", "responses_stream", featureSetResponses)
 	addRouteFeatures("anthropic", "messages", featureSetMessages)
 	addRouteFeatures("anthropic", "messages_stream", featureSetMessages)

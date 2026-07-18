@@ -15,7 +15,6 @@ func TestInferClientFamily_UsesExplicitRequestAndPathRules(t *testing.T) {
 	}{
 		{name: "chat completions POST", method: "POST", path: NormalizedPathChatCompletions, want: ClientFamilyChatCompletions},
 		{name: "responses POST", method: "POST", path: NormalizedPathResponses, want: ClientFamilyResponses},
-		{name: "completions POST", method: "POST", path: NormalizedPathCompletions, want: ClientFamilyCompletions},
 		{name: "messages POST with protocol marker", method: "POST", path: NormalizedPathMessages, hasMessagesProtocolMarker: true, want: ClientFamilyMessages},
 	}
 

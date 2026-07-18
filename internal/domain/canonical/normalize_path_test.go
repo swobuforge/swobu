@@ -15,8 +15,6 @@ func TestNormalizePath_MapsSupportedAliasesToCanonicalPaths(t *testing.T) {
 		{name: "chat with version", raw: "/v1/chat/completions", want: NormalizedPathChatCompletions},
 		{name: "responses without version", raw: "/responses", want: NormalizedPathResponses},
 		{name: "responses with version", raw: "/v1/responses", want: NormalizedPathResponses},
-		{name: "completions without version", raw: "/completions", want: NormalizedPathCompletions},
-		{name: "completions with version", raw: "/v1/completions", want: NormalizedPathCompletions},
 		{name: "messages without version", raw: "/messages", want: NormalizedPathMessages},
 		{name: "messages with version", raw: "/v1/messages", want: NormalizedPathMessages},
 		{name: "models without version", raw: "/models", want: NormalizedPathModels},
@@ -37,7 +35,7 @@ func TestNormalizePath_MapsSupportedAliasesToCanonicalPaths(t *testing.T) {
 }
 
 func TestNormalizePath_RejectsUnsupportedPaths(t *testing.T) {
-	for _, raw := range []string{"/v1/embeddings"} {
+	for _, raw := range []string{"/v1/embeddings", "/completions", "/v1/completions"} {
 		_, err := NormalizePath(raw)
 		if err == nil {
 			t.Fatalf("expected error for %q, got nil", raw)

@@ -13,7 +13,6 @@ func TestProviderPackages_DoNotImportProtocolFamilyPackagesDirectly(t *testing.T
 	root := "."
 	forbidden := []string{
 		`"github.com/swobuforge/swobu/internal/wire/chatcompletions"`,
-		`"github.com/swobuforge/swobu/internal/wire/completions"`,
 		`"github.com/swobuforge/swobu/internal/wire/messages"`,
 		`"github.com/swobuforge/swobu/internal/wire/responses"`,
 	}

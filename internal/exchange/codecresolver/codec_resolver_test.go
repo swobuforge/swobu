@@ -14,7 +14,6 @@ func TestCodecResolver_ComposesAllClientFamilies(t *testing.T) {
 	for _, family := range []canonical.ClientFamily{
 		canonical.ClientFamilyChatCompletions,
 		canonical.ClientFamilyResponses,
-		canonical.ClientFamilyCompletions,
 		canonical.ClientFamilyMessages,
 	} {
 		if resolver.ClientCodec(family) == nil {
@@ -28,7 +27,6 @@ func TestCodecResolver_ComposesAllProviderProtocols(t *testing.T) {
 	for _, kind := range []protocolkind.ProtocolKind{
 		protocolkind.ChatCompletions,
 		protocolkind.Responses,
-		protocolkind.Completions,
 		protocolkind.Messages,
 	} {
 		if resolver.ProviderRequestDocumentEncoder(kind) == nil {

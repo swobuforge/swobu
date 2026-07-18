@@ -10,7 +10,6 @@
                                                                                                                         
         3 of 3 shown                                                                                      ↑↓ search     
      protocol          blocked                                                                            model first   
-     routing           step 1                                                                                           
      create                                                                                               model first   
                                                                                                                         
                                                                                                                         

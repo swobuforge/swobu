@@ -3,8 +3,43 @@ package target_config
 import (
 	"fmt"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
+
+func PlacementSelect(w *TargetConfig) *ui.Select {
+	return ui.NewSelect(ui.SelectProps{
+		ID: TargetAddMountKey(w, "placement-display"), Label: "routing", Value: w.Placement.Get().Summary(), Action: "change ↵",
+		CanEnter: func() bool { return w.Phase.Get() == PhaseReadyToCreate },
+		Body:     func(backout func()) tui.Component { return PlacementPicker(w, backout) },
+	})
+}
+
+func PlacementPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
+	opts := w.placementOptions()
+	items := make([]ui.SearchOption, 0, len(opts))
+	for _, opt := range opts {
+		items = append(items, ui.SearchOption{ID: placementOptionID(opt), Label: opt.Summary()})
+	}
+	picker := ui.NewSearchPicker(TargetAddMountKey(w, "placement-picker"), "routing", items, func(sel ui.Selection) {
+		for _, opt := range opts {
+			if placementOptionID(opt) == sel.Value {
+				w.SelectPlacement(opt)
+				break
+			}
+		}
+		if backout != nil {
+			backout()
+		}
+	}, func() {
+		if backout != nil {
+			backout()
+		}
+	})
+	picker.AutoFocus = true
+	return picker
+}
 
 func defaultPlacementForRoute(route readmodel.RouteReadModel) readmodel.PlacementOptionReadModel {
 	var anchor readmodel.TargetID

@@ -92,14 +92,12 @@ type protocolOption struct {
 }
 
 var protocolPreference = []string{
-	"responses_stream",
 	"responses",
-	"chat_completions_stream",
+	"responses_stream",
 	"chat_completions",
-	"messages_stream",
+	"chat_completions_stream",
 	"messages",
-	"completions_stream",
-	"completions",
+	"messages_stream",
 }
 
 // resolveProtocolOptions returns concrete protocol choices in product order.
@@ -193,21 +191,17 @@ func orderedProtocolOptions(providerSpec string, candidates []string) []protocol
 func protocolOptionLabel(protocol string) string {
 	switch protocol {
 	case "responses_stream":
-		return "responses_stream · OpenAI"
+		return "OpenAI · Responses · stream"
 	case "responses":
-		return "responses · OpenAI"
+		return "OpenAI · Responses"
 	case "chat_completions_stream":
-		return "chat_completions_stream · OpenAI"
+		return "OpenAI · Chat Completions · stream"
 	case "chat_completions":
-		return "chat_completions · OpenAI"
+		return "OpenAI · Chat Completions"
 	case "messages_stream":
-		return "messages_stream · Anthropic"
+		return "Anthropic · Messages · stream"
 	case "messages":
-		return "messages · Anthropic"
-	case "completions_stream":
-		return "completions_stream · legacy"
-	case "completions":
-		return "completions · legacy"
+		return "Anthropic · Messages"
 	default:
 		return protocol
 	}

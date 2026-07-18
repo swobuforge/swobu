@@ -168,7 +168,7 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 			InputText: "hi",
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.Completions, "credential_ref", "", ""),
+		exchange.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "credential_ref", "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
 		t.Fatalf("unknown provider must fail fast, got err=%v", err)
