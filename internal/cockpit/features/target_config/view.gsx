@@ -77,7 +77,7 @@ templ (w *TargetConfig) Render() {
 					@ProviderSummary(w)
 					if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecAzure {
 						@AzureProviderForm(w)
-					} else if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecOpenAICompatible {
+					} else if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecCustom {
 						@CustomProviderForm(w)
 					} else if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecBedrock {
 						@BedrockProviderForm(w)

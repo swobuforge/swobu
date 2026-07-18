@@ -49,7 +49,7 @@ func providerPickerOrder(p profile.Profile) int {
 		return 4
 	case profile.ProviderSpecAzure:
 		return 5
-	case profile.ProviderSpecOpenAICompatible:
+	case profile.ProviderSpecCustom:
 		return 6
 	default:
 		return 100

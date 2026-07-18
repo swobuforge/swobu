@@ -106,7 +106,7 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 	}
 }
 
-func TestListModels_OpenAICompatibleUsesSelectedAuthHeader(t *testing.T) {
+func TestListModels_CustomUsesSelectedAuthHeader(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -135,10 +135,10 @@ func TestListModels_OpenAICompatibleUsesSelectedAuthHeader(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAICompatiblePolicy())
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewCustomPolicy())
 			target := exchange.NewRoutableTarget(
 				"draft",
-				"openai_compatible",
+				"custom",
 				srv.URL+"/v1",
 				"env:OPENAI_API_KEY",
 				protocolkind.ChatCompletions,

@@ -62,11 +62,7 @@ func toRoutableTarget(target routing.Target) (RoutableTarget, error) {
 // RoutableTargetFromConnection derives provider execution data from the typed
 // routing connection at the single exchange boundary.
 func RoutableTargetFromConnection(backendRef string, connection routing.Connection, providerProtocol string) (RoutableTarget, error) {
-	providerID := string(connection.Provider())
-	providerSpec := providerID
-	if connection.Provider() == routing.ProviderCustom {
-		providerSpec = "openai_compatible"
-	}
+	providerSpec := string(connection.Provider())
 	baseURL := profile.DefaultExecuteBaseURL(providerSpec)
 	credential := ""
 	authHeader := ""

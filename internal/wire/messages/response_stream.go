@@ -14,7 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/effect"
 	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
@@ -131,13 +131,13 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		if !frameUsage.IsZero() {
 			s.latestUsage = frameUsage
 			_, inputPresent := frameUsage.InputTokens()
-			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 			_, outputPresent := frameUsage.OutputTokens()
-			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 			_, cacheReadPresent := frameUsage.CacheReadTokens()
-			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 			_, cacheWritePresent := frameUsage.CacheWriteTokens()
-			openaicompat.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var envelope streamEnvelope
 		if err := json.Unmarshal([]byte(frame.Data), &envelope); err != nil {

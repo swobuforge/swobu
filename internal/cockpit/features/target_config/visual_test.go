@@ -139,20 +139,20 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			return renderCredentialJourney(t, width, keys, nil)
 		}},
 		{name: "custom_loopback_anonymous", build: func(t *testing.T) tui.Component {
-			w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "http://127.0.0.1:8080/v1", "")
+			w := authoringConfig(t, profile.ProviderSpecCustom, "http://127.0.0.1:8080/v1", "")
 			selectReadyModel(w, "local-model", "chat_completions_stream")
 			return w
 		}},
 		{name: "custom_remote_credential_required", build: func(t *testing.T) tui.Component {
-			return authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.example.com/v1", "")
+			return authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "")
 		}},
 		{name: "custom_ready", build: func(t *testing.T) tui.Component {
-			w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
+			w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
 			selectReadyModel(w, "custom-model", "chat_completions_stream")
 			return w
 		}},
 		{name: "custom_manual_model", build: func(t *testing.T) tui.Component {
-			w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.z.ai/api/anthropic", "secret:zai")
+			w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.z.ai/api/anthropic", "secret:zai")
 			w.Catalog.Set(catalogOperationState{Err: "model catalog endpoint is unsupported"})
 			return w
 		}},
@@ -267,14 +267,14 @@ func renderDeploymentPicker(t *testing.T, width int) string {
 
 func renderProtocolPicker(t *testing.T, width int) string {
 	t.Helper()
-	w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
+	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
 	selectReadyModel(w, "model-x", "responses_stream")
 	return renderAuthoringKeys(t, width, w, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 }
 
 func renderCustomHeaderJourney(t *testing.T, width int, query string) string {
 	t.Helper()
-	w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
+	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
 	selectReadyModel(w, "model-x", "responses_stream")
 	keys := []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}}
 	keys = append(keys, runeKeys(query)...)

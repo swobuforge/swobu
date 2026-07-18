@@ -57,9 +57,6 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	providerSpec := string(connection.Provider())
-	if connection.Provider() == routing.ProviderCustom {
-		providerSpec = string(profile.ProviderSpecOpenAICompatible)
-	}
 	result := TargetProbeResult{}
 	probe, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, connection, input.ProviderProtocol)
 	if probeErr != nil {
@@ -95,9 +92,6 @@ func probeDeployments(
 	providerProtocol string,
 ) (exchange.TargetProbeResult, string, error) {
 	providerSpec := string(connection.Provider())
-	if connection.Provider() == routing.ProviderCustom {
-		providerSpec = string(profile.ProviderSpecOpenAICompatible)
-	}
 	if !profile.SupportsSpec(providerSpec) {
 		return exchange.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}

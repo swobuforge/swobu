@@ -89,12 +89,15 @@ func TestSupportsFeature(t *testing.T) {
 	if got := SupportsFeature("missing", protocolkind.Responses, "", ToolDeclaration); got != Unknown {
 		t.Fatalf("unknown route support = %q want %q", got, Unknown)
 	}
+	if got := SupportsFeature("openai_"+"compatible", protocolkind.Messages, "glm-5.2", ToolDeclaration); got != Unknown {
+		t.Fatalf("obsolete provider identity support = %q want %q", got, Unknown)
+	}
 	for _, feature := range featureSetMessages {
-		if got := SupportsFeature("openai_compatible", protocolkind.Messages, "glm-5.2", feature); got != Supported {
+		if got := SupportsFeature("custom", protocolkind.Messages, "glm-5.2", feature); got != Supported {
 			t.Fatalf("custom messages feature %q support = %q want %q", feature, got, Supported)
 		}
 	}
-	if got := SupportsFeature("openai_compatible", protocolkind.Messages, "glm-5.2", RequestStructuredOutput); got != Unsupported {
+	if got := SupportsFeature("custom", protocolkind.Messages, "glm-5.2", RequestStructuredOutput); got != Unsupported {
 		t.Fatalf("custom messages structured output support = %q want %q", got, Unsupported)
 	}
 }

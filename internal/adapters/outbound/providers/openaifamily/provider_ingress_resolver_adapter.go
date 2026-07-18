@@ -69,20 +69,20 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		return nil, canonical.BadRequest("canonical request is required")
 	}
 	if strings.TrimSpace(req.Target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("OpenAI-family provider base URL is required")
+		return nil, canonical.BadEndpoint("provider endpoint base URL is required")
 	}
 	if requiresExplicitCredentialRef(req.Target.ProviderID(), req.Target.BaseURL, req.Target.CredentialRef) {
 		return nil, canonical.BadEndpoint(providerCredentialRequiredMessage(req.Target.ProviderID()))
 	}
 
 	if parsed, ok := profile.ParseProviderID(strings.TrimSpace(req.Target.ProviderID())); !ok || parsed != e.profile.ProviderID() { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("provider policy is unsupported for OpenAI-family adapter runtime")
+		return nil, canonical.BadEndpoint("provider policy is unsupported for HTTP adapter runtime")
 	}
 	if err := req.Contract.ProviderDelivery.Validate(); err != nil {
-		return nil, canonical.UnsupportedDelivery("OpenAI-family provider delivery is unsupported")
+		return nil, canonical.UnsupportedDelivery("provider endpoint delivery is unsupported")
 	}
 	if req.Contract.ProviderDelivery.IsStreaming() && req.Contract.ProviderDelivery.Framing != delivery.FramingSSE {
-		return nil, canonical.UnsupportedDelivery("OpenAI-family provider does not implement the requested delivery framing")
+		return nil, canonical.UnsupportedDelivery("provider endpoint does not implement the requested delivery framing")
 	}
 	wireReqCarrier := req.RequestDocument
 	if wireReqCarrier.IsEmpty() {
@@ -107,7 +107,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 		bytes.NewReader(wireReqBody),
 	)
 	if err != nil {
-		badEndpoint := canonical.BadEndpoint("OpenAI-family provider request could not be built")
+		badEndpoint := canonical.BadEndpoint("provider endpoint request could not be built")
 		badEndpoint.Details = map[string]string{
 			"request_build_error": detailErrorMessage(err), // swobu:io-string source=boundary
 		}
@@ -127,7 +127,7 @@ func (e ProviderIngressResolverAdapter) ResolveProviderIngress(ctx context.Conte
 	if err != nil {
 		// Preserve the causal transport error so request-outcome logs can tell
 		// a connection/URL failure from the generic BAD_ENDPOINT wrapper.
-		badEndpoint := canonical.BadEndpoint("OpenAI-family provider request failed before backend response")
+		badEndpoint := canonical.BadEndpoint("provider endpoint request failed before backend response")
 		badEndpoint.Details = map[string]string{
 			"request_transport_error": detailErrorMessage(err), // swobu:io-string source=boundary
 		}

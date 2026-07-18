@@ -33,11 +33,11 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 			return nil, err
 		}
 		return routing.NewBedrockConnection(region, credential)
-	case profile.ProviderSpecOpenAICompatible:
+	case profile.ProviderSpecCustom:
 		var auth routing.CustomAuth
 		if credential != "" {
 			header, err := routing.NewCustomHeaderAuth(
-				resolvedCredentialHeader(draft.ProviderSpec, draft.ProviderOptions.OpenAICompatible.CredentialHeader),
+				resolvedCredentialHeader(draft.ProviderSpec, draft.CredentialHeader),
 				credential,
 			)
 			if err != nil {
@@ -67,8 +67,8 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.Target
 		ModelID:          strings.TrimSpace(target.Model),            // swobu:io-string source=boundary
 		RouteModelID:     strings.TrimSpace(string(routeID)),         // swobu:io-string source=boundary
 	}
-	if profile.ProviderID(spec) == profile.ProviderSpecOpenAICompatible {
-		draft.ProviderOptions.OpenAICompatible.CredentialHeader = strings.TrimSpace(target.AuthHeader) // swobu:io-string source=boundary
+	if profile.ProviderID(spec) == profile.ProviderSpecCustom {
+		draft.CredentialHeader = strings.TrimSpace(target.AuthHeader) // swobu:io-string source=boundary
 	}
 	return draft
 }

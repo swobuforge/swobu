@@ -22,10 +22,17 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("azure") {
 		t.Fatal("azure provider spec should be supported")
 	}
+	if !SupportsSpec("custom") {
+		t.Fatal("custom provider spec should be supported")
+	}
+	obsoleteIdentity := "openai_" + "compatible"
+	if SupportsSpec(obsoleteIdentity) {
+		t.Fatal("obsolete custom-endpoint provider identity must fail closed")
+	}
 }
 
 func TestCustomEndpointLoopbackCredentialPolicyParsesHostname(t *testing.T) {
-	spec := string(ProviderSpecOpenAICompatible)
+	spec := string(ProviderSpecCustom)
 	for _, raw := range []string{"http://localhost:8080/v1", "http://127.0.0.1:8080/v1", "http://[::1]:8080/v1"} {
 		if RequiresCredential(spec, raw) {
 			t.Errorf("RequiresCredential(%q) = true, want false", raw)
@@ -56,11 +63,11 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if RequiresCredential("ollama", "http://127.0.0.1:11434/v1") {
 		t.Fatal("ollama should not require credential")
 	}
-	if RequiresCredential("openai_compatible", "http://localhost:9999/v1") {
-		t.Fatal("localhost OpenAI-compatible URL should not require credential")
+	if RequiresCredential("custom", "http://localhost:9999/v1") {
+		t.Fatal("localhost custom endpoint should not require credential")
 	}
-	if !RequiresCredential("openai_compatible", "https://lab.example/v1") {
-		t.Fatal("remote OpenAI-compatible URL should require credential")
+	if !RequiresCredential("custom", "https://lab.example/v1") {
+		t.Fatal("remote custom endpoint should require credential")
 	}
 	if !RequiresLocator("azure") {
 		t.Fatal("azure should require an explicit endpoint")
@@ -74,15 +81,18 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if got := DefaultEnvKeyForSpec("bedrock"); got != "AWS_BEARER_TOKEN_BEDROCK" {
 		t.Fatalf("bedrock default env key = %q", got)
 	}
-	if got := DefaultAuthHeaderForSpec("openai_compatible"); got != "Authorization" {
-		t.Fatalf("openai-compatible default auth header = %q", got)
+	if got := DefaultAuthHeaderForSpec("custom"); got != "Authorization" {
+		t.Fatalf("custom endpoint default auth header = %q", got)
 	}
-	authHeaders := SupportedAuthHeadersForSpec("openai_compatible")
+	authHeaders := SupportedAuthHeadersForSpec("custom")
 	if len(authHeaders) != 3 {
-		t.Fatalf("openai-compatible auth headers=%v want 3 common choices", authHeaders)
+		t.Fatalf("custom endpoint auth headers=%v want 3 common choices", authHeaders)
 	}
 	if authHeaders[0] != "Authorization" || authHeaders[1] != "x-api-key" || authHeaders[2] != "api-key" {
-		t.Fatalf("openai-compatible auth headers=%v want [Authorization x-api-key api-key]", authHeaders)
+		t.Fatalf("custom endpoint auth headers=%v want [Authorization x-api-key api-key]", authHeaders)
+	}
+	if got := ConcreteProviderProtocolsForSpec("custom"); len(got) != 6 {
+		t.Fatalf("custom endpoint concrete protocols=%v want exactly 6", got)
 	}
 	for _, tc := range []struct {
 		baseURL string
@@ -132,14 +142,14 @@ func TestCatalog_ProviderSetupKeywordsAreSearchOnly(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"ollama":            "model, protocol",
-		"openai":            "credential, model, protocol",
-		"chatgpt":           "sign in, model, protocol",
-		"anthropic":         "credential, model, protocol",
-		"openrouter":        "credential, model, protocol",
-		"bedrock":           "region, Bedrock API key, AWS credentials, model, protocol",
-		"azure":             "endpoint, credential, deployment, protocol",
-		"openai_compatible": "backend URL, credential, credential header, model, protocol",
+		"ollama":     "model, protocol",
+		"openai":     "credential, model, protocol",
+		"chatgpt":    "sign in, model, protocol",
+		"anthropic":  "credential, model, protocol",
+		"openrouter": "credential, model, protocol",
+		"bedrock":    "region, Bedrock API key, AWS credentials, model, protocol",
+		"azure":      "endpoint, credential, deployment, protocol",
+		"custom":     "backend URL, credential, credential header, model, protocol",
 	}
 
 	for spec, want := range cases {
@@ -157,14 +167,14 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		credential CredentialSpec
 		noun       string
 	}{
-		"ollama":            {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:11434/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
-		"openai":            {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
-		"chatgpt":           {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
-		"anthropic":         {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
-		"openrouter":        {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
-		"bedrock":           {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK"}, "model"},
-		"azure":             {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
-		"openai_compatible": {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback}, "model"},
+		"ollama":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:11434/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
+		"openai":     {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
+		"chatgpt":    {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
+		"anthropic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
+		"openrouter": {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
+		"bedrock":    {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK"}, "model"},
+		"azure":      {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
+		"custom":     {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback}, "model"},
 	}
 	for spec, want := range cases {
 		got, ok := LocatorSpecForProvider(spec)
@@ -245,10 +255,10 @@ func TestCatalog_ConcreteProviderProtocolsForSpec_OrderIsCanonical(t *testing.T)
 }
 
 func TestCustomEndpointDoesNotPromiseModelCatalog(t *testing.T) {
-	if SupportsCapability(string(ProviderSpecOpenAICompatible), CapabilityModelCatalog) {
+	if SupportsCapability(string(ProviderSpecCustom), CapabilityModelCatalog) {
 		t.Fatal("Custom Endpoint cannot promise /models support for arbitrary compatible backends")
 	}
-	if !SupportsCapability(string(ProviderSpecOpenAICompatible), CapabilityStreaming) {
+	if !SupportsCapability(string(ProviderSpecCustom), CapabilityStreaming) {
 		t.Fatal("Custom Endpoint lost its declared streaming capability")
 	}
 }

@@ -26,14 +26,14 @@ type CredentialSpec struct {
 type Capability string
 
 const (
-	ProviderSpecOllama           ProviderID = "ollama"
-	ProviderSpecOpenAI           ProviderID = "openai"
-	ProviderSpecChatGPT          ProviderID = "chatgpt"
-	ProviderSpecAnthropic        ProviderID = "anthropic"
-	ProviderSpecOpenRouter       ProviderID = "openrouter"
-	ProviderSpecBedrock          ProviderID = "bedrock"
-	ProviderSpecAzure            ProviderID = "azure"
-	ProviderSpecOpenAICompatible ProviderID = "openai_compatible"
+	ProviderSpecOllama     ProviderID = "ollama"
+	ProviderSpecOpenAI     ProviderID = "openai"
+	ProviderSpecChatGPT    ProviderID = "chatgpt"
+	ProviderSpecAnthropic  ProviderID = "anthropic"
+	ProviderSpecOpenRouter ProviderID = "openrouter"
+	ProviderSpecBedrock    ProviderID = "bedrock"
+	ProviderSpecAzure      ProviderID = "azure"
+	ProviderSpecCustom     ProviderID = "custom"
 
 	CapabilityModelCatalog Capability = "model_catalog"
 	CapabilityStreaming    Capability = "streaming"

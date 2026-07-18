@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
@@ -97,7 +97,7 @@ func decodeMessagesSystem(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return strings.TrimSpace(text), nil // swobu:io-string source=boundary
 	}
-	parts, err := openaicompat.DecodeTextContentItems(raw, "messages system", canonical.ItemAuthorUser)
+	parts, err := openaiwire.DecodeTextContentItems(raw, "messages system", canonical.ItemAuthorUser)
 	if err != nil {
 		return "", err
 	}
@@ -118,8 +118,8 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 	if role == "" {
 		role = "user"
 	}
-	author := openaicompat.AuthorForRole(role)
-	parts, err := openaicompat.DecodeContentParts(raw, "messages request content is invalid")
+	author := openaiwire.AuthorForRole(role)
+	parts, err := openaiwire.DecodeContentParts(raw, "messages request content is invalid")
 	if err != nil {
 		return nil, pendingToolUseIDs, err
 	}
@@ -128,7 +128,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	pending := append([]string(nil), pendingToolUseIDs...)
-	err = openaicompat.WalkContentParts(parts, func(partIdx int, part openaicompat.ContentPartItem) error {
+	err = openaiwire.WalkContentParts(parts, func(partIdx int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=provider-wire
 		switch partType {
 		case "text":
@@ -151,7 +151,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			}
 			toolUseID := strings.TrimSpace(part.ID) // swobu:io-string source=boundary
 			if toolUseID == "" {
-				toolUseID = openaicompat.GeneratedToolUseID(msgIdx, partIdx)
+				toolUseID = openaiwire.GeneratedToolUseID(msgIdx, partIdx)
 			}
 			pending = append(pending, toolUseID)
 			decoded = append(decoded, canonical.NewToolUseItem(author, "", toolUseID, name, canonical.NewToolArgumentsObject(string(args))))
@@ -183,12 +183,12 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 }
 
 func decodeToolResultText(raw json.RawMessage) (string, error) {
-	parts, err := openaicompat.DecodeContentParts(raw, "messages request tool_result content is invalid")
+	parts, err := openaiwire.DecodeContentParts(raw, "messages request tool_result content is invalid")
 	if err != nil {
 		return "", err
 	}
 	var builder strings.Builder
-	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPartItem) error {
+	err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		if partType == "" {
 			partType = "text"

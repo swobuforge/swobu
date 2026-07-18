@@ -21,8 +21,8 @@ func DefaultAuthHeaderForSpec(spec string) string {
 // a provider spec. Manual entry remains a separate escape hatch.
 func SupportedAuthHeadersForSpec(spec string) []string {
 	normalized := strings.TrimSpace(spec) // swobu:io-string source=boundary
-	if normalized == string(ProviderSpecOpenAICompatible) {
-		return slices.Clone(openAICompatibleAuthHeaders)
+	if normalized == string(ProviderSpecCustom) {
+		return slices.Clone(customAuthHeaders)
 	}
 	return nil
 }
@@ -39,7 +39,7 @@ func SupportedAuthHeadersForSpec(spec string) []string {
 //   - Azure OpenAI-looking host            -> api-key
 //   - otherwise                            -> Authorization
 func InferredCredentialHeaderForBackendURL(baseURL string) string {
-	fallback := DefaultAuthHeaderForSpec(string(ProviderSpecOpenAICompatible))
+	fallback := DefaultAuthHeaderForSpec(string(ProviderSpecCustom))
 	raw := strings.TrimSpace(baseURL) // swobu:io-string source=boundary
 	if raw == "" {
 		return fallback

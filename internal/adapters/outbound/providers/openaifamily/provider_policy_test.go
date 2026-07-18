@@ -19,8 +19,8 @@ func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
 	if got := NewOllamaPolicy().ProviderID(); got != profile.ProviderSpecOllama {
 		t.Fatalf("ollama policy provider=%s", got)
 	}
-	if got := NewOpenAICompatiblePolicy().ProviderID(); got != profile.ProviderSpecOpenAICompatible {
-		t.Fatalf("openaicompat policy provider=%s", got)
+	if got := NewCustomPolicy().ProviderID(); got != profile.ProviderSpecCustom {
+		t.Fatalf("custom policy provider=%s", got)
 	}
 	if got := NewOpenRouterPolicy().ProviderID(); got != profile.ProviderSpecOpenRouter {
 		t.Fatalf("openrouter policy provider=%s", got)
@@ -31,8 +31,8 @@ func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
 	if got := NewOllamaPolicy().AuthStrategy().Style; got != AuthStyleNone {
 		t.Fatalf("ollama auth style=%s", got)
 	}
-	if got := NewOpenAICompatiblePolicy().AuthStrategy().Header; got != AuthHeaderAuthorization {
-		t.Fatalf("openai-compatible auth header=%s", got)
+	if got := NewCustomPolicy().AuthStrategy().Header; got != AuthHeaderAuthorization {
+		t.Fatalf("custom endpoint auth header=%s", got)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 	for _, profile := range []ProviderRoutePolicy{
 		NewOpenAIPolicy(),
 		NewOllamaPolicy(),
-		NewOpenAICompatiblePolicy(),
+		NewCustomPolicy(),
 		NewOpenRouterPolicy(),
 	} {
 		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), carrier.CarrierDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")

@@ -54,6 +54,20 @@ func TestStoreStoredSecret_WritesProviderScopedScope(t *testing.T) {
 	}
 }
 
+func TestStoreStoredSecret_CustomUsesCanonicalProviderScope(t *testing.T) {
+	orig := keyringSet
+	t.Cleanup(func() { keyringSet = orig })
+	keyringSet = func(scope, user, pass string) error {
+		if scope != "swobu/custom" {
+			t.Fatalf("scope = %q, want swobu/custom", scope)
+		}
+		return nil
+	}
+	if err := StoreStoredSecret("custom", "custom/default", "token-123"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoreStoredSecret_FallsBackToFileWhenKeyringUnavailable(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	orig := keyringSet

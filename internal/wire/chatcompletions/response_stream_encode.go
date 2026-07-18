@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
 func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
@@ -16,5 +16,5 @@ func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 
 func (e ResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, _ delivery.Delivery) (effect.Result[carrier.CarrierStream], error) {
 	state := e.newStreamState()
-	return openaicompat.EncodeEnvelopeStream(events, state, protocolkind.ChatCompletions)
+	return openaiwire.EncodeEnvelopeStream(events, state, protocolkind.ChatCompletions)
 }

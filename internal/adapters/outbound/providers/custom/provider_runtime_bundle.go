@@ -1,4 +1,4 @@
-package openaicompat
+package custom
 
 import (
 	"net/http"
@@ -8,5 +8,5 @@ import (
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	return openaifamily.NewRuntime(client, credentials, openaifamily.NewOpenAICompatiblePolicy())
+	return openaifamily.NewRuntime(client, credentials, openaifamily.NewCustomPolicy())
 }
