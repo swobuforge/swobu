@@ -7,14 +7,6 @@ import (
 	"time"
 )
 
-// ResolveDaemonURL applies standard CLI precedence: flag > env > default.
-func ResolveDaemonURL(flagValue string) string {
-	if trimmed := strings.TrimSpace(flagValue); trimmed != "" { // swobu:io-string source=boundary
-		return trimmed
-	}
-	return DefaultDaemonURL()
-}
-
 // ResolveTelemetryEndpoint applies env override over the built-in endpoint.
 func ResolveTelemetryEndpoint(defaultValue string) string {
 	if explicit := strings.TrimSpace(os.Getenv(EnvTelemetryEndpoint)); explicit != "" { // swobu:io-string source=boundary
@@ -36,14 +28,14 @@ func ResolveTelemetryExportInterval(defaultValue time.Duration) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// ResolveDaemonRuntimeConfigPath resolves the config path for `swobu daemon`.
+// ResolveConfigPath resolves the config path for `swobu daemon`.
 // If the operator supplied --config explicitly, that path is used as-is.
-// Otherwise the default path is resolved and ensured on disk.
-func ResolveDaemonRuntimeConfigPath(flagValue string) (string, error) {
+// Otherwise the default path is returned without filesystem mutation.
+func ResolveConfigPath(flagValue string) string {
 	if trimmed := strings.TrimSpace(flagValue); trimmed != "" { // swobu:io-string source=boundary
-		return trimmed, nil
+		return trimmed
 	}
-	return EnsureDefaultConfigFile()
+	return DefaultConfigPath()
 }
 
 // ResolveAuthCredentialWritePolicy resolves daemon credential write policy.

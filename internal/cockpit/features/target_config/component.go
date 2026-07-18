@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
+	"fmt"
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"fmt"
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
 )
 
@@ -65,7 +65,7 @@ func TargetAddMountKey(w *TargetConfig, suffix string) string {
 }
 
 // SaveTargetFunc is the narrow command boundary for target creation.
-type SaveTargetFunc func(context.Context, ports.SaveTargetRequest) (readmodel.TargetReadModel, error)
+type SaveTargetFunc func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error)
 
 type targetConfigMode int
 
@@ -82,7 +82,7 @@ const TargetConfigChildOptionLabel = " "
 
 // TargetConfig owns the state machine for adding a target to a route. Provider-
 // specific setup handlers build a TargetDraft-shaped snapshot before catalog
-// probing and saving; durable validation remains in endpointintent.
+// probing and saving; durable validation remains in routing/configstore.
 //
 // The route section mounts the target config when add-target or target-edit is open
 // and closes it when a target is saved or the operator escapes/cancels.
@@ -99,8 +99,8 @@ type TargetConfig struct {
 	TargetSetupQueries ports.TargetSetupQueries
 	TargetAuthCommands ports.TargetAuthCommands
 	CredentialCommands ports.TargetCredentialCommands
-	OnCreated          func(readmodel.TargetReadModel)
-	OnSaved            func(readmodel.TargetReadModel)
+	OnCreated          func(ports.SaveTargetResult)
+	OnSaved            func(ports.SaveTargetResult)
 	OnDeleteConfirmed  func() error
 	OnClose            func()
 
@@ -148,7 +148,7 @@ func NewEditTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.Rout
 		ModelName:               target.Model,
 		DefaultProviderProtocol: target.ProviderProtocol,
 	})
-	w.Placement.Set(placementForTarget(target))
+	w.Placement.Set(defaultPlacementForRoute(route))
 	if w.Draft.Get().ProviderSpec != "" {
 		w.refreshSetup()
 	}
@@ -266,7 +266,7 @@ func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route rea
 			ModelName:               target.Model,
 			DefaultProviderProtocol: target.ProviderProtocol,
 		})
-		w.Placement.Set(placementForTarget(target))
+		w.Placement.Set(defaultPlacementForRoute(route))
 		if w.Draft.Get().ProviderSpec != "" {
 			w.refreshSetup()
 		}

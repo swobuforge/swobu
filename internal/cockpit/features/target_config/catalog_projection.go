@@ -222,7 +222,3 @@ func protocolOptionKeywords(protocol string) []string {
 		strings.ReplaceAll(label, "_", " "),
 	}
 }
-
-func (w *TargetConfig) CurrentProtocolOptions() []protocolOption {
-	return resolveProtocolOptions(w.Draft.Get().ProviderSpec, w.SelectedModel.Get())
-}

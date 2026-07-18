@@ -34,7 +34,7 @@ func (k TargetConfigKey) mountKey() string {
 // TargetConfigCommands are the domain effects a mounted target config may
 // execute. Static provider picker options are page/readmodel data, not commands.
 type TargetConfigCommands struct {
-	SaveTarget  func(context.Context, ports.SaveTargetRequest) (readmodel.TargetReadModel, error)
+	SaveTarget  func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error)
 	Setup       ports.TargetSetupQueries
 	Auth        ports.TargetAuthCommands
 	Credentials ports.TargetCredentialCommands
@@ -43,8 +43,8 @@ type TargetConfigCommands struct {
 // TargetConfigCallbacks report local target config lifecycle events back to the
 // routes section that mounted the target config.
 type TargetConfigCallbacks struct {
-	OnCreated         func(readmodel.RouteID, readmodel.TargetReadModel)
-	OnSaved           func(readmodel.RouteID, readmodel.TargetReadModel)
+	OnCreated         func(readmodel.RouteReadModel)
+	OnSaved           func(readmodel.RouteReadModel)
 	OnDeleteConfirmed func(readmodel.RouteID, readmodel.TargetID) error
 	OnAddClose        func(readmodel.RouteID)
 	OnEditClose       func(readmodel.TargetID)
@@ -161,7 +161,7 @@ func (h *TargetConfigMounts) Refresh(routes []readmodel.RouteReadModel, closeAdd
 
 	liveEditConfigs := make(map[TargetConfigKey]struct{})
 	for _, route := range routes {
-		for _, target := range route.Targets {
+		for _, target := range route.AllTargets() {
 			key := h.editKey(route.ID, target.ID)
 			liveEditConfigs[key] = struct{}{}
 			if wf := h.components[key]; wf != nil {
@@ -226,9 +226,9 @@ func (h *TargetConfigMounts) newAdd(route readmodel.RouteReadModel) *target_conf
 		},
 	)
 	h.refreshAddConfig(wf, route)
-	wf.OnCreated = func(t readmodel.TargetReadModel) {
+	wf.OnCreated = func(result ports.SaveTargetResult) {
 		if h.Callbacks.OnCreated != nil {
-			h.Callbacks.OnCreated(route.ID, t)
+			h.Callbacks.OnCreated(result.Route)
 		}
 	}
 	return wf
@@ -247,14 +247,14 @@ func (h *TargetConfigMounts) newEdit(route readmodel.RouteReadModel, target read
 		},
 	)
 	h.refreshEditConfig(wf, route, target)
-	wf.OnCreated = func(t readmodel.TargetReadModel) {
+	wf.OnCreated = func(result ports.SaveTargetResult) {
 		if h.Callbacks.OnCreated != nil {
-			h.Callbacks.OnCreated(route.ID, t)
+			h.Callbacks.OnCreated(result.Route)
 		}
 	}
-	wf.OnSaved = func(t readmodel.TargetReadModel) {
+	wf.OnSaved = func(result ports.SaveTargetResult) {
 		if h.Callbacks.OnSaved != nil {
-			h.Callbacks.OnSaved(route.ID, t)
+			h.Callbacks.OnSaved(result.Route)
 		}
 	}
 	wf.OnDeleteConfirmed = func() error {
@@ -266,9 +266,9 @@ func (h *TargetConfigMounts) newEdit(route readmodel.RouteReadModel, target read
 	return wf
 }
 
-func (h *TargetConfigMounts) saveTarget(ctx context.Context, req ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
+func (h *TargetConfigMounts) saveTarget(ctx context.Context, req ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
 	if h.Commands.SaveTarget == nil {
-		return readmodel.TargetReadModel{}, errTargetSaveNotWired
+		return ports.SaveTargetResult{}, errTargetSaveNotWired
 	}
 	return h.Commands.SaveTarget(ctx, req)
 }

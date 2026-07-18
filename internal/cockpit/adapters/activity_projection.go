@@ -14,7 +14,7 @@ import (
 func (a *LiveOperatorAdapter) ListActivity(ctx context.Context, request ports.ListActivityRequest) (readmodel.ActivityReadModel, error) {
 	scope := "all"
 	if request.WorkspaceID != "" {
-		scope = "endpoint:" + string(request.WorkspaceID)
+		scope = "workspace:" + string(request.WorkspaceID)
 	}
 	projection, err := a.client.Status(ctx, scope)
 	if err != nil {

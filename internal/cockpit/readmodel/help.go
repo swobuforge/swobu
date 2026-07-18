@@ -11,10 +11,10 @@ import (
 // Diagnostics holds runtime workspace/route/activity context copied to the
 // operator's clipboard.
 type HelpReadModel struct {
-	Version       string
-	DaemonVersion string
+	Version           string
+	DaemonVersion     string
 	DiagnosticsStatus DiagnosticsStatus
-	Diagnostics   DiagnosticsPayload
+	Diagnostics       DiagnosticsPayload
 }
 
 // DiagnosticsPayload is the explicit safe-list support context copied from the

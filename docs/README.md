@@ -22,5 +22,6 @@ These docs contain practical setup recipes and troubleshooting references that a
 
 ## Operations
 
+- [Workspace configuration](./configuration.md)
 - [Troubleshooting](./troubleshooting.md)
 - [Telemetry](./telemetry.md)

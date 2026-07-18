@@ -39,11 +39,13 @@ type TargetAuthCommands interface {
 }
 
 // StartAuthSessionRequest names the provider and auth mode for an interactive
-// session. EndpointRef may be a transient subject locator while the target is
-// still being created.
+// session. DraftSubject is used only before a target exists.
 type StartAuthSessionRequest struct {
 	ProviderSpec string
-	EndpointRef  string
+	Workspace    string
+	Route        string
+	TargetID     string
+	DraftSubject string
 	AuthMode     string
 }
 

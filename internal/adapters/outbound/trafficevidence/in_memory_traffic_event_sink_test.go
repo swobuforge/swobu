@@ -32,7 +32,7 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
-	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Endpoint: "acme",
+	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Workspace: "acme",
 		RequestID:    requestID,
 		Route:        route,
 		Result:       trafficevidence.ResultClassSuccess,

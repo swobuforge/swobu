@@ -158,7 +158,7 @@ func (d *Daemon) emitEventTelemetryBestEffort(ctx context.Context, event traffic
 		return
 	}
 	state := string(HealthStateHealthy)
-	if d.endpoints != nil {
+	if d.configStore != nil {
 		if status, err := d.Status(); err == nil {
 			state = string(status.State)
 		}

@@ -3,8 +3,8 @@ package target_config
 import (
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -75,7 +75,7 @@ func (w *TargetConfig) SelectBedrockRegion(region string) {
 		return
 	}
 	w.BaseURL.Set(profile.BedrockMantleEndpointForRegion(region))
-	w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft {
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ProviderOptions.Bedrock.Region = region
 		return d
 	})

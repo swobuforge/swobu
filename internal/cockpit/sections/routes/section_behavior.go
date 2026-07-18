@@ -3,7 +3,6 @@ package routes
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	tui "github.com/grindlemire/go-tui"
@@ -32,7 +31,7 @@ type SectionView struct {
 	addRouteFocusPending bool
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
-	DeleteTarget         func(context.Context, ports.DeleteTargetRequest) error
+	DeleteTarget         func(context.Context, ports.DeleteTargetRequest) (readmodel.RouteReadModel, error)
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *SectionView {
@@ -134,11 +133,13 @@ func (s *SectionView) configureTargetConfigMounts() {
 		s.TargetConfigs = NewTargetConfigMounts(s.Model.ID)
 	}
 	s.TargetConfigs.WorkspaceID = s.Model.ID
-	s.TargetConfigs.Callbacks.OnCreated = func(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
-		s.saveTarget(routeID, target)
+	s.TargetConfigs.Callbacks.OnCreated = func(route readmodel.RouteReadModel) {
+		s.applyRouteUpsert(route)
+		s.State.AddTargetRoute.Set("")
 	}
-	s.TargetConfigs.Callbacks.OnSaved = func(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
-		s.updateTarget(routeID, target)
+	s.TargetConfigs.Callbacks.OnSaved = func(route readmodel.RouteReadModel) {
+		s.applyRouteUpsert(route)
+		s.State.OpenTarget.Set("")
 	}
 	s.TargetConfigs.Callbacks.OnDeleteConfirmed = func(routeID readmodel.RouteID, targetID readmodel.TargetID) error {
 		return s.deleteTargetAndClose(routeID, targetID)
@@ -273,26 +274,21 @@ func (s *SectionView) refreshTargetConfigs() {
 	})
 }
 
-func (s *SectionView) saveTarget(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
-	s.applyTargetSaved(routeID, target)
-}
-
-func (s *SectionView) updateTarget(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
-	s.applyTargetUpdated(routeID, target)
-}
-
 func (s *SectionView) deleteTargetAndClose(routeID readmodel.RouteID, targetID readmodel.TargetID) error {
 	if s.DeleteTarget == nil {
 		return errTargetDeleteNotWired
 	}
-	if err := s.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
+	committed, err := s.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
 		WorkspaceID: s.Model.ID,
 		RouteID:     routeID,
 		TargetID:    targetID,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	s.applyTargetDeleted(routeID, targetID)
+	s.applyRouteUpsert(committed)
+	s.State.OpenTarget.Set("")
+	s.State.DeleteConfirmTarget.Set("")
 	return nil
 }
 
@@ -303,37 +299,6 @@ func (s *SectionView) confirmDeleteTarget(targetID readmodel.TargetID) {
 
 func (s *SectionView) closeDeleteTargetConfirm() {
 	s.State.DeleteConfirmTarget.Set("")
-}
-
-// renumberSteps collapses ranks so deleting the last target in a step cannot
-// leave a hole such as step 1, step 3.
-func renumberSteps(route *readmodel.RouteReadModel) {
-	if len(route.Targets) == 0 {
-		return
-	}
-	seen := make([]int, 0, len(route.Targets))
-	for _, t := range route.Targets {
-		if !intSliceContains(seen, t.Rank) {
-			seen = append(seen, t.Rank)
-		}
-	}
-	sort.Ints(seen)
-	rankMap := make(map[int]int, len(seen))
-	for i, old := range seen {
-		rankMap[old] = i + 1
-	}
-	for i := range route.Targets {
-		route.Targets[i].Rank = rankMap[route.Targets[i].Rank]
-	}
-}
-
-func intSliceContains(values []int, value int) bool {
-	for _, candidate := range values {
-		if candidate == value {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *SectionView) Back() bool {
@@ -614,7 +579,7 @@ func (s *SectionView) ensureDefaultAfterDeletion() {
 		}
 	}
 	for _, route := range s.State.Routes {
-		if len(route.Targets) == 0 {
+		if route.TargetCount() == 0 {
 			continue
 		}
 		s.markOnlyDefault(route.ID)
@@ -640,99 +605,13 @@ func (s *SectionView) requestRouteDeleteFocus(deletedIdx int) {
 	s.RequestAddRouteFocus()
 }
 
-func (s *SectionView) applyTargetSaved(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
-	for i, route := range s.State.Routes {
-		if route.ID != routeID {
-			continue
-		}
-		routeChanged := false
-		for j, existing := range route.Targets {
-			if existing.ID == target.ID {
-				s.State.Routes[i].Targets[j] = target
-				routeChanged = true
-				break
-			}
-		}
-		if !routeChanged {
-			s.State.Routes[i].Targets = append(s.State.Routes[i].Targets, target)
-		}
-		syncRouteSummary(&s.State.Routes[i])
-		s.State.OpenTarget.Set("")
-		s.State.AddTargetRoute.Set("")
-		s.TargetConfigs.DeleteEdit(route, target.ID)
-		return
-	}
-}
-
-func (s *SectionView) applyTargetUpdated(routeID readmodel.RouteID, target readmodel.TargetReadModel) {
-	for i, route := range s.State.Routes {
-		if route.ID != routeID {
-			continue
-		}
-		for j, existing := range route.Targets {
-			if existing.ID != target.ID {
-				continue
-			}
-			s.State.Routes[i].Targets[j] = target
-			syncRouteSummary(&s.State.Routes[i])
-			return
-		}
-	}
-}
-
-func (s *SectionView) applyTargetDeleted(routeID readmodel.RouteID, targetID readmodel.TargetID) {
-	for i, route := range s.State.Routes {
-		if route.ID != routeID {
-			continue
-		}
-		next := make([]readmodel.TargetReadModel, 0, len(route.Targets))
-		removed := false
-		for _, target := range route.Targets {
-			if target.ID == targetID {
-				removed = true
-				continue
-			}
-			next = append(next, target)
-		}
-		if !removed {
-			return
-		}
-		if len(next) == 0 {
-			s.applyRouteDeleted(routeID)
-			return
-		}
-		s.State.Routes[i].Targets = next
-		renumberSteps(&s.State.Routes[i])
-		syncRouteSummary(&s.State.Routes[i])
-		s.State.OpenTarget.Set("")
-		s.State.DeleteConfirmTarget.Set("")
-		s.State.AddTargetRoute.Set("")
-		s.TargetConfigs.DeleteEdit(route, targetID)
-		return
-	}
-}
-
-// syncRouteSummary keeps the row status aligned with the current target slice.
-func syncRouteSummary(route *readmodel.RouteReadModel) {
-	route.State = routeStateFromTargets(route.Targets)
-}
-
-func routeStateFromTargets(targets []readmodel.TargetReadModel) readmodel.RouteState {
-	return readmodel.RouteNormal
-}
-
 func (s *SectionView) markOnlyDefault(routeID readmodel.RouteID) {
 	for i := range s.State.Routes {
 		s.State.Routes[i].Default = s.State.Routes[i].ID == routeID
 	}
 }
 
-func targetRankLabel(target readmodel.TargetReadModel) string {
-	if target.Rank > 0 {
-		return fmt.Sprint(target.Rank)
-	}
-	return string(target.ID)
-}
+func targetRankLabel(target readmodel.TargetReadModel) string { return string(target.ID) }
 
 func routeActionLabel(open bool) string {
 	if open {
@@ -751,32 +630,24 @@ func targetValue(target readmodel.TargetReadModel) string {
 	return target.Provider + "/" + target.Model
 }
 
-// groupedTargets returns targets grouped by Rank, sorted by Rank ascending.
-// Each inner slice is one step.
+// groupedTargets returns structural tiers without inference or sorting.
 func groupedTargets(route readmodel.RouteReadModel) [][]readmodel.TargetReadModel {
-	targets := append([]readmodel.TargetReadModel(nil), route.Targets...)
-	sort.SliceStable(targets, func(i, j int) bool {
-		return targets[i].Rank < targets[j].Rank
-	})
-	order := make(map[int]int) // rank -> step index
-	var steps [][]readmodel.TargetReadModel
-	for _, t := range targets {
-		idx, ok := order[t.Rank]
-		if !ok {
-			idx = len(steps)
-			order[t.Rank] = idx
-			steps = append(steps, nil)
-		}
-		steps[idx] = append(steps[idx], t)
+	out := make([][]readmodel.TargetReadModel, 0, len(route.Tiers))
+	for _, tier := range route.Tiers {
+		out = append(out, append([]readmodel.TargetReadModel(nil), tier.Targets...))
 	}
-	return steps
+	return out
 }
 
-func stepHeaderText(stepNum int, balanced bool) string {
-	if balanced {
-		return fmt.Sprintf("step %d        balance", stepNum)
+func tierHeaderText(tierIndex int, balanced bool) string {
+	label := "primary"
+	if tierIndex > 0 {
+		label = fmt.Sprintf("fallback %d", tierIndex)
 	}
-	return fmt.Sprintf("step %d", stepNum)
+	if balanced {
+		return label + "        balance"
+	}
+	return label
 }
 
 func modelSendsRowValue(route readmodel.RouteReadModel) string { return "model = " + route.ModelName }
@@ -818,12 +689,11 @@ func RouteRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.Selec
 }
 
 // TargetRowComponent mounts a selectable target row indented as a route child.
-// Target rows show provider/model and share% only inside balanced steps.
+// Target rows show provider/model and equal share inside balanced tiers.
 func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel) *ui.SelectableRow {
 	value := targetValue(target)
-	stepTargets := targetsAtRank(route.Targets, target.Rank)
-	if len(stepTargets) > 1 {
-		value = value + " · " + sharePercent(target, stepTargets) + "%"
+	if tierIndex, ok := route.TargetTier(target.ID); ok && len(route.Tiers[tierIndex].Targets) > 1 {
+		value = value + " · " + fmt.Sprint(100/len(route.Tiers[tierIndex].Targets)) + "%"
 	}
 	row := ui.NewSelectableRow(
 		targetMountKey(route, target),
@@ -836,39 +706,6 @@ func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target r
 		row.OnEscape = func() { s.State.OpenTarget.Set("") }
 	}
 	return row
-}
-
-// targetsAtRank returns all targets sharing the same rank.
-func targetsAtRank(targets []readmodel.TargetReadModel, rank int) []readmodel.TargetReadModel {
-	var out []readmodel.TargetReadModel
-	for _, t := range targets {
-		if t.Rank == rank {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// sharePercent returns the display share for a target within its step.
-func sharePercent(target readmodel.TargetReadModel, stepTargets []readmodel.TargetReadModel) string {
-	total := 0
-	for _, t := range stepTargets {
-		w := t.Weight
-		if w <= 0 {
-			w = 1
-		}
-		total += w
-	}
-	if total == 0 {
-		return "100"
-	}
-	w := target.Weight
-	if w <= 0 {
-		w = 1
-	}
-	// Round to nearest integer to avoid fractional percentages in UI.
-	pct := (w * 100) / total
-	return fmt.Sprint(pct)
 }
 
 func routeMountKey(route readmodel.RouteReadModel) string { return "route:" + string(route.ID) }

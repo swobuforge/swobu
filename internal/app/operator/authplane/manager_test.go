@@ -35,15 +35,14 @@ func (d driverStub) Cancel(ctx context.Context, sessionID string) error {
 
 type storeStub struct {
 	provider  string
-	endpoint  string
+	subject   CredentialSubject
 	ref       string
 	returnRef string
 	err       error
 }
 
-func (s *storeStub) UpsertCredentialRef(_ context.Context, providerSpec string, endpointRef string, credentialRef string) (string, error) {
-	s.provider = providerSpec
-	s.endpoint = endpointRef
+func (s *storeStub) SetCredential(_ context.Context, subject CredentialSubject, credentialRef string) (string, error) {
+	s.subject = subject
 	s.ref = credentialRef
 	if s.err != nil {
 		return "", s.err
@@ -72,7 +71,7 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
 
-	start, err := manager.Start(context.Background(), StartInput{ProviderSpec: " ChatGPT ", EndpointRef: "acme"})
+	start, err := manager.Start(context.Background(), StartInput{ProviderSpec: " ChatGPT ", DraftSubject: "subject:acme"})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
@@ -90,8 +89,8 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 	if session.CredentialRef != "keychain:chatgpt/default" {
 		t.Fatalf("session credential ref = %q", session.CredentialRef)
 	}
-	if store.provider != "chatgpt" || store.endpoint != "acme" || store.ref != "keychain:chatgpt/default" {
-		t.Fatalf("store write mismatch provider=%q endpoint=%q ref=%q", store.provider, store.endpoint, store.ref)
+	if store.subject.DraftSubject != "subject:acme" || store.ref != "keychain:chatgpt/default" {
+		t.Fatalf("store write mismatch subject=%#v ref=%q", store.subject, store.ref)
 	}
 }
 
@@ -109,7 +108,7 @@ func TestManagerPollUsesPersistedCredentialRefOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
-	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", EndpointRef: "acme"}); err != nil {
+	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", DraftSubject: "subject:acme"}); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
 	session, err := manager.Poll(context.Background(), "sess-2")
@@ -144,7 +143,7 @@ func TestManagerCancelPropagatesDriverError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
-	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", EndpointRef: "acme"}); err != nil {
+	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", DraftSubject: "subject:acme"}); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
 	if err := manager.Cancel(context.Background(), "sess-1"); !errors.Is(err, wantErr) {
@@ -169,7 +168,7 @@ func TestManagerRetryReusesStartInput(t *testing.T) {
 	}
 	_, err = manager.Start(context.Background(), StartInput{
 		ProviderSpec: "chatgpt",
-		EndpointRef:  "main#cfg-a",
+		Workspace:    "main", Route: "chat", TargetID: "cfg-a",
 	})
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
@@ -180,7 +179,7 @@ func TestManagerRetryReusesStartInput(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("start count = %d", len(seen))
 	}
-	if seen[1].ProviderSpec != "chatgpt" || seen[1].EndpointRef != "main#cfg-a" {
+	if seen[1].ProviderSpec != "chatgpt" || seen[1].Workspace != "main" || seen[1].TargetID != "cfg-a" {
 		t.Fatalf("retry input lost fields: %#v", seen[1])
 	}
 }

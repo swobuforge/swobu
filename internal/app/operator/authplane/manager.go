@@ -32,20 +32,20 @@ func (m *AuthSessionManager) Start(ctx context.Context, in StartInput) (StartOut
 	slog.Debug("auth session start requested",
 		"component", "authplane",
 		"provider_spec", provider,
-		"has_endpoint_ref", strings.TrimSpace(in.EndpointRef) != "", // swobu:io-string source=boundary
+		"has_target", strings.TrimSpace(in.TargetID) != "", // swobu:io-string source=boundary
 		"auth_mode", strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	)
 	if provider == "" {
 		return StartOutput{}, fmt.Errorf("provider spec is required")
 	}
-	endpointRef := strings.TrimSpace(in.EndpointRef) // swobu:io-string source=boundary
-	if endpointRef == "" {
-		return StartOutput{}, fmt.Errorf("endpoint ref is required")
+	subject := CredentialSubject{Workspace: strings.TrimSpace(in.Workspace), Route: strings.TrimSpace(in.Route), TargetID: strings.TrimSpace(in.TargetID), DraftSubject: strings.TrimSpace(in.DraftSubject)}
+	if subject.DraftSubject == "" && (subject.Workspace == "" || subject.Route == "" || subject.TargetID == "") {
+		return StartOutput{}, fmt.Errorf("workspace, route, and target ID are required")
 	}
 	out, err := m.driver.Start(ctx, StartInput{
 		ProviderSpec: provider,
-		EndpointRef:  endpointRef,
-		AuthMode:     strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
+		Workspace:    subject.Workspace, Route: subject.Route, TargetID: subject.TargetID, DraftSubject: subject.DraftSubject,
+		AuthMode: strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	})
 	if err != nil {
 		slog.Warn("auth session driver start failed",
@@ -62,8 +62,8 @@ func (m *AuthSessionManager) Start(ctx context.Context, in StartInput) (StartOut
 	m.mu.Lock()
 	m.sessions[sessionID] = StartInput{
 		ProviderSpec: provider,
-		EndpointRef:  endpointRef,
-		AuthMode:     strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
+		Workspace:    subject.Workspace, Route: subject.Route, TargetID: subject.TargetID, DraftSubject: subject.DraftSubject,
+		AuthMode: strings.TrimSpace(in.AuthMode), // swobu:io-string source=boundary
 	}
 	m.mu.Unlock()
 	slog.Debug("auth session started",
@@ -109,7 +109,7 @@ func (m *AuthSessionManager) Poll(ctx context.Context, sessionID string) (Sessio
 			return SessionOutput{}, fmt.Errorf("auth session succeeded without credential ref")
 		}
 		if m.store != nil {
-			persistedRef, err := m.store.UpsertCredentialRef(ctx, input.ProviderSpec, input.EndpointRef, strings.TrimSpace(pollOut.CredentialRef)) // swobu:io-string source=boundary
+			persistedRef, err := m.store.SetCredential(ctx, CredentialSubject{Workspace: input.Workspace, Route: input.Route, TargetID: input.TargetID, DraftSubject: input.DraftSubject}, strings.TrimSpace(pollOut.CredentialRef)) // swobu:io-string source=boundary
 			if err != nil {
 				slog.Warn("auth session credential ref persistence failed",
 					"component", "authplane",

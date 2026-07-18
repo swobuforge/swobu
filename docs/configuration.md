@@ -1,0 +1,34 @@
+# Workspace Configuration
+
+Swobu stores local routing configuration in one private YAML file. The daemon is the only writer while it runs; use Cockpit or the local workspace command surface for changes. Manual edits require stopping the daemon first.
+
+```yaml
+schema_version: 1
+workspaces:
+  dev:
+    default_route: chat
+    routes:
+      chat:
+        tiers:
+          - targets:
+              - id: openai-primary
+                model: gpt-5
+                protocol: responses
+                connection:
+                  openai:
+                    credential: env:OPENAI_API_KEY
+```
+
+Clients use `/c/dev/...` and request the route name (`chat`) as `model`. The exact model value `swobu` selects `default_route`; unknown names fail. The first tier is primary, later tiers are fallbacks, and targets within one tier are equally balanced.
+
+Swobu listens on `127.0.0.1:7926` by default. Override it with `--addr` or
+`SWOBU_ADDR`. The address is restart-bound startup configuration, not routing
+state, and workspace edits never rewrite it.
+
+Each target uses exactly one connection arm: `openai`, `anthropic`, `openrouter`, `chatgpt`, `ollama`, `azure`, `bedrock`, or `custom`. Credentials are locators such as `env:OPENAI_API_KEY`, not secret values. Protocols must be concrete; `auto` is rejected.
+
+Swobu rejects unknown fields and obsolete schemas at startup. The file is
+replaced atomically after every successful command. Failures before rename keep
+the old snapshot; directory-sync uncertainty after rename publishes the renamed
+snapshot and fail-stops later writes until restart. A second daemon using the
+same path is rejected while the first holds the lock.

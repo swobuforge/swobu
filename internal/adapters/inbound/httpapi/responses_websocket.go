@@ -15,9 +15,9 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/routing"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -51,7 +51,7 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		return
 	}
 
-	parsedEndpoint, err := endpointintent.ParseEndpointName(endpointName)
+	parsedWorkspace, err := routing.ParseWorkspaceSlug(endpointName)
 	if err != nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadEndpoint("endpoint name is invalid"))))
 		return
@@ -67,13 +67,13 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 			return
 		}
 
-		if err := h.handleResponsesWebsocketMessage(conn, r, parsedEndpoint, normalizedPath, []byte(message)); err != nil {
+		if err := h.handleResponsesWebsocketMessage(conn, r, parsedWorkspace, normalizedPath, []byte(message)); err != nil {
 			_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
 		}
 	}
 }
 
-func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, endpoint endpointintent.EndpointName, normalizedPath canonical.NormalizedPath, raw []byte) error {
+func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, raw []byte) error {
 	if len(raw) > maxWebsocketRequestBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
@@ -101,7 +101,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	timing := trafficevidence.NewUnknownTiming()
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
-		EndpointName:    endpoint,
+		Workspace:       workspace,
 		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), r.Header, payload),
 		ClientHandler:   trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
 		ClientFamily:    canonical.ClientFamilyResponses,
@@ -111,11 +111,11 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	})
 	if err != nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
-		finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, err)
+		finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, err)
 		return err
 	}
 	writeErr := writeResponsesWebsocketSuccess(conn, requestID, out.Response, &timing)
-	finalizeTrafficEvidence(r.Context(), requestID, endpoint.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, writeErr)
+	finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, writeErr)
 	return writeErr
 }
 

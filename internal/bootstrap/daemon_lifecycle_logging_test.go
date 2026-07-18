@@ -10,13 +10,18 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/bootstrap"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
 func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
 	t.Parallel()
 
-	configPath := filepath.Join(t.TempDir(), "swobu.yaml")
-	configYAML := "bind_addr: 127.0.0.1:0\nendpoints:\n  []\n"
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "swobu.yaml")
+	configYAML := "schema_version: 1\nworkspaces: {}\n"
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
@@ -25,8 +30,9 @@ func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{}))
 
 	daemon, err := bootstrap.Start(context.Background(), bootstrap.StartInput{
-		ConfigPath: configPath,
-		Logger:     logger,
+		ConfigPath:    configPath,
+		StartupConfig: platformconfig.StartupConfig{Addr: "127.0.0.1:0"},
+		Logger:        logger,
 	})
 	if err != nil {
 		t.Fatalf("bootstrap.Start returned error: %v", err)
@@ -48,31 +54,39 @@ func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
 func TestDaemonLifecycle_StartFailureIncludesErrorDetailsInErrorAndLogs(t *testing.T) {
 	t.Parallel()
 
-	missingConfigPath := filepath.Join(t.TempDir(), "missing-swobu.yaml")
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	notDirectory := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(notDirectory, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invalidConfigPath := filepath.Join(notDirectory, "swobu.yaml")
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{}))
 
 	_, err := bootstrap.Start(context.Background(), bootstrap.StartInput{
-		ConfigPath: missingConfigPath,
+		ConfigPath: invalidConfigPath,
 		Logger:     logger,
 	})
 	if err == nil {
-		t.Fatal("bootstrap.Start returned nil error for missing config")
+		t.Fatal("bootstrap.Start returned nil error for invalid config directory")
 	}
 	errText := err.Error()
-	if !strings.Contains(errText, "missing-swobu.yaml") {
-		t.Fatalf("error = %q, want missing config path detail", errText)
+	if !strings.Contains(errText, "not-a-directory") {
+		t.Fatalf("error = %q, want invalid config path detail", errText)
 	}
-	if !strings.Contains(strings.ToLower(errText), "no such file") { // swobu:io-string source=domain
+	if !strings.Contains(strings.ToLower(errText), "not a directory") { // swobu:io-string source=domain
 		t.Fatalf("error = %q, want filesystem cause detail", errText)
 	}
 
 	logText := logs.String()
 	assertContainsLogEvent(t, logText, "intent_store_open_failed")
-	if !strings.Contains(logText, "config_path="+missingConfigPath) {
+	if !strings.Contains(logText, "config_path="+invalidConfigPath) {
 		t.Fatalf("logs missing config_path detail; logs=%s", logText)
 	}
-	if !strings.Contains(strings.ToLower(logText), "no such file") { // swobu:io-string source=domain
+	if !strings.Contains(strings.ToLower(logText), "not a directory") { // swobu:io-string source=domain
 		t.Fatalf("logs missing underlying error detail; logs=%s", logText)
 	}
 }

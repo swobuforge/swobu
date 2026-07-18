@@ -40,7 +40,7 @@ func (r writerStartupReporter) Report(event daemonlifecycle.StartupEvent) {
 	case daemonlifecycle.StartupEventSplash:
 		writeRawLines(r.out, splashLines())
 	case daemonlifecycle.StartupEventDaemonNotReachable:
-		writeStartupLine(r.out, "checking: daemon not reachable at "+event.DaemonURL)
+		writeStartupLine(r.out, "checking: daemon not reachable at "+event.Addr)
 	case daemonlifecycle.StartupEventStartingDaemon:
 		writeStartupLine(r.out, "starting: starting daemon")
 	case daemonlifecycle.StartupEventWaitingReadiness:

@@ -41,7 +41,7 @@ type Runner struct {
 	Stdout              io.Writer
 	Stderr              io.Writer
 	HTTPClient          *http.Client
-	DaemonURL           string // resolved by caller; zero means use platform default
+	Addr                string // zero means resolve SWOBU_ADDR or the local default
 	Start               func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
 	IsInteractive       func() bool
 	AttachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
@@ -81,9 +81,12 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 		// V0: direct launch into the active go-tui Cockpit.
 		// We import internal/cockpit — the canonical operator TUI authority —
 		// because it owns the interactive workspace surface.
-		daemonURL := platformconfig.ResolveDaemonURL(r.DaemonURL)
+		startupConfig, err := platformconfig.ResolveStartupConfig(r.Addr)
+		if err != nil {
+			return ExitDown
+		}
 		launchInteractive = func(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-			return cockpit.Run(ctx, daemonURL, stdin, stdout, stderr)
+			return cockpit.Run(ctx, startupConfig.Addr, stdin, stdout, stderr)
 		}
 	}
 	attachOrStart := r.AttachOrStart
@@ -214,17 +217,19 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon [--config <path>]")
+		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon [--config <path>] [--addr <host:port>]")
 		fs.PrintDefaults()
 	}
 	configPath := fs.String("config", "", fmt.Sprintf("root daemon config path (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
+	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
 		}
 		return ExitDown
 	}
-	resolvedConfigPath, err := platformconfig.ResolveDaemonRuntimeConfigPath(*configPath)
+	resolvedConfigPath := platformconfig.ResolveConfigPath(*configPath)
+	startupConfig, err := platformconfig.ResolveStartupConfig(*addr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
@@ -236,10 +241,10 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	writePlainLines(stdout, []string{"starting daemon runtime", "config path: " + resolvedConfigPath})
+	writePlainLines(stdout, []string{"starting daemon runtime", "config path: " + resolvedConfigPath, "address: " + startupConfig.Addr})
 
 	logger := slog.Default()
-	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, Logger: logger})
+	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, StartupConfig: startupConfig, Logger: logger})
 	if err != nil {
 		next := []string{
 			"check daemon config path and values",
@@ -308,10 +313,10 @@ func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stdout, "usage: swobu status [--daemon-url <url>]")
+		_, _ = fmt.Fprintln(stdout, "usage: swobu status [--addr <host:port>]")
 		fs.PrintDefaults()
 	}
-	daemonURL := fs.String("daemon-url", "", fmt.Sprintf("daemon base URL (env: %s) (default: %s)", platformconfig.EnvDaemonURL, platformconfig.DefaultDaemonURL()))
+	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -319,7 +324,11 @@ func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.
 		return ExitDown
 	}
 
-	payload, exitCode := fetchStatus(ctx, client, platformconfig.ResolveDaemonURL(*daemonURL))
+	startupConfig, err := platformconfig.ResolveStartupConfig(*addr)
+	if err != nil {
+		return ExitDown
+	}
+	payload, exitCode := fetchStatus(ctx, client, startupConfig.Addr)
 	_ = json.NewEncoder(stdout).Encode(payload)
 	return exitCode
 }
@@ -328,10 +337,10 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu down [--daemon-url <url>] [--timeout <duration>]")
+		_, _ = fmt.Fprintln(stderr, "usage: swobu down [--addr <host:port>] [--timeout <duration>]")
 		fs.PrintDefaults()
 	}
-	daemonURL := fs.String("daemon-url", "", fmt.Sprintf("daemon base URL (env: %s) (default: %s)", platformconfig.EnvDaemonURL, platformconfig.DefaultDaemonURL()))
+	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
 	timeout := fs.Duration("timeout", 5*time.Second, "time to wait for graceful shutdown")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -343,10 +352,15 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 		_, _ = fmt.Fprintln(stderr, "--timeout must be > 0")
 		return ExitDown
 	}
+	startupConfig, err := platformconfig.ResolveStartupConfig(*addr)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
 	result, err := daemonlifecycle.Down(ctx, daemonlifecycle.DownInput{
-		DaemonURL: platformconfig.ResolveDaemonURL(*daemonURL),
-		Client:    client,
-		Timeout:   *timeout,
+		Addr:    startupConfig.Addr,
+		Client:  client,
+		Timeout: *timeout,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
@@ -358,8 +372,8 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 	return ExitHealthy
 }
 
-func fetchStatus(ctx context.Context, client *http.Client, daemonURL string) (StatusPayload, ExitCode) {
-	payload, class := daemonlifecycle.FetchStatus(ctx, client, daemonURL)
+func fetchStatus(ctx context.Context, client *http.Client, addr string) (StatusPayload, ExitCode) {
+	payload, class := daemonlifecycle.FetchStatus(ctx, client, addr)
 	switch class {
 	case daemonlifecycle.StatusClassHealthy:
 		return payload, ExitHealthy
@@ -372,12 +386,16 @@ func fetchStatus(ctx context.Context, client *http.Client, daemonURL string) (St
 	}
 }
 func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, client *http.Client) error {
+	startupConfig, resolveErr := platformconfig.ResolveStartupConfig("")
+	if resolveErr != nil {
+		return resolveErr
+	}
 	_, err := daemonlifecycle.AttachOrStart(ctx, daemonlifecycle.AttachOrStartInput{
-		DaemonURL:            platformconfig.DefaultDaemonURL(),
-		Client:               client,
-		ResolveDefaultConfig: platformconfig.EnsureDefaultConfigFile,
-		Report:               withoutStartupSplash(startupReporterFromWriter(stdout)),
-		ReadinessTimeout:     15 * time.Second,
+		Addr:              startupConfig.Addr,
+		Client:            client,
+		ResolveConfigPath: platformconfig.DefaultConfigPath,
+		Report:            withoutStartupSplash(startupReporterFromWriter(stdout)),
+		ReadinessTimeout:  15 * time.Second,
 	})
 	return err
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -321,10 +320,10 @@ func resolveAzureResourceRoot(raw string) (string, error) {
 	if candidate == "" {
 		return "", fmt.Errorf("azure resource locator is required")
 	}
-	if root, err := endpointintent.AzureResourceRootFromProjectEndpoint(candidate); err == nil {
+	if root, err := profile.AzureResourceRootFromProjectEndpoint(candidate); err == nil {
 		return root, nil
 	}
-	return endpointintent.NormalizeAzureResourceLocator(candidate)
+	return profile.NormalizeAzureResourceLocator(candidate)
 }
 
 func resolveAzureNextLink(resourceRoot string, nextLink string) string {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,11 +93,11 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 		}
 		statusCalls++
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"healthy","endpoint_count":1}`)
+		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
 	}))
 	defer srv.Close()
 
-	t.Setenv("SWOBU_DAEMON_URL", srv.URL)
+	t.Setenv("SWOBU_ADDR", strings.TrimPrefix(srv.URL, "http://"))
 	var stdout bytes.Buffer
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	err := defaultAttachOrStart(context.Background(), &stdout, io.Discard, client)

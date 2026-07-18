@@ -13,6 +13,7 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
+	"github.com/swobuforge/swobu/internal/configstore"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
@@ -32,14 +33,14 @@ const (
 // Status is the first machine-readable runtime health projection. CLI and TUI
 // surfaces can render or relay it without re-deriving state from prose.
 type Status struct {
-	State         HealthState `json:"state"`
-	EndpointCount int         `json:"endpoint_count"`
+	State          HealthState `json:"state"`
+	WorkspaceCount int         `json:"workspace_count"`
 }
 
 // Daemon is the live process boundary produced by bootstrap. It owns listener
 // lifetime, runtime health, and graceful shutdown for the local daemon.
 type Daemon struct {
-	endpoints         *endpointReaderCatalog
+	configStore       *configstore.Store
 	server            *http.Server
 	listener          net.Listener
 	logger            *slog.Logger
@@ -60,6 +61,7 @@ var daemonIdleTimeout = 60 * time.Second
 // bootstrap must wire into the live request path.
 type StartInput struct {
 	ConfigPath       string
+	StartupConfig    config.StartupConfig
 	Providers        exchange.ProviderIngressResolver
 	ModelCatalog     exchange.ProviderModelCatalog
 	TrafficEventSink observation.TrafficEventSink
@@ -73,18 +75,28 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		logger = slog.Default()
 	}
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "intent_store_open_start", "config_path", in.ConfigPath)
-	loaded, err := config.Load(in.ConfigPath)
+	store, err := configstore.OpenOrCreate(in.ConfigPath)
 	if err != nil {
 		logger.Error("daemon lifecycle", "component", "daemon", "event", "intent_store_open_failed", "config_path", in.ConfigPath, "error", err.Error())
 		return nil, err
 	}
-	logger.Info("daemon lifecycle", "component", "daemon", "event", "intent_store_open_success", "config_path", in.ConfigPath, "endpoint_count", len(loaded.Endpoints))
-	cfg := loaded.Runtime
+	storeOwnedByDaemon := false
+	defer func() {
+		if !storeOwnedByDaemon {
+			_ = store.Close()
+		}
+	}()
+	logger.Info("daemon lifecycle", "component", "daemon", "event", "intent_store_open_success", "config_path", in.ConfigPath, "workspace_count", store.Config().WorkspaceCount())
+	startupConfig, err := config.ResolveStartupConfig(in.StartupConfig.Addr)
+	if err != nil {
+		return nil, fmt.Errorf("resolve daemon address: %w", err)
+	}
+	addr := startupConfig.Addr
 
 	daemon := &Daemon{
-		endpoints: newEndpointCatalog(in.ConfigPath, cfg, loaded.Endpoints),
-		logger:    logger,
-		done:      make(chan struct{}),
+		configStore: store,
+		logger:      logger,
+		done:        make(chan struct{}),
 		telemetry: embeddedTelemetryRuntimeState{
 			store: telemetry.NewStore(),
 			now:   time.Now,
@@ -121,19 +133,19 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		daemon.trafficEventStore = store
 	}
 	trafficEventSink = newTelemetryObservedTrafficEventSink(trafficEventSink, daemon.observeTelemetryEvent)
-	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, cfg, runtimeRoot, trafficEventSink, authCredentialWritePolicy)
+	mux, chatGPTLogin, err := buildDaemonServeMux(daemon, addr, runtimeRoot, trafficEventSink, authCredentialWritePolicy)
 	if err != nil {
 		return nil, err
 	}
-	server := newDaemonHTTPServer(cfg.BindAddr, mux)
+	server := newDaemonHTTPServer(addr, mux)
 
-	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_start", "bind_addr", cfg.BindAddr)
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.BindAddr)
+	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_start", "addr", addr)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
-		logger.Error("daemon lifecycle", "component", "daemon", "event", "bind_failure", "bind_addr", cfg.BindAddr, "error", err.Error())
+		logger.Error("daemon lifecycle", "component", "daemon", "event", "bind_failure", "addr", addr, "error", err.Error())
 		return nil, fmt.Errorf("listen: %w", err)
 	}
-	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_success", "bind_addr", listener.Addr().String())
+	logger.Info("daemon lifecycle", "component", "daemon", "event", "bind_success", "addr", listener.Addr().String())
 	daemon.server = server
 	daemon.listener = listener
 	chatGPTLogin.SetPublicBaseURL("http://" + listener.Addr().String())
@@ -147,8 +159,9 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 			logger.Error("daemon lifecycle", "component", "daemon", "event", "serve_failure", "error", err.Error())
 		}
 	}()
-	logger.Info("daemon lifecycle", "component", "daemon", "event", "initialization_completed", "bind_addr", listener.Addr().String())
+	logger.Info("daemon lifecycle", "component", "daemon", "event", "initialization_completed", "addr", listener.Addr().String())
 	daemon.startTelemetryRuntime()
+	storeOwnedByDaemon = true
 
 	return daemon, nil
 }
@@ -171,6 +184,11 @@ func (d *Daemon) Close(ctx context.Context) error {
 		return shutdownErr
 	}
 	d.stopTelemetryRuntimeWithContext(ctx)
+	if d.configStore != nil {
+		if err := d.configStore.Close(); err != nil {
+			return err
+		}
+	}
 	select {
 	case <-d.done:
 		serveErr := d.serveError()
@@ -192,7 +210,7 @@ func (d *Daemon) Close(ctx context.Context) error {
 	}
 }
 
-func (d *Daemon) BindAddr() string {
+func (d *Daemon) Addr() string {
 	if d == nil || d.listener == nil {
 		return ""
 	}
@@ -200,11 +218,11 @@ func (d *Daemon) BindAddr() string {
 }
 
 func (d *Daemon) BaseURL() string {
-	addr := d.BindAddr()
+	addr := d.Addr()
 	if addr == "" {
 		return ""
 	}
-	return "http://" + addr
+	return config.BaseURL(addr)
 }
 
 func (d *Daemon) Status() (Status, error) {
@@ -212,10 +230,10 @@ func (d *Daemon) Status() (Status, error) {
 		return Status{}, fmt.Errorf("daemon is nil")
 	}
 	status := Status{
-		State:         HealthStateHealthy,
-		EndpointCount: d.endpoints.Count(),
+		State:          HealthStateHealthy,
+		WorkspaceCount: d.configStore.Config().WorkspaceCount(),
 	}
-	if status.EndpointCount == 0 {
+	if status.WorkspaceCount == 0 {
 		status.State = HealthStateUninitialized
 		return status, nil
 	}
@@ -230,9 +248,9 @@ func (d *Daemon) isRequestPathDegraded() bool {
 		return false
 	}
 	projection := d.trafficEventStore.ProjectStatus(trafficevidencestore.ProjectionInput{
-		State:         string(HealthStateHealthy),
-		EndpointCount: d.endpoints.Count(),
-		Scope:         trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll},
+		State:          string(HealthStateHealthy),
+		WorkspaceCount: d.configStore.Config().WorkspaceCount(),
+		Scope:          trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll},
 	})
 	for _, row := range projection.RecentTraffic {
 		resultClass, err := trafficevidence.ParseResultClass(row.Result)
@@ -253,18 +271,18 @@ func (d *Daemon) StatusProjectionForScope(scope trafficevidencestore.ProjectionS
 	}
 	if d.trafficEventStore == nil {
 		return trafficevidencestore.StatusProjection{
-			State:         string(status.State),
-			EndpointCount: status.EndpointCount,
-			Scope:         scope,
+			State:          string(status.State),
+			WorkspaceCount: status.WorkspaceCount,
+			Scope:          scope,
 			Counters: trafficevidencestore.StatusCounters{
 				PerModel: map[string]int{},
 			},
 		}, nil
 	}
 	return d.trafficEventStore.ProjectStatus(trafficevidencestore.ProjectionInput{
-		State:         string(status.State),
-		EndpointCount: status.EndpointCount,
-		Scope:         scope,
+		State:          string(status.State),
+		WorkspaceCount: status.WorkspaceCount,
+		Scope:          scope,
 	}), nil
 }
 

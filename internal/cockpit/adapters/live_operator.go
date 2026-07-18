@@ -3,7 +3,6 @@ package adapters
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
@@ -21,368 +21,261 @@ import (
 )
 
 type operatorClient interface {
-	ListEndpoints(context.Context) ([]operatorclient.EndpointData, error)
-	GetEndpoint(context.Context, string) (operatorclient.EndpointData, error)
-	UpsertEndpoint(context.Context, operatorclient.EndpointData) error
-	DeleteEndpoint(context.Context, string) error
+	ListWorkspaces(context.Context) ([]workspaceapi.WorkspaceSummary, error)
+	GetWorkspace(context.Context, string) (workspaceapi.Workspace, error)
+	CreateWorkspace(context.Context, workspaceapi.CreateWorkspace) (workspaceapi.Workspace, error)
+	RenameWorkspace(context.Context, string, string) (workspaceapi.Workspace, error)
+	DeleteWorkspace(context.Context, string) error
+	CreateRoute(context.Context, workspaceapi.CreateRoute) (workspaceapi.Workspace, error)
+	RenameRoute(context.Context, workspaceapi.RenameRoute) (workspaceapi.Workspace, error)
+	SetDefaultRoute(context.Context, workspaceapi.SetDefaultRoute) (workspaceapi.Workspace, error)
+	DeleteRoute(context.Context, workspaceapi.DeleteRoute) (workspaceapi.Workspace, error)
+	CreateTarget(context.Context, workspaceapi.CreateTarget) (workspaceapi.Workspace, error)
+	UpdateTargetSettings(context.Context, workspaceapi.UpdateTargetSettings) (workspaceapi.Workspace, error)
+	DeleteTarget(context.Context, workspaceapi.DeleteTarget) (workspaceapi.Workspace, error)
 	Status(context.Context, string) (operatorclient.StatusProjection, error)
 	DaemonVersion(context.Context) (string, error)
-	StartAuthSession(context.Context, string, string, string) (operatorclient.AuthSessionStartResult, error)
+	StartAuthSession(context.Context, string, string, string, string, string, string) (operatorclient.AuthSessionStartResult, error)
 	GetAuthSessionStatus(context.Context, string) (operatorclient.AuthSessionStatusResult, error)
 	CancelAuthSession(context.Context, string) error
 	RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error)
 	ProbeModelCatalog(context.Context, string, string, string, string, string, string) (operatorclient.ModelCatalogResult, error)
 }
-
-// LiveOperatorAdapter implements Cockpit ports over the daemon operator control
-// plane. Endpoint intent is projected as one Cockpit workspace per endpoint.
 type LiveOperatorAdapter struct {
 	client     operatorClient
-	daemonURL  string
+	addr       string
 	runCommand runCommandExecutor
 	commandIO  runCommandIOConfig
 }
 
-// NewLiveOperatorAdapter builds the daemon-backed Cockpit adapter.
-func NewLiveOperatorAdapter(httpClient *http.Client, daemonURL string) *LiveOperatorAdapter {
+func NewLiveOperatorAdapter(httpClient *http.Client, addr string) *LiveOperatorAdapter {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	resolvedURL := config.ResolveDaemonURL(daemonURL)
-	adapter := &LiveOperatorAdapter{
-		client:    operatorclient.New(httpClient, resolvedURL),
-		daemonURL: strings.TrimRight(resolvedURL, "/"),
-		commandIO: processRunCommandIO(),
-	}
-	adapter.runCommand = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
-		return executeClientRunCommand(ctx, command, adapter.commandIO)
+	a := &LiveOperatorAdapter{client: operatorclient.New(httpClient, config.BaseURL(addr)), addr: addr, commandIO: processRunCommandIO()}
+	a.runCommand = func(ctx context.Context, cmd clientprofile.RunCommandSpec) error {
+		return executeClientRunCommand(ctx, cmd, a.commandIO)
 	}
 	ui.RegisterEffectHooks(browser.Open, clipboard.TryWriteText, clipboard.WriteTempFileFallback)
-	return adapter
+	return a
 }
 
-// LoadCockpit projects the daemon endpoint list into the Cockpit read model.
 func (a *LiveOperatorAdapter) LoadCockpit(ctx context.Context) (readmodel.CockpitReadModel, error) {
-	endpoints, err := a.client.ListEndpoints(ctx)
+	summaries, err := a.client.ListWorkspaces(ctx)
 	if err != nil {
 		return readmodel.CockpitReadModel{}, adapterFailure("load cockpit data", err)
 	}
-	sort.Slice(endpoints, func(i, j int) bool {
-		return endpoints[i].Name < endpoints[j].Name
-	})
-
-	model := readmodel.CockpitReadModel{
-		HeaderRight: a.headerRight(),
-		ActivePage:  readmodel.CockpitWorkspacePage,
-		Help:        a.helpReadModel(ctx, endpoints),
-	}
-	if len(endpoints) == 0 {
+	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Slug < summaries[j].Slug })
+	model := readmodel.CockpitReadModel{HeaderRight: a.headerRight(), ActivePage: readmodel.CockpitWorkspacePage, Help: a.helpReadModel(ctx, summaries)}
+	if len(summaries) == 0 {
 		model.SelectedWorkspaceID = "+"
 		model.SelectedWorkspace = draftWorkspace()
-		model.Tabs = []readmodel.WorkspaceTabReadModel{
-			{ID: "+", Kind: readmodel.WorkspaceTabDraft, Selected: true},
-			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
-		}
+		model.Tabs = []readmodel.WorkspaceTabReadModel{{ID: "+", Kind: readmodel.WorkspaceTabDraft, Selected: true}, {ID: "?", Kind: readmodel.WorkspaceTabHelp}}
 		return model, nil
 	}
-
-	selected := endpoints[0]
-	workspace, err := a.workspaceFromEndpoint(ctx, selected)
+	selected, err := a.client.GetWorkspace(ctx, summaries[0].Slug)
 	if err != nil {
-		return readmodel.CockpitReadModel{}, adapterFailure(fmt.Sprintf("load workspace %q", selected.Name), err)
+		return readmodel.CockpitReadModel{}, adapterFailure("load selected workspace", err)
 	}
-	model.SelectedWorkspaceID = readmodel.WorkspaceID(selected.Name)
+	workspace, err := a.workspaceFromView(ctx, selected)
+	if err != nil {
+		return readmodel.CockpitReadModel{}, err
+	}
+	model.SelectedWorkspaceID = workspace.ID
 	model.SelectedWorkspace = workspace
-	for _, endpoint := range endpoints {
-		id := readmodel.WorkspaceID(endpoint.Name)
-		model.Tabs = append(model.Tabs, readmodel.WorkspaceTabReadModel{
-			ID:       id,
-			Slug:     endpoint.Name,
-			Kind:     readmodel.WorkspaceTabExisting,
-			Selected: id == model.SelectedWorkspaceID,
-		})
+	for _, summary := range summaries {
+		id := readmodel.WorkspaceID(summary.Slug)
+		model.Tabs = append(model.Tabs, readmodel.WorkspaceTabReadModel{ID: id, Slug: summary.Slug, Kind: readmodel.WorkspaceTabExisting, Selected: id == model.SelectedWorkspaceID})
 	}
-	model.Tabs = append(model.Tabs,
-		readmodel.WorkspaceTabReadModel{ID: "+", Kind: readmodel.WorkspaceTabDraft},
-		readmodel.WorkspaceTabReadModel{ID: "?", Kind: readmodel.WorkspaceTabHelp},
-	)
+	model.Tabs = append(model.Tabs, readmodel.WorkspaceTabReadModel{ID: "+", Kind: readmodel.WorkspaceTabDraft}, readmodel.WorkspaceTabReadModel{ID: "?", Kind: readmodel.WorkspaceTabHelp})
 	return model, nil
 }
-
-func (a *LiveOperatorAdapter) helpReadModel(ctx context.Context, endpoints []operatorclient.EndpointData) readmodel.HelpReadModel {
-	var daemonVersion string
-	if ver, err := a.client.DaemonVersion(ctx); err == nil {
-		daemonVersion = ver
+func (a *LiveOperatorAdapter) helpReadModel(ctx context.Context, summaries []workspaceapi.WorkspaceSummary) readmodel.HelpReadModel {
+	version, _ := a.client.DaemonVersion(ctx)
+	payload := readmodel.DiagnosticsPayload{Version: controlplane.SwobuVersion(), DaemonVersion: version, ConfigPath: config.DefaultConfigPath()}
+	for _, summary := range summaries {
+		payload.Workspaces = append(payload.Workspaces, readmodel.DiagnosticsWorkspacePayload{Name: summary.Slug, ActivityCount: a.activityCount(ctx, summary.Slug)})
 	}
-	payload := diagnosticsPayloadFromEndpoints(
-		readmodel.DiagnosticsPayload{Version: controlplane.SwobuVersion(), DaemonVersion: daemonVersion, ConfigPath: config.DefaultConfigPath()},
-		endpoints,
-		a.diagnosticsActivityCounts(ctx, endpoints),
-	)
-	return readmodel.HelpReadModel{
-		Version:       controlplane.SwobuVersion(),
-		DaemonVersion: daemonVersion,
-		Diagnostics:   payload,
-	}
+	return readmodel.HelpReadModel{Version: controlplane.SwobuVersion(), DaemonVersion: version, Diagnostics: payload}
 }
-
-func (a *LiveOperatorAdapter) diagnosticsActivityCounts(ctx context.Context, endpoints []operatorclient.EndpointData) map[string]int {
-	projection, err := a.client.Status(ctx, "all")
+func (a *LiveOperatorAdapter) activityCount(ctx context.Context, slug string) int {
+	projection, err := a.client.Status(ctx, "workspace:"+slug)
 	if err != nil {
-		return nil
+		return 0
 	}
-	counts := make(map[string]int, len(endpoints))
-	endpointNames := make(map[string]struct{}, len(endpoints))
-	for _, endpoint := range endpoints {
-		endpointNames[endpoint.Name] = struct{}{}
-	}
-	for _, traffic := range projection.RecentTraffic {
-		if _, ok := endpointNames[traffic.Endpoint]; ok {
-			counts[traffic.Endpoint]++
-		}
-	}
-	return counts
+	return len(projection.RecentTraffic)
 }
-
-// LoadWorkspace projects one daemon endpoint into a Cockpit workspace row.
 func (a *LiveOperatorAdapter) LoadWorkspace(ctx context.Context, id readmodel.WorkspaceID) (readmodel.WorkspaceReadModel, error) {
 	if id == "" || id == "+" {
 		return draftWorkspace(), nil
 	}
-	endpoint, err := a.client.GetEndpoint(ctx, string(id))
+	workspace, err := a.client.GetWorkspace(ctx, string(id))
 	if err != nil {
-		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("load workspace %q", id), err)
+		return readmodel.WorkspaceReadModel{}, adapterFailure("load workspace", err)
 	}
-	workspace, err := a.workspaceFromEndpoint(ctx, endpoint)
-	if err != nil {
-		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("load workspace %q", id), err)
-	}
-	return workspace, nil
+	return a.workspaceFromView(ctx, workspace)
 }
-
-// SaveWorkspace updates the daemon endpoint. Slug changes (renames) are
-// rejected because the daemon does not expose an atomic rename operation.
-// Only in-place field edits of an existing endpoint are supported.
-//
-// Draft workspace creation stays local until the first real route/target save
-// can materialize a valid endpoint. The daemon endpoint domain requires at
-// least one provider config, so a blank slug submit must not synthesize an
-// invalid endpoint intent.
 func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
-	slug := strings.TrimSpace(request.Slug) // swobu:io-string source=boundary
+	slug := strings.TrimSpace(request.Slug)
 	if slug == "" {
-		return readmodel.WorkspaceReadModel{}, errors.New("save workspace: workspace slug is required")
+		return readmodel.WorkspaceReadModel{}, errors.New("workspace slug is required")
 	}
 	if request.ID == "" || request.ID == "+" {
-		return a.workspaceFromEndpoint(ctx, operatorclient.EndpointData{Name: slug})
+		draft := draftWorkspace()
+		draft.ID = readmodel.WorkspaceID(slug)
+		draft.Slug = slug
+		draft.State = readmodel.WorkspaceExisting
+		draft.ClientBaseURL = a.clientBaseURL(slug)
+		return draft, nil
 	}
-	current, err := a.client.GetEndpoint(ctx, string(request.ID))
-	if err != nil {
-		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("save workspace %q", request.ID), err)
-	}
-	if slug != string(request.ID) {
-		return readmodel.WorkspaceReadModel{}, adapterFailure("rename workspace", ErrUnsupportedCommand)
-	}
-	current.Name = slug
-	if err := a.client.UpsertEndpoint(ctx, current); err != nil {
-		return readmodel.WorkspaceReadModel{}, adapterFailure(fmt.Sprintf("save workspace %q", slug), err)
-	}
-	return a.workspaceFromEndpoint(ctx, current)
-}
-
-// DeleteWorkspace removes one daemon endpoint.
-func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports.DeleteWorkspaceRequest) error {
-	if err := a.client.DeleteEndpoint(ctx, string(request.ID)); err != nil {
-		return adapterFailure(fmt.Sprintf("delete workspace %q", request.ID), err)
-	}
-	return nil
-}
-
-// SaveRoute renames the projected route group backed by matching provider
-// configs. Cockpit groups provider configs by client-visible route model name
-// and rewrites that route identity in place. Creating an empty route,
-// persisting an enabled flag, or changing routing policy without targets is
-// therefore not representable here yet.
-func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
-	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
-	if err != nil {
-		return readmodel.RouteReadModel{}, adapterFailure(fmt.Sprintf("save route %q", request.RouteID), err)
-	}
-	routeID := strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
-	if routeID == "" {
-		return readmodel.RouteReadModel{}, adapterFailure("save route", ErrUnsupportedCommand)
-	}
-	modelName := strings.TrimSpace(request.ModelName) // swobu:io-string source=boundary
-	if modelName == "" {
-		modelName = routeID
-	}
-	var selectedRef string
-	changed := false
-	for i := range endpoint.ProviderConfigs {
-		if projectedRouteModel(endpoint.ProviderConfigs[i]) != routeID {
-			continue
-		}
-		endpoint.ProviderConfigs[i].RouteModelID = modelName
-		if selectedRef == "" {
-			selectedRef = endpoint.ProviderConfigs[i].Ref
-		}
-		changed = true
-	}
-	if !changed {
-		return readmodel.RouteReadModel{}, adapterFailure(fmt.Sprintf("create empty route %q", modelName), ErrUnsupportedCommand)
-	}
-	if request.Default && selectedRef != "" {
-		endpoint.SelectedRef = selectedRef
-	}
-	if err := a.client.UpsertEndpoint(ctx, endpoint); err != nil {
-		return readmodel.RouteReadModel{}, adapterFailure(fmt.Sprintf("save route %q", modelName), err)
-	}
-	return routeFromEndpoint(endpoint, modelName)
-}
-
-// DeleteRoute removes one projected route group from the provider configs.
-func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.DeleteRouteRequest) error {
-	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
-	if err != nil {
-		return adapterFailure(fmt.Sprintf("delete route %q", request.RouteID), err)
-	}
-	routeID := strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
-	next := make([]operatorclient.ProviderConfigData, 0, len(endpoint.ProviderConfigs))
-	removedSelected := false
-	removed := false
-	for _, config := range endpoint.ProviderConfigs {
-		if projectedRouteModel(config) != routeID {
-			next = append(next, config)
-			continue
-		}
-		removed = true
-		removedSelected = removedSelected || config.Ref == endpoint.SelectedRef
-	}
-	if !removed {
-		return fmt.Errorf("delete route %q: route could not be resolved", request.RouteID)
-	}
-	if len(next) == 0 {
-		return adapterFailure(fmt.Sprintf("delete final route %q", request.RouteID), ErrUnsupportedCommand)
-	}
-	endpoint.ProviderConfigs = next
-	if removedSelected {
-		endpoint.SelectedRef = next[0].Ref
-	}
-	if err := a.client.UpsertEndpoint(ctx, endpoint); err != nil {
-		return adapterFailure(fmt.Sprintf("delete route %q", request.RouteID), err)
-	}
-	return nil
-}
-
-// SaveTarget updates or appends one provider config.
-func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.SaveTargetRequest) (readmodel.TargetReadModel, error) {
-	workspaceID := strings.TrimSpace(string(request.WorkspaceID)) // swobu:io-string source=boundary
-	if workspaceID == "" {
-		return readmodel.TargetReadModel{}, errors.New("save target: workspace is required")
-	}
-	endpoint, err := a.client.GetEndpoint(ctx, workspaceID)
-	if err != nil {
-		if targetID := strings.TrimSpace(string(request.TargetID)); targetID != "" || !operatorclient.IsNotFound(err) {
-			return readmodel.TargetReadModel{}, adapterFailure(fmt.Sprintf("save target %q", request.TargetID), err)
-		}
-		endpoint = operatorclient.EndpointData{Name: workspaceID}
-	}
-	routeID := strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
-	if routeID == "" {
-		return readmodel.TargetReadModel{}, errors.New("save target: route is required")
-	}
-	targetID := strings.TrimSpace(string(request.TargetID)) // swobu:io-string source=boundary
-	if targetID == "" {
-		ref, err := newProviderConfigRef(endpoint.ProviderConfigs)
+	if string(request.ID) == slug {
+		workspace, err := a.client.GetWorkspace(ctx, slug)
 		if err != nil {
-			return readmodel.TargetReadModel{}, adapterFailure("save target", err)
+			return readmodel.WorkspaceReadModel{}, adapterFailure("load workspace", err)
 		}
-		targetID = ref
+		return a.workspaceFromView(ctx, workspace)
 	}
-	config, err := providerConfigFromTargetRequest(request, targetID)
+	workspace, err := a.client.RenameWorkspace(ctx, string(request.ID), slug)
 	if err != nil {
-		return readmodel.TargetReadModel{}, adapterFailure("save target", err)
+		return readmodel.WorkspaceReadModel{}, adapterFailure("rename workspace", err)
 	}
-	if strings.TrimSpace(string(request.TargetID)) == "" {
-		endpoint.ProviderConfigs = append(endpoint.ProviderConfigs, config)
-		if endpoint.SelectedRef == "" {
-			endpoint.SelectedRef = targetID
+	return a.workspaceFromView(ctx, workspace)
+}
+func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports.DeleteWorkspaceRequest) error {
+	if err := a.client.DeleteWorkspace(ctx, string(request.ID)); err != nil {
+		return adapterFailure("delete workspace", err)
+	}
+	return nil
+}
+func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+	if request.RouteID == "" {
+		return readmodel.RouteReadModel{}, ErrUnsupportedCommand
+	}
+	workspaceID := string(request.WorkspaceID)
+	routeID := string(request.RouteID)
+	name := strings.TrimSpace(request.ModelName)
+	if name == "" {
+		name = routeID
+	}
+	var workspace workspaceapi.Workspace
+	var err error
+	if name == routeID {
+		workspace, err = a.client.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			return readmodel.RouteReadModel{}, adapterFailure("load route", err)
 		}
 	} else {
-		replaced := false
-		for i := range endpoint.ProviderConfigs {
-			if !targetMatchesRoute(endpoint.ProviderConfigs[i], targetID, routeID) {
-				continue
-			}
-			config.Ref = targetID
-			endpoint.ProviderConfigs[i] = config
-			replaced = true
-			break
-		}
-		if !replaced {
-			return readmodel.TargetReadModel{}, fmt.Errorf("save target %q: target not found in route %q", targetID, routeID)
+		workspace, err = a.client.RenameRoute(ctx, workspaceapi.RenameRoute{Workspace: workspaceID, Route: routeID, NewName: name})
+		if err != nil {
+			return readmodel.RouteReadModel{}, adapterFailure("rename route", err)
 		}
 	}
-	if err := a.client.UpsertEndpoint(ctx, endpoint); err != nil {
-		return readmodel.TargetReadModel{}, adapterFailure(fmt.Sprintf("save target %q", config.Ref), err)
-	}
-	for _, route := range routesFromEndpoint(endpoint) {
-		for _, target := range route.Targets {
-			if string(target.ID) == config.Ref {
-				return target, nil
-			}
+	if request.Default {
+		workspace, err = a.client.SetDefaultRoute(ctx, workspaceapi.SetDefaultRoute{Workspace: workspaceID, Route: name})
+		if err != nil {
+			return readmodel.RouteReadModel{}, adapterFailure("set default route", err)
 		}
 	}
-	return targetFromProviderConfig(config), nil
+	for _, route := range workspace.Routes {
+		if route.Name == name {
+			return routeFromWorkspaceRoute(workspace.DefaultRoute, route), nil
+		}
+	}
+	return readmodel.RouteReadModel{}, errors.New("committed route missing")
 }
-
-// DeleteTarget removes one provider config from the endpoint.
-func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.DeleteTargetRequest) error {
-	endpoint, err := a.client.GetEndpoint(ctx, string(request.WorkspaceID))
+func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.DeleteRouteRequest) error {
+	workspace, err := a.client.GetWorkspace(ctx, string(request.WorkspaceID))
 	if err != nil {
-		return adapterFailure(fmt.Sprintf("delete target %q", request.TargetID), err)
+		return adapterFailure("load route", err)
 	}
-	targetID := strings.TrimSpace(string(request.TargetID)) // swobu:io-string source=boundary
-	next := make([]operatorclient.ProviderConfigData, 0, len(endpoint.ProviderConfigs))
-	removedSelected := false
-	removed := false
-	routeID := strings.TrimSpace(string(request.RouteID)) // swobu:io-string source=boundary
-	for _, config := range endpoint.ProviderConfigs {
-		if !targetMatchesRoute(config, targetID, routeID) {
-			next = append(next, config)
-			continue
+	replacement := ""
+	if workspace.DefaultRoute == string(request.RouteID) {
+		for _, route := range workspace.Routes {
+			if route.Name != string(request.RouteID) {
+				replacement = route.Name
+				break
+			}
 		}
-		removed = true
-		removedSelected = config.Ref == endpoint.SelectedRef
 	}
-	if !removed {
-		return fmt.Errorf("delete target %q: target could not be resolved", targetID)
-	}
-	if len(next) == 0 {
-		return adapterFailure(fmt.Sprintf("delete final target %q", targetID), ErrUnsupportedCommand)
-	}
-	endpoint.ProviderConfigs = next
-	if removedSelected {
-		endpoint.SelectedRef = next[0].Ref
-	}
-	if err := a.client.UpsertEndpoint(ctx, endpoint); err != nil {
-		return adapterFailure(fmt.Sprintf("delete target %q", targetID), err)
+	_, err = a.client.DeleteRoute(ctx, workspaceapi.DeleteRoute{Workspace: string(request.WorkspaceID), Route: string(request.RouteID), Replacement: replacement})
+	if err != nil {
+		return adapterFailure("delete route", err)
 	}
 	return nil
 }
-
-// ExecuteRunCommand resolves a run command through the operator client-profile
-// facade and executes it.
-func (a *LiveOperatorAdapter) ExecuteRunCommand(ctx context.Context, request ports.ExecuteRunCommandRequest) (ports.RunExecutionResult, error) {
-	if request.WorkspaceID == "" {
-		return ports.RunExecutionResult{}, errors.New("workspace is required")
+func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+	workspaceID := strings.TrimSpace(string(request.WorkspaceID))
+	routeID := strings.TrimSpace(string(request.RouteID))
+	if workspaceID == "" || routeID == "" {
+		return ports.SaveTargetResult{}, errors.New("workspace and route are required")
 	}
-	if request.RunCommandID == "" {
-		return ports.RunExecutionResult{}, errors.New("run command is required")
+	targetID := strings.TrimSpace(string(request.TargetID))
+	if targetID == "" {
+		var err error
+		targetID, err = newTargetID()
+		if err != nil {
+			return ports.SaveTargetResult{}, err
+		}
+	}
+	target, err := targetFromSaveRequest(request, targetID)
+	if err != nil {
+		return ports.SaveTargetResult{}, err
+	}
+	workspace, currentErr := a.client.GetWorkspace(ctx, workspaceID)
+	if currentErr != nil {
+		if !operatorclient.IsNotFound(currentErr) {
+			return ports.SaveTargetResult{}, adapterFailure("load workspace", currentErr)
+		}
+		workspace, err = a.client.CreateWorkspace(ctx, workspaceapi.CreateWorkspace{Slug: workspaceID, InitialRoute: routeID, Target: target})
+	} else {
+		routeExists := false
+		for _, route := range workspace.Routes {
+			if route.Name == routeID {
+				routeExists = true
+				break
+			}
+		}
+		if !routeExists {
+			workspace, err = a.client.CreateRoute(ctx, workspaceapi.CreateRoute{Workspace: workspaceID, Name: routeID, Target: target})
+		} else if request.TargetID == "" {
+			workspace, err = a.client.CreateTarget(ctx, workspaceapi.CreateTarget{Workspace: workspaceID, Route: routeID, Target: target, Placement: placementFromReadModel(request.Placement)})
+		} else {
+			workspace, err = a.client.UpdateTargetSettings(ctx, workspaceapi.UpdateTargetSettings{Workspace: workspaceID, Route: routeID, TargetID: targetID, Target: workspaceapi.TargetSettingsDraft{Model: target.Model, Protocol: target.Protocol, Connection: target.Connection}})
+		}
+	}
+	if err != nil {
+		return ports.SaveTargetResult{}, adapterFailure("save target", err)
+	}
+	committedTarget, err := targetFromWorkspace(workspace, targetID)
+	if err != nil {
+		return ports.SaveTargetResult{}, err
+	}
+	for _, route := range workspace.Routes {
+		if route.Name == routeID {
+			return ports.SaveTargetResult{Target: committedTarget, Route: routeFromWorkspaceRoute(workspace.DefaultRoute, route)}, nil
+		}
+	}
+	return ports.SaveTargetResult{}, errors.New("committed route missing from workspace response")
+}
+func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.DeleteTargetRequest) (readmodel.RouteReadModel, error) {
+	workspace, err := a.client.DeleteTarget(ctx, workspaceapi.DeleteTarget{Workspace: string(request.WorkspaceID), Route: string(request.RouteID), TargetID: string(request.TargetID)})
+	if err != nil {
+		return readmodel.RouteReadModel{}, adapterFailure("delete target", err)
+	}
+	for _, route := range workspace.Routes {
+		if route.Name == string(request.RouteID) {
+			return routeFromWorkspaceRoute(workspace.DefaultRoute, route), nil
+		}
+	}
+	return readmodel.RouteReadModel{}, errors.New("committed route missing from workspace response")
+}
+func (a *LiveOperatorAdapter) ExecuteRunCommand(ctx context.Context, request ports.ExecuteRunCommandRequest) (ports.RunExecutionResult, error) {
+	if request.WorkspaceID == "" || request.RunCommandID == "" {
+		return ports.RunExecutionResult{}, errors.New("workspace and run command are required")
 	}
 	workspace, err := a.LoadWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
-		return ports.RunExecutionResult{}, adapterFailure(fmt.Sprintf("run command %q", request.RunCommandID), err)
+		return ports.RunExecutionResult{}, err
 	}
 	modelID := string(request.RouteID)
 	if modelID == "" && len(workspace.Routes) > 0 {
@@ -390,18 +283,55 @@ func (a *LiveOperatorAdapter) ExecuteRunCommand(ctx context.Context, request por
 	}
 	command, ok := clientprofile.ResolveRunCommand(string(request.RunCommandID), workspace.ClientBaseURL, modelID)
 	if !ok {
-		return ports.RunExecutionResult{}, adapterFailure(fmt.Sprintf("run command %q", request.RunCommandID), ErrUnsupportedCommand)
+		return ports.RunExecutionResult{}, ErrUnsupportedCommand
 	}
-	executor := a.runCommand
-	if executor == nil {
-		executor = func(ctx context.Context, command clientprofile.RunCommandSpec) error {
-			return executeClientRunCommand(ctx, command, a.commandIO)
-		}
-	}
-	if err := executor(ctx, command); err != nil {
-		return ports.RunExecutionResult{}, adapterFailure(fmt.Sprintf("run command %q", request.RunCommandID), err)
+	if err := a.runCommand(ctx, command); err != nil {
+		return ports.RunExecutionResult{}, err
 	}
 	return ports.RunExecutionResult{}, nil
+}
+func (a *LiveOperatorAdapter) StorePastedCredential(_ context.Context, req ports.StorePastedCredentialRequest) (ports.StorePastedCredentialResult, error) {
+	policy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
+	ref, err := credentialsadapter.StoreMaterializedCredential(req.ProviderSpec, req.Name, req.Secret, policy)
+	if err != nil {
+		return ports.StorePastedCredentialResult{}, err
+	}
+	return ports.StorePastedCredentialResult{CredentialRef: ref}, nil
+}
+func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
+	result, err := a.client.ProbeModelCatalog(ctx, req.ProviderSpec, req.BaseURL, req.AuthHeader, req.CredentialRef, req.AuthMode, req.ProviderProtocol)
+	if err != nil {
+		return readmodel.ModelCatalogReadModel{}, err
+	}
+	var deployments []readmodel.ModelDeploymentReadModel
+	for _, d := range result.Deployments {
+		deployments = append(deployments, readmodel.ModelDeploymentReadModel{ID: d.Name, Name: d.Name, ModelName: d.ModelName, ModelPublisher: d.ModelPublisher, ModelVersion: d.ModelVersion, Family: d.Family, SupportedProviderProtocols: d.SupportedProviderProtocols, DefaultProviderProtocol: d.DefaultProviderProtocol})
+	}
+	return readmodel.ModelCatalogReadModel{Deployments: deployments, ResolvedProviderProtocol: result.ResolvedProviderProtocol, Error: result.Error}, nil
+}
+func (a *LiveOperatorAdapter) StartAuthSession(ctx context.Context, req ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
+	result, err := a.client.StartAuthSession(ctx, req.ProviderSpec, req.Workspace, req.Route, req.TargetID, req.DraftSubject, req.AuthMode)
+	if err != nil {
+		return readmodel.AuthSessionReadModel{}, err
+	}
+	return readmodel.AuthSessionReadModel{ProviderSpec: result.ProviderSpec, SessionID: result.SessionID, AuthorizeURL: result.AuthorizeURL, UserCode: result.UserCode, State: result.State}, nil
+}
+func (a *LiveOperatorAdapter) PollAuthSession(ctx context.Context, id string) (readmodel.AuthSessionReadModel, error) {
+	result, err := a.client.GetAuthSessionStatus(ctx, id)
+	if err != nil {
+		return readmodel.AuthSessionReadModel{}, err
+	}
+	return readmodel.AuthSessionReadModel{ProviderSpec: result.ProviderSpec, SessionID: result.SessionID, State: result.State, CredentialRef: result.CredentialRef, ErrorMessage: result.ErrorMessage}, nil
+}
+func (a *LiveOperatorAdapter) CancelAuthSession(ctx context.Context, id string) error {
+	return a.client.CancelAuthSession(ctx, id)
+}
+func (a *LiveOperatorAdapter) RetryAuthSession(ctx context.Context, id string) (readmodel.AuthSessionReadModel, error) {
+	result, err := a.client.RetryAuthSession(ctx, id)
+	if err != nil {
+		return readmodel.AuthSessionReadModel{}, err
+	}
+	return readmodel.AuthSessionReadModel{SessionID: result.SessionID, AuthorizeURL: result.AuthorizeURL, UserCode: result.UserCode, State: result.State}, nil
 }
 
 var _ ports.WorkspaceQueries = (*LiveOperatorAdapter)(nil)
@@ -411,104 +341,3 @@ var _ ports.RunExecutor = (*LiveOperatorAdapter)(nil)
 var _ ports.ActivityQueries = (*LiveOperatorAdapter)(nil)
 var _ ports.TargetAuthCommands = (*LiveOperatorAdapter)(nil)
 var _ ports.TargetCredentialCommands = (*LiveOperatorAdapter)(nil)
-
-// StorePastedCredential persists pasted target credentials through the same
-// materialized credential store used by daemon auth flows. The UI supplies a
-// semantic, collision-resistant slot; this adapter chooses keyring/file storage
-// according to the configured write policy and returns only the durable ref.
-func (a *LiveOperatorAdapter) StorePastedCredential(ctx context.Context, req ports.StorePastedCredentialRequest) (ports.StorePastedCredentialResult, error) {
-	_ = ctx
-	policy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
-	ref, err := credentialsadapter.StoreMaterializedCredential(req.ProviderSpec, req.Name, req.Secret, policy)
-	if err != nil {
-		return ports.StorePastedCredentialResult{}, adapterFailure("store pasted credential", err)
-	}
-	return ports.StorePastedCredentialResult{CredentialRef: ref}, nil
-}
-
-// ---------------------------------------------------------------------------
-// TargetSetupQueries
-// ---------------------------------------------------------------------------
-
-// ProbeProviderModels calls the daemon model catalog endpoint.
-func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-	result, err := a.client.ProbeModelCatalog(ctx, req.ProviderSpec, req.BaseURL, req.AuthHeader, req.CredentialRef, req.AuthMode, req.ProviderProtocol)
-	if err != nil {
-		return readmodel.ModelCatalogReadModel{}, adapterFailure("probe model catalog", err)
-	}
-	var deployments []readmodel.ModelDeploymentReadModel
-	for _, d := range result.Deployments {
-		deployments = append(deployments, readmodel.ModelDeploymentReadModel{
-			ID:                         d.Name,
-			Name:                       d.Name,
-			ModelName:                  d.ModelName,
-			ModelPublisher:             d.ModelPublisher,
-			ModelVersion:               d.ModelVersion,
-			Family:                     d.Family,
-			SupportedProviderProtocols: d.SupportedProviderProtocols,
-			DefaultProviderProtocol:    d.DefaultProviderProtocol,
-		})
-	}
-	return readmodel.ModelCatalogReadModel{
-		Deployments:              deployments,
-		ResolvedProviderProtocol: result.ResolvedProviderProtocol,
-		Error:                    result.Error,
-	}, nil
-}
-
-// ---------------------------------------------------------------------------
-// TargetAuthCommands
-// ---------------------------------------------------------------------------
-
-// StartAuthSession starts an interactive auth session on the daemon.
-func (a *LiveOperatorAdapter) StartAuthSession(ctx context.Context, req ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
-	result, err := a.client.StartAuthSession(ctx, req.ProviderSpec, req.EndpointRef, req.AuthMode)
-	if err != nil {
-		return readmodel.AuthSessionReadModel{}, adapterFailure("start auth session", err)
-	}
-	return readmodel.AuthSessionReadModel{
-		ProviderSpec: result.ProviderSpec,
-		SessionID:    result.SessionID,
-		AuthorizeURL: result.AuthorizeURL,
-		UserCode:     result.UserCode,
-		State:        result.State,
-	}, nil
-}
-
-// PollAuthSession polls daemon for auth session status.
-func (a *LiveOperatorAdapter) PollAuthSession(ctx context.Context, sessionID string) (readmodel.AuthSessionReadModel, error) {
-	result, err := a.client.GetAuthSessionStatus(ctx, sessionID)
-	if err != nil {
-		return readmodel.AuthSessionReadModel{}, adapterFailure("poll auth session", err)
-	}
-	return readmodel.AuthSessionReadModel{
-		ProviderSpec:  result.ProviderSpec,
-		SessionID:     result.SessionID,
-		State:         result.State,
-		CredentialRef: result.CredentialRef,
-		ErrorMessage:  result.ErrorMessage,
-	}, nil
-}
-
-// CancelAuthSession cancels the auth session on the daemon.
-func (a *LiveOperatorAdapter) CancelAuthSession(ctx context.Context, sessionID string) error {
-	if err := a.client.CancelAuthSession(ctx, sessionID); err != nil {
-		return adapterFailure("cancel auth session", err)
-	}
-	return nil
-}
-
-// RetryAuthSession retries a failed auth session.
-func (a *LiveOperatorAdapter) RetryAuthSession(ctx context.Context, sessionID string) (readmodel.AuthSessionReadModel, error) {
-	result, err := a.client.RetryAuthSession(ctx, sessionID)
-	if err != nil {
-		return readmodel.AuthSessionReadModel{}, adapterFailure("retry auth session", err)
-	}
-	return readmodel.AuthSessionReadModel{
-		ProviderSpec: "",
-		SessionID:    result.SessionID,
-		AuthorizeURL: result.AuthorizeURL,
-		UserCode:     result.UserCode,
-		State:        result.State,
-	}, nil
-}

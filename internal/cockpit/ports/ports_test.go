@@ -35,12 +35,12 @@ func (fakeRoutePorts) DeleteRoute(context.Context, DeleteRouteRequest) error {
 	return nil
 }
 
-func (fakeRoutePorts) SaveTarget(context.Context, SaveTargetRequest) (readmodel.TargetReadModel, error) {
-	return readmodel.TargetReadModel{}, nil
+func (fakeRoutePorts) SaveTarget(context.Context, SaveTargetRequest) (SaveTargetResult, error) {
+	return SaveTargetResult{}, nil
 }
 
-func (fakeRoutePorts) DeleteTarget(context.Context, DeleteTargetRequest) error {
-	return nil
+func (fakeRoutePorts) DeleteTarget(context.Context, DeleteTargetRequest) (readmodel.RouteReadModel, error) {
+	return readmodel.RouteReadModel{}, nil
 }
 
 type fakeRunExecutor struct{}

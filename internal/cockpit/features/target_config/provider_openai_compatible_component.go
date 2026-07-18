@@ -10,7 +10,9 @@ import (
 
 type openAICompatibleProviderForm struct{ target *TargetConfig }
 
-func OpenAICompatibleProviderForm(w *TargetConfig) tui.Component { return &openAICompatibleProviderForm{target: w} }
+func OpenAICompatibleProviderForm(w *TargetConfig) tui.Component {
+	return &openAICompatibleProviderForm{target: w}
+}
 
 // openAICompatibleReadiness needs an explicit endpoint and, where required, a credential.
 func openAICompatibleReadiness(w *TargetConfig, base providerSetupState) providerSetupState {

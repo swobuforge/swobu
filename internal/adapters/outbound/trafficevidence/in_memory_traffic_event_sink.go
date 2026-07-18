@@ -17,23 +17,23 @@ type StoreConfig struct {
 // StatusProjection is the minimal read model derived from immutable traffic
 // events plus runtime health truth.
 type StatusProjection struct {
-	State         string             `json:"state"`
-	EndpointCount int                `json:"endpoint_count"`
-	Scope         ProjectionScope    `json:"scope"`
-	Counters      StatusCounters     `json:"counters"`
-	RecentTraffic []RecentTrafficRow `json:"recent_traffic"`
+	State          string             `json:"state"`
+	WorkspaceCount int                `json:"workspace_count"`
+	Scope          ProjectionScope    `json:"scope"`
+	Counters       StatusCounters     `json:"counters"`
+	RecentTraffic  []RecentTrafficRow `json:"recent_traffic"`
 }
 
 type ProjectionScopeKind string
 
 const (
-	ProjectionScopeAll      ProjectionScopeKind = "all"
-	ProjectionScopeEndpoint ProjectionScopeKind = "endpoint"
+	ProjectionScopeAll       ProjectionScopeKind = "all"
+	ProjectionScopeWorkspace ProjectionScopeKind = "workspace"
 )
 
 type ProjectionScope struct {
-	Kind     ProjectionScopeKind `json:"kind"`
-	Endpoint string              `json:"endpoint,omitempty"`
+	Kind      ProjectionScopeKind `json:"kind"`
+	Workspace string              `json:"workspace,omitempty"`
 }
 
 // StatusCounters are summaries only; they must stay derivable from traffic
@@ -48,7 +48,7 @@ type StatusCounters struct {
 
 type RecentTrafficRow struct {
 	RequestID      string                           `json:"request_id"`
-	Endpoint       string                           `json:"endpoint"`
+	Workspace      string                           `json:"workspace"`
 	ClientHandler  string                           `json:"client_handler,omitempty"`
 	ClientProtocol string                           `json:"client_protocol,omitempty"`
 	ClientFamily   string                           `json:"client_family,omitempty"`
@@ -61,17 +61,17 @@ type RecentTrafficRow struct {
 	TokenUsage     *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
 	// TODO(execution-system): Flattened token fields are preserved for continuity with existing
 	// trafficevidence integration tests and older readers.
-	InputTokens         *int                          `json:"-"`
-	OutputTokens        *int                          `json:"-"`
-	CacheReadTokens     *int                          `json:"-"`
-	CacheWriteTokens    *int                          `json:"-"`
+	InputTokens           *int                          `json:"-"`
+	OutputTokens          *int                          `json:"-"`
+	CacheReadTokens       *int                          `json:"-"`
+	CacheWriteTokens      *int                          `json:"-"`
 	ModelRequested        string                        `json:"model_requested,omitempty"`
 	ModelResolved         string                        `json:"model_resolved,omitempty"`
 	ModelResolutionMode   string                        `json:"model_resolution_mode,omitempty"`
 	WorkspaceRouteModelID string                        `json:"workspace_route_model,omitempty"`
-	Mutations           []trafficevidence.Mutation    `json:"wire_patch_mutations,omitempty"`
-	ExchangeDiagnostics []string                      `json:"exchange_diagnostics,omitempty"`
-	StageReports        []trafficevidence.StageReport `json:"exchange_stage_reports,omitempty"`
+	Mutations             []trafficevidence.Mutation    `json:"wire_patch_mutations,omitempty"`
+	ExchangeDiagnostics   []string                      `json:"exchange_diagnostics,omitempty"`
+	StageReports          []trafficevidence.StageReport `json:"exchange_stage_reports,omitempty"`
 }
 
 type RecentTrafficTimingSnapshot struct {
@@ -95,10 +95,10 @@ type RecentTrafficTokenUsageSnapshot struct {
 }
 
 type ProjectionInput struct {
-	State         string
-	EndpointCount int
-	RecentLimit   int
-	Scope         ProjectionScope
+	State          string
+	WorkspaceCount int
+	RecentLimit    int
+	Scope          ProjectionScope
 }
 
 type InMemoryTrafficEventSink struct {
@@ -157,9 +157,9 @@ func (s *InMemoryTrafficEventSink) ProjectStatus(input ProjectionInput) StatusPr
 	scope := normalizeProjectionScope(input.Scope)
 	if s == nil {
 		return StatusProjection{
-			State:         input.State,
-			EndpointCount: input.EndpointCount,
-			Scope:         scope,
+			State:          input.State,
+			WorkspaceCount: input.WorkspaceCount,
+			Scope:          scope,
 			Counters: StatusCounters{
 				PerModel: map[string]int{},
 			},
@@ -172,16 +172,16 @@ func (s *InMemoryTrafficEventSink) ProjectStatus(input ProjectionInput) StatusPr
 	}
 
 	projection := StatusProjection{
-		State:         input.State,
-		EndpointCount: input.EndpointCount,
-		Scope:         scope,
+		State:          input.State,
+		WorkspaceCount: input.WorkspaceCount,
+		Scope:          scope,
 		Counters: StatusCounters{
 			PerModel: map[string]int{},
 		},
 		RecentTraffic: make([]RecentTrafficRow, 0, min(recentLimit, len(latest))),
 	}
 	for _, event := range latest {
-		if !scope.includesEndpoint(event.event.Endpoint()) {
+		if !scope.includesWorkspace(event.event.Workspace()) {
 			continue
 		}
 		if event.event.Result().IsTerminal() {
@@ -232,21 +232,21 @@ func classifyCounters(counters *StatusCounters, event trafficevidence.TrafficEve
 
 func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 	trafficEvent := event.event
-	row := RecentTrafficRow{Endpoint: trafficEvent.Endpoint(),
-		ClientHandler:       string(trafficEvent.ClientHandler()),
-		ClientProtocol:      string(trafficEvent.ClientProtocol()),
-		ClientFamily:        string(trafficEvent.ClientFamily()),
-		NormalizedOp:        string(trafficEvent.NormalizedOp()),
-		Route:               trafficEvent.Route().String(),
-		Result:              trafficEvent.Result().String(),
-		StatusCode:          trafficEvent.StatusCode(),
+	row := RecentTrafficRow{Workspace: trafficEvent.Workspace(),
+		ClientHandler:         string(trafficEvent.ClientHandler()),
+		ClientProtocol:        string(trafficEvent.ClientProtocol()),
+		ClientFamily:          string(trafficEvent.ClientFamily()),
+		NormalizedOp:          string(trafficEvent.NormalizedOp()),
+		Route:                 trafficEvent.Route().String(),
+		Result:                trafficEvent.Result().String(),
+		StatusCode:            trafficEvent.StatusCode(),
 		ModelRequested:        trafficEvent.ModelRequested(),
 		ModelResolved:         trafficEvent.ModelResolved(),
 		ModelResolutionMode:   trafficEvent.ModelResolutionMode(),
 		WorkspaceRouteModelID: trafficEvent.WorkspaceRouteModelID(),
-		Mutations:           trafficEvent.Mutations(),
-		ExchangeDiagnostics: trafficEvent.ExchangeDiagnostics(),
-		StageReports:        trafficEvent.StageReports(),
+		Mutations:             trafficEvent.Mutations(),
+		ExchangeDiagnostics:   trafficEvent.ExchangeDiagnostics(),
+		StageReports:          trafficEvent.StageReports(),
 	}
 	if !event.observedAt.IsZero() {
 		row.ObservedAt = event.observedAt.Format("15:04:05")
@@ -293,8 +293,8 @@ func min(left int, right int) int {
 
 func normalizeProjectionScope(scope ProjectionScope) ProjectionScope {
 	switch scope.Kind {
-	case ProjectionScopeEndpoint:
-		if scope.Endpoint != "" {
+	case ProjectionScopeWorkspace:
+		if scope.Workspace != "" {
 			return scope
 		}
 		return ProjectionScope{Kind: ProjectionScopeAll}
@@ -305,9 +305,9 @@ func normalizeProjectionScope(scope ProjectionScope) ProjectionScope {
 	}
 }
 
-func (s ProjectionScope) includesEndpoint(endpoint string) bool {
-	if s.Kind == ProjectionScopeEndpoint {
-		return endpoint == s.Endpoint
+func (s ProjectionScope) includesWorkspace(workspace string) bool {
+	if s.Kind == ProjectionScopeWorkspace {
+		return workspace == s.Workspace
 	}
 	return true
 }

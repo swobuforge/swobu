@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
@@ -20,6 +21,8 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 	t.Cleanup(func() { fetchLatestVersion = originalFetch })
 
 	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
+	t.Setenv(platformconfig.EnvDoNotTrack, "1")
+	t.Setenv(platformconfig.EnvSkipTelemetryNotice, "1")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -192,6 +195,8 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttac
 	t.Cleanup(func() { fetchLatestVersion = originalFetch })
 
 	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
+	t.Setenv(platformconfig.EnvDoNotTrack, "1")
+	t.Setenv(platformconfig.EnvSkipTelemetryNotice, "1")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -205,6 +210,8 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttac
 			attachCalled = true
 			return nil
 		},
+		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer) error { return nil },
+		Sleep:             func(time.Duration) {},
 	}
 
 	exitCode := runner.Run(context.Background(), nil)

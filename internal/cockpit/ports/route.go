@@ -10,8 +10,8 @@ import (
 type RouteCommands interface {
 	SaveRoute(ctx context.Context, request SaveRouteRequest) (readmodel.RouteReadModel, error)
 	DeleteRoute(ctx context.Context, request DeleteRouteRequest) error
-	SaveTarget(ctx context.Context, request SaveTargetRequest) (readmodel.TargetReadModel, error)
-	DeleteTarget(ctx context.Context, request DeleteTargetRequest) error
+	SaveTarget(ctx context.Context, request SaveTargetRequest) (SaveTargetResult, error)
+	DeleteTarget(ctx context.Context, request DeleteTargetRequest) (readmodel.RouteReadModel, error)
 }
 
 // SaveRouteRequest describes an add or edit request for one client-visible

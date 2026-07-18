@@ -19,7 +19,7 @@ func TestClientStartAuthSession(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	out, err := c.StartAuthSession(context.Background(), "chatgpt", "main/openai", "browser")
+	out, err := c.StartAuthSession(context.Background(), "chatgpt", "main", "chat", "target", "", "browser")
 	if err != nil {
 		t.Fatalf("StartAuthSession returned error: %v", err)
 	}

@@ -29,7 +29,7 @@ func TestStatusProjectionHandler_RejectsInvalidScope(t *testing.T) {
 		t.Fatal("read should not be called when scope is invalid")
 		return trafficevidencestore.StatusProjection{}, nil
 	})
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/status-projection?scope=workspace:acme", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/status-projection?scope=project:acme", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -66,15 +66,15 @@ func TestStatusProjectionHandler_PassesAllScope(t *testing.T) {
 	}
 }
 
-func TestStatusProjectionHandler_PassesEndpointScope(t *testing.T) {
+func TestStatusProjectionHandler_PassesWorkspaceScope(t *testing.T) {
 	called := false
 	handler := NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		called = true
-		if scope.Kind != trafficevidencestore.ProjectionScopeEndpoint {
-			t.Fatalf("scope kind = %q, want %q", scope.Kind, trafficevidencestore.ProjectionScopeEndpoint)
+		if scope.Kind != trafficevidencestore.ProjectionScopeWorkspace {
+			t.Fatalf("scope kind = %q, want %q", scope.Kind, trafficevidencestore.ProjectionScopeWorkspace)
 		}
-		if scope.Endpoint != "acme" {
-			t.Fatalf("scope endpoint = %q, want %q", scope.Endpoint, "acme")
+		if scope.Workspace != "acme" {
+			t.Fatalf("scope workspace = %q, want %q", scope.Workspace, "acme")
 		}
 		return trafficevidencestore.StatusProjection{
 			Scope: scope,
@@ -83,7 +83,7 @@ func TestStatusProjectionHandler_PassesEndpointScope(t *testing.T) {
 			},
 		}, nil
 	})
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/status-projection?scope=endpoint:acme", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_swobu/status-projection?scope=workspace:acme", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)

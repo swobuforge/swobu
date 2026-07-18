@@ -4,49 +4,67 @@ import (
 	"strings"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 )
 
 func (w *TargetConfig) SelectProtocol(protocol string) {
 	protocol = strings.TrimSpace(protocol)
 	for _, option := range w.CurrentProtocolOptions() {
-		if option.ID != protocol { continue }
-		w.Draft.Update(func(d endpointintent.TargetDraft) endpointintent.TargetDraft { d.ProviderProtocol = protocol; return d })
+		if option.ID != protocol {
+			continue
+		}
+		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = protocol; return d })
 		w.Error.Set("")
 		w.Phase.Set(PhaseReadyToCreate)
 		w.CommitEdit(w.actionContext())
 		return
 	}
-	if protocol != "" { w.Error.Set("unsupported protocol " + protocol) }
+	if protocol != "" {
+		w.Error.Set("unsupported protocol " + protocol)
+	}
 }
 
 func (w *TargetConfig) ProtocolPickerOptions() []ui.SearchOption {
 	options := w.CurrentProtocolOptions()
 	opts := make([]ui.SearchOption, len(options))
-	for i, option := range options { opts[i] = ui.SearchOption{ID: option.ID, Label: option.Label, Value: option.ID, Keywords: option.Keywords} }
+	for i, option := range options {
+		opts[i] = ui.SearchOption{ID: option.ID, Label: option.Label, Value: option.ID, Keywords: option.Keywords}
+	}
 	return opts
 }
 
 func ProtocolPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 	options := w.CurrentProtocolOptions()
 	opts := make([]ui.SearchOption, len(options))
-	for i, option := range options { opts[i] = ui.SearchOption{ID: option.ID, Label: option.Label, Keywords: option.Keywords} }
+	for i, option := range options {
+		opts[i] = ui.SearchOption{ID: option.ID, Label: option.Label, Keywords: option.Keywords}
+	}
 	picker := ui.NewSearchPicker(TargetAddMountKey(w, "protocol-picker"), "protocol", opts, func(sel ui.Selection) {
 		w.SelectProtocol(sel.Value)
-		if backout != nil { backout() }
-	}, func() { if backout != nil { backout() } })
+		if backout != nil {
+			backout()
+		}
+	}, func() {
+		if backout != nil {
+			backout()
+		}
+	})
 	picker.AutoFocus = true
 	return picker
 }
 
 func protocolBlockedAction(w *TargetConfig) string {
 	if w.setupState().RequiresEndpoint || w.setupState().AuthModeRequired {
-		if w.IsAzureFlow() { return "deployment" }
+		if w.IsAzureFlow() {
+			return "deployment"
+		}
 		return "model first"
 	}
 	if strings.TrimSpace(w.SelectedModel.Get().ModelName) == "" {
-		if w.IsAzureFlow() { return "deployment" }
+		if w.IsAzureFlow() {
+			return "deployment"
+		}
 		return "model first"
 	}
 	return "blocked"
@@ -72,7 +90,9 @@ func ProtocolSelect(w *TargetConfig) *ui.Select {
 	}
 	props := ui.SelectProps{ID: TargetAddMountKey(w, "protocol-display"), Label: "protocol", Value: value, Action: action, AutoFocus: hydrating, CanEnter: func() bool { return enterable }}
 	if enterable {
-		if hydrating { props.OnEnter = func() { w.ReadyAndProbe(w.Draft.Get().CredentialRef, w.BaseURL.Get()) } }
+		if hydrating {
+			props.OnEnter = func() { w.ReadyAndProbe(w.Draft.Get().CredentialRef, w.BaseURL.Get()) }
+		}
 		props.Body = func(backout func()) tui.Component { return ProtocolPicker(w, backout) }
 	}
 	return ui.NewSelect(props)

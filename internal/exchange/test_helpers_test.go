@@ -17,6 +17,12 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
+type deterministicResponseIDGenerator struct{}
+
+func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (replay.ResponseID, error) {
+	return replay.ResponseID("swobu_" + exchangeID), nil
+}
+
 type recordingEffectSink struct {
 	effects []effect.Effect
 }

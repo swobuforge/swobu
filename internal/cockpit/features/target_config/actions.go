@@ -50,7 +50,9 @@ func CreateControl(w *TargetConfig) *ui.SelectableRow {
 	switch {
 	case !w.SetupAllowsModelChoice():
 		action = firstAction(ModelBlockedAction(w))
-		if w.IsAzureFlow() && action == "credential first" { action = "credential" }
+		if w.IsAzureFlow() && action == "credential first" {
+			action = "credential"
+		}
 		activate = func() { w.Error.Set(action) }
 	case strings.TrimSpace(w.SelectedModel.Get().ModelName) == "":
 		action, activate = "model first", func() { w.Error.Set("model first") }
@@ -64,16 +66,24 @@ func CreateControl(w *TargetConfig) *ui.SelectableRow {
 
 func firstAction(action string) string {
 	action = strings.TrimSpace(action)
-	if strings.HasSuffix(action, "first") { return action }
+	if strings.HasSuffix(action, "first") {
+		return action
+	}
 	switch action {
-	case "credential": return "credential first"
-	case "auth": return "auth first"
-	case "": return "model first"
-	default: return action
+	case "credential":
+		return "credential first"
+	case "auth":
+		return "auth first"
+	case "":
+		return "model first"
+	default:
+		return action
 	}
 }
 
 func (w *TargetConfig) saveVerb() string {
-	if w.mode == targetConfigModeEdit { return "save" }
+	if w.mode == targetConfigModeEdit {
+		return "save"
+	}
 	return "create"
 }

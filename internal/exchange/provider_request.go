@@ -7,13 +7,13 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/endpointintent"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
-type EndpointReader interface {
-	GetEndpoint(ctx context.Context, name endpointintent.EndpointName) (endpointintent.Endpoint, error)
+type WorkspaceLookup interface {
+	GetWorkspace(ctx context.Context, slug routing.WorkspaceSlug) (routing.Workspace, error)
 }
 
 type ProviderIngressResolver interface {

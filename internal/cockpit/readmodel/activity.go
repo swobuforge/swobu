@@ -24,16 +24,16 @@ type ActivityRowReadModel struct {
 	// Cockpit does not synthesize a timestamp from partial clock data.
 	ObservedAt string
 	// ClientLabel is the normalized client handler shown in the activity row.
-	ClientLabel  string
-	RouteID      RouteID
-	RouteLabel   string
-	Status       ActivityStatus
-	HTTPStatus   int
-	Duration     time.Duration
-	Error        bool
-	Attempts     []ActivityAttemptReadModel
-	TokensIn     int
-	TokensOut    int
+	ClientLabel string
+	RouteID     RouteID
+	RouteLabel  string
+	Status      ActivityStatus
+	HTTPStatus  int
+	Duration    time.Duration
+	Error       bool
+	Attempts    []ActivityAttemptReadModel
+	TokensIn    int
+	TokensOut   int
 }
 
 // ActivityStatus is the typed result state used by copy and styling.

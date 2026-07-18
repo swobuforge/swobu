@@ -27,7 +27,7 @@ const (
 type Event struct {
 	Kind       EventKind
 	Text       string
-	DaemonURL  string
+	Addr       string
 	State      string
 	ConfigPath string
 	NextAction []string
