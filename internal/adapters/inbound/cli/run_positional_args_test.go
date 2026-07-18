@@ -11,8 +11,7 @@ import (
 )
 
 // Leaf commands take only flags; a leftover positional is a user error and must
-// not be a silent no-op. The canonical case is "swobu daemon down", which used
-// to start the daemon by ignoring the stray "down".
+// not be a silent no-op.
 
 func TestRunner_DaemonRejectsUnexpectedPositionalArg(t *testing.T) {
 	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
@@ -30,14 +29,14 @@ func TestRunner_DaemonRejectsUnexpectedPositionalArg(t *testing.T) {
 		},
 	}
 
-	exitCode := runner.Run(context.Background(), []string{"daemon", "down"})
+	exitCode := runner.Run(context.Background(), []string{"daemon", "extra"})
 	if exitCode != ExitDown {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
 	}
 	if started {
 		t.Fatal("daemon start was called for a stray positional argument")
 	}
-	if got := stderr.String(); !strings.Contains(got, `unexpected argument "down"`) {
+	if got := stderr.String(); !strings.Contains(got, `unexpected argument "extra"`) {
 		t.Fatalf("stderr missing rejection message; stderr=%q", got)
 	}
 	if stdout.String() != "" {
@@ -60,17 +59,44 @@ func TestRunner_StatusRejectsUnexpectedPositionalArg(t *testing.T) {
 	}
 }
 
-func TestRunner_DownRejectsUnexpectedPositionalArg(t *testing.T) {
+func TestRunner_DaemonDownRejectsUnexpectedPositionalArg(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 	runner := Runner{Stdout: &stdout, Stderr: &stderr}
 
-	exitCode := runner.Run(context.Background(), []string{"down", "extra"})
+	exitCode := runner.Run(context.Background(), []string{"daemon", "down", "extra"})
 	if exitCode != ExitDown {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
 	}
 	if got := stderr.String(); !strings.Contains(got, `unexpected argument "extra"`) {
 		t.Fatalf("stderr missing rejection message; stderr=%q", got)
+	}
+}
+
+func TestRunner_DaemonDownOwnsShutdownHelp(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+	runner := Runner{Stdout: &stdout, Stderr: &stderr}
+
+	exitCode := runner.Run(context.Background(), []string{"daemon", "down", "--help"})
+	if exitCode != ExitHealthy {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
+	}
+	if got := stderr.String(); !strings.Contains(got, "usage: swobu daemon down") {
+		t.Fatalf("stderr missing nested shutdown usage; stderr=%q", got)
+	}
+}
+
+func TestRunner_RootDownIsNotACommand(t *testing.T) {
+	var stderr strings.Builder
+	runner := Runner{Stderr: &stderr}
+
+	exitCode := runner.Run(context.Background(), []string{"down"})
+	if exitCode != ExitDown {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
+	}
+	if got := stderr.String(); !strings.Contains(got, `unknown subcommand "down"`) {
+		t.Fatalf("stderr missing removed-command error; stderr=%q", got)
 	}
 }
 

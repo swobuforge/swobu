@@ -67,8 +67,9 @@ func main() {
 		Use:                "down [args]",
 		Short:              "Request daemon shutdown",
 		DisableFlagParsing: true,
-		RunE:               delegate("down"),
+		RunE:               delegate("daemon", "down"),
 	}
+	daemonCmd.AddCommand(downCmd)
 	telemetryCmd := &cobra.Command{
 		Use:   "telemetry",
 		Short: "Telemetry controls",
@@ -99,7 +100,7 @@ func main() {
 		RunE:  delegate("version"),
 	}
 
-	root.AddCommand(daemonCmd, statusCmd, downCmd, telemetryCmd, versionCmd)
+	root.AddCommand(daemonCmd, statusCmd, telemetryCmd, versionCmd)
 
 	if err := root.Execute(); err != nil {
 		var codeErr *exitCodeError

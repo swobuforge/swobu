@@ -200,11 +200,12 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 		_, _ = fmt.Fprintln(stdout, controlplane.SwobuVersion())
 		return ExitHealthy
 	case "daemon":
+		if len(args) > 1 && args[1] == "down" {
+			return runDown(ctx, client, stdout, stderr, args[2:])
+		}
 		return runDaemon(ctx, start, stdout, stderr, args[1:])
 	case "status":
 		return runStatus(ctx, client, stdout, stderr, args[1:])
-	case "down":
-		return runDown(ctx, client, stdout, stderr, args[1:])
 	case "telemetry":
 		return runTelemetry(stdout, stderr, args[1:])
 	default:
@@ -215,7 +216,7 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 
 // rejectUnexpectedPositionalArgs reports whether fs still holds positional
 // arguments after flag parsing. Leaf commands take only flags, so a leftover
-// positional (e.g. "swobu daemon down") is a user error, not a silent no-op.
+// positional input is a user error, not a silent no-op.
 // When it rejects, it prints one usage-style line to out and the caller returns
 // ExitDown.
 func rejectUnexpectedPositionalArgs(fs *flag.FlagSet, out io.Writer) bool {
@@ -232,6 +233,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon [--config <path>] [--addr <host:port>]")
 		fs.PrintDefaults()
+		_, _ = fmt.Fprintln(stderr, "\ncommands:\n  down    Request daemon shutdown")
 	}
 	configPath := fs.String("config", "", fmt.Sprintf("root daemon config path (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
 	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
@@ -272,7 +274,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		}
 		if strings.Contains(err.Error(), "bind: address already in use") {
 			next = []string{
-				"stop existing daemon or run `swobu down`",
+				"stop existing daemon or run `swobu daemon down`",
 				"run `swobu status`",
 			}
 		}
@@ -360,7 +362,7 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu down [--addr <host:port>] [--timeout <duration>]")
+		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon down [--addr <host:port>] [--timeout <duration>]")
 		fs.PrintDefaults()
 	}
 	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
