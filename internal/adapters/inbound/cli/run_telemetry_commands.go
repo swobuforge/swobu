@@ -43,6 +43,9 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitC
 		}
 		return ExitDown
 	}
+	if rejectUnexpectedPositionalArgs(fs, stderr) {
+		return ExitDown
+	}
 	store := telemetry.NewStore()
 	state, err := store.LoadOrCreate()
 	if err != nil {
@@ -82,6 +85,9 @@ func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, ar
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
 		}
+		return ExitDown
+	}
+	if rejectUnexpectedPositionalArgs(fs, stderr) {
 		return ExitDown
 	}
 	store := telemetry.NewStore()

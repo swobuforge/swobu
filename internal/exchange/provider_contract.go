@@ -5,7 +5,7 @@
 //   - machine, turnstate, observation: called by this package, not callers.
 //
 // Laws:
-//   - Does not import adapters or terminalui.
+//   - Does not import adapters.
 //   - Routing policy lives in internal/routing; this package only executes.
 package exchange
 
