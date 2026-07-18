@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/effect"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
@@ -78,15 +78,15 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	}
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
 	_, inputPresent := usage.InputTokens()
-	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 	_, outputPresent := usage.OutputTokens()
-	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 	_, reasoningPresent := usage.ReasoningTokens()
-	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
+	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
 	_, cacheReadPresent := usage.CacheReadTokens()
-	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaicompat.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if terminalReason, promptBlocked := responsesTerminalReason("", dto.Status, "", dto.ContentFilters, responseIncompleteReason(dto.IncompleteDetails)); promptBlocked {
 		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
 		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
@@ -112,11 +112,11 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
 		switch itemType {
 		case "message":
-			parts, err := openaicompat.DecodeContentParts(item.Content, "responses message content is invalid")
+			parts, err := openaiwire.DecodeContentParts(item.Content, "responses message content is invalid")
 			if err != nil {
 				return nil, canonical.InternalError("responses message content is invalid")
 			}
-			err = openaicompat.WalkContentParts(parts, func(idx int, part openaicompat.ContentPartItem) error {
+			err = openaiwire.WalkContentParts(parts, func(idx int, part openaiwire.ContentPartItem) error {
 				partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 				switch partType {
 				case "text", "output_text", "input_text":

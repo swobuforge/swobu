@@ -42,6 +42,9 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if strings.Contains(string(raw), "target_rank") {
 		t.Fatalf("forbidden field emitted:\n%s", raw)
 	}
+	if !strings.Contains(string(raw), "custom:") || strings.Contains(string(raw), "openai_"+"compatible") {
+		t.Fatalf("custom connection identity changed during round trip:\n%s", raw)
+	}
 }
 
 func TestCodecAcceptsEmptyInstallation(t *testing.T) {

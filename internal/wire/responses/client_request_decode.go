@@ -15,7 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
@@ -175,7 +175,7 @@ func decodeResponsesInput(raw json.RawMessage, sink effect.Sink, exchangeID stri
 				}
 				role = "user"
 			}
-			parts, err := openaicompat.DecodeTextContentItems(item.Content, "responses", openaicompat.AuthorForRole(role))
+			parts, err := openaiwire.DecodeTextContentItems(item.Content, "responses", openaiwire.AuthorForRole(role))
 			if err != nil {
 				return "", nil, err
 			}
@@ -189,7 +189,7 @@ func decodeResponsesInput(raw json.RawMessage, sink effect.Sink, exchangeID stri
 				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
 					return "", nil, err
 				}
-				callID = openaicompat.GeneratedToolUseID(idx, 0)
+				callID = openaiwire.GeneratedToolUseID(idx, 0)
 			} else if strings.TrimSpace(item.CallID) == "" { // swobu:io-string source=boundary
 				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
 					return "", nil, err

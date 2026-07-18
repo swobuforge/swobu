@@ -59,14 +59,14 @@ func buildRouteFeatureMatrix() map[routeKey][]Feature {
 	}
 	addFamily("openai")
 	addFamily("openrouter")
-	addFamily("openai_compatible")
+	addFamily("custom")
 	addFamily("bedrock")
 	addFamily("azure")
 	addRouteFeatures("ollama", protocolkind.ChatCompletions, featureSetChatCompletions)
 	addRouteFeatures("chatgpt", protocolkind.Responses, featureSetResponses)
 	addRouteFeatures("anthropic", protocolkind.Messages, featureSetMessages)
 	addRouteFeatures("bedrock", protocolkind.Messages, featureSetMessages)
-	addRouteFeatures("openai_compatible", protocolkind.Messages, featureSetMessages)
+	addRouteFeatures("custom", protocolkind.Messages, featureSetMessages)
 	return out
 }
 

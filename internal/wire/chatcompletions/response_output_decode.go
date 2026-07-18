@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
 func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody) ([]canonical.OutputItem, error) {
@@ -93,12 +93,12 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 }
 
 func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, error) {
-	parts, err := openaicompat.DecodeContentParts(raw, "chat completions response content is invalid")
+	parts, err := openaiwire.DecodeContentParts(raw, "chat completions response content is invalid")
 	if err != nil {
 		return nil, err
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
-	err = openaicompat.WalkContentParts(parts, func(_ int, part openaicompat.ContentPartItem) error {
+	err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"

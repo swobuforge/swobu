@@ -13,7 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
@@ -58,7 +58,7 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDo
 	for idx, msg := range dto.Messages {
 		role := strings.TrimSpace(msg.Role) // swobu:io-string source=boundary
 		if role == "system" || role == "developer" {
-			textItems, err := openaicompat.DecodeTextContentItems(msg.Content, "chat completions", canonical.ItemAuthorUser)
+			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", canonical.ItemAuthorUser)
 			if err != nil {
 				return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 			}
@@ -107,8 +107,8 @@ func decodeChatCompletionsItems(
 	toolCallID string,
 	msgIdx int,
 ) ([]canonical.CanonicalItem, error) {
-	author := openaicompat.AuthorForRole(role)
-	textItems, err := openaicompat.DecodeTextContentItems(content, "chat completions", author)
+	author := openaiwire.AuthorForRole(role)
+	textItems, err := openaiwire.DecodeTextContentItems(content, "chat completions", author)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func decodeChatCompletionsItems(
 			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
 				return nil, err
 			}
-			id = openaicompat.GeneratedToolUseID(msgIdx, idx)
+			id = openaiwire.GeneratedToolUseID(msgIdx, idx)
 		}
 		switch strings.ToLower(strings.TrimSpace(call.Type)) { // swobu:io-string source=domain
 		case "", "function":

@@ -18,7 +18,7 @@ These docs contain practical setup recipes and troubleshooting references that a
 - [AWS Bedrock](./backends/aws-bedrock.md)
 - [Ollama](./backends/ollama.md)
 - [ChatGPT](./backends/chatgpt.md)
-- [Custom OpenAI-compatible backend](./backends/custom-openai.md)
+- [Custom Endpoint](./backends/custom-endpoint.md)
 
 ## Operations
 

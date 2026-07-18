@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
-func TestRoutingCapabilitiesOwnsCatalogProtocolMapping(t *testing.T) {
+func TestRoutingCapabilitiesUsesDirectProviderIdentity(t *testing.T) {
 	capabilities := RoutingCapabilities()
 	tests := []struct {
 		name     string
@@ -14,7 +14,7 @@ func TestRoutingCapabilitiesOwnsCatalogProtocolMapping(t *testing.T) {
 		protocol string
 		want     bool
 	}{
-		{name: "custom maps to catalog spec", provider: routing.ProviderCustom, protocol: "messages", want: true},
+		{name: "custom is the catalog identity", provider: routing.ProviderCustom, protocol: "messages", want: true},
 		{name: "native provider", provider: routing.ProviderOpenAI, protocol: "responses", want: true},
 		{name: "auto fails closed", provider: routing.ProviderOpenAI, protocol: ProviderProtocolAuto, want: false},
 		{name: "unknown fails closed", provider: routing.ProviderOpenAI, protocol: "unknown", want: false},

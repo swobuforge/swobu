@@ -225,10 +225,10 @@ func TestHandler_LogsResponsesToolReferenceDetailsOnFailure(t *testing.T) {
 func TestHandler_ServesEndpointModels(t *testing.T) {
 	handler := NewHandler(&modelsCapableHandler{
 		modelsOut: exchange.ListModelsOutput{
-			DefaultModelID: "openai_compatible:gpt-4o",
+			DefaultModelID: "custom:gpt-4o",
 			Models: []exchange.ModelOption{
-				{ID: "openai_compatible:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "openai_compatible", BackendRef: "backend-a"},
-				{ID: "openai_compatible:gpt-4.1", ModelID: "gpt-4.1", ProviderSpec: "openai_compatible", BackendRef: "backend-b"},
+				{ID: "custom:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "custom", BackendRef: "backend-a"},
+				{ID: "custom:gpt-4.1", ModelID: "gpt-4.1", ProviderSpec: "custom", BackendRef: "backend-b"},
 			},
 		},
 	})
@@ -244,10 +244,10 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	if !strings.Contains(body, `"object":"list"`) {
 		t.Fatalf("body = %q, want list object", body)
 	}
-	if !strings.Contains(body, `"id":"openai_compatible:gpt-4o"`) {
+	if !strings.Contains(body, `"id":"custom:gpt-4o"`) {
 		t.Fatalf("body = %q, want model id", body)
 	}
-	if !strings.Contains(body, `"name":"openai_compatible:gpt-4o"`) {
+	if !strings.Contains(body, `"name":"custom:gpt-4o"`) {
 		t.Fatalf("body = %q, want model name", body)
 	}
 	if !strings.Contains(body, `"id":"default"`) || !strings.Contains(body, `"name":"default"`) {
@@ -261,8 +261,8 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 	handler := NewHandler(&modelsCapableHandler{
 		modelsOut: exchange.ListModelsOutput{
-			DefaultModelID: "openai_compatible:gpt-4o",
-			Models:         []exchange.ModelOption{{ID: "openai_compatible:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "openai_compatible", BackendRef: "backend-a"}},
+			DefaultModelID: "custom:gpt-4o",
+			Models:         []exchange.ModelOption{{ID: "custom:gpt-4o", ModelID: "gpt-4o", ProviderSpec: "custom", BackendRef: "backend-a"}},
 		},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/c/alpha/models", nil)
@@ -273,10 +273,10 @@ func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if !strings.Contains(rec.Body.String(), `"id":"openai_compatible:gpt-4o"`) {
+	if !strings.Contains(rec.Body.String(), `"id":"custom:gpt-4o"`) {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"name":"openai_compatible:gpt-4o"`) {
+	if !strings.Contains(rec.Body.String(), `"name":"custom:gpt-4o"`) {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
 }
@@ -881,7 +881,7 @@ func (h *capturingRequestIngress) HandleRequest(_ context.Context, in exchange.R
 	if err != nil {
 		return exchange.RequestOutput{}, err
 	}
-	out.Target = exchange.NewRoutableTarget("backend-a", "openai_compatible", "https://example.test/v1", "cred-1", "chat_completions", "", "")
+	out.Target = exchange.NewRoutableTarget("backend-a", "custom", "https://example.test/v1", "cred-1", "chat_completions", "", "")
 	return out, nil
 }
 

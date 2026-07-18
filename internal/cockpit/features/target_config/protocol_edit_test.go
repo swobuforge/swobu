@@ -16,7 +16,7 @@ func TestEditCustomTargetProtocolRemainsChangeable(t *testing.T) {
 	target := readmodel.TargetReadModel{
 		ID:               "primary",
 		Model:            "glm-5.2",
-		Provider:         "openai_compatible",
+		Provider:         "custom",
 		ProviderProtocol: "responses_stream",
 		BaseURL:          "https://api.example.test/v1",
 	}
@@ -32,10 +32,21 @@ func TestEditCustomTargetProtocolRemainsChangeable(t *testing.T) {
 	}
 }
 
+func TestCustomTargetRehydratesWithCanonicalIdentityAndHeader(t *testing.T) {
+	target := readmodel.TargetReadModel{
+		ID: "primary", Provider: "custom", ProviderProtocol: "messages",
+		BaseURL: "https://api.example.test/v1", AuthHeader: "x-api-key",
+	}
+	draft := TargetDraftFromReadModel("chat", target)
+	if draft.ProviderSpec != "custom" || draft.CredentialHeader != "x-api-key" {
+		t.Fatalf("draft = %#v, want canonical custom identity and direct credential header", draft)
+	}
+}
+
 func TestEditCustomTargetPersistsChangedProtocol(t *testing.T) {
 	t.Parallel()
 
-	target := readmodel.TargetReadModel{ID: "primary", Model: "glm-5.2", Provider: "openai_compatible", ProviderProtocol: "responses_stream", BaseURL: "https://api.example.test/v1"}
+	target := readmodel.TargetReadModel{ID: "primary", Model: "glm-5.2", Provider: "custom", ProviderProtocol: "responses_stream", BaseURL: "https://api.example.test/v1"}
 	route := readmodel.RouteReadModel{ID: "primary", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
 	var saved ports.SaveTargetRequest
 	save := func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {

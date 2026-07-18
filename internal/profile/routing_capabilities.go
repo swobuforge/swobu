@@ -8,11 +8,7 @@ import "github.com/swobuforge/swobu/internal/routing"
 func RoutingCapabilities() routing.TargetCapabilities {
 	return routing.TargetCapabilities{
 		ProtocolSupported: func(provider routing.Provider, protocol string) bool {
-			spec := string(provider)
-			if provider == routing.ProviderCustom {
-				spec = "openai_compatible"
-			}
-			return protocol != ProviderProtocolAuto && SupportsProviderProtocolForSpec(spec, protocol)
+			return protocol != ProviderProtocolAuto && SupportsProviderProtocolForSpec(string(provider), protocol)
 		},
 		NormalizeAzureProjectEndpoint: NormalizeAzureProjectEndpoint,
 		BedrockRegionSupported:        SupportsBedrockMantleRegion,

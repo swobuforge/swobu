@@ -2,7 +2,7 @@ package chatcompletions
 
 import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	openaicompat "github.com/swobuforge/swobu/internal/wire/openai"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
 func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (canonical.GenerationControls, error) {
@@ -10,15 +10,15 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	temperature, err := openaicompat.DecodeOptionalFloat(dto.Temperature, "chat completions request temperature is invalid")
+	temperature, err := openaiwire.DecodeOptionalFloat(dto.Temperature, "chat completions request temperature is invalid")
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	topP, err := openaicompat.DecodeOptionalFloat(dto.TopP, "chat completions request top_p is invalid")
+	topP, err := openaiwire.DecodeOptionalFloat(dto.TopP, "chat completions request top_p is invalid")
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	stopSequences, err := openaicompat.DecodeStopSequences(dto.Stop, "chat completions request stop is invalid")
+	stopSequences, err := openaiwire.DecodeStopSequences(dto.Stop, "chat completions request stop is invalid")
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
@@ -33,14 +33,14 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 func decodeChatCompletionsMaxOutputTokens(dto chatCompletionsRequestDTO) (*int, error) {
 	// GPT-5-series reasoning models use the newer field name on chat completions.
 	// Prefer it when present, then fall back to the legacy name for older models.
-	maxCompletionTokens, err := openaicompat.DecodeOptionalInt(dto.MaxCompletionTokens, "chat completions request max_completion_tokens is invalid")
+	maxCompletionTokens, err := openaiwire.DecodeOptionalInt(dto.MaxCompletionTokens, "chat completions request max_completion_tokens is invalid")
 	if err != nil {
 		return nil, err
 	}
 	if maxCompletionTokens != nil {
 		return maxCompletionTokens, nil
 	}
-	return openaicompat.DecodeOptionalInt(dto.MaxTokens, "chat completions request max_tokens is invalid")
+	return openaiwire.DecodeOptionalInt(dto.MaxTokens, "chat completions request max_tokens is invalid")
 }
 
 func encodeChatCompletionsGenerationControls(payload map[string]any, _ string, controls canonical.GenerationControls) error {
@@ -53,6 +53,6 @@ func encodeChatCompletionsGenerationControls(payload map[string]any, _ string, c
 	if value, ok := controls.Sampling.TopP.Value(); ok {
 		payload["top_p"] = value
 	}
-	openaicompat.SetStopSequence(payload, "stop", controls.Limits.StopSequences)
+	openaiwire.SetStopSequence(payload, "stop", controls.Limits.StopSequences)
 	return nil
 }

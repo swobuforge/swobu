@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	openAICompatibleAuthHeaders = []string{
+	customAuthHeaders = []string{
 		"Authorization",
 		"x-api-key",
 		"api-key",
@@ -45,10 +45,8 @@ var (
 		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
-	// providerProtocolsCustomEndpoint carries the OpenAI-family protocols plus
-	// the Anthropic Messages protocols, because a Custom Endpoint can front an
-	// Anthropic-style backend. Native OpenAI/OpenRouter keep the narrower family
-	// list; only Custom Endpoint declares this cross-family surface.
+	// providerProtocolsCustomEndpoint lists every protocol an operator may
+	// explicitly select for a user-supplied HTTP endpoint.
 	providerProtocolsCustomEndpoint = []ProviderProtocolSpec{
 		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
@@ -162,9 +160,9 @@ func catalog() []Profile {
 			DeclaredCapabilities: []Capability{CapabilityModelCatalog, CapabilityStreaming},
 		},
 		{
-			ProviderID:          ProviderSpecOpenAICompatible,
+			ProviderID:          ProviderSpecCustom,
 			ProviderDisplayName: "Custom Endpoint",
-			SetupHint:           "OpenAI-style URL",
+			SetupHint:           "backend URL",
 			SetupKeywords:       []string{"backend URL", "credential", "credential header", "model", "protocol"},
 			Locator: LocatorSpec{
 				Kind:  LocatorBaseURL,

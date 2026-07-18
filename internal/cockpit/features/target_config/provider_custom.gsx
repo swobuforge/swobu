@@ -31,7 +31,7 @@ func customReadiness(w *TargetConfig, base providerSetupState) providerSetupStat
 }
 
 func (w *TargetConfig) IsCustomFlow() bool {
-	return profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecOpenAICompatible
+	return profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecCustom
 }
 
 // ShouldRenderCredentialHeaderRow shows the credential-header row only once a
@@ -52,7 +52,7 @@ func shouldRenderCustomCredentialRow(w *TargetConfig) bool {
 // body. ui.Select owns the entered state; selecting a header commits and backs
 // out through the shared ui.Select entered-state contract.
 func CredentialHeaderControl(w *TargetConfig) *ui.Select {
-	value := strings.TrimSpace(w.Draft.Get().ProviderOptions.OpenAICompatible.CredentialHeader)
+	value := strings.TrimSpace(w.Draft.Get().CredentialHeader)
 	if value == "" {
 		value = w.inferredCredentialHeader()
 	}
@@ -69,7 +69,7 @@ func CredentialHeaderControl(w *TargetConfig) *ui.Select {
 
 func (w *TargetConfig) commitCredentialHeader(header string) {
 	d := w.Draft.Get()
-	d.ProviderOptions.OpenAICompatible.CredentialHeader = header
+	d.CredentialHeader = header
 	w.Draft.Set(d)
 	if w.CredentialHeaderEdited != nil {
 		w.CredentialHeaderEdited.Set(true)
@@ -89,19 +89,18 @@ func (w *TargetConfig) reseedInferredCredentialHeader() {
 		return
 	}
 	d := w.Draft.Get()
-	d.ProviderOptions.OpenAICompatible.CredentialHeader = w.inferredCredentialHeader()
+	d.CredentialHeader = w.inferredCredentialHeader()
 	w.Draft.Set(d)
 }
 
-// resolvedCredentialHeader returns the effective header for an openai-compatible
-// provider: the operator's explicit choice, or the inferred default when the arm
-// is empty. The domain boundary applies the same default, so the arm stays empty
-// until the operator picks one.
+// resolvedCredentialHeader returns the effective header for a custom endpoint:
+// the materialized inferred value or the operator's explicit choice. The domain
+// boundary repeats the default only as a defensive construction invariant.
 func resolvedCredentialHeader(spec, header string) string {
 	if h := strings.TrimSpace(header); h != "" {
 		return h
 	}
-	if profile.ProviderID(spec) != profile.ProviderSpecOpenAICompatible {
+	if profile.ProviderID(spec) != profile.ProviderSpecCustom {
 		return ""
 	}
 	if defaults := profile.SupportedAuthHeadersForSpec(spec); len(defaults) > 0 {

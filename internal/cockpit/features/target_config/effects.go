@@ -243,7 +243,7 @@ func (w *TargetConfig) SetSetupReady(credentialRef, baseURL string) {
 }
 
 func seedProviderDefaults(w *TargetConfig) {
-	if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecOpenAICompatible {
+	if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecCustom {
 		w.reseedInferredCredentialHeader()
 	}
 }
@@ -381,7 +381,7 @@ func (w *TargetConfig) ChangeProvider() {
 // seedSetupDefaults seeds only parent-owned lifecycle trivia: the default
 // endpoint for providers that do not require an explicit one. Provider arms are
 // opaque to the parent — each provider seeds its own defaults (e.g. the
-// openai-compatible header defaults at the domain boundary when empty).
+// custom-endpoint header defaults at the domain boundary when empty).
 func (w *TargetConfig) seedSetupDefaults() {
 	spec := w.Draft.Get().ProviderSpec
 	if spec == "" {

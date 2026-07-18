@@ -11,7 +11,7 @@ type ProviderRoutePolicy interface {
 
 type openAIProviderRoutePolicy struct{}
 type ollamaProviderRoutePolicy struct{}
-type openAICompatibleProviderRoutePolicy struct{}
+type customProviderRoutePolicy struct{}
 type openRouterProviderRoutePolicy struct{}
 
 func (openAIProviderRoutePolicy) ProviderID() profile.ProviderID {
@@ -24,10 +24,10 @@ func (ollamaProviderRoutePolicy) ProviderID() profile.ProviderID {
 }
 func (ollamaProviderRoutePolicy) AuthStrategy() AuthStrategy { return NoAuthStrategy() }
 
-func (openAICompatibleProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecOpenAICompatible
+func (customProviderRoutePolicy) ProviderID() profile.ProviderID {
+	return profile.ProviderSpecCustom
 }
-func (openAICompatibleProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
+func (customProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
 
 func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 	return profile.ProviderSpecOpenRouter
@@ -40,9 +40,9 @@ func NewOpenAIPolicy() ProviderRoutePolicy { return openAIProviderRoutePolicy{} 
 // NewOllamaPolicy returns the Ollama route policy.
 func NewOllamaPolicy() ProviderRoutePolicy { return ollamaProviderRoutePolicy{} }
 
-// NewOpenAICompatiblePolicy returns the generic OpenAI-compatible route policy.
-func NewOpenAICompatiblePolicy() ProviderRoutePolicy {
-	return openAICompatibleProviderRoutePolicy{}
+// NewCustomPolicy returns the custom-endpoint route policy.
+func NewCustomPolicy() ProviderRoutePolicy {
+	return customProviderRoutePolicy{}
 }
 
 // NewOpenRouterPolicy returns the OpenRouter route policy.

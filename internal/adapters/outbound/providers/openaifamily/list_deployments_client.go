@@ -16,7 +16,7 @@ import (
 // provider target. This is an operator-support path.
 func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("OpenAI-family provider base URL is required")
+		return nil, canonical.BadEndpoint("provider endpoint base URL is required")
 	}
 	if requiresExplicitCredentialRef(target.ProviderID(), target.BaseURL, target.CredentialRef) {
 		return nil, canonical.BadEndpoint(providerCredentialRequiredMessage(target.ProviderID()))
@@ -24,7 +24,7 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpedge.JoinBaseURLAndPath(target.BaseURL, "/models"), nil)
 	if err != nil {
-		return nil, canonical.BadEndpoint("OpenAI-family provider model catalog request could not be built")
+		return nil, canonical.BadEndpoint("provider endpoint model catalog request could not be built")
 	}
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
@@ -34,7 +34,7 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, canonical.BadEndpoint("OpenAI-family provider model catalog request failed before backend response")
+		return nil, canonical.BadEndpoint("provider endpoint model catalog request failed before backend response")
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

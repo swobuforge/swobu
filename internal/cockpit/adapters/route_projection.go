@@ -50,7 +50,6 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadM
 		out.BaseURL = profile.BedrockMantleEndpointForRegion(target.Connection.Bedrock.Region)
 		out.CredentialRef = target.Connection.Bedrock.Credential
 	case target.Connection.Custom != nil:
-		out.Provider = "openai_compatible"
 		out.BaseURL = target.Connection.Custom.BaseURL
 		if target.Connection.Custom.Header != nil {
 			out.AuthHeader = target.Connection.Custom.Header.Name

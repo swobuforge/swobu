@@ -127,7 +127,7 @@ func providerReadiness(w *TargetConfig, base providerSetupState) providerSetupSt
 		return bedrockReadiness(w, base)
 	case profile.ProviderSpecAzure:
 		return azureReadiness(w, base)
-	case profile.ProviderSpecOpenAICompatible:
+	case profile.ProviderSpecCustom:
 		return customReadiness(w, base)
 	default:
 		return httpReadiness(w, base)
@@ -358,7 +358,7 @@ func (w *TargetConfig) resetFlowState() {
 func (w *TargetConfig) resetSetupState() {
 	d := w.Draft.Get()
 	d.CredentialRef = ""
-	d.ProviderOptions = readmodel.ProviderOptionsDraft{}
+	d.CredentialHeader = ""
 	w.Draft.Set(d)
 	w.BaseURL.Set("")
 	w.CredentialHeaderEdited.Set(false)

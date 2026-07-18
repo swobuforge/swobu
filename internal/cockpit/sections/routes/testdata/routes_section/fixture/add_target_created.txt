@@ -6,13 +6,12 @@
         default           no                                                                                                                                                                                  make default ↵
 
         step 1
-           openai_compatible/custom-route                                                                                                                                                                     edit ↵
+           custom/custom-route                                                                                                                                                                     edit ↵
 
         add target                                                                                                                                                                                            add ↵
         delete            model route                                                                                                                                                                         delete ↵
 
      add model route                                                                                                                                                                                          add ↵
-
 
 
 

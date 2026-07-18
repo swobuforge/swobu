@@ -323,7 +323,7 @@ func TestMountedBedrockRefreshStartsExactlyOneProbeAndReconcilesSelection(t *tes
 }
 
 func TestCustomCredentialHeaderFollowsCredentialPresence(t *testing.T) {
-	w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://example.test/v1", "")
+	w := authoringConfig(t, profile.ProviderSpecCustom, "https://example.test/v1", "")
 	if shouldRenderCredentialHeaderRow(w) {
 		t.Fatal("header row visible without credential")
 	}
@@ -342,7 +342,7 @@ func TestCustomCredentialHeaderFollowsCredentialPresence(t *testing.T) {
 func TestCustomEndpointSubmitLeavesOneSelectionAndNoStaleCaret(t *testing.T) {
 	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
 	w.Open()
-	w.SelectProvider(string(profile.ProviderSpecOpenAICompatible))
+	w.SelectProvider(string(profile.ProviderSpecCustom))
 	h, err := testkit.NewHarnessAt(w, 100, 16)
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +367,7 @@ func TestCustomEndpointSubmitLeavesOneSelectionAndNoStaleCaret(t *testing.T) {
 }
 
 func TestCustomEndpointWithoutModelCatalogAcceptsTypedModel(t *testing.T) {
-	w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.z.ai/api/anthropic", "secret:zai")
+	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.z.ai/api/anthropic", "secret:zai")
 	w.Catalog.Set(catalogOperationState{})
 	picker := ModelPicker(w, nil)
 	if picker.Mode != ui.SearchPickerOpen {
@@ -388,7 +388,7 @@ func TestCustomEndpointWithoutModelCatalogAcceptsTypedModel(t *testing.T) {
 }
 
 func TestMountedCustomModelRowEntersOpenPickerWithoutReprobing(t *testing.T) {
-	w := authoringConfig(t, profile.ProviderSpecOpenAICompatible, "https://api.z.ai/api/anthropic", "secret:zai")
+	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.z.ai/api/anthropic", "secret:zai")
 	w.Catalog.Set(catalogOperationState{})
 	probes := 0
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
