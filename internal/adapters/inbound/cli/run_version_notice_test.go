@@ -46,15 +46,11 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 		t.Fatal("attach/start was not called")
 	}
 	text := stdout.String()
-	if !strings.Contains(text, "╭─ Update Available ") {
-		t.Fatalf("missing version notice block; stdout=%q", text)
-	}
-	if !strings.Contains(text, installCommand) {
-		t.Fatalf("missing install command; stdout=%q", text)
-	}
-	if !strings.Contains(text, "SWOBU_SKIP_VERSION_NOTICE") {
-		t.Fatalf("missing skip env hint; stdout=%q", text)
-	}
+	requireClosedNotice(t, text, "Update Available", []string{
+		"latest version: v999.0.0",
+		"update now: " + installCommand,
+		"skip this notice: export " + platformconfig.EnvSkipVersionNotice + "=1",
+	})
 	if !strings.Contains(text, "press Enter to continue") {
 		t.Fatalf("missing continue prompt; stdout=%q", text)
 	}

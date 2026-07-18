@@ -213,6 +213,19 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 	}
 }
 
+// rejectUnexpectedPositionalArgs reports whether fs still holds positional
+// arguments after flag parsing. Leaf commands take only flags, so a leftover
+// positional (e.g. "swobu daemon down") is a user error, not a silent no-op.
+// When it rejects, it prints one usage-style line to out and the caller returns
+// ExitDown.
+func rejectUnexpectedPositionalArgs(fs *flag.FlagSet, out io.Writer) bool {
+	if fs.NArg() == 0 {
+		return false
+	}
+	fmt.Fprintf(out, "unexpected argument %q\n", fs.Arg(0))
+	return true
+}
+
 func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -228,6 +241,9 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		}
 		return ExitDown
 	}
+	if rejectUnexpectedPositionalArgs(fs, stderr) {
+		return ExitDown
+	}
 	resolvedConfigPath := platformconfig.ResolveConfigPath(*configPath)
 	startupConfig, err := platformconfig.ResolveStartupConfig(*addr)
 	if err != nil {
@@ -241,7 +257,11 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	writePlainLines(stdout, []string{"starting daemon runtime", "config path: " + resolvedConfigPath, "address: " + startupConfig.Addr})
+	writeStartupLine(stdout, "starting daemon runtime")
+	writeNoticeBlock(stdout, "Daemon Runtime", []string{
+		"config path: " + resolvedConfigPath,
+		"address: " + startupConfig.Addr,
+	})
 
 	logger := slog.Default()
 	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, StartupConfig: startupConfig, Logger: logger})
@@ -304,7 +324,7 @@ func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
 	if state.NoticeShown {
 		return nil
 	}
-	writeNoticeBlock(out, "telemetry disclosure", splitNoticeRows(telemetry.FirstRunNoticeText()))
+	writeNoticeBlock(out, "Telemetry Disclosure", splitNoticeRows(telemetry.FirstRunNoticeText()))
 	_, err = store.MarkNoticeShown()
 	return err
 }
@@ -321,6 +341,9 @@ func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
 		}
+		return ExitDown
+	}
+	if rejectUnexpectedPositionalArgs(fs, stdout) {
 		return ExitDown
 	}
 
@@ -346,6 +369,9 @@ func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Wr
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
 		}
+		return ExitDown
+	}
+	if rejectUnexpectedPositionalArgs(fs, stderr) {
 		return ExitDown
 	}
 	if *timeout <= 0 {

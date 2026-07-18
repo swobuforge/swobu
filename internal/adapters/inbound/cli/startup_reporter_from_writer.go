@@ -48,36 +48,9 @@ func (r writerStartupReporter) Report(event daemonlifecycle.StartupEvent) {
 	case daemonlifecycle.StartupEventDaemonReady:
 		writeStartupLine(r.out, fmt.Sprintf("ready: daemon ready (%s)", event.State))
 	case daemonlifecycle.StartupEventStartupFailed:
-		writeNoticeBlock(r.out, "startup failed", noticeRows(event.Text, event.NextAction))
+		writeNoticeBlock(r.out, "Startup Failed", noticeRows(event.Text, event.NextAction))
 	case daemonlifecycle.StartupEventStartupTimedOut:
-		writeNoticeBlock(r.out, "startup timed out", noticeRows(event.Text, event.NextAction))
-	}
-}
-
-func writeNoticeBlock(out io.Writer, title string, rows []string) {
-	if out == nil {
-		return
-	}
-	writeStartupLine(out, fmt.Sprintf("╭─ %s ", title))
-	for _, row := range rows {
-		trimmed := strings.TrimSpace(row) // swobu:io-string source=boundary
-		if trimmed == "" {
-			continue
-		}
-		writeStartupLine(out, trimmed)
-	}
-}
-
-func writePlainLines(out io.Writer, rows []string) {
-	if out == nil {
-		return
-	}
-	for _, row := range rows {
-		trimmed := strings.TrimSpace(row) // swobu:io-string source=boundary
-		if trimmed == "" {
-			continue
-		}
-		writeStartupLine(out, trimmed)
+		writeNoticeBlock(r.out, "Startup Timed Out", noticeRows(event.Text, event.NextAction))
 	}
 }
 
