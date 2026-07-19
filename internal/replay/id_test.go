@@ -5,37 +5,39 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// deterministicResponseIDGenerator produces stable IDs for tests.
-type deterministicResponseIDGenerator struct{}
+// deterministicSwobuResponseIDGenerator produces stable IDs for tests.
+type deterministicSwobuResponseIDGenerator struct{}
 
-func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (ResponseID, error) {
-	return ResponseID("resp_" + exchangeID), nil
+func (deterministicSwobuResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
+	return canonical.SwobuResponseID("resp_" + exchangeID), nil
 }
 
-func TestResponseIDGenerator_AllocatesStableID(t *testing.T) {
-	gen := deterministicResponseIDGenerator{}
-	id, err := gen.NewResponseID(context.Background(), "ex-42")
+func TestSwobuResponseIDGeneratorAllocatesStableID(t *testing.T) {
+	gen := deterministicSwobuResponseIDGenerator{}
+	swobuResponseID, err := gen.NewSwobuResponseID(context.Background(), "ex-42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if swobuResponseID == "" {
+		t.Fatal("SwobuResponseID must not be empty")
+	}
+	if !strings.HasPrefix(string(swobuResponseID), "resp_ex-42") {
+		t.Fatalf("expected prefix resp_ex-42, got %q", swobuResponseID)
+	}
+}
+
+func TestDefaultSwobuResponseIDGeneratorAllocatesPrefixedID(t *testing.T) {
+	gen := NewDefaultSwobuResponseIDGenerator()
+	id, err := gen.NewSwobuResponseID(context.Background(), "ex-42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if id == "" {
-		t.Fatal("ResponseID must not be empty")
-	}
-	if !strings.HasPrefix(string(id), "resp_ex-42") {
-		t.Fatalf("expected prefix resp_ex-42, got %q", id)
-	}
-}
-
-func TestDefaultResponseIDGenerator_AllocatesPrefixedID(t *testing.T) {
-	gen := NewDefaultResponseIDGenerator()
-	id, err := gen.NewResponseID(context.Background(), "ex-42")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id == "" {
-		t.Fatal("ResponseID must not be empty")
+		t.Fatal("SwobuResponseID must not be empty")
 	}
 	if !strings.HasPrefix(string(id), "resp_") {
 		t.Fatalf("expected prefix resp_, got %q", id)

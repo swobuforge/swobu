@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 var errTerminalCommit = errors.New("replay terminal commit failed")
@@ -26,29 +25,25 @@ type TerminalCommitConfig struct {
 	WorkspaceSlug string
 	// ExchangeID is the logical exchange identifier (for projection/logging only).
 	ExchangeID string
-	// ResponseID is the Swobu client-visible response ID allocated early.
-	ResponseID ResponseID
+	// SwobuResponseID is the Swobu client-visible response ID allocated early.
+	SwobuResponseID canonical.SwobuResponseID
+	// TargetID and TargetVersion bind a protocol-native response handle to the
+	// exact backend generation that produced it.
+	TargetID      string
+	TargetVersion uint64
 	// Store receives the built record.
 	Store Store
 	// SemanticRequest is the complete semantic state that produced this response.
 	SemanticRequest canonical.CanonicalRequest
-	// ContinuationSource is exact-codec output, never canonical metadata.
-	ContinuationSource provider.ContinuationSource
-	// CaptureContinuation is the exact-backend opt-in that binds a decoded
-	// continuation handle to its routing target ID and version. Nil disables
-	// capture.
-	CaptureContinuation func(providerResultID string) *provider.NativeContinuation
 }
 
 // CommitReader wraps a canonical event stream and stores a replay record at
 // terminal success. Non-terminal events stream immediately. Terminal success
 // is only returned after Store.Put succeeds.
 //
-// IDENTITY REWRITE: the response envelope start is tagged with the allocated
-// Swobu ResponseID via Meta.ResultID so response.created can surface it
-// immediately. Provider NativeID is cleared before downstream projection so
-// client-visible identity comes only from Meta.ResultID. Native replay capture
-// uses only TerminalCommitConfig.ContinuationSource.
+// IDENTITY ENRICHMENT: the response envelope start receives the allocated
+// Swobu ResponseID. Any Responses-native refinement is bound to the exact
+// target generation before downstream client projection sees the event.
 //
 // FAILURE: If Store.Put fails after partial streaming, the terminal event is
 // replaced with EventError followed by a synthetic EnvelopeEnd{Status: Error},
@@ -75,11 +70,11 @@ func (c TerminalCommitConfig) Validate() error {
 	if c.Store == nil {
 		return errors.New("replay commit store is nil")
 	}
-	if strings.TrimSpace(c.WorkspaceSlug) == "" {
+	if strings.TrimSpace(c.WorkspaceSlug) == "" { // swobu:io-string source=domain
 		return errors.New("replay commit workspace slug is empty")
 	}
-	if strings.TrimSpace(string(c.ResponseID)) == "" {
-		return errors.New("replay commit response id is empty")
+	if err := (canonical.ResponseRef{SwobuID: c.SwobuResponseID}).ValidateCommittedResponse(); err != nil {
+		return fmt.Errorf("replay commit response reference: %w", err)
 	}
 	return nil
 }
@@ -125,30 +120,19 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 		return canonical.Event{}, err
 	}
 
-	// Rewrite streaming identity: provider result_id must not leak to the
-	// client. Record the original for native replay capture; downstream sees
-	// the Swobu ID only.
+	// Enrich streaming identity before the first response event is visible.
 	if ev.Kind == canonical.EventEnvelopeStart {
 		if payload, ok := ev.Payload.(canonical.EnvelopeStartPayload); ok && payload.Kind == canonical.EnvResponse {
 			r.startedResponse = true
-			ev.Meta.NativeID = ""
-			ev.Meta.ResultID = string(r.config.ResponseID)
-		}
-	}
-	if ev.Kind == canonical.EventMetadata {
-		if payload, ok := ev.Payload.(canonical.MetadataPayload); ok {
-			if id := payload.Values["result_id"]; id != "" {
-				if r.config.ResponseID != "" {
-					mutated := make(map[string]string, len(payload.Values))
-					for k, v := range payload.Values {
-						mutated[k] = v
-					}
-					mutated["result_id"] = string(r.config.ResponseID)
-					ev.Payload = canonical.MetadataPayload{Values: mutated}
-					ev.Meta.NativeID = ""
-					ev.Meta.ResultID = string(r.config.ResponseID)
-				}
+			payload.Response.SwobuID = r.config.SwobuResponseID
+			if payload.Response.Responses != nil {
+				responses := *payload.Response.Responses
+				responses.TargetID = r.config.TargetID
+				responses.TargetVersion = r.config.TargetVersion
+				payload.Response.Responses = &responses
 			}
+			ev.Payload = payload
+			ev.Meta.NativeID = ""
 		}
 	}
 
@@ -197,7 +181,7 @@ func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code stri
 		"event", "replay_terminal_failure",
 		"code", code,
 		"exchange_id", base.ExchangeID,
-		"response_id", r.config.ResponseID,
+		"response_id", r.config.SwobuResponseID,
 		"failure_origin", terminalFailureOrigin(code),
 		"response_started", r.startedResponse,
 		"last_event_kind", base.Kind,
@@ -294,26 +278,9 @@ func (r *CommitReader) doCommit(ctx context.Context) error {
 		return fmt.Errorf("projecting response for replay commit: %w", err)
 	}
 
-	// Native replay capture: only through the opt-in extractor.
-	// No fallback — if the codec did not opt in, native replay is nil.
-	var nativeContinuation *provider.NativeContinuation
-	if r.config.CaptureContinuation != nil && r.config.ContinuationSource != nil {
-		if id, ok := r.config.ContinuationSource.ContinuationID(); ok {
-			nativeContinuation = r.config.CaptureContinuation(string(id))
-		}
-	}
-
-	// Substitute Swobu response ID into the projected output for storage.
-	if r.config.ResponseID != "" {
-		p := output.WithResultID(string(r.config.ResponseID))
-		output = &p
-	}
-
 	record := Record{
-		ID:        ReplayIDFromResponseID(r.config.ResponseID),
 		Request:   r.config.SemanticRequest.Clone(),
 		Response:  *output,
-		Native:    nativeContinuation,
 		CreatedAt: time.Now().UTC(),
 	}
 

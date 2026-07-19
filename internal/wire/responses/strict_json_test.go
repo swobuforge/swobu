@@ -24,8 +24,9 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Text != "hi" {
-		t.Fatalf("item text = %q, want %q", items[0].Text, "hi")
+	text, _ := items[0].TextItem()
+	if text.Text != "hi" {
+		t.Fatalf("item text = %q, want %q", text.Text, "hi")
 	}
 }
 

@@ -43,14 +43,7 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 	if !strings.Contains(compatErr.Message, "reasoning") {
 		t.Fatalf("error message = %q, want reasoning to be mentioned", compatErr.Message)
 	}
-	if len(sink.effects) != 1 {
-		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
-	}
-	compatEffect := sink.effects[0]
-	if compatEffect.Feature != compat.ResponseReasoning || compatEffect.Outcome != compat.Reject {
-		t.Fatalf("captured effect = %#v, want response.reasoning reject", compatEffect)
-	}
-	if compatEffect.Subject != compat.Subject("wire:/output/0/type") {
-		t.Fatalf("captured subject = %q, want wire:/output/0/type", compatEffect.Subject)
+	if len(sink.effects) != 0 {
+		t.Fatalf("captured effects = %#v, want none until canonical Thinking exists", sink.effects)
 	}
 }

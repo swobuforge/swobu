@@ -66,8 +66,8 @@ func TestUpdateTargetSettingsPreservesBalancedTier(t *testing.T) {
 	if ids[0] != "one" || ids[1] != "two" {
 		t.Fatalf("settings update changed balanced peers: %v", ids)
 	}
-	if got := route.Tiers()[0].Targets()[1].Version(); got != two.Version()+1 {
-		t.Fatalf("updated target version = %d, want %d", got, two.Version()+1)
+	if got := route.Tiers()[0].Targets()[1].Version(); got != two.Version() {
+		t.Fatalf("unchanged effective target version = %d, want %d", got, two.Version())
 	}
 	if got := route.Tiers()[0].Targets()[0].Version(); got != initialTargetVersion {
 		t.Fatalf("unrelated target version = %d, want %d", got, initialTargetVersion)
@@ -131,7 +131,7 @@ func TestSetCredentialPreservesUnrelatedTargetFields(t *testing.T) {
 	}
 }
 
-func TestNoOpTargetSavesStillAdvanceVersion(t *testing.T) {
+func TestNoOpTargetSavesRetainVersion(t *testing.T) {
 	config := testConfig(t, testTarget(t, "a"))
 	slug, _ := ParseWorkspaceSlug("dev")
 	routeName, _ := ParseRouteName("chat")
@@ -148,8 +148,8 @@ func TestNoOpTargetSavesStillAdvanceVersion(t *testing.T) {
 	}
 	nextWorkspace, _ := next.Workspace(slug)
 	nextRoute, _ := nextWorkspace.Route(routeName)
-	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version()+1 {
-		t.Fatalf("no-op settings save version = %d, want %d", got, target.Version()+1)
+	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version() {
+		t.Fatalf("no-op settings save version = %d, want %d", got, target.Version())
 	}
 
 	credential := target.Connection().(OpenAIConnection).Credential().String()
@@ -159,7 +159,132 @@ func TestNoOpTargetSavesStillAdvanceVersion(t *testing.T) {
 	}
 	nextWorkspace, _ = next.Workspace(slug)
 	nextRoute, _ = nextWorkspace.Route(routeName)
-	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version()+2 {
-		t.Fatalf("no-op credential save version = %d, want %d", got, target.Version()+2)
+	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version() {
+		t.Fatalf("no-op credential save version = %d, want %d", got, target.Version())
+	}
+}
+
+func TestTargetVersionChangesForIndependentTargetSettingsMutations(t *testing.T) {
+	openAIBase := testTarget(t, "a")
+	modelChanged, _ := ParseUpstreamModel("different-deployment")
+	protocolChanged := testProtocol(t, ProviderOpenAI, "chat_completions")
+	credentialChanged, _ := NewOpenAIConnection("env:ROTATED_OPENAI_KEY")
+	customAuth, _ := NewCustomHeaderAuth("Authorization", "env:CUSTOM_KEY")
+	customA, _ := NewCustomConnection("https://custom-a.example/v1", customAuth)
+	customB, _ := NewCustomConnection("https://custom-b.example/v1", customAuth)
+	regionA, _ := ParseBedrockRegion("eu-west-1")
+	regionB, _ := ParseBedrockRegion("eu-west-2")
+	bedrockA, _ := NewBedrockConnection(regionA, "")
+	bedrockB, _ := NewBedrockConnection(regionB, "")
+	targetID, _ := ParseTargetID("a")
+	newTarget := func(protocol Protocol, connection Connection) Target {
+		t.Helper()
+		target, err := NewTarget(targetID, openAIBase.Model(), protocol, connection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return target
+	}
+	customBase := newTarget(testProtocol(t, ProviderCustom, "responses"), customA)
+	bedrockBase := newTarget(testProtocol(t, ProviderBedrock, "responses"), bedrockA)
+
+	cases := []struct {
+		name     string
+		base     Target
+		settings TargetSettings
+	}{
+		{
+			name: "model/deployment within one provider", base: openAIBase,
+			settings: TargetSettings{Model: modelChanged, Protocol: openAIBase.Protocol(), Connection: openAIBase.Connection()},
+		},
+		{
+			name: "protocol within one provider", base: openAIBase,
+			settings: TargetSettings{Model: openAIBase.Model(), Protocol: protocolChanged, Connection: openAIBase.Connection()},
+		},
+		{
+			name: "custom endpoint within one provider", base: customBase,
+			settings: TargetSettings{Model: customBase.Model(), Protocol: customBase.Protocol(), Connection: customB},
+		},
+		{
+			name: "credential reference within one provider", base: openAIBase,
+			settings: TargetSettings{Model: openAIBase.Model(), Protocol: openAIBase.Protocol(), Connection: credentialChanged},
+		},
+		{
+			name: "Bedrock region options within one provider", base: bedrockBase,
+			settings: TargetSettings{Model: bedrockBase.Model(), Protocol: bedrockBase.Protocol(), Connection: bedrockB},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.base.Provider() != tc.settings.Connection.Provider() {
+				t.Fatalf("test setup changed provider from %q to %q", tc.base.Provider(), tc.settings.Connection.Provider())
+			}
+			config := testConfig(t, tc.base)
+			slug, _ := ParseWorkspaceSlug("dev")
+			routeName, _ := ParseRouteName("chat")
+			id, _ := ParseTargetID("a")
+			next, err := config.UpdateTargetSettings(slug, routeName, id, tc.settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspace, _ := next.Workspace(slug)
+			route, _ := workspace.Route(routeName)
+			if got, want := route.Tiers()[0].Targets()[0].Version(), tc.base.Version()+1; got != want {
+				t.Fatalf("target version = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestTargetVersionChangesWhenProviderConnectionVariantChanges(t *testing.T) {
+	targetID, _ := ParseTargetID("a")
+	model, _ := ParseUpstreamModel("shared-deployment")
+	region, _ := ParseBedrockRegion("eu-west-1")
+	bedrock, _ := NewBedrockConnection(region, "")
+	protocol := testProtocol(t, ProviderBedrock, "messages")
+	base, err := NewTarget(targetID, model, protocol, bedrock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anthropic, _ := NewAnthropicConnection("env:ANTHROPIC_API_KEY")
+	anthropicProtocol := testProtocol(t, ProviderAnthropic, "messages")
+
+	config := testConfig(t, base)
+	slug, _ := ParseWorkspaceSlug("dev")
+	routeName, _ := ParseRouteName("chat")
+	next, err := config.UpdateTargetSettings(slug, routeName, targetID, TargetSettings{
+		Model: model, Protocol: anthropicProtocol, Connection: anthropic,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ := next.Workspace(slug)
+	route, _ := workspace.Route(routeName)
+	if got, want := route.Tiers()[0].Targets()[0].Version(), base.Version()+1; got != want {
+		t.Fatalf("target version = %d, want %d", got, want)
+	}
+}
+
+func TestTargetRejectsProtocolFromDifferentProvider(t *testing.T) {
+	targetID, _ := ParseTargetID("a")
+	model, _ := ParseUpstreamModel("shared-deployment")
+	bedrockProtocol := testProtocol(t, ProviderBedrock, "messages")
+	anthropic, _ := NewAnthropicConnection("env:ANTHROPIC_API_KEY")
+	if _, err := NewTarget(targetID, model, bedrockProtocol, anthropic); err == nil {
+		t.Fatal("target accepted protocol from a provider that contradicts its connection")
+	}
+}
+
+func TestUpdateTargetSettingsRejectsProviderChangeWithoutMatchingProtocol(t *testing.T) {
+	base := testTarget(t, "a")
+	config := testConfig(t, base)
+	slug, _ := ParseWorkspaceSlug("dev")
+	routeName, _ := ParseRouteName("chat")
+	anthropic, _ := NewAnthropicConnection("env:ANTHROPIC_API_KEY")
+	if _, err := config.UpdateTargetSettings(slug, routeName, base.ID(), TargetSettings{
+		Model: base.Model(), Protocol: base.Protocol(), Connection: anthropic,
+	}); err == nil {
+		t.Fatal("provider change retained a protocol constructed for the old provider")
 	}
 }

@@ -4,9 +4,12 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 // NewMemoryStore returns a thread-safe in-memory Store for production
@@ -25,7 +28,7 @@ type memoryStore struct {
 
 type workspaceRecordID struct {
 	workspaceSlug string
-	id            ID
+	id            canonical.SwobuResponseID
 }
 
 func newMemoryStore() *memoryStore {
@@ -64,7 +67,7 @@ func (s *memoryStore) reclaimExpired(now time.Time) {
 	}
 }
 
-func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id ID) (Record, bool, error) {
+func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Record, bool, error) {
 	_ = ctx
 	workspaceSlug = strings.TrimSpace(workspaceSlug)
 	if workspaceSlug == "" {
@@ -94,10 +97,11 @@ func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Reco
 	if workspaceSlug == "" {
 		return errors.New("replay workspace slug is empty")
 	}
-	if record.ID == "" {
-		return errors.New("replay record id is empty")
+	responseRef := record.Response.Response()
+	if err := responseRef.ValidateCommittedResponse(); err != nil {
+		return fmt.Errorf("invalid replay record response reference: %w", err)
 	}
-	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: record.ID}
+	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: responseRef.SwobuID}
 	if _, exists := s.records[key]; exists {
 		return ErrReplayRecordExists
 	}

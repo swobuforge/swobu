@@ -167,14 +167,18 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 	out := make([]messageBody, 0, len(items))
 	for i := 0; i < len(items); {
 		item := items[i]
-		if item.Kind == canonical.ItemKindToolResult {
-			if strings.TrimSpace(item.ToolUseID) == "" { // swobu:io-string source=boundary
+		if item.Kind() == canonical.ItemKindToolResult {
+			toolResult, ok := item.ToolResult()
+			if !ok {
+				return nil, canonical.InternalError("chat completions tool-result item payload is invalid")
+			}
+			if strings.TrimSpace(toolResult.UseID) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("tool_result items require tool_use_id for the chat completions protocol")
 			}
 			out = append(out, messageBody{
 				Role:       "tool",
-				Content:    item.Text,
-				ToolCallID: item.ToolUseID,
+				Content:    toolResult.Text,
+				ToolCallID: toolResult.UseID,
 			})
 			i++
 			continue
@@ -185,30 +189,38 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 		toolCalls := make([]toolCallBody, 0, 1)
 		for i < len(items) {
 			current := items[i]
-			if current.Kind == canonical.ItemKindToolResult || roleForChatItem(current) != role {
+			if current.Kind() == canonical.ItemKindToolResult || roleForChatItem(current) != role {
 				break
 			}
-			switch current.Kind {
+			switch current.Kind() {
 			case canonical.ItemKindText:
-				text += current.Text
+				textItem, ok := current.TextItem()
+				if !ok {
+					return nil, canonical.InternalError("chat completions text item payload is invalid")
+				}
+				text += textItem.Text
 			case canonical.ItemKindToolUse:
-				args := current.Input.RawObject()
-				switch strings.ToLower(strings.TrimSpace(current.ToolType)) { // swobu:io-string source=domain
+				toolUse, ok := current.ToolUse()
+				if !ok {
+					return nil, canonical.InternalError("chat completions tool-use item payload is invalid")
+				}
+				args := toolUse.Input.RawObject()
+				switch strings.ToLower(strings.TrimSpace(toolUse.ToolType)) { // swobu:io-string source=domain
 				case "", canonical.ToolTypeFunction:
 					toolCalls = append(toolCalls, toolCallBody{
-						ID:   current.ToolUseID,
+						ID:   toolUse.UseID,
 						Type: "function",
 						Function: &toolFunctionBody{
-							Name:      current.Name,
+							Name:      toolUse.Name,
 							Arguments: args,
 						},
 					})
 				case canonical.ToolTypeCustom:
 					toolCalls = append(toolCalls, toolCallBody{
-						ID:   current.ToolUseID,
+						ID:   toolUse.UseID,
 						Type: "custom",
 						Custom: &toolCustomBody{
-							Name:  current.Name,
+							Name:  toolUse.Name,
 							Input: args,
 						},
 					})
@@ -233,7 +245,7 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 }
 
 func roleForChatItem(item canonical.CanonicalItem) string {
-	switch item.Author {
+	switch item.Author() {
 	case canonical.ItemAuthorAssistant:
 		return "assistant"
 	case canonical.ItemAuthorTool:

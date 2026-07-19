@@ -88,7 +88,9 @@ func TestDecodeTextContentItems_UsesWalker(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("items len = %d, want 2", len(items))
 	}
-	if items[0].Text != "hello" || items[1].Text != "world" {
+	first, _ := items[0].TextItem()
+	second, _ := items[1].TextItem()
+	if first.Text != "hello" || second.Text != "world" {
 		t.Fatalf("items = %#v", items)
 	}
 }

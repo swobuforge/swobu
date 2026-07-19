@@ -98,41 +98,53 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 		content := make([]contentID, 0, 1)
 		for i < len(items) && roleForMessagesItem(items[i]) == role {
 			current := items[i]
-			switch current.Kind {
+			switch current.Kind() {
 			case canonical.ItemKindText:
+				text, ok := current.TextItem()
+				if !ok {
+					return nil, canonical.InternalError("messages text item payload is invalid")
+				}
 				content = append(content, contentID{
 					Type: "text",
-					Text: current.Text,
+					Text: text.Text,
 				})
 			case canonical.ItemKindToolUse:
-				if current.ToolType != "" && current.ToolType != canonical.ToolTypeFunction {
+				toolUse, ok := current.ToolUse()
+				if !ok {
+					return nil, canonical.InternalError("messages tool-use item payload is invalid")
+				}
+				if toolUse.ToolType != "" && toolUse.ToolType != canonical.ToolTypeFunction {
 					return nil, canonical.UnsupportedOperation("messages protocol only supports function tool uses")
 				}
-				input, err := decodeToolArgumentsObject(current.Input)
+				input, err := decodeToolArgumentsObject(toolUse.Input)
 				if err != nil {
 					return nil, err
 				}
-				toolTypes[current.ToolUseID] = current.ToolType
+				toolTypes[toolUse.UseID] = toolUse.ToolType
 				content = append(content, contentID{
 					Type:  "tool_use",
-					ID:    strings.TrimSpace(current.ToolUseID), // swobu:io-string source=boundary
-					Name:  strings.TrimSpace(current.Name),      // swobu:io-string source=boundary
+					ID:    strings.TrimSpace(toolUse.UseID), // swobu:io-string source=boundary
+					Name:  strings.TrimSpace(toolUse.Name),  // swobu:io-string source=boundary
 					Input: input,
 				})
 				if strings.TrimSpace(content[len(content)-1].Name) == "" { // swobu:io-string source=boundary
 					return nil, canonical.BadRequest("messages protocol tool_use items require a name")
 				}
 			case canonical.ItemKindToolResult:
-				if strings.TrimSpace(current.ToolUseID) == "" { // swobu:io-string source=boundary
+				toolResult, ok := current.ToolResult()
+				if !ok {
+					return nil, canonical.InternalError("messages tool-result item payload is invalid")
+				}
+				if strings.TrimSpace(toolResult.UseID) == "" { // swobu:io-string source=boundary
 					return nil, canonical.BadRequest("messages protocol tool_result items require tool_use_id")
 				}
-				if toolType := toolTypes[current.ToolUseID]; toolType != "" && toolType != canonical.ToolTypeFunction {
+				if toolType := toolTypes[toolResult.UseID]; toolType != "" && toolType != canonical.ToolTypeFunction {
 					return nil, canonical.UnsupportedOperation("messages protocol only supports function tool results")
 				}
 				content = append(content, contentID{
 					Type:      "tool_result",
-					ToolUseID: strings.TrimSpace(current.ToolUseID), // swobu:io-string source=boundary
-					Content:   current.Text,
+					ToolUseID: strings.TrimSpace(toolResult.UseID), // swobu:io-string source=boundary
+					Content:   toolResult.Text,
 				})
 			default:
 				return nil, canonical.UnsupportedOperation("canonical item is not supported on the messages protocol")
@@ -268,7 +280,7 @@ func messagesToolSchemaFromWire(raw json.RawMessage) (canonical.ToolSchema, erro
 }
 
 func roleForMessagesItem(item canonical.CanonicalItem) string {
-	switch item.Author {
+	switch item.Author() {
 	case canonical.ItemAuthorAssistant:
 		return "assistant"
 	default:
@@ -291,7 +303,7 @@ func emitMessagesToolNameNamespaceDecision(sink compat.Sink, exchangeID string, 
 	}
 	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
 		compat.Decision{
-			Feature: compat.ToolNameNamespace,
+			Feature: compat.RequestToolsNameNamespace,
 			Outcome: outcome,
 			Subject: subject,
 		},

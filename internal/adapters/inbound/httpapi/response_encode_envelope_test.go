@@ -20,7 +20,7 @@ type deliveryReplayStore struct {
 	putErr   error
 }
 
-func (*deliveryReplayStore) Get(context.Context, string, replay.ID) (replay.Record, bool, error) {
+func (*deliveryReplayStore) Get(context.Context, string, canonical.SwobuResponseID) (replay.Record, bool, error) {
 	return replay.Record{}, false, nil
 }
 
@@ -38,7 +38,7 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 		},
 		"completed",
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.Response(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 		},
 		"completed",
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.Response(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
@@ -152,17 +152,17 @@ func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing
 	)
 	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		"ex_replay_failure",
-		response.ResultID(),
+		response.Response(),
 		response.Model(),
 		response.Items(),
 		response.FinishReason(),
 		response.Usage(),
 	))
 	committed := replay.NewCommitReader(events, replay.TerminalCommitConfig{
-		WorkspaceSlug: "alpha",
-		ExchangeID:    "ex_replay_failure",
-		ResponseID:    replay.ResponseID("swobu_replay_failure"),
-		Store:         store,
+		WorkspaceSlug:   "alpha",
+		ExchangeID:      "ex_replay_failure",
+		SwobuResponseID: canonical.SwobuResponseID("swobu_replay_failure"),
+		Store:           store,
 		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     "m",
 			InputText: "hello",
@@ -198,17 +198,17 @@ func TestWriteSuccessResponse_ClientCancellationDoesNotCommitReplay(t *testing.T
 	committed := replay.NewCommitReader(
 		canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 			"ex_cancel",
-			response.ResultID(),
+			response.Response(),
 			response.Model(),
 			response.Items(),
 			response.FinishReason(),
 			response.Usage(),
 		)),
 		replay.TerminalCommitConfig{
-			WorkspaceSlug: "alpha",
-			ExchangeID:    "ex_cancel",
-			ResponseID:    replay.ResponseID("swobu_cancel"),
-			Store:         store,
+			WorkspaceSlug:   "alpha",
+			ExchangeID:      "ex_cancel",
+			SwobuResponseID: canonical.SwobuResponseID("swobu_cancel"),
+			Store:           store,
 			SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model:     "m",
 				InputText: "hello",

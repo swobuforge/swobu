@@ -16,10 +16,14 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 	}
 	out := make([]canonical.OutputItem, 0, len(items)+len(toolCalls))
 	for idx, item := range items {
-		if item.Kind != canonical.ItemKindText {
+		if item.Kind() != canonical.ItemKindText {
 			continue
 		}
-		out = append(out, canonical.NewTextOutputItem("text_"+strconv.Itoa(idx), item.Text))
+		text, ok := item.TextItem()
+		if !ok {
+			return nil, canonical.InternalError("chat completions text item payload is invalid")
+		}
+		out = append(out, canonical.NewTextOutputItem("text_"+strconv.Itoa(idx), text.Text))
 	}
 	for _, call := range toolCalls {
 		itemID := strings.TrimSpace(call.ID) // swobu:io-string source=boundary

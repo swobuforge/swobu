@@ -60,8 +60,12 @@ func ParseTargetID(raw string) (TargetID, error) {
 
 func (id TargetID) String() string { return id.value }
 
-// TargetVersion is the process-local save generation of one target. Replay is
-// process-local too, so configuration persistence deliberately omits it.
+// TargetVersion identifies the complete effective backend configuration. Any
+// change affecting request encoding, transport, provider identity, native
+// state ownership, model/deployment, credentials, codec options, or
+// provider-specific request options creates a new version.
+//
+// Persistent replay is unsupported while TargetVersion is process-local.
 type TargetVersion uint64
 
 const initialTargetVersion TargetVersion = 1
@@ -97,7 +101,10 @@ const (
 // Protocol is a finalized, concrete provider protocol. ParseProtocol requires
 // the provider catalog's support predicate at the construction edge, avoiding a
 // second protocol table in this package.
-type Protocol struct{ value string }
+type Protocol struct {
+	value    string
+	provider Provider
+}
 
 type ProtocolSupport func(provider Provider, protocol string) bool
 
@@ -109,10 +116,13 @@ func ParseProtocol(raw string, provider Provider, supports ProtocolSupport) (Pro
 	if supports == nil || !supports(provider, raw) {
 		return Protocol{}, pathError("target.protocol", fmt.Sprintf("protocol %q is unsupported for provider %q", raw, provider))
 	}
-	return Protocol{value: raw}, nil
+	return Protocol{value: raw, provider: provider}, nil
 }
 
 func (p Protocol) String() string { return p.value }
+
+// Provider returns the provider whose catalog admitted this protocol.
+func (p Protocol) Provider() Provider { return p.provider }
 
 // Config is the complete immutable routing aggregate published to readers.
 type Config struct {
@@ -366,6 +376,9 @@ func (t Target) validate() error {
 	}
 	if t.connection == nil || t.connection.Provider() == "" {
 		return pathError("target.connection", "exactly one connection variant is required")
+	}
+	if t.protocol.provider != t.connection.Provider() {
+		return pathError("target.protocol", fmt.Sprintf("provider %q contradicts connection provider %q", t.protocol.provider, t.connection.Provider()))
 	}
 	return nil
 }

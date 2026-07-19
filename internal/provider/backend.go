@@ -17,13 +17,6 @@ type Codec interface {
 	Decode(context.Context, string, Ingress) (DecodedResponse, error)
 }
 
-// ContinuationSource exposes the provider-issued response identity through the
-// exact codec result that decoded it. Progressive sources may become ready only
-// after Stream reaches the provider response-start event.
-type ContinuationSource interface {
-	ContinuationID() (ContinuationID, bool)
-}
-
 // DecisionSource exposes compatibility decisions discovered only while a
 // progressive provider response is consumed.
 type DecisionSource interface {
@@ -31,11 +24,9 @@ type DecisionSource interface {
 }
 
 // DecodedResponse is one invocation-bound provider decode result. Provider
-// continuation identity is explicit exact-codec output; replay never scrapes it
-// from canonical event metadata.
+// durable provider fidelity enters the typed canonical response stream.
 type DecodedResponse struct {
 	Stream            canonical.ResponseStream
-	Continuation      ContinuationSource
 	Decisions         []compat.Decision
 	TerminalDecisions DecisionSource
 }
@@ -75,16 +66,15 @@ type Backend struct {
 	Target    TargetSnapshot
 	Codec     Codec
 	Transport Transport
-
-	// CaptureContinuation is an exact-backend wire-contract opt-in. Routing-owned
-	// target ID and version bind the returned handle to this saved target version.
-	CaptureContinuation func(providerResultID string) *NativeContinuation
 }
 
 // Validate proves the backend is complete before exchange execution.
 func (b Backend) Validate() error {
 	if b.Target.ProviderSpec == "" || b.Target.TargetID == "" || b.Target.TargetVersion == 0 || b.Target.Model == "" {
 		return errors.New("provider backend target is incomplete")
+	}
+	if err := b.Target.ValidateExecutionProtocol(); err != nil {
+		return err
 	}
 	if b.Codec == nil {
 		return errors.New("provider backend codec is nil")

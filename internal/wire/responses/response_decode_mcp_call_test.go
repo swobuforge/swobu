@@ -25,19 +25,20 @@ func TestDecodeOutputItems_AcceptsMcpCallAsToolUse(t *testing.T) {
 		t.Fatalf("output item count = %d, want 1", len(items))
 	}
 	item := items[0]
-	if item.Kind != canonical.ItemKindToolUse {
-		t.Fatalf("item kind = %s, want %s", item.Kind, canonical.ItemKindToolUse)
+	if item.Kind() != canonical.ItemKindToolUse {
+		t.Fatalf("item kind = %s, want %s", item.Kind(), canonical.ItemKindToolUse)
 	}
-	if item.ItemID != "mcp_1" {
-		t.Fatalf("item id = %q, want mcp_1", item.ItemID)
+	if item.ItemID() != "mcp_1" {
+		t.Fatalf("item id = %q, want mcp_1", item.ItemID())
 	}
-	if item.ToolUseID != "mcp_1" {
-		t.Fatalf("tool use id = %q, want mcp_1", item.ToolUseID)
+	toolUse, _ := item.ToolUse()
+	if toolUse.UseID != "mcp_1" {
+		t.Fatalf("tool use id = %q, want mcp_1", toolUse.UseID)
 	}
-	if item.Name != "Read" {
-		t.Fatalf("item name = %q, want Read", item.Name)
+	if toolUse.Name != "Read" {
+		t.Fatalf("item name = %q, want Read", toolUse.Name)
 	}
-	if got := item.Input.RawObject(); got != `{"path":"workspace/file.txt"}` {
+	if got := toolUse.Input.RawObject(); got != `{"path":"workspace/file.txt"}` {
 		t.Fatalf("arguments = %s, want normalized path JSON", got)
 	}
 }
@@ -68,13 +69,14 @@ func TestDecodeResponseBuffered_AcceptsMcpCall(t *testing.T) {
 		t.Fatalf("output item count = %d, want 1", len(items))
 	}
 	item := items[0]
-	if item.Kind != canonical.ItemKindToolUse {
-		t.Fatalf("item kind = %s, want %s", item.Kind, canonical.ItemKindToolUse)
+	if item.Kind() != canonical.ItemKindToolUse {
+		t.Fatalf("item kind = %s, want %s", item.Kind(), canonical.ItemKindToolUse)
 	}
-	if item.ToolUseID != "mcp_1" {
-		t.Fatalf("tool use id = %q, want mcp_1", item.ToolUseID)
+	toolUse, _ := item.ToolUse()
+	if toolUse.UseID != "mcp_1" {
+		t.Fatalf("tool use id = %q, want mcp_1", toolUse.UseID)
 	}
-	if item.Name != "Read" {
-		t.Fatalf("item name = %q, want Read", item.Name)
+	if toolUse.Name != "Read" {
+		t.Fatalf("item name = %q, want Read", toolUse.Name)
 	}
 }

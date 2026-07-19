@@ -2,27 +2,24 @@ package responses
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
-func TestEncode_UsesNativeContinuationWhenPresent(t *testing.T) {
+func TestEncode_UsesResponsesRefinementWhenPresent(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Turn:  canonical.NewTurnRef("client_prev"),
+		Model:            "m",
+		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		PreviousResponse: testResponsesPrevious("swobu_resp_123", "provider_resp_789"),
 	})
 
-	// Native continuation present: the encoder uses its opaque provider ID and
-	// ignores the client turn reference.
-	input := wire.ProviderEncodeInput{
-		Request:            req,
-		NativeContinuation: &provider.NativeContinuation{ID: "native_prev_99"},
-	}
+	// The typed Responses refinement supplies the provider wire ID; the Swobu ID
+	// remains the replay/client identity.
+	input := wire.ProviderEncodeInput{Request: req}
 	result, err := ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(input, delivery.BufferedDelivery(), "ex-1")
 	if err != nil {
 		t.Fatalf("encode failed: %v", err)
@@ -31,33 +28,70 @@ func TestEncode_UsesNativeContinuationWhenPresent(t *testing.T) {
 	if err := json.Unmarshal(result.Document.RawBytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got := body["previous_response_id"]; got != "native_prev_99" {
-		t.Fatalf("previous_response_id=%q, want native_prev_99", got)
+	if got := body["previous_response_id"]; got != "provider_resp_789" {
+		t.Fatalf("previous_response_id=%q, want provider_resp_789", got)
 	}
 }
 
-func TestEncode_DoesNotUseRequestTurnAsPreviousResponseIDWhenNativeContinuationNil(t *testing.T) {
+func TestEncode_RejectsSwobuSelectorWithoutResponsesRefinement(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Turn:  canonical.NewTurnRef("client_prev"),
+		Model:            "m",
+		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123"},
 	})
 
-	// A nil native continuation means the encoder must not synthesize
-	// previous_response_id from TurnRef.
-	input := wire.ProviderEncodeInput{Request: req, NativeContinuation: nil}
+	input := wire.ProviderEncodeInput{Request: req}
+	if _, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, delivery.BufferedDelivery(), "ex-2"); err == nil {
+		t.Fatal("encode succeeded with an unhydrated Swobu response selector")
+	}
+}
 
-	result, err := ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(input, delivery.BufferedDelivery(), "ex-2")
+func TestEncode_RejectsMalformedResponsesRefinement(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		native canonical.ResponsesNativeRef
+	}{
+		{name: "empty provider response ID", native: canonical.ResponsesNativeRef{TargetID: "target-a", TargetVersion: 1}},
+		{name: "empty target ID", native: canonical.ResponsesNativeRef{ProviderResponseID: "provider_resp_789", TargetVersion: 1}},
+		{name: "zero target version", native: canonical.ResponsesNativeRef{ProviderResponseID: "provider_resp_789", TargetID: "target-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: "m",
+				PreviousResponse: &canonical.ResponseRef{
+					SwobuID: "swobu_resp_123", Responses: &tc.native,
+				},
+			})
+			input := wire.ProviderEncodeInput{Request: req}
+			if _, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, delivery.BufferedDelivery(), "ex-invalid"); err == nil {
+				t.Fatal("encode succeeded with malformed Responses native refinement")
+			}
+		})
+	}
+}
+
+func TestClientResponseExposesSwobuIDAndNeverProviderID(t *testing.T) {
+	output := canonical.NewOutputWithUsage(
+		canonical.SemanticKindConversation,
+		canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			ProviderResponseID: "provider_resp_789", TargetID: "target-a", TargetVersion: 1,
+		}},
+		"m", nil, "completed", canonical.NewUnknownTokenUsage(),
+	)
+	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
 	if err != nil {
-		t.Fatalf("encode failed: %v", err)
+		t.Fatal(err)
 	}
-	var body map[string]any
-	if err := json.Unmarshal(result.Document.RawBytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	raw := string(result.Document.RawBytes())
+	if !strings.Contains(raw, `"id":"swobu_resp_123"`) || strings.Contains(raw, "provider_resp_789") {
+		t.Fatalf("client response identity leaked provider domain: %s", raw)
 	}
-	if _, ok := body["previous_response_id"]; ok {
-		t.Fatalf("expected NO previous_response_id when native continuation is nil; full body: %s", string(result.Document.RawBytes()))
-	}
+}
+
+func testResponsesPrevious(swobuID, providerID string) *canonical.ResponseRef {
+	return &canonical.ResponseRef{SwobuID: canonical.SwobuResponseID(swobuID), Responses: &canonical.ResponsesNativeRef{
+		ProviderResponseID: canonical.NewResponsesNativeResponseID(providerID), TargetID: "target-test", TargetVersion: 1,
+	}}
 }
 
 func TestEncode_EncodesCanonicalRequestAlways(t *testing.T) {

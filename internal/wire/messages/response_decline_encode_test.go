@@ -31,7 +31,7 @@ func TestResponseDocumentEncoder_RefusalLowersToStopReason(t *testing.T) {
 func TestResponseStreamEncoder_RefusalLowersToStopReason(t *testing.T) {
 	t.Parallel()
 
-	events := canonical.SynthesizeResponseEnvelopeEvents("ex_msg", "msg_1", "claude-x", nil, "refusal", canonical.NewUnknownTokenUsage())
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex_msg", canonical.ResponseRef{SwobuID: "msg_1"}, "claude-x", nil, "refusal", canonical.NewUnknownTokenUsage())
 	stream, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream returned error: %v", err)

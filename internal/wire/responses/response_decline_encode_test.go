@@ -38,7 +38,7 @@ func TestResponseDocumentEncoder_ContentFilterLowersToIncomplete(t *testing.T) {
 func TestResponseStreamEncoder_ContentFilterLowersToIncomplete(t *testing.T) {
 	t.Parallel()
 
-	events := canonical.SynthesizeResponseEnvelopeEvents("ex_resp", "resp_1", "m", nil, "content_filter", canonical.NewUnknownTokenUsage())
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex_resp", canonical.ResponseRef{SwobuID: "resp_1"}, "m", nil, "content_filter", canonical.NewUnknownTokenUsage())
 	stream, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream returned error: %v", err)

@@ -115,7 +115,7 @@ func decodeChatCompletionsItems(
 	role = strings.TrimSpace(role) // swobu:io-string source=boundary
 	if role == "tool" {
 		if strings.TrimSpace(toolCallID) == "" { // swobu:io-string source=boundary
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, 0, "tool_call_id")); err != nil {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, chatCompletionsToolSubject(msgIdx, 0, "tool_call_id")); err != nil {
 				return nil, err
 			}
 			return nil, canonical.BadRequest("chat completions tool messages require tool_call_id")
@@ -128,7 +128,7 @@ func decodeChatCompletionsItems(
 	for idx, call := range toolCalls {
 		id := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if id == "" {
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
 				return nil, err
 			}
 			id = openaiwire.GeneratedToolUseID(msgIdx, idx)
@@ -136,7 +136,7 @@ func decodeChatCompletionsItems(
 		switch strings.ToLower(strings.TrimSpace(call.Type)) { // swobu:io-string source=domain
 		case "", "function":
 			if call.Function == nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallArguments, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
 					return nil, err
 				}
 				return nil, canonical.BadRequest("chat completions tool calls require a function body")
@@ -146,14 +146,14 @@ func decodeChatCompletionsItems(
 			}
 			input, err := decodeChatCompletionsFunctionArguments(call.Function.Arguments)
 			if err != nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallArguments, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
 					return nil, err
 				}
 				return nil, err
 			}
 			args, err := json.Marshal(input)
 			if err != nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallArguments, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
 					return nil, err
 				}
 				return nil, canonical.BadRequest("chat completions tool call arguments are invalid")
@@ -161,7 +161,7 @@ func decodeChatCompletionsItems(
 			items = append(items, canonical.NewToolUseItem(author, "", id, strings.TrimSpace(call.Function.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
 		case "custom":
 			if call.Custom == nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallArguments, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "custom/input")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "custom/input")); err != nil {
 					return nil, err
 				}
 				return nil, canonical.BadRequest("chat completions custom tool calls require a custom body")
@@ -171,7 +171,7 @@ func decodeChatCompletionsItems(
 			}
 			items = append(items, canonical.NewCustomToolUseItem(author, "", id, strings.TrimSpace(call.Custom.Name), canonical.NewToolArgumentsObject(call.Custom.Input))) // swobu:io-string source=boundary
 		default:
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ToolCallKind, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolType, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
 				return nil, err
 			}
 			return nil, canonical.BadRequest("chat completions request contains an unsupported tool call type")
@@ -226,10 +226,12 @@ func chatCompletionsToolSubject(msgIdx int, toolIdx int, field string) compat.Su
 func joinItemText(items []canonical.CanonicalItem) string {
 	var builder strings.Builder
 	for _, item := range items {
-		if item.Kind != canonical.ItemKindText {
+		if item.Kind() != canonical.ItemKindText {
 			continue
 		}
-		builder.WriteString(item.Text)
+		if text, ok := item.TextItem(); ok {
+			builder.WriteString(text.Text)
+		}
 	}
 	return builder.String()
 }

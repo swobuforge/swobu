@@ -86,17 +86,19 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 
 	var text []string
 	for _, item := range output.Items() {
-		if item.Kind == canonical.ItemKindToolUse {
-			if item.Name != "record_action" {
-				t.Fatalf("tool name = %q, want record_action", item.Name)
+		if item.Kind() == canonical.ItemKindToolUse {
+			toolUse, _ := item.ToolUse()
+			if toolUse.Name != "record_action" {
+				t.Fatalf("tool name = %q, want record_action", toolUse.Name)
 			}
-			if !strings.Contains(item.Input.RawObject(), `"inspect"`) {
-				t.Fatalf("tool input = %q, want inspect action", item.Input.RawObject())
+			if !strings.Contains(toolUse.Input.RawObject(), `"inspect"`) {
+				t.Fatalf("tool input = %q, want inspect action", toolUse.Input.RawObject())
 			}
 			return
 		}
-		if item.Kind == canonical.ItemKindText {
-			text = append(text, strings.TrimSpace(item.Text))
+		if item.Kind() == canonical.ItemKindText {
+			textItem, _ := item.TextItem()
+			text = append(text, strings.TrimSpace(textItem.Text))
 		}
 	}
 	t.Fatalf("Azure Codex returned no required tool call; text=%q finish=%q", strings.Join(text, "\n"), output.FinishReason())

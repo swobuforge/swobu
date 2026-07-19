@@ -35,7 +35,7 @@ type RuntimePoliciesSpec struct {
 	ObservationStore observation.Store
 	DecisionSink     compat.Sink
 	ReplayStore      replay.Store
-	ResponseIDs      replay.ResponseIDGenerator
+	SwobuResponseIDs replay.SwobuResponseIDGenerator
 }
 
 // RuntimeResolver provides client codec lookup for request ingress and the
@@ -54,8 +54,8 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	if policies.ReplayStore == nil {
 		policies.ReplayStore = replay.NewMemoryStore()
 	}
-	if policies.ResponseIDs == nil {
-		policies.ResponseIDs = replay.NewDefaultResponseIDGenerator()
+	if policies.SwobuResponseIDs == nil {
+		policies.SwobuResponseIDs = replay.NewDefaultSwobuResponseIDGenerator()
 	}
 	sink := policies.DecisionSink
 	if sink == nil {
@@ -68,10 +68,10 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	return RequestIngress{
 		workspaces: workspaces,
 		runner: runtimeBundle{
-			Runtime:      runtime,
-			DecisionSink: sink,
-			ReplayStore:  policies.ReplayStore,
-			ResponseIDs:  policies.ResponseIDs,
+			Runtime:          runtime,
+			DecisionSink:     sink,
+			ReplayStore:      policies.ReplayStore,
+			SwobuResponseIDs: policies.SwobuResponseIDs,
 		},
 	}
 }
@@ -97,15 +97,15 @@ type RequestOutput struct {
 // TrafficEvidenceInput is the immutable exchange fact set completed by the
 // inbound delivery owner's concrete DeliveryResult.
 type TrafficEvidenceInput struct {
-	workspace     routing.Workspace
-	routeName     routing.RouteName
-	exchangeID    string
-	clientHandler trafficevidence.ClientHandler
-	clientFamily  canonical.ClientFamily
-	request       canonical.CanonicalRequest
-	target        provider.TargetSnapshot
-	response      ClientResponse
-	attemptCount  int
+	workspace                routing.Workspace
+	routeName                routing.RouteName
+	exchangeID               string
+	clientHandler            trafficevidence.ClientHandler
+	clientFamily             canonical.ClientFamily
+	request                  canonical.CanonicalRequest
+	target                   provider.TargetSnapshot
+	response                 ClientResponse
+	providerCallAttemptCount int
 }
 
 // HandleRequest resolves the endpoint name, derives client semantics from the
@@ -202,7 +202,7 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportp
 		Result:                resultClass,
 		StatusCode:            statusCode,
 		Timing:                timing,
-		AttemptCount:          max(evidence.attemptCount, 1),
+		AttemptCount:          evidence.providerCallAttemptCount,
 		ModelRequested:        evidence.request.Model(),
 		ModelResolved:         evidence.request.Model(),
 		WorkspaceRouteModelID: evidence.routeName.String(),

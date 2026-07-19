@@ -56,19 +56,21 @@ func TestClientRequestDecoder_DecodesExplicitToolUseAndToolResultID(t *testing.T
 	if len(items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind; got != canonical.ItemKindToolUse {
+	if got := items[1].Kind(); got != canonical.ItemKindToolUse {
 		t.Fatalf("tool use kind = %s, want %s", got, canonical.ItemKindToolUse)
 	}
-	if got := items[1].ToolUseID; got != "toolu_swobu_0_1" {
+	toolUse, _ := items[1].ToolUse()
+	if got := toolUse.UseID; got != "toolu_swobu_0_1" {
 		t.Fatalf("tool use id = %q, want toolu_swobu_0_1", got)
 	}
-	if got := items[2].Kind; got != canonical.ItemKindToolResult {
+	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("tool result kind = %s, want %s", got, canonical.ItemKindToolResult)
 	}
-	if got := items[2].ToolUseID; got != "toolu_swobu_0_1" {
+	toolResult, _ := items[2].ToolResult()
+	if got := toolResult.UseID; got != "toolu_swobu_0_1" {
 		t.Fatalf("tool result tool_use_id = %q, want toolu_swobu_0_1", got)
 	}
-	if got := items[2].Text; got != "Hello, World!" {
+	if got := toolResult.Text; got != "Hello, World!" {
 		t.Fatalf("tool result text = %q, want Hello, World!", got)
 	}
 	tools := request.Tools()

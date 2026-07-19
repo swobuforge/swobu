@@ -1,80 +1,70 @@
 // swobu:lint ignore test-only-dead-cluster because=compat feature vocabulary is authoritative even when only tests exercise some names.
 package compat
 
-// Feature names one user-visible semantic contract observed at a representation seam.
+// Feature names a compatibility-addressable canonical or approved
+// representation path. For canonical data, the value mirrors its typed schema
+// path. Optional scoped suffixes are protocol, then provider; collection
+// indices are omitted because Subject identifies one occurrence.
 type Feature string
 
 const (
-	// Request-level semantics.
-	RequestInputShape       Feature = "request.input_shape"
-	RequestModel            Feature = "request.model"
-	RequestRole             Feature = "request.role"
-	RequestToolChoice       Feature = "request.tool_choice"
-	RequestParallelTools    Feature = "request.parallel_tools"
-	RequestStructuredOutput Feature = "request.structured_output"
-	RequestContinuation     Feature = "request.continuation"
-	RequestConversation     Feature = "request.conversation"
-	RequestThinking         Feature = "request.thinking"
+	// Canonical request paths.
+	RequestModel                     Feature = "request.model"
+	RequestInstructions              Feature = "request.instructions"
+	RequestItemsKind                 Feature = "request.items.kind"
+	RequestItemsAuthor               Feature = "request.items.author"
+	RequestItemsText                 Feature = "request.items.text"
+	RequestItemsToolUseID            Feature = "request.items.tool_use.use_id"
+	RequestItemsToolType             Feature = "request.items.tool_use.tool_type"
+	RequestItemsToolName             Feature = "request.items.tool_use.name"
+	RequestItemsToolInput            Feature = "request.items.tool_use.input"
+	RequestItemsToolResultUseID      Feature = "request.items.tool_result.use_id"
+	RequestItemsToolResultText       Feature = "request.items.tool_result.text"
+	RequestTools                     Feature = "request.tools"
+	RequestToolsKind                 Feature = "request.tools.kind"
+	RequestToolsName                 Feature = "request.tools.name"
+	RequestToolsNameNamespace        Feature = "request.tools.name_namespace"
+	RequestToolsDescription          Feature = "request.tools.description"
+	RequestToolsSchema               Feature = "request.tools.schema"
+	RequestToolsSchemaStrict         Feature = "request.tools.schema.strict"
+	RequestToolPolicy                Feature = "request.tool_policy"
+	RequestToolCallBatch             Feature = "request.tool_call_batch"
+	RequestOutputFormat              Feature = "request.output_format"
+	RequestOutputFormatSchema        Feature = "request.output_format.schema"
+	RequestControlsMaxOutputTokens   Feature = "request.controls.max_output_tokens"
+	RequestControlsTemperature       Feature = "request.controls.temperature"
+	RequestControlsTopP              Feature = "request.controls.top_p"
+	RequestControlsStopSequences     Feature = "request.controls.stop_sequences"
+	RequestPreviousResponse          Feature = "request.previous_response"
+	RequestPreviousResponseResponses Feature = "request.previous_response.responses"
 
-	// Message/content semantics.
-	MessageRole     Feature = "message.role"
-	MessageAuthor   Feature = "message.author"
-	ContentPartKind Feature = "content.part_kind"
-	ContentText     Feature = "content.text"
-	ContentImage    Feature = "content.image"
-	ContentAudio    Feature = "content.audio"
-	ContentFile     Feature = "content.file"
-	ContentRefusal  Feature = "content.refusal"
+	// Canonical response paths.
+	ResponseID                    Feature = "response.id"
+	ResponseIDResponses           Feature = "response.id.responses"
+	ResponseItemsKind             Feature = "response.items.kind"
+	ResponseItemsAuthor           Feature = "response.items.author"
+	ResponseItemsText             Feature = "response.items.text"
+	ResponseItemsToolUseID        Feature = "response.items.tool_use.use_id"
+	ResponseItemsToolType         Feature = "response.items.tool_use.tool_type"
+	ResponseItemsToolName         Feature = "response.items.tool_use.name"
+	ResponseItemsToolInput        Feature = "response.items.tool_use.input"
+	ResponseItemsToolResultUseID  Feature = "response.items.tool_result.use_id"
+	ResponseItemsToolResultText   Feature = "response.items.tool_result.text"
+	ResponseFinishReason          Feature = "response.finish_reason"
+	ResponseUsageInputTokens      Feature = "response.usage.input_tokens"
+	ResponseUsageOutputTokens     Feature = "response.usage.output_tokens"
+	ResponseUsageReasoningTokens  Feature = "response.usage.reasoning_tokens"
+	ResponseUsageCacheReadTokens  Feature = "response.usage.cache_read_tokens"
+	ResponseUsageCacheWriteTokens Feature = "response.usage.cache_write_tokens"
 
-	// Tool declaration and execution.
-	ToolDeclaration   Feature = "tool.declaration"
-	ToolKind          Feature = "tool.kind"
-	ToolName          Feature = "tool.name"
-	ToolNameNamespace Feature = "tool.name_namespace"
-	ToolDescription   Feature = "tool.description"
-	ToolSchema        Feature = "tool.schema"
-	ToolSchemaStrict  Feature = "tool.schema_strict"
-	ToolCallID        Feature = "tool.call_id"
-	ToolCallKind      Feature = "tool.call_kind"
-	ToolCallArguments Feature = "tool.call_arguments"
-	ToolResultID      Feature = "tool.result_id"
-	ToolResultBody    Feature = "tool.result_body"
-
-	// Generation controls.
-	GenerationMaxTokens     Feature = "generation.max_tokens"
-	GenerationTemperature   Feature = "generation.temperature"
-	GenerationTopP          Feature = "generation.top_p"
-	GenerationStopSequences Feature = "generation.stop_sequences"
-	GenerationSeed          Feature = "generation.seed"
-	GenerationMultiplicity  Feature = "generation.multiplicity"
-
-	// Output/response semantics.
-	OutputFormat      Feature = "output.format"
-	OutputJSONSchema  Feature = "output.json_schema"
-	OutputTextFormat  Feature = "output.text_format"
-	OutputItemKind    Feature = "output.item_kind"
-	ResponseReasoning Feature = "response.reasoning"
-	ResponseFinish    Feature = "response.finish"
-	ResponseError     Feature = "response.error"
-
-	// Usage accounting.
-	UsageInputTokens      Feature = "usage.input_tokens"
-	UsageOutputTokens     Feature = "usage.output_tokens"
-	UsageReasoningTokens  Feature = "usage.reasoning_tokens"
-	UsageCacheReadTokens  Feature = "usage.cache_read_tokens"
-	UsageCacheWriteTokens Feature = "usage.cache_write_tokens"
-
-	// Delivery/framing.
+	// Approved noncanonical representation roots.
 	DeliveryStreaming        Feature = "delivery.streaming"
 	DeliveryServerSentEvents Feature = "delivery.server_sent_events"
 	DeliveryWebSocket        Feature = "delivery.websocket"
 	DeliveryIncremental      Feature = "delivery.incremental"
 	DeliveryTerminalEvent    Feature = "delivery.terminal_event"
-
-	// Wire/state.
-	WireJSONMode Feature = "wire.json_mode"
-
-	// Errors.
-	ErrorShape Feature = "error.shape"
-	ErrorClass Feature = "error.class"
+	WireJSONMode             Feature = "wire.json_mode"
+	WireConversation         Feature = "wire.conversation"
+	ErrorShape               Feature = "error.shape"
+	ErrorClass               Feature = "error.class"
 )

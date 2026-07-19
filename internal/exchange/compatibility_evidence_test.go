@@ -17,7 +17,7 @@ func (rejectingCompatibilitySink) Commit(context.Context, string, []compat.Decis
 func TestCompatibilityEvidencePersistenceIsBestEffort(t *testing.T) {
 	commitDecisionsBestEffort(context.Background(), rejectingCompatibilitySink{}, "ex", []compat.Decision{
 		{
-			Feature: compat.GenerationMaxTokens,
+			Feature: compat.RequestControlsMaxOutputTokens,
 			Outcome: compat.Exact,
 			Subject: compat.Subject("provider:openai"),
 		},

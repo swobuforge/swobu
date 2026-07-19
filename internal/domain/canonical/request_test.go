@@ -47,8 +47,22 @@ func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
 	})
 
 	cloned := req.Items()
-	cloned[0].Text = "changed"
-	cloned[1].Input = NewToolArgumentsObject(`{"expr":"changed"}`)
+	cloned[0], err = appendTextItemDelta(cloned[0], " changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloned[1], err = withToolUseInput(cloned[1], NewToolArgumentsObject(`{"expr":"changed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clonedText, _ := cloned[0].TextItem()
+	if clonedText.Text != "hi changed" {
+		t.Fatalf("clone text = %q, want changed clone", clonedText.Text)
+	}
+	clonedTool, _ := cloned[1].ToolUse()
+	if clonedTool.Input.RawObject() != `{"expr":"changed"}` {
+		t.Fatalf("clone tool input = %q, want changed clone", clonedTool.Input.RawObject())
+	}
 	tools := req.Tools()
 	tool := tools[0].(FunctionToolDecl)
 	tool.Name = "changed"
@@ -61,14 +75,16 @@ func TestConversationRequest_ClonesStructuredMessagesDeeply(t *testing.T) {
 	clonedControls.Limits.StopSequences[0] = "mutated"
 
 	got := req.Items()
-	if got[0].Text != "hi" {
-		t.Fatalf("text = %q, want %q", got[0].Text, "hi")
+	textItem, _ := got[0].TextItem()
+	if textItem.Text != "hi" {
+		t.Fatalf("text = %q, want %q", textItem.Text, "hi")
 	}
 	if gotInstructions := req.Instructions(); gotInstructions != "Use tools for filesystem work." {
 		t.Fatalf("instructions = %q, want preserved instructions", gotInstructions)
 	}
-	if got[1].Input.RawObject() != `{"expr":"2+2"}` {
-		t.Fatalf("tool input = %q, want %q", got[1].Input.RawObject(), `{"expr":"2+2"}`)
+	toolUse, _ := got[1].ToolUse()
+	if toolUse.Input.RawObject() != `{"expr":"2+2"}` {
+		t.Fatalf("tool input = %q, want %q", toolUse.Input.RawObject(), `{"expr":"2+2"}`)
 	}
 	if gotTool := req.Tools()[0].(FunctionToolDecl); gotTool.ToolName() != "calculator" {
 		t.Fatalf("tool name = %q, want %q", gotTool.ToolName(), "calculator")
@@ -99,10 +115,10 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 		t.Fatalf("NewGenerationControls returned error: %v", err)
 	}
 	req := NewCanonicalRequest(RequestParams{
-		Model:         "m",
-		Instructions:  "Continue using tools.",
-		Turn:          NewTurnRef("resp_123"),
-		ToolCallBatch: NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
+		Model:            "m",
+		Instructions:     "Continue using tools.",
+		PreviousResponse: &ResponseRef{SwobuID: "resp_123"},
+		ToolCallBatch:    NewToolCallBatchPolicy(ToolCallBatchAtMostOne),
 		Items: []CanonicalItem{
 			NewToolUseItem(ItemAuthorAssistant, "", "call_1", "grep", NewToolArgumentsObject(`{"pattern":"TODO"}`)),
 		},
@@ -121,15 +137,26 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 
 	cloned := req.Clone()
 	items := cloned.Items()
-	items[0].Input = NewToolArgumentsObject(`{"pattern":"changed"}`)
+	items[0], err = withToolUseInput(items[0], NewToolArgumentsObject(`{"pattern":"changed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedToolUse, _ := items[0].ToolUse()
+	if changedToolUse.Input.RawObject() != `{"pattern":"changed"}` {
+		t.Fatalf("clone tool input = %q, want changed input", changedToolUse.Input.RawObject())
+	}
 	toolDecls := cloned.Tools()
 	toolDecl := toolDecls[0].(FunctionToolDecl)
 	toolDecl.Description = "changed"
 	toolDecls[0] = toolDecl
+	if changedTool := toolDecls[0].(FunctionToolDecl); changedTool.ToolDescription() != "changed" {
+		t.Fatalf("clone tool description = %q, want changed", changedTool.ToolDescription())
+	}
 
 	got := req.Items()
-	if got[0].Input.RawObject() != `{"pattern":"TODO"}` {
-		t.Fatalf("tool input = %q, want %q", got[0].Input.RawObject(), `{"pattern":"TODO"}`)
+	toolUse, _ := got[0].ToolUse()
+	if toolUse.Input.RawObject() != `{"pattern":"TODO"}` {
+		t.Fatalf("tool input = %q, want %q", toolUse.Input.RawObject(), `{"pattern":"TODO"}`)
 	}
 	if gotTool := req.Tools()[0].(FunctionToolDecl); gotTool.ToolDescription() != "search text" {
 		t.Fatalf("tool description = %q, want %q", gotTool.ToolDescription(), "search text")
@@ -137,7 +164,7 @@ func TestResponseRequest_ClonesStructuredConversationStateDeeply(t *testing.T) {
 	if gotBatch := req.ToolCallBatch(); gotBatch.Mode != ToolCallBatchAtMostOne {
 		t.Fatalf("tool call batch mode = %q, want %q", gotBatch.Mode, ToolCallBatchAtMostOne)
 	}
-	if prev, ok := cloned.Turn().PreviousID(); !ok || prev.String() != "resp_123" {
+	if prev, ok := cloned.PreviousResponse(); !ok || prev.SwobuID.String() != "resp_123" {
 		t.Fatalf("clone lost response state")
 	}
 	if gotInstructions := cloned.Instructions(); gotInstructions != "Continue using tools." {

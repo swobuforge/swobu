@@ -16,6 +16,49 @@ type Connection interface {
 	isConnection()
 }
 
+// connectionsEqual compares only durable provider configuration. Keeping this
+// rule in the sealed sum prevents runtime-only fields from changing generation.
+func connectionsEqual(left, right Connection) bool {
+	switch left := left.(type) {
+	case OpenAIConnection:
+		right, ok := right.(OpenAIConnection)
+		return ok && left.credential.String() == right.credential.String()
+	case AnthropicConnection:
+		right, ok := right.(AnthropicConnection)
+		return ok && left.credential.String() == right.credential.String()
+	case OpenRouterConnection:
+		right, ok := right.(OpenRouterConnection)
+		return ok && left.credential.String() == right.credential.String()
+	case ChatGPTConnection:
+		right, ok := right.(ChatGPTConnection)
+		return ok && left.credential.String() == right.credential.String()
+	case OllamaConnection:
+		right, ok := right.(OllamaConnection)
+		return ok && left.baseURL.String() == right.baseURL.String()
+	case AzureConnection:
+		right, ok := right.(AzureConnection)
+		return ok && left.projectEndpoint.String() == right.projectEndpoint.String() && left.credential.String() == right.credential.String()
+	case BedrockConnection:
+		right, ok := right.(BedrockConnection)
+		return ok && left.region == right.region && left.Credential().String() == right.Credential().String()
+	case CustomConnection:
+		right, ok := right.(CustomConnection)
+		return ok && left.baseURL.String() == right.baseURL.String() && customAuthEqual(left.auth, right.auth)
+	default:
+		return false
+	}
+}
+
+func customAuthEqual(left, right CustomAuth) bool {
+	switch left := left.(type) {
+	case CustomHeaderAuth:
+		right, ok := right.(CustomHeaderAuth)
+		return ok && left.name == right.name && left.credential.String() == right.credential.String()
+	default:
+		return left == nil && right == nil
+	}
+}
+
 func parseCredential(path, raw string) (credentialref.Ref, error) {
 	ref := credentialref.Parse(raw)
 	if ref.String() == "" || ref.Kind() == credentialref.KindOther {

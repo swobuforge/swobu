@@ -64,16 +64,17 @@ func TestCustomToolResponseRoundTrip(t *testing.T) {
 		t.Fatalf("item count = %d, want 1", len(items))
 	}
 	item := items[0]
-	if item.Kind != canonical.ItemKindToolUse {
-		t.Fatalf("item kind = %s, want %s", item.Kind, canonical.ItemKindToolUse)
+	if item.Kind() != canonical.ItemKindToolUse {
+		t.Fatalf("item kind = %s, want %s", item.Kind(), canonical.ItemKindToolUse)
 	}
-	if item.ToolType != canonical.ToolTypeCustom {
-		t.Fatalf("tool type = %q, want %q", item.ToolType, canonical.ToolTypeCustom)
+	toolUse, _ := item.ToolUse()
+	if toolUse.ToolType != canonical.ToolTypeCustom {
+		t.Fatalf("tool type = %q, want %q", toolUse.ToolType, canonical.ToolTypeCustom)
 	}
-	if item.Name != "apply_patch" {
-		t.Fatalf("item name = %q, want apply_patch", item.Name)
+	if toolUse.Name != "apply_patch" {
+		t.Fatalf("item name = %q, want apply_patch", toolUse.Name)
 	}
-	if got := item.Input.RawObject(); got != "patch contents" {
+	if got := toolUse.Input.RawObject(); got != "patch contents" {
 		t.Fatalf("item input = %q, want patch contents", got)
 	}
 }

@@ -260,7 +260,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if got := out.FinishReason(); got != tc.wantOutputReason {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
-				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())
+				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.Response(), out.Model(), out.Items(), out.FinishReason(), out.Usage())
 				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), tc.providerDelivery)
 				if err != nil {
 					t.Fatalf("EncodeResponseStream returned error: %v", err)

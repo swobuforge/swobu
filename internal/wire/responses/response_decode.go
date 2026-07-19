@@ -80,15 +80,15 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	}
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
 	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 	_, reasoningPresent := usage.ReasoningTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
 	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if terminalReason, promptBlocked := responsesTerminalReason("", dto.Status, "", dto.ContentFilters, responseIncompleteReason(dto.IncompleteDetails)); promptBlocked {
 		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
 		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
@@ -97,9 +97,10 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 		if err != nil {
 			return nil, err
 		}
+		emitNativeResponseIDCaptured(ctx, sink, exchangeID, dto.ID)
 		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 			exchangeID,
-			dto.ID,
+			canonical.ResponseRef{Responses: &canonical.ResponsesNativeRef{ProviderResponseID: canonical.NewResponsesNativeResponseID(dto.ID)}},
 			dto.Model,
 			items,
 			terminalReason,
@@ -108,9 +109,20 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	}
 }
 
+func emitNativeResponseIDCaptured(ctx context.Context, sink compat.Sink, exchangeID string, providerResponseID string) {
+	if sink == nil || strings.TrimSpace(providerResponseID) == "" { // swobu:io-string source=provider-wire
+		return
+	}
+	_ = sink.Commit(ctx, exchangeID, []compat.Decision{{
+		Feature: compat.ResponseIDResponses,
+		Outcome: compat.Exact,
+		Subject: compat.Subject("wire:/id"),
+	}})
+}
+
 func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink compat.Sink) ([]canonical.OutputItem, error) {
 	output := make([]canonical.OutputItem, 0, len(items))
-	for idx, item := range items {
+	for _, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
 		switch itemType {
 		case "message":
@@ -171,15 +183,6 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 				canonical.NewToolArgumentsObject(item.Input),
 			))
 		case "reasoning":
-			if sink != nil {
-				_ = sink.Commit(ctx, exchangeID, []compat.Decision{
-					compat.Decision{
-						Feature: compat.ResponseReasoning,
-						Outcome: compat.Reject,
-						Subject: compat.Subject(fmt.Sprintf("wire:/output/%d/type", idx)),
-					},
-				})
-			}
 			return nil, canonical.UnsupportedOperation("responses reasoning output is not supported by swobu v0")
 		default:
 			return nil, canonical.UnsupportedOperation("responses output item type is not implemented")

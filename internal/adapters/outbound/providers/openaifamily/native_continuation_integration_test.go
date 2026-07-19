@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/replay"
 )
 
-func TestOfficialOpenAIResponsesUsesVersionedNativeContinuation(t *testing.T) {
+func TestOfficialOpenAIResponsesUsesVersionedCanonicalRefinement(t *testing.T) {
 	target := provider.NewTargetSnapshot(
 		"official-openai",
 		"openai",
@@ -26,10 +26,6 @@ func TestOfficialOpenAIResponsesUsesVersionedNativeContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backend.CaptureContinuation == nil {
-		t.Fatal("official OpenAI Responses did not opt into native continuation")
-	}
-
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "gpt-test",
 		Items: []canonical.CanonicalItem{
@@ -38,16 +34,19 @@ func TestOfficialOpenAIResponsesUsesVersionedNativeContinuation(t *testing.T) {
 			canonical.NewTextItem(canonical.ItemAuthorUser, "turn two"),
 		},
 	})
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "gpt-test", InputText: "turn two"})
+	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "gpt-test", InputText: "turn two", PreviousResponse: &canonical.ResponseRef{
+		SwobuID: "swobu_previous", Responses: &canonical.ResponsesNativeRef{
+			ProviderResponseID: "provider_response_from_previous_target_version", TargetID: backend.Target.TargetID, TargetVersion: backend.Target.TargetVersion,
+		},
+	}})
 	prepared := replay.Prepared{
 		Semantic: semantic,
 		Delta:    delta,
-		Base:     &replay.Record{Native: backend.Target.NativeContinuation("provider_response_from_previous_target_version")},
 	}
 
-	request := prepared.ForBackend(backend, delivery.BufferedDelivery())
-	if request.Continuation == nil {
-		t.Fatal("matching target version did not reuse provider-native state")
+	request := provider.Request{Canonical: prepared.PreferredForTarget(backend.Target), Delivery: delivery.BufferedDelivery()}
+	if previous, ok := request.Canonical.PreviousResponse(); !ok || previous.Responses == nil {
+		t.Fatal("matching target version did not reuse canonical Responses refinement")
 	}
 	document, _, err := backend.Codec.Encode(request)
 	if err != nil {

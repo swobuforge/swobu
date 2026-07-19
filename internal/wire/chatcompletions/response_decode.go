@@ -98,15 +98,15 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	choice := dto.Choices[0]
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
 	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 	_, reasoningPresent := usage.ReasoningTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
 	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
 		items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
 		if err != nil {
@@ -114,7 +114,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 		}
 		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 			exchangeID,
-			dto.ID,
+			canonical.ResponseRef{},
 			dto.Model,
 			items,
 			choice.FinishReason,
@@ -127,7 +127,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	}
 	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		exchangeID,
-		dto.ID,
+		canonical.ResponseRef{},
 		dto.Model,
 		items,
 		choice.FinishReason,
@@ -216,15 +216,15 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		if !chunkUsage.IsZero() {
 			s.latestUsage = chunkUsage
 			_, inputPresent := chunkUsage.InputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 			_, outputPresent := chunkUsage.OutputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 			_, reasoningPresent := chunkUsage.ReasoningTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
 			_, cacheReadPresent := chunkUsage.CacheReadTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 			_, cacheWritePresent := chunkUsage.CacheWriteTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
@@ -238,7 +238,7 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 			s.enqueue(canonical.Event{
 				Kind:    canonical.EventMetadata,
 				EnvID:   s.responseID,
-				Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": chunk.ID, "model": chunk.Model}},
+				Payload: canonical.MetadataPayload{Values: map[string]string{"model": chunk.Model}},
 			})
 		}
 		if len(chunk.Choices) == 0 {

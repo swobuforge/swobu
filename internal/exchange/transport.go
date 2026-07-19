@@ -116,7 +116,7 @@ func commitDecisionsBestEffort(ctx context.Context, sink compat.Sink, exchangeID
 	_ = sink.Commit(ctx, exchangeID, decisions)
 }
 
-func deliveryCompatibilityDecisions(call preparedProviderCall, incremental bool) []compat.Decision {
+func deliveryCompatibilityDecisions(call providerCall, incremental bool) []compat.Decision {
 	if !call.clientDelivery.IsStreaming() {
 		return nil
 	}
@@ -131,7 +131,7 @@ func deliveryCompatibilityDecisions(call preparedProviderCall, incremental bool)
 	return decisions
 }
 
-func deliveryIncrementalDecision(call preparedProviderCall, incremental bool) (compat.Decision, bool) {
+func deliveryIncrementalDecision(call providerCall, incremental bool) (compat.Decision, bool) {
 	if !call.clientDelivery.IsStreaming() {
 		return compat.Decision{}, false
 	}
@@ -146,7 +146,7 @@ func deliveryIncrementalDecision(call preparedProviderCall, incremental bool) (c
 	}, true
 }
 
-func deliveryFramingDecisions(call preparedProviderCall) []compat.Decision {
+func deliveryFramingDecisions(call providerCall) []compat.Decision {
 	if !call.clientDelivery.IsStreaming() {
 		return nil
 	}
@@ -191,7 +191,7 @@ func deliveryFramingDecisions(call preparedProviderCall) []compat.Decision {
 	}
 }
 
-func deliveryStreamingDecision(call preparedProviderCall, incremental bool) (compat.Decision, bool) {
+func deliveryStreamingDecision(call providerCall, incremental bool) (compat.Decision, bool) {
 	if !call.clientDelivery.IsStreaming() {
 		return compat.Decision{}, false
 	}
@@ -208,7 +208,7 @@ func deliveryStreamingDecision(call preparedProviderCall, incremental bool) (com
 
 // Backend errors become message-only canonical errors before the client
 // envelope is written, so record the shape drop on the candidate route here.
-func backendErrorShapeDecisions(call preparedProviderCall, err error) []compat.Decision {
+func backendErrorShapeDecisions(call providerCall, err error) []compat.Decision {
 	var backendErr canonical.BackendError
 	if !errors.As(err, &backendErr) {
 		return nil

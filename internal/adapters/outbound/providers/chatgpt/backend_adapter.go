@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -69,9 +68,6 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 	}
 	backend := provider.Backend{
 		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send),
-	}
-	if target.ProtocolKind == protocolkind.Responses {
-		backend.CaptureContinuation = target.NativeContinuation
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

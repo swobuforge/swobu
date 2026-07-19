@@ -3,21 +3,21 @@ package responses
 import "encoding/json"
 
 type responsesRequestDTO struct {
-	Model              string                       `json:"model"`
-	Input              json.RawMessage              `json:"input"`
-	ToolChoice         json.RawMessage              `json:"tool_choice"`
-	ParallelToolCalls  json.RawMessage              `json:"parallel_tool_calls,omitempty"`
-	Tools              []responsesToolDefinitionDTO `json:"tools,omitempty"`
-	PreviousResponseID string                       `json:"previous_response_id"`
-	Conversation       string                       `json:"conversation"`
-	Instructions       json.RawMessage              `json:"instructions,omitempty"`
-	Text               *responsesTextDTO            `json:"text,omitempty"`
-	Store              json.RawMessage              `json:"store,omitempty"`
-	MaxOutputTokens    json.RawMessage              `json:"max_output_tokens,omitempty"`
-	Temperature        json.RawMessage              `json:"temperature,omitempty"`
-	TopP               json.RawMessage              `json:"top_p,omitempty"`
-	Stop               json.RawMessage              `json:"stop,omitempty"`
-	Stream             json.RawMessage              `json:"stream,omitempty"`
+	Model                  string                       `json:"model"`
+	Input                  json.RawMessage              `json:"input"`
+	ToolChoice             json.RawMessage              `json:"tool_choice"`
+	ParallelToolCalls      json.RawMessage              `json:"parallel_tool_calls,omitempty"`
+	Tools                  []responsesToolDefinitionDTO `json:"tools,omitempty"`
+	PreviousResponseWireID string                       `json:"previous_response_id"`
+	Conversation           string                       `json:"conversation"`
+	Instructions           json.RawMessage              `json:"instructions,omitempty"`
+	Text                   *responsesTextDTO            `json:"text,omitempty"`
+	Store                  json.RawMessage              `json:"store,omitempty"`
+	MaxOutputTokens        json.RawMessage              `json:"max_output_tokens,omitempty"`
+	Temperature            json.RawMessage              `json:"temperature,omitempty"`
+	TopP                   json.RawMessage              `json:"top_p,omitempty"`
+	Stop                   json.RawMessage              `json:"stop,omitempty"`
+	Stream                 json.RawMessage              `json:"stream,omitempty"`
 }
 
 type responsesTextDTO struct {

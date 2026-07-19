@@ -51,8 +51,8 @@ func StructuredOutputDecisions(providerID string, protocol protocolkind.Protocol
 		return nil
 	}
 	return []compat.Decision{
-		{Feature: compat.OutputFormat, Outcome: compat.Exact, Subject: subject},
-		{Feature: compat.OutputJSONSchema, Outcome: compat.Exact, Subject: subject},
+		{Feature: compat.RequestOutputFormat, Outcome: compat.Exact, Subject: subject},
+		{Feature: compat.RequestOutputFormatSchema, Outcome: compat.Exact, Subject: subject},
 		{Feature: compat.WireJSONMode, Outcome: compat.Exact, Subject: subject},
 	}
 }
@@ -87,7 +87,7 @@ func ToolSchemaStrictDecision(providerID string, protocol protocolkind.ProtocolK
 	if preserved {
 		outcome = compat.Exact
 	}
-	return compat.Decision{Feature: compat.ToolSchemaStrict, Outcome: outcome, Subject: subject}, true
+	return compat.Decision{Feature: compat.RequestToolsSchemaStrict, Outcome: outcome, Subject: subject}, true
 }
 
 func hasStrictFunctionTool(tools []canonical.ToolDecl) bool {

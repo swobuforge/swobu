@@ -11,17 +11,21 @@ import (
 func OutputText(items []canonical.OutputItem) string {
 	out := ""
 	for _, item := range items {
-		if item.Kind != canonical.OutputItemText {
+		if item.Kind() != canonical.OutputItemText {
 			continue
 		}
-		out += item.Text
+		text, ok := item.TextItem()
+		if !ok {
+			continue
+		}
+		out += text.Text
 	}
 	return out
 }
 
 func ContainsToolUseOutput(items []canonical.OutputItem) bool {
 	for _, item := range items {
-		if item.Kind == canonical.OutputItemToolUse {
+		if item.Kind() == canonical.OutputItemToolUse {
 			return true
 		}
 	}

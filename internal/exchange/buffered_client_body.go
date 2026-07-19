@@ -15,7 +15,7 @@ import (
 // codec, but it does not consume the response stream during reduction.
 type bufferedClientBody struct {
 	ctx        context.Context
-	call       preparedProviderCall
+	call       providerCall
 	envelope   canonical.ResponseStream
 	sink       compat.Sink
 	initialize sync.Once
@@ -25,7 +25,7 @@ type bufferedClientBody struct {
 	consumed   bool
 }
 
-func newBufferedClientBody(ctx context.Context, call preparedProviderCall, envelope canonical.ResponseStream, sink compat.Sink) *bufferedClientBody {
+func newBufferedClientBody(ctx context.Context, call providerCall, envelope canonical.ResponseStream, sink compat.Sink) *bufferedClientBody {
 	return &bufferedClientBody{ctx: ctx, call: call, envelope: envelope, sink: sink}
 }
 

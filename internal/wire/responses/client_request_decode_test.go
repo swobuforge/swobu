@@ -14,26 +14,31 @@ import (
 func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
+	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"swobu_resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
 	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	previous, ok := got.PreviousResponse()
+	if !ok || previous.SwobuID != "swobu_resp_123" || previous.Responses != nil {
+		t.Fatalf("client previous response = %#v, want Swobu-only selector", previous)
 	}
 
 	items := got.Items()
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Kind != canonical.ItemKindToolUse {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind, canonical.ItemKindToolUse)
+	if items[0].Kind() != canonical.ItemKindToolUse {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolUse)
 	}
-	if got := items[0].ToolUseID; got != "call_1" {
+	toolUse, _ := items[0].ToolUse()
+	if got := toolUse.UseID; got != "call_1" {
 		t.Fatalf("items[0].ToolUseID = %q, want call_1", got)
 	}
-	if got := items[0].Name; got != "search" {
+	if got := toolUse.Name; got != "search" {
 		t.Fatalf("items[0].Name = %q, want search", got)
 	}
-	if got := items[0].Input.RawObject(); got != `{"query":"hello"}` {
+	if got := toolUse.Input.RawObject(); got != `{"query":"hello"}` {
 		t.Fatalf("items[0].Input.RawObject() = %q, want normalized object JSON", got)
 	}
 }
@@ -41,7 +46,7 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 func TestDecodeClientRequest_PreservesExplicitEmptyDurableBands(t *testing.T) {
 	raw := []byte(`{
 		"input":"continue",
-		"previous_response_id":"resp_123",
+		"previous_response_id":"swobu_resp_123",
 		"model":"",
 		"instructions":"",
 		"tools":[],
@@ -99,21 +104,22 @@ func TestDecodeClientRequest_AcceptsMultilineToolOutputTranscript(t *testing.T) 
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Kind != canonical.ItemKindToolResult {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind, canonical.ItemKindToolResult)
+	if items[0].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolResult)
 	}
-	if items[0].ToolUseID != "call_1" {
-		t.Fatalf("items[0].ToolUseID = %q, want call_1", items[0].ToolUseID)
+	toolResult, _ := items[0].ToolResult()
+	if toolResult.UseID != "call_1" {
+		t.Fatalf("items[0] tool use ID = %q, want call_1", toolResult.UseID)
 	}
-	if items[0].Text != toolOutput {
-		t.Fatalf("tool output changed during decode:\ngot:\n%s\nwant:\n%s", items[0].Text, toolOutput)
+	if toolResult.Text != toolOutput {
+		t.Fatalf("tool output changed during decode:\ngot:\n%s\nwant:\n%s", toolResult.Text, toolOutput)
 	}
 }
 
 func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"oops"}]}`)
+	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"swobu_resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"oops"}]}`)
 	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err == nil {
 		t.Fatal("DecodeClientRequest returned nil error, want BAD_REQUEST")

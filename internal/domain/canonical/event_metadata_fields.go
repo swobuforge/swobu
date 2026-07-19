@@ -53,14 +53,10 @@ type EventMetadataFields struct {
 	// Degraded marks behavior downgrades (for example stream-shaped batch).
 	Degraded bool
 
-	// ResultID is the client-visible response identity when replay-addressed
-	// routing has allocated one. NativeID stays provider-private.
-	ResultID string
 	// Native identifiers are references only; canonical envelope IDs stay
 	// primary and stable throughout the exchange.
 	NativeID    string
 	NativeIndex *int
-	Raw         any
 }
 
 // Event is the canonical envelope event used as internal wire truth.
@@ -85,7 +81,9 @@ const (
 )
 
 type EnvelopeStartPayload struct {
-	Kind      EnvelopeKind
+	Kind EnvelopeKind
+	// Response is set only for EnvResponse and carries canonical identity.
+	Response  ResponseRef
 	Role      ItemAuthor
 	Name      string
 	ToolUseID string

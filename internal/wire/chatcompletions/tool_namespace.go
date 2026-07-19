@@ -17,7 +17,7 @@ func emitChatCompletionsToolNameNamespaceDecision(sink compat.Sink, exchangeID s
 	}
 	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
 		compat.Decision{
-			Feature: compat.ToolNameNamespace,
+			Feature: compat.RequestToolsNameNamespace,
 			Outcome: outcome,
 			Subject: subject,
 		},

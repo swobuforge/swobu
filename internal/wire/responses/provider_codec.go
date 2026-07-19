@@ -2,15 +2,12 @@ package responses
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
@@ -18,14 +15,14 @@ import (
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request, NativeContinuation: input.NativeContinuation}, d, sink, exchangeID, EncodeOptions{})
+		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request}, d, sink, exchangeID, EncodeOptions{})
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request, NativeContinuation: input.NativeContinuation}, d, sink, exchangeID, options)
+		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request}, d, sink, exchangeID, options)
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
@@ -39,10 +36,7 @@ func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc c
 	stream, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (canonical.ResponseStream, error) {
 		return decodeResponseBuffered(ctx, doc.RawBytes(), exchangeID, sink)
 	})
-	var identity responseEnvelope
-	_ = json.Unmarshal(doc.RawBytes(), &identity)
-	continuation := &staticResponsesContinuation{id: provider.ContinuationID(strings.TrimSpace(identity.ID))}
-	return wire.ProviderDecodeResult{Stream: stream, Decisions: decisions, Continuation: continuation}, err
+	return wire.ProviderDecodeResult{Stream: stream, Decisions: decisions}, err
 }
 
 func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
@@ -54,11 +48,5 @@ func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.ByteStream,
 	reader, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (*responsesEventReader, error) {
 		return decodeResponseStream(stream, exchangeID, sink), nil
 	})
-	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, Continuation: reader, TerminalDecisions: reader}, err
-}
-
-type staticResponsesContinuation struct{ id provider.ContinuationID }
-
-func (s *staticResponsesContinuation) ContinuationID() (provider.ContinuationID, bool) {
-	return s.id, strings.TrimSpace(string(s.id)) != ""
+	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, TerminalDecisions: reader}, err
 }

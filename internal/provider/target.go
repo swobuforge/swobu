@@ -1,6 +1,16 @@
 package provider
 
-import "github.com/swobuforge/swobu/internal/domain/protocolkind"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+)
+
+const (
+	executionFrameHTTPJSONBody = "http_json_body"
+	executionFrameSSEEvent     = "sse_event"
+)
 
 // ProviderID identifies one fixed provider implementation.
 type ProviderID string
@@ -30,21 +40,39 @@ func (t TargetSnapshot) Equal(other TargetSnapshot) bool { return t == other }
 // ProviderID returns the fixed provider implementation identifier.
 func (t TargetSnapshot) ProviderID() string { return t.ProviderSpec }
 
-// NativeContinuation binds one provider-issued handle to this exact routing
-// target version. Calling this method is the backend's explicit wire-contract
-// opt-in; target snapshots never opt in by themselves.
-func (t TargetSnapshot) NativeContinuation(id string) *NativeContinuation {
-	if id == "" || t.TargetID == "" || t.TargetVersion == 0 {
-		return nil
+// ValidateExecutionProtocol proves that protocol name, semantic kind, and
+// frame describe one catalog-shaped execution mode. Provider admission remains
+// profile-owned; this method rejects internally contradictory projections.
+func (t TargetSnapshot) ValidateExecutionProtocol() error {
+	providerProtocol := strings.TrimSpace(t.ProviderProtocol)
+	if providerProtocol == "" || t.ProtocolKind == "" || t.SelectedFrame == "" {
+		return fmt.Errorf("provider execution protocol is incomplete")
 	}
-	return &NativeContinuation{TargetID: t.TargetID, TargetVersion: t.TargetVersion, ID: ContinuationID(id)}
+	baseProtocol := strings.TrimSuffix(providerProtocol, "_stream")
+	if baseProtocol != t.ProtocolKind.String() {
+		return fmt.Errorf("provider protocol %q contradicts protocol kind %q", providerProtocol, t.ProtocolKind)
+	}
+	wantFrame := executionFrameHTTPJSONBody
+	if strings.HasSuffix(providerProtocol, "_stream") {
+		wantFrame = executionFrameSSEEvent
+	}
+	if t.SelectedFrame != wantFrame {
+		return fmt.Errorf("provider protocol %q requires frame %q, got %q", providerProtocol, wantFrame, t.SelectedFrame)
+	}
+	return nil
 }
 
 // NewTargetSnapshot constructs one provider execution target projection.
 func NewTargetSnapshot(targetID, providerSpec, baseURL, credentialRef string, protocol protocolkind.ProtocolKind, selectedFrame string, providerProtocol ...string) TargetSnapshot {
-	resolvedProviderProtocol := ""
+	resolvedProviderProtocol := protocol.String()
 	if len(providerProtocol) > 0 {
 		resolvedProviderProtocol = providerProtocol[0]
+	}
+	if selectedFrame == "" {
+		selectedFrame = executionFrameHTTPJSONBody
+		if strings.HasSuffix(resolvedProviderProtocol, "_stream") {
+			selectedFrame = executionFrameSSEEvent
+		}
 	}
 	return TargetSnapshot{
 		TargetID:         targetID,

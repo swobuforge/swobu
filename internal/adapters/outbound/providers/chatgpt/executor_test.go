@@ -172,7 +172,7 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 	}
 }
 
-func TestResolveBackendResponsesEnablesVersionedNativeContinuation(t *testing.T) {
+func TestResolveBackendResponsesNeedsNoContinuationCallback(t *testing.T) {
 	target := provider.NewTargetSnapshot(
 		"chatgpt-default",
 		string(profile.ProviderSpecChatGPT),
@@ -187,12 +187,8 @@ func TestResolveBackendResponsesEnablesVersionedNativeContinuation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backend.CaptureContinuation == nil {
-		t.Fatal("ChatGPT Responses did not opt into native continuation")
-	}
-	native := backend.CaptureContinuation("resp_1")
-	if native == nil || native.TargetID != target.TargetID || native.TargetVersion != target.TargetVersion {
-		t.Fatalf("native continuation = %#v", native)
+	if backend.Target.TargetID != target.TargetID || backend.Target.TargetVersion != target.TargetVersion {
+		t.Fatalf("backend target = %#v, want exact target %#v", backend.Target, target)
 	}
 }
 

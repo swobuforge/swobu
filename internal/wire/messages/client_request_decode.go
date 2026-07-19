@@ -107,8 +107,10 @@ func decodeMessagesSystem(raw json.RawMessage) (string, error) {
 func joinMessagesText(items []canonical.CanonicalItem) string {
 	var builder strings.Builder
 	for _, item := range items {
-		if item.Kind == canonical.ItemKindText {
-			builder.WriteString(item.Text)
+		if item.Kind() == canonical.ItemKindText {
+			if text, ok := item.TextItem(); ok {
+				builder.WriteString(text.Text)
+			}
 		}
 	}
 	return builder.String()

@@ -13,17 +13,17 @@ import (
 
 // runtimeBundle contains the explicit dependencies used by exchange commands.
 type runtimeBundle struct {
-	Runtime      ExecutionRuntime
-	DecisionSink compat.Sink
-	ReplayStore  replay.Store
-	ResponseIDs  replay.ResponseIDGenerator
+	Runtime          ExecutionRuntime
+	DecisionSink     compat.Sink
+	ReplayStore      replay.Store
+	SwobuResponseIDs replay.SwobuResponseIDGenerator
 }
 
-func allocateResponseID(ctx context.Context, exchangeID string, gen replay.ResponseIDGenerator) (replay.ResponseID, error) {
+func allocateSwobuResponseID(ctx context.Context, exchangeID string, gen replay.SwobuResponseIDGenerator) (canonical.SwobuResponseID, error) {
 	if gen == nil {
 		return "", errors.New("exchange response id generator is required")
 	}
-	responseID, err := gen.NewResponseID(ctx, exchangeID)
+	responseID, err := gen.NewSwobuResponseID(ctx, exchangeID)
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +34,7 @@ func validateReplayRuntime(r runtimeBundle) error {
 	if r.ReplayStore == nil {
 		return errors.New("exchange replay store is required")
 	}
-	if r.ResponseIDs == nil {
+	if r.SwobuResponseIDs == nil {
 		return errors.New("exchange response id generator is required")
 	}
 	return nil
@@ -52,7 +52,7 @@ func validateReplayInput(r runtimeBundle, workspaceSlug string) error {
 
 // ---- helpers used by provider-round execution ----
 
-func encodeClientOutput(ctx context.Context, call preparedProviderCall, envelope canonical.ResponseStream, incremental bool, sink compat.Sink) (ClientResponse, error) {
+func encodeClientOutput(ctx context.Context, call providerCall, envelope canonical.ResponseStream, incremental bool, sink compat.Sink) (ClientResponse, error) {
 	commitDecisionsBestEffort(ctx, sink, call.exchangeID, deliveryCompatibilityDecisions(call, incremental))
 
 	if call.clientDelivery.Mode == delivery.Streaming {

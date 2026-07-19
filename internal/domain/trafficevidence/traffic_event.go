@@ -339,8 +339,8 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 	if strings.TrimSpace(input.DecisionReason) == "" { // swobu:io-string source=domain
 		input.DecisionReason = "selected_provider_config"
 	}
-	if input.AttemptCount <= 0 {
-		input.AttemptCount = 1
+	if input.AttemptCount < 0 {
+		return TrafficEventInput{}, fmt.Errorf("attempt count cannot be negative")
 	}
 	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode)     // swobu:io-string source=domain
 	input.ModelRequested = strings.TrimSpace(input.ModelRequested)               // swobu:io-string source=domain

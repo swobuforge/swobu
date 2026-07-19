@@ -40,14 +40,15 @@ func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t 
 		t.Fatalf("output items len=%d, want 1", len(items))
 	}
 	item := items[0]
-	if item.Kind != canonical.ItemKindToolUse {
-		t.Fatalf("output item kind=%s, want %s", item.Kind, canonical.ItemKindToolUse)
+	if item.Kind() != canonical.ItemKindToolUse {
+		t.Fatalf("output item kind=%s, want %s", item.Kind(), canonical.ItemKindToolUse)
 	}
-	if item.Name != "Bash" {
-		t.Fatalf("output item name=%q, want Bash", item.Name)
+	toolUse, _ := item.ToolUse()
+	if toolUse.Name != "Bash" {
+		t.Fatalf("output item name=%q, want Bash", toolUse.Name)
 	}
-	if item.ToolUseID != "call_1" {
-		t.Fatalf("tool use id=%q, want call_1", item.ToolUseID)
+	if toolUse.UseID != "call_1" {
+		t.Fatalf("tool use id=%q, want call_1", toolUse.UseID)
 	}
 }
 
@@ -84,8 +85,8 @@ func TestDecodeResponseStream_IgnoresDuplicateResponseCreated(t *testing.T) {
 			continue
 		}
 		starts++
-		if starts == 1 && ev.Meta.ResultID != "resp_1" {
-			t.Fatalf("response start result id = %q, want resp_1", ev.Meta.ResultID)
+		if payload, ok := ev.Payload.(canonical.EnvelopeStartPayload); starts == 1 && (!ok || payload.Response.Responses == nil || payload.Response.Responses.ProviderResponseID != "resp_1") {
+			t.Fatalf("response start = %#v, want Responses provider id resp_1", ev.Payload)
 		}
 		if starts > 1 {
 			t.Fatalf("duplicate response.created emitted %d response starts", starts)
