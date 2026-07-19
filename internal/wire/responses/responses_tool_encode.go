@@ -8,11 +8,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func encodeResponsesTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) ([]any, error) {
+func encodeResponsesTools(tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) ([]any, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -27,7 +26,7 @@ func encodeResponsesTools(tools []canonical.ToolDecl, sink effect.Sink, exchange
 	return out, nil
 }
 
-func encodeResponsesTool(tool canonical.ToolDecl, sink effect.Sink, exchangeID string, index int) (map[string]any, error) {
+func encodeResponsesTool(tool canonical.ToolDecl, sink compat.Sink, exchangeID string, index int) (map[string]any, error) {
 	if tool == nil {
 		return nil, canonical.BadRequest("response request tool declarations are invalid")
 	}
@@ -49,7 +48,7 @@ func encodeResponsesTool(tool canonical.ToolDecl, sink effect.Sink, exchangeID s
 	}
 }
 
-func encodeResponsesFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect.Sink, exchangeID string, index int) (map[string]any, error) {
+func encodeResponsesFunctionToolDecl(decl canonical.FunctionToolDecl, sink compat.Sink, exchangeID string, index int) (map[string]any, error) {
 	name, err := responsesToolWireName(decl)
 	if err != nil {
 		return nil, err
@@ -77,7 +76,7 @@ func encodeResponsesFunctionToolDecl(decl canonical.FunctionToolDecl, sink effec
 	return wire, nil
 }
 
-func encodeResponsesCustomToolDecl(decl canonical.CustomToolDecl, sink effect.Sink, exchangeID string, index int) (map[string]any, error) {
+func encodeResponsesCustomToolDecl(decl canonical.CustomToolDecl, sink compat.Sink, exchangeID string, index int) (map[string]any, error) {
 	name, err := responsesToolWireName(decl)
 	if err != nil {
 		return nil, err
@@ -165,7 +164,7 @@ func responsesToolConfigFromCanonical(config canonical.ToolCapabilityConfig) (ma
 	return obj, nil
 }
 
-func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (any, error) {
+func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -208,21 +207,21 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, s
 	}
 }
 
-func emitResponsesToolNameNamespaceDecision(sink effect.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
+func emitResponsesToolNameNamespaceDecision(sink compat.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
 	if sink == nil || subject == "" {
 		return nil
 	}
 	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") { // swobu:io-string source=boundary
 		return nil
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.CompatibilityEffect{
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
+		compat.Decision{
 			Feature: compat.ToolNameNamespace,
 			Outcome: outcome,
 			Subject: subject,
 		},
 	}); err != nil {
-		return canonical.InternalError("compatibility effect sink commit failed")
+		return canonical.InternalError("compatibility decision sink commit failed")
 	}
 	return nil
 }

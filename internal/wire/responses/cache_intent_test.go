@@ -60,7 +60,7 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","name":"` + functionTool.ToolName() + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","input":"hi"}`)
-	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}

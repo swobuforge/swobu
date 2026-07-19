@@ -8,12 +8,11 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes tool declaration variants.
-func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -80,7 +79,7 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 	return canonical.NewToolSchemaObject(trimmed), nil
 }
 
-func encodeChatCompletionsTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) ([]chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsTools(tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) ([]chatCompletionsToolDefinitionDTO, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -95,7 +94,7 @@ func encodeChatCompletionsTools(tools []canonical.ToolDecl, sink effect.Sink, ex
 	return out, nil
 }
 
-func encodeChatCompletionsTool(tool canonical.ToolDecl, sink effect.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsTool(tool canonical.ToolDecl, sink compat.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
 	if tool == nil {
 		return chatCompletionsToolDefinitionDTO{}, canonical.BadRequest("chat completions request tool declarations are invalid")
 	}
@@ -113,7 +112,7 @@ func encodeChatCompletionsTool(tool canonical.ToolDecl, sink effect.Sink, exchan
 	}
 }
 
-func encodeChatCompletionsFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsFunctionToolDecl(decl canonical.FunctionToolDecl, sink compat.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
 	name, err := canonical.ProjectedToolName(decl)
 	if err != nil {
 		return chatCompletionsToolDefinitionDTO{}, err
@@ -143,7 +142,7 @@ func encodeChatCompletionsFunctionToolDecl(decl canonical.FunctionToolDecl, sink
 	return wire, nil
 }
 
-func encodeChatCompletionsCustomToolDecl(decl canonical.CustomToolDecl, sink effect.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsCustomToolDecl(decl canonical.CustomToolDecl, sink compat.Sink, exchangeID string, index int) (chatCompletionsToolDefinitionDTO, error) {
 	name, err := canonical.ProjectedToolName(decl)
 	if err != nil {
 		return chatCompletionsToolDefinitionDTO{}, err
@@ -218,7 +217,7 @@ func chatCompletionsUnsupportedToolKind(tool canonical.ToolDecl) string {
 }
 
 // swobu:lint ignore function-complexity because=chat completions tool-choice decoding keeps all protocol variants in one boundary helper.
-func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
 		if len(tools) > 0 {
@@ -331,7 +330,7 @@ func hasChatCompletionsCustomTools(tools []canonical.ToolDecl) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
-func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (any, error) {
+func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}

@@ -1,27 +1,14 @@
 package carrier
 
 import (
+	"io"
 	"net/http"
-
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-// Framing identifies the boundary framing shape for streamed carriers.
-type Framing string
-
-const (
-	FramingNone      Framing = ""
-	FramingSSE       Framing = "sse"
-	FramingWebSocket Framing = "websocket"
-	FramingNDJSON    Framing = "ndjson"
-)
-
-// CarrierStream is one framed stream carrier on a wire leg.
-type CarrierStream struct {
-	Stage   Stage
-	Family  protocolkind.ProtocolKind
-	Framing Framing
-	Header  http.Header
-	Frames  FrameReader
-	Meta    Meta
+// ByteStream is one raw byte stream on a wire leg. Body read boundaries carry
+// no SSE, NDJSON, JSON, or WebSocket message semantics.
+type ByteStream struct {
+	Header    http.Header
+	MediaType string
+	Body      io.ReadCloser
 }

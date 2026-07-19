@@ -9,7 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type stubCredentialResolver struct{}
@@ -28,7 +28,7 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
-	_, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	_, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"openrouter",
 		srv.URL+"/v1",
@@ -53,7 +53,7 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAIPolicy())
-	_, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	_, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"openai",
 		srv.URL+"/v1",
@@ -85,7 +85,7 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
-	_, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	_, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"openrouter",
 		srv.URL+"/v1",
@@ -136,7 +136,7 @@ func TestListModels_CustomUsesSelectedAuthHeader(t *testing.T) {
 			defer srv.Close()
 
 			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewCustomPolicy())
-			target := exchange.NewRoutableTarget(
+			target := provider.NewTargetSnapshot(
 				"draft",
 				"custom",
 				srv.URL+"/v1",

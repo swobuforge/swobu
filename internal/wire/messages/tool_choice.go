@@ -6,11 +6,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Messages tool_choice variants.
-func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
 		if len(tools) > 0 {
@@ -74,7 +73,7 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, s
 	}
 }
 
-func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (any, error) {
+func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}

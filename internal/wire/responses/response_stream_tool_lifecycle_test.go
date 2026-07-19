@@ -22,7 +22,7 @@ func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t 
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 
 	reader := decodeResponseStream(
-		carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))},
+		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex_stream_tool_lifecycle",
 		nil,
 	)
@@ -59,7 +59,7 @@ func TestDecodeResponseStream_IgnoresDuplicateResponseCreated(t *testing.T) {
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 
 	reader := decodeResponseStream(
-		carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))},
+		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex_stream_duplicate_created",
 		nil,
 	)

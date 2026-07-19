@@ -4,14 +4,13 @@ import (
 	"context"
 
 	"github.com/swobuforge/swobu/internal/compat"
-	"github.com/swobuforge/swobu/internal/effect"
 )
 
 const terminalEventSubject = compat.Subject("wire:/event/terminal")
 
 // EmitTerminalUsagePresence records whether the terminal completion carried
 // usage. It is an observability signal, not a lifecycle transition.
-func EmitTerminalUsagePresence(ctx context.Context, sink effect.Sink, exchangeID string, exact bool) {
+func EmitTerminalUsagePresence(ctx context.Context, sink compat.Sink, exchangeID string, exact bool) {
 	if sink == nil {
 		return
 	}
@@ -19,8 +18,8 @@ func EmitTerminalUsagePresence(ctx context.Context, sink effect.Sink, exchangeID
 	if exact {
 		outcome = compat.Exact
 	}
-	_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-		effect.CompatibilityEffect{
+	_ = sink.Commit(ctx, exchangeID, []compat.Decision{
+		compat.Decision{
 			Feature: compat.DeliveryTerminalEvent,
 			Outcome: outcome,
 			Subject: terminalEventSubject,

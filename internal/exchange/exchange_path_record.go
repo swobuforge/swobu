@@ -10,38 +10,78 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
-func mapErrorToFailureClass(err error) routing.FailureClass {
-	var backendErr canonical.BackendError
-	if errors.As(err, &backendErr) {
-		switch status := backendErr.StatusCode; {
-		case status == 404:
-			return routing.FailureNotFound
-		case status == 400:
-			return routing.FailureBadRequest
-		case status == 401 || status == 403:
-			return routing.FailureAuth
-		case status == 429:
-			return routing.FailureRateLimited
-		case status >= 500 && status < 600:
-			return routing.FailureServerError
+type executionFailureKind uint8
+
+const (
+	failureRequestInvalid executionFailureKind = iota
+	failureUnsupportedByBackend
+	failureBackendUnavailable
+	failureBackendRejected
+	failureCancelled
+	failureInternal
+)
+
+func classifyExecutionFailure(err error) executionFailureKind {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return failureCancelled
+	}
+	var unsupported provider.UnsupportedError
+	if errors.As(err, &unsupported) {
+		return failureUnsupportedByBackend
+	}
+	var unavailable provider.UnavailableError
+	if errors.As(err, &unavailable) {
+		return failureBackendUnavailable
+	}
+	var rejected provider.RejectedError
+	if errors.As(err, &rejected) {
+		return failureBackendRejected
+	}
+	var invalid provider.InvalidRequestError
+	if errors.As(err, &invalid) {
+		return failureRequestInvalid
+	}
+	var cancelled provider.CancelledError
+	if errors.As(err, &cancelled) {
+		return failureCancelled
+	}
+	var internal provider.InternalError
+	if errors.As(err, &internal) {
+		return failureInternal
+	}
+	var canonicalErr canonical.Error
+	if errors.As(err, &canonicalErr) {
+		switch canonicalErr.Code {
+		case canonical.ErrorCodeBadRequest, canonical.ErrorCodeUnsupportedOperation,
+			canonical.ErrorCodeUnsupportedDelivery, canonical.ErrorCodeUnsupportedEndpoint,
+			canonical.ErrorCodeBadEndpoint, canonical.ErrorCodeUnknownTarget:
+			return failureRequestInvalid
 		default:
-			return routing.FailureNetwork
+			return failureInternal
 		}
 	}
-	return routing.FailureUnknown
+	return failureInternal
 }
 
-func buildPathRecord(ctx context.Context, exchangeID string, target routing.Target, clientDelivery delivery.Delivery, request canonical.CanonicalRequest) (exchangePathRecord, error) {
-	_ = ctx
-	_ = exchangeID
-	routable, err := toRoutableTarget(target)
+func fallbackEligibleFailure(err error) bool {
+	switch classifyExecutionFailure(err) {
+	case failureUnsupportedByBackend, failureBackendUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func buildPathRecord(target routing.Target, request canonical.CanonicalRequest) (exchangePathRecord, error) {
+	routable, err := toProviderTarget(target)
 	if err != nil {
 		return exchangePathRecord{}, err
 	}
-	protocol, _, ok := profile.ProviderProtocolKindAndFrame(routable.ProviderSpec, target.Protocol().String())
+	protocol, frame, ok := profile.ProviderProtocolKindAndFrame(routable.ProviderSpec, target.Protocol().String())
 	if !ok {
 		return exchangePathRecord{}, canonical.BadEndpoint("selected provider protocol is unsupported")
 	}
@@ -49,19 +89,29 @@ func buildPathRecord(ctx context.Context, exchangeID string, target routing.Targ
 	if modelID == "" {
 		return exchangePathRecord{}, canonical.BadRequest("selected provider model is not configured")
 	}
-	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: modelID, Instructions: request.Instructions(), Items: request.Items(), Tools: request.Tools(), Turn: request.Turn(), ToolPolicy: request.ToolPolicy(), ToolCallBatch: request.ToolCallBatch(), Controls: request.Controls(), OutputFormat: request.OutputFormat()})
-	return exchangePathRecord{Request: req, Target: routable, ProviderDelivery: clientDelivery, ProtocolKind: protocol}, nil
+	routable.Model = modelID
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: modelID, Instructions: request.Instructions(), Items: request.Items(), Tools: request.Tools(), Turn: request.Turn(), ToolPolicy: request.ToolPolicy(), ToolCallBatch: request.ToolCallBatch(), Controls: request.Controls(), OutputFormat: request.OutputFormat(), Presence: request.Presence()})
+	providerDelivery := delivery.BufferedDelivery()
+	if frame == profile.FrameSSEEvent {
+		providerDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
+	}
+	return exchangePathRecord{Request: req, Target: routable, ProviderDelivery: providerDelivery, ProtocolKind: protocol}, nil
 }
 
-// toRoutableTarget is the single adapter from durable connection intent to
+// toProviderTarget is the single adapter from durable connection intent to
 // provider execution data. Derived URLs and auth modes never enter persistence.
-func toRoutableTarget(target routing.Target) (RoutableTarget, error) {
-	return RoutableTargetFromConnection(target.ID().String(), target.Connection(), target.Protocol().String())
+func toProviderTarget(target routing.Target) (provider.TargetSnapshot, error) {
+	snapshot, err := ProviderTargetFromConnection(target.ID().String(), target.Connection(), target.Protocol().String())
+	if err != nil {
+		return provider.TargetSnapshot{}, err
+	}
+	snapshot.TargetVersion = uint64(target.Version())
+	return snapshot, nil
 }
 
-// RoutableTargetFromConnection derives provider execution data from the typed
+// ProviderTargetFromConnection derives provider execution data from the typed
 // routing connection at the single exchange boundary.
-func RoutableTargetFromConnection(backendRef string, connection routing.Connection, providerProtocol string) (RoutableTarget, error) {
+func ProviderTargetFromConnection(targetID string, connection routing.Connection, providerProtocol string) (provider.TargetSnapshot, error) {
 	providerSpec := string(connection.Provider())
 	baseURL := profile.DefaultExecuteBaseURL(providerSpec)
 	credential := ""
@@ -93,13 +143,13 @@ func RoutableTargetFromConnection(backendRef string, connection routing.Connecti
 			authHeader = header.Name()
 		}
 	default:
-		return RoutableTarget{}, fmt.Errorf("unsupported routing connection %T", connection)
+		return provider.TargetSnapshot{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}
 	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
 	if !ok {
-		return RoutableTarget{}, canonical.BadEndpoint("selected provider protocol is unsupported")
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("selected provider protocol is unsupported")
 	}
-	routable := NewRoutableTarget(backendRef, providerSpec, baseURL, credential, protocolKind, frame, providerProtocol)
+	routable := provider.NewTargetSnapshot(targetID, providerSpec, baseURL, credential, protocolKind, frame, providerProtocol)
 	routable.AuthHeader = authHeader
 	return routable, nil
 }
@@ -108,7 +158,7 @@ func resolveProviderProtocolKind(targetSpec, targetProtocol string, configured p
 	if !profile.SupportsSpec(targetSpec) {
 		return "", canonical.BadEndpoint("provider id is unsupported")
 	}
-	if strings.TrimSpace(request.Model()) == "" {
+	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=domain
 		return "", canonical.BadRequest("canonical request is required")
 	}
 	if targetProtocol == "" || targetProtocol == profile.ProviderProtocolAuto {
@@ -123,7 +173,7 @@ func resolveProviderProtocolKind(targetSpec, targetProtocol string, configured p
 
 type exchangePathRecord struct {
 	Request          canonical.CanonicalRequest
-	Target           RoutableTarget
+	Target           provider.TargetSnapshot
 	ProviderDelivery delivery.Delivery
 	ProtocolKind     protocolkind.ProtocolKind
 }

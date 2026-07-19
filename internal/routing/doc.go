@@ -9,6 +9,11 @@
 // TargetDraft finalizer; runtime consumers receive immutable values and never
 // reconstruct routes from DTOs.
 //
+// Each target has one durable ID and one process-local monotonic version.
+// Target settings and credential-reference saves advance the version; replay
+// uses it to reject native handles captured before a target save. Version is
+// intentionally not persisted while replay itself is process-local.
+//
 // The canonical model lives in
 // docs/03-architecture/system-shape-and-request-flow/workspace-routing-configuration-and-local-persistence.md
 // and docs/03-architecture/system-shape-and-request-flow/monotonic-routing-boundary-and-attempt-semantics.md.

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func TestLiveBedrockMantleCatalogAuthenticationPrecedence(t *testing.T) {
@@ -38,9 +38,9 @@ func TestLiveBedrockMantleCatalogAuthenticationPrecedence(t *testing.T) {
 	})
 }
 
-func assertLiveCatalog(t *testing.T, ctx context.Context, exec ProviderIngressResolverAdapter, endpoint string, authMode string, credentialRef string) {
+func assertLiveCatalog(t *testing.T, ctx context.Context, exec BackendAdapter, endpoint string, authMode string, credentialRef string) {
 	t.Helper()
-	target := exchange.NewRoutableTarget(
+	target := provider.NewTargetSnapshot(
 		"live-bedrock-dogfood",
 		string(profile.ProviderSpecBedrock),
 		endpoint,

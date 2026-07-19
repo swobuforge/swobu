@@ -11,21 +11,21 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/provider"
 	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
-func decodeResponseStream(stream carrier.CarrierStream, exchangeID string, sink effect.Sink) canonical.EventReader {
-	recording := &effect.RecordingSink{Delegate: sink}
+func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesEventReader {
+	recording := &compat.RecordingSink{Delegate: sink}
 	return &responsesEventReader{
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
 		sink:        recording,
 		recording:   recording,
-		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
+		reader:      core.NewSSEReader(stream.Body),
 		toolStates:  map[string]responsesToolState{},
 		toolInputs:  map[string]string{},
 		textOpen:    false,
@@ -34,28 +34,36 @@ func decodeResponseStream(stream carrier.CarrierStream, exchangeID string, sink 
 }
 
 type responsesEventReader struct {
-	exchangeID    string
-	responseID    canonical.EnvelopeID
-	sink          effect.Sink
-	recording     *effect.RecordingSink
-	reader        *core.SSEReaderCloser
-	pending       canonical.EventSequence
-	toolStates    map[string]responsesToolState
-	toolInputs    map[string]string
-	textOpen      bool
-	textEnvID     canonical.EnvelopeID
-	emittedOutput bool
-	started       bool
-	completed     bool
-	latestUsage   canonical.TokenUsage
-	seq           int64
+	exchangeID       string
+	responseID       canonical.EnvelopeID
+	sink             compat.Sink
+	recording        *compat.RecordingSink
+	reader           *core.SSEReaderCloser
+	pending          canonical.EventSequence
+	toolStates       map[string]responsesToolState
+	toolInputs       map[string]string
+	textOpen         bool
+	textEnvID        canonical.EnvelopeID
+	emittedOutput    bool
+	started          bool
+	completed        bool
+	latestUsage      canonical.TokenUsage
+	seq              int64
+	providerResultID string
 }
 
-func (s *responsesEventReader) Effects() []effect.Effect {
+// ContinuationID exposes the Responses continuation handle through the
+// explicit codec-owned source returned with this stream.
+func (s *responsesEventReader) ContinuationID() (provider.ContinuationID, bool) {
+	id := strings.TrimSpace(s.providerResultID)
+	return provider.ContinuationID(id), id != ""
+}
+
+func (s *responsesEventReader) Decisions() []compat.Decision {
 	if s.recording == nil {
 		return nil
 	}
-	return append([]effect.Effect(nil), s.recording.Effects...)
+	return s.recording.Decisions()
 }
 
 type responsesToolState struct {
@@ -76,7 +84,7 @@ func (s *responsesEventReader) Next(ctx context.Context) (canonical.Event, error
 		return event, nil
 	}
 	for {
-		event, err := s.reader.Next()
+		event, err := s.reader.Next(ctx)
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
 				s.handleUnexpectedEOF(ctx)
@@ -104,15 +112,15 @@ func (s *responsesEventReader) Next(ctx context.Context) (canonical.Event, error
 		if !frameUsage.IsZero() {
 			s.latestUsage = frameUsage
 			_, inputPresent := frameUsage.InputTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 			_, outputPresent := frameUsage.OutputTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 			_, reasoningPresent := frameUsage.ReasoningTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
 			_, cacheReadPresent := frameUsage.CacheReadTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 			_, cacheWritePresent := frameUsage.CacheWriteTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var frame streamFrame
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {

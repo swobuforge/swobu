@@ -26,12 +26,10 @@ func buildDaemonServeMux(
 	exchangeIngress := exchange.NewIngress(
 		daemon.configStore,
 		runtime,
-		exchange.RuntimePoliciesSpec{
-			TrafficEventSink: trafficEventSink,
-		},
+		exchange.RuntimePoliciesSpec{},
 	)
 	mux := http.NewServeMux()
-	mux.Handle("/c/", httpapi.NewHandler(exchangeIngress))
+	mux.Handle("/c/", httpapi.NewHandler(exchangeIngress, trafficEventSink))
 	mux.Handle("/_swobu/status", httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
 		status, err := daemon.Status()
 		if err != nil {

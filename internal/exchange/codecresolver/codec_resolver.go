@@ -6,19 +6,19 @@
 package codecresolver
 
 import (
+	"context"
+
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
-// RuntimeCodecResolver composes one exchange runtime protocol bundle set for all
-// supported client families and provider protocol kinds.
+// RuntimeCodecResolver composes client-facing codecs for all supported client
+// families. Exact provider codec composition lives behind provider backends.
 //
 // It owns explicit protocol-family bundle composition for one running Swobu process.
 // It does not own daemon lifecycle, endpoint resolution, or provider execution,
@@ -27,10 +27,6 @@ type RuntimeCodecResolver struct {
 	chatCompletionsClient wire.ClientCodec
 	responsesClient       wire.ClientCodec
 	messagesClient        wire.ClientCodec
-
-	chatCompletionsProvider protocolBundle
-	responsesProvider       protocolBundle
-	messagesProvider        protocolBundle
 }
 
 // NewRuntimeCodecResolver returns a fully wired codec resolver.
@@ -51,21 +47,6 @@ func NewRuntimeCodecResolver() RuntimeCodecResolver {
 			document: messages.ResponseDocumentEncoder{},
 			stream:   messages.ResponseStreamEncoder{},
 		},
-		chatCompletionsProvider: protocolBundle{
-			requestEncoder:  chatcompletions.ProviderRequestDocumentEncoder{},
-			streamDecoder:   chatcompletions.ProviderEnvelopeDecoder{},
-			documentDecoder: chatcompletions.ProviderDocumentDecoder{},
-		},
-		responsesProvider: protocolBundle{
-			requestEncoder:  responses.ProviderRequestDocumentEncoder{},
-			streamDecoder:   responses.ProviderEnvelopeDecoder{},
-			documentDecoder: responses.ProviderDocumentDecoder{},
-		},
-		messagesProvider: protocolBundle{
-			requestEncoder:  messages.ProviderRequestDocumentEncoder{},
-			streamDecoder:   messages.ProviderEnvelopeDecoder{},
-			documentDecoder: messages.ProviderDocumentDecoder{},
-		},
 	}
 }
 
@@ -83,68 +64,33 @@ func (r RuntimeCodecResolver) ClientCodec(f canonical.ClientFamily) wire.ClientC
 	}
 }
 
-// ProviderRequestDocumentEncoder returns the encoder for the given protocol kind.
-func (r RuntimeCodecResolver) ProviderRequestDocumentEncoder(kind protocolkind.ProtocolKind) wire.ProviderRequestDocumentEncoder {
-	return r.providerBundle(kind).requestEncoder
-}
-
-// ProviderEnvelopeDecoder returns the envelope decoder for streaming deliveries.
-func (r RuntimeCodecResolver) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) wire.ProviderEnvelopeDecoder {
-	if d.Mode != delivery.Streaming {
-		return nil
-	}
-	return r.providerBundle(kind).streamDecoder
-}
-
-// ProviderDocumentDecoder returns the document decoder for buffered deliveries.
-func (r RuntimeCodecResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) wire.ProviderDocumentDecoder {
-	if d.Mode != delivery.Buffered {
-		return nil
-	}
-	return r.providerBundle(kind).documentDecoder
-}
-
-func (r RuntimeCodecResolver) providerBundle(kind protocolkind.ProtocolKind) protocolBundle {
-	switch kind {
-	case protocolkind.ChatCompletions:
-		return r.chatCompletionsProvider
-	case protocolkind.Responses:
-		return r.responsesProvider
-	case protocolkind.Messages:
-		return r.messagesProvider
-	default:
-		return protocolBundle{}
-	}
-}
-
-type protocolBundle struct {
-	requestEncoder  wire.ProviderRequestDocumentEncoder
-	streamDecoder   wire.ProviderEnvelopeDecoder
-	documentDecoder wire.ProviderDocumentDecoder
-}
-
 // clientCodecBundle bridges three separate decoder/encoder types into one
 // wire.ClientCodec. It is a composition convenience, not a semantic type.
 type clientCodecBundle struct {
 	request interface {
-		DecodeClientRequest(carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error)
+		DecodeClientRequest(carrier.Document) (wire.ClientDecodeResult, error)
 	}
 	document interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (effect.Result[carrier.CarrierDocument], error)
+		EncodeResponseDocument(canonical.CanonicalOutput) (wire.ClientDocumentResult, error)
 	}
 	stream interface {
-		EncodeResponseStream(canonical.EventReader, delivery.Delivery) (effect.Result[carrier.CarrierStream], error)
+		EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
+		EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error)
 	}
 }
 
-func (b clientCodecBundle) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
+func (b clientCodecBundle) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	return b.request.DecodeClientRequest(doc)
 }
 
-func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.CarrierDocument], error) {
+func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
 	return b.document.EncodeResponseDocument(output)
 }
 
-func (b clientCodecBundle) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (effect.Result[carrier.CarrierStream], error) {
-	return b.stream.EncodeResponseStream(events, d)
+func (b clientCodecBundle) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
+	return b.stream.EncodeResponseStream(ctx, events, d)
+}
+
+func (b clientCodecBundle) EncodeResponseMessages(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientMessageResult, error) {
+	return b.stream.EncodeResponseMessages(ctx, events, d)
 }

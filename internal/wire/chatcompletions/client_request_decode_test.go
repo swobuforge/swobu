@@ -14,7 +14,7 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"{\"query\":\"hello\"}"}}]}]}`)
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
@@ -41,7 +41,7 @@ func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testin
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"oops"}}]}]}`)
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw})
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err == nil {
 		t.Fatal("DecodeClientRequest returned nil error, want BAD_REQUEST")
 	}
@@ -65,7 +65,7 @@ func TestDecodeClientRequest_PreservesSystemAndDeveloperMessagesAsInstructions(t
 		{"role":"developer","content":"Use native tools for file edits."},
 		{"role":"user","content":"inspect files"}
 	]}`)
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}

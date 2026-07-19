@@ -11,18 +11,18 @@ import (
 	"testing"
 
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type stubTargetProber struct {
-	result   exchange.TargetProbeResult
+	result   provider.TargetProbeResult
 	err      error
-	probeFn  func(exchange.RoutableTarget) (exchange.TargetProbeResult, error)
-	attempts []exchange.RoutableTarget
+	probeFn  func(provider.TargetSnapshot) (provider.TargetProbeResult, error)
+	attempts []provider.TargetSnapshot
 }
 
-func (s *stubTargetProber) ProbeTarget(_ context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+func (s *stubTargetProber) ProbeTarget(_ context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	s.attempts = append(s.attempts, target)
 	if s.probeFn != nil {
 		return s.probeFn(target)
@@ -53,7 +53,7 @@ func TestModelCatalogProbeHandlerRequiresTypedPOST(t *testing.T) {
 
 func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testing.T) {
 	diagnostics := json.RawMessage(`{"authentication":"aws_identity"}`)
-	stub := &stubTargetProber{result: exchange.TargetProbeResult{
+	stub := &stubTargetProber{result: provider.TargetProbeResult{
 		Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}},
 		Diagnostics: diagnostics,
 	}}
@@ -76,7 +76,7 @@ func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testin
 }
 
 func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.T) {
-	stub := &stubTargetProber{result: exchange.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}}
+	stub := &stubTargetProber{result: provider.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}}
 	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
 		Custom: &workspaceapi.CustomConnection{BaseURL: "https://example.test/v1", Header: &workspaceapi.CustomHeader{Name: "X-Custom-Auth", Credential: "env:CUSTOM_KEY"}},
 	}, "responses")
@@ -89,11 +89,11 @@ func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.
 }
 
 func TestModelCatalogProbeHandlerAutoProbeUsesProtocolCapabilities(t *testing.T) {
-	stub := &stubTargetProber{probeFn: func(target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+	stub := &stubTargetProber{probeFn: func(target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 		if target.ProviderProtocol == "responses_stream" {
-			return exchange.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}, nil
+			return provider.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}, nil
 		}
-		return exchange.TargetProbeResult{}, errors.New("try next protocol")
+		return provider.TargetProbeResult{}, errors.New("try next protocol")
 	}}
 	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
 		OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"},

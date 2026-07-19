@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func Wrap(inner canonical.EventReader) canonical.EventReader {
+func Wrap(inner canonical.ResponseStream) canonical.ResponseStream {
 	if inner == nil {
 		return nil
 	}
@@ -18,7 +18,7 @@ func Wrap(inner canonical.EventReader) canonical.EventReader {
 }
 
 type EventReader struct {
-	inner     canonical.EventReader
+	inner     canonical.ResponseStream
 	stateByID map[canonical.EnvelopeID]canonical.EnvelopeKind
 }
 

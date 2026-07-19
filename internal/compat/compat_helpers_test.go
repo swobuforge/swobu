@@ -3,19 +3,7 @@ package compat
 import (
 	"fmt"
 	"strings"
-
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
-
-// Capability describes one route-scoped support fact for one feature.
-type Capability struct {
-	Feature    Feature           `json:"feature"`
-	Support    Support           `json:"support"`
-	Provider   string            `json:"provider,omitempty"`
-	Protocol   string            `json:"protocol,omitempty"`
-	Model      string            `json:"model,omitempty"`
-	Qualifiers map[string]string `json:"qualifiers,omitempty"`
-}
 
 var knownFeatureSet = map[Feature]struct{}{
 	RequestInputShape:        {},
@@ -70,9 +58,6 @@ var knownFeatureSet = map[Feature]struct{}{
 	DeliveryIncremental:      {},
 	DeliveryTerminalEvent:    {},
 	WireJSONMode:             {},
-	WireRawPayload:           {},
-	WireNativePayload:        {},
-	StateTurnSnapshot:        {},
 	ErrorShape:               {},
 	ErrorClass:               {},
 }
@@ -116,31 +101,4 @@ func ValidateSubject(subject Subject) error {
 		return fmt.Errorf("subject %q is invalid", normalized)
 	}
 	return nil
-}
-
-// CapabilitiesForRoute returns the support facts for one route/protocol/model
-// tuple. Unknown routes return nil.
-func CapabilitiesForRoute(provider string, protocol string, model string) []Capability {
-	provider = strings.TrimSpace(provider)
-	protocol = strings.TrimSpace(protocol)
-	model = strings.TrimSpace(model)
-	features, ok := routeFeatures(routeKey{
-		Provider: provider,
-		Protocol: protocolkind.ProtocolKind(protocol),
-		Model:    model,
-	})
-	if !ok {
-		return nil
-	}
-	caps := make([]Capability, 0, len(features))
-	for _, feature := range features {
-		caps = append(caps, Capability{
-			Feature:  feature,
-			Support:  Supported,
-			Provider: provider,
-			Protocol: protocol,
-			Model:    model,
-		})
-	}
-	return caps
 }

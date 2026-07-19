@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
-func logBedrockBackendDiagnostic(operation string, target exchange.RoutableTarget, requestPath string, payload []byte, backendErr canonical.BackendError) {
+func logBedrockBackendDiagnostic(operation string, target provider.TargetSnapshot, requestPath string, payload []byte, backendErr canonical.BackendError) {
 	msg := strings.TrimSpace(backendErr.Message) // swobu:io-string source=boundary
 	if msg == "" {
 		return
@@ -35,7 +35,7 @@ func logBedrockBackendDiagnostic(operation string, target exchange.RoutableTarge
 			"foundation_model_arn", foundationModelARN,
 			"inference_profile_arn", inferenceProfileARN,
 			"status_code", backendErr.StatusCode,
-			"backend_ref", backendErr.BackendRef,
+			"target_id", backendErr.TargetID,
 			"diagnostic", "model/operation is not invokable for current account+region+api path",
 		)
 	case strings.Contains(lower, "does not exist") && strings.Contains(lower, "model"):
@@ -49,7 +49,7 @@ func logBedrockBackendDiagnostic(operation string, target exchange.RoutableTarge
 			"foundation_model_arn", foundationModelARN,
 			"inference_profile_arn", inferenceProfileARN,
 			"status_code", backendErr.StatusCode,
-			"backend_ref", backendErr.BackendRef,
+			"target_id", backendErr.TargetID,
 			"diagnostic", "selected model id is unavailable on this endpoint/account/region",
 		)
 	}

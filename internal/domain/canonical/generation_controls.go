@@ -122,9 +122,6 @@ func NewGenerationControls(params GenerationControlsParams) (GenerationControls,
 		controls.Limits.MaxOutputTokens = NewOptionalInt(*params.MaxOutputTokens)
 	}
 	if params.StopSequences != nil {
-		if len(params.StopSequences) == 0 {
-			return GenerationControls{}, BadRequest("generation controls stop sequence must not be empty")
-		}
 		stopSequences := make([]string, 0, len(params.StopSequences))
 		for _, seq := range params.StopSequences {
 			if strings.TrimSpace(seq) == "" { // swobu:io-string source=domain

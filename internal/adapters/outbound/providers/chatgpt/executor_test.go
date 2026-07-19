@@ -15,12 +15,13 @@ import (
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type stubCredentialResolver struct{}
@@ -68,13 +69,43 @@ func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	}, nil
 }
 
-type recordingEffectSink struct {
-	effects []effect.Effect
+type recordingDecisionSink struct {
+	effects []compat.Decision
 }
 
-func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
 	s.effects = append(s.effects, effects...)
 	return nil
+}
+
+type testProviderRequest struct {
+	Request      canonical.CanonicalRequest
+	Contract     exchange.ExecutionContract
+	Target       provider.TargetSnapshot
+	ExchangeID   string
+	DecisionSink compat.Sink
+}
+
+func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...compat.Sink) testProviderRequest {
+	var sink compat.Sink
+	if len(sinks) > 0 {
+		sink = sinks[0]
+	}
+	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, DecisionSink: sink}
+}
+
+func executeTestProviderRequest(ctx context.Context, exec BackendAdapter, req testProviderRequest) (provider.Ingress, error) {
+	target := req.Target.Clone()
+	target.Model = req.Request.Model()
+	backend, err := exec.ResolveBackend(target)
+	if err != nil {
+		return nil, err
+	}
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
+	if err != nil {
+		return nil, err
+	}
+	return backend.Transport.Send(ctx, doc)
 }
 
 func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
@@ -104,7 +135,7 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 		t.Fatalf("store secretfile bundle: %v", err)
 	}
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -127,7 +158,7 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 	t.Setenv("USERPROFILE", "")
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -138,6 +169,30 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 		""))
 	if err == nil {
 		t.Fatalf("expected error, got models=%v", models)
+	}
+}
+
+func TestResolveBackendResponsesEnablesVersionedNativeContinuation(t *testing.T) {
+	target := provider.NewTargetSnapshot(
+		"chatgpt-default",
+		string(profile.ProviderSpecChatGPT),
+		"",
+		"secret:chatgpt/default",
+		protocolkind.Responses,
+		"",
+		"responses_stream",
+	)
+	target.Model = "gpt-test"
+	backend, err := NewExecutor(nil, stubCredentialResolver{}).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.CaptureContinuation == nil {
+		t.Fatal("ChatGPT Responses did not opt into native continuation")
+	}
+	native := backend.CaptureContinuation("resp_1")
+	if native == nil || native.TargetID != target.TargetID || native.TargetVersion != target.TargetVersion {
+		t.Fatalf("native continuation = %#v", native)
 	}
 }
 
@@ -167,7 +222,7 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 	}
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"chatgpt",
 		srv.URL+"/v1",
@@ -203,7 +258,7 @@ func TestListModels_ResolvesTierFromStoredSecretBundleWhenRefHasNoTierSegment(t 
 	}
 
 	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListDeployments(context.Background(), exchange.NewRoutableTarget(
+	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"chatgpt",
 		"https://chatgpt.com/backend-api/codex",
@@ -225,14 +280,14 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 
 	rt := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		exchange.NewRoutableTarget(
+		provider.NewTargetSnapshot(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			"https://api.openai.com/v1",
@@ -241,15 +296,16 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 
 			"", "responses_stream"),
 	)
-	resp, err := exec.ResolveProviderIngress(context.Background(), req)
+	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	streamBody, ok := resp.(carrier.CarrierStream)
-	if !ok || streamBody.Frames == nil {
+	streamIngress, ok := resp.(provider.StreamIngress)
+	if !ok || streamIngress.Stream.Body == nil {
 		t.Fatal("expected transport stream response")
 	}
-	if closeErr := streamBody.Frames.Close(); closeErr != nil {
+	streamBody := streamIngress.Stream
+	if closeErr := streamBody.Body.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 	if rt.lastRequest == nil {
@@ -278,15 +334,15 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 
 	rt := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
-	sink := &recordingEffectSink{}
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
+	sink := &recordingDecisionSink{}
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		exchange.NewRoutableTarget(
+		provider.NewTargetSnapshot(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			"https://api.openai.com/v1",
@@ -299,15 +355,16 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	)
 	req.ExchangeID = "ex-chatgpt-cache"
 
-	resp, err := exec.ResolveProviderIngress(context.Background(), req)
+	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	streamBody, ok := resp.(carrier.CarrierStream)
-	if !ok || streamBody.Frames == nil {
+	streamIngress, ok := resp.(provider.StreamIngress)
+	if !ok || streamIngress.Stream.Body == nil {
 		t.Fatal("expected transport stream response")
 	}
-	if closeErr := streamBody.Frames.Close(); closeErr != nil {
+	streamBody := streamIngress.Stream
+	if closeErr := streamBody.Body.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 	body := mustJSONBodyMap(t, rt.lastBody)
@@ -318,7 +375,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 		t.Fatalf("prompt_cache_retention must be omitted")
 	}
 	if len(sink.effects) != 0 {
-		t.Fatalf("compatibility effects len=%d want 0", len(sink.effects))
+		t.Fatalf("compatibility decisions len=%d want 0", len(sink.effects))
 	}
 }
 
@@ -334,14 +391,14 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		exchange.NewRoutableTarget(
+		provider.NewTargetSnapshot(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -350,7 +407,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 
 			"", "responses_stream"),
 	)
-	if _, err := exec.ResolveProviderIngress(context.Background(), req); err != nil {
+	if _, err := executeTestProviderRequest(context.Background(), exec, req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if seenPath != "/backend-api/codex/responses" {
@@ -367,14 +424,14 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), failingCredentialResolver{})
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		exchange.NewRoutableTarget(
+		provider.NewTargetSnapshot(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -383,7 +440,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 
 			"", "responses_stream"),
 	)
-	_, err := exec.ResolveProviderIngress(context.Background(), req)
+	_, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -438,14 +495,14 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		exchange.NewRoutableTarget(
+		provider.NewTargetSnapshot(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -454,12 +511,12 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 
 			"", "responses_stream"),
 	)
-	resp, err := exec.ResolveProviderIngress(context.Background(), req)
+	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
-	if streamBody, ok := resp.(carrier.CarrierStream); ok && streamBody.Frames != nil {
-		_ = streamBody.Frames.Close()
+	if streamIngress, ok := resp.(provider.StreamIngress); ok && streamIngress.Stream.Body != nil {
+		_ = streamIngress.Stream.Body.Close()
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts=%d want 2", attempts)
@@ -490,14 +547,14 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "gpt-5.4-mini",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
 		}),
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
-		exchange.NewRoutableTarget(
+		provider.NewTargetSnapshot(
 			"draft",
 			string(profile.ProviderSpecChatGPT),
 			srv.URL+"/backend-api/codex",
@@ -506,15 +563,16 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 
 			"", "responses_stream"),
 	)
-	resp, err := exec.ResolveProviderIngress(context.Background(), req)
+	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	streamBody, ok := resp.(carrier.CarrierStream)
-	if !ok || streamBody.Frames == nil {
+	streamIngress, ok := resp.(provider.StreamIngress)
+	if !ok || streamIngress.Stream.Body == nil {
 		t.Fatal("expected transport stream response")
 	}
-	if closeErr := streamBody.Frames.Close(); closeErr != nil {
+	streamBody := streamIngress.Stream
+	if closeErr := streamBody.Body.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
 	}
 }

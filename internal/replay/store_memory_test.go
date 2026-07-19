@@ -13,7 +13,7 @@ import (
 
 func TestMemoryStoreConcurrentAccess(t *testing.T) {
 	store := NewMemoryStore()
-	scope := Scope{Namespace: "alpha", CallerKey: "local"}
+	scope := "alpha"
 
 	const goroutines = 32
 	const iterations = 64
@@ -30,7 +30,6 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 				id := ID(fmt.Sprintf("resp_%d_%d", g, i))
 				record := Record{
 					ID:        id,
-					Scope:     scope,
 					CreatedAt: time.Now().UTC(),
 				}
 				if err := store.Put(context.Background(), scope, record); err != nil {
@@ -63,18 +62,12 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreDefensivelyCopiesNativeRef(t *testing.T) {
+func TestMemoryStoreDefensivelyCopiesNativeContinuation(t *testing.T) {
 	store := NewMemoryStore()
-	scope := Scope{Namespace: "alpha", CallerKey: "local"}
-	native := &NativeRef{
-		ReplayID: "resp_1",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_resp_1",
-	}
+	scope := "alpha"
+	native := testBackendTarget(t, "m").NativeContinuation("provider_resp_1")
 	record := Record{
 		ID:        "resp_1",
-		Scope:     scope,
 		Request:   makeRequest("m", makeItems("hello"), canonical.TurnRef{}),
 		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")),
 		Native:    native,
@@ -85,7 +78,7 @@ func TestMemoryStoreDefensivelyCopiesNativeRef(t *testing.T) {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	native.Value = "mutated"
+	native.ID = "mutated"
 	got, ok, err := store.Get(context.Background(), scope, "resp_1")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
@@ -96,11 +89,11 @@ func TestMemoryStoreDefensivelyCopiesNativeRef(t *testing.T) {
 	if got.Native == nil {
 		t.Fatal("expected native ref to be present")
 	}
-	if got.Native.Value != "provider_resp_1" {
-		t.Fatalf("stored native value = %q, want provider_resp_1", got.Native.Value)
+	if got.Native.ID != "provider_resp_1" {
+		t.Fatalf("stored native ID = %q, want provider_resp_1", got.Native.ID)
 	}
 
-	got.Native.Value = "changed"
+	got.Native.ID = "changed"
 	gotAgain, ok, err := store.Get(context.Background(), scope, "resp_1")
 	if err != nil {
 		t.Fatalf("second Get failed: %v", err)
@@ -111,18 +104,17 @@ func TestMemoryStoreDefensivelyCopiesNativeRef(t *testing.T) {
 	if gotAgain.Native == nil {
 		t.Fatal("expected native ref to be present on second read")
 	}
-	if gotAgain.Native.Value != "provider_resp_1" {
-		t.Fatalf("store was mutated through Get result, native value = %q", gotAgain.Native.Value)
+	if gotAgain.Native.ID != "provider_resp_1" {
+		t.Fatalf("store was mutated through Get result, native ID = %q", gotAgain.Native.ID)
 	}
 }
 
 func TestMemoryStoreDefensivelyCopiesExpiresAt(t *testing.T) {
 	store := NewMemoryStore()
-	scope := Scope{Namespace: "alpha", CallerKey: "local"}
+	scope := "alpha"
 	expiresAt := time.Now().UTC().Add(time.Hour)
 	record := Record{
 		ID:        "resp_expiry",
-		Scope:     scope,
 		Request:   makeRequest("m", makeItems("hello"), canonical.TurnRef{}),
 		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")),
 		ExpiresAt: &expiresAt,
@@ -162,11 +154,10 @@ func TestMemoryStoreDefensivelyCopiesExpiresAt(t *testing.T) {
 
 func TestMemoryStoreRejectsExpiredRecord(t *testing.T) {
 	store := NewMemoryStore()
-	scope := Scope{Namespace: "alpha", CallerKey: "local"}
+	scope := "alpha"
 	expiredAt := time.Now().UTC().Add(-time.Minute)
 	record := Record{
 		ID:        "resp_expired",
-		Scope:     scope,
 		Request:   makeRequest("m", makeItems("hello"), canonical.TurnRef{}),
 		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")),
 		ExpiresAt: &expiredAt,
@@ -188,10 +179,9 @@ func TestMemoryStoreRejectsExpiredRecord(t *testing.T) {
 
 func TestMemoryStoreRejectsDuplicateIDs(t *testing.T) {
 	store := NewMemoryStore()
-	scope := Scope{Namespace: "alpha", CallerKey: "local"}
+	scope := "alpha"
 	record := Record{
 		ID:        "resp_1",
-		Scope:     scope,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := store.Put(context.Background(), scope, record); err != nil {
@@ -214,23 +204,55 @@ func TestMemoryStoreRejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreRejectsScopeMismatch(t *testing.T) {
+func TestMemoryStoreWriteReclaimsHighVolumeExpiredRecordsWithoutReadingThem(t *testing.T) {
+	store := newMemoryStore()
+	current := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return current }
+	expiresAt := current.Add(time.Minute)
+
+	const recordCount = 10_000
+	for i := 0; i < recordCount; i++ {
+		record := Record{ID: ID(fmt.Sprintf("expired_%05d", i)), CreatedAt: current, ExpiresAt: &expiresAt}
+		if err := store.Put(context.Background(), "alpha", record); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+	}
+	if got := len(store.records); got != recordCount {
+		t.Fatalf("records before expiry = %d, want %d", got, recordCount)
+	}
+
+	current = current.Add(2 * time.Minute)
+	if err := store.Put(context.Background(), "alpha", Record{ID: "live", CreatedAt: current}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(store.records); got != 1 {
+		t.Fatalf("records after write reclamation = %d, want 1", got)
+	}
+	if got := store.expires.Len(); got != 1 {
+		t.Fatalf("expiration index after reclamation = %d, want 1", got)
+	}
+}
+
+func TestDaemonReplayStorePartitionsByWorkspaceSlug(t *testing.T) {
 	store := NewMemoryStore()
-	recordScope := Scope{Namespace: "alpha", CallerKey: "local"}
-	callScope := Scope{Namespace: "beta", CallerKey: "local"}
-	record := Record{
-		ID:        "resp_1",
-		Scope:     recordScope,
-		CreatedAt: time.Now().UTC(),
+	record := Record{ID: "resp_shared", CreatedAt: time.Now().UTC()}
+
+	if err := store.Put(context.Background(), "alpha", record); err != nil {
+		t.Fatalf("Put alpha: %v", err)
 	}
-	if err := store.Put(context.Background(), callScope, record); err == nil {
-		t.Fatal("expected scope mismatch to fail")
-	} else if err.Error() != "replay record scope mismatch" {
-		t.Fatalf("scope mismatch error = %v, want replay record scope mismatch", err)
+	if _, found, err := store.Get(context.Background(), "beta", record.ID); err != nil {
+		t.Fatalf("Get beta: %v", err)
+	} else if found {
+		t.Fatal("record from alpha was visible in beta")
 	}
-	if _, ok, err := store.Get(context.Background(), recordScope, "resp_1"); err != nil {
-		t.Fatalf("Get failed: %v", err)
-	} else if ok {
-		t.Fatal("expected scope-mismatched record not to be stored")
+	if err := store.Put(context.Background(), "beta", record); err != nil {
+		t.Fatalf("same replay ID must be legal in another workspace: %v", err)
+	}
+	for _, workspaceSlug := range []string{"alpha", "beta"} {
+		if got, found, err := store.Get(context.Background(), workspaceSlug, record.ID); err != nil {
+			t.Fatalf("Get %s: %v", workspaceSlug, err)
+		} else if !found || got.ID != record.ID {
+			t.Fatalf("Get %s = (%q, %t), want (%q, true)", workspaceSlug, got.ID, found, record.ID)
+		}
 	}
 }

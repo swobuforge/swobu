@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
 // DecodeResponsesToolPolicy maps responses tool_choice into canonical tool
 // policy. String auto/required values remain direct. Specific tool selection is
 // resolved against the declared tools so the semantic tool ID stays canonical.
-func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		if len(tools) > 0 {

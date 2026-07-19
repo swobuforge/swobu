@@ -1,12 +1,12 @@
 package messages
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -20,7 +20,7 @@ func TestResponseDocumentEncoder_RefusalLowersToStopReason(t *testing.T) {
 		t.Fatalf("EncodeResponseDocument returned error: %v", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Value.Raw, &payload); err != nil {
+	if err := json.Unmarshal(result.Document.Raw, &payload); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if got := payload["stop_reason"]; got != "refusal" {
@@ -32,11 +32,11 @@ func TestResponseStreamEncoder_RefusalLowersToStopReason(t *testing.T) {
 	t.Parallel()
 
 	events := canonical.SynthesizeResponseEnvelopeEvents("ex_msg", "msg_1", "claude-x", nil, "refusal", canonical.NewUnknownTokenUsage())
-	stream, err := (ResponseStreamEncoder{}).EncodeResponseStream(canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream returned error: %v", err)
 	}
-	raw, err := io.ReadAll(carrier.ReadCloserFromFrameReader(stream.Value.Frames))
+	raw, err := io.ReadAll(stream.Stream.Body)
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
 	}

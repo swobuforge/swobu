@@ -15,10 +15,10 @@ import (
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	"github.com/swobuforge/swobu/internal/configstore"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
@@ -62,8 +62,8 @@ var daemonIdleTimeout = 60 * time.Second
 type StartInput struct {
 	ConfigPath       string
 	StartupConfig    config.StartupConfig
-	Providers        exchange.ProviderIngressResolver
-	ModelCatalog     exchange.ProviderDiscovery
+	Providers        provider.BackendResolver
+	ModelCatalog     provider.Discovery
 	TrafficEventSink observation.TrafficEventSink
 	Logger           *slog.Logger
 }
@@ -117,10 +117,13 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if providers == nil {
 		// Bootstrap owns provider wiring composition so operator surfaces do not
 		// import provider adapters directly.
-		composition := providersadapter.NewProviderRegistry(
+		composition, err := providersadapter.NewProviderRegistry(
 			newProviderHTTPClient(),
 			credentialsadapter.NewResolver(),
 		)
+		if err != nil {
+			return nil, fmt.Errorf("compose providers: %w", err)
+		}
 		providers = composition
 		discovery = composition
 	}

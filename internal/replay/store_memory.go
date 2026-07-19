@@ -1,6 +1,7 @@
 package replay
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"strings"
@@ -10,73 +11,102 @@ import (
 
 // NewMemoryStore returns a thread-safe in-memory Store for production
 // bootstrap where persistent replay is not yet wired. Records are bounded by
-// ExpiresAt and purged on read once they go stale.
+// ExpiresAt and reclaimed opportunistically on every write as well as reads.
 func NewMemoryStore() Store {
 	return newMemoryStore()
 }
 
 type memoryStore struct {
 	mu      sync.RWMutex
-	records map[scopedID]Record
+	records map[workspaceRecordID]Record
+	expires expirationHeap
+	now     func() time.Time
 }
 
-type scopedID struct {
-	Scope Scope
-	ID    ID
+type workspaceRecordID struct {
+	workspaceSlug string
+	id            ID
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		records: make(map[scopedID]Record),
+		records: make(map[workspaceRecordID]Record),
+		now:     func() time.Time { return time.Now().UTC() },
 	}
 }
 
-func (s *memoryStore) Get(ctx context.Context, scope Scope, id ID) (Record, bool, error) {
-	_ = ctx
-	if strings.TrimSpace(scope.Namespace) == "" {
-		return Record{}, false, errors.New("replay scope namespace is empty")
+type expirationEntry struct {
+	key workspaceRecordID
+	at  time.Time
+}
+
+type expirationHeap []expirationEntry
+
+func (h expirationHeap) Len() int           { return len(h) }
+func (h expirationHeap) Less(i, j int) bool { return h[i].at.Before(h[j].at) }
+func (h expirationHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *expirationHeap) Push(value any)    { *h = append(*h, value.(expirationEntry)) }
+func (h *expirationHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	*h = old[:last]
+	return value
+}
+
+func (s *memoryStore) reclaimExpired(now time.Time) {
+	for s.expires.Len() > 0 && !s.expires[0].at.After(now) {
+		entry := heap.Pop(&s.expires).(expirationEntry)
+		record, found := s.records[entry.key]
+		if found && record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
+			delete(s.records, entry.key)
+		}
 	}
-	if strings.TrimSpace(scope.CallerKey) == "" {
-		return Record{}, false, errors.New("replay scope caller key is empty")
+}
+
+func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id ID) (Record, bool, error) {
+	_ = ctx
+	workspaceSlug = strings.TrimSpace(workspaceSlug)
+	if workspaceSlug == "" {
+		return Record{}, false, errors.New("replay workspace slug is empty")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.records[scopedID{Scope: scope, ID: id}]
+	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: id}
+	r, ok := s.records[key]
 	if !ok {
 		return Record{}, false, nil
 	}
-	if r.ExpiresAt != nil && !r.ExpiresAt.After(time.Now().UTC()) {
-		delete(s.records, scopedID{Scope: scope, ID: id})
+	if r.ExpiresAt != nil && !r.ExpiresAt.After(s.now()) {
+		delete(s.records, key)
 		return Record{}, false, nil
 	}
 	return r.Clone(), true, nil
 }
 
-func (s *memoryStore) Put(ctx context.Context, scope Scope, record Record) error {
+func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Record) error {
 	_ = ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if strings.TrimSpace(scope.Namespace) == "" {
-		return errors.New("replay scope namespace is empty")
-	}
-	if strings.TrimSpace(scope.CallerKey) == "" {
-		return errors.New("replay scope caller key is empty")
+	now := s.now()
+	s.reclaimExpired(now)
+	workspaceSlug = strings.TrimSpace(workspaceSlug)
+	if workspaceSlug == "" {
+		return errors.New("replay workspace slug is empty")
 	}
 	if record.ID == "" {
 		return errors.New("replay record id is empty")
 	}
-	if record.Scope != scope {
-		return errors.New("replay record scope mismatch")
-	}
-	key := scopedID{Scope: scope, ID: record.ID}
+	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: record.ID}
 	if _, exists := s.records[key]; exists {
 		return ErrReplayRecordExists
 	}
 	cloned := record.Clone()
 	if cloned.ExpiresAt == nil {
-		expiresAt := time.Now().UTC().Add(defaultRecordTTL)
+		expiresAt := now.Add(defaultRecordTTL)
 		cloned.ExpiresAt = &expiresAt
 	}
 	s.records[key] = cloned
+	heap.Push(&s.expires, expirationEntry{key: key, at: *cloned.ExpiresAt})
 	return nil
 }

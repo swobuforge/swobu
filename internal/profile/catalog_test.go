@@ -253,12 +253,3 @@ func TestCatalog_ConcreteProviderProtocolsForSpec_OrderIsCanonical(t *testing.T)
 		t.Fatalf("chatgpt concrete protocols=%v want [responses_stream]", chatgpt)
 	}
 }
-
-func TestCustomEndpointDoesNotPromiseModelCatalog(t *testing.T) {
-	if SupportsCapability(string(ProviderSpecCustom), CapabilityModelCatalog) {
-		t.Fatal("Custom Endpoint cannot promise /models support for arbitrary compatible backends")
-	}
-	if !SupportsCapability(string(ProviderSpecCustom), CapabilityStreaming) {
-		t.Fatal("Custom Endpoint lost its declared streaming capability")
-	}
-}

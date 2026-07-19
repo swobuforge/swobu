@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,8 +11,23 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/replay"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
+
+type deliveryReplayStore struct {
+	putCalls int
+	putErr   error
+}
+
+func (*deliveryReplayStore) Get(context.Context, string, replay.ID) (replay.Record, bool, error) {
+	return replay.Record{}, false, nil
+}
+
+func (s *deliveryReplayStore) Put(context.Context, string, replay.Record) error {
+	s.putCalls++
+	return s.putErr
+}
 
 func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	out := canonical.NewConversationOutput(
@@ -22,15 +38,15 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 		},
 		"completed",
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream, false)}
+	resp := exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream)}
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(context.Background(), rr, "req_test_1", canonical.ClientFamilyResponses, resp); err != nil {
-		t.Fatalf("writeSuccessResponse error: %v", err)
+	if result := writeSuccessResponse(context.Background(), rr, "req_test_1", canonical.ClientFamilyResponses, resp); result.Kind != transportpkg.DeliverySucceeded {
+		t.Fatalf("delivery result: %#v", result)
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -53,15 +69,15 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 		},
 		"completed",
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	resp := exchange.RequestOutput{Response: exchange.NewTransportResponseFromStream(stream, false)}
+	resp := exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream)}
 
 	rr := httptest.NewRecorder()
-	if err := writeSuccessResponse(context.Background(), rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); err != nil {
-		t.Fatalf("writeSuccessResponse error: %v", err)
+	if result := writeSuccessResponse(context.Background(), rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); result.Kind != transportpkg.DeliverySucceeded {
+		t.Fatalf("delivery result: %#v", result)
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -74,24 +90,22 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 
 func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testing.T) {
 	resp := exchange.RequestOutput{
-		Response: exchange.TransportResponse{
-			Transport: transportpkg.TransportResponse{
-				Status: http.StatusOK,
-				Header: http.Header{
-					"Content-Type": []string{"text/event-stream"},
-				},
-				Body: immediateReadErrorBody{},
+		Response: exchange.StreamingResponse{Response: transportpkg.Response{
+			Status: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
 			},
-		},
+			Body: immediateReadErrorBody{},
+		}},
 	}
 
 	writer := &writeHeaderCountingResponseWriter{}
-	err := writeSuccessResponse(context.Background(), writer, "req_test_3", canonical.ClientFamilyResponses, resp)
-	if err == nil {
-		t.Fatal("writeSuccessResponse returned nil, want stream decoding failure")
+	result := writeSuccessResponse(context.Background(), writer, "req_test_3", canonical.ClientFamilyResponses, resp)
+	if result.Kind != transportpkg.DeliveryProviderStreamFailed || result.Err == nil {
+		t.Fatalf("delivery result = %#v, want provider stream failure", result)
 	}
-	if !strings.Contains(err.Error(), "stream decoding failed") {
-		t.Fatalf("error = %v, want stream decoding failed", err)
+	if !strings.Contains(result.Err.Error(), "stream body failed") {
+		t.Fatalf("error = %v, want stream body failure", result.Err)
 	}
 	if writer.writeHeaderCount != 0 {
 		t.Fatalf("writeHeader count = %d, want 0", writer.writeHeaderCount)
@@ -103,29 +117,121 @@ func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testin
 	defer cancel()
 
 	resp := exchange.RequestOutput{
-		Response: exchange.TransportResponse{
-			Transport: transportpkg.TransportResponse{
-				Status: http.StatusOK,
-				Header: http.Header{
-					"Content-Type": []string{"text/event-stream"},
-				},
-				Body: &firstChunkThenErrorBody{},
+		Response: exchange.StreamingResponse{Response: transportpkg.Response{
+			Status: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
 			},
-		},
+			Body: &firstChunkThenErrorBody{},
+		}},
 	}
 
 	writer := &writeHeaderCountingResponseWriter{
 		cancelAfterWriteCount: 1,
 		cancel:                cancel,
 	}
-	err := writeSuccessResponse(ctx, writer, "req_test_4", canonical.ClientFamilyResponses, resp)
-	if err != nil {
-		t.Fatalf("writeSuccessResponse returned error: %v", err)
+	result := writeSuccessResponse(ctx, writer, "req_test_4", canonical.ClientFamilyResponses, resp)
+	if result.Kind != transportpkg.DeliveryClientCancelled {
+		t.Fatalf("delivery result = %#v, want client cancellation", result)
 	}
 	if writer.writeHeaderCount != 1 {
 		t.Fatalf("writeHeader count = %d, want 1", writer.writeHeaderCount)
 	}
 	if writer.writeCount == 0 {
 		t.Fatal("body was not written")
+	}
+}
+
+func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing.T) {
+	store := &deliveryReplayStore{putErr: errors.New("store unavailable")}
+	response := canonical.NewConversationOutput(
+		"provider_response_1",
+		"m",
+		[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "hello")},
+		"completed",
+	)
+	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		"ex_replay_failure",
+		response.ResultID(),
+		response.Model(),
+		response.Items(),
+		response.FinishReason(),
+		response.Usage(),
+	))
+	committed := replay.NewCommitReader(events, replay.TerminalCommitConfig{
+		WorkspaceSlug: "alpha",
+		ExchangeID:    "ex_replay_failure",
+		ResponseID:    replay.ResponseID("swobu_replay_failure"),
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model:     "m",
+			InputText: "hello",
+		}),
+	})
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(
+		context.Background(), committed, delivery.StreamingDelivery(delivery.FramingSSE),
+	)
+	if err != nil {
+		t.Fatalf("EncodeResponseStream error: %v", err)
+	}
+
+	result := writeSuccessResponse(context.Background(), httptest.NewRecorder(), "req_replay_failure", canonical.ClientFamilyResponses, exchange.RequestOutput{
+		Response: exchange.NewStreamingResponse(stream),
+	})
+
+	if result.Kind != transportpkg.DeliveryReplayCommitFailed || result.Err == nil {
+		t.Fatalf("delivery result = %#v, want replay commit failure", result)
+	}
+	if store.putCalls != 1 {
+		t.Fatalf("replay put calls = %d, want 1", store.putCalls)
+	}
+}
+
+func TestWriteSuccessResponse_ClientCancellationDoesNotCommitReplay(t *testing.T) {
+	store := &deliveryReplayStore{}
+	response := canonical.NewConversationOutput(
+		"provider_response_2",
+		"m",
+		[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "hello")},
+		"completed",
+	)
+	committed := replay.NewCommitReader(
+		canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+			"ex_cancel",
+			response.ResultID(),
+			response.Model(),
+			response.Items(),
+			response.FinishReason(),
+			response.Usage(),
+		)),
+		replay.TerminalCommitConfig{
+			WorkspaceSlug: "alpha",
+			ExchangeID:    "ex_cancel",
+			ResponseID:    replay.ResponseID("swobu_cancel"),
+			Store:         store,
+			SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model:     "m",
+				InputText: "hello",
+			}),
+		},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(
+		ctx, committed, delivery.StreamingDelivery(delivery.FramingSSE),
+	)
+	if err != nil {
+		t.Fatalf("EncodeResponseStream error: %v", err)
+	}
+	writer := &writeHeaderCountingResponseWriter{cancelAfterWriteCount: 1, cancel: cancel}
+
+	result := writeSuccessResponse(ctx, writer, "req_cancel", canonical.ClientFamilyResponses, exchange.RequestOutput{
+		Response: exchange.NewStreamingResponse(stream),
+	})
+
+	if result.Kind != transportpkg.DeliveryClientCancelled {
+		t.Fatalf("delivery result = %#v, want client cancellation", result)
+	}
+	if store.putCalls != 0 {
+		t.Fatalf("replay put calls = %d, want 0", store.putCalls)
 	}
 }

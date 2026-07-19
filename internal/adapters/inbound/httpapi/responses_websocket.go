@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,23 +59,62 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		return
 	}
 
+	ctx, cancel := context.WithCancel(r.Context())
+	incoming := make(chan string, 1)
+	readErrors := make(chan error, 1)
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			var message string
+			if err := websocket.Message.Receive(conn, &message); err != nil {
+				cancel()
+				readErrors <- err
+				return
+			}
+			select {
+			case incoming <- message:
+			default:
+				cancel()
+				readErrors <- canonical.BadRequest("websocket response.create requests must be processed serially")
+				return
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		_ = conn.Close()
+		<-readerDone
+	}()
+
+	connectionID := requestIDFromRequest(r)
+	var messageSequence uint64
 	for {
 		var message string
-		if err := websocket.Message.Receive(conn, &message); err != nil {
+		select {
+		case message = <-incoming:
+		case err := <-readErrors:
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadRequest("websocket payload could not be read"))))
+			if ctx.Err() == nil {
+				_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadRequest("websocket payload could not be read"))))
+			}
+			return
+		case <-ctx.Done():
 			return
 		}
 
-		if err := h.handleResponsesWebsocketMessage(conn, r, parsedWorkspace, normalizedPath, []byte(message)); err != nil {
+		messageSequence++
+		exchangeID := connectionID + "/create/" + strconv.FormatUint(messageSequence, 10)
+		request := r.WithContext(ctx)
+		if err := h.handleResponsesWebsocketMessage(conn, request, parsedWorkspace, normalizedPath, exchangeID, []byte(message)); err != nil && ctx.Err() == nil {
 			_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
 		}
 	}
 }
 
-func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, raw []byte) error {
+func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, raw []byte) error {
 	if len(raw) > maxWebsocketRequestBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
@@ -97,7 +138,6 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if err != nil {
 		return canonical.BadRequest("websocket request body is invalid JSON")
 	}
-	requestID := requestIDFromRequest(r)
 	timing := trafficevidence.NewUnknownTiming()
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
@@ -111,31 +151,44 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	})
 	if err != nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
-		finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, err)
+		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, transportpkg.DeliveryResult{Kind: transportpkg.DeliveryExchangeFailed, Err: err})
 		return err
 	}
-	writeErr := writeResponsesWebsocketSuccess(conn, requestID, out.Response, &timing)
-	finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, writeErr)
-	return writeErr
+	result := writeResponsesWebsocketSuccess(r.Context(), conn, requestID, out.Response, &timing)
+	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, result)
+	return result.Err
 }
 
-func writeResponsesWebsocketSuccess(conn *websocket.Conn, requestID string, response exchange.TransportResponse, timing *trafficevidence.Timing) error {
-	if response.Transport.Header.Get("Content-Type") != "application/json" {
-		return canonical.UnsupportedDelivery("websocket responses require websocket-framed streaming output")
+func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *trafficevidence.Timing) transportpkg.DeliveryResult {
+	streaming, ok := response.(exchange.MessageStreamingResponse)
+	if !ok {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.UnsupportedDelivery("websocket responses require message-oriented streaming output")}
 	}
-	if response.Transport.Body == nil {
-		return canonical.InternalError("streaming client response is missing transport body")
+	transportResponse := streaming.Response
+	if transportResponse.Header.Get("Content-Type") != "application/json" {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.UnsupportedDelivery("websocket responses require websocket-framed streaming output")}
 	}
-	return writeResponsesWebsocketStream(conn, requestID, response.Transport, timing)
+	if transportResponse.Messages == nil {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing message stream")}
+	}
+	err := writeResponsesWebsocketStream(ctx, conn, requestID, transportResponse, timing)
+	if err == nil {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliverySucceeded}
+	}
+	var writeErr websocketFrameWriteError
+	if errors.As(err, &writeErr) {
+		return classifyClientWriteFailure(ctx, writeErr.err, nil)
+	}
+	return classifyDeliveryFailure(ctx, nil, err, nil)
 }
 
-func writeResponsesWebsocketStream(conn *websocket.Conn, requestID string, response transportpkg.TransportResponse, timing *trafficevidence.Timing) error {
-	stats, err := drainWebsocketBodyWithStats(response.Body, &websocketFrameSink{conn: conn, timing: timing})
+func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, requestID string, response transportpkg.MessageResponse, timing *trafficevidence.Timing) error {
+	stats, err := drainWebsocketMessagesWithStats(ctx, response.Messages, &websocketFrameSink{conn: conn, timing: timing})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
-		return canonical.InternalError("stream decoding failed")
+		return err
 	}
 	slog.Debug("protocol websocket stream emitted",
 		"component", "httpapi",
@@ -149,22 +202,24 @@ func writeResponsesWebsocketStream(conn *websocket.Conn, requestID string, respo
 	return nil
 }
 
-func drainWebsocketBodyWithStats(body io.ReadCloser, sink *websocketFrameSink) (streamDrainCounters, error) {
-	defer func() { _ = body.Close() }()
+type websocketFrameWriter interface {
+	WriteFrame([]byte) error
+}
+
+func drainWebsocketMessagesWithStats(ctx context.Context, messages transportpkg.MessageStream, sink websocketFrameWriter) (streamDrainCounters, error) {
+	defer func() { _ = messages.Close(ctx) }()
 	stats := streamDrainCounters{}
 	hash := sha256.New()
-	buf := make([]byte, 4096)
 	for {
-		n, err := body.Read(buf)
-		if n > 0 {
-			chunk := append([]byte(nil), buf[:n]...)
-			if writeErr := sink.WriteFrame(chunk); writeErr != nil {
-				return stats, writeErr
+		message, err := messages.Next(ctx)
+		if len(message) > 0 {
+			if writeErr := sink.WriteFrame(message); writeErr != nil {
+				return stats, websocketFrameWriteError{err: writeErr}
 			}
-			_, _ = hash.Write(chunk)
+			_, _ = hash.Write(message)
 			stats.EventCount++
 			stats.FrameCount++
-			stats.FrameBytes += len(chunk)
+			stats.FrameBytes += len(message)
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -175,6 +230,11 @@ func drainWebsocketBodyWithStats(body io.ReadCloser, sink *websocketFrameSink) (
 		}
 	}
 }
+
+type websocketFrameWriteError struct{ err error }
+
+func (e websocketFrameWriteError) Error() string { return e.err.Error() }
+func (e websocketFrameWriteError) Unwrap() error { return e.err }
 
 type websocketFrameSink struct {
 	conn      *websocket.Conn

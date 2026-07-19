@@ -3,24 +3,20 @@ package chatcompletions
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T) {
 	tests := []struct {
 		name        string
-		wire        carrier.CarrierStream
+		wire        carrier.ByteStream
 		reasonMatch string
 	}{
-		{name: "wrong protocol", wire: carrier.CarrierStream{Family: protocolkind.Responses, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingSSE}, reasonMatch: "protocol must be"},
-		{name: "wrong framing", wire: carrier.CarrierStream{Family: protocolkind.ChatCompletions, Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(""))), Framing: carrier.FramingNDJSON}, reasonMatch: "framing must be"},
-		{name: "missing frames", wire: carrier.CarrierStream{Family: protocolkind.ChatCompletions, Framing: carrier.FramingSSE}, reasonMatch: "frames must be configured"},
+		{name: "missing body", wire: carrier.ByteStream{MediaType: "text/event-stream"}, reasonMatch: "body must be configured"},
 	}
 
 	codec := legacyProviderEnvelopeDecoder{}

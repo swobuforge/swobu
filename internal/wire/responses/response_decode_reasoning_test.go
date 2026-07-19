@@ -8,14 +8,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 )
 
-type recordingEffectSink struct {
-	effects []effect.Effect
+type recordingDecisionSink struct {
+	effects []compat.Decision
 }
 
-func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
 	s.effects = append(s.effects, effects...)
 	return nil
 }
@@ -28,7 +27,7 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 		"model":"m",
 		"output":[{"type":"reasoning","id":"reasoning_1"}]
 	}`)
-	sink := &recordingEffectSink{}
+	sink := &recordingDecisionSink{}
 
 	_, err := decodeResponseBuffered(context.Background(), raw, "ex_reasoning", sink)
 	if err == nil {
@@ -47,10 +46,7 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
-	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
-	}
+	compatEffect := sink.effects[0]
 	if compatEffect.Feature != compat.ResponseReasoning || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want response.reasoning reject", compatEffect)
 	}

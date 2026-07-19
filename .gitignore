@@ -2,6 +2,7 @@ dist
 .out
 .aider*
 .pi
+**/handover
 
 # Local scratch/repro files used during iterative debugging.
 .tmp_*.go

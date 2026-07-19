@@ -152,7 +152,7 @@ func (t TargetSettingsDraft) routingTarget(id string) (routing.Target, error) {
 func finalizeTargetDraft(id, model, protocol string, connection Connection) (routing.Target, error) {
 	return routing.FinalizeTarget(routing.TargetDraft{
 		ID: id, Model: model, Protocol: protocol, Connection: connection.routingDraft(),
-	}, profile.RoutingCapabilities())
+	}, profile.RoutingConstructionFacts())
 }
 
 func (c Connection) routingDraft() routing.ConnectionDraft {
@@ -190,7 +190,7 @@ func (c Connection) routingDraft() routing.ConnectionDraft {
 // RoutingConnection parses the operator connection union through the routing
 // domain's single connection finalizer.
 func (c Connection) RoutingConnection() (routing.Connection, error) {
-	return routing.FinalizeConnection(c.routingDraft(), profile.RoutingCapabilities())
+	return routing.FinalizeConnection(c.routingDraft(), profile.RoutingConstructionFacts())
 }
 
 func normalize(raw string) string { return strings.TrimSpace(raw) }

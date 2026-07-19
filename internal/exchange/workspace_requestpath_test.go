@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -42,9 +43,9 @@ func requestpathWorkspace(t *testing.T) routing.Workspace {
 func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 	workspace := requestpathWorkspace(t)
 	var refs []string
-	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		refs = append(refs, req.Target.BackendRef)
-		return carrier.NewCarrierDocument(carrier.StageProviderIngressIn, req.Target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{}), nil
+	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		refs = append(refs, target.TargetID)
+		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
 	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "route-a", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
@@ -57,9 +58,9 @@ func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 func TestRequestPathUnknownModelAttemptsDefaultRoute(t *testing.T) {
 	workspace := requestpathWorkspace(t)
 	var refs []string
-	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		refs = append(refs, req.Target.BackendRef)
-		return carrier.NewCarrierDocument(carrier.StageProviderIngressIn, req.Target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{}), nil
+	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		refs = append(refs, target.TargetID)
+		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
 	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "unknown", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"missing","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
 	if err != nil {

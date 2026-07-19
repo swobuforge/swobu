@@ -6,6 +6,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.CarrierDocument, error) {
-	return EncodeCarrierWithEffects(req, d, nil, "")
+func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
+	return EncodeCarrierWithDecisions(req, d, nil, "")
 }

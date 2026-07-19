@@ -22,7 +22,7 @@ type envelopeOpenProjection struct {
 
 // ReadClosedEnvelope consumes events until the requested envelope kind closes.
 // It returns io.EOF when no such closed envelope exists in the stream.
-func ReadClosedEnvelope(ctx context.Context, r EventReader, kind EnvelopeKind) (*ClosedEnvelope, error) {
+func ReadClosedEnvelope(ctx context.Context, r ResponseStream, kind EnvelopeKind) (*ClosedEnvelope, error) {
 	open := map[EnvelopeID]*envelopeOpenProjection{}
 	appendToAncestors := func(id EnvelopeID, ev Event) {
 		current := id

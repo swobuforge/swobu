@@ -8,7 +8,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -57,7 +56,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink effect.Sink) (canonical.EventReader, error) {
+func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
 	var dto bufferedResponseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("messages response is invalid JSON")
@@ -86,13 +85,13 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 		}
 	}
 	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		exchangeID,
 		dto.ID,

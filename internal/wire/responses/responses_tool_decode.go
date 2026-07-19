@@ -8,11 +8,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func decodeResponsesTools(tools []responsesToolDefinitionDTO, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+func decodeResponsesTools(tools []responsesToolDefinitionDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -42,7 +41,7 @@ func decodeResponsesTools(tools []responsesToolDefinitionDTO, sink effect.Sink, 
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Responses tool variants.
-func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
 	if kind == "" {
 		switch {
@@ -102,7 +101,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 	}
 }
 
-func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return nil, canonical.BadRequest("responses request tool namespace declarations require a name")
@@ -126,7 +125,7 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 	return out, nil
 }
 
-func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) (canonical.ToolDecl, error) {
+func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) (canonical.ToolDecl, error) {
 	schema, err := responsesToolParametersFromWire(tool.Parameters)
 	if err != nil {
 		return nil, err
@@ -166,7 +165,7 @@ func decodeResponsesNestedFunctionTool(tool responsesToolDefinitionDTO, ctx resp
 	return decl, nil
 }
 
-func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink effect.Sink, exchangeID string) (canonical.ToolDecl, error) {
+func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) (canonical.ToolDecl, error) {
 	format, err := responsesToolFormatFromWire(tool.Format)
 	if err != nil {
 		return nil, err

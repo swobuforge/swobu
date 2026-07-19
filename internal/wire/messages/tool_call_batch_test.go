@@ -35,7 +35,7 @@ func TestDecodeRequest_DecodesDisableParallelToolUse(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: []byte(tc.raw)})
+			got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: []byte(tc.raw)})
 			if err != nil {
 				t.Fatalf("DecodeClientRequest: %v", err)
 			}
@@ -48,7 +48,7 @@ func TestDecodeRequest_DecodesDisableParallelToolUse(t *testing.T) {
 
 func TestDecodeRequest_RejectsDisableParallelToolUseWrongType(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
-	_, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Messages, Raw: []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"disable_parallel_tool_use":"nope"}`)})
+	_, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"disable_parallel_tool_use":"nope"}`)})
 	if err == nil {
 		t.Fatal("expected DecodeClientRequest to reject invalid disable_parallel_tool_use")
 	}

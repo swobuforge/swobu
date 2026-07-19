@@ -10,32 +10,34 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/provider"
 )
+
+var errTerminalCommit = errors.New("replay terminal commit failed")
+
+// IsTerminalCommitFailure reports whether terminal response consumption failed
+// because the completed replay record could not be stored.
+func IsTerminalCommitFailure(err error) bool { return errors.Is(err, errTerminalCommit) }
 
 // TerminalCommitConfig configures how the CommitReader builds and stores a
 // replay record at terminal success.
 type TerminalCommitConfig struct {
-	// Scope is the replay storage partition for this record.
-	Scope Scope
+	// WorkspaceSlug is the validated replay partition resolved from the request URL.
+	WorkspaceSlug string
 	// ExchangeID is the logical exchange identifier (for projection/logging only).
 	ExchangeID string
 	// ResponseID is the Swobu client-visible response ID allocated early.
 	ResponseID ResponseID
 	// Store receives the built record.
 	Store Store
-	// NativeReplay is the native provider pointer supplied by exchange
-	// preparation. When present, CaptureRequest materializes the full semantic
-	// request from the previous record plus the current delta.
-	NativeReplay *NativeRef
-	// CaptureRequest is the request seeded into the exchange (delta when native
-	// replay is present, full otherwise). CommitReader calls CaptureRequest at
-	// commit time to materialize the full persisted request.
-	CaptureRequest canonical.CanonicalRequest
-	// NativeExtractor is the ONLY path to capture native replay. If nil, no
-	// native replay is stored. The callback receives the original provider
-	// result ID and must return a fully populated NativeRef (all fields set).
-	NativeExtractor func(providerResultID string, replayID ID) *NativeRef
+	// SemanticRequest is the complete semantic state that produced this response.
+	SemanticRequest canonical.CanonicalRequest
+	// ContinuationSource is exact-codec output, never canonical metadata.
+	ContinuationSource provider.ContinuationSource
+	// CaptureContinuation is the exact-backend opt-in that binds a decoded
+	// continuation handle to its routing target ID and version. Nil disables
+	// capture.
+	CaptureContinuation func(providerResultID string) *provider.NativeContinuation
 }
 
 // CommitReader wraps a canonical event stream and stores a replay record at
@@ -44,27 +46,26 @@ type TerminalCommitConfig struct {
 //
 // IDENTITY REWRITE: the response envelope start is tagged with the allocated
 // Swobu ResponseID via Meta.ResultID so response.created can surface it
-// immediately. Provider NativeID is consumed for native replay capture, then
-// cleared before downstream projection so client-visible identity comes only
-// from Meta.ResultID.
+// immediately. Provider NativeID is cleared before downstream projection so
+// client-visible identity comes only from Meta.ResultID. Native replay capture
+// uses only TerminalCommitConfig.ContinuationSource.
 //
 // FAILURE: If Store.Put fails after partial streaming, the terminal event is
 // replaced with EventError followed by a synthetic EnvelopeEnd{Status: Error},
 // so every downstream encoder sees a proper terminal failure.
 type CommitReader struct {
-	upstream         canonical.EventReader
-	config           TerminalCommitConfig
-	events           []canonical.Event // all events seen so far (for projection)
-	returned         int               // events already returned to downstream
-	committed        bool
-	startedResponse  bool
-	providerResultID string // original provider ID, preserved for native capture
-	commitErr        error
+	upstream        canonical.ResponseStream
+	config          TerminalCommitConfig
+	events          []canonical.Event // all events seen so far (for projection)
+	returned        int               // events already returned to downstream
+	committed       bool
+	startedResponse bool
+	commitErr       error
 }
 
 // NewCommitReader wraps upstream so that terminal success is gated on replay
 // store commit.
-func NewCommitReader(upstream canonical.EventReader, config TerminalCommitConfig) *CommitReader {
+func NewCommitReader(upstream canonical.ResponseStream, config TerminalCommitConfig) *CommitReader {
 	return &CommitReader{upstream: upstream, config: config}
 }
 
@@ -74,11 +75,8 @@ func (c TerminalCommitConfig) Validate() error {
 	if c.Store == nil {
 		return errors.New("replay commit store is nil")
 	}
-	if strings.TrimSpace(c.Scope.Namespace) == "" {
-		return errors.New("replay commit scope namespace is empty")
-	}
-	if strings.TrimSpace(c.Scope.CallerKey) == "" {
-		return errors.New("replay commit scope caller key is empty")
+	if strings.TrimSpace(c.WorkspaceSlug) == "" {
+		return errors.New("replay commit workspace slug is empty")
 	}
 	if strings.TrimSpace(string(c.ResponseID)) == "" {
 		return errors.New("replay commit response id is empty")
@@ -86,7 +84,7 @@ func (c TerminalCommitConfig) Validate() error {
 	return nil
 }
 
-// Next implements canonical.EventReader.
+// Next implements canonical.ResponseStream.
 func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 	if r.committed && r.returned < len(r.events) {
 		ev := r.events[r.returned]
@@ -133,9 +131,6 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 	if ev.Kind == canonical.EventEnvelopeStart {
 		if payload, ok := ev.Payload.(canonical.EnvelopeStartPayload); ok && payload.Kind == canonical.EnvResponse {
 			r.startedResponse = true
-			if r.providerResultID == "" && strings.TrimSpace(ev.Meta.NativeID) != "" {
-				r.providerResultID = strings.TrimSpace(ev.Meta.NativeID)
-			}
 			ev.Meta.NativeID = ""
 			ev.Meta.ResultID = string(r.config.ResponseID)
 		}
@@ -143,9 +138,6 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 	if ev.Kind == canonical.EventMetadata {
 		if payload, ok := ev.Payload.(canonical.MetadataPayload); ok {
 			if id := payload.Values["result_id"]; id != "" {
-				if r.providerResultID == "" {
-					r.providerResultID = id
-				}
 				if r.config.ResponseID != "" {
 					mutated := make(map[string]string, len(payload.Values))
 					for k, v := range payload.Values {
@@ -192,21 +184,13 @@ func (r *CommitReader) Close(ctx context.Context) error {
 	return r.upstream.Close(ctx)
 }
 
-// Effects surfaces any effects accumulated by the upstream reader.
-func (r *CommitReader) Effects() []effect.Effect {
-	type effectReader interface {
-		Effects() []effect.Effect
-	}
-	if er, ok := r.upstream.(effectReader); ok {
-		return er.Effects()
-	}
-	return nil
-}
-
 // CommitError returns the store error if terminal commit failed, or nil.
 func (r *CommitReader) CommitError() error { return r.commitErr }
 
 func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code string, message string, err error, replaceLast bool) canonical.Event {
+	if code == "replay_capture_failed" {
+		err = fmt.Errorf("%w: %v", errTerminalCommit, err)
+	}
 	r.commitErr = err
 	slog.Warn("replay terminal failure",
 		"component", "replay",
@@ -312,9 +296,11 @@ func (r *CommitReader) doCommit(ctx context.Context) error {
 
 	// Native replay capture: only through the opt-in extractor.
 	// No fallback — if the codec did not opt in, native replay is nil.
-	var nativeRef *NativeRef
-	if r.config.NativeExtractor != nil && r.providerResultID != "" {
-		nativeRef = r.config.NativeExtractor(r.providerResultID, ReplayIDFromResponseID(r.config.ResponseID))
+	var nativeContinuation *provider.NativeContinuation
+	if r.config.CaptureContinuation != nil && r.config.ContinuationSource != nil {
+		if id, ok := r.config.ContinuationSource.ContinuationID(); ok {
+			nativeContinuation = r.config.CaptureContinuation(string(id))
+		}
 	}
 
 	// Substitute Swobu response ID into the projected output for storage.
@@ -323,22 +309,13 @@ func (r *CommitReader) doCommit(ctx context.Context) error {
 		output = &p
 	}
 
-	// Build the persisted request. CaptureRequest materializes full history
-	// when a native replay pointer is present, ensuring stored records are
-	// always complete semantic state.
-	request, err := CaptureRequest(ctx, r.config.Store, r.config.Scope, r.config.NativeReplay, r.config.CaptureRequest)
-	if err != nil {
-		return fmt.Errorf("capturing request for replay: %w", err)
-	}
-
 	record := Record{
 		ID:        ReplayIDFromResponseID(r.config.ResponseID),
-		Scope:     r.config.Scope,
-		Request:   request,
+		Request:   r.config.SemanticRequest.Clone(),
 		Response:  *output,
-		Native:    nativeRef,
+		Native:    nativeContinuation,
 		CreatedAt: time.Now().UTC(),
 	}
 
-	return r.config.Store.Put(ctx, r.config.Scope, record)
+	return r.config.Store.Put(ctx, r.config.WorkspaceSlug, record)
 }

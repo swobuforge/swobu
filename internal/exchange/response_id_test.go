@@ -13,16 +13,17 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
 )
 
 type failingReplayStore struct{}
 
-func (failingReplayStore) Get(context.Context, replay.Scope, replay.ID) (replay.Record, bool, error) {
+func (failingReplayStore) Get(context.Context, string, replay.ID) (replay.Record, bool, error) {
 	return replay.Record{}, false, nil
 }
 
-func (failingReplayStore) Put(context.Context, replay.Scope, replay.Record) error {
+func (failingReplayStore) Put(context.Context, string, replay.Record) error {
 	return errors.New("forced replay store failure")
 }
 
@@ -32,26 +33,26 @@ func (failingReplayStore) Put(context.Context, replay.Scope, replay.Record) erro
 func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 	// The provider ingress contains provider-native ID "resp_1".
 	store := replay.NewMemoryStore()
-	runner := withRuntime(bufferedProviderIngressResolver(nil)).
+	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithReplayStore(store)
-	out, err := runner.Run(context.Background(), ExchangeInput{
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "test_ex",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
-		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if out.Transport.Body == nil {
+	if ClientTransportForTest(out).Body == nil {
 		t.Fatal("buffered response must set transport body")
 	}
-	raw, readErr := io.ReadAll(out.Transport.Body)
+	raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
 	if readErr != nil {
 		t.Fatalf("read buffered body: %v", readErr)
 	}
@@ -70,7 +71,7 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 		t.Fatalf("provider-native ID leaked to client: %s", string(raw))
 	}
 
-	rec, ok, err := store.Get(context.Background(), unsafeLocalReplayScope("alpha"), replay.ReplayIDFromResponseID("swobu_test_ex"))
+	rec, ok, err := store.Get(context.Background(), "alpha", replay.ReplayIDFromResponseID("swobu_test_ex"))
 	if err != nil {
 		t.Fatalf("store.Get error: %v", err)
 	}
@@ -84,26 +85,26 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 
 func TestRunner_SwobuResponseIDPassedByInput(t *testing.T) {
 	store := replay.NewMemoryStore()
-	runner := withRuntime(bufferedProviderIngressResolver(nil)).
+	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithReplayStore(store)
-	out, err := runner.Run(context.Background(), ExchangeInput{
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "ex_gen",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
-		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if out.Transport.Body == nil {
+	if ClientTransportForTest(out).Body == nil {
 		t.Fatal("body must not be nil")
 	}
-	raw, _ := io.ReadAll(out.Transport.Body)
+	raw, _ := io.ReadAll(ClientTransportForTest(out).Body)
 	var body map[string]any
 	json.Unmarshal(raw, &body)
 	if body["id"] != "swobu_ex_gen" {
@@ -116,28 +117,25 @@ func TestRunnerWithoutReplayStoreRejectsBeforeProviderIngress(t *testing.T) {
 	runner := Runner{
 		Runtime: runtimeWithProviderIngress{
 			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
-			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+			providerTransport: func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
 				calls++
-				return carrier.CarrierStream{
-					Stage:   carrier.StageProviderIngressIn,
-					Family:  req.Target.ProtocolKind,
-					Framing: carrier.FramingSSE,
-					Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n"))),
-				}, nil
+				return provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream",
+					Body: io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n")),
+				}}, nil
 			},
 		},
 		ResponseIDs: deterministicResponseIDGenerator{},
 	}
 
-	_, err := runner.Run(context.Background(), ExchangeInput{
+	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "no_replay_store",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
-		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -156,14 +154,14 @@ func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
 	runner := Runner{
 		Runtime: runtimeWithProviderIngress{
 			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
-			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+			providerTransport: func(_ context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 				calls++
-				return bufferedProviderIngressResolver(nil)(context.Background(), req)
+				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
 		ResponseIDs: deterministicResponseIDGenerator{},
 	}
-	_, err := runner.Run(context.Background(), ExchangeInput{
+	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID: "no_replay_store_previous",
 		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
@@ -182,70 +180,35 @@ func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
 	}
 }
 
-func TestRunnerRejectsEmptyReplayScopeNamespaceBeforeProviderIngress(t *testing.T) {
+func TestRunnerRejectsEmptyReplayWorkspaceSlugBeforeProviderIngress(t *testing.T) {
 	calls := 0
 	runner := Runner{
 		Runtime: runtimeWithProviderIngress{
 			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
-			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
+			providerTransport: func(_ context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 				calls++
-				return bufferedProviderIngressResolver(nil)(context.Background(), req)
+				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
 		ReplayStore: replay.NewMemoryStore(),
 		ResponseIDs: deterministicResponseIDGenerator{},
 	}
-	_, err := runner.Run(context.Background(), ExchangeInput{
+	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "empty_scope_ns",
 		Request:          testCanonicalRequest("m"),
-		ReplayScope:      replay.Scope{CallerKey: "local"},
+		WorkspaceSlug:    "",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
-		t.Fatal("expected empty replay scope namespace to reject before provider ingress")
+		t.Fatal("expected empty replay workspace slug to reject before provider ingress")
 	}
-	if !strings.Contains(err.Error(), "replay scope namespace is required") {
-		t.Fatalf("error = %v, want replay scope namespace rejection", err)
-	}
-	if calls != 0 {
-		t.Fatalf("provider ingress calls = %d, want 0", calls)
-	}
-}
-
-func TestRunnerRejectsEmptyReplayScopeCallerKeyBeforeProviderIngress(t *testing.T) {
-	calls := 0
-	runner := Runner{
-		Runtime: runtimeWithProviderIngress{
-			RuntimeResolver: codecresolver.NewRuntimeCodecResolver(),
-			providerIngress: func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-				calls++
-				return bufferedProviderIngressResolver(nil)(context.Background(), req)
-			},
-		},
-		ReplayStore: replay.NewMemoryStore(),
-		ResponseIDs: deterministicResponseIDGenerator{},
-	}
-	_, err := runner.Run(context.Background(), ExchangeInput{
-		ExchangeID:       "empty_scope_ck",
-		Request:          testCanonicalRequest("m"),
-		ReplayScope:      replay.Scope{Namespace: "alpha"},
-		ClientFamily:     canonical.ClientFamilyResponses,
-		ClientDelivery:   delivery.BufferedDelivery(),
-		ProviderProtocol: protocolkind.Responses,
-		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
-		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
-	})
-	if err == nil {
-		t.Fatal("expected empty replay scope caller key to reject before provider ingress")
-	}
-	if !strings.Contains(err.Error(), "replay scope caller key is required") {
-		t.Fatalf("error = %v, want replay scope caller key rejection", err)
+	if !strings.Contains(err.Error(), "replay workspace slug is required") {
+		t.Fatalf("error = %v, want replay workspace slug rejection", err)
 	}
 	if calls != 0 {
 		t.Fatalf("provider ingress calls = %d, want 0", calls)
@@ -254,28 +217,28 @@ func TestRunnerRejectsEmptyReplayScopeCallerKeyBeforeProviderIngress(t *testing.
 
 func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) {
 	store := replay.NewMemoryStore()
-	runner := withRuntime(bufferedProviderIngressResolver(nil)).
+	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithReplayStore(store).
 		WithResponseIDs(deterministicResponseIDGenerator{})
 
-	out, err := runner.Run(context.Background(), ExchangeInput{
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "alloc_missing",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
-		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if out.Transport.Body == nil {
+	if ClientTransportForTest(out).Body == nil {
 		t.Fatal("buffered response must set transport body")
 	}
-	raw, readErr := io.ReadAll(out.Transport.Body)
+	raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
 	if readErr != nil {
 		t.Fatalf("read buffered body: %v", readErr)
 	}
@@ -287,7 +250,7 @@ func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) 
 	if gotID != "swobu_alloc_missing" {
 		t.Fatalf("allocated response id = %q, want swobu_alloc_missing", gotID)
 	}
-	rec, ok, err := store.Get(context.Background(), unsafeLocalReplayScope("alpha"), replay.ReplayIDFromResponseID("swobu_alloc_missing"))
+	rec, ok, err := store.Get(context.Background(), "alpha", replay.ReplayIDFromResponseID("swobu_alloc_missing"))
 	if err != nil {
 		t.Fatalf("store.Get error: %v", err)
 	}
@@ -300,31 +263,29 @@ func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) 
 }
 
 func TestRunnerReplayCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing.T) {
-	runner := withRuntime(bufferedProviderIngressResolver(nil)).
+	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithReplayStore(failingReplayStore{}).
 		WithResponseIDs(deterministicResponseIDGenerator{})
 
-	out, err := runner.Run(context.Background(), ExchangeInput{
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "commit_failure",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
-		ReplayScope:      unsafeLocalReplayScope("alpha"),
+		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           NewRoutableTarget("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
-	if err == nil {
-		t.Fatalf("Run() error = nil, want replay commit failure")
+	if err != nil {
+		t.Fatalf("Run() error = %v, want delivery-owned terminal failure", err)
 	}
-	if out.Transport.Body != nil {
-		raw, readErr := io.ReadAll(out.Transport.Body)
-		if readErr != nil {
-			t.Fatalf("read failed body: %v", readErr)
-		}
-		if strings.Contains(string(raw), "ok") || strings.Contains(string(raw), "response.completed") {
-			t.Fatalf("commit failure returned successful-looking body: %s", string(raw))
-		}
+	raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
+	if readErr == nil || !IsReplayCommitFailure(readErr) {
+		t.Fatalf("read error = %v, want replay commit failure", readErr)
+	}
+	if strings.Contains(string(raw), "ok") || strings.Contains(string(raw), "response.completed") {
+		t.Fatalf("commit failure returned successful-looking body: %s", string(raw))
 	}
 }

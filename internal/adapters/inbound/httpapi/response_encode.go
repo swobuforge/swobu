@@ -12,40 +12,49 @@ import (
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
-func writeSuccessResponse(ctx context.Context, w http.ResponseWriter, requestID string, family canonical.ClientFamily, out exchange.RequestOutput) error {
-	response := out.Response.Transport
+func writeSuccessResponse(ctx context.Context, w http.ResponseWriter, requestID string, family canonical.ClientFamily, out exchange.RequestOutput) transportpkg.DeliveryResult {
 	_ = family
-	if !isStreamingTransportResponse(response) {
-		if response.Body == nil {
-			return canonical.InternalError("buffered client response is missing transport body")
-		}
-		return writeBufferedResponse(w, response)
+	switch response := out.Response.(type) {
+	case exchange.BufferedResponse:
+		return writeBufferedResponse(ctx, w, response.Response)
+	case exchange.StreamingResponse:
+		return writeStreamingSuccess(ctx, w, requestID, response.Response)
 	}
+	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("client response variant is invalid")}
+}
+
+func writeBufferedResponse(ctx context.Context, w http.ResponseWriter, response transportpkg.Response) transportpkg.DeliveryResult {
 	if response.Body == nil {
-		return canonical.InternalError("streaming client response is missing transport body")
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("buffered client response is missing transport body")}
 	}
-	return writeStreamingSuccess(ctx, w, requestID, family, response)
-}
-
-func isStreamingTransportResponse(response transportpkg.TransportResponse) bool {
-	return response.Header.Get("Content-Type") == "text/event-stream"
-}
-
-func writeBufferedResponse(w http.ResponseWriter, response transportpkg.TransportResponse) error {
+	defer func() { _ = response.Body.Close() }()
+	prefix, err := readFirstStreamChunk(response.Body)
+	if err != nil {
+		return classifyDeliveryFailure(ctx, response.Body, err, nil)
+	}
 	copyResponseHeaders(w, response.Header)
 	w.WriteHeader(response.Status)
-	defer func() { _ = response.Body.Close() }()
-	_, err := io.Copy(w, response.Body)
-	return err
+	if _, err := w.Write(prefix); err != nil {
+		return classifyClientWriteFailure(ctx, err, nil)
+	}
+	_, err = io.Copy(w, response.Body)
+	if err != nil {
+		return classifyDeliveryFailure(ctx, response.Body, err, nil)
+	}
+	if terminalErr := responseBodyTerminalError(response.Body); terminalErr != nil {
+		return classifyDeliveryFailure(ctx, response.Body, terminalErr, nil)
+	}
+	return transportpkg.DeliveryResult{Kind: transportpkg.DeliverySucceeded}
 }
 
 // swobu:lint ignore function-complexity because=streaming success encoding keeps transport branching local to one HTTP seam.
-func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID string, family canonical.ClientFamily, response transportpkg.TransportResponse) error {
+func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID string, response transportpkg.Response) transportpkg.DeliveryResult {
 	_ = requestID
-	_ = family
+	if response.Body == nil {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing transport body")}
+	}
 
 	closeDone := make(chan struct{})
-	writerDone := make(chan struct{})
 	var once sync.Once
 	closeBody := func() {
 		once.Do(func() {
@@ -56,7 +65,6 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 		})
 	}
 	defer closeBody()
-	defer close(writerDone)
 	if ctx != nil {
 		go func() {
 			select {
@@ -79,20 +87,14 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 	}
 	prefix, err := readFirstStreamChunk(response.Body)
 	if err != nil {
-		if streamDownstreamClosed(ctx, closeDone) {
-			return nil
-		}
-		return canonical.InternalError("stream decoding failed")
+		return classifyDeliveryFailure(ctx, response.Body, err, closeDone)
 	}
 	copyResponseHeaders(w, response.Header)
 	w.WriteHeader(response.Status)
 	if len(prefix) > 0 {
 		if _, err := w.Write(prefix); err != nil {
 			closeBody()
-			if streamDownstreamClosed(ctx, closeDone) {
-				return nil
-			}
-			return canonical.InternalError("stream decoding failed")
+			return classifyClientWriteFailure(ctx, err, closeDone)
 		}
 	}
 	// Flush each stream boundary so disconnects are observed on the live socket
@@ -100,41 +102,13 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
-	type streamChunk struct {
-		bytes []byte
-		err   error
-	}
-	chunks := make(chan streamChunk, 1)
-	go func() {
-		defer close(chunks)
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := response.Body.Read(buf)
-			chunk := streamChunk{}
-			if n > 0 {
-				chunk.bytes = append([]byte(nil), buf[:n]...)
-			}
-			if readErr != nil {
-				chunk.err = readErr
-			}
-			select {
-			case chunks <- chunk:
-			case <-writerDone:
-				return
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-	for chunk := range chunks {
-		if len(chunk.bytes) > 0 {
-			if _, err := w.Write(chunk.bytes); err != nil {
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := response.Body.Read(buf)
+		if n > 0 {
+			if _, err := w.Write(buf[:n]); err != nil {
 				closeBody()
-				if streamDownstreamClosed(ctx, closeDone) {
-					return nil
-				}
-				return canonical.InternalError("stream decoding failed")
+				return classifyClientWriteFailure(ctx, err, closeDone)
 			}
 			// Emit provider chunks promptly so the client connection can signal
 			// cancellation before the upstream reader has to drain the whole body.
@@ -142,16 +116,41 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 				flusher.Flush()
 			}
 		}
-		if chunk.err == nil {
+		if readErr == nil {
 			continue
 		}
-		if errors.Is(chunk.err, io.EOF) {
-			return nil
+		if errors.Is(readErr, io.EOF) {
+			if terminalErr := responseBodyTerminalError(response.Body); terminalErr != nil {
+				return classifyDeliveryFailure(ctx, response.Body, terminalErr, closeDone)
+			}
+			return transportpkg.DeliveryResult{Kind: transportpkg.DeliverySucceeded}
 		}
-		if streamDownstreamClosed(ctx, closeDone) {
-			return nil
-		}
-		return canonical.InternalError("stream decoding failed")
+		return classifyDeliveryFailure(ctx, response.Body, readErr, closeDone)
+	}
+}
+
+func classifyClientWriteFailure(ctx context.Context, err error, closeDone <-chan struct{}) transportpkg.DeliveryResult {
+	if streamDownstreamClosed(ctx, closeDone) {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientCancelled, Err: err}
+	}
+	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientWriteFailed, Err: err}
+}
+
+func classifyDeliveryFailure(ctx context.Context, body io.ReadCloser, err error, closeDone <-chan struct{}) transportpkg.DeliveryResult {
+	if exchange.IsReplayCommitFailure(err) {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryReplayCommitFailed, Err: err}
+	}
+	if streamDownstreamClosed(ctx, closeDone) || errors.Is(err, context.Canceled) {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientCancelled, Err: err}
+	}
+	_ = body
+	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: err}
+}
+
+func responseBodyTerminalError(body io.ReadCloser) error {
+	type terminalErrorSource interface{ TerminalError() error }
+	if source, ok := body.(terminalErrorSource); ok {
+		return source.TerminalError()
 	}
 	return nil
 }

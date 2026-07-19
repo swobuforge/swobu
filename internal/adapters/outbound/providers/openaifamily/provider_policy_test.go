@@ -44,11 +44,11 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		NewCustomPolicy(),
 		NewOpenRouterPolicy(),
 	} {
-		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), carrier.CarrierDocument{Stage: carrier.StageProviderIngressIn, Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
+		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), carrier.Document{Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
 		if err != nil {
 			t.Fatalf("provider=%s decode: %v", profile.ProviderID(), err)
 		}
-		closed, err := canonical.ReadClosedEnvelope(context.Background(), respResult.Value, canonical.EnvResponse)
+		closed, err := canonical.ReadClosedEnvelope(context.Background(), respResult.Stream, canonical.EnvResponse)
 		if err != nil {
 			t.Fatalf("provider=%s envelope read: %v", profile.ProviderID(), err)
 		}

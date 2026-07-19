@@ -6,7 +6,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type realizedResponsesBody struct {
@@ -21,9 +21,9 @@ func TestEncode_OmitsInputForContinuationOnlyRequests(t *testing.T) {
 		Turn:  canonical.NewTurnRef("resp_123"),
 	})
 
-	wire, err := EncodeCarrierWithEffects(EncodeInput{
-		Request:      req,
-		NativeReplay: &replay.NativeRef{Value: "resp_123"},
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{
+		Request:            req,
+		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
 	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatalf("Encode returned err=%v", err)
@@ -51,9 +51,9 @@ func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 		Turn: canonical.NewTurnRef("resp_123"),
 	})
 
-	wire, err := EncodeCarrierWithEffects(EncodeInput{
-		Request:      req,
-		NativeReplay: &replay.NativeRef{Value: "resp_123"},
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{
+		Request:            req,
+		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
 	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatalf("Encode returned err=%v", err)
@@ -65,6 +65,86 @@ func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 	}
 	if got, ok := body["input"].(string); !ok || got != "new user turn" {
 		t.Fatalf("input=%#v want current user turn string; raw=%s", body["input"], string(raw))
+	}
+}
+
+func TestEncode_EmitsExplicitClearsWithNativeContinuation(t *testing.T) {
+	presence := canonical.RequestPresence{
+		Instructions: true,
+		Tools:        true,
+		OutputFormat: true,
+		Controls: canonical.GenerationControlsPresence{
+			MaxOutputTokens: true,
+			StopSequences:   true,
+			Temperature:     true,
+			TopP:            true,
+		},
+	}
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:    "gpt-4o",
+		Items:    []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "continue")},
+		Tools:    []canonical.ToolDecl{},
+		Controls: canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{}}},
+		Presence: presence,
+	})
+
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{
+		Request:            req,
+		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
+	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wire.Raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := body["instructions"]; !ok || value != "" {
+		t.Fatalf("instructions = %#v, present=%v", value, ok)
+	}
+	if value, ok := body["tools"].([]any); !ok || len(value) != 0 {
+		t.Fatalf("tools = %#v", body["tools"])
+	}
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p"} {
+		if value, ok := body[field]; !ok || value != nil {
+			t.Fatalf("%s = %#v, present=%v", field, value, ok)
+		}
+	}
+	if value, ok := body["stop"].([]any); !ok || len(value) != 0 {
+		t.Fatalf("stop = %#v", body["stop"])
+	}
+	text, ok := body["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("text = %#v", body["text"])
+	}
+	format, ok := text["format"].(map[string]any)
+	if !ok || format["type"] != "text" {
+		t.Fatalf("text.format = %#v", text["format"])
+	}
+}
+
+func TestEncode_EmitsDefaultParallelPolicyToClearInheritedRestriction(t *testing.T) {
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "gpt-4o",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "continue")},
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("search", "search", "search", canonical.NewToolSchemaObject(`{"type":"object"}`)),
+		},
+		Presence: canonical.RequestPresence{ToolCallBatch: true},
+	})
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{
+		Request:            req,
+		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
+	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wire.Raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := body["parallel_tool_calls"].(bool); !ok || !value {
+		t.Fatalf("parallel_tool_calls = %#v", body["parallel_tool_calls"])
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 const defaultRecordTTL = 24 * time.Hour
@@ -20,10 +21,9 @@ const defaultRecordTTL = 24 * time.Hour
 //   - Continuation namespace
 type Record struct {
 	ID        ID
-	Scope     Scope
 	Request   canonical.CanonicalRequest
 	Response  canonical.CanonicalOutputProjection
-	Native    *NativeRef
+	Native    *provider.NativeContinuation
 	CreatedAt time.Time
 	// ExpiresAt bounds how long the record remains replay-addressable.
 	ExpiresAt *time.Time
@@ -33,7 +33,6 @@ type Record struct {
 func (r Record) Clone() Record {
 	cloned := Record{
 		ID:        r.ID,
-		Scope:     r.Scope,
 		Request:   r.Request.Clone(),
 		Response:  r.Response.CloneProjection(),
 		CreatedAt: r.CreatedAt,

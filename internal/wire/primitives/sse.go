@@ -2,8 +2,10 @@ package core
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"strings"
+	"sync"
 )
 
 type SSEEvent struct {
@@ -12,8 +14,10 @@ type SSEEvent struct {
 }
 
 type SSEReaderCloser struct {
-	scanner *bufio.Scanner
-	body    io.ReadCloser
+	scanner   *bufio.Scanner
+	body      io.ReadCloser
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func NewSSEReader(body io.ReadCloser) *SSEReaderCloser {
@@ -25,7 +29,27 @@ func NewSSEReader(body io.ReadCloser) *SSEReaderCloser {
 	}
 }
 
-func (r *SSEReaderCloser) Next() (SSEEvent, error) {
+func (r *SSEReaderCloser) Next(ctx context.Context) (SSEEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return SSEEvent{}, err
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = r.Close()
+		case <-done:
+		}
+	}()
+	event, err := r.next()
+	close(done)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return SSEEvent{}, ctxErr
+	}
+	return event, err
+}
+
+func (r *SSEReaderCloser) next() (SSEEvent, error) {
 	var eventName string
 	var data []string
 	for r.scanner.Scan() {
@@ -66,5 +90,6 @@ func (r *SSEReaderCloser) Close() error {
 	if r == nil || r.body == nil {
 		return nil
 	}
-	return r.body.Close()
+	r.closeOnce.Do(func() { r.closeErr = r.body.Close() })
+	return r.closeErr
 }

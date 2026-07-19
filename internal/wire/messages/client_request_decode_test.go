@@ -38,8 +38,7 @@ func TestClientRequestDecoder_DecodesExplicitToolUseAndToolResultID(t *testing.T
 		]
 	}`)
 
-	request, clientDelivery, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewCarrierDocument(
-		carrier.StageClientRequestIn,
+	request, clientDelivery, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
 		protocolkind.Messages,
 		"application/json",
 		nil,
@@ -103,8 +102,7 @@ func TestClientRequestDecoder_RejectsMissingToolUseName(t *testing.T) {
 		]
 	}`)
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewCarrierDocument(
-		carrier.StageClientRequestIn,
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
 		protocolkind.Messages,
 		"application/json",
 		nil,
@@ -138,8 +136,7 @@ func TestClientRequestDecoder_RejectsMissingToolResultID(t *testing.T) {
 		]
 	}`)
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewCarrierDocument(
-		carrier.StageClientRequestIn,
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
 		protocolkind.Messages,
 		"application/json",
 		nil,

@@ -2,51 +2,23 @@ package openai
 
 import (
 	"context"
-	"errors"
-	"io"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-// EncodeEnvelopeStream pipes canonical events through an SSE envelope encoder.
+// EncodeEnvelopeStream exposes a pull-based SSE body over canonical events.
 //
 // This helper captures the mechanical event-loop pattern shared by all
 // OpenAI-family streaming adapters. Families inject their encoder state and
-// wire-stream metadata; the helper owns only the pipe-forwarding mechanics.
+// wire-stream metadata; the delivery owner drives reads and closure.
 func EncodeEnvelopeStream(
-	events canonical.EventReader,
+	ctx context.Context,
+	events canonical.ResponseStream,
 	encoder sse.EnvelopeStreamEncoder,
-	family protocolkind.ProtocolKind,
-) (effect.Result[carrier.CarrierStream], error) {
-	pr, pw := io.Pipe()
-	go func() {
-		defer func() { _ = events.Close(context.Background()) }()
-		defer func() { _ = pw.Close() }()
-		for {
-			ev, err := events.Next(context.Background())
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					return
-				}
-				_ = pw.CloseWithError(err)
-				return
-			}
-			frames, err := encoder.EncodeEnvelopeEvent(ev)
-			if err != nil {
-				_ = pw.CloseWithError(err)
-				return
-			}
-			for _, frame := range frames {
-				if _, err := pw.Write(frame); err != nil {
-					_ = pw.CloseWithError(err)
-					return
-				}
-			}
-		}
-	}()
-	return effect.NewResult(carrier.CarrierStream{Family: family, Framing: carrier.FramingSSE, Frames: carrier.FrameReaderFromReadCloser(pr)}), nil
+) (wire.ClientByteStreamResult, error) {
+	body := wire.NewEncodedResponseBody(ctx, events, encoder.EncodeEnvelopeEvent)
+	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}}, nil
 }

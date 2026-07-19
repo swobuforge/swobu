@@ -1,12 +1,12 @@
 package messages
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -73,11 +73,11 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 		},
 	}
 
-	stream, err := codec.EncodeResponseStream(canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := codec.EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	raw, err := io.ReadAll(carrier.ReadCloserFromFrameReader(stream.Frames))
+	raw, err := io.ReadAll(stream.Body)
 	if err != nil {
 		t.Fatalf("read stream error: %v", err)
 	}

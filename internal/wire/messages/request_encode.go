@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -31,17 +30,17 @@ type contentID struct {
 	Content   string         `json:"content,omitempty"`
 }
 
-func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
+func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string) (carrier.Document, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
+		return carrier.Document{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
 	}
 	items := req.Items()
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	payload := map[string]any{
 		"model":    req.Model(),
@@ -51,23 +50,23 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 		payload["system"] = instructions
 	}
 	if wireTools, err := encodeMessagesTools(tools, sink, exchangeID); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
 	}
 	if err := encodeMessagesGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), len(tools) > 0)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	if choice != nil {
 		payload["tool_choice"] = choice
@@ -77,10 +76,9 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.CarrierDocument{}, canonical.BadRequest("conversation request could not be encoded for the messages protocol")
+		return carrier.Document{}, canonical.BadRequest("conversation request could not be encoded for the messages protocol")
 	}
-	return carrier.NewCarrierDocument(
-		carrier.StageProviderRequestOut,
+	return carrier.NewDocument(
 		"",
 		"application/json",
 		nil,
@@ -152,7 +150,7 @@ func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
 	return out, nil
 }
 
-func encodeMessagesTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeID string) ([]messagesToolDTO, error) {
+func encodeMessagesTools(tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) ([]messagesToolDTO, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -198,7 +196,7 @@ func encodeMessagesTools(tools []canonical.ToolDecl, sink effect.Sink, exchangeI
 	return out, nil
 }
 
-func encodeMessagesFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect.Sink, exchangeID string, index int) (messagesToolDTO, error) {
+func encodeMessagesFunctionToolDecl(decl canonical.FunctionToolDecl, sink compat.Sink, exchangeID string, index int) (messagesToolDTO, error) {
 	schema, err := messagesToolSchema(decl.ToolInputSchema())
 	if err != nil {
 		return messagesToolDTO{}, err
@@ -221,7 +219,7 @@ func encodeMessagesFunctionToolDecl(decl canonical.FunctionToolDecl, sink effect
 	}, nil
 }
 
-func encodeMessagesCapabilityToolDecl(decl canonical.CapabilityToolDecl, sink effect.Sink, exchangeID string, index int) (messagesToolDTO, error) {
+func encodeMessagesCapabilityToolDecl(decl canonical.CapabilityToolDecl, sink compat.Sink, exchangeID string, index int) (messagesToolDTO, error) {
 	capability := strings.TrimSpace(string(decl.ToolCapability())) // swobu:io-string source=boundary
 	switch capability {
 	case "web_search":
@@ -278,7 +276,7 @@ func roleForMessagesItem(item canonical.CanonicalItem) string {
 	}
 }
 
-func emitMessagesToolNameNamespaceDecision(sink effect.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
+func emitMessagesToolNameNamespaceDecision(sink compat.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
 	if sink == nil {
 		return nil
 	}
@@ -291,14 +289,14 @@ func emitMessagesToolNameNamespaceDecision(sink effect.Sink, exchangeID string, 
 	if tool == nil && outcome == compat.Approx {
 		return nil
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.CompatibilityEffect{
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
+		compat.Decision{
 			Feature: compat.ToolNameNamespace,
 			Outcome: outcome,
 			Subject: subject,
 		},
 	}); err != nil {
-		return canonical.InternalError("compatibility effect sink commit failed")
+		return canonical.InternalError("compatibility decision sink commit failed")
 	}
 	return nil
 }

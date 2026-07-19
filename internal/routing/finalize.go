@@ -54,9 +54,9 @@ type CustomHeaderDraft struct {
 	Credential string
 }
 
-// TargetCapabilities supplies catalog facts at the construction edge without
+// TargetConstructionFacts supplies catalog facts at the construction edge without
 // importing provider catalogs into the routing domain.
-type TargetCapabilities struct {
+type TargetConstructionFacts struct {
 	ProtocolSupported             ProtocolSupport
 	NormalizeAzureProjectEndpoint func(string) (string, error)
 	BedrockRegionSupported        func(string) bool
@@ -64,7 +64,7 @@ type TargetCapabilities struct {
 
 // FinalizeTarget is the single interpretation path for raw target and
 // connection input from persistence and operator transports.
-func FinalizeTarget(draft TargetDraft, capabilities TargetCapabilities) (Target, error) {
+func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, error) {
 	id, err := ParseTargetID(draft.ID)
 	if err != nil {
 		return Target{}, err
@@ -73,11 +73,11 @@ func FinalizeTarget(draft TargetDraft, capabilities TargetCapabilities) (Target,
 	if err != nil {
 		return Target{}, err
 	}
-	connection, err := FinalizeConnection(draft.Connection, capabilities)
+	connection, err := FinalizeConnection(draft.Connection, facts)
 	if err != nil {
 		return Target{}, err
 	}
-	protocol, err := ParseProtocol(draft.Protocol, connection.Provider(), capabilities.ProtocolSupported)
+	protocol, err := ParseProtocol(draft.Protocol, connection.Provider(), facts.ProtocolSupported)
 	if err != nil {
 		return Target{}, err
 	}
@@ -86,7 +86,7 @@ func FinalizeTarget(draft TargetDraft, capabilities TargetCapabilities) (Target,
 
 // FinalizeConnection validates one raw transport connection union without
 // requiring unrelated target identity, model, or protocol fields.
-func FinalizeConnection(draft ConnectionDraft, capabilities TargetCapabilities) (Connection, error) {
+func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (Connection, error) {
 	count := 0
 	for _, present := range []bool{draft.OpenAI != nil, draft.Anthropic != nil, draft.OpenRouter != nil, draft.ChatGPT != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
 		if present {
@@ -112,17 +112,17 @@ func FinalizeConnection(draft ConnectionDraft, capabilities TargetCapabilities) 
 		return NewOllamaConnection(draft.Ollama.BaseURL)
 	}
 	if draft.Azure != nil {
-		if capabilities.NormalizeAzureProjectEndpoint == nil {
+		if facts.NormalizeAzureProjectEndpoint == nil {
 			return nil, pathError("connection.azure.project_endpoint", "Azure endpoint normalization capability is required")
 		}
-		endpoint, err := capabilities.NormalizeAzureProjectEndpoint(draft.Azure.ProjectEndpoint)
+		endpoint, err := facts.NormalizeAzureProjectEndpoint(draft.Azure.ProjectEndpoint)
 		if err != nil {
 			return nil, err
 		}
 		return NewAzureConnection(endpoint, draft.Azure.Credential)
 	}
 	if draft.Bedrock != nil {
-		if capabilities.BedrockRegionSupported == nil || !capabilities.BedrockRegionSupported(draft.Bedrock.Region) {
+		if facts.BedrockRegionSupported == nil || !facts.BedrockRegionSupported(draft.Bedrock.Region) {
 			return nil, pathError("connection.bedrock.region", fmt.Sprintf("unsupported region %q", draft.Bedrock.Region))
 		}
 		region, err := ParseBedrockRegion(draft.Bedrock.Region)

@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -17,17 +16,18 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
+		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, "")
 		return wire.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
 		}, err
 	})
+	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
@@ -205,7 +205,7 @@ func decodeToolResultText(raw json.RawMessage) (string, error) {
 	return builder.String(), nil
 }
 
-func decodeMessagesTools(tools []messagesToolDTO, sink effect.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+func decodeMessagesTools(tools []messagesToolDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
