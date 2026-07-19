@@ -45,7 +45,9 @@ func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFram
 	frameType := strings.TrimSpace(frame.Type) // swobu:io-string source=provider-wire
 	switch frameType {
 	case "response.created":
-		s.handleResponseCreated(frame)
+		if err := s.handleResponseCreated(ctx, frame); err != nil {
+			return false, canonical.Event{}, err
+		}
 		return true, canonical.Event{}, nil
 	case "response.output_text.delta":
 		s.handleOutputTextDelta(frame)
@@ -95,30 +97,34 @@ func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFram
 	}
 }
 
-func (s *responsesEventReader) handleResponseCreated(frame streamFrame) {
+func (s *responsesEventReader) handleResponseCreated(ctx context.Context, frame streamFrame) error {
 	if s.started {
-		return
+		return nil
 	}
 	s.started = true
-	resultID := strings.TrimSpace(frame.ID) // swobu:io-string source=boundary
-	if resultID == "" {
-		resultID = strings.TrimSpace(frame.Response.ID) // swobu:io-string source=boundary
+	providerResponseID := frame.ID
+	if strings.TrimSpace(providerResponseID) == "" { // swobu:io-string source=provider-wire
+		providerResponseID = frame.Response.ID
 	}
-	s.providerResultID = resultID
-	s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}, canonical.EventMetadataFields{NativeID: resultID, ResultID: resultID})
+	if strings.TrimSpace(providerResponseID) == "" { // swobu:io-string source=provider-wire
+		return canonical.InternalError("responses stream is missing response id")
+	}
+	emitNativeResponseIDCaptured(ctx, s.sink, s.exchangeID, providerResponseID)
+	s.enqueueEnvelopeStart(s.responseEnvID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Response: canonical.ResponseRef{Responses: &canonical.ResponsesNativeRef{ProviderResponseID: canonical.NewResponsesNativeResponseID(providerResponseID)}}}, canonical.EventMetadataFields{})
 	model := strings.TrimSpace(frame.Model) // swobu:io-string source=boundary
 	if model == "" {
 		model = strings.TrimSpace(frame.Response.Model) // swobu:io-string source=boundary
 	}
-	s.enqueueMetadata(map[string]string{"result_id": resultID, "model": model})
+	s.enqueueMetadata(map[string]string{"model": model})
+	return nil
 }
 
 func (s *responsesEventReader) handleOutputTextDelta(frame streamFrame) {
 	s.emittedOutput = true
 	if !s.textOpen {
 		s.textOpen = true
-		s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
-		s.enqueueEnvelopeStart(s.textEnvID, s.responseID, canonical.EnvelopeStartPayload{
+		s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseEnvID))
+		s.enqueueEnvelopeStart(s.textEnvID, s.responseEnvID, canonical.EnvelopeStartPayload{
 			Kind: canonical.EnvMessage,
 			Role: canonical.ItemAuthorAssistant,
 		}, canonical.EventMetadataFields{NativeID: "text_0"})
@@ -230,7 +236,9 @@ func (s *responsesEventReader) completeToolState(frame streamFrame, toolType str
 
 func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame streamFrame) error {
 	if !s.started {
-		s.handleResponseCreated(frame)
+		if err := s.handleResponseCreated(ctx, frame); err != nil {
+			return err
+		}
 	}
 	if terminalReason, promptBlocked := responsesTerminalReason(frame.Type, frame.Status, frame.Response.Status, frame.Response.ContentFilters, responseIncompleteReason(frame.Response.IncompleteDetails)); promptBlocked {
 		s.completed = true
@@ -238,7 +246,7 @@ func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame
 		s.closeOpenText(canonical.EnvelopeStatusError)
 		s.closeOpenTools(canonical.EnvelopeStatusError)
 		s.enqueueError("content_filter", responsesContentFilterMessage(responsesBlockedContentFilterSource(frame.Response.ContentFilters)))
-		s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+		s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 		return nil
 	} else {
 		usedFallback := false
@@ -249,7 +257,9 @@ func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame
 				return err
 			}
 			if len(items) > 0 {
-				s.enqueueCompletedOutputItems(items)
+				if err := s.enqueueCompletedOutputItems(items); err != nil {
+					return err
+				}
 				s.emittedOutput = true
 				usedFallback = true
 				fallbackItems = items
@@ -261,7 +271,7 @@ func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame
 		s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 		s.enqueueUsage(s.latestUsage)
 		s.enqueueFinish(terminalReason)
-		s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+		s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 		logResponsesTerminalProjection(usedFallback, terminalReason, len(frame.Response.Output), strings.TrimSpace(frame.Response.OutputText) != "", fallbackItems) // swobu:io-string source=provider-wire
 		return nil
 	}
@@ -273,39 +283,48 @@ func (s *responsesEventReader) shiftPendingEvent() canonical.Event {
 	return event
 }
 
-func (s *responsesEventReader) enqueueCompletedOutputItems(items []canonical.OutputItem) {
+func (s *responsesEventReader) enqueueCompletedOutputItems(items []canonical.OutputItem) error {
 	textIdx := 0
 	toolIdx := 0
 	for _, item := range items {
-		switch item.Kind {
+		switch item.Kind() {
 		case canonical.ItemKindText:
-			envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:text_%d", s.responseID, textIdx))
+			text, ok := item.TextItem()
+			if !ok {
+				return canonical.InternalError("responses text item payload is invalid")
+			}
+			envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:text_%d", s.responseEnvID, textIdx))
 			metaID := fmt.Sprintf("text_%d", textIdx)
 			textIdx++
-			s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{
+			s.enqueueEnvelopeStart(envID, s.responseEnvID, canonical.EnvelopeStartPayload{
 				Kind: canonical.EnvMessage,
 				Role: canonical.ItemAuthorAssistant,
 			}, canonical.EventMetadataFields{NativeID: metaID})
-			s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, EnvID: envID, Payload: canonical.TextDeltaPayload{Text: item.Text}})
+			s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, EnvID: envID, Payload: canonical.TextDeltaPayload{Text: text.Text}})
 			s.enqueueEnvelopeEnd(envID, canonical.EnvMessage, canonical.EnvelopeStatusCompleted)
 		case canonical.ItemKindToolUse:
-			envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:tool_%d", s.responseID, toolIdx))
-			toolIdx++
-			toolUseID := item.ToolUseID
-			if toolUseID == "" {
-				toolUseID = item.ItemID
+			toolUse, ok := item.ToolUse()
+			if !ok {
+				return canonical.InternalError("responses tool-use item payload is invalid")
 			}
-			s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{
+			envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:tool_%d", s.responseEnvID, toolIdx))
+			toolIdx++
+			toolUseID := toolUse.UseID
+			if toolUseID == "" {
+				toolUseID = item.ItemID()
+			}
+			s.enqueueEnvelopeStart(envID, s.responseEnvID, canonical.EnvelopeStartPayload{
 				Kind:      canonical.EnvToolCall,
-				Name:      item.Name,
+				Name:      toolUse.Name,
 				ToolUseID: toolUseID,
-				ToolType:  item.ToolType,
-			}, canonical.EventMetadataFields{NativeID: item.ItemID})
-			args := item.Input.RawObject()
+				ToolType:  toolUse.ToolType,
+			}, canonical.EventMetadataFields{NativeID: item.ItemID()})
+			args := toolUse.Input.RawObject()
 			if args != "" {
 				s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, EnvID: envID, Payload: canonical.ArgsDeltaPayload{Args: args}})
 			}
 			s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
 		}
 	}
+	return nil
 }

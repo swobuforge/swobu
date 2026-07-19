@@ -27,11 +27,8 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for i := 0; i < iterations; i++ {
-				id := ID(fmt.Sprintf("resp_%d_%d", g, i))
-				record := Record{
-					ID:        id,
-					CreatedAt: time.Now().UTC(),
-				}
+				id := canonical.SwobuResponseID(fmt.Sprintf("resp_%d_%d", g, i))
+				record := storeRecord(id)
 				if err := store.Put(context.Background(), scope, record); err != nil {
 					errCh <- fmt.Errorf("Put(%s) error: %w", id, err)
 					return
@@ -45,8 +42,8 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 					errCh <- fmt.Errorf("Get(%s) missing record", id)
 					return
 				}
-				if got.ID != id {
-					errCh <- fmt.Errorf("Get(%s) returned %s", id, got.ID)
+				if got.Response.Response().SwobuID != id {
+					errCh <- fmt.Errorf("Get(%s) returned %s", id, got.Response.Response().SwobuID)
 					return
 				}
 			}
@@ -62,23 +59,18 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreDefensivelyCopiesNativeContinuation(t *testing.T) {
+func TestMemoryStoreDefensivelyCopiesResponsesRefinement(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
-	native := testBackendTarget(t, "m").NativeContinuation("provider_resp_1")
-	record := Record{
-		ID:        "resp_1",
-		Request:   makeRequest("m", makeItems("hello"), canonical.TurnRef{}),
-		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")),
-		Native:    native,
-		CreatedAt: time.Now().UTC(),
-	}
+	target := testBackendTarget(t, "m")
+	responses := nativeResponses(target, "provider_resp_1")
+	record := replayRecord("resp_1", makeRequest("m", makeItems("hello"), nil), makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")), responses)
 
 	if err := store.Put(context.Background(), scope, record); err != nil {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	native.ID = "mutated"
+	responses.ProviderResponseID = "mutated"
 	got, ok, err := store.Get(context.Background(), scope, "resp_1")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
@@ -86,14 +78,12 @@ func TestMemoryStoreDefensivelyCopiesNativeContinuation(t *testing.T) {
 	if !ok {
 		t.Fatal("expected record to be found")
 	}
-	if got.Native == nil {
-		t.Fatal("expected native ref to be present")
-	}
-	if got.Native.ID != "provider_resp_1" {
-		t.Fatalf("stored native ID = %q, want provider_resp_1", got.Native.ID)
+	if got.Response.Response().Responses == nil || got.Response.Response().Responses.ProviderResponseID != "provider_resp_1" {
+		t.Fatalf("stored Responses refinement = %#v", got.Response.Response().Responses)
 	}
 
-	got.Native.ID = "changed"
+	gotRef := got.Response.Response()
+	gotRef.Responses.ProviderResponseID = "changed"
 	gotAgain, ok, err := store.Get(context.Background(), scope, "resp_1")
 	if err != nil {
 		t.Fatalf("second Get failed: %v", err)
@@ -101,11 +91,8 @@ func TestMemoryStoreDefensivelyCopiesNativeContinuation(t *testing.T) {
 	if !ok {
 		t.Fatal("expected record to be found on second read")
 	}
-	if gotAgain.Native == nil {
-		t.Fatal("expected native ref to be present on second read")
-	}
-	if gotAgain.Native.ID != "provider_resp_1" {
-		t.Fatalf("store was mutated through Get result, native ID = %q", gotAgain.Native.ID)
+	if gotAgain.Response.Response().Responses == nil || gotAgain.Response.Response().Responses.ProviderResponseID != "provider_resp_1" {
+		t.Fatalf("store was mutated through Get result: %#v", gotAgain.Response.Response().Responses)
 	}
 }
 
@@ -113,13 +100,9 @@ func TestMemoryStoreDefensivelyCopiesExpiresAt(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	record := Record{
-		ID:        "resp_expiry",
-		Request:   makeRequest("m", makeItems("hello"), canonical.TurnRef{}),
-		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")),
-		ExpiresAt: &expiresAt,
-		CreatedAt: time.Now().UTC(),
-	}
+	record := replayRecord("resp_expiry", makeRequest("m", makeItems("hello"), nil), makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")), nil)
+	record.ExpiresAt = &expiresAt
+	record.CreatedAt = time.Now().UTC()
 
 	if err := store.Put(context.Background(), scope, record); err != nil {
 		t.Fatalf("Put failed: %v", err)
@@ -156,13 +139,9 @@ func TestMemoryStoreRejectsExpiredRecord(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
 	expiredAt := time.Now().UTC().Add(-time.Minute)
-	record := Record{
-		ID:        "resp_expired",
-		Request:   makeRequest("m", makeItems("hello"), canonical.TurnRef{}),
-		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")),
-		ExpiresAt: &expiredAt,
-		CreatedAt: time.Now().UTC().Add(-2 * time.Minute),
-	}
+	record := replayRecord("resp_expired", makeRequest("m", makeItems("hello"), nil), makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")), nil)
+	record.ExpiresAt = &expiredAt
+	record.CreatedAt = time.Now().UTC().Add(-2 * time.Minute)
 
 	if err := store.Put(context.Background(), scope, record); err != nil {
 		t.Fatalf("Put failed: %v", err)
@@ -180,10 +159,7 @@ func TestMemoryStoreRejectsExpiredRecord(t *testing.T) {
 func TestMemoryStoreRejectsDuplicateIDs(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
-	record := Record{
-		ID:        "resp_1",
-		CreatedAt: time.Now().UTC(),
-	}
+	record := storeRecord("resp_1")
 	if err := store.Put(context.Background(), scope, record); err != nil {
 		t.Fatalf("first Put failed: %v", err)
 	}
@@ -199,8 +175,8 @@ func TestMemoryStoreRejectsDuplicateIDs(t *testing.T) {
 	if !ok {
 		t.Fatal("expected record to remain present after duplicate Put rejection")
 	}
-	if got.ID != "resp_1" {
-		t.Fatalf("stored record id = %q, want resp_1", got.ID)
+	if got.Response.Response().SwobuID != "resp_1" {
+		t.Fatalf("stored record id = %q, want resp_1", got.Response.Response().SwobuID)
 	}
 }
 
@@ -212,7 +188,8 @@ func TestMemoryStoreWriteReclaimsHighVolumeExpiredRecordsWithoutReadingThem(t *t
 
 	const recordCount = 10_000
 	for i := 0; i < recordCount; i++ {
-		record := Record{ID: ID(fmt.Sprintf("expired_%05d", i)), CreatedAt: current, ExpiresAt: &expiresAt}
+		record := storeRecord(canonical.SwobuResponseID(fmt.Sprintf("expired_%05d", i)))
+		record.CreatedAt, record.ExpiresAt = current, &expiresAt
 		if err := store.Put(context.Background(), "alpha", record); err != nil {
 			t.Fatalf("Put %d: %v", i, err)
 		}
@@ -222,7 +199,9 @@ func TestMemoryStoreWriteReclaimsHighVolumeExpiredRecordsWithoutReadingThem(t *t
 	}
 
 	current = current.Add(2 * time.Minute)
-	if err := store.Put(context.Background(), "alpha", Record{ID: "live", CreatedAt: current}); err != nil {
+	live := storeRecord("live")
+	live.CreatedAt = current
+	if err := store.Put(context.Background(), "alpha", live); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(store.records); got != 1 {
@@ -235,12 +214,12 @@ func TestMemoryStoreWriteReclaimsHighVolumeExpiredRecordsWithoutReadingThem(t *t
 
 func TestDaemonReplayStorePartitionsByWorkspaceSlug(t *testing.T) {
 	store := NewMemoryStore()
-	record := Record{ID: "resp_shared", CreatedAt: time.Now().UTC()}
+	record := storeRecord("resp_shared")
 
 	if err := store.Put(context.Background(), "alpha", record); err != nil {
 		t.Fatalf("Put alpha: %v", err)
 	}
-	if _, found, err := store.Get(context.Background(), "beta", record.ID); err != nil {
+	if _, found, err := store.Get(context.Background(), "beta", record.Response.Response().SwobuID); err != nil {
 		t.Fatalf("Get beta: %v", err)
 	} else if found {
 		t.Fatal("record from alpha was visible in beta")
@@ -249,10 +228,14 @@ func TestDaemonReplayStorePartitionsByWorkspaceSlug(t *testing.T) {
 		t.Fatalf("same replay ID must be legal in another workspace: %v", err)
 	}
 	for _, workspaceSlug := range []string{"alpha", "beta"} {
-		if got, found, err := store.Get(context.Background(), workspaceSlug, record.ID); err != nil {
+		if got, found, err := store.Get(context.Background(), workspaceSlug, record.Response.Response().SwobuID); err != nil {
 			t.Fatalf("Get %s: %v", workspaceSlug, err)
-		} else if !found || got.ID != record.ID {
-			t.Fatalf("Get %s = (%q, %t), want (%q, true)", workspaceSlug, got.ID, found, record.ID)
+		} else if !found || got.Response.Response().SwobuID != record.Response.Response().SwobuID {
+			t.Fatalf("Get %s = (%q, %t), want (%q, true)", workspaceSlug, got.Response.Response().SwobuID, found, record.Response.Response().SwobuID)
 		}
 	}
+}
+
+func storeRecord(id canonical.SwobuResponseID) Record {
+	return Record{Response: canonical.NewConversationOutput(canonical.NewSwobuResponseID(id.String()), "", nil, ""), CreatedAt: time.Now().UTC()}
 }

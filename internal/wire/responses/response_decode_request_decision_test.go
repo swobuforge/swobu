@@ -46,10 +46,10 @@ func TestDecodeClientRequestWithDecisions_RecordsResponsesRequestScars(t *testin
 		outcome compat.Outcome
 		subject compat.Subject
 	}{
-		{feature: compat.RequestInputShape, outcome: compat.Approx, subject: compat.Subject("wire:/input/0/type")},
-		{feature: compat.RequestRole, outcome: compat.Approx, subject: compat.Subject("wire:/input/0/role")},
-		{feature: compat.ToolCallID, outcome: compat.Approx, subject: compat.Subject("wire:/input/1/call_id")},
-		{feature: compat.ToolResultID, outcome: compat.Reject, subject: compat.Subject("wire:/input/2/call_id")},
+		{feature: compat.RequestItemsKind, outcome: compat.Approx, subject: compat.Subject("wire:/input/0/type")},
+		{feature: compat.RequestItemsAuthor, outcome: compat.Approx, subject: compat.Subject("wire:/input/0/role")},
+		{feature: compat.RequestItemsToolUseID, outcome: compat.Approx, subject: compat.Subject("wire:/input/1/call_id")},
+		{feature: compat.RequestItemsToolResultUseID, outcome: compat.Reject, subject: compat.Subject("wire:/input/2/call_id")},
 	}
 	for i, effectItem := range sink.effects {
 		compatEffect := effectItem

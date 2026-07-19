@@ -9,58 +9,67 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
-	"github.com/swobuforge/swobu/internal/routing"
 )
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
 // exact backend and lowers one final wire document without external I/O.
-func prepareProviderCall(s exchangeState, attempt routing.Attempt, runner runtimeBundle) (preparedProviderCall, provider.TargetSnapshot, exchangeEvidence, error) {
-	path, err := buildPathRecord(attempt.Target, s.prepared.Semantic)
-	if err != nil {
-		return preparedProviderCall{}, provider.TargetSnapshot{}, exchangeEvidence{}, err
+func prepareProviderCall(s exchangeState, selection providerCallSelection, runner runtimeBundle) (providerCall, provider.TargetSnapshot, exchangeEvidence, error) {
+	target, ok := s.route.at(selection.candidateIndex)
+	if !ok {
+		return providerCall{}, provider.TargetSnapshot{}, exchangeEvidence{}, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
 	}
-	deltaPath, err := buildPathRecord(attempt.Target, s.prepared.Delta)
+	path, err := resolveProviderPath(target)
 	if err != nil {
-		return preparedProviderCall{}, path.Target, exchangeEvidence{}, err
+		return providerCall{}, provider.TargetSnapshot{}, exchangeEvidence{}, err
 	}
-	backend, err := runner.Runtime.ResolveBackend(path.Target)
+	backend, err := runner.Runtime.ResolveBackend(path.target)
 	if err != nil {
-		return preparedProviderCall{}, path.Target, exchangeEvidence{}, err
+		return providerCall{}, path.target, exchangeEvidence{}, err
 	}
 	if err := backend.Validate(); err != nil {
-		return preparedProviderCall{}, path.Target, exchangeEvidence{}, canonical.UnsupportedOperation("required provider backend is incomplete")
+		return providerCall{}, path.target, exchangeEvidence{}, canonical.UnsupportedOperation("required provider backend is incomplete")
+	}
+	if !backend.Target.Equal(path.target) {
+		return providerCall{}, path.target, exchangeEvidence{}, canonical.UnsupportedOperation("resolved provider backend changed target execution projection")
 	}
 	clientCodec := runner.Runtime.ClientCodec(s.input.clientFamily)
 	if clientCodec == nil {
-		return preparedProviderCall{}, path.Target, exchangeEvidence{}, canonical.UnsupportedOperation("required client codec not resolved")
+		return providerCall{}, path.target, exchangeEvidence{}, canonical.UnsupportedOperation("required client codec not resolved")
 	}
-	providerPrepared := *s.prepared
-	providerPrepared.Semantic = path.Request
-	providerPrepared.Delta = deltaPath.Request
-	providerRequest := providerPrepared.ForBackend(backend, path.ProviderDelivery)
+	var canonicalRequest canonical.CanonicalRequest
+	switch selection.requestChoice {
+	case providerRequestPreferred:
+		canonicalRequest = s.prepared.PreferredForTarget(path.target)
+	case providerRequestFullHistory:
+		canonicalRequest = s.prepared.Semantic.Clone()
+	default:
+		return providerCall{}, path.target, exchangeEvidence{}, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
+	}
+	providerRequest := provider.Request{Canonical: bindRequestToTarget(canonicalRequest, path.target.Model), Delivery: path.delivery}
+	evidence := exchangeEvidence{}
 	workspaceSlug := s.input.workspace.Slug().String()
 	if err := validateReplayInput(runner, workspaceSlug); err != nil {
-		return preparedProviderCall{}, path.Target, exchangeEvidence{}, err
+		return providerCall{}, path.target, exchangeEvidence{}, err
 	}
-	contract := NewExecutionContract(s.input.clientDelivery).WithProviderDelivery(path.ProviderDelivery)
+	contract := NewExecutionContract(s.input.clientDelivery).WithProviderDelivery(path.delivery)
 	if err := contract.Validate(); err != nil {
-		return preparedProviderCall{}, path.Target, exchangeEvidence{}, canonical.BadRequest("execution contract is invalid: " + err.Error())
+		return providerCall{}, path.target, exchangeEvidence{}, canonical.BadRequest("execution contract is invalid: " + err.Error())
 	}
 	doc, decisions, err := backend.Codec.Encode(providerRequest)
-	evidence := exchangeEvidence{decisions: decisions}
+	evidence.decisions = append(evidence.decisions, decisions...)
 	if err != nil {
-		return preparedProviderCall{}, path.Target, evidence, fmt.Errorf("provider request encoding: %w", err)
+		return providerCall{}, path.target, evidence, fmt.Errorf("provider request encoding: %w", err)
 	}
-	return preparedProviderCall{
+	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
-		workspaceSlug: workspaceSlug, semanticRequest: s.prepared.Semantic.Clone(),
-	}, path.Target, evidence, nil
+		workspaceSlug: workspaceSlug, replayRequest: s.prepared.Semantic.Clone(),
+	}, path.target, evidence, nil
 }
 
 // completeProviderCall is a reducer-owned response edge. It validates and
 // decodes provider ingress before deciding the final client handoff.
-func completeProviderCall(ctx context.Context, call preparedProviderCall, ingress provider.Ingress, responseID replay.ResponseID, runner runtimeBundle) (ClientResponse, []compat.Decision, error) {
+func completeProviderCall(ctx context.Context, call providerCall, ingress provider.Ingress, swobuResponseID canonical.SwobuResponseID, runner runtimeBundle) (ClientResponse, []compat.Decision, error) {
 	if err := provider.ValidateIngress(ingress); err != nil {
 		return nil, nil, canonical.InternalError("provider ingress shape is invalid")
 	}
@@ -70,19 +79,19 @@ func completeProviderCall(ctx context.Context, call preparedProviderCall, ingres
 	}
 	events := newTerminalCompatibilityStream(decoded.Stream, decoded.TerminalDecisions, runner.DecisionSink, call.exchangeID)
 	events = replay.NewCommitReader(events, replay.TerminalCommitConfig{
-		WorkspaceSlug:       call.workspaceSlug,
-		ExchangeID:          call.exchangeID,
-		ResponseID:          responseID,
-		Store:               runner.ReplayStore,
-		SemanticRequest:     call.semanticRequest.Clone(),
-		ContinuationSource:  decoded.Continuation,
-		CaptureContinuation: call.backend.CaptureContinuation,
+		WorkspaceSlug:   call.workspaceSlug,
+		ExchangeID:      call.exchangeID,
+		SwobuResponseID: swobuResponseID,
+		Store:           runner.ReplayStore,
+		SemanticRequest: call.replayRequest.Clone(),
+		TargetID:        call.backend.Target.TargetID,
+		TargetVersion:   call.backend.Target.TargetVersion,
 	})
 	response, err := encodeClientOutput(ctx, call, events, incremental, runner.DecisionSink)
 	return response, decoded.Decisions, err
 }
 
-func decodeProviderIngress(ctx context.Context, call preparedProviderCall, ingress provider.Ingress, backend provider.Backend) (provider.DecodedResponse, bool, error) {
+func decodeProviderIngress(ctx context.Context, call providerCall, ingress provider.Ingress, backend provider.Backend) (provider.DecodedResponse, bool, error) {
 	var decoded provider.DecodedResponse
 	var err error
 	switch resolved := ingress.(type) {

@@ -45,8 +45,8 @@ func TestDecodeClientRequestWithDecisions_RecordsToolCallIDAndKindScars(t *testi
 		outcome compat.Outcome
 		subject compat.Subject
 	}{
-		{feature: compat.ToolCallID, outcome: compat.Approx, subject: compat.Subject("wire:/messages/0/tool_calls/0/id")},
-		{feature: compat.ToolCallKind, outcome: compat.Reject, subject: compat.Subject("wire:/messages/1/tool_calls/0/type")},
+		{feature: compat.RequestItemsToolUseID, outcome: compat.Approx, subject: compat.Subject("wire:/messages/0/tool_calls/0/id")},
+		{feature: compat.RequestItemsToolType, outcome: compat.Reject, subject: compat.Subject("wire:/messages/1/tool_calls/0/type")},
 	}
 	for i, effectItem := range sink.effects {
 		compatEffect := effectItem
@@ -85,7 +85,7 @@ func TestDecodeClientRequestWithDecisions_RecordsToolCallArgumentsScar(t *testin
 		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
 	}
 	compatEffect := sink.effects[0]
-	if compatEffect.Feature != compat.ToolCallArguments || compatEffect.Outcome != compat.Reject {
+	if compatEffect.Feature != compat.RequestItemsToolInput || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want tool.call_arguments reject", compatEffect)
 	}
 	if compatEffect.Subject != compat.Subject("wire:/messages/0/tool_calls/0/function/arguments") {

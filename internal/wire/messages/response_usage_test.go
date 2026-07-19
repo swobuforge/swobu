@@ -63,19 +63,19 @@ func TestDecodeResponseBuffered_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
 		t.Fatalf("captured effects len=%d want=4", len(sink.effects))
 	}
 	inputEffect := sink.effects[0]
-	if inputEffect.Feature != compat.UsageInputTokens || inputEffect.Outcome != compat.Exact || inputEffect.Subject != compat.Subject("wire:/usage/input_tokens") {
+	if inputEffect.Feature != compat.ResponseUsageInputTokens || inputEffect.Outcome != compat.Exact || inputEffect.Subject != compat.Subject("wire:/usage/input_tokens") {
 		t.Fatalf("captured effect[0] = %#v, want usage.input_tokens exact wire:/usage/input_tokens", inputEffect)
 	}
 	outputEffect := sink.effects[1]
-	if outputEffect.Feature != compat.UsageOutputTokens || outputEffect.Outcome != compat.Exact || outputEffect.Subject != compat.Subject("wire:/usage/output_tokens") {
+	if outputEffect.Feature != compat.ResponseUsageOutputTokens || outputEffect.Outcome != compat.Exact || outputEffect.Subject != compat.Subject("wire:/usage/output_tokens") {
 		t.Fatalf("captured effect[1] = %#v, want usage.output_tokens exact wire:/usage/output_tokens", outputEffect)
 	}
 	cacheReadEffect := sink.effects[2]
-	if cacheReadEffect.Feature != compat.UsageCacheReadTokens || cacheReadEffect.Outcome != compat.Exact || cacheReadEffect.Subject != compat.Subject("wire:/usage/cache_read_tokens") {
+	if cacheReadEffect.Feature != compat.ResponseUsageCacheReadTokens || cacheReadEffect.Outcome != compat.Exact || cacheReadEffect.Subject != compat.Subject("wire:/usage/cache_read_tokens") {
 		t.Fatalf("captured effect[2] = %#v, want usage.cache_read_tokens exact wire:/usage/cache_read_tokens", cacheReadEffect)
 	}
 	cacheWriteEffect := sink.effects[3]
-	if cacheWriteEffect.Feature != compat.UsageCacheWriteTokens || cacheWriteEffect.Outcome != compat.Exact || cacheWriteEffect.Subject != compat.Subject("wire:/usage/cache_write_tokens") {
+	if cacheWriteEffect.Feature != compat.ResponseUsageCacheWriteTokens || cacheWriteEffect.Outcome != compat.Exact || cacheWriteEffect.Subject != compat.Subject("wire:/usage/cache_write_tokens") {
 		t.Fatalf("captured effect[3] = %#v, want usage.cache_write_tokens exact wire:/usage/cache_write_tokens", cacheWriteEffect)
 	}
 }
@@ -102,7 +102,7 @@ func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
 		t.Fatalf("captured effects len=%d want=2", len(sink.effects))
 	}
 	usageEffect := sink.effects[0]
-	if usageEffect.Feature != compat.UsageOutputTokens || usageEffect.Outcome != compat.Exact || usageEffect.Subject != compat.Subject("wire:/usage/output_tokens") {
+	if usageEffect.Feature != compat.ResponseUsageOutputTokens || usageEffect.Outcome != compat.Exact || usageEffect.Subject != compat.Subject("wire:/usage/output_tokens") {
 		t.Fatalf("captured effect[0] = %#v, want usage.output_tokens exact wire:/usage/output_tokens", usageEffect)
 	}
 	terminalEffect := sink.effects[1]

@@ -14,23 +14,31 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	items := output.Items()
 	content := make([]messagesResponsePartDTO, 0, len(items))
 	for _, item := range items {
-		switch item.Kind {
+		switch item.Kind() {
 		case canonical.ItemKindText:
-			content = append(content, messagesResponsePartDTO{Type: "text", Text: item.Text})
+			text, ok := item.TextItem()
+			if !ok {
+				return wire.ClientDocumentResult{}, canonical.InternalError("messages text item payload is invalid")
+			}
+			content = append(content, messagesResponsePartDTO{Type: "text", Text: text.Text})
 		case canonical.ItemKindToolUse:
-			if item.ToolType != "" && item.ToolType != canonical.ToolTypeFunction {
+			toolUse, ok := item.ToolUse()
+			if !ok {
+				return wire.ClientDocumentResult{}, canonical.InternalError("messages tool-use item payload is invalid")
+			}
+			if toolUse.ToolType != "" && toolUse.ToolType != canonical.ToolTypeFunction {
 				return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("messages protocol only supports function tool output")
 			}
 			input := map[string]any{}
-			if raw := item.Input.RawObject(); raw != "" {
+			if raw := toolUse.Input.RawObject(); raw != "" {
 				if err := json.Unmarshal([]byte(raw), &input); err != nil {
 					return wire.ClientDocumentResult{}, canonical.BadRequest("messages tool_use input is invalid JSON object")
 				}
 			}
 			content = append(content, messagesResponsePartDTO{
 				Type:  "tool_use",
-				ID:    item.ToolUseID,
-				Name:  item.Name,
+				ID:    toolUse.UseID,
+				Name:  toolUse.Name,
 				Input: input,
 			})
 		case canonical.ItemKindToolResult:
@@ -40,7 +48,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		}
 	}
 	raw, err := json.Marshal(messagesResponseDTO{
-		ID:         sse.FallbackID(output.ResultID(), "msg_swobu"),
+		ID:         sse.FallbackID(output.Response().SwobuID.String(), "msg_swobu"),
 		Type:       "message",
 		Role:       "assistant",
 		Model:      output.Model(),

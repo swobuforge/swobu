@@ -58,12 +58,9 @@ type ClientRequestResult struct {
 	Delivery delivery.Delivery
 }
 
-// ProviderEncodeInput is the declarative input for provider request encoders.
-// Encoders receive the canonical request plus an optional exact-backend native
-// continuation. Stateless encoders ignore the continuation.
+// ProviderEncodeInput is the declarative canonical input for provider encoders.
 type ProviderEncodeInput struct {
-	Request            canonical.CanonicalRequest
-	NativeContinuation *provider.NativeContinuation
+	Request canonical.CanonicalRequest
 }
 
 // ProviderEncodeResult is the concrete provider-request lowering result.
@@ -73,12 +70,10 @@ type ProviderEncodeResult struct {
 }
 
 // ProviderDecodeResult makes all provider-owned decode outputs explicit.
-// Progressive decision and continuation sources are returned deliberately by
-// the codec that constructs the stream; callers never discover optional
-// methods through type assertions.
+// Progressive decision sources are returned deliberately by the codec that
+// constructs the stream; durable fidelity lives in canonical events.
 type ProviderDecodeResult struct {
 	Stream            canonical.ResponseStream
 	Decisions         []compat.Decision
-	Continuation      provider.ContinuationSource
 	TerminalDecisions provider.DecisionSource
 }

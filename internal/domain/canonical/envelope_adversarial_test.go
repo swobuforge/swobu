@@ -71,8 +71,8 @@ func TestEnvelopeSynthesizeProject_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectResponse error: %v", err)
 	}
-	if projected.ResultID() != out.ResultID() {
-		t.Fatalf("result id = %q, want %q", projected.ResultID(), out.ResultID())
+	if projected.Response().SwobuID != out.Response().SwobuID {
+		t.Fatalf("response id = %q, want %q", projected.Response().SwobuID, out.Response().SwobuID)
 	}
 	if projected.Model() != out.Model() {
 		t.Fatalf("model = %q, want %q", projected.Model(), out.Model())
@@ -83,11 +83,12 @@ func TestEnvelopeSynthesizeProject_RoundTrip(t *testing.T) {
 	if len(projected.Items()) != 2 {
 		t.Fatalf("items len = %d, want 2", len(projected.Items()))
 	}
-	if projected.Items()[1].Kind != ItemKindToolUse {
-		t.Fatalf("second item kind = %q, want %q", projected.Items()[1].Kind, ItemKindToolUse)
+	if projected.Items()[1].Kind() != ItemKindToolUse {
+		t.Fatalf("second item kind = %q, want %q", projected.Items()[1].Kind(), ItemKindToolUse)
 	}
-	if !strings.Contains(projected.Items()[1].Input.RawObject(), `"query":"swobu"`) {
-		t.Fatalf("tool args query missing in %q", projected.Items()[1].Input.RawObject())
+	toolUse, _ := projected.Items()[1].ToolUse()
+	if !strings.Contains(toolUse.Input.RawObject(), `"query":"swobu"`) {
+		t.Fatalf("tool args query missing in %q", toolUse.Input.RawObject())
 	}
 }
 
@@ -168,8 +169,9 @@ func TestEnvelopeRequestSynthesizeProject_RoundTrip(t *testing.T) {
 	if len(typed.Items()) != 2 {
 		t.Fatalf("thread len = %d, want 2", len(typed.Items()))
 	}
-	if !strings.Contains(typed.Items()[1].Input.RawObject(), `"q":"swobu"`) {
-		t.Fatalf("tool input q missing in %q", typed.Items()[1].Input.RawObject())
+	toolUse, _ := typed.Items()[1].ToolUse()
+	if !strings.Contains(toolUse.Input.RawObject(), `"q":"swobu"`) {
+		t.Fatalf("tool input q missing in %q", toolUse.Input.RawObject())
 	}
 	if len(typed.Tools()) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(typed.Tools()))

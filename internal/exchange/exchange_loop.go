@@ -25,7 +25,7 @@ func runExchange(
 	if err := validateReplayRuntime(runner); err != nil {
 		return RequestOutput{}, err
 	}
-	responseID, err := allocateResponseID(ctx, exchangeID, runner.ResponseIDs)
+	responseID, err := allocateSwobuResponseID(ctx, exchangeID, runner.SwobuResponseIDs)
 	if err != nil {
 		return RequestOutput{}, err
 	}
@@ -35,8 +35,8 @@ func runExchange(
 			clientFamily: clientFamily, clientDelivery: clientDelivery,
 			request: canonical.CloneCanonicalRequest(request), workspace: workspace, timing: timing,
 		},
-		responseID: responseID,
-		phase:      startingPhase{},
+		swobuResponseID: responseID,
+		phase:           startingPhase{},
 	}
 	var current exchangeEvent = exchangeStarted{}
 	for steps := 0; steps < 1000; steps++ {
@@ -47,10 +47,10 @@ func runExchange(
 		recordExchangeEvidenceBestEffort(ctx, runner.DecisionSink, exchangeID, tr.evidence)
 		s = tr.nextState
 		switch p := s.phase.(type) {
-		case responseReturnedPhase:
-			return terminalRequestOutput(s.input, p.response, p.target, p.attempt, p.count), nil
-		case exchangeFailedPhase:
-			return terminalRequestOutput(s.input, nil, p.target, p.attempt, p.count), p.problem
+		case completedPhase:
+			return terminalRequestOutput(s.input, p.response, p.target, s.route.name, len(s.providerCallAttempts)), nil
+		case failedPhase:
+			return terminalRequestOutput(s.input, nil, p.target, s.route.name, len(s.providerCallAttempts)), p.problem
 		}
 		if tr.command == nil {
 			return RequestOutput{}, canonical.InternalError(fmt.Sprintf("exchange invariant: active phase %T produced no command", s.phase))
@@ -67,16 +67,19 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 		return replayLoaded{record: record, found: found, err: err}
 	case callProviderCommand:
 		ingress, err := c.backend.Transport.Send(ctx, c.document)
-		return providerReturned{ingress: ingress, err: err}
+		if err != nil {
+			return providerCallFailed{attemptID: c.attemptID, err: err}
+		}
+		return providerIngressReceived{attemptID: c.attemptID, ingress: ingress}
 	default:
-		return providerReturned{err: canonical.InternalError(fmt.Sprintf("exchange command %T is unsupported", cmd))}
+		panic(fmt.Sprintf("exchange invariant: unsupported closed command %T", cmd))
 	}
 }
 
-func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, attempt routing.Attempt, count int) RequestOutput {
+func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, providerCallCount int) RequestOutput {
 	var evidence *TrafficEvidenceInput
 	if target.TargetID != "" {
-		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: attempt.Route, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, request: input.request.Clone(), target: target, response: response, attemptCount: count}
+		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, request: input.request.Clone(), target: target, response: response, providerCallAttemptCount: providerCallCount}
 	}
 	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence}
 }

@@ -10,8 +10,7 @@ const (
 
 func NewTextOutputItem(itemID string, text string) CanonicalItem {
 	item := NewTextItem(ItemAuthorAssistant, text)
-	item.ItemID = itemID
-	return item
+	return itemWithID(item, itemID)
 }
 
 func NewToolUseOutputItem(itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
@@ -25,8 +24,8 @@ func NewCustomToolUseOutputItem(itemID string, toolUseID string, name string, in
 type CanonicalOutput interface {
 	// SemanticKind reports which semantic family this successful canonical output represents.
 	SemanticKind() SemanticKind
-	// ResultID returns the continuity-critical provider body identity when available.
-	ResultID() string
+	// Response returns the canonical response identity and typed refinements.
+	Response() ResponseRef
 	// Model returns the backend model identity reported for this output when available.
 	Model() string
 	// FinishReason returns the provider-neutral terminal status for this output when available.
@@ -43,17 +42,17 @@ type CanonicalOutput interface {
 // Streaming is modeled as ordered assembly of this object rather than as a separate semantic path.
 type CanonicalOutputProjection struct {
 	semanticKind SemanticKind
-	resultID     string
+	response     ResponseRef
 	model        string
 	items        []CanonicalItem
 	finishReason string
 	usage        TokenUsage
 }
 
-func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
+func NewOutputWithUsage(semanticKind SemanticKind, response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
 	return CanonicalOutputProjection{
 		semanticKind: semanticKind,
-		resultID:     resultID,
+		response:     response.Clone(),
 		model:        model,
 		items:        cloneCanonicalItems(items),
 		finishReason: finishReason,
@@ -61,28 +60,32 @@ func NewOutputWithUsage(semanticKind SemanticKind, resultID string, model string
 	}
 }
 
-func NewConversationOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputProjection {
-	return NewConversationOutputWithUsage(resultID, model, items, finishReason, NewUnknownTokenUsage())
+func NewConversationOutput(swobuResponseID SwobuResponseID, model string, items []CanonicalItem, finishReason string) CanonicalOutputProjection {
+	return NewConversationOutputWithUsage(swobuResponseID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewConversationOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
-	return NewOutputWithUsage(SemanticKindConversation, resultID, model, items, finishReason, usage)
+func NewConversationOutputWithUsage(swobuResponseID SwobuResponseID, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
+	return newConversationOutputWithResponse(ResponseRef{SwobuID: swobuResponseID}, model, items, finishReason, usage)
 }
 
-func NewPromptOutput(resultID string, model string, items []CanonicalItem, finishReason string) CanonicalOutputProjection {
-	return NewPromptOutputWithUsage(resultID, model, items, finishReason, NewUnknownTokenUsage())
+func NewPromptOutput(swobuResponseID SwobuResponseID, model string, items []CanonicalItem, finishReason string) CanonicalOutputProjection {
+	return NewPromptOutputWithUsage(swobuResponseID, model, items, finishReason, NewUnknownTokenUsage())
 }
 
-func NewPromptOutputWithUsage(resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
-	return NewOutputWithUsage(SemanticKindPrompt, resultID, model, items, finishReason, usage)
+func NewPromptOutputWithUsage(swobuResponseID SwobuResponseID, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
+	return NewOutputWithUsage(SemanticKindPrompt, ResponseRef{SwobuID: swobuResponseID}, model, items, finishReason, usage)
+}
+
+func newConversationOutputWithResponse(response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalOutputProjection {
+	return NewOutputWithUsage(SemanticKindConversation, response, model, items, finishReason, usage)
 }
 
 func (o CanonicalOutputProjection) SemanticKind() SemanticKind {
 	return o.semanticKind
 }
 
-func (o CanonicalOutputProjection) ResultID() string {
-	return o.resultID
+func (o CanonicalOutputProjection) Response() ResponseRef {
+	return o.response.Clone()
 }
 
 func (o CanonicalOutputProjection) Model() string {
@@ -108,21 +111,25 @@ func (o CanonicalOutputProjection) CloneOutput() CanonicalOutput {
 // CloneProjection returns a deep copy of the concrete output projection
 // without forcing callers through an interface assertion.
 func (o CanonicalOutputProjection) CloneProjection() CanonicalOutputProjection {
-	return NewOutputWithUsage(o.semanticKind, o.resultID, o.model, o.items, o.finishReason, o.usage)
+	return NewOutputWithUsage(o.semanticKind, o.response, o.model, o.items, o.finishReason, o.usage)
 }
 
-func (o CanonicalOutputProjection) WithResultID(id string) CanonicalOutputProjection {
-	o.resultID = id
+func (o CanonicalOutputProjection) WithResponse(response ResponseRef) CanonicalOutputProjection {
+	o.response = response.Clone()
 	return o
 }
 
 func (o CanonicalOutputProjection) Text() string {
 	out := ""
 	for _, item := range o.items {
-		if item.Kind != ItemKindText {
+		if item.Kind() != ItemKindText {
 			continue
 		}
-		out += item.Text
+		text, ok := item.TextItem()
+		if !ok {
+			continue
+		}
+		out += text.Text
 	}
 	return out
 }

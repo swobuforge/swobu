@@ -82,11 +82,13 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputProjection, error) {
 	orderedIDs := make([]EnvelopeID, 0)
 	usage := NewUnknownTokenUsage()
 	finish := ""
-	resultID := ""
+	response := ResponseRef{}
 	model := ""
 
 	for _, ev := range e.Events {
-		responseProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &usage, &finish, &resultID, &model)
+		if err := responseProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &usage, &finish, &response, &model); err != nil {
+			return nil, err
+		}
 	}
 	items := make([]CanonicalItem, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -94,14 +96,18 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputProjection, error) {
 		if item == nil {
 			continue
 		}
-		if item.Kind == ItemKindToolUse {
+		if item.Kind() == ItemKindToolUse {
 			if raw := toolArgsByID[id]; raw != "" {
-				item.Input = NewToolArgumentsObject(raw)
+				updated, err := withToolUseInput(*item, NewToolArgumentsObject(raw))
+				if err != nil {
+					return nil, err
+				}
+				item = &updated
 			}
 		}
 		items = append(items, item.Clone())
 	}
-	out := NewConversationOutputWithUsage(resultID, model, items, finish, usage)
+	out := newConversationOutputWithResponse(response, model, items, finish, usage)
 	return &out, nil
 }
 
@@ -112,22 +118,14 @@ func responseProjectionApplyEvent(
 	orderedIDs *[]EnvelopeID,
 	usage *TokenUsage,
 	finish *string,
-	resultID *string,
+	response *ResponseRef,
 	model *string,
-) {
+) error {
 	switch ev.Kind {
 	case EventEnvelopeStart:
-		responseProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs)
-	case EventTextDelta:
-		payload, _ := ev.Payload.(TextDeltaPayload)
-		if item, ok := itemsByID[ev.EnvID]; ok {
-			item.Text += payload.Text
-		}
-	case EventArgsDelta:
-		payload, _ := ev.Payload.(ArgsDeltaPayload)
-		if _, ok := itemsByID[ev.EnvID]; ok {
-			toolArgsByID[ev.EnvID] = toolArgsByID[ev.EnvID] + payload.Args
-		}
+		return responseProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs, response)
+	case EventTextDelta, EventArgsDelta:
+		return projectionApplyItemDelta(ev, itemsByID, toolArgsByID)
 	case EventUsage:
 		payload, ok := ev.Payload.(UsagePayload)
 		if ok {
@@ -139,9 +137,6 @@ func responseProjectionApplyEvent(
 	case EventMetadata:
 		payload, _ := ev.Payload.(MetadataPayload)
 		if payload.Values != nil {
-			if payload.Values["result_id"] != "" {
-				*resultID = payload.Values["result_id"]
-			}
 			if payload.Values["model"] != "" {
 				*model = payload.Values["model"]
 			}
@@ -149,16 +144,24 @@ func responseProjectionApplyEvent(
 	default:
 		// ignored by response projection
 	}
+	return nil
 }
 
-func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) {
-	payload, _ := ev.Payload.(EnvelopeStartPayload)
+func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID, response *ResponseRef) error {
+	payload, ok := ev.Payload.(EnvelopeStartPayload)
+	if !ok {
+		return fmt.Errorf("envelope start payload type %T is unsupported", ev.Payload)
+	}
+	if payload.Kind == EnvResponse {
+		*response = payload.Response.Clone()
+		return nil
+	}
 	if payload.Kind == EnvMessage {
 		item := NewTextOutputItem(string(ev.EnvID), "")
-		item.Author = payload.Role
+		item = itemWithAuthor(item, payload.Role)
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
-		return
+		return nil
 	}
 	if payload.Kind == EnvToolCall {
 		toolUseID := payload.ToolUseID
@@ -166,11 +169,15 @@ func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*C
 			toolUseID = string(ev.EnvID)
 		}
 		item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, EmptyToolArguments())
-		item.ToolType = payload.ToolType
-		item.Author = ItemAuthorAssistant
+		item, err := withToolUseType(item, payload.ToolType)
+		if err != nil {
+			return err
+		}
+		item = itemWithAuthor(item, ItemAuthorAssistant)
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
 	}
+	return nil
 }
 
 // ProjectRequest materializes a closed request envelope into a canonical
@@ -203,8 +210,11 @@ func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
 			continue
 		}
 		if raw := toolArgsByID[id]; raw != "" {
-			item.Input = NewToolArgumentsObject(raw)
-			item.Kind = ItemKindToolUse
+			updated, err := withToolUseInput(*item, NewToolArgumentsObject(raw))
+			if err != nil {
+				return CanonicalRequest{}, err
+			}
+			item = &updated
 		}
 		items = append(items, item.Clone())
 	}
@@ -267,42 +277,79 @@ func requestProjectionApplyEvent(
 			}
 		}
 	case EventEnvelopeStart:
-		requestProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs)
-	case EventTextDelta:
-		payload, _ := ev.Payload.(TextDeltaPayload)
-		if item, ok := itemsByID[ev.EnvID]; ok {
-			item.Text += payload.Text
-		}
-	case EventArgsDelta:
-		payload, _ := ev.Payload.(ArgsDeltaPayload)
-		if _, ok := itemsByID[ev.EnvID]; ok {
-			toolArgsByID[ev.EnvID] = toolArgsByID[ev.EnvID] + payload.Args
-		}
+		return requestProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs)
+	case EventTextDelta, EventArgsDelta:
+		return projectionApplyItemDelta(ev, itemsByID, toolArgsByID)
 	default:
 		// ignored by request projection
 	}
 	return nil
 }
 
-func requestProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) {
-	payload, _ := ev.Payload.(EnvelopeStartPayload)
+func projectionApplyItemDelta(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, toolArgsByID map[EnvelopeID]string) error {
+	item, ok := itemsByID[ev.EnvID]
+	if !ok {
+		return fmt.Errorf("%s targets unknown canonical item %q", ev.Kind, ev.EnvID)
+	}
+	switch ev.Kind {
+	case EventTextDelta:
+		payload, ok := ev.Payload.(TextDeltaPayload)
+		if !ok {
+			return fmt.Errorf("text delta payload type %T is unsupported", ev.Payload)
+		}
+		var updated CanonicalItem
+		var err error
+		switch item.Kind() {
+		case ItemKindText:
+			updated, err = appendTextItemDelta(*item, payload.Text)
+		case ItemKindToolResult:
+			updated, err = appendToolResultTextDelta(*item, payload.Text)
+		default:
+			err = fmt.Errorf("text delta cannot target %q item", item.Kind())
+		}
+		if err != nil {
+			return err
+		}
+		itemsByID[ev.EnvID] = &updated
+	case EventArgsDelta:
+		payload, ok := ev.Payload.(ArgsDeltaPayload)
+		if !ok {
+			return fmt.Errorf("args delta payload type %T is unsupported", ev.Payload)
+		}
+		if item.Kind() != ItemKindToolUse {
+			return fmt.Errorf("args delta cannot target %q item", item.Kind())
+		}
+		toolArgsByID[ev.EnvID] += payload.Args
+	}
+	return nil
+}
+
+func requestProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) error {
+	payload, ok := ev.Payload.(EnvelopeStartPayload)
+	if !ok {
+		return fmt.Errorf("envelope start payload type %T is unsupported", ev.Payload)
+	}
 	if payload.Kind == EnvMessage {
 		item := NewTextItem(payload.Role, "")
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
-		return
+		return nil
 	}
 	if payload.Kind == EnvToolCall {
 		item := NewToolUseItem(payload.Role, string(ev.EnvID), payload.ToolUseID, payload.Name, EmptyToolArguments())
-		item.ToolType = payload.ToolType
+		var err error
+		item, err = withToolUseType(item, payload.ToolType)
+		if err != nil {
+			return err
+		}
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
-		return
+		return nil
 	}
 	if payload.Kind == EnvToolResult {
 		item := NewToolResultItem(payload.Role, payload.ToolUseID, "")
-		item.Name = payload.Name
 		itemsByID[ev.EnvID] = &item
 		*orderedIDs = append(*orderedIDs, ev.EnvID)
 	}
+	return nil
 }

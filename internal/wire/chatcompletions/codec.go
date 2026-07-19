@@ -177,9 +177,13 @@ func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsRes
 	var text strings.Builder
 	toolCalls := make([]chatCompletionsResponseToolCallDTO, 0)
 	for _, item := range output.Items() {
-		switch item.Kind {
+		switch item.Kind() {
 		case canonical.ItemKindText:
-			text.WriteString(item.Text)
+			textItem, ok := item.TextItem()
+			if !ok {
+				return chatCompletionsResponseMessageDTO{}, canonical.InternalError("chat completions text item payload is invalid")
+			}
+			text.WriteString(textItem.Text)
 		case canonical.ItemKindToolUse:
 			wire, err := chatToolCallFromOutputItem(item)
 			if err != nil {
@@ -201,16 +205,20 @@ func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsRes
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
 func chatToolCallFromOutputItem(item canonical.OutputItem) (chatCompletionsResponseToolCallDTO, error) {
-	toolUseID := strings.TrimSpace(item.ToolUseID) // swobu:io-string source=boundary
+	toolUse, ok := item.ToolUse()
+	if !ok {
+		return chatCompletionsResponseToolCallDTO{}, canonical.InternalError("chat completions tool-use item payload is invalid")
+	}
+	toolUseID := strings.TrimSpace(toolUse.UseID) // swobu:io-string source=boundary
 	if toolUseID == "" {
 		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require tool_use_id")
 	}
-	name := strings.TrimSpace(item.Name) // swobu:io-string source=boundary
+	name := strings.TrimSpace(toolUse.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require a name")
 	}
-	args := item.Input.RawObject()
-	switch strings.ToLower(strings.TrimSpace(item.ToolType)) { // swobu:io-string source=domain
+	args := toolUse.Input.RawObject()
+	switch strings.ToLower(strings.TrimSpace(toolUse.ToolType)) { // swobu:io-string source=domain
 	case "", canonical.ToolTypeFunction:
 		return chatCompletionsResponseToolCallDTO{
 			ID:   toolUseID,

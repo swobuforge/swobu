@@ -95,14 +95,20 @@ func continuationTestTarget(t *testing.T, protocol protocolkind.ProtocolKind) pr
 	return target
 }
 
-func continuationPrepared(target provider.TargetSnapshot) replay.Prepared {
+func continuationPrepared(target provider.TargetSnapshot, withResponsesRefinement bool) replay.Prepared {
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", Items: []canonical.CanonicalItem{
 		canonical.NewTextItem(canonical.ItemAuthorUser, "turn one"),
 		canonical.NewTextItem(canonical.ItemAuthorAssistant, "answer one"),
 		canonical.NewTextItem(canonical.ItemAuthorUser, "turn two"),
 	}})
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", InputText: "turn two"})
-	return replay.Prepared{Semantic: semantic, Delta: delta, Base: &replay.Record{Native: target.NativeContinuation("provider_previous")}}
+	var previous *canonical.ResponseRef
+	if withResponsesRefinement {
+		previous = &canonical.ResponseRef{SwobuID: "swobu_previous", Responses: &canonical.ResponsesNativeRef{
+			ProviderResponseID: "provider_previous", TargetID: target.TargetID, TargetVersion: target.TargetVersion,
+		}}
+	}
+	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", InputText: "turn two", PreviousResponse: previous})
+	return replay.Prepared{Semantic: semantic, Delta: delta}
 }
 
 func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
@@ -113,11 +119,10 @@ func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
 	}{
 		{name: "chat_completions", providerID: "openai", protocol: protocolkind.ChatCompletions},
 		{name: "messages", providerID: "anthropic", protocol: protocolkind.Messages},
-		{name: "responses_without_opt_in", providerID: "custom", protocol: protocolkind.Responses},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := continuationTestTarget(t, tc.protocol)
-			request := continuationPrepared(target).ForBackend(provider.Backend{Target: target}, delivery.BufferedDelivery())
+			request := provider.Request{Canonical: continuationPrepared(target, false).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
 			codec := Codec{ProviderID: tc.providerID, Protocol: tc.protocol}
 			if tc.protocol == protocolkind.ChatCompletions {
 				codec.Options.ChatCompletionsTokenField = chatcompletions.MaxOutputTokensFieldCompletion
@@ -127,17 +132,16 @@ func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw := string(document.RawBytes())
-			if request.Continuation != nil || !strings.Contains(raw, "turn one") || !strings.Contains(raw, "answer one") || !strings.Contains(raw, "turn two") {
+			if _, ok := request.Canonical.PreviousResponse(); ok || !strings.Contains(raw, "turn one") || !strings.Contains(raw, "answer one") || !strings.Contains(raw, "turn two") {
 				t.Fatalf("stateless replay lost semantic history: %s", raw)
 			}
 		})
 	}
 }
 
-func TestResponsesBackendWithContinuationOptInSendsDeltaAndPreviousResponseID(t *testing.T) {
+func TestResponsesBackendWithMatchingCanonicalRefinementSendsDeltaAndPreviousResponseID(t *testing.T) {
 	target := continuationTestTarget(t, protocolkind.Responses)
-	backend := provider.Backend{Target: target, CaptureContinuation: target.NativeContinuation}
-	request := continuationPrepared(target).ForBackend(backend, delivery.BufferedDelivery())
+	request := provider.Request{Canonical: continuationPrepared(target, true).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
 	document, _, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Encode(request)
 	if err != nil {
 		t.Fatal(err)

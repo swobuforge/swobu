@@ -121,6 +121,31 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	}
 }
 
+func TestTrafficEvent_PreservesZeroProviderCallAttempts(t *testing.T) {
+	requestID, err := ParseRequestID("req-zero-calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := NewRoute("target-a", "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{
+		RequestID:    requestID,
+		Workspace:    "alpha",
+		Route:        route,
+		Result:       ResultClassBackendError,
+		StatusCode:   500,
+		AttemptCount: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := event.AttemptCount(); got != 0 {
+		t.Fatalf("provider-call attempt count = %d, want 0", got)
+	}
+}
+
 func TestTrafficEvent_RejectsTerminalInProgressResult(t *testing.T) {
 	requestID, err := ParseRequestID("req-1")
 	if err != nil {

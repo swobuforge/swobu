@@ -143,7 +143,7 @@ func SynthesizeResponseFromOutput(exchangeID string, output CanonicalOutput) ([]
 	if output == nil {
 		return nil, fmt.Errorf("output is nil")
 	}
-	return SynthesizeResponseEnvelopeEvents(exchangeID, output.ResultID(), output.Model(), output.Items(), output.FinishReason(), output.Usage()), nil
+	return SynthesizeResponseEnvelopeEvents(exchangeID, output.Response(), output.Model(), output.Items(), output.FinishReason(), output.Usage()), nil
 }
 
 // SynthesizeRequestFromCanonicalRequest converts a canonical request into a
@@ -207,29 +207,41 @@ func SynthesizeRequestFromCanonicalRequest(exchangeID string, request CanonicalR
 	toolIdx := 0
 	resultIdx := 0
 	for _, item := range request.Items() {
-		switch item.Kind {
+		switch item.Kind() {
 		case ItemKindText:
+			text, ok := item.TextItem()
+			if !ok {
+				return nil, fmt.Errorf("text kind has payload %T", item.payload)
+			}
 			id := EnvelopeID(fmt.Sprintf("%s:message:%d", requestID, msgIdx))
 			msgIdx++
 			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: requestID, Payload: EnvelopeStartPayload{Kind: EnvMessage, Role: item.Author}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: requestID, Payload: TextDeltaPayload{Text: item.Text}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: requestID, Payload: EnvelopeStartPayload{Kind: EnvMessage, Role: item.Author()}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: requestID, Payload: TextDeltaPayload{Text: text.Text}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: requestID, Payload: EnvelopeEndPayload{Kind: EnvMessage, Status: EnvelopeStatusCompleted}},
 			)
 		case ItemKindToolUse:
+			toolUse, ok := item.ToolUse()
+			if !ok {
+				return nil, fmt.Errorf("tool-use kind has payload %T", item.payload)
+			}
 			id := EnvelopeID(fmt.Sprintf("%s:tool_call:%d", requestID, toolIdx))
 			toolIdx++
 			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: requestID, Payload: EnvelopeStartPayload{Kind: EnvToolCall, Name: item.Name, ToolUseID: item.ToolUseID, Role: item.Author}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventArgsDelta, EnvID: id, ParentID: requestID, Payload: ArgsDeltaPayload{Args: item.Input.RawObject()}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: requestID, Payload: EnvelopeStartPayload{Kind: EnvToolCall, Name: toolUse.Name, ToolUseID: toolUse.UseID, Role: item.Author()}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventArgsDelta, EnvID: id, ParentID: requestID, Payload: ArgsDeltaPayload{Args: toolUse.Input.RawObject()}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: requestID, Payload: EnvelopeEndPayload{Kind: EnvToolCall, Status: EnvelopeStatusCompleted}},
 			)
 		case ItemKindToolResult:
+			toolResult, ok := item.ToolResult()
+			if !ok {
+				return nil, fmt.Errorf("tool-result kind has payload %T", item.payload)
+			}
 			id := EnvelopeID(fmt.Sprintf("%s:tool_result:%d", requestID, resultIdx))
 			resultIdx++
 			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: requestID, Payload: EnvelopeStartPayload{Kind: EnvToolResult, Name: item.Name, ToolUseID: item.ToolUseID, Role: item.Author}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: requestID, Payload: TextDeltaPayload{Text: item.Text}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: requestID, Payload: EnvelopeStartPayload{Kind: EnvToolResult, ToolUseID: toolResult.UseID, Role: item.Author()}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: requestID, Payload: TextDeltaPayload{Text: toolResult.Text}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: requestID, Payload: EnvelopeEndPayload{Kind: EnvToolResult, Status: EnvelopeStatusCompleted}},
 			)
 		default:

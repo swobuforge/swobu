@@ -6,7 +6,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type realizedResponsesBody struct {
@@ -16,15 +15,12 @@ type realizedResponsesBody struct {
 
 func TestEncode_OmitsInputForContinuationOnlyRequests(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-opus-4-6",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output")},
-		Turn:  canonical.NewTurnRef("resp_123"),
+		Model:            "claude-opus-4-6",
+		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output")},
+		PreviousResponse: testResponsesPrevious("swobu_resp_123", "provider_resp_789"),
 	})
 
-	wire, err := EncodeCarrierWithDecisions(EncodeInput{
-		Request:            req,
-		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
-	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{Request: req}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatalf("Encode returned err=%v", err)
 	}
@@ -33,8 +29,8 @@ func TestEncode_OmitsInputForContinuationOnlyRequests(t *testing.T) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	if body.PreviousResponseID != "resp_123" {
-		t.Fatalf("previous_response_id=%q want resp_123; raw=%s", body.PreviousResponseID, string(raw))
+	if body.PreviousResponseID != "provider_resp_789" {
+		t.Fatalf("previous_response_id=%q want provider_resp_789; raw=%s", body.PreviousResponseID, string(raw))
 	}
 	if body.Input != nil {
 		t.Fatalf("input=%#v want nil for continuation-only request; raw=%s", body.Input, string(raw))
@@ -43,18 +39,12 @@ func TestEncode_OmitsInputForContinuationOnlyRequests(t *testing.T) {
 
 func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-opus-4-6",
-		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorAssistant, "prior output"),
-			canonical.NewTextItem(canonical.ItemAuthorUser, "new user turn"),
-		},
-		Turn: canonical.NewTurnRef("resp_123"),
+		Model:            "claude-opus-4-6",
+		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "new user turn")},
+		PreviousResponse: testResponsesPrevious("swobu_resp_123", "provider_resp_789"),
 	})
 
-	wire, err := EncodeCarrierWithDecisions(EncodeInput{
-		Request:            req,
-		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
-	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{Request: req}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatalf("Encode returned err=%v", err)
 	}
@@ -68,7 +58,7 @@ func TestEncode_KeepsLastTurnInputWithPreviousResponseID(t *testing.T) {
 	}
 }
 
-func TestEncode_EmitsExplicitClearsWithNativeContinuation(t *testing.T) {
+func TestEncode_EmitsExplicitClearsWithResponsesRefinement(t *testing.T) {
 	presence := canonical.RequestPresence{
 		Instructions: true,
 		Tools:        true,
@@ -81,17 +71,15 @@ func TestEncode_EmitsExplicitClearsWithNativeContinuation(t *testing.T) {
 		},
 	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:    "gpt-4o",
-		Items:    []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "continue")},
-		Tools:    []canonical.ToolDecl{},
-		Controls: canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{}}},
-		Presence: presence,
+		Model:            "gpt-4o",
+		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "continue")},
+		Tools:            []canonical.ToolDecl{},
+		Controls:         canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{}}},
+		Presence:         presence,
+		PreviousResponse: testResponsesPrevious("swobu_123", "resp_123"),
 	})
 
-	wire, err := EncodeCarrierWithDecisions(EncodeInput{
-		Request:            req,
-		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
-	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{Request: req}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,12 +118,10 @@ func TestEncode_EmitsDefaultParallelPolicyToClearInheritedRestriction(t *testing
 		Tools: []canonical.ToolDecl{
 			canonical.NewFunctionToolDecl("search", "search", "search", canonical.NewToolSchemaObject(`{"type":"object"}`)),
 		},
-		Presence: canonical.RequestPresence{ToolCallBatch: true},
+		Presence:         canonical.RequestPresence{ToolCallBatch: true},
+		PreviousResponse: testResponsesPrevious("swobu_123", "resp_123"),
 	})
-	wire, err := EncodeCarrierWithDecisions(EncodeInput{
-		Request:            req,
-		NativeContinuation: &provider.NativeContinuation{ID: "resp_123"},
-	}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	wire, err := EncodeCarrierWithDecisions(EncodeInput{Request: req}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

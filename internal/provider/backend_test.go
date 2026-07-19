@@ -1,17 +1,24 @@
 package provider
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestTargetSnapshotBindsNativeContinuationToItsVersion(t *testing.T) {
-	target := NewTargetSnapshot("tgt-1", "openai", "https://api.openai.com/v1", "credential-a", "responses", "")
-	native := target.NativeContinuation("resp_1")
-	if native == nil || native.TargetID != target.TargetID || native.TargetVersion != target.TargetVersion || native.ID != "resp_1" {
-		t.Fatalf("native continuation = %#v", native)
+func TestProviderContractsHaveNoContinuationSidecar(t *testing.T) {
+	for name, typ := range map[string]reflect.Type{
+		"Request":         reflect.TypeOf(Request{}),
+		"Backend":         reflect.TypeOf(Backend{}),
+		"DecodedResponse": reflect.TypeOf(DecodedResponse{}),
+	} {
+		for _, field := range []string{"Continuation", "CaptureContinuation", "NativeContinuation"} {
+			if _, ok := typ.FieldByName(field); ok {
+				t.Fatalf("%s still exposes %s", name, field)
+			}
+		}
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
@@ -21,42 +20,34 @@ import (
 func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesEventReader {
 	recording := &compat.RecordingSink{Delegate: sink}
 	return &responsesEventReader{
-		exchangeID:  exchangeID,
-		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:        recording,
-		recording:   recording,
-		reader:      core.NewSSEReader(stream.Body),
-		toolStates:  map[string]responsesToolState{},
-		toolInputs:  map[string]string{},
-		textOpen:    false,
-		latestUsage: canonical.NewUnknownTokenUsage(),
+		exchangeID:    exchangeID,
+		responseEnvID: canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		sink:          recording,
+		recording:     recording,
+		reader:        core.NewSSEReader(stream.Body),
+		toolStates:    map[string]responsesToolState{},
+		toolInputs:    map[string]string{},
+		textOpen:      false,
+		latestUsage:   canonical.NewUnknownTokenUsage(),
 	}
 }
 
 type responsesEventReader struct {
-	exchangeID       string
-	responseID       canonical.EnvelopeID
-	sink             compat.Sink
-	recording        *compat.RecordingSink
-	reader           *core.SSEReaderCloser
-	pending          canonical.EventSequence
-	toolStates       map[string]responsesToolState
-	toolInputs       map[string]string
-	textOpen         bool
-	textEnvID        canonical.EnvelopeID
-	emittedOutput    bool
-	started          bool
-	completed        bool
-	latestUsage      canonical.TokenUsage
-	seq              int64
-	providerResultID string
-}
-
-// ContinuationID exposes the Responses continuation handle through the
-// explicit codec-owned source returned with this stream.
-func (s *responsesEventReader) ContinuationID() (provider.ContinuationID, bool) {
-	id := strings.TrimSpace(s.providerResultID)
-	return provider.ContinuationID(id), id != ""
+	exchangeID    string
+	responseEnvID canonical.EnvelopeID
+	sink          compat.Sink
+	recording     *compat.RecordingSink
+	reader        *core.SSEReaderCloser
+	pending       canonical.EventSequence
+	toolStates    map[string]responsesToolState
+	toolInputs    map[string]string
+	textOpen      bool
+	textEnvID     canonical.EnvelopeID
+	emittedOutput bool
+	started       bool
+	completed     bool
+	latestUsage   canonical.TokenUsage
+	seq           int64
 }
 
 func (s *responsesEventReader) Decisions() []compat.Decision {
@@ -112,15 +103,15 @@ func (s *responsesEventReader) Next(ctx context.Context) (canonical.Event, error
 		if !frameUsage.IsZero() {
 			s.latestUsage = frameUsage
 			_, inputPresent := frameUsage.InputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 			_, outputPresent := frameUsage.OutputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 			_, reasoningPresent := frameUsage.ReasoningTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
 			_, cacheReadPresent := frameUsage.CacheReadTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 			_, cacheWritePresent := frameUsage.CacheWriteTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var frame streamFrame
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {
@@ -176,19 +167,19 @@ func (s *responsesEventReader) enqueueArgsDelta(id canonical.EnvelopeID, args st
 }
 
 func (s *responsesEventReader) enqueueUsage(usage canonical.TokenUsage) {
-	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: usage}})
+	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseEnvID, Payload: canonical.UsagePayload{Usage: usage}})
 }
 
 func (s *responsesEventReader) enqueueFinish(reason string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: reason}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseEnvID, Payload: canonical.FinishPayload{Reason: reason}})
 }
 
 func (s *responsesEventReader) enqueueMetadata(values map[string]string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventMetadata, EnvID: s.responseID, Payload: canonical.MetadataPayload{Values: values}})
+	s.enqueue(canonical.Event{Kind: canonical.EventMetadata, EnvID: s.responseEnvID, Payload: canonical.MetadataPayload{Values: values}})
 }
 
 func (s *responsesEventReader) enqueueError(code string, message string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: code, Message: message}})
+	s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseEnvID, Payload: canonical.ErrorPayload{Code: code, Message: message}})
 }
 
 func (s *responsesEventReader) handleUnexpectedEOF(ctx context.Context) {
@@ -196,7 +187,7 @@ func (s *responsesEventReader) handleUnexpectedEOF(ctx context.Context) {
 	s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
 	s.closeOpenText(canonical.EnvelopeStatusError)
 	s.closeOpenTools(canonical.EnvelopeStatusError)
-	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 	s.completed = true
 }
 
@@ -215,7 +206,7 @@ func (s *responsesEventReader) handleTerminalCompletion(ctx context.Context, sta
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)
 	s.enqueueFinish(normalizedStatus)
-	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 
 func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
@@ -248,10 +239,10 @@ func (s *responsesEventReader) ensureToolState(itemID string, toolType string, c
 	if normalizedType == "" {
 		normalizedType = canonical.ToolTypeFunction
 	}
-	envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, itemID))
+	envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseEnvID, itemID))
 	state := responsesToolState{envID: envID, toolType: normalizedType}
 	s.toolStates[itemID] = state
-	s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{
+	s.enqueueEnvelopeStart(envID, s.responseEnvID, canonical.EnvelopeStartPayload{
 		Kind:      canonical.EnvToolCall,
 		Name:      name,
 		ToolUseID: callID,

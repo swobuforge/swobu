@@ -4,10 +4,11 @@
 // This package owns:
 //   - Client request ingress (wire decode, endpoint resolution)
 //   - Routing orchestration (one reducer-owned state lifecycle per request)
+//   - Ordered provider-call attempts and all selection of further provider work
 //   - Explicit workspace-slug partitioning for the daemon-global replay store
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
-//   - The reducer-owned provider-return edge where future concrete tool
+//   - The reducer-owned provider-result edge where future concrete tool
 //     classification may be admitted before client handoff
 //
 // It does NOT own:
@@ -23,4 +24,9 @@
 // Future external tool work must enter as a concrete command, event, and phase
 // only when a feature supplies real I/O and lifecycle ownership. This package
 // does not keep dormant tool phases or executor interfaces for extensibility.
+// New provider representations add explicit transient request choices and
+// closed transitions only when an implemented alternative exists. Attempt
+// requirements record issued-call facts; generic provider errors never infer
+// which feature caused a failure. Alternatives do not add nested retry loops,
+// synchronized route cursors, or phase booleans.
 package exchange

@@ -49,11 +49,13 @@ func logResponsesTerminalProjection(usedFallback bool, status string, rawOutputC
 	fallbackToolUseCount := 0
 	textPreview := ""
 	for _, item := range items {
-		switch item.Kind {
+		switch item.Kind() {
 		case canonical.ItemKindText:
 			fallbackTextCount++
 			if textPreview == "" {
-				textPreview = strings.TrimSpace(item.Text) // swobu:io-string source=log-formatting
+				if text, ok := item.TextItem(); ok {
+					textPreview = strings.TrimSpace(text.Text) // swobu:io-string source=log-formatting
+				}
 			}
 		case canonical.ItemKindToolUse:
 			fallbackToolUseCount++

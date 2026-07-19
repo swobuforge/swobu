@@ -32,19 +32,38 @@ func TestCanonicalRequest_DoesNotExposeClientAdapterSelectors(t *testing.T) {
 	}
 }
 
-func TestCanonicalItem_ToolInputIsRawPayloadNotMap(t *testing.T) {
+func TestCanonicalItem_HasOnePrivatePayloadAndRawToolInput(t *testing.T) {
 	t.Parallel()
 
-	field, ok := reflect.TypeOf(CanonicalItem{}).FieldByName("Input")
-	if !ok {
-		t.Fatal("CanonicalItem must expose Input field")
+	itemType := reflect.TypeOf(CanonicalItem{})
+	for i := 0; i < itemType.NumField(); i++ {
+		if itemType.Field(i).IsExported() {
+			t.Fatalf("CanonicalItem field %q must remain private", itemType.Field(i).Name)
+		}
 	}
-	// Tool input stays a raw payload wrapper so protocol decoders never infer a
-	// fake semantic map shape at the canonical boundary.
+	field, ok := reflect.TypeOf(ToolUseItemPayload{}).FieldByName("Input")
+	if !ok {
+		t.Fatal("ToolUseItemPayload must own Input")
+	}
 	if field.Type.Kind() == reflect.Map {
-		t.Fatal("CanonicalItem.Input must not be map-shaped")
+		t.Fatal("ToolUseItemPayload.Input must not be map-shaped")
 	}
 	if field.Type.Name() != "ToolArguments" {
-		t.Fatalf("CanonicalItem.Input type = %q, want ToolArguments", field.Type.Name())
+		t.Fatalf("ToolUseItemPayload.Input type = %q, want ToolArguments", field.Type.Name())
+	}
+}
+
+func TestOutputConstructorsRequireSwobuResponseID(t *testing.T) {
+	t.Parallel()
+	want := reflect.TypeOf(SwobuResponseID(""))
+	for name, constructor := range map[string]any{
+		"conversation":            NewConversationOutput,
+		"conversation with usage": NewConversationOutputWithUsage,
+		"prompt":                  NewPromptOutput,
+		"prompt with usage":       NewPromptOutputWithUsage,
+	} {
+		if got := reflect.TypeOf(constructor).In(0); got != want {
+			t.Fatalf("%s response ID parameter = %v, want %v", name, got, want)
+		}
 	}
 }

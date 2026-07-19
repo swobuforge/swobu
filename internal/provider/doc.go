@@ -9,7 +9,7 @@
 // unavailable, rejected, invalid request, cancelled, or internal. Exchange may
 // apply fallback policy to those types but must not infer availability from an
 // unknown HTTP status or compatibility decision.
-// Native continuation identity is projected from routing as target ID and
-// version. Adapters may opt into an exact continuation wire contract but never
-// derive another identity from provider configuration.
+// Protocol-specific response identity stays in typed canonical refinements.
+// Provider contracts carry no continuation sidecar; routing-owned target ID
+// and version are used only to test refinement applicability.
 package provider

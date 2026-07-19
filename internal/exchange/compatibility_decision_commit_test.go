@@ -89,12 +89,13 @@ func TestRunnerRun_RecordsDeliveryStreamingDecisionApproxWhenBuffered(t *testing
 	if !ClientResponseStreamingForTest(out) {
 		t.Fatal("buffered-provider conversion must still return the concrete streaming response variant")
 	}
-	if len(sink.effects) != 3 {
-		t.Fatalf("captured effects len=%d want=3", len(sink.effects))
+	if len(sink.effects) != 4 {
+		t.Fatalf("captured effects len=%d want=4", len(sink.effects))
 	}
 	assertCompatibilityEffect(t, sink.effects[0], compat.DeliveryStreaming, compat.Approx, compat.Subject("route:provider/openai/protocol/responses"))
 	assertCompatibilityEffect(t, sink.effects[1], compat.DeliveryIncremental, compat.Approx, compat.Subject("route:provider/openai/protocol/responses"))
 	assertCompatibilityEffect(t, sink.effects[2], compat.DeliveryServerSentEvents, compat.Exact, compat.Subject("route:provider/openai/protocol/responses"))
+	assertCompatibilityEffect(t, sink.effects[3], compat.ResponseIDResponses, compat.Exact, compat.Subject("wire:/id"))
 }
 
 func TestRunnerRun_RecordsDeliveryWebSocketConversionApproxWhenProviderIsSSE(t *testing.T) {
@@ -159,10 +160,11 @@ func TestRunnerRun_RecordsDeliveryTerminalEventDropWhenProviderStreamLacksUsage(
 	if _, err := io.ReadAll(ClientTransportForTest(out).Body); err != nil {
 		t.Fatalf("consume buffered client response: %v", err)
 	}
-	if len(sink.effects) != 1 {
-		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
+	if len(sink.effects) != 2 {
+		t.Fatalf("captured effects len=%d want=2", len(sink.effects))
 	}
-	assertCompatibilityEffect(t, sink.effects[0], compat.DeliveryTerminalEvent, compat.Drop, compat.Subject("wire:/event/terminal"))
+	assertCompatibilityEffect(t, sink.effects[0], compat.ResponseIDResponses, compat.Exact, compat.Subject("wire:/id"))
+	assertCompatibilityEffect(t, sink.effects[1], compat.DeliveryTerminalEvent, compat.Drop, compat.Subject("wire:/event/terminal"))
 }
 
 func TestRunnerRun_RecordsErrorShapeDropOnBackendError(t *testing.T) {

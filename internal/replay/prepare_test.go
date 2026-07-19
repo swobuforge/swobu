@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -21,16 +20,13 @@ func testBackendTarget(t *testing.T, model string) provider.TargetSnapshot {
 
 func testBackend(t *testing.T, model string, continuation bool) provider.Backend {
 	t.Helper()
-	backend := provider.Backend{Target: testBackendTarget(t, model)}
-	if continuation {
-		backend.CaptureContinuation = backend.Target.NativeContinuation
-	}
-	return backend
+	_ = continuation
+	return provider.Backend{Target: testBackendTarget(t, model)}
 }
 
-func makeRequest(model string, items []canonical.CanonicalItem, turn canonical.TurnRef) canonical.CanonicalRequest {
+func makeRequest(model string, items []canonical.CanonicalItem, previous *canonical.ResponseRef) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: model, Items: items, Turn: turn,
+		Model: model, Items: items, PreviousResponse: previous,
 		Controls: canonical.GenerationControls{Limits: canonical.GenerationLimits{MaxOutputTokens: canonical.NewOptionalInt(100)}},
 	})
 }
@@ -46,70 +42,52 @@ func makeItems(texts ...string) []canonical.CanonicalItem {
 func makeResponse(items ...canonical.CanonicalItem) canonical.CanonicalOutputProjection {
 	idSuffix := "empty"
 	if len(items) > 0 {
-		idSuffix = items[0].Text
+		idSuffix = canonicalItemText(items[0])
 	}
-	return canonical.NewConversationOutput("resp_"+idSuffix, "gpt-4o", items, "stop")
+	return canonical.NewConversationOutput(canonical.NewSwobuResponseID("resp_"+idSuffix), "gpt-4o", items, "stop")
 }
 
-func replayRecord(id ID, request canonical.CanonicalRequest, response canonical.CanonicalOutputProjection, native *provider.NativeContinuation) Record {
-	return Record{ID: id, Request: request, Response: response, Native: native}
+func replayRecord(id canonical.SwobuResponseID, request canonical.CanonicalRequest, response canonical.CanonicalOutputProjection, responses *canonical.ResponsesNativeRef) Record {
+	return Record{Request: request, Response: response.WithResponse(canonical.ResponseRef{SwobuID: id, Responses: responses})}
 }
 
-func TestPrepareWithoutPreviousIDDoesNotReadStore(t *testing.T) {
-	spy := newSpyStore()
-	request := makeRequest("gpt-4o", makeItems("hello"), canonical.TurnRef{})
-
-	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if spy.getCalled {
-		t.Fatal("store.Get called without previous_response_id")
-	}
-	providerRequest := prepared.ForBackend(testBackend(t, "gpt-4o", false), delivery.BufferedDelivery())
-	if providerRequest.Continuation != nil {
-		t.Fatalf("continuation = %#v, want nil", providerRequest.Continuation)
-	}
-	if len(providerRequest.Canonical.Items()) != 1 || providerRequest.Canonical.Items()[0].Text != "hello" {
-		t.Fatalf("provider request items = %#v", providerRequest.Canonical.Items())
-	}
+func nativeResponses(target provider.TargetSnapshot, providerResponseID string) *canonical.ResponsesNativeRef {
+	return &canonical.ResponsesNativeRef{ProviderResponseID: canonical.NewResponsesNativeResponseID(providerResponseID), TargetID: target.TargetID, TargetVersion: target.TargetVersion}
 }
 
-func TestPrepareUnknownPreviousIDRejectsAfterOneLookup(t *testing.T) {
-	spy := newSpyStore()
-	request := makeRequest("gpt-4o", makeItems("hello"), canonical.NewTurnRef("resp_unknown"))
+func TestPrepareCurrentRemovesPreviousResponse(t *testing.T) {
+	request := makeRequest("gpt-4o", makeItems("hello"), nil)
 
-	_, err := Prepare(context.Background(), spy, testWorkspaceSlug, request)
-	if err == nil || err.Error() != "BAD_REQUEST: unknown previous_response_id" {
-		t.Fatalf("error = %v", err)
+	prepared := PrepareCurrent(request)
+	providerRequest := prepared.PreferredForTarget(testBackend(t, "gpt-4o", false).Target)
+	if _, ok := providerRequest.PreviousResponse(); ok {
+		t.Fatalf("previous response survived without replay")
 	}
-	if spy.getCalls != 1 {
-		t.Fatalf("store.Get calls = %d, want 1", spy.getCalls)
+	if len(providerRequest.Items()) != 1 || canonicalItemText(providerRequest.Items()[0]) != "hello" {
+		t.Fatalf("provider request items = %#v", providerRequest.Items())
 	}
 }
 
 func TestPrepareExpiredPreviousIDRejects(t *testing.T) {
-	spy := newSpyStore()
 	expiredAt := time.Now().UTC().Add(-time.Minute)
 	record := replayRecord(
 		"resp_expired",
-		makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
+		makeRequest("gpt-4o", makeItems("turn1"), nil),
 		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
-		testBackendTarget(t, "gpt-4o").NativeContinuation("provider_expired"),
+		nativeResponses(testBackendTarget(t, "gpt-4o"), "provider_expired"),
 	)
 	record.ExpiresAt = &expiredAt
-	if err := spy.Put(context.Background(), testWorkspaceSlug, record); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := Prepare(context.Background(), spy, testWorkspaceSlug, makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_expired")))
+	_, err := PrepareFromRecord(
+		makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_expired"}),
+		"resp_expired",
+		record,
+	)
 	if err == nil || err.Error() != "BAD_REQUEST: unknown previous_response_id" {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestPreparedMatchingBackendUsesInheritedDeltaAndNativeContinuation(t *testing.T) {
-	spy := newSpyStore()
+func TestPreparedMatchingBackendUsesInheritedDeltaAndResponsesRefinement(t *testing.T) {
 	backend := testBackendTarget(t, "gpt-4o")
 	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "gpt-4o", Instructions: "be concise", Items: makeItems("turn1"),
@@ -118,32 +96,30 @@ func TestPreparedMatchingBackendUsesInheritedDeltaAndNativeContinuation(t *testi
 	record := replayRecord(
 		"resp_prev", previous,
 		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
-		backend.NativeContinuation("provider_prev"),
+		nativeResponses(backend, "provider_prev"),
 	)
-	if err := spy.Put(context.Background(), testWorkspaceSlug, record); err != nil {
-		t.Fatal(err)
-	}
 	current := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items: makeItems("turn2"), Turn: canonical.NewTurnRef("resp_prev"),
+		Items: makeItems("turn2"), PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_prev"},
 	})
 
-	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, current)
+	prepared, err := PrepareFromRecord(current, "resp_prev", record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := prepared.ForBackend(testBackend(t, "gpt-4o", true), delivery.StreamingDelivery(delivery.FramingSSE))
-	if request.Continuation == nil || request.Continuation.ID != "provider_prev" || request.Continuation.TargetID != backend.TargetID || request.Continuation.TargetVersion != backend.TargetVersion {
-		t.Fatalf("continuation = %#v", request.Continuation)
+	request := prepared.PreferredForTarget(testBackend(t, "gpt-4o", true).Target)
+	previousRef, ok := request.PreviousResponse()
+	if !ok || previousRef.Responses == nil || previousRef.Responses.ProviderResponseID != "provider_prev" || previousRef.Responses.TargetID != backend.TargetID || previousRef.Responses.TargetVersion != backend.TargetVersion {
+		t.Fatalf("previous response = %#v", previousRef)
 	}
-	if request.Canonical.Model() != "gpt-4o" || request.Canonical.Instructions() != "be concise" || len(request.Canonical.Tools()) != 1 {
-		t.Fatalf("durable bands were not inherited: %#v", request.Canonical)
+	if request.Model() != "gpt-4o" || request.Instructions() != "be concise" || len(request.Tools()) != 1 {
+		t.Fatalf("durable bands were not inherited: %#v", request)
 	}
-	items := request.Canonical.Items()
-	if len(items) != 1 || items[0].Text != "turn2" {
+	items := request.Items()
+	if len(items) != 1 || canonicalItemText(items[0]) != "turn2" {
 		t.Fatalf("delta items = %#v", items)
 	}
 	semanticItems := prepared.Semantic.Items()
-	if len(semanticItems) != 3 || semanticItems[0].Text != "turn1" || semanticItems[1].Text != "assistant1" || semanticItems[2].Text != "turn2" {
+	if len(semanticItems) != 3 || canonicalItemText(semanticItems[0]) != "turn1" || canonicalItemText(semanticItems[1]) != "assistant1" || canonicalItemText(semanticItems[2]) != "turn2" {
 		t.Fatalf("semantic items = %#v", semanticItems)
 	}
 }
@@ -167,7 +143,7 @@ func TestPrepareFromRecordExplicitEmptyCollectionsClearInheritedBands(t *testing
 		},
 	})
 
-	prepared, err := PrepareFromRecord(current, replayRecord(
+	prepared, err := prepareFromRecordForTest(current, replayRecord(
 		"resp_prev",
 		previous,
 		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
@@ -230,7 +206,7 @@ func TestPrepareFromRecordExplicitZeroClearsEveryDurableBand(t *testing.T) {
 		Presence: presence,
 	})
 
-	prepared, err := PrepareFromRecord(current, replayRecord(
+	prepared, err := prepareFromRecordForTest(current, replayRecord(
 		"resp_prev",
 		previous,
 		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
@@ -275,7 +251,7 @@ func TestPrepareFromRecordAbsentInheritsAndNonEmptyReplacesDurableBands(t *testi
 	})
 	record := replayRecord("resp_prev", previous, makeResponse(), nil)
 
-	inherited, err := PrepareFromRecord(canonical.NewCanonicalRequest(canonical.RequestParams{Items: makeItems("turn2")}), record)
+	inherited, err := prepareFromRecordForTest(canonical.NewCanonicalRequest(canonical.RequestParams{Items: makeItems("turn2")}), record)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +270,7 @@ func TestPrepareFromRecordAbsentInheritsAndNonEmptyReplacesDurableBands(t *testi
 		},
 		OutputFormat: canonical.OutputFormat{Kind: canonical.OutputFormatText},
 	})
-	replaced, err := PrepareFromRecord(replacement, record)
+	replaced, err := prepareFromRecordForTest(replacement, record)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,6 +284,20 @@ func mustOutputFormat(t *testing.T, params canonical.OutputFormatParams) canonic
 		t.Fatal(err)
 	}
 	return format
+}
+
+func prepareFromRecordForTest(request canonical.CanonicalRequest, record Record) (Prepared, error) {
+	return PrepareFromRecord(request, record.Response.Response().SwobuID, record)
+}
+
+func canonicalItemText(item canonical.CanonicalItem) string {
+	if text, ok := item.TextItem(); ok {
+		return text.Text
+	}
+	if toolResult, ok := item.ToolResult(); ok {
+		return toolResult.Text
+	}
+	return ""
 }
 
 func assertPreparedDurableBands(t *testing.T, prepared Prepared, model, instructions, toolName string, policy canonical.ToolPolicyMode, batch canonical.ToolCallBatchMode, maxTokens int, stop string, temperature, topP float64, format canonical.OutputFormatKind) {
@@ -333,22 +323,20 @@ func assertPreparedDurableBands(t *testing.T, prepared Prepared, model, instruct
 	}
 }
 
-func TestPreparedMatchingBackendWithoutContinuationOptInUsesFullSemanticRequest(t *testing.T) {
+func TestPreparedWithoutResponsesRefinementUsesFullSemanticRequest(t *testing.T) {
 	for _, protocol := range []string{"chat_completions", "messages", "responses_without_opt_in"} {
 		t.Run(protocol, func(t *testing.T) {
-			backend := testBackendTarget(t, "gpt-4o")
 			prepared := Prepared{
-				Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), canonical.TurnRef{}),
-				Delta:    makeRequest("gpt-4o", makeItems("turn2"), canonical.TurnRef{}),
-				Base:     &Record{Native: backend.NativeContinuation("provider_prev")},
+				Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), nil),
+				Delta:    makeRequest("gpt-4o", makeItems("turn2"), nil),
 			}
 
-			request := prepared.ForBackend(provider.Backend{Target: backend}, delivery.BufferedDelivery())
+			request := prepared.PreferredForTarget(testBackendTarget(t, "gpt-4o"))
 
-			if request.Continuation != nil {
-				t.Fatalf("continuation = %#v, want nil without exact-backend opt-in", request.Continuation)
+			if _, ok := request.PreviousResponse(); ok {
+				t.Fatal("previous response survived without Responses refinement")
 			}
-			if got := len(request.Canonical.Items()); got != 3 {
+			if got := len(request.Items()); got != 3 {
 				t.Fatalf("semantic item count = %d, want full history", got)
 			}
 		})
@@ -356,28 +344,28 @@ func TestPreparedMatchingBackendWithoutContinuationOptInUsesFullSemanticRequest(
 }
 
 func TestPreparedMismatchedBackendUsesFullSemanticRequest(t *testing.T) {
-	spy := newSpyStore()
 	previousBackend := testBackendTarget(t, "gpt-4o")
 	previous := replayRecord(
 		"resp_prev",
-		makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
+		makeRequest("gpt-4o", makeItems("turn1"), nil),
 		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
-		previousBackend.NativeContinuation("provider_prev"),
+		nativeResponses(previousBackend, "provider_prev"),
 	)
-	if err := spy.Put(context.Background(), testWorkspaceSlug, previous); err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_prev")))
+	prepared, err := PrepareFromRecord(
+		makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev"}),
+		"resp_prev",
+		previous,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	request := prepared.ForBackend(testBackend(t, "gpt-4o-fallback", true), delivery.BufferedDelivery())
-	if request.Continuation != nil {
-		t.Fatalf("continuation survived backend mismatch: %#v", request.Continuation)
+	request := prepared.PreferredForTarget(testBackend(t, "gpt-4o-fallback", true).Target)
+	if _, ok := request.PreviousResponse(); ok {
+		t.Fatal("previous response survived backend mismatch")
 	}
-	items := request.Canonical.Items()
-	if len(items) != 3 || items[0].Text != "turn1" || items[1].Text != "assistant1" || items[2].Text != "turn2" {
+	items := request.Items()
+	if len(items) != 3 || canonicalItemText(items[0]) != "turn1" || canonicalItemText(items[1]) != "assistant1" || canonicalItemText(items[2]) != "turn2" {
 		t.Fatalf("full semantic items = %#v", items)
 	}
 }
@@ -385,19 +373,18 @@ func TestPreparedMismatchedBackendUsesFullSemanticRequest(t *testing.T) {
 func TestPreparedMismatchedTargetVersionUsesFullSemanticRequest(t *testing.T) {
 	target := testBackendTarget(t, "gpt-4o")
 	prepared := Prepared{
-		Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), canonical.TurnRef{}),
-		Delta:    makeRequest("gpt-4o", makeItems("turn2"), canonical.TurnRef{}),
-		Base:     &Record{Native: target.NativeContinuation("provider_prev")},
+		Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), nil),
+		Delta: makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{
+			SwobuID: "resp_prev", Responses: nativeResponses(target, "provider_prev"),
+		}),
 	}
 	newVersion := target
 	newVersion.TargetVersion++
-	backend := provider.Backend{Target: newVersion, CaptureContinuation: newVersion.NativeContinuation}
-
-	request := prepared.ForBackend(backend, delivery.BufferedDelivery())
-	if request.Continuation != nil {
-		t.Fatalf("continuation survived target-version mismatch: %#v", request.Continuation)
+	request := prepared.PreferredForTarget(newVersion)
+	if _, ok := request.PreviousResponse(); ok {
+		t.Fatal("previous response survived target-version mismatch")
 	}
-	if got := len(request.Canonical.Items()); got != 3 {
+	if got := len(request.Items()); got != 3 {
 		t.Fatalf("semantic item count = %d, want full history", got)
 	}
 }
@@ -406,23 +393,28 @@ func TestPreparedValuesDoNotAliasStoredRecord(t *testing.T) {
 	spy := newSpyStore()
 	previous := replayRecord(
 		"resp_prev",
-		makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
+		makeRequest("gpt-4o", makeItems("turn1"), nil),
 		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
 		nil,
 	)
 	if err := spy.Put(context.Background(), testWorkspaceSlug, previous); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_prev")))
+	prepared, err := PrepareFromRecord(
+		makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev"}),
+		"resp_prev",
+		previous,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared.Semantic.Items()[0].Text = "mutated"
+	payload, _ := prepared.Semantic.Items()[0].TextItem()
+	payload.Text = "mutated"
 	stored, found, err := spy.Get(context.Background(), testWorkspaceSlug, "resp_prev")
 	if err != nil || !found {
 		t.Fatalf("stored record = %#v, found=%v, err=%v", stored, found, err)
 	}
-	if stored.Request.Items()[0].Text != "turn1" {
+	if canonicalItemText(stored.Request.Items()[0]) != "turn1" {
 		t.Fatalf("stored request aliased prepared semantic: %#v", stored.Request.Items())
 	}
 }

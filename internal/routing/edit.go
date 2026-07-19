@@ -1,6 +1,8 @@
 package routing
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // WorkspaceSeed creates a workspace, its initial route, primary tier, and
 // target as one invariant-preserving value transition.
@@ -158,25 +160,45 @@ type TargetSettings struct {
 	Connection Connection
 }
 
+// Equal reports durable effective settings equality. Runtime caches or derived
+// connection metadata must never change target generation behavior.
+func (s TargetSettings) Equal(other TargetSettings) bool {
+	return s.Model == other.Model && s.Protocol == other.Protocol && connectionsEqual(s.Connection, other.Connection)
+}
+
 // UpdateTargetSettings replaces editable settings in place and cannot alter
 // the target's tier or any balanced peer.
 func (c Config) UpdateTargetSettings(slug WorkspaceSlug, routeName RouteName, id TargetID, settings TargetSettings) (Config, error) {
 	return c.editRoute(slug, routeName, func(route Route) (Route, error) {
-		sourceTier, sourceIndex, ok := route.target(id)
-		if !ok {
-			return Route{}, fmt.Errorf("%w: target %q", ErrNotFound, id.String())
-		}
-		replacement, err := NewTarget(id, settings.Model, settings.Protocol, settings.Connection)
-		if err != nil {
-			return Route{}, err
-		}
-		replacement.version = route.tiers[sourceTier].targets[sourceIndex].version + 1
-		if replacement.version == 0 {
-			return Route{}, pathError("target.version", "target version exhausted")
-		}
-		route.tiers[sourceTier].targets[sourceIndex] = replacement
-		return NewRoute(route.name, route.tiers)
+		return replaceTargetSettings(route, id, settings)
 	})
+}
+
+// replaceTargetSettings is the authoritative generation seam. TargetVersion
+// identifies the complete effective backend configuration: provider,
+// protocol, endpoint, credential reference, model/deployment, and
+// provider-specific request options. Transport and codec options are pure
+// derivatives of TargetSettings and have no independent mutation path.
+func replaceTargetSettings(route Route, id TargetID, settings TargetSettings) (Route, error) {
+	sourceTier, sourceIndex, ok := route.target(id)
+	if !ok {
+		return Route{}, fmt.Errorf("%w: target %q", ErrNotFound, id.String())
+	}
+	current := route.tiers[sourceTier].targets[sourceIndex]
+	currentSettings := TargetSettings{Model: current.model, Protocol: current.protocol, Connection: current.connection}
+	if currentSettings.Equal(settings) {
+		return NewRoute(route.name, route.tiers)
+	}
+	replacement, err := NewTarget(id, settings.Model, settings.Protocol, settings.Connection)
+	if err != nil {
+		return Route{}, err
+	}
+	replacement.version = current.version + 1
+	if replacement.version == 0 {
+		return Route{}, pathError("target.version", "target version exhausted")
+	}
+	route.tiers[sourceTier].targets[sourceIndex] = replacement
+	return NewRoute(route.name, route.tiers)
 }
 
 func (c Config) DeleteTarget(slug WorkspaceSlug, routeName RouteName, id TargetID) (Config, error) {
@@ -211,13 +233,7 @@ func (c Config) SetCredential(slug WorkspaceSlug, routeName RouteName, id Target
 		if err != nil {
 			return Route{}, err
 		}
-		target.connection = connection
-		target.version++
-		if target.version == 0 {
-			return Route{}, pathError("target.version", "target version exhausted")
-		}
-		route.tiers[tierIndex].targets[targetIndex] = target
-		return NewRoute(route.name, route.tiers)
+		return replaceTargetSettings(route, id, TargetSettings{Model: target.model, Protocol: target.protocol, Connection: connection})
 	})
 }
 

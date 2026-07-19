@@ -82,7 +82,9 @@ func openEnvelopeIDs(state map[canonical.EnvelopeID]canonical.EnvelopeKind) stri
 func TestWrap_ValidEnvelopePassThrough(t *testing.T) {
 	in := canonical.NewSliceEventReader(canonical.EventSequence{
 		{Kind: canonical.EventEnvelopeStart, EnvID: "r1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
-		{Kind: canonical.EventTextDelta, EnvID: "r1", Payload: canonical.TextDeltaPayload{Text: "ok"}},
+		{Kind: canonical.EventEnvelopeStart, EnvID: "m1", ParentID: "r1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}},
+		{Kind: canonical.EventTextDelta, EnvID: "m1", ParentID: "r1", Payload: canonical.TextDeltaPayload{Text: "ok"}},
+		{Kind: canonical.EventEnvelopeEnd, EnvID: "m1", ParentID: "r1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvMessage, Status: canonical.EnvelopeStatusCompleted}},
 		{Kind: canonical.EventEnvelopeEnd, EnvID: "r1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	})
 	wrapped := Wrap(in)
@@ -97,8 +99,8 @@ func TestWrap_ValidEnvelopePassThrough(t *testing.T) {
 		}
 		count++
 	}
-	if count != 3 {
-		t.Fatalf("count=%d want 3", count)
+	if count != 5 {
+		t.Fatalf("count=%d want 5", count)
 	}
 }
 

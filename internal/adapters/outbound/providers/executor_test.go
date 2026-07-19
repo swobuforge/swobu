@@ -363,10 +363,10 @@ func TestServices_OpenAIFamilyEmitsStructuredOutputCompatibilityDecisions(t *tes
 	}
 
 	assertCompatibilityDecisions(t, sink, []compatExpectation{
-		{feature: compat.OutputFormat, outcome: compat.Exact},
-		{feature: compat.OutputJSONSchema, outcome: compat.Exact},
+		{feature: compat.RequestOutputFormat, outcome: compat.Exact},
+		{feature: compat.RequestOutputFormatSchema, outcome: compat.Exact},
 		{feature: compat.WireJSONMode, outcome: compat.Exact},
-		{feature: compat.ToolSchemaStrict, outcome: compat.Exact},
+		{feature: compat.RequestToolsSchemaStrict, outcome: compat.Exact},
 	}, compat.Subject("route:provider/openai/protocol/chat_completions"))
 }
 
@@ -406,7 +406,7 @@ func TestServices_BedrockEmitsToolSchemaStrictDropCompatibilityDecision(t *testi
 	}
 
 	assertCompatibilityDecisions(t, sink, []compatExpectation{
-		{feature: compat.ToolSchemaStrict, outcome: compat.Drop},
+		{feature: compat.RequestToolsSchemaStrict, outcome: compat.Drop},
 	}, compat.Subject("route:provider/bedrock/protocol/messages"))
 }
 
@@ -446,7 +446,7 @@ func TestServices_AnthropicEmitsToolSchemaStrictDropCompatibilityDecision(t *tes
 	}
 
 	assertCompatibilityDecisions(t, sink, []compatExpectation{
-		{feature: compat.ToolSchemaStrict, outcome: compat.Drop},
+		{feature: compat.RequestToolsSchemaStrict, outcome: compat.Drop},
 	}, compat.Subject("route:provider/anthropic/protocol/messages"))
 }
 
@@ -519,7 +519,7 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 		t.Fatalf("captured effect len=%d want=1", len(sink.effects))
 	}
 	compatEffect := sink.effects[0]
-	if compatEffect.Feature != compat.RequestStructuredOutput || compatEffect.Outcome != compat.Reject {
+	if compatEffect.Feature != compat.RequestOutputFormat || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want request.structured_output reject", compatEffect)
 	}
 }

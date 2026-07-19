@@ -15,9 +15,13 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	outputText := ""
 	status, incompleteReason := responsesWireStatusForFinishReason(output.FinishReason())
 	for _, item := range output.Items() {
-		switch item.Kind {
+		switch item.Kind() {
 		case canonical.ItemKindText:
-			text := item.Text
+			textItem, ok := item.TextItem()
+			if !ok {
+				return wire.ClientDocumentResult{}, canonical.InternalError("responses text item payload is invalid")
+			}
+			text := textItem.Text
 			outputText += text
 			encoded = append(encoded, responsesOutputItemDTO{
 				Type:   "message",
@@ -29,18 +33,22 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 				}},
 			})
 		case canonical.ItemKindToolUse:
+			toolUse, ok := item.ToolUse()
+			if !ok {
+				return wire.ClientDocumentResult{}, canonical.InternalError("responses tool-use item payload is invalid")
+			}
 			encoded = append(encoded, responsesWireToolItem(
-				sse.FallbackID(item.ItemID, item.ToolUseID),
-				item.ToolUseID,
-				item.Name,
-				item.ToolType,
+				sse.FallbackID(item.ItemID(), toolUse.UseID),
+				toolUse.UseID,
+				toolUse.Name,
+				toolUse.ToolType,
 				status,
-				item.Input.RawObject(),
+				toolUse.Input.RawObject(),
 			))
 		}
 	}
 	encodedBody, err := json.Marshal(responsesResponseDTO{
-		ID:                sse.FallbackID(output.ResultID(), "resp_swobu"),
+		ID:                sse.FallbackID(output.Response().SwobuID.String(), "resp_swobu"),
 		Object:            "response",
 		Model:             output.Model(),
 		Status:            status,

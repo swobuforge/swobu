@@ -46,10 +46,10 @@ func (r *blockingEnvelopeReader) Next(context.Context) (canonical.Event, error) 
 
 func (r *blockingEnvelopeReader) Close(context.Context) error { return nil }
 
-type deterministicResponseIDGenerator struct{}
+type deterministicSwobuResponseIDGenerator struct{}
 
-func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (replay.ResponseID, error) {
-	return replay.ResponseID("swobu_" + exchangeID), nil
+func (deterministicSwobuResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
+	return canonical.SwobuResponseID("swobu_" + exchangeID), nil
 }
 
 func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
@@ -326,8 +326,8 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
 		},
-		ReplayStore: replay.NewMemoryStore(),
-		ResponseIDs: deterministicResponseIDGenerator{},
+		ReplayStore:      replay.NewMemoryStore(),
+		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
 	}
 }
 
@@ -383,9 +383,6 @@ type testBackendCodec struct{ protocol protocolkind.ProtocolKind }
 
 func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
 	input := wire.ProviderEncodeInput{Request: req.Canonical}
-	if req.Continuation != nil {
-		input.NativeContinuation = &provider.NativeContinuation{ID: req.Continuation.ID}
-	}
 	var result wire.ProviderEncodeResult
 	var err error
 	switch c.protocol {
@@ -414,7 +411,7 @@ func (c testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress
 		case protocolkind.Messages:
 			result, err = (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
 		}
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
 	case provider.DocumentIngress:
 		var result wire.ProviderDecodeResult
 		var err error
@@ -426,7 +423,7 @@ func (c testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress
 		case protocolkind.Messages:
 			result, err = (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
 		}
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
 	default:
 		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
 	}

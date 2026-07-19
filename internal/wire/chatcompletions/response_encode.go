@@ -16,7 +16,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		return wire.ClientDocumentResult{}, err
 	}
 	raw, err := json.Marshal(chatCompletionsResponseDTO{
-		ID:     sse.FallbackID(output.ResultID(), "chatcmpl_swobu"),
+		ID:     sse.FallbackID(output.Response().SwobuID.String(), "chatcmpl_swobu"),
 		Object: "chat.completion",
 		Model:  output.Model(),
 		Choices: []chatCompletionsChoiceDTO{{

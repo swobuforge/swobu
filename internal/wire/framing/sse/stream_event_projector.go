@@ -1,10 +1,6 @@
 package sse
 
-import (
-	"strings"
-
-	"github.com/swobuforge/swobu/internal/domain/canonical"
-)
+import "github.com/swobuforge/swobu/internal/domain/canonical"
 
 // EnvelopeEventAdapter incrementally maps canonical envelope events to stream
 // event primitives expected by existing family stream encoders.
@@ -56,9 +52,7 @@ func (a *EnvelopeEventAdapter) translateEnvelopeStart(ev canonical.Event, emitte
 	if payload.Kind == canonical.EnvResponse {
 		if !a.started {
 			a.started = true
-			// Response identity is client-visible only through ResultID.
-			// NativeID is provider-private and is not a response fallback here.
-			resultID := strings.TrimSpace(ev.Meta.ResultID)
+			resultID := payload.Response.SwobuID.String()
 			if resultID == "" {
 				resultID = a.resultID
 			}
@@ -86,9 +80,6 @@ func (a *EnvelopeEventAdapter) translateEnvelopeStart(ev canonical.Event, emitte
 
 func (a *EnvelopeEventAdapter) translateMetadata(ev canonical.Event) {
 	payload, _ := ev.Payload.(canonical.MetadataPayload)
-	if id := payload.Values["result_id"]; id != "" {
-		a.resultID = id
-	}
 	if model := payload.Values["model"]; model != "" {
 		a.model = model
 	}

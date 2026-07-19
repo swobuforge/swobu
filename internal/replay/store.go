@@ -3,6 +3,8 @@ package replay
 import (
 	"context"
 	"errors"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 // ErrReplayRecordExists reports that Put was asked to overwrite an existing
@@ -15,7 +17,7 @@ var ErrReplayRecordExists = errors.New("replay record already exists")
 type Store interface {
 	// Get returns one record by workspace slug and ID.
 	// The bool indicates whether the record was found.
-	Get(ctx context.Context, workspaceSlug string, id ID) (Record, bool, error)
+	Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Record, bool, error)
 	// Put writes one record under the given workspace slug.
 	// Duplicate IDs are rejected.
 	Put(ctx context.Context, workspaceSlug string, record Record) error

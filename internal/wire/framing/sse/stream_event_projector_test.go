@@ -175,12 +175,9 @@ func TestEnvelopeEventAdapter_ResponseStartPrefersResultID(t *testing.T) {
 	started := adapter.Translate(canonical.Event{
 		Kind:  canonical.EventEnvelopeStart,
 		EnvID: "resp_2",
-		Meta: canonical.EventMetadataFields{
-			NativeID: "provider_resp_2",
-			ResultID: "swobu_resp_2",
-		},
+		Meta:  canonical.EventMetadataFields{NativeID: "provider_resp_2"},
 		Payload: canonical.EnvelopeStartPayload{
-			Kind: canonical.EnvResponse,
+			Kind: canonical.EnvResponse, Response: canonical.ResponseRef{SwobuID: "swobu_resp_2"},
 		},
 	})
 	if len(started) != 1 || started[0].Kind != StreamEventStarted {

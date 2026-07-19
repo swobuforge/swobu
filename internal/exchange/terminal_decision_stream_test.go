@@ -58,7 +58,7 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 		},
 	})
 	decisions := testDecisionSource{decisions: []compat.Decision{{
-		Feature: compat.ResponseReasoning,
+		Feature: compat.ResponseUsageReasoningTokens,
 		Outcome: compat.Drop,
 		Subject: "test:terminal-stream",
 	}}}
@@ -75,11 +75,11 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	}
 
-	call := preparedProviderCall{
+	call := providerCall{
 		backend:     provider.Backend{Target: in.Target},
 		request:     provider.Request{Canonical: in.Request, Delivery: in.ProviderDelivery},
 		clientCodec: pullingClientCodec{}, clientDelivery: in.ClientDelivery,
-		exchangeID: in.ExchangeID, workspaceSlug: in.WorkspaceSlug, semanticRequest: in.Request,
+		exchangeID: in.ExchangeID, workspaceSlug: in.WorkspaceSlug, replayRequest: in.Request,
 	}
 	out, err := encodeClientOutput(context.Background(), call, newTerminalCompatibilityStream(reader, decisions, sink, in.ExchangeID), true, sink)
 	if err != nil {
@@ -94,7 +94,7 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 
 	found := false
 	for _, decision := range sink.effects {
-		if decision.Feature == compat.ResponseReasoning {
+		if decision.Feature == compat.ResponseUsageReasoningTokens {
 			found = true
 			if decision.Outcome != compat.Drop {
 				t.Fatalf("decision outcome = %q, want drop", decision.Outcome)

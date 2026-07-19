@@ -61,10 +61,10 @@ func ClientMessageTransportForTest(response ClientResponse) transportpkg.Message
 	return transportpkg.MessageResponse{}
 }
 
-type deterministicResponseIDGenerator struct{}
+type deterministicSwobuResponseIDGenerator struct{}
 
-func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchangeID string) (replay.ResponseID, error) {
-	return replay.ResponseID("swobu_" + exchangeID), nil
+func (deterministicSwobuResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
+	return canonical.SwobuResponseID("swobu_" + exchangeID), nil
 }
 
 func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeInput) (ClientResponse, error) {
@@ -74,7 +74,7 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 	if err := validateReplayInput(runner, in.WorkspaceSlug); err != nil {
 		return nil, err
 	}
-	responseID, err := allocateResponseID(ctx, in.ExchangeID, runner.ResponseIDs)
+	responseID, err := allocateSwobuResponseID(ctx, in.ExchangeID, runner.SwobuResponseIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +83,11 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		return nil, err
 	}
 	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
-	request := in.Prepared.ForBackend(backend, in.ProviderDelivery)
-	call := preparedProviderCall{
+	request := provider.Request{Canonical: in.Prepared.PreferredForTarget(backend.Target), Delivery: in.ProviderDelivery}
+	call := providerCall{
 		backend: backend, request: request, clientCodec: clientCodec,
 		clientDelivery: in.ClientDelivery, exchangeID: in.ExchangeID,
-		workspaceSlug: in.WorkspaceSlug, semanticRequest: in.Prepared.Semantic.Clone(),
+		workspaceSlug: in.WorkspaceSlug, replayRequest: in.Prepared.Semantic.Clone(),
 	}
 	document, decisions, err := backend.Codec.Encode(request)
 	call.document = document
@@ -162,8 +162,8 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
 		},
-		ReplayStore: replay.NewMemoryStore(),
-		ResponseIDs: deterministicResponseIDGenerator{},
+		ReplayStore:      replay.NewMemoryStore(),
+		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
 	}
 }
 
@@ -181,8 +181,8 @@ func (r Runner) WithReplayStore(store replay.Store) Runner {
 	return r
 }
 
-func (r Runner) WithResponseIDs(gen replay.ResponseIDGenerator) Runner {
-	r.ResponseIDs = gen
+func (r Runner) WithSwobuResponseIDs(gen replay.SwobuResponseIDGenerator) Runner {
+	r.SwobuResponseIDs = gen
 	return r
 }
 
@@ -230,10 +230,10 @@ func (testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress p
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		result, err := (testProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
 	case provider.DocumentIngress:
 		result, err := (testProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
 	default:
 		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
 	}
@@ -250,7 +250,7 @@ type testClientCodec struct{}
 
 func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	model := "m"
-	var turn canonical.TurnRef
+	var previousResponse *canonical.ResponseRef
 	var items []canonical.CanonicalItem
 	if len(doc.Raw) > 0 {
 		var parsed map[string]any
@@ -259,7 +259,7 @@ func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDec
 				model = v
 			}
 			if v, ok := parsed["previous_response_id"].(string); ok && v != "" {
-				turn = canonical.NewTurnRef(v)
+				previousResponse = &canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(v)}
 			}
 			if msgs, ok := parsed["messages"].([]any); ok {
 				for _, m := range msgs {
@@ -285,9 +285,9 @@ func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDec
 	return wire.ClientDecodeResult{
 		Request: wire.ClientRequestResult{
 			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model: model,
-				Items: items,
-				Turn:  turn,
+				Model:            model,
+				Items:            items,
+				PreviousResponse: previousResponse,
 			}),
 			Delivery: delivery.BufferedDelivery(),
 		},
@@ -301,15 +301,17 @@ func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) 
 	}
 	if text == "" {
 		for _, item := range output.Items() {
-			if item.Kind == canonical.ItemKindText {
-				text += item.Text
+			if item.Kind() == canonical.ItemKindText {
+				if textItem, ok := item.TextItem(); ok {
+					text += textItem.Text
+				}
 			}
 		}
 	}
 	if text == "" {
 		text = "ok"
 	}
-	resultID := output.ResultID()
+	resultID := output.Response().SwobuID.String()
 	if resultID != "" {
 		return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"id":"`+resultID+`","output_text":"`+text+`"}`), carrier.Meta{})}, nil
 	}
@@ -358,8 +360,7 @@ func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, d
 
 func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 	now := time.Now().UTC()
-	// Produce a completed response envelope with metadata carrying a
-	// result_id so replay capture can project and persist it.
+	// Produce a completed response envelope with typed response identity.
 	events := []canonical.Event{
 		{
 			ExchangeID: exchangeID,
@@ -367,7 +368,10 @@ func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 			Time:       now,
 			Kind:       canonical.EventEnvelopeStart,
 			EnvID:      "r1",
-			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse},
+			Payload: canonical.EnvelopeStartPayload{
+				Kind:     canonical.EnvResponse,
+				Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(exchangeID + "_result")},
+			},
 		},
 		{
 			ExchangeID: exchangeID,
@@ -375,7 +379,7 @@ func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 			Time:       now,
 			Kind:       canonical.EventMetadata,
 			EnvID:      "r1",
-			Payload:    canonical.MetadataPayload{Values: map[string]string{"result_id": exchangeID + "_result", "model": "m"}},
+			Payload:    canonical.MetadataPayload{Values: map[string]string{"model": "m"}},
 		},
 		{
 			ExchangeID: exchangeID,

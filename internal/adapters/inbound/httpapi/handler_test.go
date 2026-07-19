@@ -347,13 +347,13 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	if len(items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind; got != canonical.ItemKindToolUse {
+	if got := items[1].Kind(); got != canonical.ItemKindToolUse {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolUse)
 	}
-	if got := items[0].Author; got != canonical.ItemAuthorAssistant {
+	if got := items[0].Author(); got != canonical.ItemAuthorAssistant {
 		t.Fatalf("author = %q, want %q", got, canonical.ItemAuthorAssistant)
 	}
-	if got := items[2].Kind; got != canonical.ItemKindToolResult {
+	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
 	}
 }
@@ -417,8 +417,9 @@ func TestHandler_AcceptsUnexpectedTopLevelFieldInRequestBody(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Text != "hi" {
-		t.Fatalf("item text = %q, want %q", items[0].Text, "hi")
+	text, _ := items[0].TextItem()
+	if text.Text != "hi" {
+		t.Fatalf("item text = %q, want %q", text.Text, "hi")
 	}
 }
 
@@ -434,17 +435,17 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	typed := testDecodeCapturedRequest(t, capturing.got)
-	if got, ok := typed.Turn().PreviousID(); !ok || got.String() != "resp_123" {
-		t.Fatalf("previous_response_id = %q, want %q", got, "resp_123")
+	if got, ok := typed.PreviousResponse(); !ok || got.SwobuID.String() != "resp_123" {
+		t.Fatalf("previous_response = %#v, want resp_123", got)
 	}
 	items := typed.Items()
 	if len(items) != 3 {
 		t.Fatalf("conversation len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind; got != canonical.ItemKindToolUse {
+	if got := items[1].Kind(); got != canonical.ItemKindToolUse {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolUse)
 	}
-	if got := items[2].Kind; got != canonical.ItemKindToolResult {
+	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
 	}
 }
@@ -919,7 +920,7 @@ func (h staticRequestIngress) HandleRequest(ctx context.Context, in exchange.Req
 func testProviderIngressFromOutput(output canonical.CanonicalOutput) canonical.ResponseStream {
 	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		"test_buffered:httpapi",
-		output.ResultID(),
+		output.Response(),
 		output.Model(),
 		output.Items(),
 		output.FinishReason(),

@@ -11,11 +11,11 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 	t.Parallel()
 
 	s := &responsesEventReader{
-		exchangeID:  "ex",
-		responseID:  "ex:response:0",
-		toolStates:  map[string]responsesToolState{},
-		toolInputs:  map[string]string{},
-		latestUsage: canonical.NewUnknownTokenUsage(),
+		exchangeID:    "ex",
+		responseEnvID: "ex:response:0",
+		toolStates:    map[string]responsesToolState{},
+		toolInputs:    map[string]string{},
+		latestUsage:   canonical.NewUnknownTokenUsage(),
 	}
 
 	handled, _, err := s.handleFrame(context.Background(), streamFrame{

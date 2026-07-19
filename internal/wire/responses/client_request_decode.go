@@ -36,11 +36,14 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if err := sse.DecodePermissiveJSON(raw, &dto, "responses request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	if len(bytes.TrimSpace(dto.Store)) != 0 {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.UnsupportedOperation("responses store is not supported")
+	}
 	presence, err := decodeResponsesRequestPresence(raw)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID)) // swobu:io-string source=boundary
+	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseWireID)) // swobu:io-string source=boundary
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "responses")
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -49,19 +52,19 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	if strings.TrimSpace(dto.PreviousResponseID) != "" && strings.TrimSpace(dto.Conversation) != "" { // swobu:io-string source=boundary
-		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestContinuation, compat.Reject, compat.Subject("wire:/previous_response_id")); err != nil {
+	if strings.TrimSpace(dto.PreviousResponseWireID) != "" && strings.TrimSpace(dto.Conversation) != "" { // swobu:io-string source=boundary
+		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestPreviousResponse, compat.Reject, compat.Subject("wire:/previous_response_id")); err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request must not specify both previous_response_id and conversation")
 	}
 	if strings.TrimSpace(dto.Conversation) != "" { // swobu:io-string source=boundary
-		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestConversation, compat.Reject, compat.Subject("wire:/conversation")); err != nil {
+		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.WireConversation, compat.Reject, compat.Subject("wire:/conversation")); err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses conversation is not supported in swobu v0")
 	}
-	if inputText == "" && len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseID) == "" { // swobu:io-string source=boundary
+	if inputText == "" && len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseWireID) == "" { // swobu:io-string source=boundary
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request is missing required fields")
 	}
 	tools, err := decodeResponsesTools(dto.Tools, sink, exchangeID)
@@ -98,18 +101,26 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	var previousResponse *canonical.ResponseRef
+	clientPreviousSwobuResponseID := canonical.NewSwobuResponseID(dto.PreviousResponseWireID)
+	if dto.PreviousResponseWireID != "" && clientPreviousSwobuResponseID.IsZero() { // swobu:io-string source=boundary
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("previous_response_id is empty")
+	}
+	if !clientPreviousSwobuResponseID.IsZero() {
+		previousResponse = &canonical.ResponseRef{SwobuID: clientPreviousSwobuResponseID}
+	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		Instructions:  instructions,
-		InputText:     inputText,
-		Items:         conversation,
-		Tools:         tools,
-		ToolPolicy:    toolPolicy,
-		ToolCallBatch: toolCallBatch,
-		Controls:      controls,
-		OutputFormat:  outputFormat,
-		Turn:          canonical.NewTurnRef(dto.PreviousResponseID), // swobu:io-string source=boundary
-		Presence:      presence,
+		Model:            strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
+		Instructions:     instructions,
+		InputText:        inputText,
+		Items:            conversation,
+		Tools:            tools,
+		ToolPolicy:       toolPolicy,
+		ToolCallBatch:    toolCallBatch,
+		Controls:         controls,
+		OutputFormat:     outputFormat,
+		PreviousResponse: previousResponse,
+		Presence:         presence,
 	})
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
@@ -197,7 +208,7 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 	for idx, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
 		if itemType == "" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestInputShape, compat.Approx, responsesInputSubject(idx, "type")); err != nil {
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Approx, responsesInputSubject(idx, "type")); err != nil {
 				return "", nil, err
 			}
 			itemType = "message"
@@ -206,7 +217,7 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 		case "message":
 			role := strings.TrimSpace(item.Role) // swobu:io-string source=boundary
 			if role == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestRole, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsAuthor, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
 					return "", nil, err
 				}
 				role = "user"
@@ -222,12 +233,12 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 				callID = strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			}
 			if callID == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
 					return "", nil, err
 				}
 				callID = openaiwire.GeneratedToolUseID(idx, 0)
 			} else if strings.TrimSpace(item.CallID) == "" { // swobu:io-string source=boundary
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ToolCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
 					return "", nil, err
 				}
 			}
@@ -246,7 +257,7 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 		case "function_call_output":
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			if callID == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ToolResultID, compat.Reject, responsesInputSubject(idx, "call_id")); err != nil {
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolResultUseID, compat.Reject, responsesInputSubject(idx, "call_id")); err != nil {
 					return "", nil, err
 				}
 				return "", nil, canonical.BadRequest("responses request function_call_output items require call_id")
@@ -257,7 +268,7 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 			}
 			decoded = append(decoded, canonical.NewToolResultItem(canonical.ItemAuthorTool, callID, output))
 		default:
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestInputShape, compat.Reject, responsesInputSubject(idx, "type")); err != nil {
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Reject, responsesInputSubject(idx, "type")); err != nil {
 				return "", nil, err
 			}
 			return "", nil, canonical.BadRequest("responses request input contains an unsupported item type")

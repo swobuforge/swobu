@@ -19,7 +19,7 @@ import (
 
 type failingReplayStore struct{}
 
-func (failingReplayStore) Get(context.Context, string, replay.ID) (replay.Record, bool, error) {
+func (failingReplayStore) Get(context.Context, string, canonical.SwobuResponseID) (replay.Record, bool, error) {
 	return replay.Record{}, false, nil
 }
 
@@ -71,15 +71,15 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 		t.Fatalf("provider-native ID leaked to client: %s", string(raw))
 	}
 
-	rec, ok, err := store.Get(context.Background(), "alpha", replay.ReplayIDFromResponseID("swobu_test_ex"))
+	rec, ok, err := store.Get(context.Background(), "alpha", canonical.NewSwobuResponseID("swobu_test_ex"))
 	if err != nil {
 		t.Fatalf("store.Get error: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected replay record to be committed")
 	}
-	if rec.Response.ResultID() != "swobu_test_ex" {
-		t.Fatalf("stored response id=%q, want swobu_test_ex", rec.Response.ResultID())
+	if rec.Response.Response().SwobuID.String() != "swobu_test_ex" {
+		t.Fatalf("stored response id=%q, want swobu_test_ex", rec.Response.Response().SwobuID.String())
 	}
 }
 
@@ -124,7 +124,7 @@ func TestRunnerWithoutReplayStoreRejectsBeforeProviderIngress(t *testing.T) {
 				}}, nil
 			},
 		},
-		ResponseIDs: deterministicResponseIDGenerator{},
+		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
 	}
 
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -159,14 +159,14 @@ func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
 				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
-		ResponseIDs: deterministicResponseIDGenerator{},
+		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
 	}
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID: "no_replay_store_previous",
 		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-			Turn:  canonical.NewTurnRef("resp_prev"),
+			Model:            "m",
+			Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_prev"},
 		}),
 	})
 	if err == nil {
@@ -190,8 +190,8 @@ func TestRunnerRejectsEmptyReplayWorkspaceSlugBeforeProviderIngress(t *testing.T
 				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
-		ReplayStore: replay.NewMemoryStore(),
-		ResponseIDs: deterministicResponseIDGenerator{},
+		ReplayStore:      replay.NewMemoryStore(),
+		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
 	}
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "empty_scope_ns",
@@ -219,7 +219,7 @@ func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) 
 	store := replay.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithReplayStore(store).
-		WithResponseIDs(deterministicResponseIDGenerator{})
+		WithSwobuResponseIDs(deterministicSwobuResponseIDGenerator{})
 
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "alloc_missing",
@@ -250,22 +250,22 @@ func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) 
 	if gotID != "swobu_alloc_missing" {
 		t.Fatalf("allocated response id = %q, want swobu_alloc_missing", gotID)
 	}
-	rec, ok, err := store.Get(context.Background(), "alpha", replay.ReplayIDFromResponseID("swobu_alloc_missing"))
+	rec, ok, err := store.Get(context.Background(), "alpha", canonical.NewSwobuResponseID("swobu_alloc_missing"))
 	if err != nil {
 		t.Fatalf("store.Get error: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected replay record to be committed")
 	}
-	if rec.Response.ResultID() != "swobu_alloc_missing" {
-		t.Fatalf("stored response id = %q, want swobu_alloc_missing", rec.Response.ResultID())
+	if rec.Response.Response().SwobuID.String() != "swobu_alloc_missing" {
+		t.Fatalf("stored response id = %q, want swobu_alloc_missing", rec.Response.Response().SwobuID.String())
 	}
 }
 
 func TestRunnerReplayCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing.T) {
 	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithReplayStore(failingReplayStore{}).
-		WithResponseIDs(deterministicResponseIDGenerator{})
+		WithSwobuResponseIDs(deterministicSwobuResponseIDGenerator{})
 
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "commit_failure",

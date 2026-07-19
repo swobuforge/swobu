@@ -23,16 +23,17 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Kind != canonical.ItemKindToolUse {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind, canonical.ItemKindToolUse)
+	if items[0].Kind() != canonical.ItemKindToolUse {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolUse)
 	}
-	if got := items[0].ToolUseID; got != "tc_1" {
+	toolUse, _ := items[0].ToolUse()
+	if got := toolUse.UseID; got != "tc_1" {
 		t.Fatalf("items[0].ToolUseID = %q, want tc_1", got)
 	}
-	if got := items[0].Name; got != "search" {
+	if got := toolUse.Name; got != "search" {
 		t.Fatalf("items[0].Name = %q, want search", got)
 	}
-	if got := items[0].Input.RawObject(); got != `{"query":"hello"}` {
+	if got := toolUse.Input.RawObject(); got != `{"query":"hello"}` {
 		t.Fatalf("items[0].Input.RawObject() = %q, want normalized object JSON", got)
 	}
 }
@@ -76,7 +77,8 @@ func TestDecodeClientRequest_PreservesSystemAndDeveloperMessagesAsInstructions(t
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want only user message", len(items))
 	}
-	if items[0].Author != canonical.ItemAuthorUser || items[0].Text != "inspect files" {
+	text, _ := items[0].TextItem()
+	if items[0].Author() != canonical.ItemAuthorUser || text.Text != "inspect files" {
 		t.Fatalf("item = %#v, want user inspect files", items[0])
 	}
 }

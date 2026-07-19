@@ -1,6 +1,10 @@
 package replay
 
-import "context"
+import (
+	"context"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+)
 
 // newSpyStore returns a Store that records all calls for assertions.
 func newSpyStore() *spyStore {
@@ -16,7 +20,7 @@ type spyStore struct {
 	getCalls  int
 }
 
-func (s *spyStore) Get(ctx context.Context, workspaceSlug string, id ID) (Record, bool, error) {
+func (s *spyStore) Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Record, bool, error) {
 	_ = ctx
 	s.getCalled = true
 	s.getCalls++
@@ -31,6 +35,6 @@ func (s *spyStore) Get(ctx context.Context, workspaceSlug string, id ID) (Record
 func (s *spyStore) Put(ctx context.Context, workspaceSlug string, record Record) error {
 	_ = ctx
 	s.calls = append(s.calls, "Put")
-	s.records[workspaceRecordID{workspaceSlug: workspaceSlug, id: record.ID}] = record.Clone()
+	s.records[workspaceRecordID{workspaceSlug: workspaceSlug, id: record.Response.Response().SwobuID}] = record.Clone()
 	return nil
 }

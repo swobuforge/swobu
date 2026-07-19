@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -42,17 +41,14 @@ type functionCallOutputItem struct {
 }
 
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
-// package does not import wire. It carries the canonical request plus an
-// optional exact-backend provider continuation.
+// package does not import wire.
 type EncodeInput struct {
-	Request            canonical.CanonicalRequest
-	NativeContinuation *provider.NativeContinuation
+	Request canonical.CanonicalRequest
 }
 
 // EncodeCarrier is a convenience that encodes a carrier document from a raw
 // canonical request without native replay support. It does not infer provider
-// continuation from TurnRef; callers that need provider continuation must pass
-// the exact-backend NativeContinuation to EncodeCarrierWithDecisions.
+// continuation from a raw client selector.
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
 	input := EncodeInput{Request: req}
 	return EncodeCarrierWithDecisions(input, d, nil, "", EncodeOptions{})
@@ -69,7 +65,17 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 
 	tools := req.Tools()
 	presence := req.Presence()
-	nativeContinuation := input.NativeContinuation != nil
+	previous, hasPrevious := req.PreviousResponse()
+	responsesRefined := false
+	if hasPrevious {
+		if previous.Responses == nil {
+			return carrier.Document{}, fmt.Errorf("responses provider encoding requires a native previous response refinement")
+		}
+		if err := previous.Responses.ValidateBound(); err != nil {
+			return carrier.Document{}, fmt.Errorf("responses provider encoding received an invalid native previous response refinement: %w", err)
+		}
+		responsesRefined = true
+	}
 	payloadInput, err := encodeInput(req, options.ForceStructuredInput)
 	if err != nil {
 		return carrier.Document{}, err
@@ -86,7 +92,7 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	if payloadInput != nil {
 		payload["input"] = payloadInput
 	}
-	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" || nativeContinuation && presence.Instructions {
+	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" || responsesRefined && presence.Instructions {
 		payload["instructions"] = instructions
 	}
 	if choice != nil {
@@ -94,7 +100,7 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	}
 	if wireTools, err := encodeResponsesTools(tools, sink, exchangeID); err != nil {
 		return carrier.Document{}, err
-	} else if len(wireTools) > 0 || nativeContinuation && presence.Tools {
+	} else if len(wireTools) > 0 || responsesRefined && presence.Tools {
 		if wireTools == nil {
 			wireTools = []any{}
 		}
@@ -103,21 +109,21 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
 		return carrier.Document{}, err
 	}
-	if nativeContinuation && presence.ToolCallBatch && req.ToolCallBatch().IsZero() && len(tools) > 0 {
+	if responsesRefined && presence.ToolCallBatch && req.ToolCallBatch().IsZero() && len(tools) > 0 {
 		payload["parallel_tool_calls"] = true
 	}
-	if err := encodeResponsesGenerationControls(payload, req.Controls(), presence.Controls, nativeContinuation); err != nil {
+	if err := encodeResponsesGenerationControls(payload, req.Controls(), presence.Controls, responsesRefined); err != nil {
 		return carrier.Document{}, err
 	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
 		return carrier.Document{}, err
 	} else if text != nil {
 		payload["text"] = text
-	} else if nativeContinuation && presence.OutputFormat {
+	} else if responsesRefined && presence.OutputFormat {
 		payload["text"] = &responsesTextDTO{Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)}}
 	}
-	if input.NativeContinuation != nil {
-		payload["previous_response_id"] = string(input.NativeContinuation.ID)
+	if responsesRefined {
+		payload["previous_response_id"] = previous.Responses.ProviderResponseID
 	}
 	if options.Store != nil {
 		payload["store"] = *options.Store
@@ -155,9 +161,7 @@ func mergedResponsesInstructions(requestInstructions string, optionInstructions 
 func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice any, d delivery.Delivery) {
 	thread := req.Items()
 	encodedItems := thread
-	if !req.Turn().IsZero() {
-		encodedItems = canonical.CurrentTurnDelta(thread)
-	}
+	_, hasPrevious := req.PreviousResponse()
 	instructions := strings.TrimSpace(req.Instructions()) // swobu:io-string source=domain
 	inputType := "nil"
 	if input != nil {
@@ -174,7 +178,7 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice a
 		"component", "protocol.responses",
 		"event", "outbound_request_shape",
 		"streaming", d.Mode == delivery.Streaming,
-		"has_previous_response_id", !req.Turn().IsZero(), // swobu:io-string source=boundary
+		"has_previous_response_id", hasPrevious, // swobu:io-string source=boundary
 		"instructions_present", instructions != "",
 		"instructions_bytes", len(instructions),
 		"thread_item_count", len(thread),
@@ -197,7 +201,7 @@ func responsesTailRole(items []canonical.CanonicalItem) string {
 	if len(items) == 0 {
 		return ""
 	}
-	tailAuthor := items[len(items)-1].Author
+	tailAuthor := items[len(items)-1].Author()
 	if tailAuthor == canonical.ItemAuthorAssistant {
 		return "assistant"
 	}
@@ -263,14 +267,8 @@ func responsesWireToolChoice(choice any) string {
 
 func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any, error) {
 	items := req.Items()
-	if !req.Turn().IsZero() {
-		items = canonical.CurrentTurnDelta(items)
-		// Native continuation-only calls should rely on previous_response_id without
-		// replaying anchor thread input. Replaying can end with assistant output and
-		// violate backend prefill constraints.
-		if !hasContinuationDelta(items) { // swobu:io-string source=boundary
-			return nil, nil
-		}
+	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasContinuationDelta(items) { // swobu:io-string source=boundary
+		return nil, nil
 	}
 	if !forceStructuredInput {
 		if input, ok, err := encodeSimpleInput(items); ok || err != nil {
@@ -292,7 +290,7 @@ func encodeSimpleInput(items []canonical.CanonicalItem) (any, bool, error) {
 	if len(items) != 1 {
 		return nil, false, nil
 	}
-	if items[0].Author != "" && items[0].Author != canonical.ItemAuthorUser {
+	if items[0].Author() != "" && items[0].Author() != canonical.ItemAuthorUser {
 		return nil, false, nil
 	}
 	text, ok := textOnlyItem(items[0])
@@ -303,15 +301,13 @@ func encodeSimpleInput(items []canonical.CanonicalItem) (any, bool, error) {
 }
 
 func textOnlyItem(item canonical.CanonicalItem) (string, bool) {
-	if item.Kind != canonical.ItemKindText {
-		return "", false
-	}
-	return item.Text, true
+	payload, ok := item.TextItem()
+	return payload.Text, ok
 }
 
 func hasContinuationDelta(items []canonical.CanonicalItem) bool {
 	for _, item := range items {
-		if item.Author == canonical.ItemAuthorUser || item.Author == canonical.ItemAuthorTool {
+		if item.Author() == canonical.ItemAuthorUser || item.Author() == canonical.ItemAuthorTool {
 			return true
 		}
 	}
@@ -323,12 +319,19 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 	for i := 0; i < len(items); {
 		start := i
 		current := items[i]
-		switch current.Kind {
+		switch current.Kind() {
 		case canonical.ItemKindText:
+			if _, ok := current.TextItem(); !ok {
+				return nil, canonical.InternalError("responses text item payload is invalid")
+			}
 			role := roleForResponsesItem(current)
 			var content strings.Builder
-			for i < len(items) && items[i].Kind == canonical.ItemKindText && roleForResponsesItem(items[i]) == role {
-				content.WriteString(items[i].Text)
+			for i < len(items) && items[i].Kind() == canonical.ItemKindText && roleForResponsesItem(items[i]) == role {
+				text, ok := items[i].TextItem()
+				if !ok {
+					return nil, canonical.InternalError("responses text item payload is invalid")
+				}
+				content.WriteString(text.Text)
 				i++
 			}
 			item := inputMessageItem{
@@ -337,26 +340,34 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 				Content: content.String(),
 			}
 			if role == "assistant" {
-				item.ID = sse.FallbackID(current.ItemID, fmt.Sprintf("msg_swobu_%d", start))
+				item.ID = sse.FallbackID(current.ItemID(), fmt.Sprintf("msg_swobu_%d", start))
 				item.Status = "completed"
 			}
 			encoded = append(encoded, item)
 		case canonical.ItemKindToolUse:
+			toolUse, ok := current.ToolUse()
+			if !ok {
+				return nil, canonical.InternalError("responses tool-use item payload is invalid")
+			}
 			encoded = append(encoded, functionCallItem{
 				Type:      "function_call",
-				CallID:    current.ToolUseID,
-				Name:      current.Name,
-				Arguments: current.Input.RawObject(),
+				CallID:    toolUse.UseID,
+				Name:      toolUse.Name,
+				Arguments: toolUse.Input.RawObject(),
 			})
 			i++
 		case canonical.ItemKindToolResult:
-			if strings.TrimSpace(current.ToolUseID) == "" { // swobu:io-string source=boundary
+			toolResult, ok := current.ToolResult()
+			if !ok {
+				return nil, canonical.InternalError("responses tool-result item payload is invalid")
+			}
+			if strings.TrimSpace(toolResult.UseID) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("tool_result items require tool_use_id for the responses protocol")
 			}
 			encoded = append(encoded, functionCallOutputItem{
 				Type:   "function_call_output",
-				CallID: current.ToolUseID,
-				Output: current.Text,
+				CallID: toolResult.UseID,
+				Output: toolResult.Text,
 			})
 			i++
 		default:
@@ -367,7 +378,7 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 }
 
 func roleForResponsesItem(item canonical.CanonicalItem) string {
-	author := item.Author
+	author := item.Author()
 	if author == canonical.ItemAuthorAssistant {
 		return "assistant"
 	}

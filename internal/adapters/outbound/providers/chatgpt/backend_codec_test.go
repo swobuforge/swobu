@@ -1,9 +1,13 @@
 package chatgpt
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -55,5 +59,29 @@ func TestBackendCodecRejectsBufferedProviderDelivery(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("buffered provider delivery must be rejected")
+	}
+}
+
+func TestBackendInternalStoreFalseDoesNotSuppressNativeResponseCapture(t *testing.T) {
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_789\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_789\",\"status\":\"completed\",\"output\":[]}}\n\n"
+	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), "ex_store_false", provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream",
+		Body:      io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), decoded.Stream, canonical.EnvResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	responsesRef := output.Response().Responses
+	if responsesRef == nil || responsesRef.ProviderResponseID != "provider_resp_789" {
+		t.Fatalf("native response refinement = %#v", responsesRef)
 	}
 }

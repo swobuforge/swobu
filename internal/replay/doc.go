@@ -5,7 +5,7 @@
 // delta. Canonical request presence distinguishes omitted durable bands from
 // explicit empty values: omission inherits, empty clears, and non-empty
 // replaces. Exact routing target ID and process-local version equality selects
-// optional provider-native continuation after backend resolution.
+// an applicable typed Responses refinement after backend resolution.
 // One daemon-global store partitions records by the validated workspace slug
 // resolved from the request URL. Committed records carry a bounded expiry owned by the store, with the
 // memory store applying the package default when a record arrives without one,

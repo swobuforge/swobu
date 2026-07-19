@@ -47,10 +47,6 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.UnsupportedDelivery("provider codec supports only SSE streaming delivery"))
 	}
 	input := wire.ProviderEncodeInput{Request: req.Canonical}
-	if req.Continuation != nil {
-		continuation := *req.Continuation
-		input.NativeContinuation = &continuation
-	}
 
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
@@ -70,7 +66,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 	if err != nil {
 		if req.Canonical.OutputFormat().Kind == canonical.OutputFormatJSONSchema {
 			decisions = append(decisions, compat.Decision{
-				Feature: compat.RequestStructuredOutput,
+				Feature: compat.RequestOutputFormat,
 				Outcome: compat.Reject,
 				Subject: providercompat.RouteSubject(c.ProviderID, string(c.Protocol)),
 			})
@@ -111,7 +107,7 @@ func (c Codec) Decode(ctx context.Context, exchangeID string, ingress provider.I
 	}
 	decoded := provider.DecodedResponse{
 		Stream: result.Stream, Decisions: result.Decisions,
-		Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions,
+		TerminalDecisions: result.TerminalDecisions,
 	}
 	return decoded, err
 }

@@ -82,7 +82,8 @@ func TestDecodeRequest_PreservesTopLevelSystemAsInstructions(t *testing.T) {
 		t.Fatalf("instructions = %q, want top-level system", got.Instructions())
 	}
 	items := got.Items()
-	if len(items) != 1 || items[0].Text != "inspect files" {
+	text, textOK := items[0].TextItem()
+	if len(items) != 1 || !textOK || text.Text != "inspect files" {
 		t.Fatalf("items = %#v, want user request only", items)
 	}
 }

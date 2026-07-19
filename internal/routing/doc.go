@@ -1,6 +1,6 @@
 // Package routing owns the immutable workspace/route/tier/target aggregate,
 // whole-value invariants, semantic edits, exact route resolution, and
-// deterministic monotonic attempt-plan construction. Daemon startup
+// deterministic ordered target-plan construction. Daemon startup
 // preferences, including daemon address, remain outside this aggregate.
 //
 // Routing is the product-domain boundary below operator and request-path
@@ -9,10 +9,16 @@
 // TargetDraft finalizer; runtime consumers receive immutable values and never
 // reconstruct routes from DTOs.
 //
-// Each target has one durable ID and one process-local monotonic version.
-// Target settings and credential-reference saves advance the version; replay
-// uses it to reject native handles captured before a target save. Version is
-// intentionally not persisted while replay itself is process-local.
+// A target's position in a built plan is possible work, not provider I/O.
+// Exchange owns the issued provider-call attempt lifecycle, and one position
+// may produce zero or more calls without changing routing order.
+//
+// Each target has one durable ID and one process-local monotonic version. Its
+// protocol records the provider whose catalog admitted it and must match the
+// typed connection provider. Effective setting equality compares durable
+// fields explicitly. Target settings and credential-reference saves advance
+// the version; replay uses it to reject native handles captured before a target
+// save. Version is intentionally not persisted while replay itself is local.
 //
 // The canonical model lives in
 // docs/03-architecture/system-shape-and-request-flow/workspace-routing-configuration-and-local-persistence.md

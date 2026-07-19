@@ -4,33 +4,17 @@ import (
 	"testing"
 )
 
-func TestValidateFeature(t *testing.T) {
+func TestResponseReferenceFeaturesMirrorCanonicalPaths(t *testing.T) {
 	t.Parallel()
 
-	valid := []Feature{
-		RequestToolChoice,
-		ToolNameNamespace,
-		GenerationStopSequences,
-		UsageCacheReadTokens,
-		WireJSONMode,
-	}
-	for _, feature := range valid {
-		if err := ValidateFeature(feature); err != nil {
-			t.Fatalf("ValidateFeature(%q) = %v", feature, err)
-		}
-	}
-
-	invalid := []Feature{
-		Feature("RequestFeature"),
-		Feature("tool.name.namespace"),
-		Feature("tool.name.flattened"),
-		Feature("openai.tool_choice"),
-		Feature("usage.missing"),
-		Feature("responses.reasoning"),
-	}
-	for _, feature := range invalid {
-		if err := ValidateFeature(feature); err == nil {
-			t.Fatalf("ValidateFeature(%q) expected error", feature)
+	for feature, want := range map[Feature]string{
+		RequestPreviousResponse:          "request.previous_response",
+		RequestPreviousResponseResponses: "request.previous_response.responses",
+		ResponseID:                       "response.id",
+		ResponseIDResponses:              "response.id.responses",
+	} {
+		if string(feature) != want {
+			t.Fatalf("feature %q = %q, want canonical path %q", feature, feature, want)
 		}
 	}
 }

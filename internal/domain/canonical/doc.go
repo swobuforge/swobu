@@ -2,8 +2,9 @@
 //
 // It classifies client families, normalizes paths, preserves canonical
 // request/output/replay semantics, and defines the Swobu-vs-backend
-// error boundary. Playback-aware flows use TurnRef so semantic chain
-// ownership stays separate from provider-native turn-state bytes. Canonical requests now also own the semantic tool ontology:
+// error boundary. Playback-aware flows share ResponseRef between requests and
+// responses so replay identity and protocol-specific refinements remain one
+// typed canonical fact. Canonical requests now also own the semantic tool ontology:
 // function/custom/capability declarations, execution ownership, structured
 // tool identity, and tool policy are represented separately so adapters can
 // lower to wire formats without collapsing distinct lifecycles into one flat

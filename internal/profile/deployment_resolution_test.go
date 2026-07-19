@@ -61,13 +61,13 @@ func TestResolveProviderDeployment_UnknownCapabilitiesFailClosed(t *testing.T) {
 
 	resolution := ResolveProviderDeployment("openai", ProviderDeploymentRecord{
 		Capabilities: []ProviderDeploymentCapability{
-			{Feature: compat.ToolDeclaration, Support: compat.Supported},
+			{Feature: compat.RequestTools, Support: compat.Supported},
 		},
 	})
-	if got := resolution.CapabilitySupport(compat.ToolDeclaration); got != compat.Supported {
+	if got := resolution.CapabilitySupport(compat.RequestTools); got != compat.Supported {
 		t.Fatalf("tool declaration support=%q want supported", got)
 	}
-	if got := resolution.CapabilitySupport(compat.RequestStructuredOutput); got != compat.Unknown {
+	if got := resolution.CapabilitySupport(compat.RequestOutputFormat); got != compat.Unknown {
 		t.Fatalf("structured output support=%q want unknown", got)
 	}
 }

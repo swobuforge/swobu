@@ -17,7 +17,6 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -71,9 +70,6 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 			ChatCompletionsTokenField: chatCompletionsTokenField(e.profile.ProviderID()),
 		}},
 		Transport: provider.BindTransport(target, e.Send),
-	}
-	if e.profile.ProviderID() == profile.ProviderSpecOpenAI && target.ProtocolKind == protocolkind.Responses {
-		backend.CaptureContinuation = target.NativeContinuation
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

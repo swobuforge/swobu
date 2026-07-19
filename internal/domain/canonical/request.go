@@ -22,12 +22,12 @@ type CanonicalRequest struct {
 	items        []CanonicalItem
 	tools        []ToolDecl
 
-	turn         TurnRef
-	toolPolicy   ToolPolicy
-	toolBatch    ToolCallBatchPolicy
-	controls     GenerationControls
-	outputFormat OutputFormat
-	presence     RequestPresence
+	previousResponse *ResponseRef
+	toolPolicy       ToolPolicy
+	toolBatch        ToolCallBatchPolicy
+	controls         GenerationControls
+	outputFormat     OutputFormat
+	presence         RequestPresence
 }
 
 // RequestPresence records which durable request bands the client supplied.
@@ -57,19 +57,19 @@ type GenerationControlsPresence struct {
 
 // RequestParams contains normalized semantic input for one request, including
 // semantic tool declarations, tool policy, tool-call batch policy, generation
-// controls, output format, and the canonical turn reference.
+// controls, output format, and the optional previous response selector.
 type RequestParams struct {
-	Model         string
-	Instructions  string
-	Items         []CanonicalItem
-	Tools         []ToolDecl
-	InputText     string
-	Turn          TurnRef
-	ToolPolicy    ToolPolicy
-	ToolCallBatch ToolCallBatchPolicy
-	Controls      GenerationControls
-	OutputFormat  OutputFormat
-	Presence      RequestPresence
+	Model            string
+	Instructions     string
+	Items            []CanonicalItem
+	Tools            []ToolDecl
+	InputText        string
+	PreviousResponse *ResponseRef
+	ToolPolicy       ToolPolicy
+	ToolCallBatch    ToolCallBatchPolicy
+	Controls         GenerationControls
+	OutputFormat     OutputFormat
+	Presence         RequestPresence
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
@@ -80,16 +80,16 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 	}
 	presence := inferRequestPresence(params)
 	return CanonicalRequest{
-		model:        strings.TrimSpace(params.Model),        // swobu:io-string source=domain
-		instructions: strings.TrimSpace(params.Instructions), // swobu:io-string source=domain
-		items:        items,
-		tools:        tools,
-		turn:         params.Turn.Clone(),
-		toolPolicy:   params.ToolPolicy.Clone(),
-		toolBatch:    params.ToolCallBatch.Clone(),
-		controls:     params.Controls.Clone(),
-		outputFormat: params.OutputFormat.Clone(),
-		presence:     presence,
+		model:            strings.TrimSpace(params.Model),        // swobu:io-string source=domain
+		instructions:     strings.TrimSpace(params.Instructions), // swobu:io-string source=domain
+		items:            items,
+		tools:            tools,
+		previousResponse: cloneResponseRefPointer(params.PreviousResponse),
+		toolPolicy:       params.ToolPolicy.Clone(),
+		toolBatch:        params.ToolCallBatch.Clone(),
+		controls:         params.Controls.Clone(),
+		outputFormat:     params.OutputFormat.Clone(),
+		presence:         presence,
 	}
 }
 
@@ -128,8 +128,11 @@ func (r CanonicalRequest) Tools() []ToolDecl {
 	return cloneToolDecls(r.tools)
 }
 
-func (r CanonicalRequest) Turn() TurnRef {
-	return r.turn.Clone()
+func (r CanonicalRequest) PreviousResponse() (ResponseRef, bool) {
+	if r.previousResponse == nil {
+		return ResponseRef{}, false
+	}
+	return r.previousResponse.Clone(), true
 }
 
 func (r CanonicalRequest) ToolPolicy() ToolPolicy {
@@ -155,17 +158,25 @@ func (r CanonicalRequest) Presence() RequestPresence {
 
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
-		Model:         r.model,
-		Instructions:  r.instructions,
-		Items:         r.items,
-		Tools:         r.tools,
-		Turn:          r.turn,
-		ToolPolicy:    r.toolPolicy,
-		ToolCallBatch: r.toolBatch,
-		Controls:      r.controls,
-		OutputFormat:  r.outputFormat,
-		Presence:      r.presence,
+		Model:            r.model,
+		Instructions:     r.instructions,
+		Items:            r.items,
+		Tools:            r.tools,
+		PreviousResponse: r.previousResponse,
+		ToolPolicy:       r.toolPolicy,
+		ToolCallBatch:    r.toolBatch,
+		Controls:         r.controls,
+		OutputFormat:     r.outputFormat,
+		Presence:         r.presence,
 	})
+}
+
+func cloneResponseRefPointer(ref *ResponseRef) *ResponseRef {
+	if ref == nil {
+		return nil
+	}
+	cloned := ref.Clone()
+	return &cloned
 }
 
 // CloneCanonicalRequest protects the provider and app seams from accidental mutation

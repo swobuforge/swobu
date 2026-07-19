@@ -7,7 +7,7 @@ import (
 
 // SynthesizeResponseEnvelopeEvents converts canonical response fields into a
 // finite envelope event stream suitable for stream or batch adapters.
-func SynthesizeResponseEnvelopeEvents(exchangeID string, resultID string, model string, items []CanonicalItem, finishReason string, usage TokenUsage) []Event {
+func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) []Event {
 	seq := int64(0)
 	next := func() int64 {
 		seq++
@@ -22,7 +22,7 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, resultID string, model 
 			Kind:       EventEnvelopeStart,
 			EnvID:      responseID,
 			Payload: EnvelopeStartPayload{
-				Kind: EnvResponse,
+				Kind: EnvResponse, Response: response.Clone(),
 			},
 		},
 		{
@@ -31,30 +31,35 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, resultID string, model 
 			Time:       time.Now().UTC(),
 			Kind:       EventMetadata,
 			EnvID:      responseID,
-			Payload: MetadataPayload{Values: map[string]string{
-				"result_id": resultID,
-				"model":     model,
-			}},
+			Payload:    MetadataPayload{Values: map[string]string{"model": model}},
 		},
 	}
 	msgIdx := 0
 	toolIdx := 0
 	for _, item := range items {
-		switch item.Kind {
+		switch item.Kind() {
 		case ItemKindText:
+			text, ok := item.TextItem()
+			if !ok {
+				continue
+			}
 			id := EnvelopeID(fmt.Sprintf("%s:message:%d", responseID, msgIdx))
 			msgIdx++
 			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: responseID, Payload: EnvelopeStartPayload{Kind: EnvMessage, Role: item.Author}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: responseID, Payload: TextDeltaPayload{Text: item.Text}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: responseID, Payload: EnvelopeStartPayload{Kind: EnvMessage, Role: item.Author()}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: responseID, Payload: TextDeltaPayload{Text: text.Text}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: responseID, Payload: EnvelopeEndPayload{Kind: EnvMessage, Status: EnvelopeStatusCompleted}},
 			)
 		case ItemKindToolUse:
+			toolUse, ok := item.ToolUse()
+			if !ok {
+				continue
+			}
 			id := EnvelopeID(fmt.Sprintf("%s:tool_call:%d", responseID, toolIdx))
 			toolIdx++
-			args := item.Input.RawObject()
+			args := toolUse.Input.RawObject()
 			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: responseID, Payload: EnvelopeStartPayload{Kind: EnvToolCall, Name: item.Name, ToolUseID: item.ToolUseID, ToolType: item.ToolType}},
+				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: responseID, Payload: EnvelopeStartPayload{Kind: EnvToolCall, Name: toolUse.Name, ToolUseID: toolUse.UseID, ToolType: toolUse.ToolType}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventArgsDelta, EnvID: id, ParentID: responseID, Payload: ArgsDeltaPayload{Args: args}},
 				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: responseID, Payload: EnvelopeEndPayload{Kind: EnvToolCall, Status: EnvelopeStatusCompleted}},
 			)
