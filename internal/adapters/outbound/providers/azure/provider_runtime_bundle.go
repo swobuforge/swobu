@@ -12,20 +12,23 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	anthropicprovider "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 // FIXME swobuCallerUAHeaderValue must be DRY across all providers. Consider centralizing if more providers need it.
 const swobuCallerUAHeaderValue = "swobu/dev"
 const azureDeploymentListPath = "/deployments?api-version=v1&deploymentType=ModelDeployment"
 
-type azureProviderIngressResolver struct {
-	openAI    openaifamily.ProviderIngressResolverAdapter
-	anthropic anthropicprovider.ProviderIngressResolverAdapter
+type azureBackendAdapter struct {
+	openAI    openaifamily.BackendAdapter
+	anthropic anthropicprovider.BackendAdapter
 }
 
 type azureProviderModelCatalogClient struct {
@@ -39,7 +42,7 @@ type azureDeploymentDocument struct {
 	ModelName      string                          `json:"modelName"`
 	ModelVersion   string                          `json:"modelVersion"`
 	ModelPublisher string                          `json:"modelPublisher"`
-	Capabilities   azureDeploymentCapabilitiesJSON `json:"capabilities"`
+	Capabilities   azureDeploymentCapabilitiesJSON `json:"facts"`
 	Sku            azureDeploymentSkuDocument      `json:"sku"`
 }
 
@@ -70,13 +73,13 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	if client == nil {
 		client = http.DefaultClient
 	}
-	router := azureProviderIngressResolver{
+	router := azureBackendAdapter{
 		openAI:    openaifamily.NewExecutor(client, credentials, NewPolicy()),
 		anthropic: anthropicprovider.NewExecutor(client, credentials),
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,
-		ProviderExecutor:   router,
+		BackendResolver:    router,
 		CredentialProvider: credentials,
 		Discovery: azureProviderModelCatalogClient{
 			client:      client,
@@ -85,23 +88,37 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	}
 }
 
-func (r azureProviderIngressResolver) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
-	baseURL, err := resolveAzureResourceRoot(req.Target.BaseURL)
+func (r azureBackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	_, err := resolveAzureResourceRoot(target.BaseURL)
+	if err != nil {
+		return provider.Backend{}, canonical.BadEndpoint("azure resource locator is required")
+	}
+	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind, Options: protocolcodec.Options{ChatCompletionsTokenField: chatcompletions.MaxOutputTokensFieldLegacy}}, Transport: provider.BindTransport(target, r.Send)}
+	if err := backend.Validate(); err != nil {
+		return provider.Backend{}, err
+	}
+	return backend, nil
+}
+
+func (r azureBackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
+	baseURL, err := resolveAzureResourceRoot(target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure resource locator is required")
 	}
-	next := req
-	switch req.Target.ProtocolKind {
+	next := target.Clone()
+	switch target.ProtocolKind {
 	case protocolkind.Messages:
-		next.Target.BaseURL = strings.TrimRight(baseURL, "/") + "/anthropic/v1"
-		return r.anthropic.ResolveProviderIngress(ctx, next)
+		next.BaseURL = strings.TrimRight(baseURL, "/") + "/anthropic/v1"
+		return r.anthropic.Send(ctx, next, doc)
 	default:
-		next.Target.BaseURL = strings.TrimRight(baseURL, "/") + "/openai/v1"
-		return r.openAI.ResolveProviderIngress(ctx, next)
+		next.BaseURL = strings.TrimRight(baseURL, "/") + "/openai/v1"
+		return r.openAI.Send(ctx, next, doc)
 	}
 }
 
-func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
+var _ provider.BackendResolver = azureBackendAdapter{}
+
+func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
 	projectEndpoint, err := resolveAzureProjectEndpoint(target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure project endpoint is required")
@@ -125,12 +142,12 @@ func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, ta
 	return out, nil
 }
 
-func (c azureProviderModelCatalogClient) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+func (c azureProviderModelCatalogClient) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := c.ListDeployments(ctx, target)
-	return exchange.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Deployments: deployments}, err
 }
 
-func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target exchange.RoutableTarget, requestURL string) ([]profile.ProviderDeploymentRecord, string, error) {
+func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target provider.TargetSnapshot, requestURL string) ([]profile.ProviderDeploymentRecord, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, "", canonical.BadEndpoint("azure provider deployment inventory request could not be built")
@@ -153,7 +170,7 @@ func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context
 	resp = decodedResp
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, "", httpedge.ReadBackendHTTPError(resp, target.BackendRef)
+		return nil, "", httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -172,7 +189,7 @@ func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context
 	return deployments, nextLink, nil
 }
 
-func (c azureProviderModelCatalogClient) applyCredential(ctx context.Context, req *http.Request, target exchange.RoutableTarget) error {
+func (c azureProviderModelCatalogClient) applyCredential(ctx context.Context, req *http.Request, target provider.TargetSnapshot) error {
 	if strings.TrimSpace(target.CredentialRef) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("azure provider credential reference is required")
 	}

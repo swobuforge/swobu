@@ -8,14 +8,58 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	"github.com/swobuforge/swobu/internal/wire"
 )
+
+// Test-only values keep provider-round tests concise without restoring a
+// production provider-only execution surface or shadow call authority.
+type Runner = runtimeBundle
+
+type ExchangeInput struct {
+	ExchangeID       string
+	ClientFamily     canonical.ClientFamily
+	ClientDelivery   delivery.Delivery
+	Request          canonical.CanonicalRequest
+	Prepared         replay.Prepared
+	WorkspaceSlug    string
+	Target           provider.TargetSnapshot
+	Contract         ExecutionContract
+	ProviderProtocol protocolkind.ProtocolKind
+	ProviderDelivery delivery.Delivery
+}
+
+func ClientTransportForTest(response ClientResponse) transportpkg.Response {
+	switch response := response.(type) {
+	case BufferedResponse:
+		return response.Response
+	case StreamingResponse:
+		return response.Response
+	}
+	return transportpkg.Response{}
+}
+
+func ClientResponseStreamingForTest(response ClientResponse) bool {
+	switch response.(type) {
+	case StreamingResponse, MessageStreamingResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+func ClientMessageTransportForTest(response ClientResponse) transportpkg.MessageResponse {
+	if response, ok := response.(MessageStreamingResponse); ok {
+		return response.Response
+	}
+	return transportpkg.MessageResponse{}
+}
 
 type deterministicResponseIDGenerator struct{}
 
@@ -23,41 +67,81 @@ func (deterministicResponseIDGenerator) NewResponseID(_ context.Context, exchang
 	return replay.ResponseID("swobu_" + exchangeID), nil
 }
 
-type recordingEffectSink struct {
-	effects []effect.Effect
+func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeInput) (ClientResponse, error) {
+	if in.Prepared.Semantic.Model() == "" {
+		in.Prepared = replay.Prepared{Semantic: in.Request.Clone(), Delta: in.Request.Clone()}
+	}
+	if err := validateReplayInput(runner, in.WorkspaceSlug); err != nil {
+		return nil, err
+	}
+	responseID, err := allocateResponseID(ctx, in.ExchangeID, runner.ResponseIDs)
+	if err != nil {
+		return nil, err
+	}
+	backend, err := runner.Runtime.ResolveBackend(in.Target)
+	if err != nil {
+		return nil, err
+	}
+	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
+	request := in.Prepared.ForBackend(backend, in.ProviderDelivery)
+	call := preparedProviderCall{
+		backend: backend, request: request, clientCodec: clientCodec,
+		clientDelivery: in.ClientDelivery, exchangeID: in.ExchangeID,
+		workspaceSlug: in.WorkspaceSlug, semanticRequest: in.Prepared.Semantic.Clone(),
+	}
+	document, decisions, err := backend.Codec.Encode(request)
+	call.document = document
+	commitDecisionsBestEffort(ctx, runner.DecisionSink, in.ExchangeID, decisions)
+	if err != nil {
+		return nil, err
+	}
+	ingress, err := backend.Transport.Send(ctx, document)
+	if err != nil {
+		recordExchangeEvidenceBestEffort(ctx, runner.DecisionSink, in.ExchangeID, exchangeEvidence{decisions: backendErrorShapeDecisions(call, err)})
+		return nil, err
+	}
+	response, decisionsEffects, err := completeProviderCall(ctx, call, ingress, responseID, runner)
+	commitDecisionsBestEffort(ctx, runner.DecisionSink, in.ExchangeID, decisionsEffects)
+	return response, err
 }
 
-func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+// RunPreparedProviderForTest exposes the package test bridge to external tests.
+// Production code has no provider-only execution entrypoint.
+func RunPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeInput) (ClientResponse, error) {
+	return runPreparedProviderForTest(ctx, runner, in)
+}
+
+type recordingDecisionSink struct {
+	effects []compat.Decision
+}
+
+func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
 	s.effects = append(s.effects, effects...)
 	return nil
 }
 
-func bufferedProviderIngressResolver(raw []byte) func(context.Context, ProviderRequest) (ProviderIngress, error) {
+func bufferedProviderTransport(raw []byte) testProviderTransport {
 	_ = raw
-	return func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		return carrier.NewCarrierDocument(
-			carrier.StageProviderIngressIn,
-			req.Target.ProtocolKind,
+	return func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		return provider.DocumentIngress{Document: carrier.NewDocument(
+			target.ProtocolKind,
 			"application/json",
 			nil,
 			[]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`),
 			carrier.Meta{},
-		), nil
+		)}, nil
 	}
 }
 
-func streamingProviderIngressResolver(stream io.ReadCloser) func(context.Context, ProviderRequest) (ProviderIngress, error) {
+func streamingProviderTransport(stream io.ReadCloser) testProviderTransport {
 	_ = stream
-	return func(_ context.Context, req ProviderRequest) (ProviderIngress, error) {
-		return carrier.CarrierStream{
-			Stage:   carrier.StageProviderIngressIn,
-			Family:  req.Target.ProtocolKind,
-			Framing: carrier.FramingSSE,
-			Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(
+	return func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		return provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream",
+			Body: io.NopCloser(strings.NewReader(
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
 					"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
-			))),
-		}, nil
+			)),
+		}}, nil
 	}
 }
 
@@ -72,11 +156,11 @@ func newTransportRequestWithTurn(method, url string, turn string, body map[strin
 	return NewTransportRequest(method, url, nil, raw)
 }
 
-func withRuntime(providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)) Runner {
+func withRuntime(providerTransport testProviderTransport) Runner {
 	return Runner{
 		Runtime: testExecutionRuntime{
 			testRuntimeResolver: testRuntimeResolver{},
-			providerIngress:     providerIngress,
+			providerTransport:   providerTransport,
 		},
 		ReplayStore: replay.NewMemoryStore(),
 		ResponseIDs: deterministicResponseIDGenerator{},
@@ -85,14 +169,11 @@ func withRuntime(providerIngress func(context.Context, ProviderRequest) (Provide
 
 type runtimeWithProviderIngress struct {
 	RuntimeResolver
-	providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)
+	providerTransport testProviderTransport
 }
 
-func (r runtimeWithProviderIngress) ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error) {
-	if r.providerIngress == nil {
-		return nil, canonical.InternalError("test provider ingress resolver is required")
-	}
-	return r.providerIngress(ctx, req)
+func (r runtimeWithProviderIngress) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	return newTestBackend(target, r.providerTransport)
 }
 
 func (r Runner) WithReplayStore(store replay.Store) Runner {
@@ -116,14 +197,11 @@ func testCanonicalRequest(model string) canonical.CanonicalRequest {
 
 type testExecutionRuntime struct {
 	testRuntimeResolver
-	providerIngress func(context.Context, ProviderRequest) (ProviderIngress, error)
+	providerTransport testProviderTransport
 }
 
-func (r testExecutionRuntime) ResolveProviderIngress(ctx context.Context, req ProviderRequest) (ProviderIngress, error) {
-	if r.providerIngress == nil {
-		return nil, canonical.InternalError("test provider ingress resolver is required")
-	}
-	return r.providerIngress(ctx, req)
+func (r testExecutionRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	return newTestBackend(target, r.providerTransport)
 }
 
 type testRuntimeResolver struct{}
@@ -132,30 +210,45 @@ func (testRuntimeResolver) ClientCodec(f canonical.ClientFamily) ClientCodec {
 	return testClientCodec{}
 }
 
-func (testRuntimeResolver) ProviderRequestDocumentEncoder(kind protocolkind.ProtocolKind) ProviderRequestDocumentEncoder {
-	_ = kind
-	return testProviderRequestDocumentEncoder{}
+type testProviderTransport func(context.Context, provider.TargetSnapshot, carrier.Document) (provider.Ingress, error)
+
+func (t testProviderTransport) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
+	if t == nil {
+		return nil, canonical.InternalError("test provider transport is required")
+	}
+	return t(ctx, target, doc)
 }
 
-func (testRuntimeResolver) ProviderEnvelopeDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) ProviderEnvelopeDecoder {
-	_ = kind
-	if d.Mode != delivery.Streaming {
-		return nil
-	}
-	return testProviderEnvelopeDecoder{}
+type testBackendCodec struct{}
+
+func (testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+	result, err := (testProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: req.Canonical}, req.Delivery, "")
+	return result.Document, result.Decisions, err
 }
 
-func (testRuntimeResolver) ProviderDocumentDecoder(kind protocolkind.ProtocolKind, d delivery.Delivery) ProviderDocumentDecoder {
-	_ = kind
-	if d.Mode != delivery.Buffered {
-		return nil
+func (testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	switch in := ingress.(type) {
+	case provider.StreamIngress:
+		result, err := (testProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
+		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions}, err
+	case provider.DocumentIngress:
+		result, err := (testProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
+		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, Continuation: result.Continuation, TerminalDecisions: result.TerminalDecisions}, err
+	default:
+		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
 	}
-	return testProviderDocumentDecoder{}
+}
+
+func newTestBackend(target provider.TargetSnapshot, transport testProviderTransport) (provider.Backend, error) {
+	if target.Model == "" {
+		target.Model = "m"
+	}
+	return provider.Backend{Target: target, Codec: testBackendCodec{}, Transport: provider.BindTransport(target, transport)}, nil
 }
 
 type testClientCodec struct{}
 
-func (testClientCodec) DecodeClientRequest(doc carrier.CarrierDocument) (Result[wire.ClientRequestResult], error) {
+func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	model := "m"
 	var turn canonical.TurnRef
 	var items []canonical.CanonicalItem
@@ -189,8 +282,8 @@ func (testClientCodec) DecodeClientRequest(doc carrier.CarrierDocument) (Result[
 	if len(items) == 0 {
 		items = []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}
 	}
-	return Result[wire.ClientRequestResult]{
-		Value: wire.ClientRequestResult{
+	return wire.ClientDecodeResult{
+		Request: wire.ClientRequestResult{
 			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model: model,
 				Items: items,
@@ -201,7 +294,7 @@ func (testClientCodec) DecodeClientRequest(doc carrier.CarrierDocument) (Result[
 	}, nil
 }
 
-func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (Result[carrier.CarrierDocument], error) {
+func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
 	text := ""
 	if textual, ok := any(output).(interface{ Text() string }); ok {
 		text = textual.Text()
@@ -218,76 +311,52 @@ func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) 
 	}
 	resultID := output.ResultID()
 	if resultID != "" {
-		return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, []byte(`{"id":"`+resultID+`","output_text":"`+text+`"}`), carrier.Meta{})), nil
+		return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"id":"`+resultID+`","output_text":"`+text+`"}`), carrier.Meta{})}, nil
 	}
-	return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{})), nil
+	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{})}, nil
 }
 
-func (testClientCodec) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (Result[carrier.CarrierStream], error) {
+func (testClientCodec) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	_ = events
 	_ = d
 	raw := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
-	return effect.NewResult(carrier.CarrierStream{
-		Stage:   carrier.StageClientResponseOut,
-		Family:  protocolkind.Responses,
-		Framing: carrier.FramingSSE,
-		Frames:  carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw))),
-	}), nil
+	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream",
+		Body: io.NopCloser(strings.NewReader(raw)),
+	}}, nil
+}
+
+func (testClientCodec) EncodeResponseMessages(_ context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientMessageResult, error) {
+	messages := wire.NewEncodedResponseMessages(events, func(canonical.Event) ([][]byte, error) {
+		return [][]byte{[]byte(`{"type":"test.event"}`)}, nil
+	})
+	return wire.ClientMessageResult{Response: carrier.MessageResponse{MediaType: "application/json", Messages: messages}}, nil
 }
 
 type testProviderRequestDocumentEncoder struct{}
 
-func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
+func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
 	_ = d
 	_ = exchangeID
-	return effect.NewResult(carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+input.Request.Model()+`"}`), carrier.Meta{})), nil
+	return wire.ProviderEncodeResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+input.Request.Model()+`"}`), carrier.Meta{})}, nil
 }
 
 type testProviderEnvelopeDecoder struct{}
 
-func (testProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string) (Result[canonical.EventReader], error) {
+func (testProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
 	_ = stream
-	return effect.NewResult(stubResponseEventReader(exchangeID)), nil
-}
-
-// NativeReplayFromOutput implements wire.NativeReplaySource so streaming
-// tests can assert native replay capture.
-func (testProviderEnvelopeDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
-	if providerResultID == "" {
-		return nil
-	}
-	return &replay.NativeRef{
-		ReplayID: replayID,
-		Target:   target,
-		Kind:     replay.NativeRefProviderResponseID,
-		Value:    providerResultID,
-	}
+	return wire.ProviderDecodeResult{Stream: stubResponseEventReader(exchangeID)}, nil
 }
 
 type testProviderDocumentDecoder struct{}
 
-func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.CarrierDocument, exchangeID string) (Result[canonical.EventReader], error) {
+func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.Document, exchangeID string) (wire.ProviderDecodeResult, error) {
 	_ = ctx
 	_ = doc
-	return effect.NewResult(stubResponseEventReader(exchangeID)), nil
+	return wire.ProviderDecodeResult{Stream: stubResponseEventReader(exchangeID)}, nil
 }
 
-// NativeReplayFromOutput implements wire.NativeReplaySource so buffered
-// tests can assert native replay capture.
-func (testProviderDocumentDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
-	if providerResultID == "" {
-		return nil
-	}
-	return &replay.NativeRef{
-		ReplayID: replayID,
-		Target:   target,
-		Kind:     replay.NativeRefProviderResponseID,
-		Value:    providerResultID,
-	}
-}
-
-func stubResponseEventReader(exchangeID string) canonical.EventReader {
+func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 	now := time.Now().UTC()
 	// Produce a completed response envelope with metadata carrying a
 	// result_id so replay capture can project and persist it.

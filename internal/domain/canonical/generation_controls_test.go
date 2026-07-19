@@ -55,10 +55,6 @@ func TestGenerationControls_RejectsInvalidValues(t *testing.T) {
 			params: GenerationControlsParams{StopSequences: []string{" "}},
 		},
 		{
-			name:   "empty stop sequence list",
-			params: GenerationControlsParams{StopSequences: []string{}},
-		},
-		{
 			name:   "temperature",
 			params: GenerationControlsParams{Temperature: &negativeTemp},
 		},
@@ -78,6 +74,16 @@ func TestGenerationControls_RejectsInvalidValues(t *testing.T) {
 				t.Fatal("NewGenerationControls returned nil error, want validation failure")
 			}
 		})
+	}
+}
+
+func TestGenerationControls_AcceptsEmptyStopSequenceListAsExplicitClear(t *testing.T) {
+	controls, err := NewGenerationControls(GenerationControlsParams{StopSequences: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controls.Limits.StopSequences == nil || len(controls.Limits.StopSequences) != 0 {
+		t.Fatalf("stop sequences = %#v, want non-nil empty clear", controls.Limits.StopSequences)
 	}
 }
 

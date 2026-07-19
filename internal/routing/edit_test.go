@@ -66,6 +66,12 @@ func TestUpdateTargetSettingsPreservesBalancedTier(t *testing.T) {
 	if ids[0] != "one" || ids[1] != "two" {
 		t.Fatalf("settings update changed balanced peers: %v", ids)
 	}
+	if got := route.Tiers()[0].Targets()[1].Version(); got != two.Version()+1 {
+		t.Fatalf("updated target version = %d, want %d", got, two.Version()+1)
+	}
+	if got := route.Tiers()[0].Targets()[0].Version(); got != initialTargetVersion {
+		t.Fatalf("unrelated target version = %d, want %d", got, initialTargetVersion)
+	}
 }
 
 func TestDeleteTargetRemovesEmptyTierAndPromotesFallback(t *testing.T) {
@@ -119,5 +125,41 @@ func TestSetCredentialPreservesUnrelatedTargetFields(t *testing.T) {
 	connection := target.Connection().(OpenAIConnection)
 	if connection.Credential().String() != "env:ROTATED" {
 		t.Fatalf("credential = %q", connection.Credential().String())
+	}
+	if target.Version() != initialTargetVersion+1 {
+		t.Fatalf("credential-save target version = %d, want %d", target.Version(), initialTargetVersion+1)
+	}
+}
+
+func TestNoOpTargetSavesStillAdvanceVersion(t *testing.T) {
+	config := testConfig(t, testTarget(t, "a"))
+	slug, _ := ParseWorkspaceSlug("dev")
+	routeName, _ := ParseRouteName("chat")
+	id, _ := ParseTargetID("a")
+	workspace, _ := config.Workspace(slug)
+	route, _ := workspace.Route(routeName)
+	target := route.Tiers()[0].Targets()[0]
+
+	next, err := config.UpdateTargetSettings(slug, routeName, id, TargetSettings{
+		Model: target.Model(), Protocol: target.Protocol(), Connection: target.Connection(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextWorkspace, _ := next.Workspace(slug)
+	nextRoute, _ := nextWorkspace.Route(routeName)
+	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version()+1 {
+		t.Fatalf("no-op settings save version = %d, want %d", got, target.Version()+1)
+	}
+
+	credential := target.Connection().(OpenAIConnection).Credential().String()
+	next, err = next.SetCredential(slug, routeName, id, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextWorkspace, _ = next.Workspace(slug)
+	nextRoute, _ = nextWorkspace.Route(routeName)
+	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version()+2 {
+		t.Fatalf("no-op credential save version = %d, want %d", got, target.Version()+2)
 	}
 }

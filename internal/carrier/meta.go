@@ -3,9 +3,8 @@ package carrier
 // Meta carries optional boundary metadata that is useful for tracing and
 // diagnostics but not part of semantic request/response meaning.
 type Meta struct {
-	Endpoint   string
-	BackendRef string
-	Opaque     map[string]string
+	Endpoint string
+	Opaque   map[string]string
 }
 
 func (m Meta) Clone() Meta {

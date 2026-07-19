@@ -5,30 +5,32 @@ import "context"
 // newSpyStore returns a Store that records all calls for assertions.
 func newSpyStore() *spyStore {
 	return &spyStore{
-		records: make(map[scopedID]Record),
+		records: make(map[workspaceRecordID]Record),
 	}
 }
 
 type spyStore struct {
-	records   map[scopedID]Record
+	records   map[workspaceRecordID]Record
 	calls     []string
 	getCalled bool
+	getCalls  int
 }
 
-func (s *spyStore) Get(ctx context.Context, scope Scope, id ID) (Record, bool, error) {
+func (s *spyStore) Get(ctx context.Context, workspaceSlug string, id ID) (Record, bool, error) {
 	_ = ctx
 	s.getCalled = true
+	s.getCalls++
 	s.calls = append(s.calls, "Get")
-	r, ok := s.records[scopedID{Scope: scope, ID: id}]
+	r, ok := s.records[workspaceRecordID{workspaceSlug: workspaceSlug, id: id}]
 	if !ok {
 		return Record{}, false, nil
 	}
 	return r.Clone(), true, nil
 }
 
-func (s *spyStore) Put(ctx context.Context, scope Scope, record Record) error {
+func (s *spyStore) Put(ctx context.Context, workspaceSlug string, record Record) error {
 	_ = ctx
 	s.calls = append(s.calls, "Put")
-	s.records[scopedID{Scope: scope, ID: record.ID}] = record.Clone()
+	s.records[workspaceRecordID{workspaceSlug: workspaceSlug, id: record.ID}] = record.Clone()
 	return nil
 }

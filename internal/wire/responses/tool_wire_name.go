@@ -5,7 +5,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 )
 
 // responsesToolWireName returns the Responses wire token for one function or
@@ -75,7 +74,7 @@ func responsesFlatToolIdentityFromWire(name string, kind canonical.ToolKind, fie
 // Raw names match plain tools by visible name. Projected names still round-trip
 // namespace-bearing tools through the exact canonical ID, but only when reverse
 // projection can prove the token.
-func responsesResolveToolChoiceByWireName(tools []canonical.ToolDecl, name, specificType, fieldPath string, sink effect.Sink, exchangeID string) (canonical.ToolDecl, string, error) {
+func responsesResolveToolChoiceByWireName(tools []canonical.ToolDecl, name, specificType, fieldPath string, sink compat.Sink, exchangeID string) (canonical.ToolDecl, string, error) {
 	trimmed := strings.TrimSpace(name) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return nil, "", canonical.BadRequest("responses request tool_choice specific requires a tool name")

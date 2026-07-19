@@ -5,10 +5,9 @@
 // facts. Credential storage sources, provider probe diagnostics, and ChatGPT
 // login methods are deliberately outside this catalog; Bedrock runtime
 // authentication strategy belongs to the Bedrock adapter.
-// Route capability facts for request features now live in internal/compat so
-// provider dispatch can consult one shared vocabulary.
-// Routing construction boundaries obtain provider/protocol, Azure endpoint,
-// and Bedrock region predicates through RoutingCapabilities; adapters must not
+// Compatibility decisions live outside this catalog and never drive routing.
+// Routing construction boundaries obtain concrete provider/protocol, Azure endpoint,
+// and Bedrock region predicates through RoutingConstructionFacts; adapters must not
 // reconstruct that catalog mapping independently.
 //
 // Static manifest truth still lives here until the provider namespace registry

@@ -12,21 +12,20 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.
-func decodeResponseStream(stream carrier.CarrierStream, exchangeID string, sink effect.Sink) canonical.EventReader {
-	recording := &effect.RecordingSink{Delegate: sink}
+func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink compat.Sink) *messagesEventReader {
+	recording := &compat.RecordingSink{Delegate: sink}
 	return &messagesEventReader{
 		exchangeID:  exchangeID,
 		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
 		sink:        recording,
 		recording:   recording,
-		reader:      core.NewSSEReader(carrier.ReadCloserFromFrameReader(stream.Frames)),
+		reader:      core.NewSSEReader(stream.Body),
 		blocks:      map[int]streamContentBlock{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
 	}
@@ -35,8 +34,8 @@ func decodeResponseStream(stream carrier.CarrierStream, exchangeID string, sink 
 type messagesEventReader struct {
 	exchangeID   string
 	responseID   canonical.EnvelopeID
-	sink         effect.Sink
-	recording    *effect.RecordingSink
+	sink         compat.Sink
+	recording    *compat.RecordingSink
 	reader       *core.SSEReaderCloser
 	resultID     string
 	model        string
@@ -49,11 +48,11 @@ type messagesEventReader struct {
 	completed    bool
 }
 
-func (s *messagesEventReader) Effects() []effect.Effect {
+func (s *messagesEventReader) Decisions() []compat.Decision {
 	if s.recording == nil {
 		return nil
 	}
-	return append([]effect.Effect(nil), s.recording.Effects...)
+	return s.recording.Decisions()
 }
 
 type streamContentBlock struct {
@@ -107,7 +106,7 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		return s.shift(), nil
 	}
 	for {
-		frame, err := s.reader.Next()
+		frame, err := s.reader.Next(ctx)
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
 				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
@@ -131,13 +130,13 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		if !frameUsage.IsZero() {
 			s.latestUsage = frameUsage
 			_, inputPresent := frameUsage.InputTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 			_, outputPresent := frameUsage.OutputTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 			_, cacheReadPresent := frameUsage.CacheReadTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 			_, cacheWritePresent := frameUsage.CacheWriteTokens()
-			openaiwire.EmitUsageCompatibilityEffect(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var envelope streamEnvelope
 		if err := json.Unmarshal([]byte(frame.Data), &envelope); err != nil {

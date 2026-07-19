@@ -1,7 +1,7 @@
 // swobu:lint ignore test-only-dead-cluster because=compat feature vocabulary is authoritative even when only tests exercise some names.
 package compat
 
-// Feature names one semantic capability that a route may need to preserve.
+// Feature names one user-visible semantic contract observed at a representation seam.
 type Feature string
 
 const (
@@ -72,10 +72,7 @@ const (
 	DeliveryTerminalEvent    Feature = "delivery.terminal_event"
 
 	// Wire/state.
-	WireJSONMode      Feature = "wire.json_mode"
-	WireRawPayload    Feature = "wire.raw_payload"
-	WireNativePayload Feature = "wire.native_payload"
-	StateTurnSnapshot Feature = "state.turn_snapshot"
+	WireJSONMode Feature = "wire.json_mode"
 
 	// Errors.
 	ErrorShape Feature = "error.shape"

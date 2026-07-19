@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -18,17 +17,18 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
+		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, "")
 		return wire.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
 		}, err
 	})
+	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "chat completions request", nil); err != nil {
@@ -99,7 +99,7 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDo
 
 // swobu:lint ignore string-switch because=protocol boundary decodes wire tool-call kinds.
 func decodeChatCompletionsItems(
-	sink effect.Sink,
+	sink compat.Sink,
 	exchangeID string,
 	role string,
 	content json.RawMessage,
@@ -196,21 +196,21 @@ func decodeChatCompletionsFunctionArguments(raw json.RawMessage) (map[string]any
 	return sse.DecodeJSONObject(json.RawMessage(trimmedStringified), "chat completions tool call arguments are invalid")
 }
 
-func emitChatCompletionsCompatibilityDecision(sink effect.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
+func emitChatCompletionsCompatibilityDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
 	if sink == nil {
 		return nil
 	}
 	if subject == "" {
 		return nil
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.CompatibilityEffect{
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
+		compat.Decision{
 			Feature: feature,
 			Outcome: outcome,
 			Subject: subject,
 		},
 	}); err != nil {
-		return canonical.InternalError("compatibility effect sink commit failed")
+		return canonical.InternalError("compatibility decision sink commit failed")
 	}
 	return nil
 }

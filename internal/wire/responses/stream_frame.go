@@ -104,6 +104,7 @@ func (s *responsesEventReader) handleResponseCreated(frame streamFrame) {
 	if resultID == "" {
 		resultID = strings.TrimSpace(frame.Response.ID) // swobu:io-string source=boundary
 	}
+	s.providerResultID = resultID
 	s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}, canonical.EventMetadataFields{NativeID: resultID, ResultID: resultID})
 	model := strings.TrimSpace(frame.Model) // swobu:io-string source=boundary
 	if model == "" {

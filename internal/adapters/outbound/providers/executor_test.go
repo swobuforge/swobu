@@ -14,10 +14,8 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
-	"github.com/swobuforge/swobu/internal/wire"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type testCredentialResolver struct{}
@@ -26,11 +24,11 @@ func (testCredentialResolver) ResolveCredential(context.Context, string, string)
 	return "token_test", nil
 }
 
-type recordingEffectSink struct {
-	effects []effect.Effect
+type recordingDecisionSink struct {
+	effects []compat.Decision
 }
 
-func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
 	s.effects = append(s.effects, effects...)
 	return nil
 }
@@ -44,17 +42,46 @@ func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
 	return body
 }
 
-func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target exchange.RoutableTarget) exchange.ProviderRequest {
+type testProviderRequest struct {
+	Request      canonical.CanonicalRequest
+	Contract     exchange.ExecutionContract
+	Target       provider.TargetSnapshot
+	ExchangeID   string
+	DecisionSink compat.Sink
+}
+
+func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...compat.Sink) testProviderRequest {
+	var sink compat.Sink
+	if len(sinks) > 0 {
+		sink = sinks[0]
+	}
+	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, DecisionSink: sink}
+}
+
+func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target provider.TargetSnapshot) testProviderRequest {
 	t.Helper()
-	codec := codecresolver.NewRuntimeCodecResolver().ProviderRequestDocumentEncoder(target.ProtocolKind)
-	if codec == nil {
-		t.Fatalf("provider request encoder missing for protocol %s", target.ProtocolKind)
-	}
-	wireRequestResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, contract.ProviderDelivery, "")
+	return newTestProviderRequest("test-ex", protocolkind.Responses, request, carrier.Document{}, contract, target)
+}
+
+func executeProviderRequest(registry ProviderRegistry, ctx context.Context, req testProviderRequest) (provider.Ingress, error) {
+	target := req.Target.Clone()
+	target.Model = req.Request.Model()
+	backend, err := registry.ResolveBackend(target)
 	if err != nil {
-		t.Fatalf("encode provider request document: %v", err)
+		return nil, err
 	}
-	return exchange.NewProviderRequest("test-ex", protocolkind.Responses, request, wireRequestResult.Value, contract, target)
+	doc, decisions, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
+	if req.DecisionSink != nil && len(decisions) > 0 {
+		effects := make([]compat.Decision, 0, len(decisions))
+		for _, decision := range decisions {
+			effects = append(effects, compat.Decision{Feature: decision.Feature, Outcome: decision.Outcome, Subject: decision.Subject})
+		}
+		_ = req.DecisionSink.Commit(ctx, req.ExchangeID, effects)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return backend.Transport.Send(ctx, doc)
 }
 
 type compatExpectation struct {
@@ -62,16 +89,13 @@ type compatExpectation struct {
 	outcome compat.Outcome
 }
 
-func assertCompatibilityEffects(t *testing.T, sink *recordingEffectSink, want []compatExpectation, subject compat.Subject) {
+func assertCompatibilityDecisions(t *testing.T, sink *recordingDecisionSink, want []compatExpectation, subject compat.Subject) {
 	t.Helper()
 	if len(sink.effects) != len(want) {
 		t.Fatalf("captured effects len=%d want=%d", len(sink.effects), len(want))
 	}
 	for i, effectItem := range sink.effects {
-		compatEffect, ok := effectItem.(effect.CompatibilityEffect)
-		if !ok {
-			t.Fatalf("effect[%d] type = %T, want effect.CompatibilityEffect", i, effectItem)
-		}
+		compatEffect := effectItem
 		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome {
 			t.Fatalf("effect[%d] = %#v, want %s %s", i, compatEffect, want[i].feature, want[i].outcome)
 		}
@@ -98,7 +122,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 
 	openAIReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -106,9 +130,9 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	if _, err := composition.ResolveProviderIngress(context.Background(), openAIReq); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), openAIReq); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
 
@@ -118,9 +142,9 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "", "messages"),
+		provider.NewTargetSnapshot("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "", "messages"),
 	)
-	if _, err := composition.ResolveProviderIngress(context.Background(), anthropicReq); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), anthropicReq); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 }
@@ -138,9 +162,9 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 
-	openAIProbe, err := composition.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	openAIProbe, err := composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", ""))
 	if err != nil {
 		t.Fatalf("openai model catalog failed: %v", err)
@@ -149,7 +173,7 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai model catalog len=%d want 2", len(openAIProbe.Deployments))
 	}
 
-	_, err = composition.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	_, err = composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"backend-b", "chatgpt", upstream.URL+"/v1", "secret:chatgpt/default", protocolkind.ChatCompletions, "", ""))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
 		t.Fatalf("chatgpt catalog dispatch must use chatgpt adapter tier validation, got err=%v", err)
@@ -159,14 +183,14 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderRegistry(http.DefaultClient, testCredentialResolver{})
-	_, err := composition.ResolveProviderIngress(context.Background(), mustProviderRequestWithDocument(t,
+	composition := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
+	_, err := executeProviderRequest(composition, context.Background(), mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     "m",
 			InputText: "hi",
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "", ""),
+		provider.NewTargetSnapshot("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "", ""),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
 		t.Fatalf("unknown provider must fail fast, got err=%v", err)
@@ -186,8 +210,8 @@ func TestServices_ProbeTargetDispatchesByProviderID(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	_, err := composition.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+	_, err := composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", ""))
 	if err != nil {
 		t.Fatalf("openai target probe failed: %v", err)
@@ -214,17 +238,17 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	sink := &recordingEffectSink{}
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+	sink := &recordingDecisionSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.EffectSink = sink
+	req.DecisionSink = sink
 	req.ExchangeID = "ex-cache-intent-openai"
 
-	if _, err := composition.ResolveProviderIngress(context.Background(), req); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
 	if readErr != nil {
@@ -239,7 +263,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 		t.Fatalf("prompt_cache_retention must be omitted")
 	}
 	if len(sink.effects) != 0 {
-		t.Fatalf("compatibility effects len=%d want 0", len(sink.effects))
+		t.Fatalf("compatibility decisions len=%d want 0", len(sink.effects))
 	}
 }
 
@@ -263,17 +287,17 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	sink := &recordingEffectSink{}
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+	sink := &recordingDecisionSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.EffectSink = sink
+	req.DecisionSink = sink
 	req.ExchangeID = "ex-cache-intent-ollama"
 
-	if _, err := composition.ResolveProviderIngress(context.Background(), req); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("ollama execution failed: %v", err)
 	}
 	if readErr != nil {
@@ -288,7 +312,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 		t.Fatalf("prompt_cache_retention must be omitted on ollama")
 	}
 	if len(sink.effects) != 0 {
-		t.Fatalf("compatibility effects len=%d want 0", len(sink.effects))
+		t.Fatalf("compatibility decisions len=%d want 0", len(sink.effects))
 	}
 }
 
@@ -324,23 +348,21 @@ func TestServices_OpenAIFamilyEmitsStructuredOutputCompatibilityDecisions(t *tes
 		Tools:        []canonical.ToolDecl{tool},
 		OutputFormat: outputFormat,
 	})
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	sink := &recordingEffectSink{}
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+	sink := &recordingDecisionSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.EffectSink = sink
+	req.DecisionSink = sink
 	req.ExchangeID = "ex-structured-output"
 
-	if _, err := composition.ResolveProviderIngress(context.Background(), req); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
 
-	assertCompatibilityEffects(t, sink, []compatExpectation{
-		{feature: compat.RequestStructuredOutput, outcome: compat.Exact},
-		{feature: compat.ToolDeclaration, outcome: compat.Exact},
+	assertCompatibilityDecisions(t, sink, []compatExpectation{
 		{feature: compat.OutputFormat, outcome: compat.Exact},
 		{feature: compat.OutputJSONSchema, outcome: compat.Exact},
 		{feature: compat.WireJSONMode, outcome: compat.Exact},
@@ -369,22 +391,21 @@ func TestServices_BedrockEmitsToolSchemaStrictDropCompatibilityDecision(t *testi
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		Tools: []canonical.ToolDecl{tool},
 	})
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	sink := &recordingEffectSink{}
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+	sink := &recordingDecisionSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-bedrock", "bedrock", upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "", "messages"),
+		provider.NewTargetSnapshot("backend-bedrock", "bedrock", upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "", "messages"),
 	)
-	req.EffectSink = sink
+	req.DecisionSink = sink
 	req.ExchangeID = "ex-bedrock-strict-drop"
 
-	if _, err := composition.ResolveProviderIngress(context.Background(), req); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("bedrock execution failed: %v", err)
 	}
 
-	assertCompatibilityEffects(t, sink, []compatExpectation{
-		{feature: compat.ToolDeclaration, outcome: compat.Exact},
+	assertCompatibilityDecisions(t, sink, []compatExpectation{
 		{feature: compat.ToolSchemaStrict, outcome: compat.Drop},
 	}, compat.Subject("route:provider/bedrock/protocol/messages"))
 }
@@ -410,27 +431,26 @@ func TestServices_AnthropicEmitsToolSchemaStrictDropCompatibilityDecision(t *tes
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		Tools: []canonical.ToolDecl{tool},
 	})
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	sink := &recordingEffectSink{}
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+	sink := &recordingDecisionSink{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-anthropic", "anthropic", upstream.URL+"/v1", "credential-ref", protocolkind.Messages, "", "messages"),
+		provider.NewTargetSnapshot("backend-anthropic", "anthropic", upstream.URL+"/v1", "credential-ref", protocolkind.Messages, "", "messages"),
 	)
-	req.EffectSink = sink
+	req.DecisionSink = sink
 	req.ExchangeID = "ex-anthropic-strict-drop"
 
-	if _, err := composition.ResolveProviderIngress(context.Background(), req); err != nil {
+	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 
-	assertCompatibilityEffects(t, sink, []compatExpectation{
-		{feature: compat.ToolDeclaration, outcome: compat.Exact},
+	assertCompatibilityDecisions(t, sink, []compatExpectation{
 		{feature: compat.ToolSchemaStrict, outcome: compat.Drop},
 	}, compat.Subject("route:provider/anthropic/protocol/messages"))
 }
 
-func TestServices_OpenAIFamilyEmitsBackendErrorClassCompatibilityDecision(t *testing.T) {
+func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t *testing.T) {
 	t.Parallel()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -444,45 +464,28 @@ func TestServices_OpenAIFamilyEmitsBackendErrorClassCompatibilityDecision(t *tes
 	}))
 	defer upstream.Close()
 
-	composition := NewProviderRegistry(upstream.Client(), testCredentialResolver{})
-	sink := &recordingEffectSink{}
+	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	req := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.EffectSink = sink
-	req.ExchangeID = "ex-error-class"
-
-	_, err := composition.ResolveProviderIngress(context.Background(), req)
+	_, err := executeProviderRequest(composition, context.Background(), req)
 	if err == nil {
 		t.Fatal("expected backend error")
 	}
 	if !canonical.IsBackendErrorClass(err, canonical.BackendErrorClassToolChoiceUnsupported) {
 		t.Fatalf("expected classified backend error, got %v", err)
 	}
-	if len(sink.effects) != 1 {
-		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
-	}
-	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
-	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
-	}
-	if compatEffect.Feature != compat.ErrorClass || compatEffect.Outcome != compat.Approx {
-		t.Fatalf("captured effect = %#v, want error.class approx", compatEffect)
-	}
-	if compatEffect.Subject != compat.Subject("route:provider/openai/protocol/chat_completions/error_class/tool_choice_unsupported") {
-		t.Fatalf("captured subject = %q, want class-specific route subject", compatEffect.Subject)
-	}
 }
 
 func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T) {
 	t.Parallel()
 
-	composition := NewProviderRegistry(http.DefaultClient, testCredentialResolver{})
+	composition := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
 	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind:        canonical.OutputFormatJSONSchema,
 		Name:        "reply_shape",
@@ -498,27 +501,24 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		OutputFormat: outputFormat,
 	})
-	req := exchange.NewProviderRequest(
+	req := newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,
-		carrier.CarrierDocument{},
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-b", "anthropic", "https://example.test/v1", "cred-1", protocolkind.Messages, "", "messages"),
+		provider.NewTargetSnapshot("backend-b", "anthropic", "https://example.test/v1", "cred-1", protocolkind.Messages, "", "messages"),
 	)
 	req.ExchangeID = "ex-structured-output"
-	sink := &recordingEffectSink{}
-	req.EffectSink = sink
+	sink := &recordingDecisionSink{}
+	req.DecisionSink = sink
 
-	_, err = composition.ResolveProviderIngress(context.Background(), req)
-	if err == nil || !strings.Contains(err.Error(), "structured JSON schema output") {
+	_, err = executeProviderRequest(composition, context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "does not support structured output") {
 		t.Fatalf("structured output should fail closed before encoding, got err=%v", err)
 	}
 	if len(sink.effects) != 1 {
 		t.Fatalf("captured effect len=%d want=1", len(sink.effects))
 	}
-	compatEffect, ok := sink.effects[0].(effect.CompatibilityEffect)
-	if !ok {
-		t.Fatalf("captured effect type = %T, want effect.CompatibilityEffect", sink.effects[0])
-	}
+	compatEffect := sink.effects[0]
 	if compatEffect.Feature != compat.RequestStructuredOutput || compatEffect.Outcome != compat.Reject {
 		t.Fatalf("captured effect = %#v, want request.structured_output reject", compatEffect)
 	}

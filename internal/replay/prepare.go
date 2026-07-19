@@ -5,64 +5,81 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
-// Prepare determines the request to send to the provider and whether a native
-// replay pointer is available for the selected target.
+// Prepared contains both the complete semantic request and the inherited
+// current delta. Exact backend resolution chooses which representation is safe
+// to send; replay lookup never predicts backend compatibility.
+type Prepared struct {
+	Semantic canonical.CanonicalRequest
+	Delta    canonical.CanonicalRequest
+	Base     *Record
+}
+
+// ForBackend constructs one provider request. Matching native continuation
+// sends the inherited current delta; absent or mismatched continuation sends
+// the complete semantic request.
+func (p Prepared) ForBackend(backend provider.Backend, providerDelivery delivery.Delivery) provider.Request {
+	request := provider.Request{Canonical: p.Semantic.Clone(), Delivery: providerDelivery}
+	if backend.CaptureContinuation == nil || p.Base == nil || p.Base.Native == nil ||
+		p.Base.Native.TargetID != backend.Target.TargetID ||
+		p.Base.Native.TargetVersion != backend.Target.TargetVersion {
+		return request
+	}
+	continuation := *p.Base.Native
+	request.Canonical = p.Delta.Clone()
+	request.Continuation = &continuation
+	return request
+}
+
+// Prepare loads at most one explicit replay record and computes complete
+// semantic state plus the inherited current delta.
 //
 // Rules:
-//   - No previous ID in request.Turn: return request with turn cleared, nil native ref.
+//   - No previous ID in request.Turn: semantic and delta are the complete request.
 //   - Store nil with previous ID present: reject (cannot validate previous).
 //   - Unknown previous ID: bad request.
-//   - Previous ID present: use the supplied request items as the current-turn
-//     input. If the target pointer is present and the previous record has a
-//     matching NativeRef, return the current-turn delta with the previous
-//     durable request bands inherited and the turn selector cleared.
-//   - Otherwise: materialize full request from previous record + current items.
+//   - Previous ID present: materialize full semantic state and inherit durable
+//     request bands into the current delta.
 //
 // One record deep. No prefix matching. No chain walking.
 func Prepare(
 	ctx context.Context,
 	store Store,
-	scope Scope,
-	target *TargetKey,
+	workspaceSlug string,
 	request canonical.CanonicalRequest,
-) (canonical.CanonicalRequest, *NativeRef, error) {
-	previousID, ok := previousReplayID(request)
+) (Prepared, error) {
+	previousID, ok := PreviousID(request)
 	if !ok {
-		return withoutTurn(request), nil, nil
+		return PrepareCurrent(request), nil
 	}
 
 	if store == nil {
-		return canonical.CanonicalRequest{}, nil, canonical.BadRequest("unknown previous_response_id")
+		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
 	}
-	if strings.TrimSpace(scope.Namespace) == "" {
-		return canonical.CanonicalRequest{}, nil, canonical.BadRequest("replay scope namespace is empty")
-	}
-	if strings.TrimSpace(scope.CallerKey) == "" {
-		return canonical.CanonicalRequest{}, nil, canonical.BadRequest("replay scope caller key is empty")
+	if strings.TrimSpace(workspaceSlug) == "" {
+		return Prepared{}, canonical.BadRequest("replay workspace slug is empty")
 	}
 
-	previous, found, err := store.Get(ctx, scope, previousID)
+	previous, found, err := store.Get(ctx, workspaceSlug, previousID)
 	if err != nil {
-		return canonical.CanonicalRequest{}, nil, err
+		return Prepared{}, err
 	}
 	if !found {
-		return canonical.CanonicalRequest{}, nil, canonical.BadRequest("unknown previous_response_id")
+		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
 	}
 	if previous.ExpiresAt != nil && !previous.ExpiresAt.After(time.Now().UTC()) {
-		return canonical.CanonicalRequest{}, nil, canonical.BadRequest("unknown previous_response_id")
+		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
 	}
-
-	if target != nil && previous.Native != nil && previous.Native.Target.Equal(*target) {
-		return inheritRequestBands(previous.Request, request), previous.Native, nil
-	}
-
-	return materialize(previous, request), nil, nil
+	return PrepareFromRecord(request, previous)
 }
 
-func previousReplayID(request canonical.CanonicalRequest) (ID, bool) {
+// PreviousID returns the explicit workspace-local replay capability carried by
+// the canonical request, if present. It performs no store access.
+func PreviousID(request canonical.CanonicalRequest) (ID, bool) {
 	if request.Turn().IsZero() {
 		return "", false
 	}
@@ -71,6 +88,27 @@ func previousReplayID(request canonical.CanonicalRequest) (ID, bool) {
 		return "", false
 	}
 	return ID(prev.String()), true
+}
+
+// PrepareCurrent constructs target-independent replay state for a request that
+// does not reference a prior replay record.
+func PrepareCurrent(request canonical.CanonicalRequest) Prepared {
+	complete := withoutTurn(request)
+	return Prepared{Semantic: complete, Delta: complete.Clone()}
+}
+
+// PrepareFromRecord materializes one immutable replay snapshot already loaded
+// by exchange orchestration. It performs no store access.
+func PrepareFromRecord(request canonical.CanonicalRequest, previous Record) (Prepared, error) {
+	if previous.ExpiresAt != nil && !previous.ExpiresAt.After(time.Now().UTC()) {
+		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
+	}
+	base := previous.Clone()
+	return Prepared{
+		Semantic: materialize(previous, request),
+		Delta:    inheritRequestBands(previous.Request, request),
+		Base:     &base,
+	}, nil
 }
 
 func withoutTurn(request canonical.CanonicalRequest) canonical.CanonicalRequest {
@@ -84,38 +122,43 @@ func withoutTurn(request canonical.CanonicalRequest) canonical.CanonicalRequest 
 		ToolCallBatch: request.ToolCallBatch(),
 		Controls:      request.Controls(),
 		OutputFormat:  request.OutputFormat(),
+		Presence:      request.Presence(),
 	})
 }
 
 func inheritRequestBands(previous canonical.CanonicalRequest, current canonical.CanonicalRequest) canonical.CanonicalRequest {
+	presence := current.Presence()
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         inheritString(current.Model(), previous.Model()),
-		Instructions:  inheritString(current.Instructions(), previous.Instructions()),
+		Model:         inheritString(presence.Model, current.Model(), previous.Model()),
+		Instructions:  inheritString(presence.Instructions, current.Instructions(), previous.Instructions()),
 		Items:         cloneCanonicalItems(current.Items()),
-		Tools:         inheritToolDecls(current.Tools(), previous.Tools()),
+		Tools:         inheritToolDecls(presence.Tools, current.Tools(), previous.Tools()),
 		Turn:          canonical.TurnRef{},
-		ToolPolicy:    inheritCloneable(current.ToolPolicy(), previous.ToolPolicy()),
-		ToolCallBatch: inheritCloneable(current.ToolCallBatch(), previous.ToolCallBatch()),
-		Controls:      inheritControls(current.Controls(), previous.Controls()),
-		OutputFormat:  inheritCloneable(current.OutputFormat(), previous.OutputFormat()),
+		ToolPolicy:    inheritCloneable(presence.ToolPolicy, current.ToolPolicy(), previous.ToolPolicy()),
+		ToolCallBatch: inheritCloneable(presence.ToolCallBatch, current.ToolCallBatch(), previous.ToolCallBatch()),
+		Controls:      inheritControls(presence.Controls, current.Controls(), previous.Controls()),
+		OutputFormat:  inheritCloneable(presence.OutputFormat, current.OutputFormat(), previous.OutputFormat()),
+		Presence:      presence,
 	})
 }
 
 func materialize(previous Record, current canonical.CanonicalRequest) canonical.CanonicalRequest {
+	presence := current.Presence()
 	items := cloneCanonicalItems(previous.Request.Items())
 	items = append(items, cloneCanonicalItems(previous.Response.Items())...)
 	items = append(items, cloneCanonicalItems(current.Items())...)
 
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         inheritString(current.Model(), previous.Request.Model()),
-		Instructions:  inheritString(current.Instructions(), previous.Request.Instructions()),
+		Model:         inheritString(presence.Model, current.Model(), previous.Request.Model()),
+		Instructions:  inheritString(presence.Instructions, current.Instructions(), previous.Request.Instructions()),
 		Items:         items,
-		Tools:         inheritToolDecls(current.Tools(), previous.Request.Tools()),
+		Tools:         inheritToolDecls(presence.Tools, current.Tools(), previous.Request.Tools()),
 		Turn:          canonical.TurnRef{},
-		ToolPolicy:    inheritCloneable(current.ToolPolicy(), previous.Request.ToolPolicy()),
-		ToolCallBatch: inheritCloneable(current.ToolCallBatch(), previous.Request.ToolCallBatch()),
-		Controls:      inheritControls(current.Controls(), previous.Request.Controls()),
-		OutputFormat:  inheritCloneable(current.OutputFormat(), previous.Request.OutputFormat()),
+		ToolPolicy:    inheritCloneable(presence.ToolPolicy, current.ToolPolicy(), previous.Request.ToolPolicy()),
+		ToolCallBatch: inheritCloneable(presence.ToolCallBatch, current.ToolCallBatch(), previous.Request.ToolCallBatch()),
+		Controls:      inheritControls(presence.Controls, current.Controls(), previous.Request.Controls()),
+		OutputFormat:  inheritCloneable(presence.OutputFormat, current.OutputFormat(), previous.Request.OutputFormat()),
+		Presence:      presence,
 	})
 }
 
@@ -144,15 +187,15 @@ func cloneToolDecls(tools []canonical.ToolDecl) []canonical.ToolDecl {
 	return cloned
 }
 
-func inheritToolDecls(current, previous []canonical.ToolDecl) []canonical.ToolDecl {
-	if len(current) > 0 {
+func inheritToolDecls(present bool, current, previous []canonical.ToolDecl) []canonical.ToolDecl {
+	if present {
 		return cloneToolDecls(current)
 	}
 	return cloneToolDecls(previous)
 }
 
-func inheritString(current, previous string) string {
-	if current != "" {
+func inheritString(present bool, current, previous string) string {
+	if present {
 		return current
 	}
 	return previous
@@ -164,37 +207,26 @@ type cloneabler[T any] interface {
 	IsZero() bool
 }
 
-func inheritCloneable[T cloneabler[T]](current, previous T) T {
-	if !current.IsZero() {
+func inheritCloneable[T cloneabler[T]](present bool, current, previous T) T {
+	if present {
 		return current.Clone()
 	}
 	return previous.Clone()
 }
 
-func inheritControls(current, previous canonical.GenerationControls) canonical.GenerationControls {
-	if current.Limits.IsZero() && current.Sampling.IsZero() {
-		return previous.Clone()
+func inheritControls(presence canonical.GenerationControlsPresence, current, previous canonical.GenerationControls) canonical.GenerationControls {
+	out := previous.Clone()
+	if presence.MaxOutputTokens {
+		out.Limits.MaxOutputTokens = current.Limits.MaxOutputTokens.Clone()
 	}
-	out := current.Clone()
-	if out.Limits.IsZero() {
-		out.Limits = previous.Limits.Clone()
-	} else {
-		if out.Limits.MaxOutputTokens.IsZero() && !previous.Limits.MaxOutputTokens.IsZero() {
-			out.Limits.MaxOutputTokens = previous.Limits.MaxOutputTokens.Clone()
-		}
-		if len(out.Limits.StopSequences) == 0 && len(previous.Limits.StopSequences) > 0 {
-			out.Limits.StopSequences = append([]string(nil), previous.Limits.StopSequences...)
-		}
+	if presence.StopSequences {
+		out.Limits.StopSequences = append([]string(nil), current.Limits.StopSequences...)
 	}
-	if out.Sampling.IsZero() {
-		out.Sampling = previous.Sampling.Clone()
-	} else {
-		if out.Sampling.Temperature.IsZero() && !previous.Sampling.Temperature.IsZero() {
-			out.Sampling.Temperature = previous.Sampling.Temperature.Clone()
-		}
-		if out.Sampling.TopP.IsZero() && !previous.Sampling.TopP.IsZero() {
-			out.Sampling.TopP = previous.Sampling.TopP.Clone()
-		}
+	if presence.Temperature {
+		out.Sampling.Temperature = current.Sampling.Temperature.Clone()
+	}
+	if presence.TopP {
+		out.Sampling.TopP = current.Sampling.TopP.Clone()
 	}
 	return out
 }

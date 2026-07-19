@@ -10,7 +10,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -71,22 +70,25 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink effect.Sink) (canonical.EventReader, error) {
+func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
 	var dto responseEnvelope
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("responses output is invalid JSON")
 	}
+	if strings.TrimSpace(dto.ID) == "" { // swobu:io-string source=provider-wire
+		return nil, canonical.InternalError("responses output is missing id")
+	}
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
 	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.UsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
 	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.UsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
 	_, reasoningPresent := usage.ReasoningTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.UsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
 	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.UsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
 	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageCompatibilityEffect(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
+	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.UsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if terminalReason, promptBlocked := responsesTerminalReason("", dto.Status, "", dto.ContentFilters, responseIncompleteReason(dto.IncompleteDetails)); promptBlocked {
 		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
 		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
@@ -106,7 +108,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	}
 }
 
-func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink effect.Sink) ([]canonical.OutputItem, error) {
+func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink compat.Sink) ([]canonical.OutputItem, error) {
 	output := make([]canonical.OutputItem, 0, len(items))
 	for idx, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
@@ -170,8 +172,8 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 			))
 		case "reasoning":
 			if sink != nil {
-				_ = sink.Commit(ctx, exchangeID, []effect.Effect{
-					effect.CompatibilityEffect{
+				_ = sink.Commit(ctx, exchangeID, []compat.Decision{
+					compat.Decision{
 						Feature: compat.ResponseReasoning,
 						Outcome: compat.Reject,
 						Subject: compat.Subject(fmt.Sprintf("wire:/output/%d/type", idx)),

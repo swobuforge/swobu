@@ -2,19 +2,48 @@ package azure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
+
+func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
+	maxTokens := 64
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &maxTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "deployment", InputText: "hi", Controls: controls})
+	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
+	target.Model = request.Model()
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["max_tokens"] != float64(maxTokens) {
+		t.Fatalf("max_tokens = %#v, want %d", payload["max_tokens"], maxTokens)
+	}
+	if _, exists := payload["max_completion_tokens"]; exists {
+		t.Fatalf("unexpected max_completion_tokens in %s", document.RawBytes())
+	}
+}
 
 func TestNewRuntime_UsesAzureProviderIDAndSharedKernel(t *testing.T) {
 	t.Parallel()
@@ -23,8 +52,8 @@ func TestNewRuntime_UsesAzureProviderIDAndSharedKernel(t *testing.T) {
 	if got := bundle.ProviderID; got != profile.ProviderSpecAzure {
 		t.Fatalf("provider id=%q want %q", got, profile.ProviderSpecAzure)
 	}
-	if bundle.ProviderExecutor == nil {
-		t.Fatal("provider executor must not be nil")
+	if bundle.BackendResolver == nil {
+		t.Fatal("backend resolver must not be nil")
 	}
 	if bundle.Discovery == nil {
 		t.Fatal("discovery facet must not be nil")
@@ -63,12 +92,12 @@ func TestNewRuntime_UsesAzureProjectDeploymentsEndpointOnProjectEndpoint(t *test
 			t.Fatalf("api-key header = %q want token_test", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"value":[{"name":"DeepSeek-V4-Pro","type":"ModelDeployment","modelName":"DeepSeek-V4-Pro","modelVersion":"2026-04-23","modelPublisher":"DeepSeek","capabilities":{"chat_completion":"true"},"sku":{"name":"GlobalStandard","family":"Anthropic","capacity":125}},{"name":"grok-4.3","type":"ModelDeployment","modelName":"grok-4.3","modelVersion":"1","modelPublisher":"xAI","capabilities":{"chat_completion":"true"},"sku":{"name":"GlobalStandard","family":"Anthropic","capacity":125}}]}`))
+		_, _ = w.Write([]byte(`{"value":[{"name":"DeepSeek-V4-Pro","type":"ModelDeployment","modelName":"DeepSeek-V4-Pro","modelVersion":"2026-04-23","modelPublisher":"DeepSeek","facts":{"chat_completion":"true"},"sku":{"name":"GlobalStandard","family":"Anthropic","capacity":125}},{"name":"grok-4.3","type":"ModelDeployment","modelName":"grok-4.3","modelVersion":"1","modelPublisher":"xAI","facts":{"chat_completion":"true"},"sku":{"name":"GlobalStandard","family":"Anthropic","capacity":125}}]}`))
 	}))
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	probe, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	probe, err := bundle.Discovery.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
@@ -113,12 +142,12 @@ func TestListDeployments_UsesTargetProjectEndpoint(t *testing.T) {
 			t.Fatalf("request path = %s want target project endpoint path", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"value":[{"name":"Kimi-K2.6","type":"ModelDeployment","modelName":"Kimi-K2.6","modelPublisher":"Moonshot AI","capabilities":{"chat_completion":"true"}}]}`))
+		_, _ = w.Write([]byte(`{"value":[{"name":"Kimi-K2.6","type":"ModelDeployment","modelName":"Kimi-K2.6","modelPublisher":"Moonshot AI","facts":{"chat_completion":"true"}}]}`))
 	}))
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	probe, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	probe, err := bundle.Discovery.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
@@ -152,7 +181,7 @@ func TestListDeployments_PreservesBackendErrorOrigin(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	_, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	_, err := bundle.Discovery.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
@@ -176,7 +205,7 @@ func TestListDeployments_PreservesBackendErrorOrigin(t *testing.T) {
 	}
 }
 
-func TestResolveProviderIngress_UsesAnthropicPathForMessages(t *testing.T) {
+func TestSendProviderRequest_UsesAnthropicPathForMessages(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -195,25 +224,30 @@ func TestResolveProviderIngress_UsesAnthropicPathForMessages(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	req := exchange.NewProviderRequest("test-ex", protocolkind.Responses,
-		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "claude-sonnet-4",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
-		}),
-		carrier.CarrierDocument{},
-		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget(
-			"draft",
-			string(profile.ProviderSpecAzure),
-			"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
-			"env:AZURE_OPENAI_API_KEY",
-			protocolkind.Messages,
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "claude-sonnet-4",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+	})
+	target := provider.NewTargetSnapshot(
+		"draft",
+		string(profile.ProviderSpecAzure),
+		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
+		"env:AZURE_OPENAI_API_KEY",
+		protocolkind.Messages,
 
-			"",
-			"messages"),
-	)
-	if _, err := bundle.ProviderExecutor.ResolveProviderIngress(context.Background(), req); err != nil {
-		t.Fatalf("ResolveProviderIngress returned error: %v", err)
+		"",
+		"messages")
+	target.Model = request.Model()
+	backend, err := bundle.BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatalf("ResolveBackend returned error: %v", err)
+	}
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatalf("Encode returned error: %v", err)
+	}
+	if _, err := backend.Transport.Send(context.Background(), doc); err != nil {
+		t.Fatalf("Send returned error: %v", err)
 	}
 }
 
@@ -233,7 +267,7 @@ func TestNewRuntime_PreservesAzureDeploymentsWithoutMetadata(t *testing.T) {
 	defer srv.Close()
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
-	probe, err := bundle.Discovery.ProbeTarget(context.Background(), exchange.NewRoutableTarget(
+	probe, err := bundle.Discovery.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",

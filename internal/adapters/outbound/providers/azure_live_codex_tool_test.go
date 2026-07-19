@@ -9,13 +9,10 @@ import (
 	"time"
 
 	outboundcredentials "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
-	"github.com/swobuforge/swobu/internal/wire"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
@@ -26,7 +23,6 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	codecs := codecresolver.NewRuntimeCodecResolver()
 	d := delivery.StreamingDelivery(delivery.FramingSSE)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "gpt-5.3-codex",
@@ -45,41 +41,41 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
 	})
 
-	wireRequestResult, err := codecs.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, d, "live-azure-codex-required-tool")
-	if err != nil {
-		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
-	}
-	registry := NewProviderRegistry(http.DefaultClient, outboundcredentials.NewResolver())
-	providerReq := exchange.NewProviderRequest(
-		"live-azure-codex-required-tool",
-		canonical.ClientFamilyResponses,
-		request,
-		wireRequestResult.Value,
-		exchange.NewExecutionContract(d),
-		exchange.NewRoutableTarget(
-			"default",
-			"azure",
-			"https://contact-8837-resource.services.ai.azure.com",
-			"secret:azure-live",
-			protocolkind.Responses,
+	registry := mustProviderRegistry(t, http.DefaultClient, outboundcredentials.NewResolver())
+	target := provider.NewTargetSnapshot(
+		"default",
+		"azure",
+		"https://contact-8837-resource.services.ai.azure.com",
+		"secret:azure-live",
+		protocolkind.Responses,
 
-			"",
-			"responses_stream"),
-	)
-
-	ingress, err := registry.ResolveProviderIngress(ctx, providerReq)
+		"",
+		"responses_stream")
+	target.Model = request.Model()
+	backend, err := registry.ResolveBackend(target)
 	if err != nil {
-		t.Fatalf("ResolveProviderIngress returned error: %v", err)
+		t.Fatalf("ResolveBackend returned error: %v", err)
 	}
-	stream, ok := ingress.(carrier.CarrierStream)
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: d})
+	if err != nil {
+		t.Fatalf("Encode returned error: %v", err)
+	}
+
+	ingress, err := backend.Transport.Send(ctx, doc)
+	if err != nil {
+		t.Fatalf("SendProviderRequest returned error: %v", err)
+	}
+	streamIngress, ok := ingress.(provider.StreamIngress)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierStream", ingress)
+		t.Fatalf("provider transport returned %T, want provider.StreamIngress", ingress)
 	}
-	readerResult, err := codecs.ProviderEnvelopeDecoder(protocolkind.Responses, d).DecodeProviderEnvelope(stream, providerReq.ExchangeID)
+	stream := streamIngress.Stream
+	decoded, err := backend.Codec.Decode(ctx, "ex_live_codex_tool", provider.StreamIngress{Stream: stream})
 	if err != nil {
 		t.Fatalf("DecodeProviderEnvelope returned error: %v", err)
 	}
-	closed, err := canonical.ReadClosedEnvelope(ctx, readerResult.Value, canonical.EnvResponse)
+	reader := decoded.Stream
+	closed, err := canonical.ReadClosedEnvelope(ctx, reader, canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}

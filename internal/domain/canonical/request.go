@@ -27,6 +27,32 @@ type CanonicalRequest struct {
 	toolBatch    ToolCallBatchPolicy
 	controls     GenerationControls
 	outputFormat OutputFormat
+	presence     RequestPresence
+}
+
+// RequestPresence records which durable request bands the client supplied.
+// Values remain provider-neutral canonical semantics; presence exists only so
+// continuation preparation can distinguish omission from an explicit clear.
+// Every new durable CanonicalRequest field must add a corresponding presence
+// fact here and define its replay merge rule in internal/replay.
+type RequestPresence struct {
+	Model         bool
+	Instructions  bool
+	Tools         bool
+	ToolPolicy    bool
+	ToolCallBatch bool
+	OutputFormat  bool
+	Controls      GenerationControlsPresence
+}
+
+// GenerationControlsPresence keeps independently inheritable generation
+// controls separate. A caller can therefore clear one control without
+// accidentally clearing or inheriting its siblings.
+type GenerationControlsPresence struct {
+	MaxOutputTokens bool
+	StopSequences   bool
+	Temperature     bool
+	TopP            bool
 }
 
 // RequestParams contains normalized semantic input for one request, including
@@ -43,6 +69,7 @@ type RequestParams struct {
 	ToolCallBatch ToolCallBatchPolicy
 	Controls      GenerationControls
 	OutputFormat  OutputFormat
+	Presence      RequestPresence
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
@@ -51,6 +78,7 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 	if params.InputText != "" {
 		items = append(items, NewTextItem(ItemAuthorUser, params.InputText))
 	}
+	presence := inferRequestPresence(params)
 	return CanonicalRequest{
 		model:        strings.TrimSpace(params.Model),        // swobu:io-string source=domain
 		instructions: strings.TrimSpace(params.Instructions), // swobu:io-string source=domain
@@ -61,7 +89,23 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		toolBatch:    params.ToolCallBatch.Clone(),
 		controls:     params.Controls.Clone(),
 		outputFormat: params.OutputFormat.Clone(),
+		presence:     presence,
 	}
+}
+
+func inferRequestPresence(params RequestParams) RequestPresence {
+	presence := params.Presence
+	presence.Model = presence.Model || strings.TrimSpace(params.Model) != ""
+	presence.Instructions = presence.Instructions || strings.TrimSpace(params.Instructions) != ""
+	presence.Tools = presence.Tools || params.Tools != nil
+	presence.ToolPolicy = presence.ToolPolicy || params.ToolPolicy.Mode != "" || params.ToolPolicy.Specific != nil || strings.TrimSpace(params.ToolPolicy.SpecificType) != ""
+	presence.ToolCallBatch = presence.ToolCallBatch || !params.ToolCallBatch.IsZero()
+	presence.OutputFormat = presence.OutputFormat || !params.OutputFormat.IsZero()
+	presence.Controls.MaxOutputTokens = presence.Controls.MaxOutputTokens || !params.Controls.Limits.MaxOutputTokens.IsZero()
+	presence.Controls.StopSequences = presence.Controls.StopSequences || params.Controls.Limits.StopSequences != nil
+	presence.Controls.Temperature = presence.Controls.Temperature || !params.Controls.Sampling.Temperature.IsZero()
+	presence.Controls.TopP = presence.Controls.TopP || !params.Controls.Sampling.TopP.IsZero()
+	return presence
 }
 
 func (r CanonicalRequest) Model() string {
@@ -104,6 +148,11 @@ func (r CanonicalRequest) OutputFormat() OutputFormat {
 	return r.outputFormat.Clone()
 }
 
+// Presence returns the supplied-field facts used by continuation preparation.
+func (r CanonicalRequest) Presence() RequestPresence {
+	return r.presence
+}
+
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
 		Model:         r.model,
@@ -115,6 +164,7 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 		ToolCallBatch: r.toolBatch,
 		Controls:      r.controls,
 		OutputFormat:  r.outputFormat,
+		Presence:      r.presence,
 	})
 }
 

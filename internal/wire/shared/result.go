@@ -1,13 +1,12 @@
 package shared
 
-import (
-	"github.com/swobuforge/swobu/internal/effect"
-)
+import "github.com/swobuforge/swobu/internal/compat"
 
-// WithAccumulatedEffects runs fn with a caller-owned effect accumulator and
-// returns one typed effect result with the collected effects.
-func WithAccumulatedEffects[T any](fn func(effect.Sink) (T, error)) (effect.Result[T], error) {
-	var effects []effect.Effect
-	value, err := fn(effect.AccumulatorSink{Effects: &effects})
-	return effect.NewResult(value, effects...), err
+// WithAccumulatedDecisions runs one codec operation with a local typed
+// compatibility collector. The value, decisions, and error remain separate;
+// there is no generic functional result container.
+func WithAccumulatedDecisions[T any](fn func(compat.Sink) (T, error)) (T, []compat.Decision, error) {
+	var decisions []compat.Decision
+	value, err := fn(compat.AccumulatorSink{Decisions: &decisions})
+	return value, decisions, err
 }

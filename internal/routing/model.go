@@ -60,6 +60,12 @@ func ParseTargetID(raw string) (TargetID, error) {
 
 func (id TargetID) String() string { return id.value }
 
+// TargetVersion is the process-local save generation of one target. Replay is
+// process-local too, so configuration persistence deliberately omits it.
+type TargetVersion uint64
+
+const initialTargetVersion TargetVersion = 1
+
 // UpstreamModel is the provider-side model or deployment identifier.
 type UpstreamModel struct{ value string }
 
@@ -331,13 +337,14 @@ func (t Tier) clone() Tier { return Tier{targets: slices.Clone(t.targets)} }
 // Target is one immutable provider/model/protocol configuration.
 type Target struct {
 	id         TargetID
+	version    TargetVersion
 	model      UpstreamModel
 	protocol   Protocol
 	connection Connection
 }
 
 func NewTarget(id TargetID, model UpstreamModel, protocol Protocol, connection Connection) (Target, error) {
-	target := Target{id: id, model: model, protocol: protocol, connection: connection}
+	target := Target{id: id, version: initialTargetVersion, model: model, protocol: protocol, connection: connection}
 	if err := target.validate(); err != nil {
 		return Target{}, err
 	}
@@ -347,6 +354,9 @@ func NewTarget(id TargetID, model UpstreamModel, protocol Protocol, connection C
 func (t Target) validate() error {
 	if t.id.value == "" {
 		return pathError("target.id", "target ID is required")
+	}
+	if t.version == 0 {
+		return pathError("target.version", "target version is required")
 	}
 	if t.model.value == "" {
 		return pathError("target.model", "upstream model is required")
@@ -361,6 +371,7 @@ func (t Target) validate() error {
 }
 
 func (t Target) ID() TargetID           { return t.id }
+func (t Target) Version() TargetVersion { return t.version }
 func (t Target) Model() UpstreamModel   { return t.model }
 func (t Target) Protocol() Protocol     { return t.protocol }
 func (t Target) Connection() Connection { return t.connection }
@@ -379,13 +390,6 @@ func ParseURL(path, raw string) (URL, error) {
 }
 
 func (u URL) String() string { return u.value }
-
-// TargetKey identifies cooldown state without making cooldown durable intent.
-type TargetKey struct {
-	Workspace string
-	Route     string
-	TargetID  string
-}
 
 // FailureClass categorizes failures into retryable vs terminal buckets.
 type FailureClass string

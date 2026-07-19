@@ -1,8 +1,17 @@
 package chatcompletions
 
 import (
+	"errors"
+
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
+)
+
+type MaxOutputTokensField string
+
+const (
+	MaxOutputTokensFieldLegacy     MaxOutputTokensField = "max_tokens"
+	MaxOutputTokensFieldCompletion MaxOutputTokensField = "max_completion_tokens"
 )
 
 func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (canonical.GenerationControls, error) {
@@ -43,9 +52,17 @@ func decodeChatCompletionsMaxOutputTokens(dto chatCompletionsRequestDTO) (*int, 
 	return openaiwire.DecodeOptionalInt(dto.MaxTokens, "chat completions request max_tokens is invalid")
 }
 
-func encodeChatCompletionsGenerationControls(payload map[string]any, _ string, controls canonical.GenerationControls) error {
+func encodeChatCompletionsGenerationControls(payload map[string]any, controls canonical.GenerationControls, field MaxOutputTokensField) error {
+	if field != MaxOutputTokensFieldLegacy && field != MaxOutputTokensFieldCompletion {
+		return errors.New("chat completions max output token field policy is required")
+	}
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
-		payload["max_completion_tokens"] = value
+		switch field {
+		case MaxOutputTokensFieldLegacy:
+			payload["max_tokens"] = value
+		case MaxOutputTokensFieldCompletion:
+			payload["max_completion_tokens"] = value
+		}
 	}
 	if value, ok := controls.Sampling.Temperature.Value(); ok {
 		payload["temperature"] = value

@@ -5,8 +5,8 @@
 // through response_format, deterministic projected tool names for flat
 // function/custom tool surfaces, and canonical tool-call batch lowering
 // through parallel_tool_calls. Chat completions lower an explicit canonical
-// max output limit to max_completion_tokens on encode and accept both
-// max_completion_tokens and legacy max_tokens on decode. Canonical instructions
+// max output limit using the exact backend policy supplied by composition and
+// accepts both max_completion_tokens and legacy max_tokens on decode. Canonical instructions
 // lower to a leading system message; inbound system/developer messages decode
 // back into that canonical instruction band instead of user-authored
 // conversation items. The package also owns success-stream decoding for this

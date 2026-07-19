@@ -8,13 +8,13 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ListDeployments reads the OpenAI-style deployment catalog for one selected
 // provider target. This is an operator-support path.
-func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, target exchange.RoutableTarget) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("provider endpoint base URL is required")
 	}
@@ -44,7 +44,7 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		return nil, httpedge.ReadBackendHTTPError(resp, target.BackendRef)
+		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
 	models, err := modelcatalogopenai.DecodeModelIDs(resp.Body)
 	if err != nil {
@@ -66,7 +66,7 @@ func (e ProviderIngressResolverAdapter) ListDeployments(ctx context.Context, tar
 	return out, nil
 }
 
-func (e ProviderIngressResolverAdapter) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := e.ListDeployments(ctx, target)
-	return exchange.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Deployments: deployments}, err
 }

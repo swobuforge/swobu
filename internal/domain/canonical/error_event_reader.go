@@ -8,7 +8,7 @@ type errorEventReader struct {
 	err error
 }
 
-func NewErrorEventReader(err error) EventReader {
+func NewErrorEventReader(err error) ResponseStream {
 	return &errorEventReader{err: err}
 }
 

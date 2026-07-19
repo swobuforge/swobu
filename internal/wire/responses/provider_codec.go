@@ -2,78 +2,63 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (effect.Result[carrier.CarrierDocument], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.CarrierDocument, error) {
-		return EncodeCarrierWithEffects(EncodeInput{Request: input.Request, NativeReplay: input.NativeReplay}, d, sink, exchangeID, EncodeOptions{})
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
+	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
+		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request, NativeContinuation: input.NativeContinuation}, d, sink, exchangeID, EncodeOptions{})
 	})
+	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (effect.Result[carrier.CarrierDocument], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (carrier.CarrierDocument, error) {
-		return EncodeCarrierWithEffects(EncodeInput{Request: input.Request, NativeReplay: input.NativeReplay}, d, sink, exchangeID, options)
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
+	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
+		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request, NativeContinuation: input.NativeContinuation}, d, sink, exchangeID, options)
 	})
+	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
 
-func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.CarrierDocument, exchangeID string) (effect.Result[canonical.EventReader], error) {
-	if err := core.ValidateResponseCarrierDocument(doc, protocolkind.Responses); err != nil {
+func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.Document, exchangeID string) (wire.ProviderDecodeResult, error) {
+	if err := core.ValidateResponseDocument(doc, protocolkind.Responses); err != nil {
 		carrierErr := canonical.InternalError("responses response wire carrier is invalid")
 		carrierErr.Details = map[string]string{"wire_document_invariant": err.Error()}
-		return effect.Result[canonical.EventReader]{Value: canonical.NewErrorEventReader(carrierErr)}, carrierErr
+		return wire.ProviderDecodeResult{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (canonical.EventReader, error) {
+	stream, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (canonical.ResponseStream, error) {
 		return decodeResponseBuffered(ctx, doc.RawBytes(), exchangeID, sink)
 	})
+	var identity responseEnvelope
+	_ = json.Unmarshal(doc.RawBytes(), &identity)
+	continuation := &staticResponsesContinuation{id: provider.ContinuationID(strings.TrimSpace(identity.ID))}
+	return wire.ProviderDecodeResult{Stream: stream, Decisions: decisions, Continuation: continuation}, err
 }
 
-// NativeReplaySource implements wire.NativeReplaySource for the Responses protocol.
-// The Responses provider response ID is usable as a native replay continuation
-// token when it is present and the target key verifies equality.
-func (ProviderDocumentDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
-	if providerResultID == "" {
-		return nil
-	}
-	return &replay.NativeRef{
-		ReplayID: replayID,
-		Target:   target,
-		Kind:     replay.NativeRefProviderResponseID,
-		Value:    providerResultID,
-	}
-}
-
-func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string) (effect.Result[canonical.EventReader], error) {
-	if err := core.ValidateResponseSSECarrierStream(stream, protocolkind.Responses); err != nil {
+func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
+	if err := core.ValidateResponseSSEByteStream(stream); err != nil {
 		carrierErr := canonical.InternalError("responses stream wire carrier is invalid")
 		carrierErr.Details = map[string]string{"wire_stream_invariant": err.Error()}
-		return effect.Result[canonical.EventReader]{Value: canonical.NewErrorEventReader(carrierErr)}, carrierErr
+		return wire.ProviderDecodeResult{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (canonical.EventReader, error) {
+	reader, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (*responsesEventReader, error) {
 		return decodeResponseStream(stream, exchangeID, sink), nil
 	})
+	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, Continuation: reader, TerminalDecisions: reader}, err
 }
 
-// NativeReplayFromOutput implements wire.NativeReplaySource for the streaming
-// Responses protocol decoder. The streaming event reader surfaces the provider
-// response ID through the same native replay contract as the buffered decoder.
-func (ProviderEnvelopeDecoder) NativeReplayFromOutput(target replay.TargetKey, replayID replay.ID, providerResultID string) *replay.NativeRef {
-	if providerResultID == "" {
-		return nil
-	}
-	return &replay.NativeRef{
-		ReplayID: replayID,
-		Target:   target,
-		Kind:     replay.NativeRefProviderResponseID,
-		Value:    providerResultID,
-	}
+type staticResponsesContinuation struct{ id provider.ContinuationID }
+
+func (s *staticResponsesContinuation) ContinuationID() (provider.ContinuationID, bool) {
+	return s.id, strings.TrimSpace(string(s.id)) != ""
 }

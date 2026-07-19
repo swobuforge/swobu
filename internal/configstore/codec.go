@@ -147,7 +147,7 @@ func decodeTarget(dto targetDTO) (routing.Target, error) {
 		Model:      dto.Model,
 		Protocol:   dto.Protocol,
 		Connection: connection,
-	}, profile.RoutingCapabilities())
+	}, profile.RoutingConstructionFacts())
 }
 
 func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {

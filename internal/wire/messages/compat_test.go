@@ -4,57 +4,57 @@ import (
 	"context"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type legacyClientRequestDecoder struct{}
 
-func (legacyClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (legacyClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	result, err := (ClientRequestDecoder{}).DecodeClientRequest(doc)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	return result.Value.Request, result.Value.Delivery, nil
+	return result.Request.Request, result.Request.Delivery, nil
 }
 
-func (legacyClientRequestDecoder) DecodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
-	return (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, exchangeID)
+func (legacyClientRequestDecoder) DecodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+	return (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, exchangeID)
 }
 
 type legacyResponseDocumentEncoder struct{}
 
-func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.CarrierDocument, error) {
+func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.Document, error) {
 	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
-	return result.Value, err
+	return result.Document, err
 }
 
 type legacyResponseStreamEncoder struct{}
 
-func (legacyResponseStreamEncoder) EncodeResponseStream(events canonical.EventReader, d delivery.Delivery) (carrier.CarrierStream, error) {
-	result, err := (ResponseStreamEncoder{}).EncodeResponseStream(events, d)
-	return result.Value, err
+func (legacyResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (carrier.ByteStream, error) {
+	result, err := (ResponseStreamEncoder{}).EncodeResponseStream(ctx, events, d)
+	return result.Stream, err
 }
 
 type legacyProviderRequestDocumentEncoder struct{}
 
-func (legacyProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, _ effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
+func (legacyProviderRequestDocumentEncoder) EncodeProviderRequestDocument(request canonical.CanonicalRequest, delivery delivery.Delivery, _ compat.Sink, exchangeID string) (carrier.Document, error) {
 	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery, exchangeID)
-	return result.Value, err
+	return result.Document, err
 }
 
 type legacyProviderDocumentDecoder struct{}
 
-func (legacyProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.CarrierDocument, exchangeID string, _ effect.Sink) (canonical.EventReader, error) {
+func (legacyProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.Document, exchangeID string, _ compat.Sink) (canonical.ResponseStream, error) {
 	result, err := (ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, doc, exchangeID)
-	return result.Value, err
+	return result.Stream, err
 }
 
 type legacyProviderEnvelopeDecoder struct{}
 
-func (legacyProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.CarrierStream, exchangeID string, _ effect.Sink) canonical.EventReader {
+func (legacyProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.ByteStream, exchangeID string, _ compat.Sink) canonical.ResponseStream {
 	result, _ := (ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(stream, exchangeID)
-	return result.Value
+	return result.Stream
 }

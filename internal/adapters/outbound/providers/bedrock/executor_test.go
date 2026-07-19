@@ -12,18 +12,17 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/wire"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
-func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolKind) exchange.RoutableTarget {
-	return exchange.NewRoutableTarget(
+func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolKind) provider.TargetSnapshot {
+	return provider.NewTargetSnapshot(
 		"backend-a",
 		"bedrock",
 		baseURL,
@@ -35,30 +34,81 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 
 }
 
-func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) exchange.ProviderRequest {
+func TestBedrockChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
+	maxTokens := 64
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &maxTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "model", InputText: "hi", Controls: controls})
+	target := newBedrockTarget("https://bedrock-runtime.us-east-1.amazonaws.com", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions)
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["max_tokens"] != float64(maxTokens) {
+		t.Fatalf("max_tokens = %#v, want %d", payload["max_tokens"], maxTokens)
+	}
+	if _, exists := payload["max_completion_tokens"]; exists {
+		t.Fatalf("unexpected max_completion_tokens in %s", document.RawBytes())
+	}
+}
+
+type testProviderRequest struct {
+	Request      canonical.CanonicalRequest
+	Contract     exchange.ExecutionContract
+	Target       provider.TargetSnapshot
+	ExchangeID   string
+	DecisionSink compat.Sink
+}
+
+func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...compat.Sink) testProviderRequest {
+	var sink compat.Sink
+	if len(sinks) > 0 {
+		sink = sinks[0]
+	}
+	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, DecisionSink: sink}
+}
+
+func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) testProviderRequest {
 	t.Helper()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:     "openai.gpt-4.1-mini",
 		InputText: "ping",
 	})
-	codec := codecresolver.NewRuntimeCodecResolver().ProviderRequestDocumentEncoder(kind)
-	if codec == nil {
-		t.Fatalf("provider request encoder missing for protocol %s", kind)
-	}
-	wireRequestResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, providerDelivery, "")
-	if err != nil {
-		t.Fatalf("encode provider request document: %v", err)
-	}
-	return exchange.NewProviderRequest(
+	return newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,
-		wireRequestResult.Value,
+		carrier.Document{},
 		exchange.NewExecutionContract(providerDelivery),
 		newBedrockTarget(baseURL, credentialRef, kind),
 	)
 }
 
-type recordingEffectSink struct {
-	effects []effect.Effect
+func executeBedrockProviderRequest(ctx context.Context, exec BackendAdapter, req testProviderRequest) (provider.Ingress, error) {
+	target := req.Target.Clone()
+	target.Model = req.Request.Model()
+	backend, err := exec.ResolveBackend(target)
+	if err != nil {
+		return nil, err
+	}
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
+	if err != nil {
+		return nil, err
+	}
+	return backend.Transport.Send(ctx, doc)
+}
+
+type recordingDecisionSink struct {
+	effects []compat.Decision
 }
 
 type testCredentialProvider struct {
@@ -72,7 +122,7 @@ func (p testCredentialProvider) ResolveCredential(context.Context, string, strin
 	return "test-token", nil
 }
 
-func (s *recordingEffectSink) Commit(_ context.Context, _ string, effects []effect.Effect) error {
+func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
 	s.effects = append(s.effects, effects...)
 	return nil
 }
@@ -304,7 +354,7 @@ func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	}, nil
 }
 
-func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T) {
+func TestSendProviderRequest_BufferedResponsesRoutesToMantlePath(t *testing.T) {
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
 
 	var gotBody []byte
@@ -333,7 +383,7 @@ func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T
 
 	exec := NewExecutor(upstream.Client())
 	exec.credentials = testCredentialProvider{}
-	ingress, err := exec.ResolveProviderIngress(context.Background(), newBedrockProviderRequest(
+	ingress, err := executeBedrockProviderRequest(context.Background(), exec, newBedrockProviderRequest(
 		t,
 		upstream.URL,
 		"env:AWS_BEARER_TOKEN_BEDROCK",
@@ -341,12 +391,13 @@ func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T
 		delivery.BufferedDelivery(),
 	))
 	if err != nil {
-		t.Fatalf("ResolveProviderIngress error: %v", err)
+		t.Fatalf("SendProviderRequest error: %v", err)
 	}
-	doc, ok := ingress.(carrier.CarrierDocument)
+	documentIngress, ok := ingress.(provider.DocumentIngress)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
+		t.Fatalf("provider transport returned %T, want provider.DocumentIngress", ingress)
 	}
+	doc := documentIngress.Document
 	if string(gotBody) == "" {
 		t.Fatal("expected encoded request body")
 	}
@@ -356,12 +407,9 @@ func TestResolveProviderIngress_BufferedResponsesRoutesToMantlePath(t *testing.T
 	if doc.Family != protocolkind.Responses {
 		t.Fatalf("family=%q want responses", doc.Family)
 	}
-	if doc.Stage != carrier.StageProviderIngressIn {
-		t.Fatalf("stage=%q want provider ingress in", doc.Stage)
-	}
 }
 
-func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T) {
+func TestSendProviderRequest_StreamingMessagesRoutesToMantlePath(t *testing.T) {
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -374,13 +422,14 @@ func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("authorization=%q want Bearer test-token", got)
 		}
+		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("stream-chunk-1"))
 	}))
 	defer upstream.Close()
 
 	exec := NewExecutor(upstream.Client())
 	exec.credentials = testCredentialProvider{}
-	ingress, err := exec.ResolveProviderIngress(context.Background(), newBedrockProviderRequest(
+	ingress, err := executeBedrockProviderRequest(context.Background(), exec, newBedrockProviderRequest(
 		t,
 		upstream.URL,
 		"env:AWS_BEARER_TOKEN_BEDROCK",
@@ -388,31 +437,29 @@ func TestResolveProviderIngress_StreamingMessagesRoutesToMantlePath(t *testing.T
 		delivery.StreamingDelivery(delivery.FramingSSE),
 	))
 	if err != nil {
-		t.Fatalf("ResolveProviderIngress error: %v", err)
+		t.Fatalf("SendProviderRequest error: %v", err)
 	}
-	stream, ok := ingress.(carrier.CarrierStream)
+	streamIngress, ok := ingress.(provider.StreamIngress)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierStream", ingress)
+		t.Fatalf("provider transport returned %T, want provider.StreamIngress", ingress)
 	}
-	if stream.Family != protocolkind.Messages {
-		t.Fatalf("family=%q want messages", stream.Family)
+	stream := streamIngress.Stream
+	if stream.MediaType != "text/event-stream" {
+		t.Fatalf("media type=%q want text/event-stream", stream.MediaType)
 	}
-	if stream.Framing != carrier.FramingSSE {
-		t.Fatalf("framing=%q want sse", stream.Framing)
-	}
-	frame, err := stream.Frames.Next(context.Background())
+	raw, err := io.ReadAll(stream.Body)
 	if err != nil {
-		t.Fatalf("read frame: %v", err)
+		t.Fatalf("read stream: %v", err)
 	}
-	if string(frame.Data) != "stream-chunk-1" {
-		t.Fatalf("frame data=%q want stream-chunk-1", string(frame.Data))
+	if string(raw) != "stream-chunk-1" {
+		t.Fatalf("stream body=%q want stream-chunk-1", string(raw))
 	}
-	if err := stream.Frames.Close(); err != nil {
+	if err := stream.Body.Close(); err != nil {
 		t.Fatalf("close stream: %v", err)
 	}
 }
 
-func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *testing.T) {
+func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *testing.T) {
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
 
 	sawBody := make(chan string, 1)
@@ -443,33 +490,26 @@ func TestResolveProviderIngress_BufferedMessagesDoesNotEmitCacheBreakpoints(t *t
 			canonical.NewTextItem(canonical.ItemAuthorUser, "ping"),
 		},
 	})
-	codec := codecresolver.NewRuntimeCodecResolver().ProviderRequestDocumentEncoder(protocolkind.Messages)
-	if codec == nil {
-		t.Fatal("provider request encoder missing for messages")
-	}
-	wireRequestResult, err := codec.EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "")
-	if err != nil {
-		t.Fatalf("encode provider request document: %v", err)
-	}
 	exec := NewExecutor(upstream.Client())
-	sink := &recordingEffectSink{}
-	req := exchange.NewProviderRequest(
+	sink := &recordingDecisionSink{}
+	req := newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,
-		wireRequestResult.Value,
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		newBedrockTarget(upstream.URL, "", protocolkind.Messages),
 		sink,
 	)
 	req.ExchangeID = "ex-bedrock-cache-breakpoint"
 
-	ingress, err := exec.ResolveProviderIngress(context.Background(), req)
+	ingress, err := executeBedrockProviderRequest(context.Background(), exec, req)
 	if err != nil {
-		t.Fatalf("ResolveProviderIngress error: %v", err)
+		t.Fatalf("SendProviderRequest error: %v", err)
 	}
-	doc, ok := ingress.(carrier.CarrierDocument)
+	documentIngress, ok := ingress.(provider.DocumentIngress)
 	if !ok {
-		t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
+		t.Fatalf("provider transport returned %T, want provider.DocumentIngress", ingress)
 	}
+	doc := documentIngress.Document
 	if string(doc.RawBytes()) == "" {
 		t.Fatal("expected upstream response body")
 	}

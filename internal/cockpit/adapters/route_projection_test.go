@@ -1,12 +1,23 @@
 package adapters
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/routing"
 )
+
+func TestNewTargetIDUsesOpaqueTypedUUID(t *testing.T) {
+	id, err := newTargetID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^tgt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		t.Fatalf("target ID = %q", id)
+	}
+}
 
 func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 	bedrockRegion, err := routing.ParseBedrockRegion("eu-west-1")

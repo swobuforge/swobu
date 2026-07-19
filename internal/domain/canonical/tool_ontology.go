@@ -203,7 +203,7 @@ func (f ToolFormat) IsEmpty() bool {
 // ToolDecl preserves the semantic request-side tool declaration surface.
 //
 // FunctionToolDecl is the common request-path shape. CapabilityToolDecl is
-// reserved for provider-independent capabilities that Swobu understands
+// reserved for provider-independent facts that Swobu understands
 // semantically but may not be able to lower to every wire family.
 type ToolDecl interface {
 	toolDecl()

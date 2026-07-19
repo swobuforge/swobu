@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 )
 
 type messageBody struct {
@@ -35,29 +35,29 @@ type toolCustomBody struct {
 	Input string `json:"input"`
 }
 
-func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Delivery, sink effect.Sink, exchangeID string) (carrier.CarrierDocument, error) {
+func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, maxOutputTokensField MaxOutputTokensField) (carrier.Document, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
+		return carrier.Document{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
 	}
 
 	items := req.Items()
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	wireTools, err := encodeChatCompletionsTools(tools, sink, exchangeID)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	if d.Mode == delivery.Streaming && hasChatCompletionsCustomTools(tools) {
-		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
+		return carrier.Document{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
 	}
 	choice, err := encodeChatCompletionsToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 
 	payload := map[string]any{
@@ -71,13 +71,13 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 		payload["tools"] = wireTools
 	}
 	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
-	if err := encodeChatCompletionsGenerationControls(payload, req.Model(), req.Controls()); err != nil {
-		return carrier.CarrierDocument{}, err
+	if err := encodeChatCompletionsGenerationControls(payload, req.Controls(), maxOutputTokensField); err != nil {
+		return carrier.Document{}, err
 	}
 	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	} else if len(responseFormat) > 0 {
 		payload["response_format"] = json.RawMessage(responseFormat)
 	}
@@ -90,13 +90,12 @@ func EncodeCarrierWithEffects(req canonical.CanonicalRequest, d delivery.Deliver
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.CarrierDocument{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
+		return carrier.Document{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
 	}
 
 	// Stage marks the carrier boundary for this wire leg; exchange path
 	// selection happens above this adapter.
-	return carrier.NewCarrierDocument(
-		carrier.StageProviderRequestOut,
+	return carrier.NewDocument(
 		"",
 		"application/json",
 		nil,

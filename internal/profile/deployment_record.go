@@ -18,7 +18,7 @@ type ProviderDeploymentRecord struct {
 	Family                     string                         `json:"family,omitempty"`
 	SupportedProviderProtocols []string                       `json:"supported_provider_protocols,omitempty"`
 	DefaultProviderProtocol    string                         `json:"default_provider_protocol,omitempty"`
-	Capabilities               []ProviderDeploymentCapability `json:"capabilities,omitempty"`
+	Capabilities               []ProviderDeploymentCapability `json:"facts,omitempty"`
 }
 
 // ProviderDeploymentCapability records one explicit runtime observation that
@@ -39,7 +39,7 @@ func NewProviderDeployment(
 	family string,
 	supportedProtocols []string,
 	defaultProtocol string,
-	capabilities ...ProviderDeploymentCapability,
+	facts ...ProviderDeploymentCapability,
 ) ProviderDeploymentRecord {
 	deployment := ProviderDeploymentRecord{
 		Name:                       strings.TrimSpace(name),           // swobu:io-string source=boundary
@@ -50,8 +50,8 @@ func NewProviderDeployment(
 		SupportedProviderProtocols: CloneModelIDs(supportedProtocols),
 		DefaultProviderProtocol:    strings.TrimSpace(defaultProtocol), // swobu:io-string source=boundary
 	}
-	if len(capabilities) > 0 {
-		deployment.Capabilities = slices.Clone(capabilities)
+	if len(facts) > 0 {
+		deployment.Capabilities = slices.Clone(facts)
 	}
 	return deployment
 }

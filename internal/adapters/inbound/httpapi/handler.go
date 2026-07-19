@@ -17,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
 	"github.com/swobuforge/swobu/internal/routing"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
@@ -36,15 +37,16 @@ type modelsHandler interface {
 }
 
 type Handler struct {
-	requestIngress requestIngress
+	requestIngress  requestIngress
+	trafficEvidence observation.TrafficEventSink
 }
 
-func NewHandler(requestIngress requestIngress) Handler {
-	return Handler{requestIngress: requestIngress}
+func NewHandler(requestIngress requestIngress, trafficEvidence observation.TrafficEventSink) Handler {
+	return Handler{requestIngress: requestIngress, trafficEvidence: trafficEvidence}
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	writer := &committingResponseWriter{ResponseWriter: w, gate: exchange.NewCommitGate()}
+	writer := &committingResponseWriter{ResponseWriter: w}
 	endpointName, operationPath, err := splitProtocolPath(r.URL.Path)
 	if err != nil {
 		writeSwobuError(writer, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
@@ -120,13 +122,19 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, err)
 		writeExchangeError(writer, err)
-		finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, err)
+		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, transportpkg.DeliveryResult{Kind: transportpkg.DeliveryExchangeFailed, Err: err})
 		return
 	}
 	writeModelResolutionHeaders(writer)
 	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, nil)
 
-	if err := writeSuccessResponse(r.Context(), writer, requestID, family, out); err != nil {
+	deliveryResult := writeSuccessResponse(r.Context(), writer, requestID, family, out)
+	if deliveryResult.Kind != transportpkg.DeliverySucceeded {
+		err := deliveryResult.Err
+		if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
+			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
+			return
+		}
 		if writer.committed {
 			slog.Warn("protocol response write failed after commit",
 				"component", "httpapi",
@@ -137,14 +145,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"normalized_op", string(normalizedPath),
 				"error", err,
 			)
-			finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, err)
+			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
 		}
 		writeExchangeError(writer, err)
-		finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, err)
+		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
-	finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, nil)
+	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 }
 
 func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, workspace routing.WorkspaceSlug) {
@@ -247,7 +255,7 @@ func logRequestOutcome(
 	result := "success"
 	statusCode := http.StatusOK
 	errorOrigin := ""
-	backendRef := ""
+	targetID := ""
 	errorMessage := ""
 	errorCode := ""
 	if err != nil {
@@ -259,7 +267,7 @@ func logRequestOutcome(
 			result = "backend_error"
 			statusCode = backendErr.StatusCode
 			errorOrigin = string(canonical.ErrorOriginBackend)
-			backendRef = strings.TrimSpace(backendErr.BackendRef) // swobu:io-string source=boundary
+			targetID = strings.TrimSpace(backendErr.TargetID) // swobu:io-string source=boundary
 		} else {
 			statusCode = statusCodeForExchangeError(err)
 			var swobuErr canonical.Error
@@ -278,7 +286,7 @@ func logRequestOutcome(
 		"result", result,
 		"status_code", statusCode,
 		"error_origin", errorOrigin,
-		"backend_ref", backendRef,
+		"target_id", targetID,
 	}
 	if errorMessage != "" {
 		attrs = append(attrs, "error_message", errorMessage)
@@ -342,7 +350,6 @@ func writeExchangeError(w http.ResponseWriter, err error) {
 type committingResponseWriter struct {
 	http.ResponseWriter
 	committed bool
-	gate      *exchange.CommitGate
 	timing    *trafficevidence.Timing
 	firstByte bool
 }
@@ -358,9 +365,6 @@ func (w *committingResponseWriter) markFirstByte() {
 func (w *committingResponseWriter) WriteHeader(statusCode int) {
 	w.markFirstByte()
 	w.committed = true
-	if w.gate != nil {
-		w.gate.Commit()
-	}
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
@@ -369,30 +373,30 @@ func (w *committingResponseWriter) Write(p []byte) (int, error) {
 		w.markFirstByte()
 	}
 	w.committed = true
-	if w.gate != nil {
-		w.gate.Commit()
-	}
 	return w.ResponseWriter.Write(p)
 }
 
-func finalizeTrafficEvidence(ctx context.Context, requestID string, endpoint string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, out exchange.RequestOutput, timing *trafficevidence.Timing, writeErr error) {
+func (h Handler) finalizeTrafficEvidence(ctx context.Context, requestID string, endpoint string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, out exchange.RequestOutput, timing *trafficevidence.Timing, result transportpkg.DeliveryResult) {
 	if timing != nil {
 		timing.MarkEnded(time.Now())
 	}
-	if out.CommitTrafficEvent == nil {
+	if out.TrafficEvidence == nil || h.trafficEvidence == nil || timing == nil {
 		return
 	}
-	if err := out.CommitTrafficEvent(ctx, writeErr); err != nil {
-		slog.Warn("traffic evidence commit failed",
-			"component", "httpapi",
-			"event", "traffic_evidence_commit_failed",
-			"request_id", requestID,
-			"endpoint", endpoint,
-			"ingress_family", string(family),
-			"normalized_op", string(normalizedPath),
-			"error", err,
-		)
+	event, err := exchange.BuildTerminalTrafficEvent(out.TrafficEvidence, result, *timing)
+	if err == nil {
+		h.trafficEvidence.Append(ctx, event)
+		return
 	}
+	slog.Warn("traffic evidence commit failed",
+		"component", "httpapi",
+		"event", "traffic_evidence_commit_failed",
+		"request_id", requestID,
+		"endpoint", endpoint,
+		"ingress_family", string(family),
+		"normalized_op", string(normalizedPath),
+		"error", err,
+	)
 }
 
 func (w *committingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

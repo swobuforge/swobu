@@ -170,6 +170,10 @@ func (c Config) UpdateTargetSettings(slug WorkspaceSlug, routeName RouteName, id
 		if err != nil {
 			return Route{}, err
 		}
+		replacement.version = route.tiers[sourceTier].targets[sourceIndex].version + 1
+		if replacement.version == 0 {
+			return Route{}, pathError("target.version", "target version exhausted")
+		}
 		route.tiers[sourceTier].targets[sourceIndex] = replacement
 		return NewRoute(route.name, route.tiers)
 	})
@@ -208,6 +212,10 @@ func (c Config) SetCredential(slug WorkspaceSlug, routeName RouteName, id Target
 			return Route{}, err
 		}
 		target.connection = connection
+		target.version++
+		if target.version == 0 {
+			return Route{}, pathError("target.version", "target version exhausted")
+		}
 		route.tiers[tierIndex].targets[targetIndex] = target
 		return NewRoute(route.name, route.tiers)
 	})

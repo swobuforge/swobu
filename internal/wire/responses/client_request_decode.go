@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -20,20 +19,25 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.CarrierDocument) (effect.Result[wire.ClientRequestResult], error) {
-	return shared.WithAccumulatedEffects(func(sink effect.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithEffects(doc, sink, "")
+func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
+		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, "")
 		return wire.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
 		}, err
 	})
+	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDocument, sink effect.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto responsesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "responses request", nil); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	presence, err := decodeResponsesRequestPresence(raw)
+	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseID)) // swobu:io-string source=boundary
@@ -105,12 +109,44 @@ func (ClientRequestDecoder) decodeClientRequestWithEffects(doc carrier.CarrierDo
 		Controls:      controls,
 		OutputFormat:  outputFormat,
 		Turn:          canonical.NewTurnRef(dto.PreviousResponseID), // swobu:io-string source=boundary
+		Presence:      presence,
 	})
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
 	return request, resolvedDelivery, nil
+}
+
+func decodeResponsesRequestPresence(raw []byte) (canonical.RequestPresence, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return canonical.RequestPresence{}, canonical.BadRequest("responses request is invalid")
+	}
+	_, model := fields["model"]
+	_, instructions := fields["instructions"]
+	_, tools := fields["tools"]
+	_, toolPolicy := fields["tool_choice"]
+	_, toolCallBatch := fields["parallel_tool_calls"]
+	_, outputFormat := fields["text"]
+	_, maxOutputTokens := fields["max_output_tokens"]
+	_, stopSequences := fields["stop"]
+	_, temperature := fields["temperature"]
+	_, topP := fields["top_p"]
+	return canonical.RequestPresence{
+		Model:         model,
+		Instructions:  instructions,
+		Tools:         tools,
+		ToolPolicy:    toolPolicy,
+		ToolCallBatch: toolCallBatch,
+		OutputFormat:  outputFormat,
+		Controls: canonical.GenerationControlsPresence{
+			MaxOutputTokens: maxOutputTokens,
+			StopSequences:   stopSequences,
+			Temperature:     temperature,
+			TopP:            topP,
+		},
+	}, nil
 }
 
 func decodeResponsesInstructions(raw json.RawMessage) (string, error) {
@@ -144,7 +180,7 @@ func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
 }
 
 // swobu:lint ignore function-complexity because=responses input decoding keeps all acceptance branches in one protocol boundary helper.
-func decodeResponsesInput(raw json.RawMessage, sink effect.Sink, exchangeID string) (string, []canonical.CanonicalItem, error) {
+func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID string) (string, []canonical.CanonicalItem, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", nil, nil
@@ -283,21 +319,21 @@ func decodeResponsesFunctionCallArguments(raw json.RawMessage) (map[string]any, 
 	return sse.DecodeJSONObject(json.RawMessage(trimmedStringified), "responses request function_call arguments are invalid")
 }
 
-func emitResponsesCompatibilityDecision(sink effect.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
+func emitResponsesCompatibilityDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
 	if sink == nil {
 		return nil
 	}
 	if subject == "" {
 		return nil
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []effect.Effect{
-		effect.CompatibilityEffect{
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
+		compat.Decision{
 			Feature: feature,
 			Outcome: outcome,
 			Subject: subject,
 		},
 	}); err != nil {
-		return canonical.InternalError("compatibility effect sink commit failed")
+		return canonical.InternalError("compatibility decision sink commit failed")
 	}
 	return nil
 }

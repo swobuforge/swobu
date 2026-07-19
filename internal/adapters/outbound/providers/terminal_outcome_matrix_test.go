@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -16,7 +17,8 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/wire"
+	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 type terminalMatrixCase struct {
@@ -178,42 +180,44 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			defer srv.Close()
 
 			client := rewritingClientForServer(t, srv)
-			registry := NewProviderRegistry(client, testCredentialResolver{})
+			registry := mustProviderRegistry(t, client, testCredentialResolver{})
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model: "m",
 				Items: []canonical.CanonicalItem{
 					canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
 				},
 			})
-			wireRequestResult, err := resolver.ProviderRequestDocumentEncoder(tc.protocolKind).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, tc.providerDelivery, "ex_matrix")
-			if err != nil {
-				t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
-			}
-			req := exchange.NewProviderRequest(
+			req := newTestProviderRequest(
 				"ex_matrix",
 				clientFamilyForProtocol(tc.protocolKind),
 				request,
-				wireRequestResult.Value,
+				carrier.Document{},
 				exchange.NewExecutionContract(tc.providerDelivery),
-				exchange.NewRoutableTarget("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "", tc.providerProtocol),
+				provider.NewTargetSnapshot("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "", tc.providerProtocol),
 			)
+			providerCodec := protocolcodec.Codec{ProviderID: tc.providerID, Protocol: tc.protocolKind}
+			if tc.protocolKind == protocolkind.ChatCompletions {
+				providerCodec.Options.ChatCompletionsTokenField = chatcompletions.MaxOutputTokensFieldLegacy
+			}
 
-			ingress, err := registry.ResolveProviderIngress(context.Background(), req)
+			ingress, err := executeProviderRequest(registry, context.Background(), req)
 			if err != nil {
-				t.Fatalf("ResolveProviderIngress returned error: %v", err)
+				t.Fatalf("SendProviderRequest returned error: %v", err)
 			}
 
 			switch tc.providerDelivery.Mode {
 			case delivery.Buffered:
-				doc, ok := ingress.(carrier.CarrierDocument)
+				documentIngress, ok := ingress.(provider.DocumentIngress)
 				if !ok {
-					t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierDocument", ingress)
+					t.Fatalf("provider transport returned %T, want provider.DocumentIngress", ingress)
 				}
-				readerResult, err := resolver.ProviderDocumentDecoder(tc.protocolKind, tc.providerDelivery).DecodeProviderDocument(context.Background(), doc, req.ExchangeID)
+				doc := documentIngress.Document
+				decoded, err := providerCodec.Decode(context.Background(), "ex_terminal_matrix", provider.DocumentIngress{Document: doc})
 				if err != nil {
 					t.Fatalf("DecodeProviderDocument returned error: %v", err)
 				}
-				closed, err := canonical.ReadClosedEnvelope(context.Background(), readerResult.Value, canonical.EnvResponse)
+				reader := decoded.Stream
+				closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 				if err != nil {
 					t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 				}
@@ -228,22 +232,24 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("EncodeResponseDocument returned error: %v", err)
 				}
-				body := string(clientResult.Value.RawBytes())
+				body := string(clientResult.Document.RawBytes())
 				for _, want := range tc.wantWireContains {
 					if !strings.Contains(body, want) {
 						t.Fatalf("encoded body missing %q: %s", want, body)
 					}
 				}
 			case delivery.Streaming:
-				stream, ok := ingress.(carrier.CarrierStream)
+				streamIngress, ok := ingress.(provider.StreamIngress)
 				if !ok {
-					t.Fatalf("ResolveProviderIngress returned %T, want carrier.CarrierStream", ingress)
+					t.Fatalf("provider transport returned %T, want provider.StreamIngress", ingress)
 				}
-				readerResult, err := resolver.ProviderEnvelopeDecoder(tc.protocolKind, tc.providerDelivery).DecodeProviderEnvelope(stream, req.ExchangeID)
+				stream := streamIngress.Stream
+				decoded, err := providerCodec.Decode(context.Background(), "ex_terminal_matrix", provider.StreamIngress{Stream: stream})
 				if err != nil {
 					t.Fatalf("DecodeProviderEnvelope returned error: %v", err)
 				}
-				closed, err := canonical.ReadClosedEnvelope(context.Background(), readerResult.Value, canonical.EnvResponse)
+				reader := decoded.Stream
+				closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 				if err != nil {
 					t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 				}
@@ -255,11 +261,11 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
 				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.ResultID(), out.Model(), out.Items(), out.FinishReason(), out.Usage())
-				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(canonical.NewSliceEventReader(events), tc.providerDelivery)
+				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), tc.providerDelivery)
 				if err != nil {
 					t.Fatalf("EncodeResponseStream returned error: %v", err)
 				}
-				raw, err := io.ReadAll(carrier.ReadCloserFromFrameReader(clientResult.Value.Frames))
+				raw, err := io.ReadAll(clientResult.Stream.Body)
 				if err != nil {
 					t.Fatalf("ReadAll returned error: %v", err)
 				}
@@ -289,31 +295,26 @@ func TestProviderIngress_AzurePromptContentFilterReturnsBackendError(t *testing.
 	defer srv.Close()
 
 	client := rewritingClientForServer(t, srv)
-	registry := NewProviderRegistry(client, testCredentialResolver{})
+	registry := mustProviderRegistry(t, client, testCredentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "m",
 		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 	})
-	resolver := codecresolver.NewRuntimeCodecResolver()
-	wireRequestResult, err := resolver.ProviderRequestDocumentEncoder(protocolkind.Responses).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "ex_prompt")
-	if err != nil {
-		t.Fatalf("EncodeProviderRequestDocument returned error: %v", err)
-	}
-	req := exchange.NewProviderRequest(
+	req := newTestProviderRequest(
 		"ex_prompt",
 		canonical.ClientFamilyResponses,
 		request,
-		wireRequestResult.Value,
+		carrier.Document{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		exchange.NewRoutableTarget("backend-a", string(profile.ProviderSpecAzure), "contact-8837-resource", "cred-1", protocolkind.Responses, "", "responses"),
+		provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecAzure), "contact-8837-resource", "cred-1", protocolkind.Responses, "", "responses"),
 	)
 
-	_, err = registry.ResolveProviderIngress(context.Background(), req)
+	_, err := executeProviderRequest(registry, context.Background(), req)
 	if err == nil {
-		t.Fatal("ResolveProviderIngress returned nil error, want backend error")
+		t.Fatal("SendProviderRequest returned nil error, want backend error")
 	}
 	if !strings.Contains(err.Error(), "prompt blocked") {
-		t.Fatalf("ResolveProviderIngress error = %v, want prompt blocked detail", err)
+		t.Fatalf("SendProviderRequest error = %v, want prompt blocked detail", err)
 	}
 }
 

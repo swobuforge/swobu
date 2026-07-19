@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/effect"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -43,38 +43,40 @@ type functionCallOutputItem struct {
 
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
 // package does not import wire. It carries the canonical request plus an
-// optional native replay pointer for provider-specific continuation.
+// optional exact-backend provider continuation.
 type EncodeInput struct {
-	Request      canonical.CanonicalRequest
-	NativeReplay *replay.NativeRef
+	Request            canonical.CanonicalRequest
+	NativeContinuation *provider.NativeContinuation
 }
 
 // EncodeCarrier is a convenience that encodes a carrier document from a raw
 // canonical request without native replay support. It does not infer provider
 // continuation from TurnRef; callers that need provider continuation must pass
-// a fully populated NativeRef to EncodeCarrierWithEffects.
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.CarrierDocument, error) {
+// the exact-backend NativeContinuation to EncodeCarrierWithDecisions.
+func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
 	input := EncodeInput{Request: req}
-	return EncodeCarrierWithEffects(input, d, nil, "", EncodeOptions{})
+	return EncodeCarrierWithDecisions(input, d, nil, "", EncodeOptions{})
 }
 
-func EncodeCarrierWithEffects(input EncodeInput, d delivery.Delivery, sink effect.Sink, exchangeID string, options EncodeOptions) (carrier.CarrierDocument, error) {
+func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
 	req := input.Request
 
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.CarrierDocument{}, canonical.UnsupportedDelivery("response requests do not implement the requested delivery mode on the responses protocol")
+		return carrier.Document{}, canonical.UnsupportedDelivery("response requests do not implement the requested delivery mode on the responses protocol")
 	}
 
 	tools := req.Tools()
+	presence := req.Presence()
+	nativeContinuation := input.NativeContinuation != nil
 	payloadInput, err := encodeInput(req, options.ForceStructuredInput)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	choice, err := encodeToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
 	logResponsesEncodeShape(req, payloadInput, choice, d)
 
@@ -84,30 +86,38 @@ func EncodeCarrierWithEffects(input EncodeInput, d delivery.Delivery, sink effec
 	if payloadInput != nil {
 		payload["input"] = payloadInput
 	}
-	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" {
+	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" || nativeContinuation && presence.Instructions {
 		payload["instructions"] = instructions
 	}
 	if choice != nil {
 		payload["tool_choice"] = choice
 	}
 	if wireTools, err := encodeResponsesTools(tools, sink, exchangeID); err != nil {
-		return carrier.CarrierDocument{}, err
-	} else if len(wireTools) > 0 {
+		return carrier.Document{}, err
+	} else if len(wireTools) > 0 || nativeContinuation && presence.Tools {
+		if wireTools == nil {
+			wireTools = []any{}
+		}
 		payload["tools"] = wireTools
 	}
 	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	}
-	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.CarrierDocument{}, err
+	if nativeContinuation && presence.ToolCallBatch && req.ToolCallBatch().IsZero() && len(tools) > 0 {
+		payload["parallel_tool_calls"] = true
+	}
+	if err := encodeResponsesGenerationControls(payload, req.Controls(), presence.Controls, nativeContinuation); err != nil {
+		return carrier.Document{}, err
 	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.CarrierDocument{}, err
+		return carrier.Document{}, err
 	} else if text != nil {
 		payload["text"] = text
+	} else if nativeContinuation && presence.OutputFormat {
+		payload["text"] = &responsesTextDTO{Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)}}
 	}
-	if input.NativeReplay != nil {
-		payload["previous_response_id"] = input.NativeReplay.Value
+	if input.NativeContinuation != nil {
+		payload["previous_response_id"] = string(input.NativeContinuation.ID)
 	}
 	if options.Store != nil {
 		payload["store"] = *options.Store
@@ -117,11 +127,10 @@ func EncodeCarrierWithEffects(input EncodeInput, d delivery.Delivery, sink effec
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return carrier.CarrierDocument{}, canonical.BadRequest("response request could not be encoded for the responses protocol")
+		return carrier.Document{}, canonical.BadRequest("response request could not be encoded for the responses protocol")
 	}
 
-	return carrier.NewCarrierDocument(
-		carrier.StageProviderRequestOut,
+	return carrier.NewDocument(
 		"",
 		"application/json",
 		nil,

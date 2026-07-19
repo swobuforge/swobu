@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -29,10 +30,10 @@ type targetProbeRequest struct {
 
 // TargetProbeHandler probes provider-backed deployments for one draft route.
 type TargetProbeHandler struct {
-	providers exchange.ProviderDiscovery
+	providers provider.Discovery
 }
 
-func NewTargetProbeHandler(providers exchange.ProviderDiscovery) TargetProbeHandler {
+func NewTargetProbeHandler(providers provider.Discovery) TargetProbeHandler {
 	return TargetProbeHandler{providers: providers}
 }
 
@@ -87,18 +88,18 @@ func credentialRefKindForProbe(credentialRef string) string {
 
 func probeDeployments(
 	ctx context.Context,
-	providers exchange.ProviderDiscovery,
+	providers provider.Discovery,
 	connection routing.Connection,
 	providerProtocol string,
-) (exchange.TargetProbeResult, string, error) {
+) (provider.TargetProbeResult, string, error) {
 	providerSpec := string(connection.Provider())
 	if !profile.SupportsSpec(providerSpec) {
-		return exchange.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
+		return provider.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
 	variants := modelCatalogProbeVariants(providerSpec, providerProtocol)
 	var lastErr error
-	var lastProbe exchange.TargetProbeResult
+	var lastProbe provider.TargetProbeResult
 	for _, variant := range variants {
 		protocol, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, variant)
 		if !ok {
@@ -106,7 +107,7 @@ func probeDeployments(
 		}
 		_ = protocol
 		_ = frame
-		target, err := exchange.RoutableTargetFromConnection("draft", connection, variant)
+		target, err := exchange.ProviderTargetFromConnection("draft", connection, variant)
 		if err != nil {
 			lastErr = err
 			continue
@@ -122,7 +123,7 @@ func probeDeployments(
 	if lastErr != nil {
 		return lastProbe, "", lastErr
 	}
-	return exchange.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
+	return provider.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
 }
 
 func connectionCredentialRef(connection routing.Connection) string {

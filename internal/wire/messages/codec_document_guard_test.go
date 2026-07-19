@@ -14,13 +14,12 @@ import (
 func TestDecodeProviderDocument_InvalidWireCarrierFailsImmediately(t *testing.T) {
 	tests := []struct {
 		name        string
-		doc         carrier.CarrierDocument
+		doc         carrier.Document
 		reasonMatch string
 	}{
-		{name: "wrong protocol", doc: carrier.NewCarrierDocument(carrier.StageProviderIngressIn, protocolkind.Responses, "application/json", nil, []byte(`{"ok":true}`), carrier.Meta{}), reasonMatch: "protocol must be"},
-		{name: "wrong stage", doc: carrier.NewCarrierDocument(carrier.StageProviderRequestOut, protocolkind.Messages, "application/json", nil, []byte(`{"ok":true}`), carrier.Meta{}), reasonMatch: "stage must be"},
-		{name: "wrong media", doc: carrier.NewCarrierDocument(carrier.StageProviderIngressIn, protocolkind.Messages, "text/plain", nil, []byte(`{"ok":true}`), carrier.Meta{}), reasonMatch: "media must be"},
-		{name: "missing body", doc: carrier.NewCarrierDocument(carrier.StageProviderIngressIn, protocolkind.Messages, "application/json", nil, nil, carrier.Meta{}), reasonMatch: "body must be configured"},
+		{name: "wrong protocol", doc: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"ok":true}`), carrier.Meta{}), reasonMatch: "protocol must be"},
+		{name: "wrong media", doc: carrier.NewDocument(protocolkind.Messages, "text/plain", nil, []byte(`{"ok":true}`), carrier.Meta{}), reasonMatch: "media must be"},
+		{name: "missing body", doc: carrier.NewDocument(protocolkind.Messages, "application/json", nil, nil, carrier.Meta{}), reasonMatch: "body must be configured"},
 	}
 
 	codec := legacyProviderDocumentDecoder{}

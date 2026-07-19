@@ -11,7 +11,14 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
+
+type testContinuationSource struct{ id provider.ContinuationID }
+
+func (s testContinuationSource) ContinuationID() (provider.ContinuationID, bool) {
+	return s.id, s.id != ""
+}
 
 func TestCommitReader_StreamsNonTerminalBeforeCapture(t *testing.T) {
 	events := canonical.NewSliceEventReader([]canonical.Event{
@@ -26,11 +33,11 @@ func TestCommitReader_StreamsNonTerminalBeforeCapture(t *testing.T) {
 	})
 	store := newMemoryStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex1", CallerKey: "local"},
-		ExchangeID: "ex1",
-		ResponseID: "swobu_resp_1",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex1",
+		ExchangeID:    "ex1",
+		ResponseID:    "swobu_resp_1",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -67,7 +74,7 @@ func TestCommitReader_StreamsNonTerminalBeforeCapture(t *testing.T) {
 	}
 
 	// Store should have the record.
-	rec, ok, err := store.Get(ctx, config.Scope, ReplayIDFromResponseID(config.ResponseID))
+	rec, ok, err := store.Get(ctx, config.WorkspaceSlug, ReplayIDFromResponseID(config.ResponseID))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -82,9 +89,9 @@ func TestCommitReader_StreamsNonTerminalBeforeCapture(t *testing.T) {
 	}
 }
 
-func TestCommitReader_WithNativeReplay_MaterializesFullStoredRequest(t *testing.T) {
+func TestCommitReader_StoresPreparedFullSemanticRequest(t *testing.T) {
 	ctx := context.Background()
-	scope := Scope{Namespace: "ex_native", CallerKey: "local"}
+	scope := "ex_native"
 	store := newMemoryStore()
 	prevRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: "m",
@@ -93,21 +100,10 @@ func TestCommitReader_WithNativeReplay_MaterializesFullStoredRequest(t *testing.
 	prevResponse := canonical.NewConversationOutput("resp_prev", "m", []canonical.CanonicalItem{
 		canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"),
 	}, "stop")
-	native := &NativeRef{
-		ReplayID: "resp_prev",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_prev",
-	}
-	if err := store.Put(ctx, scope, Record{
-		ID:       ReplayIDFromResponseID("resp_prev"),
-		Scope:    scope,
-		Request:  prevRequest,
-		Response: prevResponse,
-		Native:   native,
-	}); err != nil {
-		t.Fatalf("seed store: %v", err)
-	}
+	semanticRequest := materialize(Record{Request: prevRequest, Response: prevResponse}, canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "m",
+		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
+	}))
 
 	events := canonical.NewSliceEventReader([]canonical.Event{
 		{Kind: canonical.EventEnvelopeStart, EnvID: "r1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
@@ -121,15 +117,11 @@ func TestCommitReader_WithNativeReplay_MaterializesFullStoredRequest(t *testing.
 		{Kind: canonical.EventEnvelopeEnd, EnvID: "r1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	})
 	config := TerminalCommitConfig{
-		Scope:        scope,
-		ExchangeID:   "ex_native",
-		ResponseID:   "swobu_resp_native",
-		Store:        store,
-		NativeReplay: native,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
-		}),
+		WorkspaceSlug:   "ex_native",
+		ExchangeID:      "ex_native",
+		ResponseID:      "swobu_resp_native",
+		Store:           store,
+		SemanticRequest: semanticRequest,
 	}
 	cr := NewCommitReader(events, config)
 
@@ -166,11 +158,11 @@ func TestCommitReader_CommitsBeforeTerminalSuccess(t *testing.T) {
 	})
 	store := newMemoryStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex2", CallerKey: "local"},
-		ExchangeID: "ex2",
-		ResponseID: "swobu_resp_2",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex2",
+		ExchangeID:    "ex2",
+		ResponseID:    "swobu_resp_2",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -195,7 +187,7 @@ func TestCommitReader_CommitsBeforeTerminalSuccess(t *testing.T) {
 		t.Fatalf("terminal kind = %v, want envelope.end", ev.Kind)
 	}
 
-	rec, ok, err := store.Get(ctx, config.Scope, ReplayIDFromResponseID(config.ResponseID))
+	rec, ok, err := store.Get(ctx, config.WorkspaceSlug, ReplayIDFromResponseID(config.ResponseID))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -220,11 +212,11 @@ func TestCommitReader_EmptyResponseIDFailsTerminalCommit(t *testing.T) {
 	})
 	store := newSpyStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex_empty", CallerKey: "local"},
-		ExchangeID: "ex_empty",
-		ResponseID: "",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex_empty",
+		ExchangeID:    "ex_empty",
+		ResponseID:    "",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -266,11 +258,11 @@ func TestCommitReader_CaptureFailureEmitsTerminalFailure(t *testing.T) {
 	})
 	store := &failingStore{}
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex3", CallerKey: "local"},
-		ExchangeID: "ex3",
-		ResponseID: "swobu_resp_3",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex3",
+		ExchangeID:    "ex3",
+		ResponseID:    "swobu_resp_3",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -323,11 +315,11 @@ func TestCommitReader_EOFBeforeTerminalSuccessEmitsFailure(t *testing.T) {
 	})
 	store := newSpyStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex_eof", CallerKey: "local"},
-		ExchangeID: "ex_eof",
-		ResponseID: "swobu_resp_eof",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex_eof",
+		ExchangeID:    "ex_eof",
+		ResponseID:    "swobu_resp_eof",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -398,11 +390,11 @@ func TestCommitReader_ProviderTerminalErrorPassesThroughWithoutReplayCommit(t *t
 	})
 	store := newSpyStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex_err_terminal", CallerKey: "local"},
-		ExchangeID: "ex_err_terminal",
-		ResponseID: "swobu_resp_err_terminal",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex_err_terminal",
+		ExchangeID:    "ex_err_terminal",
+		ResponseID:    "swobu_resp_err_terminal",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -452,11 +444,11 @@ func TestCommitReader_ProviderTerminalIncompletePassesThroughWithoutSyntheticInc
 	})
 	store := newSpyStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex_incomplete_terminal", CallerKey: "local"},
-		ExchangeID: "ex_incomplete_terminal",
-		ResponseID: "swobu_resp_incomplete_terminal",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex_incomplete_terminal",
+		ExchangeID:    "ex_incomplete_terminal",
+		ResponseID:    "swobu_resp_incomplete_terminal",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -503,11 +495,11 @@ func TestCommitReader_UpstreamErrorAfterResponseStartEmitsTerminalFailure(t *tes
 	ctx := context.Background()
 	store := newSpyStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex_err", CallerKey: "local"},
-		ExchangeID: "ex_err",
-		ResponseID: "swobu_resp_err",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex_err",
+		ExchangeID:    "ex_err",
+		ResponseID:    "swobu_resp_err",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -597,11 +589,11 @@ func TestCommitReader_UpstreamErrorAfterResponseStartLogsDiagnosticContext(t *te
 		},
 		err: errors.New("stream error: stream ID 81; CANCEL; received from peer"),
 	}, TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex_log", CallerKey: "local"},
-		ExchangeID: "ex_log",
-		ResponseID: "swobu_resp_log",
-		Store:      newSpyStore(),
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex_log",
+		ExchangeID:    "ex_log",
+		ResponseID:    "swobu_resp_log",
+		Store:         newSpyStore(),
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
@@ -641,7 +633,7 @@ func TestTerminalFailureOriginUsesGenericReplayCommitOrigin(t *testing.T) {
 	}
 }
 
-func TestCommitReader_NativeExtractor(t *testing.T) {
+func TestCommitReader_UsesExplicitContinuationSource(t *testing.T) {
 	events := canonical.NewSliceEventReader([]canonical.Event{
 		{Kind: canonical.EventEnvelopeStart, EnvID: "r1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
 		{Kind: canonical.EventMetadata, EnvID: "r1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": "provider_native_1", "model": "m"}}},
@@ -649,25 +641,16 @@ func TestCommitReader_NativeExtractor(t *testing.T) {
 	})
 	store := newMemoryStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex4", CallerKey: "local"},
-		ExchangeID: "ex4",
-		ResponseID: "swobu_resp_4",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex4",
+		ExchangeID:    "ex4",
+		ResponseID:    "swobu_resp_4",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
-		NativeExtractor: func(providerResultID string, rid ID) *NativeRef {
-			if providerResultID == "" {
-				return nil
-			}
-			return &NativeRef{
-				ReplayID: rid,
-				Target:   testTarget(),
-				Kind:     NativeRefProviderResponseID,
-				Value:    providerResultID,
-			}
-		},
+		ContinuationSource:  testContinuationSource{id: "provider_native_1"},
+		CaptureContinuation: testBackendTarget(t, "m").NativeContinuation,
 	}
 	cr := NewCommitReader(events, config)
 	ctx := context.Background()
@@ -683,7 +666,7 @@ func TestCommitReader_NativeExtractor(t *testing.T) {
 		}
 	}
 
-	rec, ok, err := store.Get(ctx, config.Scope, ReplayIDFromResponseID(config.ResponseID))
+	rec, ok, err := store.Get(ctx, config.WorkspaceSlug, ReplayIDFromResponseID(config.ResponseID))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -693,17 +676,8 @@ func TestCommitReader_NativeExtractor(t *testing.T) {
 	if rec.Native == nil {
 		t.Fatal("expected Native ref, got nil")
 	}
-	if rec.Native.ReplayID != ReplayIDFromResponseID(config.ResponseID) {
-		t.Fatalf("native replay id = %q, want %q", rec.Native.ReplayID, ReplayIDFromResponseID(config.ResponseID))
-	}
-	if rec.Native.Target != testTarget() {
-		t.Fatalf("native target = %+v, want %+v", rec.Native.Target, testTarget())
-	}
-	if rec.Native.Kind != NativeRefProviderResponseID {
-		t.Fatalf("native kind = %q, want %q", rec.Native.Kind, NativeRefProviderResponseID)
-	}
-	if rec.Native.Value != "provider_native_1" {
-		t.Fatalf("native ref = %q, want provider_native_1", rec.Native.Value)
+	if rec.Native.TargetID != testBackendTarget(t, "m").TargetID || rec.Native.TargetVersion != testBackendTarget(t, "m").TargetVersion || rec.Native.ID != "provider_native_1" {
+		t.Fatalf("native continuation = %#v", rec.Native)
 	}
 }
 
@@ -714,25 +688,16 @@ func TestCommitReader_DoesNotExposeNativeIDFromEnvelopeStart(t *testing.T) {
 	})
 	store := newMemoryStore()
 	config := TerminalCommitConfig{
-		Scope:      Scope{Namespace: "ex5", CallerKey: "local"},
-		ExchangeID: "ex5",
-		ResponseID: "swobu_resp_5",
-		Store:      store,
-		CaptureRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		WorkspaceSlug: "ex5",
+		ExchangeID:    "ex5",
+		ResponseID:    "swobu_resp_5",
+		Store:         store,
+		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: "m",
 			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
 		}),
-		NativeExtractor: func(providerResultID string, rid ID) *NativeRef {
-			if providerResultID == "" {
-				return nil
-			}
-			return &NativeRef{
-				ReplayID: rid,
-				Target:   testTarget(),
-				Kind:     NativeRefProviderResponseID,
-				Value:    providerResultID,
-			}
-		},
+		ContinuationSource:  testContinuationSource{id: "provider_native_start"},
+		CaptureContinuation: testBackendTarget(t, "m").NativeContinuation,
 	}
 	cr := NewCommitReader(events, config)
 	ctx := context.Background()
@@ -761,7 +726,7 @@ func TestCommitReader_DoesNotExposeNativeIDFromEnvelopeStart(t *testing.T) {
 		}
 	}
 
-	rec, ok, err := store.Get(ctx, config.Scope, ReplayIDFromResponseID(config.ResponseID))
+	rec, ok, err := store.Get(ctx, config.WorkspaceSlug, ReplayIDFromResponseID(config.ResponseID))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -771,27 +736,18 @@ func TestCommitReader_DoesNotExposeNativeIDFromEnvelopeStart(t *testing.T) {
 	if rec.Native == nil {
 		t.Fatal("expected Native ref, got nil")
 	}
-	if rec.Native.ReplayID != ReplayIDFromResponseID(config.ResponseID) {
-		t.Fatalf("native replay id = %q, want %q", rec.Native.ReplayID, ReplayIDFromResponseID(config.ResponseID))
-	}
-	if rec.Native.Target != testTarget() {
-		t.Fatalf("native target = %+v, want %+v", rec.Native.Target, testTarget())
-	}
-	if rec.Native.Kind != NativeRefProviderResponseID {
-		t.Fatalf("native kind = %q, want %q", rec.Native.Kind, NativeRefProviderResponseID)
-	}
-	if rec.Native.Value != "provider_native_start" {
-		t.Fatalf("native ref = %q, want provider_native_start", rec.Native.Value)
+	if rec.Native.TargetID != testBackendTarget(t, "m").TargetID || rec.Native.TargetVersion != testBackendTarget(t, "m").TargetVersion || rec.Native.ID != "provider_native_start" {
+		t.Fatalf("native continuation = %#v", rec.Native)
 	}
 }
 
 type failingStore struct{}
 
-func (f *failingStore) Get(ctx context.Context, scope Scope, id ID) (Record, bool, error) {
+func (f *failingStore) Get(ctx context.Context, workspaceSlug string, id ID) (Record, bool, error) {
 	return Record{}, false, nil
 }
 
-func (f *failingStore) Put(ctx context.Context, scope Scope, record Record) error {
+func (f *failingStore) Put(ctx context.Context, workspaceSlug string, record Record) error {
 	return errors.New("store.Put failed")
 }
 
@@ -821,5 +777,5 @@ func (r *errorAfterStartReader) Next(context.Context) (canonical.Event, error) {
 func (r *errorAfterStartReader) Close(context.Context) error { return nil }
 
 var (
-	_ canonical.EventReader = (*errorAfterStartReader)(nil)
+	_ canonical.ResponseStream = (*errorAfterStartReader)(nil)
 )

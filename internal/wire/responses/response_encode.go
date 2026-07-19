@@ -6,11 +6,11 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/effect"
+	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (effect.Result[carrier.CarrierDocument], error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
 	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
 	status, incompleteReason := responsesWireStatusForFinishReason(output.FinishReason())
@@ -50,10 +50,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Usage:             responsesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
-		return effect.Result[carrier.CarrierDocument]{}, err
+		return wire.ClientDocumentResult{}, err
 	}
 	logResponsesEgressBuffered(encodedBody)
-	return effect.NewResult(carrier.NewCarrierDocument("", protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})), nil
+	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})}, nil
 }
 
 func responsesWireStatusForFinishReason(finishReason string) (string, string) {

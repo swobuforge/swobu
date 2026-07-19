@@ -10,13 +10,12 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
-	"github.com/swobuforge/swobu/internal/effect"
-	stage "github.com/swobuforge/swobu/internal/exchange/stage"
 	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
@@ -28,37 +27,27 @@ const (
 
 // RequestIngress runs one client request lifecycle at the exchange boundary.
 type RequestIngress struct {
-	workspaces      WorkspaceLookup
-	runner          Runner
-	trafficEvidence TrafficEventSink
+	workspaces WorkspaceLookup
+	runner     runtimeBundle
 }
 
 type RuntimePoliciesSpec struct {
 	ObservationStore observation.Store
-	EffectSink       effect.Sink
-	TrafficEventSink TrafficEventSink
+	DecisionSink     compat.Sink
 	ReplayStore      replay.Store
 	ResponseIDs      replay.ResponseIDGenerator
 }
 
-// TrafficEventSink records immutable traffic events at the exchange
-// boundary without creating a dependency back onto the broader ports layer.
-type TrafficEventSink interface {
-	Append(context.Context, trafficevidence.TrafficEvent)
-}
-
-// RuntimeResolver provides client codec lookup and provider protocol-bundle lookup for request ingress and the exchange runner.
+// RuntimeResolver provides client codec lookup for request ingress and the
+// exchange runner. Exact provider codecs resolve through provider.BackendResolver.
 type RuntimeResolver interface {
 	ClientCodec(canonical.ClientFamily) ClientCodec
-	ProviderRequestDocumentEncoder(protocolkind.ProtocolKind) ProviderRequestDocumentEncoder
-	ProviderEnvelopeDecoder(protocolkind.ProtocolKind, delivery.Delivery) ProviderEnvelopeDecoder
-	ProviderDocumentDecoder(protocolkind.ProtocolKind, delivery.Delivery) ProviderDocumentDecoder
 }
 
 // ExecutionRuntime resolves client codecs and provider ingress for one exchange run.
 type ExecutionRuntime interface {
 	RuntimeResolver
-	ProviderIngressResolver
+	provider.BackendResolver
 }
 
 func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
@@ -68,25 +57,21 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	if policies.ResponseIDs == nil {
 		policies.ResponseIDs = replay.NewDefaultResponseIDGenerator()
 	}
-	sink := policies.EffectSink
+	sink := policies.DecisionSink
 	if sink == nil {
 		if policies.ObservationStore != nil {
-			sink = effect.StoreBackedSink{
-				Observations: policies.ObservationStore,
-			}
+			sink = compatibilityObservationSink{store: policies.ObservationStore}
 		} else {
-			sink = effect.NoopSink{}
+			sink = compat.NoopSink{}
 		}
 	}
 	return RequestIngress{
-		workspaces:      workspaces,
-		trafficEvidence: policies.TrafficEventSink,
-		runner: Runner{
-			Runtime:        runtime,
-			StageMechanics: stage.StageMechanics{},
-			EffectSink:     sink,
-			ReplayStore:    policies.ReplayStore,
-			ResponseIDs:    policies.ResponseIDs,
+		workspaces: workspaces,
+		runner: runtimeBundle{
+			Runtime:      runtime,
+			DecisionSink: sink,
+			ReplayStore:  policies.ReplayStore,
+			ResponseIDs:  policies.ResponseIDs,
 		},
 	}
 }
@@ -98,15 +83,29 @@ type RequestInput struct {
 	ClientFamily    canonical.ClientFamily
 	ResponseFraming delivery.Framing
 	Timing          *trafficevidence.Timing
-	// ExchangeID is the request-scoped identifier used for event and effect
+	// ExchangeID is the request-scoped identifier used for event and decision
 	// tracing. Callers must supply one unique value per exchange run.
 	ExchangeID string
 }
 
 type RequestOutput struct {
-	Response           TransportResponse
-	Target             RoutableTarget
-	CommitTrafficEvent func(context.Context, error) error
+	Response        ClientResponse
+	Target          provider.TargetSnapshot
+	TrafficEvidence *TrafficEvidenceInput
+}
+
+// TrafficEvidenceInput is the immutable exchange fact set completed by the
+// inbound delivery owner's concrete DeliveryResult.
+type TrafficEvidenceInput struct {
+	workspace     routing.Workspace
+	routeName     routing.RouteName
+	exchangeID    string
+	clientHandler trafficevidence.ClientHandler
+	clientFamily  canonical.ClientFamily
+	request       canonical.CanonicalRequest
+	target        provider.TargetSnapshot
+	response      ClientResponse
+	attemptCount  int
 }
 
 // HandleRequest resolves the endpoint name, derives client semantics from the
@@ -128,14 +127,7 @@ func (h RequestIngress) HandleRequest(ctx context.Context, in RequestInput) (Req
 // HandleRequestWithWorkspace reuses the request lifecycle when the caller
 // already owns workspace resolution truth, such as control-plane probes.
 func (h RequestIngress) HandleRequestWithWorkspace(ctx context.Context, workspace routing.Workspace, in RequestInput) (RequestOutput, error) {
-	out, err := h.runExchangeResponse(ctx, workspace, in)
-	if in.Timing == nil && out.CommitTrafficEvent != nil {
-		_ = out.CommitTrafficEvent(ctx, err)
-	}
-	if err != nil {
-		return RequestOutput{}, err
-	}
-	return out, nil
+	return h.runExchangeResponse(ctx, workspace, in)
 }
 
 func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routing.Workspace, in RequestInput) (RequestOutput, error) {
@@ -166,79 +158,66 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	if err != nil {
 		return RequestOutput{}, err
 	}
-	requestDocResult, err := applyDocumentPatches(
-		ctx,
-		stage.StageMechanics{},
-		exchangeID,
-		stage.StageClientWireIn,
-		requestDoc,
-		delivery.BufferedDelivery(),
-	)
-	if err != nil {
-		return RequestOutput{}, err
-	}
-	requestDoc = requestDocResult.Value
-	commitEffectsBestEffort(ctx, h.runner.EffectSink, exchangeID, requestDocResult.Effects)
 	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc)
-	commitEffectsBestEffort(ctx, h.runner.EffectSink, exchangeID, decodeResult.Effects)
+	commitDecisionsBestEffort(ctx, h.runner.DecisionSink, exchangeID, decodeResult.Decisions)
 	if err != nil {
 		return RequestOutput{}, err
 	}
-	request := decodeResult.Value.Request
-	decodedDelivery := decodeResult.Value.Delivery
+	request := decodeResult.Request.Request
+	decodedDelivery := decodeResult.Request.Delivery
 	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=domain
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	out, err := runExchangeWithMachine(ctx, h.runner, h.trafficEvidence, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, workspace, in.Timing)
+	out, err := runExchange(ctx, h.runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, workspace, in.Timing)
 	if err != nil {
 		return out, err
 	}
 	return out, nil
 }
 
-func buildTerminalTrafficEvent(workspace routing.Workspace, routeName routing.RouteName, exchangeID string, clientHandler trafficevidence.ClientHandler, clientFamily canonical.ClientFamily, request canonical.CanonicalRequest, target RoutableTarget, response TransportResponse, err error, attemptCount int, timing *trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
-	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(exchangeID))
+func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportpkg.DeliveryResult, timing trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
+	if evidence == nil {
+		return trafficevidence.TrafficEvent{}, errors.New("traffic evidence input is absent")
+	}
+	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(evidence.exchangeID))
 	if parseErr != nil {
 		return trafficevidence.TrafficEvent{}, parseErr
 	}
-	if strings.TrimSpace(target.BackendRef) == "" { // swobu:io-string source=boundary
+	if strings.TrimSpace(evidence.target.TargetID) == "" { // swobu:io-string source=boundary
 		return trafficevidence.TrafficEvent{}, fmt.Errorf("traffic evidence target is required")
 	}
-	route, routeErr := trafficevidence.NewRoute(target.BackendRef, request.Model())
+	route, routeErr := trafficevidence.NewRoute(evidence.target.TargetID, evidence.request.Model())
 	if routeErr != nil {
 		return trafficevidence.TrafficEvent{}, routeErr
 	}
 
-	result, statusCode := requestOutcomeEvidence(err, response)
+	resultClass, statusCode := requestOutcomeEvidence(result, evidence.response)
 	input := trafficevidence.TrafficEventInput{
 		RequestID:             requestID,
-		Workspace:             workspace.Slug().String(),
-		ClientHandler:         clientHandler,
-		ClientFamily:          trafficevidence.ClientFamily(clientFamily),
+		Workspace:             evidence.workspace.Slug().String(),
+		ClientHandler:         evidence.clientHandler,
+		ClientFamily:          trafficevidence.ClientFamily(evidence.clientFamily),
 		Route:                 route,
-		Result:                result,
+		Result:                resultClass,
 		StatusCode:            statusCode,
-		Timing:                snapshotTiming(timing),
-		AttemptCount:          max(attemptCount, 1),
-		ModelRequested:        request.Model(),
-		ModelResolved:         request.Model(),
-		WorkspaceRouteModelID: routeName.String(),
-		ExchangeDiagnostics:   requestOutcomeDiagnostics(err),
+		Timing:                timing,
+		AttemptCount:          max(evidence.attemptCount, 1),
+		ModelRequested:        evidence.request.Model(),
+		ModelResolved:         evidence.request.Model(),
+		WorkspaceRouteModelID: evidence.routeName.String(),
+		ExchangeDiagnostics:   requestOutcomeDiagnostics(result.Err),
 	}
 	return trafficevidence.NewTerminalTrafficEvent(input)
 }
 
-func snapshotTiming(timing *trafficevidence.Timing) trafficevidence.Timing {
-	if timing == nil {
-		return trafficevidence.NewUnknownTiming()
+func requestOutcomeEvidence(deliveryResult transportpkg.DeliveryResult, response ClientResponse) (trafficevidence.ResultClass, int) {
+	if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
+		return trafficevidence.ResultClassCancelled, 499
 	}
-	return *timing
-}
-
-func requestOutcomeEvidence(err error, response TransportResponse) (trafficevidence.ResultClass, int) {
-	if err == nil {
-		statusCode := response.Transport.Status
+	err := deliveryResult.Err
+	if deliveryResult.Kind == transportpkg.DeliverySucceeded && err == nil {
+		statusCode := clientResponseStatus(response)
 		if statusCode <= 0 {
 			statusCode = http.StatusOK
 		}
@@ -260,6 +239,16 @@ func requestOutcomeEvidence(err error, response TransportResponse) (trafficevide
 	}
 
 	return trafficevidence.ResultClassSwobuError, http.StatusInternalServerError
+}
+
+func clientResponseStatus(response ClientResponse) int {
+	switch response := response.(type) {
+	case BufferedResponse:
+		return response.Response.Status
+	case StreamingResponse:
+		return response.Response.Status
+	}
+	return 0
 }
 
 func requestOutcomeFromSwobuError(code canonical.ErrorCode) trafficevidence.ResultClass {
@@ -297,17 +286,16 @@ func requestOutcomeDiagnostics(err error) []string {
 	return []string{strings.TrimSpace(err.Error())} // swobu:io-string source=boundary
 }
 
-func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.CarrierDocument, error) {
+func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.Document, error) {
 	body, err := readTransportRequestBody(req.Body)
 	if err != nil {
-		return carrier.CarrierDocument{}, canonical.BadRequest("request body could not be read")
+		return carrier.Document{}, canonical.BadRequest("request body could not be read")
 	}
 	mediaType := strings.TrimSpace(req.Header.Get("Content-Type")) // swobu:io-string source=boundary
 	if mediaType == "" {
 		mediaType = "application/json"
 	}
-	return carrier.NewCarrierDocument(
-		carrier.StageClientRequestIn,
+	return carrier.NewDocument(
 		family,
 		mediaType,
 		cloneHeader(req.Header),
@@ -349,10 +337,7 @@ type ListModelsInput struct {
 }
 
 type ModelOption struct {
-	ID           string
-	ModelID      string
-	ProviderSpec string
-	BackendRef   string
+	ID string
 }
 
 type ListModelsOutput struct {
@@ -376,15 +361,7 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 		Models:         make([]ModelOption, 0, len(workspace.Routes())),
 	}
 	for _, route := range workspace.Routes() {
-		option := ModelOption{
-			ID:      route.Name().String(),
-			ModelID: route.Name().String(),
-		}
-		if tiers := route.Tiers(); len(tiers) > 0 && len(tiers[0].Targets()) > 0 {
-			option.ProviderSpec = string(tiers[0].Targets()[0].Provider())
-			option.BackendRef = tiers[0].Targets()[0].ID().String()
-		}
-		out.Models = append(out.Models, option)
+		out.Models = append(out.Models, ModelOption{ID: route.Name().String()})
 	}
 	return out, nil
 }

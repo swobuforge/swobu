@@ -2,125 +2,114 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/azure"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/custom"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/ollama"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
-	_ "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
-	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/azure"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/custom"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/ollama"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ProviderRegistry is the outbound provider namespace registry and dispatch root.
 type ProviderRegistry struct {
 	manifests   map[profile.ProviderID]profile.Profile
 	discoveries map[profile.ProviderID]providersruntime.Discovery
-	ingresses   map[profile.ProviderID]providersruntime.ProviderExecutor
+	backends    map[profile.ProviderID]provider.BackendResolver
 }
 
-type providerRegistryBuilder struct {
-	manifests   map[profile.ProviderID]profile.Profile
-	discoveries map[profile.ProviderID]providersruntime.Discovery
-	ingresses   map[profile.ProviderID]providersruntime.ProviderExecutor
-}
-
-// NewRegistryBuilder composes provider facets into a registry builder at the
-// namespace edge.
-func NewRegistryBuilder() providersruntime.Builder {
-	return &providerRegistryBuilder{
-		manifests:   make(map[profile.ProviderID]profile.Profile),
-		discoveries: make(map[profile.ProviderID]providersruntime.Discovery),
-		ingresses:   make(map[profile.ProviderID]providersruntime.ProviderExecutor),
-	}
-}
-
-// NewProviderRegistry composes concrete provider adapters once at the
-// composition edge.
-func NewProviderRegistry(client *http.Client, credentials providersruntime.CredentialProvider) ProviderRegistry {
+// NewProviderRegistry explicitly constructs the fixed provider set. Provider
+// availability is determined here, never by package initialization order.
+func NewProviderRegistry(client *http.Client, credentials providersruntime.CredentialProvider) (ProviderRegistry, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	builder := NewRegistryBuilder().(*providerRegistryBuilder)
-	for _, manifest := range profile.All() {
-		builder.RegisterManifest(manifest)
-		runtimeFactory, ok := providersruntime.RuntimeFactoryFor(manifest.ProviderID)
-		if !ok {
-			panic("providers: missing runtime constructor for provider id " + string(manifest.ProviderID))
+	return newProviderRegistry(profile.All(), []providersruntime.ProviderRuntimeBundle{
+		openai.NewRuntime(client, credentials),
+		anthropic.NewRuntime(profile.ProviderSpecAnthropic, client, credentials),
+		chatgpt.NewRuntime(profile.ProviderSpecChatGPT, client, credentials),
+		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),
+		azure.NewRuntime(client, credentials),
+		openrouter.NewRuntime(client, credentials),
+		ollama.NewRuntime(client, credentials),
+		custom.NewRuntime(client, credentials),
+	})
+}
+
+func newProviderRegistry(manifests []profile.Profile, runtimes []providersruntime.ProviderRuntimeBundle) (ProviderRegistry, error) {
+	manifestByID := make(map[profile.ProviderID]profile.Profile, len(manifests))
+	for _, manifest := range manifests {
+		if manifest.ProviderID == "" {
+			return ProviderRegistry{}, fmt.Errorf("providers: manifest provider id is empty")
 		}
-		runtime := runtimeFactory(client, credentials)
-		builder.RegisterDiscovery(manifest.ProviderID, runtime.Discovery)
-		builder.RegisterIngress(manifest.ProviderID, runtime.ProviderExecutor)
+		manifestByID[manifest.ProviderID] = manifest
 	}
-	registry, ok := builder.Build().(ProviderRegistry)
-	if !ok {
-		panic("providers: registry builder returned unexpected registry type")
+	discoveryByID := make(map[profile.ProviderID]providersruntime.Discovery, len(runtimes))
+	backendByID := make(map[profile.ProviderID]provider.BackendResolver, len(runtimes))
+	for _, runtime := range runtimes {
+		if runtime.ProviderID == "" || runtime.Discovery == nil || runtime.BackendResolver == nil {
+			return ProviderRegistry{}, fmt.Errorf("providers: runtime bundle is incomplete")
+		}
+		if _, exists := backendByID[runtime.ProviderID]; exists {
+			return ProviderRegistry{}, fmt.Errorf("providers: duplicate runtime for provider id %q", runtime.ProviderID)
+		}
+		discoveryByID[runtime.ProviderID] = runtime.Discovery
+		backendByID[runtime.ProviderID] = runtime.BackendResolver
 	}
-	return registry
-}
-
-func (b *providerRegistryBuilder) RegisterManifest(manifest profile.Profile) {
-	if b == nil || manifest.ProviderID == "" {
-		return
+	for providerID := range manifestByID {
+		if backendByID[providerID] == nil || discoveryByID[providerID] == nil {
+			return ProviderRegistry{}, fmt.Errorf("providers: missing runtime for provider id %q", providerID)
+		}
 	}
-	b.manifests[manifest.ProviderID] = manifest
-}
-
-func (b *providerRegistryBuilder) RegisterDiscovery(providerID profile.ProviderID, discovery providersruntime.Discovery) {
-	if b == nil || providerID == "" || discovery == nil {
-		return
-	}
-	b.discoveries[providerID] = discovery
-}
-
-func (b *providerRegistryBuilder) RegisterIngress(providerID profile.ProviderID, ingress providersruntime.ProviderExecutor) {
-	if b == nil || providerID == "" || ingress == nil {
-		return
-	}
-	b.ingresses[providerID] = ingress
-}
-
-func (b *providerRegistryBuilder) Build() providersruntime.Registry {
-	if b == nil {
-		return ProviderRegistry{}
+	for providerID := range backendByID {
+		if _, exists := manifestByID[providerID]; !exists {
+			return ProviderRegistry{}, fmt.Errorf("providers: runtime has no manifest for provider id %q", providerID)
+		}
 	}
 	return ProviderRegistry{
-		manifests:   cloneManifestRegistry(b.manifests),
-		discoveries: cloneDiscoveryRegistry(b.discoveries),
-		ingresses:   cloneIngressRegistry(b.ingresses),
-	}
+		manifests:   cloneManifestRegistry(manifestByID),
+		discoveries: cloneDiscoveryRegistry(discoveryByID),
+		backends:    cloneBackendRegistry(backendByID),
+	}, nil
 }
 
-func (r ProviderRegistry) ResolveProviderIngress(ctx context.Context, req exchange.ProviderRequest) (exchange.ProviderIngress, error) {
-	providerID, err := providerIDFromTarget(req.Target.ProviderID())
-	if err != nil {
-		return nil, err
-	}
-	ingress, ok := r.Ingress(providerID)
-	if !ok {
-		return nil, canonical.InternalError("provider ingress facet is missing")
-	}
-	if err := providercompat.GateRouteFeatureSupport(ctx, req.EffectSink, req.ExchangeID, string(providerID), req.Target.ProtocolKind, req.Request); err != nil {
-		return nil, err
-	}
-	return ingress.ResolveProviderIngress(ctx, req)
-}
-
-func (r ProviderRegistry) ProbeTarget(ctx context.Context, target exchange.RoutableTarget) (exchange.TargetProbeResult, error) {
+// ResolveBackend resolves the selected target through exactly one fixed
+// provider implementation and rejects any target drift.
+func (r ProviderRegistry) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	providerID, err := providerIDFromTarget(target.ProviderID())
 	if err != nil {
-		return exchange.TargetProbeResult{}, err
+		return provider.Backend{}, err
+	}
+	resolver, ok := r.BackendResolver(providerID)
+	if !ok {
+		return provider.Backend{}, canonical.InternalError("provider backend resolver is missing")
+	}
+	backend, err := resolver.ResolveBackend(target)
+	if err != nil {
+		return provider.Backend{}, err
+	}
+	if !backend.Target.Equal(target) {
+		return provider.Backend{}, canonical.InternalError("provider backend target does not match selected target")
+	}
+	return backend, nil
+}
+
+func (r ProviderRegistry) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
+	providerID, err := providerIDFromTarget(target.ProviderID())
+	if err != nil {
+		return provider.TargetProbeResult{}, err
 	}
 	discovery, ok := r.Discovery(providerID)
 	if !ok {
-		return exchange.TargetProbeResult{}, canonical.InternalError("provider discovery facet is missing")
+		return provider.TargetProbeResult{}, canonical.InternalError("provider discovery facet is missing")
 	}
 	return discovery.ProbeTarget(ctx, target)
 }
@@ -144,15 +133,15 @@ func (r ProviderRegistry) Discovery(providerID profile.ProviderID) (providersrun
 	return discovery, true
 }
 
-func (r ProviderRegistry) Ingress(providerID profile.ProviderID) (providersruntime.ProviderExecutor, bool) {
-	if r.ingresses == nil {
+func (r ProviderRegistry) BackendResolver(providerID profile.ProviderID) (provider.BackendResolver, bool) {
+	if r.backends == nil {
 		return nil, false
 	}
-	ingress, ok := r.ingresses[providerID]
-	if !ok || ingress == nil {
+	resolver, ok := r.backends[providerID]
+	if !ok || resolver == nil {
 		return nil, false
 	}
-	return ingress, true
+	return resolver, true
 }
 
 func providerIDFromTarget(rawProviderID string) (profile.ProviderID, error) {
@@ -185,17 +174,17 @@ func cloneDiscoveryRegistry(src map[profile.ProviderID]providersruntime.Discover
 	return out
 }
 
-func cloneIngressRegistry(src map[profile.ProviderID]providersruntime.ProviderExecutor) map[profile.ProviderID]providersruntime.ProviderExecutor {
+func cloneBackendRegistry(src map[profile.ProviderID]provider.BackendResolver) map[profile.ProviderID]provider.BackendResolver {
 	if len(src) == 0 {
-		return map[profile.ProviderID]providersruntime.ProviderExecutor{}
+		return map[profile.ProviderID]provider.BackendResolver{}
 	}
-	out := make(map[profile.ProviderID]providersruntime.ProviderExecutor, len(src))
-	for providerID, ingress := range src {
-		out[providerID] = ingress
+	out := make(map[profile.ProviderID]provider.BackendResolver, len(src))
+	for providerID, resolver := range src {
+		out[providerID] = resolver
 	}
 	return out
 }
 
-var _ exchange.ProviderIngressResolver = ProviderRegistry{}
-var _ exchange.ProviderDiscovery = ProviderRegistry{}
+var _ provider.BackendResolver = ProviderRegistry{}
+var _ provider.Discovery = ProviderRegistry{}
 var _ providersruntime.Registry = ProviderRegistry{}

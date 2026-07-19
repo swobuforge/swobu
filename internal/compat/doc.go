@@ -1,7 +1,4 @@
-// Package compat owns the shared compatibility vocabulary for feature support,
-// support decisions, and route capability lookup.
-//
-// It centralizes the semantic terms that previously drifted across request
-// features and route capability helpers so provider dispatch can ask one
-// question: what feature does this route support, and at what level?
+// Package compat owns descriptive decisions emitted by concrete representation
+// seams. Decisions are post-operation evidence only: they are never provider
+// declarations, routing inputs, replay state, or predictions of future support.
 package compat

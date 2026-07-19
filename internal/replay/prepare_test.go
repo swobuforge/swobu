@@ -5,69 +5,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
-var testScope = Scope{Namespace: "test-ns", CallerKey: "test-caller"}
+const testWorkspaceSlug = "test-ns"
 
-func testTarget() TargetKey {
-	return TargetKey{
-		ProviderSpec:     "openai",
-		Protocol:         protocolkind.Responses,
-		ProviderProtocol: "responses",
-		BaseURL:          "https://api.openai.com",
-		AuthScope:        "default",
-		ModelID:          "gpt-4o",
+func testBackendTarget(t *testing.T, model string) provider.TargetSnapshot {
+	t.Helper()
+	target := provider.NewTargetSnapshot("target-"+model, "openai", "https://api.openai.com", "test", "responses", "")
+	target.Model = model
+	return target
+}
+
+func testBackend(t *testing.T, model string, continuation bool) provider.Backend {
+	t.Helper()
+	backend := provider.Backend{Target: testBackendTarget(t, model)}
+	if continuation {
+		backend.CaptureContinuation = backend.Target.NativeContinuation
 	}
-}
-
-func testTargetDifferent() TargetKey {
-	return TargetKey{
-		ProviderSpec:     "anthropic",
-		Protocol:         protocolkind.Messages,
-		ProviderProtocol: "messages",
-		BaseURL:          "https://api.anthropic.com",
-		AuthScope:        "default",
-		ModelID:          "claude-3-sonnet",
-	}
-}
-
-func testTargetPtr() *TargetKey {
-	target := testTarget()
-	return &target
-}
-
-func testTargetDifferentPtr() *TargetKey {
-	target := testTargetDifferent()
-	return &target
+	return backend
 }
 
 func makeRequest(model string, items []canonical.CanonicalItem, turn canonical.TurnRef) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:    model,
-		Items:    items,
-		Turn:     turn,
+		Model: model, Items: items, Turn: turn,
 		Controls: canonical.GenerationControls{Limits: canonical.GenerationLimits{MaxOutputTokens: canonical.NewOptionalInt(100)}},
 	})
 }
 
 func makeItems(texts ...string) []canonical.CanonicalItem {
 	items := make([]canonical.CanonicalItem, 0, len(texts))
-	for _, t := range texts {
-		items = append(items, canonical.NewTextItem(canonical.ItemAuthorUser, t))
+	for _, text := range texts {
+		items = append(items, canonical.NewTextItem(canonical.ItemAuthorUser, text))
 	}
 	return items
-}
-
-func makeRecord(id ID, target TargetKey, request canonical.CanonicalRequest, response canonical.CanonicalOutputProjection, native *NativeRef) Record {
-	return Record{
-		ID:       id,
-		Scope:    testScope,
-		Request:  request,
-		Response: response,
-		Native:   native,
-	}
 }
 
 func makeResponse(items ...canonical.CanonicalItem) canonical.CanonicalOutputProjection {
@@ -78,583 +51,378 @@ func makeResponse(items ...canonical.CanonicalItem) canonical.CanonicalOutputPro
 	return canonical.NewConversationOutput("resp_"+idSuffix, "gpt-4o", items, "stop")
 }
 
-// --- Prepare tests ---
+func replayRecord(id ID, request canonical.CanonicalRequest, response canonical.CanonicalOutputProjection, native *provider.NativeContinuation) Record {
+	return Record{ID: id, Request: request, Response: response, Native: native}
+}
 
-func TestPrepareNoPreviousReturnsRequestAndNilNative(t *testing.T) {
+func TestPrepareWithoutPreviousIDDoesNotReadStore(t *testing.T) {
 	spy := newSpyStore()
-	req := makeRequest("gpt-4o", makeItems("hello"), canonical.TurnRef{})
+	request := makeRequest("gpt-4o", makeItems("hello"), canonical.TurnRef{})
 
-	got, native, err := Prepare(context.Background(), spy, testScope, testTargetPtr(), req)
+	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, request)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
 	if spy.getCalled {
-		t.Error("expected store.Get not to be called when request has no previous ID")
+		t.Fatal("store.Get called without previous_response_id")
 	}
-	if native != nil {
-		t.Errorf("expected nil native ref, got %+v", native)
+	providerRequest := prepared.ForBackend(testBackend(t, "gpt-4o", false), delivery.BufferedDelivery())
+	if providerRequest.Continuation != nil {
+		t.Fatalf("continuation = %#v, want nil", providerRequest.Continuation)
 	}
-	if !got.Turn().IsZero() {
-		t.Errorf("expected turn to be cleared, got %+v", got.Turn())
-	}
-	items := got.Items()
-	if len(items) != 1 || items[0].Text != "hello" {
-		t.Errorf("expected [hello], got %+v", items)
+	if len(providerRequest.Canonical.Items()) != 1 || providerRequest.Canonical.Items()[0].Text != "hello" {
+		t.Fatalf("provider request items = %#v", providerRequest.Canonical.Items())
 	}
 }
 
-func TestPrepareUnknownPreviousRejects(t *testing.T) {
+func TestPrepareUnknownPreviousIDRejectsAfterOneLookup(t *testing.T) {
 	spy := newSpyStore()
-	turn := canonical.NewTurnRef("resp_unknown")
-	req := makeRequest("gpt-4o", makeItems("hello"), turn)
+	request := makeRequest("gpt-4o", makeItems("hello"), canonical.NewTurnRef("resp_unknown"))
 
-	_, _, err := Prepare(context.Background(), spy, testScope, testTargetPtr(), req)
-	if err == nil {
-		t.Fatal("expected error for unknown previous response id, got nil")
+	_, err := Prepare(context.Background(), spy, testWorkspaceSlug, request)
+	if err == nil || err.Error() != "BAD_REQUEST: unknown previous_response_id" {
+		t.Fatalf("error = %v", err)
 	}
-	if err.Error() != "BAD_REQUEST: unknown previous_response_id" {
-		t.Errorf("unexpected error message: %v", err)
+	if spy.getCalls != 1 {
+		t.Fatalf("store.Get calls = %d, want 1", spy.getCalls)
 	}
 }
 
-func TestPrepareExpiredPreviousRejects(t *testing.T) {
+func TestPrepareExpiredPreviousIDRejects(t *testing.T) {
 	spy := newSpyStore()
 	expiredAt := time.Now().UTC().Add(-time.Minute)
-	record := Record{
-		ID:        "resp_expired",
-		Scope:     testScope,
-		Request:   makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
-		Response:  makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
-		Native:    &NativeRef{ReplayID: "resp_expired", Target: testTarget(), Kind: NativeRefProviderResponseID, Value: "provider_expired"},
-		CreatedAt: time.Now().UTC().Add(-2 * time.Minute),
-		ExpiresAt: &expiredAt,
-	}
-	if err := spy.Put(context.Background(), testScope, record); err != nil {
-		t.Fatalf("seed expired record: %v", err)
+	record := replayRecord(
+		"resp_expired",
+		makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
+		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
+		testBackendTarget(t, "gpt-4o").NativeContinuation("provider_expired"),
+	)
+	record.ExpiresAt = &expiredAt
+	if err := spy.Put(context.Background(), testWorkspaceSlug, record); err != nil {
+		t.Fatal(err)
 	}
 
-	req := makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_expired"))
-	_, _, err := Prepare(context.Background(), spy, testScope, testTargetPtr(), req)
-	if err == nil {
-		t.Fatal("expected expired previous_response_id to reject")
-	}
-	if err.Error() != "BAD_REQUEST: unknown previous_response_id" {
-		t.Fatalf("error = %v, want BAD_REQUEST: unknown previous_response_id", err)
+	_, err := Prepare(context.Background(), spy, testWorkspaceSlug, makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_expired")))
+	if err == nil || err.Error() != "BAD_REQUEST: unknown previous_response_id" {
+		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestPrepareSameTargetReturnsDeltaAndNativeRef(t *testing.T) {
+func TestPreparedMatchingBackendUsesInheritedDeltaAndNativeContinuation(t *testing.T) {
 	spy := newSpyStore()
-	prevItems := makeItems("turn1")
-	prevReq := makeRequest("gpt-4o", prevItems, canonical.TurnRef{})
-	prevResp := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
-	nativeRef := &NativeRef{
-		ReplayID: "resp_prev",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_prev_id",
+	backend := testBackendTarget(t, "gpt-4o")
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "gpt-4o", Instructions: "be concise", Items: makeItems("turn1"),
+		Tools: []canonical.ToolDecl{canonical.NewFunctionToolDecl("search", "search", "search", canonical.NewToolSchemaObject(`{"type":"object"}`))},
+	})
+	record := replayRecord(
+		"resp_prev", previous,
+		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
+		backend.NativeContinuation("provider_prev"),
+	)
+	if err := spy.Put(context.Background(), testWorkspaceSlug, record); err != nil {
+		t.Fatal(err)
 	}
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nativeRef)
-	spy.Put(context.Background(), testScope, record)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Items: makeItems("turn2"), Turn: canonical.NewTurnRef("resp_prev"),
+	})
 
-	turn := canonical.NewTurnRef("resp_prev")
-	req := makeRequest("gpt-4o", makeItems("turn2"), turn)
-
-	got, native, err := Prepare(context.Background(), spy, testScope, testTargetPtr(), req)
+	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, current)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	if native == nil {
-		t.Fatal("expected native ref for same target, got nil")
+	request := prepared.ForBackend(testBackend(t, "gpt-4o", true), delivery.StreamingDelivery(delivery.FramingSSE))
+	if request.Continuation == nil || request.Continuation.ID != "provider_prev" || request.Continuation.TargetID != backend.TargetID || request.Continuation.TargetVersion != backend.TargetVersion {
+		t.Fatalf("continuation = %#v", request.Continuation)
 	}
-	if native.Value != "provider_prev_id" {
-		t.Errorf("expected native value provider_prev_id, got %s", native.Value)
+	if request.Canonical.Model() != "gpt-4o" || request.Canonical.Instructions() != "be concise" || len(request.Canonical.Tools()) != 1 {
+		t.Fatalf("durable bands were not inherited: %#v", request.Canonical)
 	}
-	if !got.Turn().IsZero() {
-		t.Fatalf("expected same-target native replay request to clear turn, got %+v", got.Turn())
-	}
-	items := got.Items()
+	items := request.Canonical.Items()
 	if len(items) != 1 || items[0].Text != "turn2" {
-		t.Errorf("expected delta [turn2], got %+v", items)
+		t.Fatalf("delta items = %#v", items)
+	}
+	semanticItems := prepared.Semantic.Items()
+	if len(semanticItems) != 3 || semanticItems[0].Text != "turn1" || semanticItems[1].Text != "assistant1" || semanticItems[2].Text != "turn2" {
+		t.Fatalf("semantic items = %#v", semanticItems)
 	}
 }
 
-func TestPrepareSameTargetNativeInheritsMissingBands(t *testing.T) {
-	spy := newSpyStore()
-	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
-		MaxOutputTokens: intPtr(256),
-		StopSequences:   []string{"STOP"},
-		Temperature:     floatPtr(0.3),
-		TopP:            floatPtr(0.8),
-	})
-	if err != nil {
-		t.Fatalf("construct controls: %v", err)
-	}
-	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:        canonical.OutputFormatJSONSchema,
-		Name:        "reply_shape",
-		Description: "structured reply",
-		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
-		Strict:      true,
-	})
-	if err != nil {
-		t.Fatalf("construct output format: %v", err)
-	}
-	prevReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "gpt-4o",
-		Instructions: "You are helpful",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn1")},
+func TestPrepareFromRecordExplicitEmptyCollectionsClearInheritedBands(t *testing.T) {
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "gpt-4o",
 		Tools: []canonical.ToolDecl{
-			canonical.NewFunctionToolDecl("search", "search", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
+			canonical.NewFunctionToolDecl("search", "search", "search", canonical.NewToolSchemaObject(`{"type":"object"}`)),
+		},
+		Controls: canonical.GenerationControls{
+			Limits: canonical.GenerationLimits{StopSequences: []string{"END"}},
+		},
+	})
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: "gpt-4o",
+		Items: makeItems("turn2"),
+		Tools: []canonical.ToolDecl{},
+		Controls: canonical.GenerationControls{
+			Limits: canonical.GenerationLimits{StopSequences: []string{}},
+		},
+	})
+
+	prepared, err := PrepareFromRecord(current, replayRecord(
+		"resp_prev",
+		previous,
+		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
+		nil,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prepared.Semantic.Tools(); len(got) != 0 {
+		t.Fatalf("semantic tools = %#v, want explicit clear", got)
+	}
+	if got := prepared.Semantic.Controls().Limits.StopSequences; len(got) != 0 {
+		t.Fatalf("semantic stop sequences = %#v, want explicit clear", got)
+	}
+}
+
+func TestPrepareFromRecordExplicitZeroClearsEveryDurableBand(t *testing.T) {
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        "gpt-4o",
+		Instructions: "be concise",
+		Tools: []canonical.ToolDecl{
+			canonical.NewFunctionToolDecl("search", "search", "search", canonical.NewToolSchemaObject(`{"type":"object"}`)),
 		},
 		ToolPolicy:    canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
 		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
-		Controls:      controls,
-		OutputFormat:  outputFormat,
-	})
-	prevResp := canonical.NewConversationOutput("resp_prev", "gpt-4o", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")}, "stop")
-	nativeRef := &NativeRef{
-		ReplayID: "resp_prev",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_prev_id",
-	}
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nativeRef)
-	spy.Put(context.Background(), testScope, record)
-
-	turn := canonical.NewTurnRef("resp_prev")
-	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
-		Turn:  turn,
-	})
-
-	got, native, err := Prepare(context.Background(), spy, testScope, testTargetPtr(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if native == nil {
-		t.Fatal("expected native ref for same target, got nil")
-	}
-	if got.Turn().IsZero() == false {
-		t.Fatalf("expected native replay request to clear turn, got %+v", got.Turn())
-	}
-	if got.Model() != "gpt-4o" {
-		t.Fatalf("expected inherited model gpt-4o, got %s", got.Model())
-	}
-	if got.Instructions() != "You are helpful" {
-		t.Fatalf("expected inherited instructions, got %s", got.Instructions())
-	}
-	if len(got.Tools()) != 1 {
-		t.Fatalf("expected 1 inherited tool, got %d", len(got.Tools()))
-	}
-	if got.ToolPolicy().Mode != canonical.ToolPolicyRequired {
-		t.Fatalf("expected inherited tool policy required, got %v", got.ToolPolicy().Mode)
-	}
-	if got.ToolCallBatch().Mode != canonical.ToolCallBatchAtMostOne {
-		t.Fatalf("expected inherited tool batch policy at_most_one, got %v", got.ToolCallBatch().Mode)
-	}
-	if gotControls := got.Controls(); gotControls.Limits.MaxOutputTokens.IsZero() {
-		t.Fatal("expected inherited max_output_tokens")
-	} else if value, _ := gotControls.Limits.MaxOutputTokens.Value(); value != 256 {
-		t.Fatalf("expected inherited max_output_tokens 256, got %d", value)
-	}
-	if gotControls := got.Controls(); gotControls.Sampling.Temperature.IsZero() {
-		t.Fatal("expected inherited temperature")
-	} else if value, _ := gotControls.Sampling.Temperature.Value(); value != 0.3 {
-		t.Fatalf("expected inherited temperature 0.3, got %v", value)
-	}
-	if gotControls := got.Controls(); gotControls.Sampling.TopP.IsZero() {
-		t.Fatal("expected inherited top_p")
-	} else if value, _ := gotControls.Sampling.TopP.Value(); value != 0.8 {
-		t.Fatalf("expected inherited top_p 0.8, got %v", value)
-	}
-	if gotFormat := got.OutputFormat(); gotFormat.Kind != canonical.OutputFormatJSONSchema || gotFormat.Name != "reply_shape" || gotFormat.Description != "structured reply" || gotFormat.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || !gotFormat.Strict {
-		t.Fatalf("expected inherited output format, got %+v", gotFormat)
-	}
-	items := got.Items()
-	if len(items) != 1 || items[0].Text != "turn2" {
-		t.Fatalf("expected delta [turn2], got %+v", items)
-	}
-}
-
-func TestPrepareDifferentTargetReturnsFullRequestAndNilNative(t *testing.T) {
-	spy := newSpyStore()
-	prevItems := makeItems("turn1")
-	prevReq := makeRequest("gpt-4o", prevItems, canonical.TurnRef{})
-	prevResp := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
-	nativeRef := &NativeRef{
-		ReplayID: "resp_prev",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_prev_id",
-	}
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nativeRef)
-	spy.Put(context.Background(), testScope, record)
-
-	turn := canonical.NewTurnRef("resp_prev")
-	req := makeRequest("claude-3-sonnet", makeItems("turn2"), turn)
-
-	got, native, err := Prepare(context.Background(), spy, testScope, testTargetDifferentPtr(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if native != nil {
-		t.Errorf("expected nil native ref for different target, got %+v", native)
-	}
-	items := got.Items()
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items (turn1 + assistant1 + turn2), got %d: %+v", len(items), items)
-	}
-	if items[0].Text != "turn1" {
-		t.Errorf("expected item[0]=turn1, got %s", items[0].Text)
-	}
-	if items[1].Text != "assistant1" {
-		t.Errorf("expected item[1]=assistant1, got %s", items[1].Text)
-	}
-	if items[2].Text != "turn2" {
-		t.Errorf("expected item[2]=turn2, got %s", items[2].Text)
-	}
-}
-
-func TestPrepareProviderProtocolChangeMaterializesAndRejectsNativeRef(t *testing.T) {
-	spy := newSpyStore()
-	previousRequest := makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{})
-	previousResponse := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
-	nativeRef := &NativeRef{
-		ReplayID: "resp_prev",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_prev_id",
-	}
-	spy.Put(context.Background(), testScope, makeRecord("resp_prev", testTarget(), previousRequest, previousResponse, nativeRef))
-
-	changed := testTarget()
-	changed.ProviderProtocol = "responses_stream"
-	current := makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_prev"))
-	got, native, err := Prepare(context.Background(), spy, testScope, &changed, current)
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	if native != nil {
-		t.Fatalf("native ref survived provider protocol change: %+v", native)
-	}
-	items := got.Items()
-	if len(items) != 3 || items[0].Text != "turn1" || items[1].Text != "assistant1" || items[2].Text != "turn2" {
-		t.Fatalf("materialized items=%+v want prior request + response + current turn", items)
-	}
-}
-
-func TestPrepareAllowsMultiItemCurrentTurnWithPreviousResponseID(t *testing.T) {
-	spy := newSpyStore()
-	prevReq := makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{})
-	prevResp := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
-	spy.Put(context.Background(), testScope, record)
-
-	currentItems := []canonical.CanonicalItem{
-		canonical.NewTextItem(canonical.ItemAuthorUser, "turn2a"),
-		canonical.NewTextItem(canonical.ItemAuthorUser, "turn2b"),
-	}
-	turn := canonical.NewTurnRef("resp_prev")
-	req := makeRequest("gpt-4o", currentItems, turn)
-
-	got, native, err := Prepare(context.Background(), spy, testScope, testTargetDifferentPtr(), req)
-	if err != nil {
-		t.Fatalf("unexpected error for current-turn input with previous_response_id")
-	}
-	if native != nil {
-		t.Fatalf("expected nil native ref for different target, got %+v", native)
-	}
-	items := got.Items()
-	if len(items) != 4 {
-		t.Fatalf("expected 4 items (turn1 + assistant1 + turn2a + turn2b), got %d: %+v", len(items), items)
-	}
-	if items[0].Text != "turn1" || items[1].Text != "assistant1" || items[2].Text != "turn2a" || items[3].Text != "turn2b" {
-		t.Fatalf("unexpected materialized items: %+v", items)
-	}
-}
-
-func TestPrepareStoreNilWithPreviousRejects(t *testing.T) {
-	turn := canonical.NewTurnRef("resp_prev")
-	req := makeRequest("gpt-4o", makeItems("hello"), turn)
-
-	_, _, err := Prepare(context.Background(), nil, testScope, testTargetPtr(), req)
-	if err == nil {
-		t.Fatal("expected error when store is nil and previous is present")
-	}
-}
-
-func TestPrepareInheritsMissingFieldsFromPrevious(t *testing.T) {
-	spy := newSpyStore()
-	prevReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "gpt-4o",
-		Instructions: "You are helpful",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn1")},
-	})
-	prevResp := canonical.NewConversationOutput("resp_prev", "gpt-4o", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")}, "stop")
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
-	spy.Put(context.Background(), testScope, record)
-
-	turn := canonical.NewTurnRef("resp_prev")
-	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
-		Turn:  turn,
-	})
-
-	got, _, err := Prepare(context.Background(), spy, testScope, testTargetDifferentPtr(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Model() != "gpt-4o" {
-		t.Errorf("expected inherited model gpt-4o, got %s", got.Model())
-	}
-	if got.Instructions() != "You are helpful" {
-		t.Errorf("expected inherited instructions, got %s", got.Instructions())
-	}
-}
-
-func TestPreparePrefersCurrentFieldsOverPrevious(t *testing.T) {
-	spy := newSpyStore()
-	prevReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "gpt-4o",
-		Instructions: "Old instr",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn1")},
-	})
-	prevResp := canonical.NewConversationOutput("resp_prev", "gpt-4o", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")}, "stop")
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
-	spy.Put(context.Background(), testScope, record)
-
-	turn := canonical.NewTurnRef("resp_prev")
-	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "claude-3-sonnet",
-		Instructions: "New instr",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
-		Turn:         turn,
-	})
-
-	got, _, err := Prepare(context.Background(), spy, testScope, testTargetDifferentPtr(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Model() != "claude-3-sonnet" {
-		t.Errorf("expected current model, got %s", got.Model())
-	}
-	if got.Instructions() != "New instr" {
-		t.Errorf("expected current instructions, got %s", got.Instructions())
-	}
-}
-
-func TestMaterializeDoesNotAliasPreviousRecordItems(t *testing.T) {
-	prevReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "gpt-4o",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn1")},
-	})
-	prevResp := canonical.NewConversationOutput("resp_prev", "gpt-4o", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")}, "stop")
-	previous := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
-	current := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
-	})
-
-	got := materialize(previous, current)
-	gotItems := got.Items()
-	gotItems[0].Text = "mutated"
-
-	if previous.Request.Items()[0].Text != "turn1" {
-		t.Fatalf("previous request item mutated through materialize result: %+v", previous.Request.Items())
-	}
-	if current.Items()[0].Text != "turn2" {
-		t.Fatalf("current request item mutated through materialize result: %+v", current.Items())
-	}
-}
-
-func TestMaterializeDoesNotAliasInheritedTools(t *testing.T) {
-	prevReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "gpt-4o",
-		Tools: []canonical.ToolDecl{
-			canonical.NewFunctionToolDecl("search", "search", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
+		Controls: canonical.GenerationControls{
+			Limits: canonical.GenerationLimits{
+				MaxOutputTokens: canonical.NewOptionalInt(100),
+				StopSequences:   []string{"END"},
+			},
+			Sampling: canonical.SamplingControls{
+				Temperature: canonical.NewOptionalFloat64(0.7),
+				TopP:        canonical.NewOptionalFloat64(0.9),
+			},
 		},
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn1")},
+		OutputFormat: mustOutputFormat(t, canonical.OutputFormatParams{
+			Kind:   canonical.OutputFormatJSONSchema,
+			Name:   "previous",
+			Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
+		}),
 	})
-	prevResp := canonical.NewConversationOutput("resp_prev", "gpt-4o", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")}, "stop")
-	previous := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
+	presence := canonical.RequestPresence{
+		Model:         true,
+		Instructions:  true,
+		Tools:         true,
+		ToolPolicy:    true,
+		ToolCallBatch: true,
+		OutputFormat:  true,
+		Controls: canonical.GenerationControlsPresence{
+			MaxOutputTokens: true,
+			StopSequences:   true,
+			Temperature:     true,
+			TopP:            true,
+		},
+	}
 	current := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
+		Items:    makeItems("turn2"),
+		Tools:    []canonical.ToolDecl{},
+		Controls: canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{}}},
+		Presence: presence,
 	})
 
-	got := materialize(previous, current)
-	gotTools := got.Tools()
-	if len(gotTools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(gotTools))
-	}
-	if tool, ok := gotTools[0].(canonical.FunctionToolDecl); ok {
-		tool.Description = "mutated"
-		gotTools[0] = tool
-	} else {
-		t.Fatalf("expected FunctionToolDecl, got %T", gotTools[0])
-	}
-
-	prevTools := previous.Request.Tools()
-	if len(prevTools) != 1 {
-		t.Fatalf("expected previous tool slice to remain intact, got %d", len(prevTools))
-	}
-	if prevTools[0].ToolDescription() != "search text" {
-		t.Fatalf("previous tool description mutated through materialize result: %q", prevTools[0].ToolDescription())
-	}
-}
-
-func floatPtr(v float64) *float64 {
-	return &v
-}
-
-func TestPrepareUnsafeNativeReplayReturnsFullRequestAndNilNative(t *testing.T) {
-	spy := newSpyStore()
-	prevReq := makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{})
-	prevResp := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
-	nativeRef := &NativeRef{
-		ReplayID: "resp_prev",
-		Target:   testTarget(),
-		Kind:     NativeRefProviderResponseID,
-		Value:    "provider_prev_id",
-	}
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nativeRef)
-	spy.Put(context.Background(), testScope, record)
-
-	turn := canonical.NewTurnRef("resp_prev")
-	req := makeRequest("gpt-4o", makeItems("turn2"), turn)
-
-	got, native, err := Prepare(context.Background(), spy, testScope, nil, req)
+	prepared, err := PrepareFromRecord(current, replayRecord(
+		"resp_prev",
+		previous,
+		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
+		nil,
+	))
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	if native != nil {
-		t.Fatalf("expected nil native ref when native replay is disallowed, got %+v", native)
-	}
-	items := got.Items()
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items (turn1 + assistant1 + turn2), got %d: %+v", len(items), items)
-	}
-	if items[0].Text != "turn1" || items[1].Text != "assistant1" || items[2].Text != "turn2" {
-		t.Fatalf("unexpected materialized items: %+v", items)
-	}
-}
-
-// --- CaptureRequest tests ---
-
-func TestCaptureRequestWithNilNativeReturnsProviderRequest(t *testing.T) {
-	spy := newSpyStore()
-	req := makeRequest("gpt-4o", makeItems("hello"), canonical.TurnRef{})
-
-	got, err := CaptureRequest(context.Background(), spy, testScope, nil, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if spy.getCalled {
-		t.Error("expected store.Get not to be called when native is nil")
-	}
-	if !got.Turn().IsZero() {
-		t.Errorf("expected turn to be cleared, got %+v", got.Turn())
-	}
-	items := got.Items()
-	if len(items) != 1 || items[0].Text != "hello" {
-		t.Errorf("expected [hello], got %+v", items)
+	for name, request := range map[string]canonical.CanonicalRequest{
+		"semantic": prepared.Semantic,
+		"delta":    prepared.Delta,
+	} {
+		if request.Model() != "" || request.Instructions() != "" || len(request.Tools()) != 0 {
+			t.Fatalf("%s scalar/collection clears failed: model=%q instructions=%q tools=%#v", name, request.Model(), request.Instructions(), request.Tools())
+		}
+		if !request.ToolPolicy().IsZero() || !request.ToolCallBatch().IsZero() || !request.OutputFormat().IsZero() {
+			t.Fatalf("%s policy/format clears failed: policy=%#v batch=%#v format=%#v", name, request.ToolPolicy(), request.ToolCallBatch(), request.OutputFormat())
+		}
+		controls := request.Controls()
+		if !controls.Limits.MaxOutputTokens.IsZero() || len(controls.Limits.StopSequences) != 0 || !controls.Sampling.Temperature.IsZero() || !controls.Sampling.TopP.IsZero() {
+			t.Fatalf("%s generation clears failed: %#v", name, controls)
+		}
 	}
 }
 
-func TestCaptureRequestWithNativeMaterializesFullRequest(t *testing.T) {
-	spy := newSpyStore()
-	prevItems := makeItems("turn1")
-	prevReq := makeRequest("gpt-4o", prevItems, canonical.TurnRef{})
-	prevResp := makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1"))
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
-	spy.Put(context.Background(), testScope, record)
-
-	native := &NativeRef{ReplayID: "resp_prev", Target: testTarget(), Kind: NativeRefProviderResponseID, Value: "provider_prev"}
-	deltaReq := makeRequest("gpt-4o", makeItems("turn2"), canonical.TurnRef{})
-
-	got, err := CaptureRequest(context.Background(), spy, testScope, native, deltaReq)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	items := got.Items()
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items, got %d: %+v", len(items), items)
-	}
-	if items[0].Text != "turn1" {
-		t.Errorf("expected item[0]=turn1, got %s", items[0].Text)
-	}
-	if items[1].Text != "assistant1" {
-		t.Errorf("expected item[1]=assistant1, got %s", items[1].Text)
-	}
-	if items[2].Text != "turn2" {
-		t.Errorf("expected item[2]=turn2, got %s", items[2].Text)
-	}
-}
-
-func TestCaptureRequestWithNativeMissingParentErrors(t *testing.T) {
-	spy := newSpyStore()
-	native := &NativeRef{ReplayID: "resp_missing", Target: testTarget(), Kind: NativeRefProviderResponseID, Value: "provider_prev"}
-	deltaReq := makeRequest("gpt-4o", makeItems("turn2"), canonical.TurnRef{})
-
-	_, err := CaptureRequest(context.Background(), spy, testScope, native, deltaReq)
-	if err == nil {
-		t.Fatal("expected error when native parent is missing")
-	}
-}
-
-func TestCaptureRequestInheritsMissingFieldsFromPrevious(t *testing.T) {
-	spy := newSpyStore()
-	prevReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "gpt-4o",
-		Instructions: "You are helpful",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn1")},
+func TestPrepareFromRecordAbsentInheritsAndNonEmptyReplacesDurableBands(t *testing.T) {
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:         "previous-model",
+		Instructions:  "previous instructions",
+		Tools:         []canonical.ToolDecl{canonical.NewFunctionToolDecl("old", "old", "old", canonical.NewToolSchemaObject(`{"type":"object"}`))},
+		ToolPolicy:    canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+		Controls: canonical.GenerationControls{
+			Limits:   canonical.GenerationLimits{MaxOutputTokens: canonical.NewOptionalInt(100), StopSequences: []string{"OLD"}},
+			Sampling: canonical.SamplingControls{Temperature: canonical.NewOptionalFloat64(0.2), TopP: canonical.NewOptionalFloat64(0.3)},
+		},
+		OutputFormat: mustOutputFormat(t, canonical.OutputFormatParams{
+			Kind:   canonical.OutputFormatJSONSchema,
+			Name:   "previous",
+			Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
+		}),
 	})
-	prevResp := canonical.NewConversationOutput("resp_prev", "gpt-4o", []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")}, "stop")
-	record := makeRecord("resp_prev", testTarget(), prevReq, prevResp, nil)
-	spy.Put(context.Background(), testScope, record)
+	record := replayRecord("resp_prev", previous, makeResponse(), nil)
 
-	native := &NativeRef{ReplayID: "resp_prev", Target: testTarget(), Kind: NativeRefProviderResponseID, Value: "provider_prev"}
-	deltaReq := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "turn2")},
-	})
-
-	got, err := CaptureRequest(context.Background(), spy, testScope, native, deltaReq)
+	inherited, err := PrepareFromRecord(canonical.NewCanonicalRequest(canonical.RequestParams{Items: makeItems("turn2")}), record)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	if got.Model() != "gpt-4o" {
-		t.Errorf("expected inherited model gpt-4o, got %s", got.Model())
+	assertPreparedDurableBands(t, inherited, "previous-model", "previous instructions", "old", canonical.ToolPolicyRequired, canonical.ToolCallBatchAtMostOne, 100, "OLD", 0.2, 0.3, canonical.OutputFormatJSONSchema)
+
+	replacement := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:         "replacement-model",
+		Instructions:  "replacement instructions",
+		Items:         makeItems("turn2"),
+		Tools:         []canonical.ToolDecl{canonical.NewFunctionToolDecl("new", "new", "new", canonical.NewToolSchemaObject(`{"type":"object"}`))},
+		ToolPolicy:    canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil),
+		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+		Controls: canonical.GenerationControls{
+			Limits:   canonical.GenerationLimits{MaxOutputTokens: canonical.NewOptionalInt(200), StopSequences: []string{"NEW"}},
+			Sampling: canonical.SamplingControls{Temperature: canonical.NewOptionalFloat64(0.7), TopP: canonical.NewOptionalFloat64(0.8)},
+		},
+		OutputFormat: canonical.OutputFormat{Kind: canonical.OutputFormatText},
+	})
+	replaced, err := PrepareFromRecord(replacement, record)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got.Instructions() != "You are helpful" {
-		t.Errorf("expected inherited instructions, got %s", got.Instructions())
+	assertPreparedDurableBands(t, replaced, "replacement-model", "replacement instructions", "new", canonical.ToolPolicyAuto, canonical.ToolCallBatchAtMostOne, 200, "NEW", 0.7, 0.8, canonical.OutputFormatText)
+}
+
+func mustOutputFormat(t *testing.T, params canonical.OutputFormatParams) canonical.OutputFormat {
+	t.Helper()
+	format, err := canonical.NewOutputFormat(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return format
+}
+
+func assertPreparedDurableBands(t *testing.T, prepared Prepared, model, instructions, toolName string, policy canonical.ToolPolicyMode, batch canonical.ToolCallBatchMode, maxTokens int, stop string, temperature, topP float64, format canonical.OutputFormatKind) {
+	t.Helper()
+	for name, request := range map[string]canonical.CanonicalRequest{"semantic": prepared.Semantic, "delta": prepared.Delta} {
+		if request.Model() != model || request.Instructions() != instructions {
+			t.Fatalf("%s model/instructions = %q/%q, want %q/%q", name, request.Model(), request.Instructions(), model, instructions)
+		}
+		tools := request.Tools()
+		if len(tools) != 1 || tools[0].ToolName() != toolName {
+			t.Fatalf("%s tools = %#v, want %q", name, tools, toolName)
+		}
+		if request.ToolPolicy().Mode != policy || request.ToolCallBatch().Mode != batch || request.OutputFormat().Kind != format {
+			t.Fatalf("%s policy/batch/format = %#v/%#v/%#v", name, request.ToolPolicy(), request.ToolCallBatch(), request.OutputFormat())
+		}
+		controls := request.Controls()
+		gotMax, maxOK := controls.Limits.MaxOutputTokens.Value()
+		gotTemp, tempOK := controls.Sampling.Temperature.Value()
+		gotTopP, topPOK := controls.Sampling.TopP.Value()
+		if !maxOK || gotMax != maxTokens || len(controls.Limits.StopSequences) != 1 || controls.Limits.StopSequences[0] != stop || !tempOK || gotTemp != temperature || !topPOK || gotTopP != topP {
+			t.Fatalf("%s controls = %#v", name, controls)
+		}
 	}
 }
 
-// --- MemoryStore roundtrip test ---
+func TestPreparedMatchingBackendWithoutContinuationOptInUsesFullSemanticRequest(t *testing.T) {
+	for _, protocol := range []string{"chat_completions", "messages", "responses_without_opt_in"} {
+		t.Run(protocol, func(t *testing.T) {
+			backend := testBackendTarget(t, "gpt-4o")
+			prepared := Prepared{
+				Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), canonical.TurnRef{}),
+				Delta:    makeRequest("gpt-4o", makeItems("turn2"), canonical.TurnRef{}),
+				Base:     &Record{Native: backend.NativeContinuation("provider_prev")},
+			}
 
-func TestMemoryStoreGetPutRoundtrip(t *testing.T) {
-	store := newMemoryStore()
-	record := makeRecord("resp_1", testTarget(), makeRequest("m", nil, canonical.TurnRef{}), makeResponse(), nil)
+			request := prepared.ForBackend(provider.Backend{Target: backend}, delivery.BufferedDelivery())
 
-	if err := store.Put(context.Background(), testScope, record); err != nil {
-		t.Fatalf("put failed: %v", err)
+			if request.Continuation != nil {
+				t.Fatalf("continuation = %#v, want nil without exact-backend opt-in", request.Continuation)
+			}
+			if got := len(request.Canonical.Items()); got != 3 {
+				t.Fatalf("semantic item count = %d, want full history", got)
+			}
+		})
 	}
+}
 
-	got, found, err := store.Get(context.Background(), testScope, "resp_1")
+func TestPreparedMismatchedBackendUsesFullSemanticRequest(t *testing.T) {
+	spy := newSpyStore()
+	previousBackend := testBackendTarget(t, "gpt-4o")
+	previous := replayRecord(
+		"resp_prev",
+		makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
+		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
+		previousBackend.NativeContinuation("provider_prev"),
+	)
+	if err := spy.Put(context.Background(), testWorkspaceSlug, previous); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_prev")))
 	if err != nil {
-		t.Fatalf("get failed: %v", err)
-	}
-	if !found {
-		t.Fatal("expected record to be found")
-	}
-	if got.ID != "resp_1" {
-		t.Errorf("expected id resp_1, got %s", got.ID)
+		t.Fatal(err)
 	}
 
-	_, found, err = store.Get(context.Background(), testScope, "resp_missing")
-	if err != nil {
-		t.Fatalf("get failed: %v", err)
+	request := prepared.ForBackend(testBackend(t, "gpt-4o-fallback", true), delivery.BufferedDelivery())
+	if request.Continuation != nil {
+		t.Fatalf("continuation survived backend mismatch: %#v", request.Continuation)
 	}
-	if found {
-		t.Error("expected missing record not to be found")
+	items := request.Canonical.Items()
+	if len(items) != 3 || items[0].Text != "turn1" || items[1].Text != "assistant1" || items[2].Text != "turn2" {
+		t.Fatalf("full semantic items = %#v", items)
+	}
+}
+
+func TestPreparedMismatchedTargetVersionUsesFullSemanticRequest(t *testing.T) {
+	target := testBackendTarget(t, "gpt-4o")
+	prepared := Prepared{
+		Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), canonical.TurnRef{}),
+		Delta:    makeRequest("gpt-4o", makeItems("turn2"), canonical.TurnRef{}),
+		Base:     &Record{Native: target.NativeContinuation("provider_prev")},
+	}
+	newVersion := target
+	newVersion.TargetVersion++
+	backend := provider.Backend{Target: newVersion, CaptureContinuation: newVersion.NativeContinuation}
+
+	request := prepared.ForBackend(backend, delivery.BufferedDelivery())
+	if request.Continuation != nil {
+		t.Fatalf("continuation survived target-version mismatch: %#v", request.Continuation)
+	}
+	if got := len(request.Canonical.Items()); got != 3 {
+		t.Fatalf("semantic item count = %d, want full history", got)
+	}
+}
+
+func TestPreparedValuesDoNotAliasStoredRecord(t *testing.T) {
+	spy := newSpyStore()
+	previous := replayRecord(
+		"resp_prev",
+		makeRequest("gpt-4o", makeItems("turn1"), canonical.TurnRef{}),
+		makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "assistant1")),
+		nil,
+	)
+	if err := spy.Put(context.Background(), testWorkspaceSlug, previous); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := Prepare(context.Background(), spy, testWorkspaceSlug, makeRequest("gpt-4o", makeItems("turn2"), canonical.NewTurnRef("resp_prev")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Semantic.Items()[0].Text = "mutated"
+	stored, found, err := spy.Get(context.Background(), testWorkspaceSlug, "resp_prev")
+	if err != nil || !found {
+		t.Fatalf("stored record = %#v, found=%v, err=%v", stored, found, err)
+	}
+	if stored.Request.Items()[0].Text != "turn1" {
+		t.Fatalf("stored request aliased prepared semantic: %#v", stored.Request.Items())
 	}
 }

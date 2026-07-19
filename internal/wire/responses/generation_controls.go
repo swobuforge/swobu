@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
 func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.GenerationControls, error) {
@@ -20,30 +21,43 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	if isRawControlSet(dto.Stop) {
+	stopSequences, err := openaiwire.DecodeStopSequences(dto.Stop, "responses request stop is invalid")
+	if err != nil {
+		return canonical.GenerationControls{}, err
+	}
+	if len(stopSequences) > 0 {
 		// Responses v0 does not carry stop sequences in canonical form; fail
 		// closed rather than silently dropping supported user intent.
 		return canonical.GenerationControls{}, canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
 	}
 	return canonical.NewGenerationControls(canonical.GenerationControlsParams{
 		MaxOutputTokens: maxOutputTokens,
+		StopSequences:   stopSequences,
 		Temperature:     temperature,
 		TopP:            topP,
 	})
 }
 
-func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls) error {
+func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls, presence canonical.GenerationControlsPresence, emitClears bool) error {
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
 		payload["max_output_tokens"] = value
+	} else if emitClears && presence.MaxOutputTokens {
+		payload["max_output_tokens"] = nil
 	}
 	if value, ok := controls.Sampling.Temperature.Value(); ok {
 		payload["temperature"] = value
+	} else if emitClears && presence.Temperature {
+		payload["temperature"] = nil
 	}
 	if value, ok := controls.Sampling.TopP.Value(); ok {
 		payload["top_p"] = value
+	} else if emitClears && presence.TopP {
+		payload["top_p"] = nil
 	}
 	if len(controls.Limits.StopSequences) > 0 {
 		return canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
+	} else if emitClears && presence.StopSequences {
+		payload["stop"] = []string{}
 	}
 	return nil
 }

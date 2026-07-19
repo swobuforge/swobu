@@ -23,8 +23,6 @@ type CredentialSpec struct {
 	SuggestedEnvVar string
 }
 
-type Capability string
-
 const (
 	ProviderSpecOllama     ProviderID = "ollama"
 	ProviderSpecOpenAI     ProviderID = "openai"
@@ -34,9 +32,6 @@ const (
 	ProviderSpecBedrock    ProviderID = "bedrock"
 	ProviderSpecAzure      ProviderID = "azure"
 	ProviderSpecCustom     ProviderID = "custom"
-
-	CapabilityModelCatalog Capability = "model_catalog"
-	CapabilityStreaming    Capability = "streaming"
 )
 
 type LocatorKind uint8
@@ -65,14 +60,13 @@ type Profile struct {
 	SetupHint           string
 	// SetupKeywords are search/copy hints only. Locator owns connection
 	// semantics; these keywords must not drive setup behavior.
-	SetupKeywords        []string
-	Locator              LocatorSpec
-	Credential           CredentialSpec
-	CatalogItemLabel     string
-	DefaultAuthHeader    string
-	VisibleInOperatorUI  bool
-	ProviderProtocols    []ProviderProtocolSpec
-	DeclaredCapabilities []Capability
+	SetupKeywords       []string
+	Locator             LocatorSpec
+	Credential          CredentialSpec
+	CatalogItemLabel    string
+	DefaultAuthHeader   string
+	VisibleInOperatorUI bool
+	ProviderProtocols   []ProviderProtocolSpec
 }
 
 type ProviderProtocolSpec struct {
@@ -111,19 +105,6 @@ func SupportedSpecs() []string {
 func SupportsSpec(spec string) bool {
 	_, ok := profileFor(spec)
 	return ok
-}
-
-func SupportsCapability(spec string, capability Capability) bool {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return false
-	}
-	for _, supported := range profile.DeclaredCapabilities {
-		if supported == capability {
-			return true
-		}
-	}
-	return false
 }
 
 func DefaultExecuteBaseURL(spec string) string {

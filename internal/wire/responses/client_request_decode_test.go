@@ -15,7 +15,7 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
@@ -35,6 +35,37 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	}
 	if got := items[0].Input.RawObject(); got != `{"query":"hello"}` {
 		t.Fatalf("items[0].Input.RawObject() = %q, want normalized object JSON", got)
+	}
+}
+
+func TestDecodeClientRequest_PreservesExplicitEmptyDurableBands(t *testing.T) {
+	raw := []byte(`{
+		"input":"continue",
+		"previous_response_id":"resp_123",
+		"model":"",
+		"instructions":"",
+		"tools":[],
+		"tool_choice":null,
+		"parallel_tool_calls":null,
+		"text":null,
+		"max_output_tokens":null,
+		"stop":[],
+		"temperature":null,
+		"top_p":null
+	}`)
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presence := got.Presence()
+	if !presence.Model || !presence.Instructions || !presence.Tools || !presence.ToolPolicy || !presence.ToolCallBatch || !presence.OutputFormat {
+		t.Fatalf("durable-band presence = %#v", presence)
+	}
+	if !presence.Controls.MaxOutputTokens || !presence.Controls.StopSequences || !presence.Controls.Temperature || !presence.Controls.TopP {
+		t.Fatalf("generation-control presence = %#v", presence.Controls)
+	}
+	if got.Instructions() != "" || len(got.Tools()) != 0 || len(got.Controls().Limits.StopSequences) != 0 {
+		t.Fatalf("explicit clears changed value: instructions=%q tools=%#v controls=%#v", got.Instructions(), got.Tools(), got.Controls())
 	}
 }
 
@@ -60,7 +91,7 @@ func TestDecodeClientRequest_AcceptsMultilineToolOutputTranscript(t *testing.T) 
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw})
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
@@ -83,7 +114,7 @@ func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testin
 	t.Parallel()
 
 	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"oops"}]}`)
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.Responses, Raw: raw})
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err == nil {
 		t.Fatal("DecodeClientRequest returned nil error, want BAD_REQUEST")
 	}

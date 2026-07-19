@@ -80,7 +80,7 @@ func TestEncode_OmitsMaxCompletionTokensWhenMaxOutputTokensUnset(t *testing.T) {
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"temperature":0.25,"top_p":0.9,"stop":["END","DONE"]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestDecodeRequest_DecodesGPT5GenerationControls(t *testing.T) {
 
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64,"temperature":0.25,"top_p":0.9}`)
-	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
@@ -115,6 +115,20 @@ func TestDecodeRequest_DecodesGPT5GenerationControls(t *testing.T) {
 	}
 	if topP, ok := got.Controls().Sampling.TopP.Value(); !ok || topP != 0.9 {
 		t.Fatalf("top_p = (%v, %v), want (0.9, true)", topP, ok)
+	}
+}
+
+func TestDecodeRequest_MaxCompletionTokensExplicitlyPrecedesLegacyMaxTokens(t *testing.T) {
+	t.Parallel()
+
+	codec := legacyClientRequestDecoder{}
+	req := []byte(`{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":32,"max_completion_tokens":64}`)
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned error: %v", err)
+	}
+	if max, ok := got.Controls().Limits.MaxOutputTokens.Value(); !ok || max != 64 {
+		t.Fatalf("max output tokens = (%d, %v), want explicit max_completion_tokens value 64", max, ok)
 	}
 }
 
@@ -185,7 +199,7 @@ func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"reply_shape","description":"structured reply","schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false},"strict":true}}}`)
-	got, _, err := codec.DecodeClientRequest(carrier.CarrierDocument{Family: protocolkind.ChatCompletions, Raw: req})
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}

@@ -77,7 +77,7 @@ func UnsupportedDelivery(message string) Error {
 
 type BackendError struct {
 	Origin     ErrorOrigin
-	BackendRef string
+	TargetID   string
 	StatusCode int
 	Message    string
 	// RetryAfterHeaderValue is the only allowed backend-header passthrough in v0.
@@ -104,7 +104,7 @@ func NewClassifiedBackendError(class BackendErrorClass, cause BackendError) Clas
 }
 
 func (e ClassifiedBackendError) Error() string {
-	if e.Cause.Origin == "" && e.Cause.BackendRef == "" && e.Cause.Message == "" && e.Cause.StatusCode == 0 {
+	if e.Cause.Origin == "" && e.Cause.TargetID == "" && e.Cause.Message == "" && e.Cause.StatusCode == 0 {
 		return "backend classified error"
 	}
 	return e.Cause.Error()
@@ -116,10 +116,10 @@ func (e ClassifiedBackendError) Unwrap() error {
 
 // NewBackendError preserves backend-origin truth instead of laundering provider
 // failures into Swobu-shaped validation or policy errors.
-func NewBackendError(backendRef string, statusCode int, message string, retryAfterHeaderValue string) BackendError {
+func NewBackendError(targetID string, statusCode int, message string, retryAfterHeaderValue string) BackendError {
 	return BackendError{
 		Origin:                ErrorOriginBackend,
-		BackendRef:            backendRef,
+		TargetID:              targetID,
 		StatusCode:            statusCode,
 		Message:               message,
 		RetryAfterHeaderValue: retryAfterHeaderValue,
@@ -128,9 +128,9 @@ func NewBackendError(backendRef string, statusCode int, message string, retryAft
 
 func (e BackendError) Error() string {
 	if e.Message == "" {
-		return fmt.Sprintf("backend error from %s (%d)", e.BackendRef, e.StatusCode)
+		return fmt.Sprintf("backend error from %s (%d)", e.TargetID, e.StatusCode)
 	}
-	return fmt.Sprintf("backend error from %s (%d): %s", e.BackendRef, e.StatusCode, e.Message)
+	return fmt.Sprintf("backend error from %s (%d): %s", e.TargetID, e.StatusCode, e.Message)
 }
 
 func IsBackendErrorClass(err error, class BackendErrorClass) bool {

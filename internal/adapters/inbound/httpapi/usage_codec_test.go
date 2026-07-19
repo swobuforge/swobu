@@ -24,7 +24,7 @@ func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(doc.Value.Raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.prompt_tokens", 100)
@@ -57,7 +57,7 @@ func TestChatCompletionsCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(doc.Value.Raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.completion_tokens_details.reasoning_tokens", 6)
@@ -77,7 +77,7 @@ func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(doc.Value.Raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.input_tokens", 80)
@@ -110,7 +110,7 @@ func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(doc.Value.Raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.output_tokens_details.reasoning_tokens", 4)
@@ -135,7 +135,7 @@ func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPrese
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(doc.Value.Raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.input_tokens_details.cached_tokens", 0)
@@ -155,7 +155,7 @@ func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
 	var dto map[string]any
-	if err := json.Unmarshal(doc.Value.Raw, &dto); err != nil {
+	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	assertUsageFieldNumber(t, dto, "usage.input_tokens", 51)

@@ -76,7 +76,7 @@ func TestDecodeResponseBuffered_IgnoresAnthropicServerToolBlocks(t *testing.T) {
 		"usage":{"input_tokens":1,"output_tokens":2}
 	}`)
 
-	sink := &recordingEffectSink{}
+	sink := &recordingDecisionSink{}
 	reader, err := decodeResponseBuffered(context.Background(), raw, "ex_web_search", sink)
 	if err != nil {
 		t.Fatalf("decodeResponseBuffered returned error: %v", err)
@@ -117,8 +117,8 @@ func TestDecodeResponseStream_IgnoresAnthropicServerToolBlocks(t *testing.T) {
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
 	}, "")
 
-	sink := &recordingEffectSink{}
-	reader := decodeResponseStream(carrier.CarrierStream{Frames: carrier.FrameReaderFromReadCloser(io.NopCloser(strings.NewReader(raw)))}, "ex_web_search_stream", sink)
+	sink := &recordingDecisionSink{}
+	reader := decodeResponseStream(carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_web_search_stream", sink)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
