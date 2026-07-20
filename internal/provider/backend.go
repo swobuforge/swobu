@@ -14,7 +14,7 @@ import (
 // is outside this interface and cannot alter the codec result.
 type Codec interface {
 	Encode(Request) (carrier.Document, []compat.Decision, error)
-	Decode(context.Context, string, Ingress) (DecodedResponse, error)
+	Decode(context.Context, Request, Ingress) (DecodedResponse, error)
 }
 
 // DecisionSource exposes compatibility decisions discovered only while a

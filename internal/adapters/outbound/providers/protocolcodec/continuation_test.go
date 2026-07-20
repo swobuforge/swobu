@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
@@ -41,7 +42,7 @@ func TestDecodePreservesExchangeIdentity(t *testing.T) {
 		[]byte(`{"id":"provider_response","model":"m","output_text":"ok"}`),
 		carrier.Meta{},
 	)
-	decoded, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Decode(context.Background(), "ex_decode_identity", provider.DocumentIngress{Document: document})
+	decoded, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Decode(context.Background(), provider.Request{ExchangeID: "ex_decode_identity"}, provider.DocumentIngress{Document: document})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestDecodePreservesExchangeIdentity(t *testing.T) {
 func TestDecodeStreamRetainsInvocationCancellation(t *testing.T) {
 	body := &cancellationBody{closed: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
-	decoded, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Decode(ctx, "ex_decode_cancel", provider.StreamIngress{Stream: carrier.ByteStream{
+	decoded, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Decode(ctx, provider.Request{ExchangeID: "ex_decode_cancel"}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream",
 		Body:      body,
 	}})
@@ -95,11 +96,11 @@ func continuationTestTarget(t *testing.T, protocol protocolkind.ProtocolKind) pr
 	return target
 }
 
-func continuationPrepared(target provider.TargetSnapshot, withResponsesRefinement bool) replay.Prepared {
-	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", Items: []canonical.CanonicalItem{
-		canonical.NewTextItem(canonical.ItemAuthorUser, "turn one"),
-		canonical.NewTextItem(canonical.ItemAuthorAssistant, "answer one"),
-		canonical.NewTextItem(canonical.ItemAuthorUser, "turn two"),
+func continuationPrepared(t *testing.T, target provider.TargetSnapshot, withResponsesRefinement bool) replay.Prepared {
+	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{
+		canonicaltest.Message(t, canonical.MessageRoleUser, "turn one"),
+		canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one"),
+		canonicaltest.Message(t, canonical.MessageRoleUser, "turn two"),
 	}})
 	var previous *canonical.ResponseRef
 	if withResponsesRefinement {
@@ -107,7 +108,7 @@ func continuationPrepared(target provider.TargetSnapshot, withResponsesRefinemen
 			ProviderResponseID: "provider_previous", TargetID: target.TargetID, TargetVersion: target.TargetVersion,
 		}}
 	}
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m", InputText: "turn two", PreviousResponse: previous})
+	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: previous})
 	return replay.Prepared{Semantic: semantic, Delta: delta}
 }
 
@@ -122,7 +123,7 @@ func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := continuationTestTarget(t, tc.protocol)
-			request := provider.Request{Canonical: continuationPrepared(target, false).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
+			request := provider.Request{Canonical: continuationPrepared(t, target, false).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
 			codec := Codec{ProviderID: tc.providerID, Protocol: tc.protocol}
 			if tc.protocol == protocolkind.ChatCompletions {
 				codec.Options.ChatCompletionsTokenField = chatcompletions.MaxOutputTokensFieldCompletion
@@ -141,7 +142,7 @@ func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
 
 func TestResponsesBackendWithMatchingCanonicalRefinementSendsDeltaAndPreviousResponseID(t *testing.T) {
 	target := continuationTestTarget(t, protocolkind.Responses)
-	request := provider.Request{Canonical: continuationPrepared(target, true).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
+	request := provider.Request{Canonical: continuationPrepared(t, target, true).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
 	document, _, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Encode(request)
 	if err != nil {
 		t.Fatal(err)

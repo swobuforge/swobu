@@ -7,17 +7,18 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
-	return EncodeCarrierWithDecisions(req, d, nil, "", MaxOutputTokensFieldCompletion)
+	return EncodeCarrierWithDecisions(req, d, nil, "", EncodeOptions{MaxOutputTokensField: MaxOutputTokensFieldCompletion})
 }
 
 func TestEncodeCarrier_LowersInstructionsToLeadingSystemMessage(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "gpt-4o-mini",
-		Instructions: "Use native tools for filesystem work.",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "inspect files")},
+		Model:        canonical.Specify("gpt-4o-mini"),
+		Instructions: canonical.Specify(canonical.NewSystemInstructionSet("Use native tools for filesystem work.")),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
 	})
 
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())

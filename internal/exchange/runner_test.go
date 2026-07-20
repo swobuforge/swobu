@@ -81,7 +81,7 @@ func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 }
 
 func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
-	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader(providerSSE))))
@@ -157,7 +157,7 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 	release := make(chan struct{})
 	go func() {
 		defer func() { _ = providerWrite.Close() }()
-		_, _ = io.WriteString(providerWrite, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n")
+		_, _ = io.WriteString(providerWrite, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n")
 		<-release
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
@@ -255,7 +255,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 	release := make(chan struct{})
 	go func() {
 		defer func() { _ = providerWrite.Close() }()
-		_, _ = io.WriteString(providerWrite, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n")
+		_, _ = io.WriteString(providerWrite, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n")
 		<-release
 		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
 	}()
@@ -328,6 +328,7 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 		},
 		ReplayStore:      replay.NewMemoryStore(),
 		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
+		Policy:           DefaultWorkspacePolicy(),
 	}
 }
 
@@ -398,18 +399,19 @@ func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []comp
 	return result.Document, result.Decisions, err
 }
 
-func (c testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress provider.Ingress) (provider.DecodedResponse, error) {
+func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	exchangeID := request.ExchangeID
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		var result wire.ProviderDecodeResult
 		var err error
 		switch c.protocol {
 		case protocolkind.ChatCompletions:
-			result, err = (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
+			result, err = (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
 		case protocolkind.Responses:
-			result, err = (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
+			result, err = (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
 		case protocolkind.Messages:
-			result, err = (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
+			result, err = (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
 		}
 		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
 	case provider.DocumentIngress:
@@ -417,11 +419,11 @@ func (c testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress
 		var err error
 		switch c.protocol {
 		case protocolkind.ChatCompletions:
-			result, err = (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
+			result, err = (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
 		case protocolkind.Responses:
-			result, err = (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
+			result, err = (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
 		case protocolkind.Messages:
-			result, err = (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
+			result, err = (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
 		}
 		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
 	default:
@@ -434,7 +436,7 @@ type testClientCodec struct {
 		DecodeClientRequest(carrier.Document) (wire.ClientDecodeResult, error)
 	}
 	doc interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (wire.ClientDocumentResult, error)
+		EncodeResponseDocument(canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
 	}
 	stream interface {
 		EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
@@ -446,7 +448,7 @@ func (c testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientD
 	return c.req.DecodeClientRequest(doc)
 }
 
-func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
+func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	return c.doc.EncodeResponseDocument(output)
 }
 
@@ -460,9 +462,17 @@ func (c testClientCodec) EncodeResponseMessages(ctx context.Context, events cano
 
 func testCanonicalRequest(model string) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: model,
+		Model: canonical.Specify(model),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			testMessage(canonical.MessageRoleUser, "hi"),
 		},
 	})
+}
+
+func testMessage(author canonical.MessageRole, text string) canonical.CanonicalItem {
+	item, err := canonical.NewMessageItem(author, []canonical.MessagePart{canonical.NewTextMessagePart(text)})
+	if err != nil {
+		panic(err)
+	}
+	return item
 }

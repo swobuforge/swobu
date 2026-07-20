@@ -21,7 +21,10 @@ type jsonEnvelopeStreamEncoder struct {
 }
 
 func (e *jsonEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
-	streamEvents := e.adapter.Translate(event)
+	streamEvents, err := e.adapter.Translate(event)
+	if err != nil {
+		return nil, err
+	}
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
 		emitted, err := e.wire.Encode(streamEvent)

@@ -2,130 +2,113 @@ package canonical
 
 import "strings"
 
-type SemanticKind string
-
-const (
-	SemanticKindCanonical    SemanticKind = "canonical_request"
-	SemanticKindConversation SemanticKind = "conversation"
-	SemanticKindResponse     SemanticKind = "response_generation"
-	SemanticKindPrompt       SemanticKind = "prompt_generation"
-)
-
 // CanonicalRequest is the single semantic request representation in core.
-// Transport/profile/protocol specifics must stay outside this type.
-// Tool declarations, tool policy, tool-call batch policy, generation controls,
-// and output format belong here because they are request grammar, not wire
-// shape.
+// Omission lives with each independently inheritable request band rather than
+// in a parallel presence schema.
 type CanonicalRequest struct {
-	model        string
-	instructions string
+	model        Specified[string]
+	instructions Specified[InstructionSet]
 	items        []CanonicalItem
-	tools        []ToolDecl
+	tools        Specified[ToolSet]
 
 	previousResponse *ResponseRef
-	toolPolicy       ToolPolicy
-	toolBatch        ToolCallBatchPolicy
+	toolPolicy       Specified[ToolPolicy]
+	toolBatch        Specified[ToolCallBatchPolicy]
 	controls         GenerationControls
-	outputFormat     OutputFormat
-	presence         RequestPresence
+	outputFormat     Specified[OutputFormat]
 }
 
-// RequestPresence records which durable request bands the client supplied.
-// Values remain provider-neutral canonical semantics; presence exists only so
-// continuation preparation can distinguish omission from an explicit clear.
-// Every new durable CanonicalRequest field must add a corresponding presence
-// fact here and define its replay merge rule in internal/replay.
-type RequestPresence struct {
-	Model         bool
-	Instructions  bool
-	Tools         bool
-	ToolPolicy    bool
-	ToolCallBatch bool
-	OutputFormat  bool
-	Controls      GenerationControlsPresence
-}
-
-// GenerationControlsPresence keeps independently inheritable generation
-// controls separate. A caller can therefore clear one control without
-// accidentally clearing or inheriting its siblings.
-type GenerationControlsPresence struct {
-	MaxOutputTokens bool
-	StopSequences   bool
-	Temperature     bool
-	TopP            bool
-}
-
-// RequestParams contains normalized semantic input for one request, including
-// semantic tool declarations, tool policy, tool-call batch policy, generation
-// controls, output format, and the optional previous response selector.
+// RequestParams carries already-decoded request bands into canonical
+// construction. Specified records omission, including explicit empty values.
 type RequestParams struct {
-	Model            string
-	Instructions     string
+	Model            Specified[string]
+	Instructions     Specified[InstructionSet]
 	Items            []CanonicalItem
-	Tools            []ToolDecl
-	InputText        string
+	Tools            Specified[ToolSet]
 	PreviousResponse *ResponseRef
-	ToolPolicy       ToolPolicy
-	ToolCallBatch    ToolCallBatchPolicy
+	ToolPolicy       Specified[ToolPolicy]
+	ToolCallBatch    Specified[ToolCallBatchPolicy]
 	Controls         GenerationControls
-	OutputFormat     OutputFormat
-	Presence         RequestPresence
+	OutputFormat     Specified[OutputFormat]
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
-	items := cloneCanonicalItems(params.Items)
-	tools := cloneToolDecls(params.Tools)
-	if params.InputText != "" {
-		items = append(items, NewTextItem(ItemAuthorUser, params.InputText))
-	}
-	presence := inferRequestPresence(params)
 	return CanonicalRequest{
-		model:            strings.TrimSpace(params.Model),        // swobu:io-string source=domain
-		instructions:     strings.TrimSpace(params.Instructions), // swobu:io-string source=domain
-		items:            items,
-		tools:            tools,
+		model:            cloneSpecified(params.Model, func(value string) string { return strings.TrimSpace(value) }), // swobu:io-string source=domain
+		instructions:     cloneSpecified(params.Instructions, InstructionSet.Clone),
+		items:            cloneCanonicalItems(params.Items),
+		tools:            cloneSpecified(params.Tools, ToolSet.Clone),
 		previousResponse: cloneResponseRefPointer(params.PreviousResponse),
-		toolPolicy:       params.ToolPolicy.Clone(),
-		toolBatch:        params.ToolCallBatch.Clone(),
+		toolPolicy:       cloneSpecified(params.ToolPolicy, ToolPolicy.Clone),
+		toolBatch:        cloneSpecified(params.ToolCallBatch, ToolCallBatchPolicy.Clone),
 		controls:         params.Controls.Clone(),
-		outputFormat:     params.OutputFormat.Clone(),
-		presence:         presence,
+		outputFormat:     cloneSpecified(params.OutputFormat, OutputFormat.Clone),
 	}
 }
 
-func inferRequestPresence(params RequestParams) RequestPresence {
-	presence := params.Presence
-	presence.Model = presence.Model || strings.TrimSpace(params.Model) != ""
-	presence.Instructions = presence.Instructions || strings.TrimSpace(params.Instructions) != ""
-	presence.Tools = presence.Tools || params.Tools != nil
-	presence.ToolPolicy = presence.ToolPolicy || params.ToolPolicy.Mode != "" || params.ToolPolicy.Specific != nil || strings.TrimSpace(params.ToolPolicy.SpecificType) != ""
-	presence.ToolCallBatch = presence.ToolCallBatch || !params.ToolCallBatch.IsZero()
-	presence.OutputFormat = presence.OutputFormat || !params.OutputFormat.IsZero()
-	presence.Controls.MaxOutputTokens = presence.Controls.MaxOutputTokens || !params.Controls.Limits.MaxOutputTokens.IsZero()
-	presence.Controls.StopSequences = presence.Controls.StopSequences || params.Controls.Limits.StopSequences != nil
-	presence.Controls.Temperature = presence.Controls.Temperature || !params.Controls.Sampling.Temperature.IsZero()
-	presence.Controls.TopP = presence.Controls.TopP || !params.Controls.Sampling.TopP.IsZero()
-	return presence
+func cloneSpecified[T any](field Specified[T], clone func(T) T) Specified[T] {
+	value, ok := field.Get()
+	if !ok {
+		return Unspecified[T]()
+	}
+	return Specify(clone(value))
 }
 
-func (r CanonicalRequest) Model() string {
-	return r.model
+func specifiedValue[T any](field Specified[T]) T {
+	value, _ := field.Get()
+	return value
 }
 
-func (r CanonicalRequest) SemanticKind() SemanticKind {
-	return SemanticKindCanonical
+func (r CanonicalRequest) Model() string        { return specifiedValue(r.model) }
+func (r CanonicalRequest) ModelSpecified() bool { return r.model.IsSpecified() }
+func (r CanonicalRequest) ModelField() Specified[string] {
+	return cloneSpecified(r.model, func(value string) string { return value })
+}
+func (r CanonicalRequest) Instructions() InstructionSet {
+	return specifiedValue(r.instructions).Clone()
+}
+func (r CanonicalRequest) InstructionsSpecified() bool { return r.instructions.IsSpecified() }
+func (r CanonicalRequest) InstructionsField() Specified[InstructionSet] {
+	return cloneSpecified(r.instructions, InstructionSet.Clone)
+}
+func (r CanonicalRequest) Items() []CanonicalItem   { return cloneCanonicalItems(r.items) }
+func (r CanonicalRequest) Tools() []ToolDeclaration { return specifiedValue(r.tools).Declarations() }
+func (r CanonicalRequest) ToolsSpecified() bool     { return r.tools.IsSpecified() }
+func (r CanonicalRequest) ToolsField() Specified[ToolSet] {
+	return cloneSpecified(r.tools, ToolSet.Clone)
+}
+func (r CanonicalRequest) ToolPolicy() ToolPolicy {
+	return specifiedValue(r.toolPolicy).Clone()
 }
 
-func (r CanonicalRequest) Instructions() string {
-	return r.instructions
+// EffectiveToolPolicy resolves the protocol-default policy without changing
+// the stored source fact. Replay materialization writes this value explicitly
+// before a successful attempt is committed.
+func (r CanonicalRequest) EffectiveToolPolicy() ToolPolicy {
+	if r.ToolPolicySpecified() {
+		return r.ToolPolicy()
+	}
+	if len(r.Tools()) > 0 {
+		return NewToolPolicy(ToolPolicyAuto, nil)
+	}
+	return NewToolPolicy(ToolPolicyNone, nil)
 }
-
-func (r CanonicalRequest) Items() []CanonicalItem {
-	return cloneCanonicalItems(r.items)
+func (r CanonicalRequest) ToolPolicySpecified() bool { return r.toolPolicy.IsSpecified() }
+func (r CanonicalRequest) ToolPolicyField() Specified[ToolPolicy] {
+	return cloneSpecified(r.toolPolicy, ToolPolicy.Clone)
 }
-
-func (r CanonicalRequest) Tools() []ToolDecl {
-	return cloneToolDecls(r.tools)
+func (r CanonicalRequest) ToolCallBatch() ToolCallBatchPolicy {
+	return specifiedValue(r.toolBatch).Clone()
+}
+func (r CanonicalRequest) ToolCallBatchSpecified() bool { return r.toolBatch.IsSpecified() }
+func (r CanonicalRequest) ToolCallBatchField() Specified[ToolCallBatchPolicy] {
+	return cloneSpecified(r.toolBatch, ToolCallBatchPolicy.Clone)
+}
+func (r CanonicalRequest) Controls() GenerationControls { return r.controls.Clone() }
+func (r CanonicalRequest) OutputFormat() OutputFormat   { return specifiedValue(r.outputFormat).Clone() }
+func (r CanonicalRequest) OutputFormatSpecified() bool  { return r.outputFormat.IsSpecified() }
+func (r CanonicalRequest) OutputFormatField() Specified[OutputFormat] {
+	return cloneSpecified(r.outputFormat, OutputFormat.Clone)
 }
 
 func (r CanonicalRequest) PreviousResponse() (ResponseRef, bool) {
@@ -135,39 +118,17 @@ func (r CanonicalRequest) PreviousResponse() (ResponseRef, bool) {
 	return r.previousResponse.Clone(), true
 }
 
-func (r CanonicalRequest) ToolPolicy() ToolPolicy {
-	return r.toolPolicy.Clone()
-}
-
-func (r CanonicalRequest) ToolCallBatch() ToolCallBatchPolicy {
-	return r.toolBatch.Clone()
-}
-
-func (r CanonicalRequest) Controls() GenerationControls {
-	return r.controls.Clone()
-}
-
-func (r CanonicalRequest) OutputFormat() OutputFormat {
-	return r.outputFormat.Clone()
-}
-
-// Presence returns the supplied-field facts used by continuation preparation.
-func (r CanonicalRequest) Presence() RequestPresence {
-	return r.presence
-}
-
 func (r CanonicalRequest) Clone() CanonicalRequest {
 	return NewCanonicalRequest(RequestParams{
-		Model:            r.model,
-		Instructions:     r.instructions,
+		Model:            cloneSpecified(r.model, func(value string) string { return value }),
+		Instructions:     cloneSpecified(r.instructions, InstructionSet.Clone),
 		Items:            r.items,
-		Tools:            r.tools,
+		Tools:            cloneSpecified(r.tools, ToolSet.Clone),
 		PreviousResponse: r.previousResponse,
-		ToolPolicy:       r.toolPolicy,
-		ToolCallBatch:    r.toolBatch,
+		ToolPolicy:       cloneSpecified(r.toolPolicy, ToolPolicy.Clone),
+		ToolCallBatch:    cloneSpecified(r.toolBatch, ToolCallBatchPolicy.Clone),
 		Controls:         r.controls,
-		OutputFormat:     r.outputFormat,
-		Presence:         r.presence,
+		OutputFormat:     cloneSpecified(r.outputFormat, OutputFormat.Clone),
 	})
 }
 
@@ -179,8 +140,6 @@ func cloneResponseRefPointer(ref *ResponseRef) *ResponseRef {
 	return &cloned
 }
 
-// CloneCanonicalRequest protects the provider and app seams from accidental mutation
-// of canonical inputs after a request has been accepted.
-func CloneCanonicalRequest(req CanonicalRequest) CanonicalRequest {
-	return req.Clone()
-}
+// CloneCanonicalRequest protects provider and app seams from mutation after a
+// request has been accepted.
+func CloneCanonicalRequest(req CanonicalRequest) CanonicalRequest { return req.Clone() }

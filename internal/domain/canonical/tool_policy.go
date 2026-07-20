@@ -55,13 +55,12 @@ func normalizeToolPolicyMode(mode ToolPolicyMode) ToolPolicyMode {
 // optional tool use, required forces at least one tool call, and specific
 // forces one exact tool.
 type ToolPolicy struct {
-	Mode         ToolPolicyMode
-	Specific     *SemanticToolID
-	SpecificType string
+	Mode     ToolPolicyMode
+	Specific *ToolKey
 }
 
 // NewToolPolicy normalizes one semantic tool policy into canonical form.
-func NewToolPolicy(mode ToolPolicyMode, specific *SemanticToolID) ToolPolicy {
+func NewToolPolicy(mode ToolPolicyMode, specific *ToolKey) ToolPolicy {
 	policy := ToolPolicy{Mode: normalizeToolPolicyMode(mode)}
 	if specific != nil {
 		id := specific.Clone()
@@ -72,30 +71,18 @@ func NewToolPolicy(mode ToolPolicyMode, specific *SemanticToolID) ToolPolicy {
 }
 
 func (p ToolPolicy) Clone() ToolPolicy {
-	cloned := NewToolPolicy(p.Mode, p.Specific)
-	cloned.SpecificType = strings.ToLower(strings.TrimSpace(p.SpecificType)) // swobu:io-string source=domain
-	return cloned
+	return NewToolPolicy(p.Mode, p.Specific)
 }
 
 func (p ToolPolicy) IsZero() bool {
 	return p.Mode == ToolPolicyNone && p.Specific == nil
 }
 
-func (p ToolPolicy) SpecificID() (SemanticToolID, bool) {
+func (p ToolPolicy) SpecificID() (ToolKey, bool) {
 	if p.Specific == nil || p.Specific.IsZero() {
-		return SemanticToolID{}, false
+		return ToolKey{}, false
 	}
 	return p.Specific.Clone(), true
-}
-
-// SpecificToolType reports the requested wire tool type when a specific tool
-// selection was decoded from a protocol that preserves it.
-func (p ToolPolicy) SpecificToolType() (string, bool) {
-	trimmed := strings.ToLower(strings.TrimSpace(p.SpecificType)) // swobu:io-string source=domain
-	if trimmed == "" {
-		return "", false
-	}
-	return trimmed, true
 }
 
 func (p ToolPolicy) Validate() error {

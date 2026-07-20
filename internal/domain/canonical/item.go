@@ -1,163 +1,304 @@
 package canonical
 
-import "fmt"
-
-// ItemAuthor records who authored one canonical item so family-specific
-// envelopes can be reconstructed without guessing from neighboring shapes.
-type ItemAuthor string
-
-const (
-	ItemAuthorUser      ItemAuthor = "user"
-	ItemAuthorAssistant ItemAuthor = "assistant"
-	ItemAuthorTool      ItemAuthor = "tool"
+import (
+	"fmt"
+	"strings"
 )
 
-// ItemKind is the shared semantic atom used by canonical requests, canonical
-// outputs, and replay history.
+// ItemKind identifies the populated branch of one CanonicalItem. Kind is
+// derived from the private branch and is never independently mutable.
 type ItemKind string
 
 const (
-	ItemKindText       ItemKind = "text"
-	ItemKindToolUse    ItemKind = "tool_use"
+	ItemKindMessage    ItemKind = "message"
+	ItemKindToolCall   ItemKind = "tool_call"
 	ItemKindToolResult ItemKind = "tool_result"
 )
 
-// CanonicalItem is one ordered semantic unit in the canonical core.
-// Requests, outputs, and persisted replay state all reuse this shape so
-// history is not modeled as a second parallel object graph.
+// TurnOwner identifies the conversational side that owns an ordered item.
+// Instructions remain directives rather than conversational turns.
+type TurnOwner string
+
+const (
+	TurnOwnerUser      TurnOwner = "user"
+	TurnOwnerAssistant TurnOwner = "assistant"
+)
+
+// MessageRole identifies the semantic role of one message.
+type MessageRole string
+
+const (
+	MessageRoleUser      MessageRole = "user"
+	MessageRoleAssistant MessageRole = "assistant"
+	MessageRoleSystem    MessageRole = "system"
+	MessageRoleDeveloper MessageRole = "developer"
+)
+
+// CanonicalItem is one exclusive branch in the ordered exchange grammar.
+// Private concrete branches make contradictory item combinations
+// unrepresentable outside this package.
 type CanonicalItem struct {
-	author  ItemAuthor
-	itemID  string
-	payload itemPayload
+	message    *MessageItem
+	toolCall   *ToolCallItem
+	toolResult *ToolResultItem
 }
 
-// itemPayload is the sealed sum of exclusive canonical item arms.
-type itemPayload interface {
-	isItemPayload()
-	clone() itemPayload
+// MessageItem owns one preserved wire message boundary and its ordered
+// content-part sequence.
+type MessageItem struct {
+	role    MessageRole
+	content []MessagePart
 }
 
-type TextItemPayload struct{ Text string }
-type ToolUseItemPayload struct {
-	ToolType string
-	UseID    string
-	Name     string
-	Input    ToolArguments
-}
-type ToolResultItemPayload struct {
-	UseID string
-	Text  string
+// ToolCallID is the canonical correlation identity shared by one tool call and
+// its later result. It is not a durable item identity or stream-routing key.
+type ToolCallID struct {
+	value string
 }
 
-func (TextItemPayload) isItemPayload()       {}
-func (ToolUseItemPayload) isItemPayload()    {}
-func (ToolResultItemPayload) isItemPayload() {}
-
-func (p TextItemPayload) clone() itemPayload { return p }
-func (p ToolUseItemPayload) clone() itemPayload {
-	return ToolUseItemPayload{ToolType: p.ToolType, UseID: p.UseID, Name: p.Name, Input: NewToolArgumentsObject(p.Input.RawObject())}
-}
-func (p ToolResultItemPayload) clone() itemPayload { return p }
-
-func NewTextItem(author ItemAuthor, text string) CanonicalItem {
-	return CanonicalItem{author: author, payload: TextItemPayload{Text: text}}
-}
-
-func NewToolUseItem(author ItemAuthor, itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
-	return CanonicalItem{author: author, itemID: itemID, payload: ToolUseItemPayload{
-		ToolType: ToolTypeFunction, UseID: toolUseID, Name: name,
-		Input: NewToolArgumentsObject(input.RawObject()),
-	}}
-}
-
-func NewCustomToolUseItem(author ItemAuthor, itemID string, toolUseID string, name string, input ToolArguments) CanonicalItem {
-	item := NewToolUseItem(author, itemID, toolUseID, name, input)
-	payload := item.payload.(ToolUseItemPayload)
-	payload.ToolType = ToolTypeCustom
-	item.payload = payload
-	return item
-}
-
-func NewToolResultItem(author ItemAuthor, toolUseID string, text string) CanonicalItem {
-	return CanonicalItem{author: author, payload: ToolResultItemPayload{UseID: toolUseID, Text: text}}
-}
-
-func (i CanonicalItem) Clone() CanonicalItem {
-	cloned := CanonicalItem{author: i.author, itemID: i.itemID}
-	if i.payload != nil {
-		cloned.payload = i.payload.clone()
+// NewToolCallID validates one call-correlation value where it first becomes
+// canonical.
+func NewToolCallID(raw string) (ToolCallID, error) {
+	if raw == "" || strings.TrimSpace(raw) != raw { // swobu:io-string source=domain
+		return ToolCallID{}, fmt.Errorf("canonical tool call id is empty")
 	}
-	return cloned
+	return ToolCallID{value: raw}, nil
 }
 
-func (i CanonicalItem) Author() ItemAuthor { return i.author }
-func (i CanonicalItem) ItemID() string     { return i.itemID }
+// String returns the canonical correlation token.
+func (id ToolCallID) String() string { return id.value }
+
+// IsZero reports whether no validated token is present.
+func (id ToolCallID) IsZero() bool { return id.value == "" }
+
+// ToolCallItem is one ordered tool invocation. CallID correlates a later result
+// while Tool is sufficient to interpret and re-encode this historical call.
+type ToolCallItem struct {
+	callID ToolCallID
+	tool   ToolKey
+	input  ToolInput
+}
+
+// ToolResultItem is one ordered correlated result with ordered content.
+type ToolResultItem struct {
+	callID  ToolCallID
+	content []ToolResultPart
+	isError bool
+}
+
+// ToolInput is the closed object-or-raw-text input grammar for a tool call.
+type ToolInput struct {
+	object *JSONObject
+	text   *string
+}
+
+// NewMessageItem validates and constructs one message without coalescing or
+// sorting its content parts.
+func NewMessageItem(role MessageRole, content []MessagePart) (CanonicalItem, error) {
+	if !validMessageRole(role) {
+		return CanonicalItem{}, fmt.Errorf("canonical message role %q is invalid", role)
+	}
+	if role != MessageRoleUser {
+		for _, part := range content {
+			if part.Kind() == PartKindImage {
+				return CanonicalItem{}, fmt.Errorf("canonical image messages require user role")
+			}
+		}
+	}
+	cloned, err := cloneValidatedMessageParts(content)
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	message := MessageItem{role: role, content: cloned}
+	return CanonicalItem{message: &message}, nil
+}
+
+// NewToolCallItem validates and constructs one correlated semantic tool call.
+func NewToolCallItem(callID ToolCallID, tool ToolKey, input ToolInput) (CanonicalItem, error) {
+	if callID.IsZero() {
+		return CanonicalItem{}, fmt.Errorf("canonical tool call requires a call id")
+	}
+	if tool.IsZero() {
+		return CanonicalItem{}, fmt.Errorf("canonical tool call requires a valid tool key")
+	}
+	if !input.valid() {
+		return CanonicalItem{}, fmt.Errorf("canonical tool call requires exactly one input branch")
+	}
+	switch tool.Kind() {
+	case ToolKindFunction:
+		if _, ok := input.Object(); !ok {
+			return CanonicalItem{}, fmt.Errorf("canonical function call requires object input")
+		}
+	case ToolKindCustom:
+		if _, ok := input.Text(); !ok {
+			return CanonicalItem{}, fmt.Errorf("canonical custom tool call requires text input")
+		}
+	default:
+		return CanonicalItem{}, fmt.Errorf("canonical tool kind %q is not callable", tool.Kind())
+	}
+	call := ToolCallItem{callID: callID, tool: tool.Clone(), input: input.Clone()}
+	return CanonicalItem{toolCall: &call}, nil
+}
+
+// NewToolResultItem validates and constructs one correlated result.
+func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool) (CanonicalItem, error) {
+	if callID.IsZero() {
+		return CanonicalItem{}, fmt.Errorf("canonical tool result requires a call id")
+	}
+	cloned, err := cloneValidatedToolResultParts(content)
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	result := ToolResultItem{callID: callID, content: cloned, isError: isError}
+	return CanonicalItem{toolResult: &result}, nil
+}
+
+// NewJSONObjectToolInput constructs an object-semantic tool input.
+func NewJSONObjectToolInput(object JSONObject) ToolInput {
+	cloned := object.Clone()
+	return ToolInput{object: &cloned}
+}
+
+// NewTextToolInput constructs a raw-text tool input, including empty text.
+func NewTextToolInput(text string) ToolInput {
+	cloned := text
+	return ToolInput{text: &cloned}
+}
+
+// Kind returns the populated branch kind, or the zero kind for an invalid
+// package-local zero value.
 func (i CanonicalItem) Kind() ItemKind {
-	switch i.payload.(type) {
-	case TextItemPayload:
-		return ItemKindText
-	case ToolUseItemPayload:
-		return ItemKindToolUse
-	case ToolResultItemPayload:
+	switch {
+	case i.message != nil && i.toolCall == nil && i.toolResult == nil:
+		return ItemKindMessage
+	case i.message == nil && i.toolCall != nil && i.toolResult == nil:
+		return ItemKindToolCall
+	case i.message == nil && i.toolCall == nil && i.toolResult != nil:
 		return ItemKindToolResult
 	default:
 		return ""
 	}
 }
-func (i CanonicalItem) TextItem() (TextItemPayload, bool) {
-	payload, ok := i.payload.(TextItemPayload)
-	return payload, ok
-}
-func (i CanonicalItem) ToolUse() (ToolUseItemPayload, bool) {
-	payload, ok := i.payload.(ToolUseItemPayload)
-	if !ok {
-		return ToolUseItemPayload{}, false
+
+// Owner returns the turn owner used by protocols that group ordered items
+// into role-bearing messages.
+func (i CanonicalItem) Owner() TurnOwner {
+	switch i.Kind() {
+	case ItemKindMessage:
+		message, _ := i.Message()
+		switch message.Role() {
+		case MessageRoleUser:
+			return TurnOwnerUser
+		case MessageRoleAssistant:
+			return TurnOwnerAssistant
+		}
+	case ItemKindToolCall:
+		return TurnOwnerAssistant
+	case ItemKindToolResult:
+		return TurnOwnerUser
 	}
-	payload.Input = NewToolArgumentsObject(payload.Input.RawObject())
-	return payload, true
-}
-func (i CanonicalItem) ToolResult() (ToolResultItemPayload, bool) {
-	payload, ok := i.payload.(ToolResultItemPayload)
-	return payload, ok
+	return ""
 }
 
-func itemWithAuthor(i CanonicalItem, author ItemAuthor) CanonicalItem { i.author = author; return i }
-func itemWithID(i CanonicalItem, itemID string) CanonicalItem         { i.itemID = itemID; return i }
-func appendTextItemDelta(i CanonicalItem, delta string) (CanonicalItem, error) {
-	payload, ok := i.payload.(TextItemPayload)
-	if !ok {
-		return CanonicalItem{}, fmt.Errorf("text delta requires text item, got %q", i.Kind())
+// Message returns an independent message value when this is a message item.
+func (i CanonicalItem) Message() (MessageItem, bool) {
+	if i.Kind() != ItemKindMessage {
+		return MessageItem{}, false
 	}
-	payload.Text += delta
-	i.payload = payload
-	return i, nil
+	return i.message.Clone(), true
 }
-func appendToolResultTextDelta(i CanonicalItem, delta string) (CanonicalItem, error) {
-	payload, ok := i.payload.(ToolResultItemPayload)
-	if !ok {
-		return CanonicalItem{}, fmt.Errorf("tool-result text delta requires tool-result item, got %q", i.Kind())
+
+// ToolCall returns an independent tool-call value when populated.
+func (i CanonicalItem) ToolCall() (ToolCallItem, bool) {
+	if i.Kind() != ItemKindToolCall {
+		return ToolCallItem{}, false
 	}
-	payload.Text += delta
-	i.payload = payload
-	return i, nil
+	return i.toolCall.Clone(), true
 }
-func withToolUseInput(i CanonicalItem, input ToolArguments) (CanonicalItem, error) {
-	payload, ok := i.payload.(ToolUseItemPayload)
-	if !ok {
-		return CanonicalItem{}, fmt.Errorf("tool input requires tool-use item, got %q", i.Kind())
+
+// ToolResult returns an independent tool-result value when populated.
+func (i CanonicalItem) ToolResult() (ToolResultItem, bool) {
+	if i.Kind() != ItemKindToolResult {
+		return ToolResultItem{}, false
 	}
-	payload.Input = NewToolArgumentsObject(input.RawObject())
-	i.payload = payload
-	return i, nil
+	return i.toolResult.Clone(), true
 }
-func withToolUseType(i CanonicalItem, toolType string) (CanonicalItem, error) {
-	payload, ok := i.payload.(ToolUseItemPayload)
-	if !ok {
-		return CanonicalItem{}, fmt.Errorf("tool type requires tool-use item, got %q", i.Kind())
+
+// Clone returns a deeply independent item.
+func (i CanonicalItem) Clone() CanonicalItem {
+	cloned := CanonicalItem{}
+	if i.message != nil {
+		value := i.message.Clone()
+		cloned.message = &value
 	}
-	payload.ToolType = toolType
-	i.payload = payload
-	return i, nil
+	if i.toolCall != nil {
+		value := i.toolCall.Clone()
+		cloned.toolCall = &value
+	}
+	if i.toolResult != nil {
+		value := i.toolResult.Clone()
+		cloned.toolResult = &value
+	}
+	return cloned
+}
+
+func (m MessageItem) Role() MessageRole      { return m.role }
+func (m MessageItem) Content() []MessagePart { return cloneMessageParts(m.content) }
+func (m MessageItem) Clone() MessageItem {
+	return MessageItem{role: m.role, content: cloneMessageParts(m.content)}
+}
+
+func (c ToolCallItem) CallID() ToolCallID { return c.callID }
+func (c ToolCallItem) Tool() ToolKey      { return c.tool.Clone() }
+func (c ToolCallItem) Input() ToolInput   { return c.input.Clone() }
+func (c ToolCallItem) Clone() ToolCallItem {
+	return ToolCallItem{callID: c.callID, tool: c.tool.Clone(), input: c.input.Clone()}
+}
+func (r ToolResultItem) CallID() ToolCallID        { return r.callID }
+func (r ToolResultItem) Content() []ToolResultPart { return cloneToolResultParts(r.content) }
+func (r ToolResultItem) IsError() bool             { return r.isError }
+func (r ToolResultItem) Clone() ToolResultItem {
+	return ToolResultItem{callID: r.callID, content: cloneToolResultParts(r.content), isError: r.isError}
+}
+
+// Object returns an independent object input when populated.
+func (i ToolInput) Object() (JSONObject, bool) {
+	if i.object == nil || i.text != nil {
+		return JSONObject{}, false
+	}
+	return i.object.Clone(), true
+}
+
+// Text returns raw text input when populated.
+func (i ToolInput) Text() (string, bool) {
+	if i.text == nil || i.object != nil {
+		return "", false
+	}
+	return *i.text, true
+}
+
+// Clone returns an independent tool input.
+func (i ToolInput) Clone() ToolInput {
+	if i.object != nil && i.text == nil {
+		return NewJSONObjectToolInput(*i.object)
+	}
+	if i.text != nil && i.object == nil {
+		return NewTextToolInput(*i.text)
+	}
+	return ToolInput{}
+}
+
+func (i ToolInput) valid() bool {
+	return (i.object == nil) != (i.text == nil)
+}
+
+func validMessageRole(role MessageRole) bool {
+	switch role {
+	case MessageRoleUser, MessageRoleAssistant, MessageRoleSystem, MessageRoleDeveloper:
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneCanonicalItems(items []CanonicalItem) []CanonicalItem {
@@ -165,8 +306,8 @@ func cloneCanonicalItems(items []CanonicalItem) []CanonicalItem {
 		return nil
 	}
 	cloned := make([]CanonicalItem, len(items))
-	for i := range items {
-		cloned[i] = items[i].Clone()
+	for index := range items {
+		cloned[index] = items[index].Clone()
 	}
 	return cloned
 }

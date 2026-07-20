@@ -19,17 +19,6 @@ func TestOutputFormat_JSONSchemaMetadataRoundTrips(t *testing.T) {
 		t.Fatalf("Clone() = %#v, want json schema output format", clone)
 	}
 
-	raw, err := encodeOutputFormatMetadata(format)
-	if err != nil {
-		t.Fatalf("encodeOutputFormatMetadata returned error: %v", err)
-	}
-	got, err := decodeOutputFormatMetadata(raw)
-	if err != nil {
-		t.Fatalf("decodeOutputFormatMetadata returned error: %v", err)
-	}
-	if got.Kind != OutputFormatJSONSchema || got.Name != "reply_shape" || got.Description != "structured reply" || got.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || !got.Strict {
-		t.Fatalf("decoded output format = %#v, want json schema output format", got)
-	}
 }
 
 func TestOutputFormat_RejectsUnsupportedSchemaKeywords(t *testing.T) {

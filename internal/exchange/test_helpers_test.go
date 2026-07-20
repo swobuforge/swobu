@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -164,6 +165,7 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 		},
 		ReplayStore:      replay.NewMemoryStore(),
 		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
+		Policy:           DefaultWorkspacePolicy(),
 	}
 }
 
@@ -188,11 +190,19 @@ func (r Runner) WithSwobuResponseIDs(gen replay.SwobuResponseIDGenerator) Runner
 
 func testCanonicalRequest(model string) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: model,
+		Model: canonical.Specify(model),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			testMessage(canonical.MessageRoleUser, "hi"),
 		},
 	})
+}
+
+func testMessage(author canonical.MessageRole, text string) canonical.CanonicalItem {
+	item, err := canonical.NewMessageItem(author, []canonical.MessagePart{canonical.NewTextMessagePart(text)})
+	if err != nil {
+		panic(err)
+	}
+	return item
 }
 
 type testExecutionRuntime struct {
@@ -226,7 +236,8 @@ func (testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat
 	return result.Document, result.Decisions, err
 }
 
-func (testBackendCodec) Decode(ctx context.Context, exchangeID string, ingress provider.Ingress) (provider.DecodedResponse, error) {
+func (testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	exchangeID := request.ExchangeID
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		result, err := (testProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
@@ -266,26 +277,26 @@ func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDec
 					if msg, ok := m.(map[string]any); ok {
 						content, _ := msg["content"].(string)
 						role, _ := msg["role"].(string)
-						var author canonical.ItemAuthor
+						var author canonical.MessageRole
 						switch role {
 						case "assistant":
-							author = canonical.ItemAuthorAssistant
+							author = canonical.MessageRoleAssistant
 						default:
-							author = canonical.ItemAuthorUser
+							author = canonical.MessageRoleUser
 						}
-						items = append(items, canonical.NewTextItem(author, content))
+						items = append(items, testMessage(author, content))
 					}
 				}
 			}
 		}
 	}
 	if len(items) == 0 {
-		items = []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}
+		items = []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")}
 	}
 	return wire.ClientDecodeResult{
 		Request: wire.ClientRequestResult{
 			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model:            model,
+				Model:            canonical.Specify(model),
 				Items:            items,
 				PreviousResponse: previousResponse,
 			}),
@@ -294,16 +305,18 @@ func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDec
 	}, nil
 }
 
-func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
+func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	text := ""
 	if textual, ok := any(output).(interface{ Text() string }); ok {
 		text = textual.Text()
 	}
 	if text == "" {
 		for _, item := range output.Items() {
-			if item.Kind() == canonical.ItemKindText {
-				if textItem, ok := item.TextItem(); ok {
-					text += textItem.Text
+			if message, ok := item.Message(); ok {
+				for _, part := range message.Content() {
+					if value, ok := part.Text(); ok {
+						text += value.Text()
+					}
 				}
 			}
 		}
@@ -360,7 +373,7 @@ func (testProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, d
 
 func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 	now := time.Now().UTC()
-	// Produce a completed response envelope with typed response identity.
+	item := testMessage(canonical.MessageRoleAssistant, "ok")
 	events := []canonical.Event{
 		{
 			ExchangeID: exchangeID,
@@ -368,48 +381,55 @@ func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 			Time:       now,
 			Kind:       canonical.EventEnvelopeStart,
 			EnvID:      "r1",
-			Payload: canonical.EnvelopeStartPayload{
-				Kind:     canonical.EnvResponse,
-				Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(exchangeID + "_result")},
-			},
+			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: "m"},
 		},
 		{
 			ExchangeID: exchangeID,
 			Seq:        2,
 			Time:       now,
-			Kind:       canonical.EventMetadata,
+			Kind:       canonical.EventResponseIdentity,
 			EnvID:      "r1",
-			Payload:    canonical.MetadataPayload{Values: map[string]string{"model": "m"}},
+			Payload:    canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(exchangeID + "_result")}},
 		},
 		{
 			ExchangeID: exchangeID,
 			Seq:        3,
 			Time:       now,
-			Kind:       canonical.EventEnvelopeStart,
-			EnvID:      "m1",
-			ParentID:   "r1",
-			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant},
+			Kind:       canonical.EventItemStart,
+			Payload:    canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonicaltest.MustMessageStart(canonical.MessageRoleAssistant)},
 		},
 		{
 			ExchangeID: exchangeID,
 			Seq:        4,
 			Time:       now,
-			Kind:       canonical.EventTextDelta,
-			EnvID:      "m1",
-			Payload:    canonical.TextDeltaPayload{Text: "ok"},
+			Kind:       canonical.EventContentStart,
+			Payload:    canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0, Part: 0}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}},
 		},
 		{
 			ExchangeID: exchangeID,
 			Seq:        5,
 			Time:       now,
-			Kind:       canonical.EventEnvelopeEnd,
-			EnvID:      "m1",
-			ParentID:   "r1",
-			Payload:    canonical.EnvelopeEndPayload{Kind: canonical.EnvMessage, Status: canonical.EnvelopeStatusCompleted},
+			Kind:       canonical.EventTextDelta,
+			Payload:    canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0, Part: 0}, Payload: canonical.TextDeltaPayload{Text: "ok"}},
 		},
 		{
 			ExchangeID: exchangeID,
 			Seq:        6,
+			Time:       now,
+			Kind:       canonical.EventItemCompleted,
+			Payload:    canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: item}},
+		},
+		{
+			ExchangeID: exchangeID,
+			Seq:        7,
+			Time:       now,
+			Kind:       canonical.EventFinish,
+			EnvID:      "r1",
+			Payload:    canonical.FinishPayload{Reason: "stop"},
+		},
+		{
+			ExchangeID: exchangeID,
+			Seq:        8,
 			Time:       now,
 			Kind:       canonical.EventEnvelopeEnd,
 			EnvID:      "r1",

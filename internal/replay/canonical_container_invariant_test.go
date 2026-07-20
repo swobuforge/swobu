@@ -23,8 +23,8 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Record", reflect.TypeOf(Record{}), []string{"Request", "Response", "CreatedAt", "ExpiresAt"})
-	assertFields("Prepared", reflect.TypeOf(Prepared{}), []string{"Semantic", "Delta"})
+	assertFields("Record", reflect.TypeOf(Record{}), []string{"Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
+	assertFields("Prepared", reflect.TypeOf(Prepared{}), []string{"Semantic", "Delta", "ResolvedMedia"})
 }
 
 func TestProductionHasNoSupersededContinuationFossils(t *testing.T) {

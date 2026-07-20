@@ -56,11 +56,6 @@ type responsesInputItemDTO struct {
 	Output    json.RawMessage `json:"output"`
 }
 
-type responsesOutputTextPartDTO struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
 type responsesResponseDTO struct {
 	ID                string                         `json:"id"`
 	Object            string                         `json:"object"`

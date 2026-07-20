@@ -10,7 +10,7 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	message, err := chatMessageFromOutput(output)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
@@ -22,7 +22,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Choices: []chatCompletionsChoiceDTO{{
 			Index:        0,
 			Message:      message,
-			FinishReason: sse.DefaultFinishReason(output.FinishReason(), "stop"),
+			FinishReason: sse.DefaultFinishReason(output.CompletionReason(), "stop"),
 		}},
 		Usage: chatUsageFromCanonical(output.Usage()),
 	})

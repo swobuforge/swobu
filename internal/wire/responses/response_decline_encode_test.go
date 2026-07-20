@@ -9,12 +9,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestResponseDocumentEncoder_ContentFilterLowersToIncomplete(t *testing.T) {
 	t.Parallel()
 
-	output := canonical.NewConversationOutput("resp_1", "m", nil, "content_filter")
+	output := canonicaltest.Response(t, "resp_1", "m", nil, "content_filter")
 	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
 	if err != nil {
 		t.Fatalf("EncodeResponseDocument returned error: %v", err)

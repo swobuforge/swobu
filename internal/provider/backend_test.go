@@ -24,7 +24,7 @@ func TestProviderContractsHaveNoContinuationSidecar(t *testing.T) {
 
 func TestRequestDeliveryIsProviderFacingWireIntent(t *testing.T) {
 	req := Request{
-		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: "m"}),
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m")}),
 		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	}
 	if req.Delivery != delivery.StreamingDelivery(delivery.FramingSSE) {

@@ -3,7 +3,6 @@ package canonical
 import (
 	"context"
 	"fmt"
-	"io"
 )
 
 // ClosedEnvelope is a fully observed envelope and all descendant events needed
@@ -22,334 +21,141 @@ type envelopeOpenProjection struct {
 
 // ReadClosedEnvelope consumes events until the requested envelope kind closes.
 // It returns io.EOF when no such closed envelope exists in the stream.
-func ReadClosedEnvelope(ctx context.Context, r ResponseStream, kind EnvelopeKind) (*ClosedEnvelope, error) {
+func ReadClosedEnvelope(ctx context.Context, reader ResponseStream, kind EnvelopeKind) (*ClosedEnvelope, error) {
 	open := map[EnvelopeID]*envelopeOpenProjection{}
-	appendToAncestors := func(id EnvelopeID, ev Event) {
-		current := id
-		for current != "" {
+	var openResponse EnvelopeID
+	appendToAncestors := func(id EnvelopeID, event Event) {
+		for current := id; current != ""; {
 			state, ok := open[current]
 			if !ok {
 				break
 			}
-			state.evs = append(state.evs, ev)
+			state.evs = append(state.evs, event)
 			current = state.parent
 		}
 	}
 	for {
-		ev, err := r.Next(ctx)
-		if err == io.EOF {
-			return nil, io.EOF
-		}
+		event, err := reader.Next(ctx)
 		if err != nil {
 			return nil, err
 		}
-		switch ev.Kind {
+		switch event.Kind {
 		case EventEnvelopeStart:
-			payload, ok := ev.Payload.(EnvelopeStartPayload)
+			payload, ok := event.Payload.(EnvelopeStartPayload)
 			if !ok {
-				return nil, fmt.Errorf("envelope.start payload type %T is unsupported", ev.Payload)
+				return nil, fmt.Errorf("envelope.start payload type %T is unsupported", event.Payload)
 			}
-			open[ev.EnvID] = &envelopeOpenProjection{kind: payload.Kind, parent: ev.ParentID, evs: nil}
-			appendToAncestors(ev.EnvID, ev)
+			if _, exists := open[event.EnvID]; exists {
+				return nil, fmt.Errorf("envelope %q is already open", event.EnvID)
+			}
+			if payload.Kind == EnvResponse {
+				if openResponse != "" {
+					return nil, fmt.Errorf("response envelope %q opened while response %q is still open", event.EnvID, openResponse)
+				}
+				openResponse = event.EnvID
+			}
+			open[event.EnvID] = &envelopeOpenProjection{kind: payload.Kind, parent: event.ParentID}
+			appendToAncestors(event.EnvID, event)
 		case EventEnvelopeEnd:
-			payload, ok := ev.Payload.(EnvelopeEndPayload)
+			payload, ok := event.Payload.(EnvelopeEndPayload)
 			if !ok {
-				return nil, fmt.Errorf("envelope.end payload type %T is unsupported", ev.Payload)
+				return nil, fmt.Errorf("envelope.end payload type %T is unsupported", event.Payload)
 			}
-			state, ok := open[ev.EnvID]
+			state, ok := open[event.EnvID]
 			if !ok {
-				return nil, fmt.Errorf("close for unknown envelope %q", ev.EnvID)
+				return nil, fmt.Errorf("close for unknown envelope %q", event.EnvID)
 			}
-			appendToAncestors(ev.EnvID, ev)
-			delete(open, ev.EnvID)
+			appendToAncestors(event.EnvID, event)
+			delete(open, event.EnvID)
+			if payload.Kind == EnvResponse {
+				if openResponse != event.EnvID {
+					return nil, fmt.Errorf("response envelope %q does not own the open response stream", event.EnvID)
+				}
+				openResponse = ""
+			}
 			if payload.Kind == kind {
-				return &ClosedEnvelope{ID: ev.EnvID, Kind: kind, Events: state.evs}, nil
+				return &ClosedEnvelope{ID: event.EnvID, Kind: kind, Events: state.evs}, nil
 			}
 		default:
-			appendToAncestors(ev.EnvID, ev)
+			if _, itemScoped := event.Payload.(ItemEvent); itemScoped {
+				if openResponse == "" {
+					return nil, fmt.Errorf("%s item event has no open response envelope", event.Kind)
+				}
+				open[openResponse].evs = append(open[openResponse].evs, event)
+			} else {
+				appendToAncestors(event.EnvID, event)
+			}
 		}
 	}
 }
 
-// ProjectResponse materializes a closed response envelope into canonical output.
-// Events remain source of truth; this is a derived view.
-func (e *ClosedEnvelope) ProjectResponse() (*CanonicalOutputProjection, error) {
+// ProjectResponse materializes a closed response from completed typed item
+// checkpoints. Start and delta events remain delivery evidence and never
+// reconstruct durable items.
+func (e *ClosedEnvelope) ProjectResponse() (*CanonicalResponse, error) {
 	if e == nil || e.Kind != EnvResponse {
 		return nil, fmt.Errorf("closed envelope is not a response")
 	}
-	itemsByID := map[EnvelopeID]*CanonicalItem{}
-	toolArgsByID := map[EnvelopeID]string{}
-	orderedIDs := make([]EnvelopeID, 0)
+	assembler := newItemStreamAssembler()
 	usage := NewUnknownTokenUsage()
 	finish := ""
 	response := ResponseRef{}
 	model := ""
-
-	for _, ev := range e.Events {
-		if err := responseProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &usage, &finish, &response, &model); err != nil {
-			return nil, err
-		}
-	}
-	items := make([]CanonicalItem, 0, len(orderedIDs))
-	for _, id := range orderedIDs {
-		item := itemsByID[id]
-		if item == nil {
-			continue
-		}
-		if item.Kind() == ItemKindToolUse {
-			if raw := toolArgsByID[id]; raw != "" {
-				updated, err := withToolUseInput(*item, NewToolArgumentsObject(raw))
-				if err != nil {
-					return nil, err
-				}
-				item = &updated
+	for _, event := range e.Events {
+		switch event.Kind {
+		case EventEnvelopeStart:
+			payload, ok := event.Payload.(EnvelopeStartPayload)
+			if !ok {
+				return nil, fmt.Errorf("envelope.start payload type %T is unsupported", event.Payload)
 			}
-		}
-		items = append(items, item.Clone())
-	}
-	out := newConversationOutputWithResponse(response, model, items, finish, usage)
-	return &out, nil
-}
-
-func responseProjectionApplyEvent(
-	ev Event,
-	itemsByID map[EnvelopeID]*CanonicalItem,
-	toolArgsByID map[EnvelopeID]string,
-	orderedIDs *[]EnvelopeID,
-	usage *TokenUsage,
-	finish *string,
-	response *ResponseRef,
-	model *string,
-) error {
-	switch ev.Kind {
-	case EventEnvelopeStart:
-		return responseProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs, response)
-	case EventTextDelta, EventArgsDelta:
-		return projectionApplyItemDelta(ev, itemsByID, toolArgsByID)
-	case EventUsage:
-		payload, ok := ev.Payload.(UsagePayload)
-		if ok {
-			*usage = payload.Usage
-		}
-	case EventFinish:
-		payload, _ := ev.Payload.(FinishPayload)
-		*finish = payload.Reason
-	case EventMetadata:
-		payload, _ := ev.Payload.(MetadataPayload)
-		if payload.Values != nil {
-			if payload.Values["model"] != "" {
-				*model = payload.Values["model"]
+			if payload.Kind == EnvResponse {
+				model = payload.Model
 			}
-		}
-	default:
-		// ignored by response projection
-	}
-	return nil
-}
-
-func responseProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID, response *ResponseRef) error {
-	payload, ok := ev.Payload.(EnvelopeStartPayload)
-	if !ok {
-		return fmt.Errorf("envelope start payload type %T is unsupported", ev.Payload)
-	}
-	if payload.Kind == EnvResponse {
-		*response = payload.Response.Clone()
-		return nil
-	}
-	if payload.Kind == EnvMessage {
-		item := NewTextOutputItem(string(ev.EnvID), "")
-		item = itemWithAuthor(item, payload.Role)
-		itemsByID[ev.EnvID] = &item
-		*orderedIDs = append(*orderedIDs, ev.EnvID)
-		return nil
-	}
-	if payload.Kind == EnvToolCall {
-		toolUseID := payload.ToolUseID
-		if toolUseID == "" {
-			toolUseID = string(ev.EnvID)
-		}
-		item := NewToolUseOutputItem(string(ev.EnvID), toolUseID, payload.Name, EmptyToolArguments())
-		item, err := withToolUseType(item, payload.ToolType)
-		if err != nil {
-			return err
-		}
-		item = itemWithAuthor(item, ItemAuthorAssistant)
-		itemsByID[ev.EnvID] = &item
-		*orderedIDs = append(*orderedIDs, ev.EnvID)
-	}
-	return nil
-}
-
-// ProjectRequest materializes a closed request envelope into a canonical
-// request snapshot while preserving semantic kind hints.
-func (e *ClosedEnvelope) ProjectRequest() (CanonicalRequest, error) {
-	if e == nil || e.Kind != EnvRequest {
-		return CanonicalRequest{}, fmt.Errorf("closed envelope is not a request")
-	}
-	var (
-		model            string
-		toolsRaw         string
-		toolPolicy       ToolPolicy
-		toolCallBatchRaw string
-		toolCallBatch    ToolCallBatchPolicy
-		controlsRaw      string
-		outputFormatRaw  string
-		itemsByID        = map[EnvelopeID]*CanonicalItem{}
-		toolArgsByID     = map[EnvelopeID]string{}
-		orderedIDs       = make([]EnvelopeID, 0)
-	)
-	for _, ev := range e.Events {
-		if err := requestProjectionApplyEvent(ev, itemsByID, toolArgsByID, &orderedIDs, &model, &toolsRaw, &toolPolicy, &toolCallBatchRaw, &controlsRaw, &outputFormatRaw); err != nil {
-			return CanonicalRequest{}, err
-		}
-	}
-	items := make([]CanonicalItem, 0, len(orderedIDs))
-	for _, id := range orderedIDs {
-		item := itemsByID[id]
-		if item == nil {
-			continue
-		}
-		if raw := toolArgsByID[id]; raw != "" {
-			updated, err := withToolUseInput(*item, NewToolArgumentsObject(raw))
-			if err != nil {
-				return CanonicalRequest{}, err
+		case EventResponseIdentity:
+			payload, ok := event.Payload.(ResponseIdentityPayload)
+			if !ok {
+				return nil, fmt.Errorf("response.identity payload type %T is unsupported", event.Payload)
 			}
-			item = &updated
-		}
-		items = append(items, item.Clone())
-	}
-	tools, err := decodeRequestToolDeclsMetadata(toolsRaw)
-	if err != nil {
-		return CanonicalRequest{}, err
-	}
-	toolCallBatch, err = decodeToolCallBatchMetadata(toolCallBatchRaw)
-	if err != nil {
-		return CanonicalRequest{}, err
-	}
-	controls, err := decodeGenerationControlsMetadata(controlsRaw)
-	if err != nil {
-		return CanonicalRequest{}, err
-	}
-	outputFormat, err := decodeOutputFormatMetadata(outputFormatRaw)
-	if err != nil {
-		return CanonicalRequest{}, err
-	}
-	return NewCanonicalRequest(RequestParams{Model: model, Items: items, Tools: tools, ToolPolicy: toolPolicy, ToolCallBatch: toolCallBatch, Controls: controls, OutputFormat: outputFormat}), nil
-}
-
-func requestProjectionApplyEvent(
-	ev Event,
-	itemsByID map[EnvelopeID]*CanonicalItem,
-	toolArgsByID map[EnvelopeID]string,
-	orderedIDs *[]EnvelopeID,
-	model *string,
-	toolsRaw *string,
-	toolPolicy *ToolPolicy,
-	toolCallBatchRaw *string,
-	controlsRaw *string,
-	outputFormatRaw *string,
-) error {
-	switch ev.Kind {
-	case EventMetadata:
-		payload, _ := ev.Payload.(MetadataPayload)
-		if payload.Values != nil {
-			if payload.Values["model"] != "" {
-				*model = payload.Values["model"]
+			response = payload.Response.Clone()
+		case EventItemStart, EventContentStart, EventTextDelta, EventArgsDelta, EventItemCompleted:
+			itemEvent, ok := event.Payload.(ItemEvent)
+			if !ok {
+				return nil, fmt.Errorf("%s payload type %T is unsupported", event.Kind, event.Payload)
 			}
-			if payload.Values["tools"] != "" {
-				*toolsRaw = payload.Values["tools"]
+			if err := assembler.apply(event.Kind, itemEvent); err != nil {
+				return nil, err
 			}
-			if payload.Values["tool_policy"] != "" {
-				policy, err := decodeToolPolicyMetadata(payload.Values["tool_policy"])
-				if err != nil {
-					return err
-				}
-				*toolPolicy = policy
+		case EventUsage:
+			payload, ok := event.Payload.(UsagePayload)
+			if !ok {
+				return nil, fmt.Errorf("usage payload type %T is unsupported", event.Payload)
 			}
-			if payload.Values["tool_call_batch"] != "" {
-				*toolCallBatchRaw = payload.Values["tool_call_batch"]
+			usage = payload.Usage
+		case EventFinish:
+			payload, ok := event.Payload.(FinishPayload)
+			if !ok {
+				return nil, fmt.Errorf("finish payload type %T is unsupported", event.Payload)
 			}
-			if payload.Values["generation_controls"] != "" {
-				*controlsRaw = payload.Values["generation_controls"]
+			finish = payload.Reason
+		case EventError:
+			payload, ok := event.Payload.(ErrorPayload)
+			if !ok {
+				return nil, fmt.Errorf("error payload type %T is unsupported", event.Payload)
 			}
-			if payload.Values["output_format"] != "" {
-				*outputFormatRaw = payload.Values["output_format"]
-			}
-		}
-	case EventEnvelopeStart:
-		return requestProjectionHandleEnvelopeStart(ev, itemsByID, orderedIDs)
-	case EventTextDelta, EventArgsDelta:
-		return projectionApplyItemDelta(ev, itemsByID, toolArgsByID)
-	default:
-		// ignored by request projection
-	}
-	return nil
-}
-
-func projectionApplyItemDelta(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, toolArgsByID map[EnvelopeID]string) error {
-	item, ok := itemsByID[ev.EnvID]
-	if !ok {
-		return fmt.Errorf("%s targets unknown canonical item %q", ev.Kind, ev.EnvID)
-	}
-	switch ev.Kind {
-	case EventTextDelta:
-		payload, ok := ev.Payload.(TextDeltaPayload)
-		if !ok {
-			return fmt.Errorf("text delta payload type %T is unsupported", ev.Payload)
-		}
-		var updated CanonicalItem
-		var err error
-		switch item.Kind() {
-		case ItemKindText:
-			updated, err = appendTextItemDelta(*item, payload.Text)
-		case ItemKindToolResult:
-			updated, err = appendToolResultTextDelta(*item, payload.Text)
+			return nil, fmt.Errorf("canonical response stream error %s: %s", payload.Code, payload.Message)
+		case EventEnvelopeEnd:
+			// Progressive delivery evidence is intentionally not projection state.
 		default:
-			err = fmt.Errorf("text delta cannot target %q item", item.Kind())
+			return nil, fmt.Errorf("response projection event kind %q is unsupported", event.Kind)
 		}
-		if err != nil {
-			return err
-		}
-		itemsByID[ev.EnvID] = &updated
-	case EventArgsDelta:
-		payload, ok := ev.Payload.(ArgsDeltaPayload)
-		if !ok {
-			return fmt.Errorf("args delta payload type %T is unsupported", ev.Payload)
-		}
-		if item.Kind() != ItemKindToolUse {
-			return fmt.Errorf("args delta cannot target %q item", item.Kind())
-		}
-		toolArgsByID[ev.EnvID] += payload.Args
 	}
-	return nil
-}
-
-func requestProjectionHandleEnvelopeStart(ev Event, itemsByID map[EnvelopeID]*CanonicalItem, orderedIDs *[]EnvelopeID) error {
-	payload, ok := ev.Payload.(EnvelopeStartPayload)
-	if !ok {
-		return fmt.Errorf("envelope start payload type %T is unsupported", ev.Payload)
+	items, err := assembler.completedItems()
+	if err != nil {
+		return nil, err
 	}
-	if payload.Kind == EnvMessage {
-		item := NewTextItem(payload.Role, "")
-		itemsByID[ev.EnvID] = &item
-		*orderedIDs = append(*orderedIDs, ev.EnvID)
-		return nil
+	output, err := NewCanonicalResponse(response, model, items, finish, usage)
+	if err != nil {
+		return nil, err
 	}
-	if payload.Kind == EnvToolCall {
-		item := NewToolUseItem(payload.Role, string(ev.EnvID), payload.ToolUseID, payload.Name, EmptyToolArguments())
-		var err error
-		item, err = withToolUseType(item, payload.ToolType)
-		if err != nil {
-			return err
-		}
-		itemsByID[ev.EnvID] = &item
-		*orderedIDs = append(*orderedIDs, ev.EnvID)
-		return nil
-	}
-	if payload.Kind == EnvToolResult {
-		item := NewToolResultItem(payload.Role, payload.ToolUseID, "")
-		itemsByID[ev.EnvID] = &item
-		*orderedIDs = append(*orderedIDs, ev.EnvID)
-	}
-	return nil
+	return &output, nil
 }

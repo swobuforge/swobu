@@ -4,7 +4,6 @@ package responses
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -70,7 +69,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
 	var dto responseEnvelope
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("responses output is invalid JSON")
@@ -93,7 +92,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
 		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
 	} else {
-		items, err := decodeOutputItems(ctx, dto.Output, dto.OutputText, exchangeID, sink)
+		items, err := decodeOutputItems(ctx, request, dto.Output, dto.OutputText, exchangeID, sink)
 		if err != nil {
 			return nil, err
 		}
@@ -120,8 +119,8 @@ func emitNativeResponseIDCaptured(ctx context.Context, sink compat.Sink, exchang
 	}})
 }
 
-func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink compat.Sink) ([]canonical.OutputItem, error) {
-	output := make([]canonical.OutputItem, 0, len(items))
+func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+	output := make([]canonical.CanonicalItem, 0, len(items))
 	for _, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
 		switch itemType {
@@ -130,11 +129,12 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 			if err != nil {
 				return nil, canonical.InternalError("responses message content is invalid")
 			}
-			err = openaiwire.WalkContentParts(parts, func(idx int, part openaiwire.ContentPartItem) error {
+			content := make([]canonical.MessagePart, 0, len(parts))
+			err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
 				partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 				switch partType {
 				case "text", "output_text", "input_text":
-					output = append(output, canonical.NewTextOutputItem(fmt.Sprintf("text_%d", len(output)+idx), part.Text))
+					content = append(content, canonical.NewTextMessagePart(part.Text))
 				default:
 					return canonical.UnsupportedOperation("responses output item content part type is not implemented")
 				}
@@ -143,45 +143,50 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 			if err != nil {
 				return nil, err
 			}
-		case "function_call", "mcp_call":
+			message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, content)
+			if err != nil {
+				return nil, canonical.InternalError("responses message item is invalid")
+			}
+			output = append(output, message)
+		case "function_call":
 			rawArgs := item.Arguments
-			if rawArgs != "" {
-				decoded := map[string]any{}
-				if err := json.Unmarshal([]byte(rawArgs), &decoded); err != nil {
-					return nil, canonical.InternalError("responses tool call arguments are invalid")
-				}
-			}
-			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
-			if itemID == "" {
-				itemID = fallbackItemID("", item.CallID, nil)
+			object, err := canonical.ParseJSONObject([]byte(rawArgs))
+			if err != nil {
+				return nil, canonical.InternalError("responses tool call arguments are invalid")
 			}
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
 			if callID == "" {
-				callID = itemID
+				return nil, canonical.InternalError("responses tool call is missing call_id")
 			}
-			output = append(output, canonical.NewToolUseOutputItem(
-				itemID,
-				callID,
-				name,
-				canonical.NewToolArgumentsObject(rawArgs),
-			))
+			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), name, canonical.ToolTypeFunction)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool call references an unknown or ambiguous tool")
+			}
+			canonicalCallID, _ := canonical.NewToolCallID(callID)
+			call, err := canonical.NewToolCallItem(canonicalCallID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
+			if err != nil {
+				return nil, canonical.InternalError("responses tool call is invalid")
+			}
+			output = append(output, call)
 		case "custom_tool_call":
-			itemID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
-			if itemID == "" {
-				itemID = fallbackItemID("", item.CallID, nil)
-			}
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
 			if callID == "" {
-				callID = itemID
+				return nil, canonical.InternalError("responses custom tool call is missing call_id")
 			}
-			output = append(output, canonical.NewCustomToolUseOutputItem(
-				itemID,
-				callID,
-				name,
-				canonical.NewToolArgumentsObject(item.Input),
-			))
+			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), name, canonical.ToolTypeCustom)
+			if err != nil {
+				return nil, canonical.InternalError("responses custom tool call references an unknown or ambiguous tool")
+			}
+			canonicalCallID, _ := canonical.NewToolCallID(callID)
+			call, err := canonical.NewToolCallItem(canonicalCallID, resolved.Key(), canonical.NewTextToolInput(item.Input))
+			if err != nil {
+				return nil, canonical.InternalError("responses custom tool call is invalid")
+			}
+			output = append(output, call)
+		case "mcp_call":
+			return nil, canonical.UnsupportedOperation("responses MCP output is not implemented")
 		case "reasoning":
 			return nil, canonical.UnsupportedOperation("responses reasoning output is not supported by swobu v0")
 		default:
@@ -189,7 +194,11 @@ func decodeOutputItems(ctx context.Context, items []responsesWireOutputItemDTO, 
 		}
 	}
 	if len(output) == 0 && strings.TrimSpace(outputText) != "" { // swobu:io-string source=boundary
-		output = append(output, canonical.NewTextOutputItem("text_0", outputText))
+		message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(outputText)})
+		if err != nil {
+			return nil, canonical.InternalError("responses output text is invalid")
+		}
+		output = append(output, message)
 	}
 	return output, nil
 }

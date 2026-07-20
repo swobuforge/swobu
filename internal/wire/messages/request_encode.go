@@ -2,8 +2,8 @@ package messages
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -21,16 +21,24 @@ type messageBody struct {
 }
 
 type contentID struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Content   string         `json:"content,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Content   any             `json:"content,omitempty"`
+	Source    any             `json:"source,omitempty"`
 }
 
-func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string) (carrier.Document, error) {
+// EncodeOptions selects destination-specific image behavior while keeping the
+// reusable Messages grammar independent of provider identity.
+type EncodeOptions struct {
+	Compatibility compat.CompatibilityPolicy
+}
+
+func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -38,7 +46,7 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	}
 	items := req.Items()
 	tools := req.Tools()
-	wireMessages, err := encodeItems(items)
+	wireMessages, err := encodeItems(items, tools, sink, exchangeID, options)
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -46,8 +54,12 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
-	if instructions := strings.TrimSpace(req.Instructions()); instructions != "" { // swobu:io-string source=boundary
-		payload["system"] = instructions
+	loweredInstructions := flattenInstructionsForMessages(req.Instructions())
+	if err := commitMessagesInstructionDecisions(sink, exchangeID, loweredInstructions); err != nil {
+		return carrier.Document{}, err
+	}
+	if loweredInstructions.Text != "" {
+		payload["system"] = loweredInstructions.Text
 	}
 	if wireTools, err := encodeMessagesTools(tools, sink, exchangeID); err != nil {
 		return carrier.Document{}, err
@@ -60,7 +72,7 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
 		return carrier.Document{}, err
 	}
-	choice, err := encodeMessagesToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
+	choice, err := encodeMessagesToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -87,163 +99,194 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	), nil
 }
 
-func encodeItems(items []canonical.CanonicalItem) ([]messageBody, error) {
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, options EncodeOptions) ([]messageBody, error) {
 	if len(items) == 0 {
 		return nil, canonical.BadRequest("messages protocol requires at least one canonical item")
 	}
 	out := make([]messageBody, 0, len(items))
-	toolTypes := map[string]string{}
 	for i := 0; i < len(items); {
-		role := roleForMessagesItem(items[i])
-		content := make([]contentID, 0, 1)
-		for i < len(items) && roleForMessagesItem(items[i]) == role {
-			current := items[i]
-			switch current.Kind() {
-			case canonical.ItemKindText:
-				text, ok := current.TextItem()
-				if !ok {
-					return nil, canonical.InternalError("messages text item payload is invalid")
-				}
-				content = append(content, contentID{
-					Type: "text",
-					Text: text.Text,
-				})
-			case canonical.ItemKindToolUse:
-				toolUse, ok := current.ToolUse()
-				if !ok {
-					return nil, canonical.InternalError("messages tool-use item payload is invalid")
-				}
-				if toolUse.ToolType != "" && toolUse.ToolType != canonical.ToolTypeFunction {
-					return nil, canonical.UnsupportedOperation("messages protocol only supports function tool uses")
-				}
-				input, err := decodeToolArgumentsObject(toolUse.Input)
-				if err != nil {
-					return nil, err
-				}
-				toolTypes[toolUse.UseID] = toolUse.ToolType
-				content = append(content, contentID{
-					Type:  "tool_use",
-					ID:    strings.TrimSpace(toolUse.UseID), // swobu:io-string source=boundary
-					Name:  strings.TrimSpace(toolUse.Name),  // swobu:io-string source=boundary
-					Input: input,
-				})
-				if strings.TrimSpace(content[len(content)-1].Name) == "" { // swobu:io-string source=boundary
-					return nil, canonical.BadRequest("messages protocol tool_use items require a name")
-				}
-			case canonical.ItemKindToolResult:
-				toolResult, ok := current.ToolResult()
-				if !ok {
-					return nil, canonical.InternalError("messages tool-result item payload is invalid")
-				}
-				if strings.TrimSpace(toolResult.UseID) == "" { // swobu:io-string source=boundary
-					return nil, canonical.BadRequest("messages protocol tool_result items require tool_use_id")
-				}
-				if toolType := toolTypes[toolResult.UseID]; toolType != "" && toolType != canonical.ToolTypeFunction {
-					return nil, canonical.UnsupportedOperation("messages protocol only supports function tool results")
-				}
-				content = append(content, contentID{
-					Type:      "tool_result",
-					ToolUseID: strings.TrimSpace(toolResult.UseID), // swobu:io-string source=boundary
-					Content:   toolResult.Text,
-				})
-			default:
-				return nil, canonical.UnsupportedOperation("canonical item is not supported on the messages protocol")
+		owner := items[i].Owner()
+		if owner != canonical.TurnOwnerUser && owner != canonical.TurnOwnerAssistant {
+			return nil, canonical.UnsupportedOperation("messages protocol cannot lower interleaved system or developer messages")
+		}
+		wire := messageBody{Role: string(owner)}
+		for i < len(items) && items[i].Owner() == owner {
+			var err error
+			wire.Content, err = appendMessagesItemBlocks(wire.Content, items[i], tools, owner, sink, exchangeID, options)
+			if err != nil {
+				return nil, err
 			}
 			i++
 		}
-		if len(content) == 0 {
-			continue
-		}
-		out = append(out, messageBody{
-			Role:    role,
-			Content: content,
-		})
+		out = append(out, wire)
 	}
 	return out, nil
 }
 
-func encodeMessagesTools(tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) ([]messagesToolDTO, error) {
+func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, tools []canonical.ToolDeclaration, owner canonical.TurnOwner, sink compat.Sink, exchangeID string, options EncodeOptions) ([]contentID, error) {
+	if message, ok := item.Message(); ok {
+		for _, part := range message.Content() {
+			if text, ok := part.Text(); ok {
+				blocks = append(blocks, contentID{Type: "text", Text: text.Text()})
+				continue
+			}
+			if owner != canonical.TurnOwnerUser {
+				return nil, canonical.UnsupportedOperation("messages protocol only accepts image input in user messages")
+			}
+			image, ok := part.Image()
+			if !ok {
+				return nil, canonical.UnsupportedOperation("messages protocol cannot lower this content kind")
+			}
+			block, err := encodeMessagesImage(image, sink, exchangeID, options, compat.RequestItemsMessageImageDetail)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+		}
+		return blocks, nil
+	}
+	if item.Kind() == canonical.ItemKindToolCall {
+		block, err := encodeMessagesToolCall(item, tools)
+		if err != nil {
+			return nil, err
+		}
+		return append(blocks, block), nil
+	}
+	if result, ok := item.ToolResult(); ok {
+		content, err := encodeMessagesToolResultContent(result.Content(), sink, exchangeID, options)
+		if err != nil {
+			return nil, err
+		}
+		return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: content, IsError: result.IsError()}), nil
+	}
+	return nil, canonical.UnsupportedOperation("canonical item is not supported on the messages protocol")
+}
+
+func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDeclaration) (contentID, error) {
+	call, ok := item.ToolCall()
+	if !ok {
+		return contentID{}, canonical.InternalError("messages tool-call item is invalid")
+	}
+	tool := call.Tool()
+	if tool.Kind() != canonical.ToolKindFunction {
+		return contentID{}, canonical.UnsupportedOperation("messages protocol only supports function tool calls")
+	}
+	name := tool.Name()
+	object, ok := call.Input().Object()
+	if !ok {
+		return contentID{}, canonical.BadRequest("messages function tool calls require object input")
+	}
+	return contentID{Type: "tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
+}
+
+func messagesTextOnlyContent(parts []canonical.MessagePart, surface string) (string, error) {
+	var builder strings.Builder
+	for _, part := range parts {
+		text, ok := part.Text()
+		if !ok {
+			return "", canonical.UnsupportedOperation(surface + " do not support this content kind")
+		}
+		builder.WriteString(text.Text())
+	}
+	return builder.String(), nil
+}
+
+func encodeMessagesToolResultContent(parts []canonical.ToolResultPart, sink compat.Sink, exchangeID string, options EncodeOptions) (any, error) {
+	if len(parts) == 1 {
+		if text, ok := parts[0].Text(); ok {
+			return text.Text(), nil
+		}
+	}
+	content := make([]contentID, 0, len(parts))
+	for _, part := range parts {
+		if text, ok := part.Text(); ok {
+			content = append(content, contentID{Type: "text", Text: text.Text()})
+			continue
+		}
+		image, ok := part.Image()
+		if !ok {
+			return nil, canonical.UnsupportedOperation("messages tool results do not support this content kind")
+		}
+		block, err := encodeMessagesImage(image, sink, exchangeID, options, compat.RequestItemsToolResultImageDetail)
+		if err != nil {
+			return nil, err
+		}
+		content = append(content, block)
+	}
+	return content, nil
+}
+
+func encodeMessagesImage(image canonical.ImagePart, sink compat.Sink, exchangeID string, options EncodeOptions, detailFeature compat.Feature) (contentID, error) {
+	if image.Detail().IsSpecified() {
+		if options.Compatibility.EffectiveMode() == compat.CompatibilityStrict {
+			if err := emitMessagesImageDecision(sink, exchangeID, detailFeature, compat.Reject); err != nil {
+				return contentID{}, err
+			}
+			return contentID{}, canonical.UnsupportedOperation("messages protocol cannot lower an image detail preference")
+		}
+		if err := emitMessagesImageDecision(sink, exchangeID, detailFeature, compat.Approx); err != nil {
+			return contentID{}, err
+		}
+	}
+	source := image.Source()
+	if rawURL, ok := source.URL(); ok {
+		return contentID{Type: "image", Source: map[string]string{"type": "url", "url": rawURL.String()}}, nil
+	}
+	if inline, ok := source.Inline(); ok {
+		return contentID{Type: "image", Source: map[string]string{"type": "base64", "media_type": string(inline.MediaType()), "data": base64.StdEncoding.EncodeToString(inline.Data())}}, nil
+	}
+	return contentID{}, canonical.InternalError("canonical image source is invalid")
+}
+
+func emitMessagesImageDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome) error {
+	if sink == nil {
+		return nil
+	}
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{{
+		Feature: feature,
+		Outcome: outcome,
+		Subject: compat.Subject("canonical:" + string(feature)),
+	}}); err != nil {
+		return canonical.InternalError("compatibility decision sink commit failed")
+	}
+	return nil
+}
+
+func encodeMessagesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]messagesToolDTO, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	// Messages wire has no strict tool-schema field; provider adapters emit the
 	// compatibility decision before this encoder runs.
 	out := make([]messagesToolDTO, 0, len(tools))
-	for idx, tool := range tools {
-		switch decl := tool.(type) {
-		case canonical.FunctionToolDecl:
-			wire, err := encodeMessagesFunctionToolDecl(decl, sink, exchangeID, idx)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, wire)
-		case *canonical.FunctionToolDecl:
-			if decl == nil {
-				return nil, canonical.BadRequest("messages protocol tool declarations are invalid")
-			}
-			wire, err := encodeMessagesFunctionToolDecl(*decl, sink, exchangeID, idx)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, wire)
-		case canonical.CapabilityToolDecl:
-			wire, err := encodeMessagesCapabilityToolDecl(decl, sink, exchangeID, idx)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, wire)
-		case *canonical.CapabilityToolDecl:
-			if decl == nil {
-				return nil, canonical.BadRequest("messages protocol tool declarations are invalid")
-			}
-			wire, err := encodeMessagesCapabilityToolDecl(*decl, sink, exchangeID, idx)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, wire)
-		default:
-			return nil, canonical.UnsupportedOperation("messages protocol only supports function and web_search tool declarations")
+	for _, tool := range tools {
+		decl, ok := tool.Function()
+		if !ok {
+			return nil, canonical.UnsupportedOperation("messages protocol only supports function tool declarations")
 		}
+		wire, err := encodeMessagesFunctionTool(tool, decl)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, wire)
 	}
 	return out, nil
 }
 
-func encodeMessagesFunctionToolDecl(decl canonical.FunctionToolDecl, sink compat.Sink, exchangeID string, index int) (messagesToolDTO, error) {
-	schema, err := messagesToolSchema(decl.ToolInputSchema())
+func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (messagesToolDTO, error) {
+	schema, err := messagesToolSchema(decl.InputSchema())
 	if err != nil {
 		return messagesToolDTO{}, err
 	}
-	name, err := canonical.ProjectedToolName(decl)
-	if err != nil {
-		return messagesToolDTO{}, err
-	}
-	if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
-		return messagesToolDTO{}, err
-	}
+	name := declaration.Key().Name()
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
 		return messagesToolDTO{}, canonical.BadRequest("messages protocol tool declarations require a name")
 	}
 	return messagesToolDTO{
 		Name:        name,
-		Description: strings.TrimSpace(decl.ToolDescription()), // swobu:io-string source=boundary
+		Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
 		InputSchema: schema,
-	}, nil
-}
-
-func encodeMessagesCapabilityToolDecl(decl canonical.CapabilityToolDecl, sink compat.Sink, exchangeID string, index int) (messagesToolDTO, error) {
-	capability := strings.TrimSpace(string(decl.ToolCapability())) // swobu:io-string source=boundary
-	switch capability {
-	case "web_search":
-	default:
-		return messagesToolDTO{}, canonical.UnsupportedOperation("messages protocol only supports web_search capability tool declarations")
-	}
-	if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/name")); err != nil {
-		return messagesToolDTO{}, err
-	}
-	return messagesToolDTO{
-		Type: "web_search_20250305",
-		Name: capability,
 	}, nil
 }
 
@@ -276,52 +319,9 @@ func messagesToolSchemaFromWire(raw json.RawMessage) (canonical.ToolSchema, erro
 	if err != nil {
 		return canonical.ToolSchema{}, canonical.InternalError("messages request tool declarations could not be decoded")
 	}
-	return canonical.NewToolSchemaObject(string(normalized)), nil
-}
-
-func roleForMessagesItem(item canonical.CanonicalItem) string {
-	switch item.Author() {
-	case canonical.ItemAuthorAssistant:
-		return "assistant"
-	default:
-		return "user"
+	object, err := canonical.ParseJSONObject(normalized)
+	if err != nil {
+		return canonical.ToolSchema{}, canonical.BadRequest("messages request tool declaration input_schema is invalid")
 	}
-}
-
-func emitMessagesToolNameNamespaceDecision(sink compat.Sink, exchangeID string, tool canonical.ToolDecl, outcome compat.Outcome, subject compat.Subject) error {
-	if sink == nil {
-		return nil
-	}
-	if subject == "" {
-		return nil
-	}
-	if tool != nil && !strings.Contains(strings.TrimSpace(tool.ToolID().Path), "/") { // swobu:io-string source=boundary
-		return nil
-	}
-	if tool == nil && outcome == compat.Approx {
-		return nil
-	}
-	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
-		compat.Decision{
-			Feature: compat.RequestToolsNameNamespace,
-			Outcome: outcome,
-			Subject: subject,
-		},
-	}); err != nil {
-		return canonical.InternalError("compatibility decision sink commit failed")
-	}
-	return nil
-}
-
-func decodeToolArgumentsObject(input canonical.ToolArguments) (map[string]any, error) {
-	raw := input.RawObject()
-	trimmedRaw := strings.TrimSpace(raw) // swobu:io-string source=boundary
-	if trimmedRaw == "" {
-		return map[string]any{}, nil
-	}
-	out := map[string]any{}
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, canonical.BadRequest("messages protocol tool_use input must be a JSON object")
-	}
-	return out, nil
+	return canonical.NewToolSchemaObject(object), nil
 }

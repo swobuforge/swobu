@@ -1,3 +1,4 @@
+// swobu:lint ignore file-length because=chat-completions response decoding keeps ordered choice assembly in one protocol owner
 // Keep the event-state machine together so migration behavior stays recoverable.
 package chatcompletions
 
@@ -6,9 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
@@ -87,7 +87,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("chat completions response is invalid JSON")
@@ -108,7 +108,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 	_, cacheWritePresent := usage.CacheWriteTokens()
 	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
-		items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
+		items, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +121,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 			usage,
 		)), nil
 	}
-	items, err := decodeResponseOutputItems(choice.Message.Content, choice.Message.ToolCalls)
+	items, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, 
 }
 
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
-func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink compat.Sink) *chatCompletionsEventReader {
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *chatCompletionsEventReader {
 	recording := &compat.RecordingSink{Delegate: sink}
 	return &chatCompletionsEventReader{
 		exchangeID:  exchangeID,
@@ -145,8 +145,8 @@ func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink com
 		recording:   recording,
 		reader:      core.NewSSEReader(stream.Body),
 		toolCalls:   map[int]streamToolState{},
-		toolEnvIDs:  map[int]canonical.EnvelopeID{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
+		request:     request.Clone(),
 	}
 }
 
@@ -163,10 +163,11 @@ type chatCompletionsEventReader struct {
 	pending     canonical.EventSequence
 	textOpen    bool
 	textEnvID   canonical.EnvelopeID
+	text        strings.Builder
 	toolCalls   map[int]streamToolState
-	toolEnvIDs  map[int]canonical.EnvelopeID
 	latestUsage canonical.TokenUsage
 	seq         int64
+	request     canonical.CanonicalRequest
 }
 
 func (s *chatCompletionsEventReader) Decisions() []compat.Decision {
@@ -177,10 +178,14 @@ func (s *chatCompletionsEventReader) Decisions() []compat.Decision {
 }
 
 type streamToolState struct {
-	OutputItemID string
-	ToolUseID    string
-	Name         string
-	PendingArgs  []string
+	EnvID       canonical.EnvelopeID
+	CallID      canonical.ToolCallID
+	Tool        canonical.ToolKey
+	WireCallID  string
+	WireName    string
+	Args        strings.Builder
+	PendingArgs []string
+	Started     bool
 }
 
 // ordered state machine over text, tool calls, and terminal frames.
@@ -234,12 +239,8 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 			s.started = true
 			s.resultID = chunk.ID
 			s.model = chunk.Model
-			s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse})
-			s.enqueue(canonical.Event{
-				Kind:    canonical.EventMetadata,
-				EnvID:   s.responseID,
-				Payload: canonical.MetadataPayload{Values: map[string]string{"model": chunk.Model}},
-			})
+			s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: chunk.Model})
+			s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseID, Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{}}})
 		}
 		if len(chunk.Choices) == 0 {
 			if len(s.pending) > 0 {
@@ -254,7 +255,9 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 			if err := s.applyChoiceDelta(choice); err != nil {
 				return canonical.Event{}, err
 			}
-			s.applyChoiceFinish(ctx, choice)
+			if err := s.applyChoiceFinish(ctx, choice); err != nil {
+				return canonical.Event{}, err
+			}
 		}
 		if len(s.pending) > 0 {
 			return s.shiftPending(), nil
@@ -265,11 +268,17 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) error {
 	if choice.Delta.Content != "" {
 		if !s.textOpen {
+			start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)
+			if err != nil {
+				return err
+			}
 			s.textOpen = true
 			s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
-			s.enqueueEnvelopeStart(s.textEnvID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMetadataFields{NativeID: "text_0"})
+			s.enqueueItem(canonical.EventItemStart, s.textEnvID, 0, start)
+			s.enqueueItem(canonical.EventContentStart, s.textEnvID, 0, canonical.ContentStartPayload{Kind: canonical.PartKindText})
 		}
-		s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, EnvID: s.textEnvID, Payload: canonical.TextDeltaPayload{Text: choice.Delta.Content}})
+		s.text.WriteString(choice.Delta.Content)
+		s.enqueueItem(canonical.EventTextDelta, s.textEnvID, 0, canonical.TextDeltaPayload{Text: choice.Delta.Content})
 	}
 	for _, call := range choice.Delta.ToolCalls {
 		if err := s.queueToolCallDelta(call); err != nil {
@@ -279,26 +288,45 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 	return nil
 }
 
-func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choice streamChoiceBody) {
+func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choice streamChoiceBody) error {
 	if strings.TrimSpace(choice.FinishReason) == "" || s.completed { // swobu:io-string source=boundary
-		return
+		return nil
 	}
 	if s.textOpen {
-		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, canonical.EnvelopeStatusCompleted)
+		item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(s.text.String())})
+		if err != nil {
+			return canonical.InternalError("chat completions streamed message is invalid")
+		}
+		s.enqueueItem(canonical.EventItemCompleted, s.textEnvID, 0, canonical.ItemCompletedPayload{Item: item})
 		s.textOpen = false
 	}
+	indices := make([]int, 0, len(s.toolCalls))
 	for idx := range s.toolCalls {
-		if envID := s.toolEnvIDs[idx]; envID != "" {
-			s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, canonical.EnvelopeStatusCompleted)
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		state := s.toolCalls[idx]
+		if !state.Started {
+			return canonical.InternalError("chat completions tool call ended before its identity was resolved")
 		}
+		object, err := canonical.ParseJSONObject([]byte(state.Args.String()))
+		if err != nil {
+			return canonical.InternalError("chat completions streamed tool arguments are invalid")
+		}
+		item, err := canonical.NewToolCallItem(state.CallID, state.Tool, canonical.NewJSONObjectToolInput(object))
+		if err != nil {
+			return canonical.InternalError("chat completions streamed tool call is invalid")
+		}
+		s.enqueueItem(canonical.EventItemCompleted, state.EnvID, toolOrdinal(idx), canonical.ItemCompletedPayload{Item: item})
 		delete(s.toolCalls, idx)
-		delete(s.toolEnvIDs, idx)
 	}
 	s.completed = true
 	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+	return nil
 }
 
 func (s *chatCompletionsEventReader) handleChoiceContentFilter(ctx context.Context, choice streamChoiceBody) {
@@ -325,83 +353,45 @@ func (s *chatCompletionsEventReader) shiftPending() canonical.Event {
 
 func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody) error {
 	state := s.toolCalls[call.Index]
-	if state.OutputItemID == "" {
-		state.OutputItemID = "tool_" + strconv.Itoa(call.Index)
+	if state.EnvID == "" {
+		state.EnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:tool_%d", s.responseID, call.Index))
 	}
-	if state.ToolUseID == "" {
-		state.ToolUseID = strings.TrimSpace(call.ID) // swobu:io-string source=boundary
-		if state.ToolUseID == "" {
-			state.ToolUseID = "toolu_swobu_" + strconv.Itoa(call.Index)
-		}
+	if strings.TrimSpace(call.ID) != "" { // swobu:io-string source=boundary
+		state.WireCallID += strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 	}
 	if strings.TrimSpace(call.Function.Name) != "" { // swobu:io-string source=boundary
-		state.Name = strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
+		state.WireName += strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
 	}
 	if call.Function.Arguments != "" {
 		state.PendingArgs = append(state.PendingArgs, call.Function.Arguments)
 	}
-	if s.toolEnvIDs[call.Index] == "" && strings.TrimSpace(state.Name) == "" { // swobu:io-string source=boundary
+	if !state.Started && (state.WireCallID == "" || state.WireName == "") {
 		s.toolCalls[call.Index] = state
 		return nil
 	}
-	if s.toolEnvIDs[call.Index] == "" {
-		envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseID, state.OutputItemID))
-		s.toolEnvIDs[call.Index] = envID
-		s.enqueueEnvelopeStart(envID, s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: state.Name, ToolUseID: state.ToolUseID}, canonical.EventMetadataFields{NativeID: state.OutputItemID})
+	if !state.Started {
+		callID, err := canonical.NewToolCallID(state.WireCallID)
+		if err != nil {
+			return canonical.InternalError("chat completions streamed tool call id is invalid")
+		}
+		declaration, _, err := canonical.ResolveToolDeclarationByName(s.request.Tools(), state.WireName, canonical.ToolTypeFunction)
+		if err != nil {
+			return canonical.InternalError("chat completions streamed tool name cannot be resolved against the effective request")
+		}
+		state.CallID = callID
+		state.Tool = declaration.Key()
+		state.Started = true
+		start, err := canonical.NewToolCallStart(state.CallID, state.Tool)
+		if err != nil {
+			return err
+		}
+		s.enqueueItem(canonical.EventItemStart, state.EnvID, toolOrdinal(call.Index), start)
 	}
 	for _, delta := range state.PendingArgs {
-		s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, EnvID: s.toolEnvIDs[call.Index], Payload: canonical.ArgsDeltaPayload{Args: delta}})
+		state.Args.WriteString(delta)
+		s.enqueueItem(canonical.EventArgsDelta, state.EnvID, toolOrdinal(call.Index), canonical.ArgsDeltaPayload{Args: delta})
 	}
 	state.PendingArgs = nil
 	s.toolCalls[call.Index] = state
 	return nil
-}
-
-func (s *chatCompletionsEventReader) nextSeq() int64 {
-	s.seq++
-	return s.seq
-}
-
-func (s *chatCompletionsEventReader) enqueue(ev canonical.Event) {
-	ev.ExchangeID = s.exchangeID
-	ev.Seq = s.nextSeq()
-	ev.Time = time.Now().UTC()
-	s.pending = append(s.pending, ev)
-}
-
-func (s *chatCompletionsEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {
-	ev := canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: id, ParentID: parent, Payload: payload}
-	if len(meta) > 0 {
-		ev.Meta = meta[0]
-	}
-	s.enqueue(ev)
-}
-
-func (s *chatCompletionsEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
-	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
-}
-
-func (s *chatCompletionsEventReader) enqueueError(code string, message string) {
-	s.enqueue(canonical.Event{
-		Kind:  canonical.EventError,
-		EnvID: s.responseID,
-		Payload: canonical.ErrorPayload{
-			Code:    code,
-			Message: message,
-		},
-	})
-}
-
-func (s *chatCompletionsEventReader) closeOpenChildren(status canonical.EnvelopeStatus) {
-	if s.textOpen {
-		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
-		s.textOpen = false
-	}
-	for idx := range s.toolCalls {
-		if envID := s.toolEnvIDs[idx]; envID != "" {
-			s.enqueueEnvelopeEnd(envID, canonical.EnvToolCall, status)
-		}
-		delete(s.toolCalls, idx)
-		delete(s.toolEnvIDs, idx)
-	}
 }

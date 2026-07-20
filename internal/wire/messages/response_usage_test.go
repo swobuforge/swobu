@@ -31,11 +31,11 @@ func TestDecodeResponseBuffered_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
 
 	sink := &recordingDecisionSink{}
 
-	reader, err := decodeResponseBuffered(context.Background(), raw, "ex_usage", sink)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_usage", sink)
 	if err != nil {
 		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}
@@ -89,9 +89,9 @@ func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 
 	sink := &recordingDecisionSink{}
-	reader := decodeResponseStream(carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_usage", sink)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_usage", sink)
 
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}

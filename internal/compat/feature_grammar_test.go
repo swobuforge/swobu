@@ -101,7 +101,7 @@ func TestFeatureScopeMetadataDetectionCoversProtocolAndProviderSuffixes(t *testi
 			t.Fatalf("feature %q did not require scope metadata", feature)
 		}
 	}
-	if featureRequiresScopeMetadata("request.items.tool_use.name") {
+	if featureRequiresScopeMetadata("request.items.tool_call.tool.name") {
 		t.Fatal("ordinary canonical path was mistaken for representation scope")
 	}
 }

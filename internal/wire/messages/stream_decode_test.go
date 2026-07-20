@@ -17,61 +17,8 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	codec := legacyResponseStreamEncoder{}
 	outputTokens := 2
 	usage := mustTokenUsage(t, nil, &outputTokens, nil, nil)
-	events := canonical.EventSequence{
-		{
-			ExchangeID: "ex_1",
-			Seq:        1,
-			Kind:       canonical.EventEnvelopeStart,
-			EnvID:      "res_1",
-			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse},
-		},
-		{
-			ExchangeID: "ex_1",
-			Seq:        2,
-			Kind:       canonical.EventEnvelopeStart,
-			EnvID:      "msg_1",
-			ParentID:   "res_1",
-			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant},
-			Meta:       canonical.EventMetadataFields{NativeID: "text_0"},
-		},
-		{
-			ExchangeID: "ex_1",
-			Seq:        3,
-			Kind:       canonical.EventTextDelta,
-			EnvID:      "msg_1",
-			ParentID:   "res_1",
-			Payload:    canonical.TextDeltaPayload{Text: "Hello world!"},
-		},
-		{
-			ExchangeID: "ex_1",
-			Seq:        4,
-			Kind:       canonical.EventEnvelopeEnd,
-			EnvID:      "msg_1",
-			ParentID:   "res_1",
-			Payload:    canonical.EnvelopeEndPayload{Kind: canonical.EnvMessage, Status: canonical.EnvelopeStatusCompleted},
-		},
-		{
-			ExchangeID: "ex_1",
-			Seq:        5,
-			Kind:       canonical.EventUsage,
-			EnvID:      "res_1",
-			Payload:    canonical.UsagePayload{Usage: usage},
-		},
-		{
-			ExchangeID: "ex_1",
-			Seq:        6,
-			Kind:       canonical.EventFinish,
-			EnvID:      "res_1",
-			Payload:    canonical.FinishPayload{Reason: "completed"},
-		},
-		{
-			ExchangeID: "ex_1",
-			Seq:        7,
-			Kind:       canonical.EventEnvelopeEnd,
-			EnvID:      "res_1",
-			Payload:    canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted},
-		},
-	}
+	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("Hello world!")})
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex_1", canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}, "m", []canonical.CanonicalItem{message}, "completed", usage)
 
 	stream, err := codec.EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {

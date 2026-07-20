@@ -9,12 +9,13 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"swobu_resp_123","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
+	raw := []byte(`{"model":"gpt-4o-mini","previous_response_id":"swobu_resp_123","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],"input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
 	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
@@ -28,18 +29,33 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Kind() != canonical.ItemKindToolUse {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolUse)
+	if items[0].Kind() != canonical.ItemKindToolCall {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolCall)
 	}
-	toolUse, _ := items[0].ToolUse()
-	if got := toolUse.UseID; got != "call_1" {
+	toolUse, _ := items[0].ToolCall()
+	if got := toolUse.CallID().String(); got != "call_1" {
 		t.Fatalf("items[0].ToolUseID = %q, want call_1", got)
 	}
-	if got := toolUse.Name; got != "search" {
-		t.Fatalf("items[0].Name = %q, want search", got)
+	if got := toolUse.Tool().String(); got == "" {
+		t.Fatal("items[0] lost semantic tool identity")
 	}
-	if got := toolUse.Input.RawObject(); got != `{"query":"hello"}` {
+	object, _ := toolUse.Input().Object()
+	if got := object.String(); got != `{"query":"hello"}` {
 		t.Fatalf("items[0].Input.RawObject() = %q, want normalized object JSON", got)
+	}
+}
+
+func TestDecodeClientRequest_AcceptsHistoricalFunctionCallWithoutCurrentTools(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"query\":\"hello\"}"}]}`)
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	call, ok := got.Items()[0].ToolCall()
+	if !ok || call.Tool().Namespace() != canonical.ToolNamespaceRequest || call.Tool().Name() != "search" {
+		t.Fatalf("historical call tool = %#v, want request/function/search", call.Tool())
 	}
 }
 
@@ -62,15 +78,11 @@ func TestDecodeClientRequest_PreservesExplicitEmptyDurableBands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presence := got.Presence()
-	if !presence.Model || !presence.Instructions || !presence.Tools || !presence.ToolPolicy || !presence.ToolCallBatch || !presence.OutputFormat {
-		t.Fatalf("durable-band presence = %#v", presence)
+	if !got.ModelSpecified() || !got.InstructionsSpecified() || !got.ToolsSpecified() || !got.ToolPolicySpecified() || !got.ToolCallBatchSpecified() || !got.OutputFormatSpecified() {
+		t.Fatal("field-local durable-band presence was lost")
 	}
-	if !presence.Controls.MaxOutputTokens || !presence.Controls.StopSequences || !presence.Controls.Temperature || !presence.Controls.TopP {
-		t.Fatalf("generation-control presence = %#v", presence.Controls)
-	}
-	if got.Instructions() != "" || len(got.Tools()) != 0 || len(got.Controls().Limits.StopSequences) != 0 {
-		t.Fatalf("explicit clears changed value: instructions=%q tools=%#v controls=%#v", got.Instructions(), got.Tools(), got.Controls())
+	if canonicaltest.InstructionSetText(got.Instructions()) != "" || len(got.Tools()) != 0 || len(got.Controls().Limits.StopSequences) != 0 {
+		t.Fatalf("explicit clears changed value: instructions=%q tools=%#v controls=%#v", canonicaltest.InstructionSetText(got.Instructions()), got.Tools(), got.Controls())
 	}
 }
 
@@ -108,11 +120,12 @@ func TestDecodeClientRequest_AcceptsMultilineToolOutputTranscript(t *testing.T) 
 		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolResult)
 	}
 	toolResult, _ := items[0].ToolResult()
-	if toolResult.UseID != "call_1" {
-		t.Fatalf("items[0] tool use ID = %q, want call_1", toolResult.UseID)
+	if toolResult.CallID().String() != "call_1" {
+		t.Fatalf("items[0] tool use ID = %q, want call_1", toolResult.CallID().String())
 	}
-	if toolResult.Text != toolOutput {
-		t.Fatalf("tool output changed during decode:\ngot:\n%s\nwant:\n%s", toolResult.Text, toolOutput)
+	text, _ := toolResult.Content()[0].Text()
+	if text.Text() != toolOutput {
+		t.Fatalf("tool output changed during decode:\ngot:\n%s\nwant:\n%s", text.Text(), toolOutput)
 	}
 }
 

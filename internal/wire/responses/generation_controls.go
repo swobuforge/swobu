@@ -38,26 +38,18 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 	})
 }
 
-func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls, presence canonical.GenerationControlsPresence, emitClears bool) error {
+func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls) error {
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
 		payload["max_output_tokens"] = value
-	} else if emitClears && presence.MaxOutputTokens {
-		payload["max_output_tokens"] = nil
 	}
 	if value, ok := controls.Sampling.Temperature.Value(); ok {
 		payload["temperature"] = value
-	} else if emitClears && presence.Temperature {
-		payload["temperature"] = nil
 	}
 	if value, ok := controls.Sampling.TopP.Value(); ok {
 		payload["top_p"] = value
-	} else if emitClears && presence.TopP {
-		payload["top_p"] = nil
 	}
 	if len(controls.Limits.StopSequences) > 0 {
 		return canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
-	} else if emitClears && presence.StopSequences {
-		payload["stop"] = []string{}
 	}
 	return nil
 }

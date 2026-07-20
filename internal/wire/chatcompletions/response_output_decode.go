@@ -2,36 +2,33 @@ package chatcompletions
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
-func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody) ([]canonical.OutputItem, error) {
-	items, err := decodeOpenAIContentItems(content)
+func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.RawMessage, toolCalls []toolCallBody) ([]canonical.CanonicalItem, error) {
+	message, hasMessage, err := decodeOpenAIContentMessage(content)
 	if err != nil {
 		return nil, canonical.InternalError("chat completions response content is unsupported")
 	}
-	out := make([]canonical.OutputItem, 0, len(items)+len(toolCalls))
-	for idx, item := range items {
-		if item.Kind() != canonical.ItemKindText {
-			continue
-		}
-		text, ok := item.TextItem()
-		if !ok {
-			return nil, canonical.InternalError("chat completions text item payload is invalid")
-		}
-		out = append(out, canonical.NewTextOutputItem("text_"+strconv.Itoa(idx), text.Text))
+	out := make([]canonical.CanonicalItem, 0, 1+len(toolCalls))
+	if hasMessage {
+		out = append(out, message)
 	}
 	for _, call := range toolCalls {
-		itemID := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
-		if itemID == "" {
-			itemID = "tool_0"
+		callID, err := canonical.NewToolCallID(call.ID)
+		if err != nil {
+			return nil, canonical.InternalError("chat completions response tool call is missing an id")
 		}
-		toolUseID := itemID
 		normalizedType := strings.ToLower(strings.TrimSpace(call.Type)) // swobu:io-string source=provider-wire
+		if normalizedType == "" && call.Function != nil && call.Custom == nil {
+			normalizedType = canonical.ToolTypeFunction
+		}
+		if normalizedType == "" && call.Custom != nil && call.Function == nil {
+			normalizedType = canonical.ToolTypeCustom
+		}
 		switch normalizedType {
 		case "function":
 			if call.Function == nil {
@@ -41,12 +38,19 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 			if functionName == "" {
 				return nil, canonical.InternalError("chat completions response function tool call is missing a name")
 			}
-			out = append(out, canonical.NewToolUseOutputItem(
-				itemID,
-				toolUseID,
-				functionName,
-				canonical.NewToolArgumentsObject(call.Function.Arguments),
-			))
+			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), functionName, canonical.ToolTypeFunction)
+			if err != nil {
+				return nil, canonical.InternalError("chat completions response references an unknown or ambiguous function tool")
+			}
+			object, err := canonical.ParseJSONObject([]byte(call.Function.Arguments))
+			if err != nil {
+				return nil, canonical.InternalError("chat completions response function arguments are invalid")
+			}
+			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
+			if err != nil {
+				return nil, canonical.InternalError("chat completions response function call is invalid")
+			}
+			out = append(out, item)
 		case "custom":
 			if call.Custom == nil {
 				return nil, canonical.InternalError("chat completions response custom tool call is incomplete")
@@ -55,40 +59,15 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 			if customName == "" {
 				return nil, canonical.InternalError("chat completions response custom tool call is missing a name")
 			}
-			out = append(out, canonical.NewCustomToolUseOutputItem(
-				itemID,
-				toolUseID,
-				customName,
-				canonical.NewToolArgumentsObject(call.Custom.Input),
-			))
-		case "":
-			if call.Function != nil && call.Custom == nil {
-				functionName := strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
-				if functionName == "" {
-					return nil, canonical.InternalError("chat completions response function tool call is missing a name")
-				}
-				out = append(out, canonical.NewToolUseOutputItem(
-					itemID,
-					toolUseID,
-					functionName,
-					canonical.NewToolArgumentsObject(call.Function.Arguments),
-				))
-				continue
+			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), customName, canonical.ToolTypeCustom)
+			if err != nil {
+				return nil, canonical.InternalError("chat completions response references an unknown or ambiguous custom tool")
 			}
-			if call.Custom != nil && call.Function == nil {
-				customName := strings.TrimSpace(call.Custom.Name) // swobu:io-string source=boundary
-				if customName == "" {
-					return nil, canonical.InternalError("chat completions response custom tool call is missing a name")
-				}
-				out = append(out, canonical.NewCustomToolUseOutputItem(
-					itemID,
-					toolUseID,
-					customName,
-					canonical.NewToolArgumentsObject(call.Custom.Input),
-				))
-				continue
+			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewTextToolInput(call.Custom.Input))
+			if err != nil {
+				return nil, canonical.InternalError("chat completions response custom call is invalid")
 			}
-			return nil, canonical.InternalError("chat completions response tool call type is unsupported")
+			out = append(out, item)
 		default:
 			return nil, canonical.InternalError("chat completions response tool call type is unsupported")
 		}
@@ -96,12 +75,12 @@ func decodeResponseOutputItems(content json.RawMessage, toolCalls []toolCallBody
 	return out, nil
 }
 
-func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, error) {
+func decodeOpenAIContentMessage(raw json.RawMessage) (canonical.CanonicalItem, bool, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "chat completions response content is invalid")
 	if err != nil {
-		return nil, err
+		return canonical.CanonicalItem{}, false, err
 	}
-	decoded := make([]canonical.CanonicalItem, 0, len(parts))
+	content := make([]canonical.MessagePart, 0, len(parts))
 	err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
@@ -117,7 +96,7 @@ func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, e
 				text = part.OutputText
 			}
 			if text != "" {
-				decoded = append(decoded, canonical.NewTextItem(canonical.ItemAuthorAssistant, text))
+				content = append(content, canonical.NewTextMessagePart(text))
 			}
 		default:
 			return canonical.UnsupportedOperation("chat completions response content contains an unsupported part type")
@@ -125,7 +104,14 @@ func decodeOpenAIContentItems(raw json.RawMessage) ([]canonical.CanonicalItem, e
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return canonical.CanonicalItem{}, false, err
 	}
-	return decoded, nil
+	if len(content) == 0 {
+		return canonical.CanonicalItem{}, false, nil
+	}
+	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, content)
+	if err != nil {
+		return canonical.CanonicalItem{}, false, err
+	}
+	return message, true, nil
 }

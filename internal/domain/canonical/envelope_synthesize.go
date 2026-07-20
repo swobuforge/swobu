@@ -5,72 +5,54 @@ import (
 	"time"
 )
 
-// SynthesizeResponseEnvelopeEvents converts canonical response fields into a
-// finite envelope event stream suitable for stream or batch adapters.
+// SynthesizeResponseEnvelopeEvents converts one buffered canonical response
+// into progressive delivery evidence plus one authoritative completed snapshot
+// per item.
 func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) []Event {
 	seq := int64(0)
-	next := func() int64 {
+	next := func(kind EventKind, envID, parentID EnvelopeID, payload any) Event {
 		seq++
-		return seq
+		return Event{ExchangeID: exchangeID, Seq: seq, Time: time.Now().UTC(), Kind: kind, EnvID: envID, ParentID: parentID, Payload: payload}
 	}
 	responseID := EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID))
 	events := []Event{
-		{
-			ExchangeID: exchangeID,
-			Seq:        next(),
-			Time:       time.Now().UTC(),
-			Kind:       EventEnvelopeStart,
-			EnvID:      responseID,
-			Payload: EnvelopeStartPayload{
-				Kind: EnvResponse, Response: response.Clone(),
-			},
-		},
-		{
-			ExchangeID: exchangeID,
-			Seq:        next(),
-			Time:       time.Now().UTC(),
-			Kind:       EventMetadata,
-			EnvID:      responseID,
-			Payload:    MetadataPayload{Values: map[string]string{"model": model}},
-		},
+		next(EventEnvelopeStart, responseID, "", EnvelopeStartPayload{Kind: EnvResponse, Model: model}),
+		next(EventResponseIdentity, responseID, "", ResponseIdentityPayload{Response: response.Clone()}),
 	}
-	msgIdx := 0
-	toolIdx := 0
-	for _, item := range items {
+	for index, original := range items {
+		item := original.Clone()
+		ordinal := uint32(index)
 		switch item.Kind() {
-		case ItemKindText:
-			text, ok := item.TextItem()
-			if !ok {
-				continue
+		case ItemKindMessage:
+			message, _ := item.Message()
+			events = append(events, next(EventItemStart, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: messageStartFromValidatedItem(message.Role())}))
+			for partIndex, part := range message.Content() {
+				events = append(events, next(EventContentStart, "", "", ItemEvent{Position: ItemPosition{Item: ordinal, Part: uint32(partIndex)}, Payload: ContentStartPayload{Kind: part.Kind()}}))
+				if text, ok := part.Text(); ok {
+					events = append(events, next(EventTextDelta, "", "", ItemEvent{Position: ItemPosition{Item: ordinal, Part: uint32(partIndex)}, Payload: TextDeltaPayload{Text: text.Text()}}))
+				}
 			}
-			id := EnvelopeID(fmt.Sprintf("%s:message:%d", responseID, msgIdx))
-			msgIdx++
-			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: responseID, Payload: EnvelopeStartPayload{Kind: EnvMessage, Role: item.Author()}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventTextDelta, EnvID: id, ParentID: responseID, Payload: TextDeltaPayload{Text: text.Text}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: responseID, Payload: EnvelopeEndPayload{Kind: EnvMessage, Status: EnvelopeStatusCompleted}},
-			)
-		case ItemKindToolUse:
-			toolUse, ok := item.ToolUse()
-			if !ok {
-				continue
+		case ItemKindToolCall:
+			call, _ := item.ToolCall()
+			events = append(events, next(EventItemStart, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: toolCallStartFromValidatedItem(call.CallID(), call.Tool())}))
+			if object, ok := call.Input().Object(); ok {
+				events = append(events, next(EventArgsDelta, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: ArgsDeltaPayload{Args: object.String()}}))
+			} else if text, ok := call.Input().Text(); ok {
+				events = append(events, next(EventArgsDelta, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: ArgsDeltaPayload{Args: text}}))
 			}
-			id := EnvelopeID(fmt.Sprintf("%s:tool_call:%d", responseID, toolIdx))
-			toolIdx++
-			args := toolUse.Input.RawObject()
-			events = append(events,
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeStart, EnvID: id, ParentID: responseID, Payload: EnvelopeStartPayload{Kind: EnvToolCall, Name: toolUse.Name, ToolUseID: toolUse.UseID, ToolType: toolUse.ToolType}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventArgsDelta, EnvID: id, ParentID: responseID, Payload: ArgsDeltaPayload{Args: args}},
-				Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: id, ParentID: responseID, Payload: EnvelopeEndPayload{Kind: EnvToolCall, Status: EnvelopeStatusCompleted}},
-			)
+		case ItemKindToolResult:
+			// Tool results have no progressive start contract in this RFC. They
+			// cross this synthesized stream only as an atomic completed checkpoint.
 		default:
-			// Ignore unsupported output item kinds during synthesis.
+			events = append(events, next(EventError, responseID, "", ErrorPayload{Code: "invalid_canonical_item", Message: "canonical response contains an invalid item"}))
+			continue
 		}
+		events = append(events, next(EventItemCompleted, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: ItemCompletedPayload{Item: item}}))
 	}
 	events = append(events,
-		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventUsage, EnvID: responseID, Payload: UsagePayload{Usage: usage}},
-		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventFinish, EnvID: responseID, Payload: FinishPayload{Reason: finishReason}},
-		Event{ExchangeID: exchangeID, Seq: next(), Time: time.Now().UTC(), Kind: EventEnvelopeEnd, EnvID: responseID, Payload: EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}},
+		next(EventUsage, responseID, "", UsagePayload{Usage: usage}),
+		next(EventFinish, responseID, "", FinishPayload{Reason: finishReason}),
+		next(EventEnvelopeEnd, responseID, "", EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}),
 	)
 	return events
 }

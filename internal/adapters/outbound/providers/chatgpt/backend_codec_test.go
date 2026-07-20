@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestBackendCodecNormalizesCodexPayload(t *testing.T) {
@@ -18,8 +19,8 @@ func TestBackendCodecNormalizesCodexPayload(t *testing.T) {
 
 	doc, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	})
@@ -52,8 +53,8 @@ func TestBackendCodecNormalizesCodexPayload(t *testing.T) {
 func TestBackendCodecRejectsBufferedProviderDelivery(t *testing.T) {
 	_, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		Delivery: delivery.BufferedDelivery(),
 	})
@@ -63,16 +64,16 @@ func TestBackendCodecRejectsBufferedProviderDelivery(t *testing.T) {
 }
 
 func TestBackendInternalStoreFalseDoesNotSuppressNativeResponseCapture(t *testing.T) {
-	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_789\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_789\",\"model\":\"gpt-5.4-mini\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_789\",\"status\":\"completed\",\"output\":[]}}\n\n"
-	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), "ex_store_false", provider.StreamIngress{Stream: carrier.ByteStream{
+	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{ExchangeID: "ex_store_false"}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream",
 		Body:      io.NopCloser(strings.NewReader(raw)),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), decoded.Stream, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
 	}

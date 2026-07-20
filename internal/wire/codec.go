@@ -27,7 +27,7 @@ import (
 // and canonical outputs back into client-facing wire documents or byte streams.
 type ClientCodec interface {
 	DecodeClientRequest(doc carrier.Document) (ClientDecodeResult, error)
-	EncodeResponseDocument(output canonical.CanonicalOutput) (ClientDocumentResult, error)
+	EncodeResponseDocument(canonical.CanonicalResponse) (ClientDocumentResult, error)
 	EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (ClientByteStreamResult, error)
 	EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (ClientMessageResult, error)
 }

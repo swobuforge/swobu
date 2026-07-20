@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestEncode_PreservesGenerationControls(t *testing.T) {
@@ -24,8 +25,8 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 		t.Fatalf("NewGenerationControls returned error: %v", err)
 	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:    "claude-3-5",
-		Items:    []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model:    canonical.Specify("claude-3-5"),
+		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		Controls: controls,
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -58,8 +59,8 @@ func TestEncode_OmitsMaxCompletionTokensWhenMaxOutputTokensUnset(t *testing.T) {
 	t.Parallel()
 
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "gpt-5.4",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model: canonical.Specify("gpt-5.4"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -144,9 +145,9 @@ func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "claude-3-5",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		OutputFormat: format,
+		Model:        canonical.Specify("claude-3-5"),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		OutputFormat: canonical.Specify(format),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {

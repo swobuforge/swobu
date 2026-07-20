@@ -8,26 +8,16 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestDecodeRequest_FlattensNamespaceToolsAndResolvesProjectedToolChoice(t *testing.T) {
+func TestDecodeRequest_FlattensNamespaceToolsAndResolvesLiteralToolChoice(t *testing.T) {
 	t.Parallel()
-
-	functionDecl := canonical.NewFunctionToolDecl(
-		"workspace/grep",
-		"grep",
-		"",
-		canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`),
-	)
-	projectedFunctionName, err := canonical.ProjectedToolName(functionDecl)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
 
 	raw := []byte(`{
 		"model":"gpt-4o-mini",
 		"input":"hi",
-		"tool_choice":{"type":"function","name":"` + projectedFunctionName + `"},
+		"tool_choice":{"type":"function","name":"grep"},
 		"tools":[
 			{
 				"name":"workspace",
@@ -46,11 +36,6 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesProjectedToolChoice(t *t
 						"description":"edit files",
 						"execution":"external",
 						"format":{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}
-					},
-					{
-						"type":"web_search",
-						"name":"search",
-						"description":"ignored"
 					}
 				]
 			}
@@ -72,24 +57,20 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesProjectedToolChoice(t *t
 	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "grep")
 	customTool := requireToolDecl(t, tools, canonical.ToolTypeCustom, "apply_patch")
 
-	if functionTool.ToolID().String() != canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "workspace/grep").String() {
-		t.Fatalf("function tool id = %q, want workspace/grep", functionTool.ToolID())
+	if functionTool.Key().String() != canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "workspace/grep").String() {
+		t.Fatalf("function tool id = %q, want workspace/grep", functionTool.Key())
 	}
-	if functionTool.ToolDescription() != "workspace tools\n\nsearch text" {
-		t.Fatalf("function tool description = %q, want composed description", functionTool.ToolDescription())
-	}
-	if functionTool.Owner() != canonical.ToolOwnerProvider {
-		t.Fatalf("function tool owner = %q, want provider", functionTool.Owner())
+	function, _ := functionTool.Function()
+	if function.Description() != "workspace tools\n\nsearch text" {
+		t.Fatalf("function tool description = %q, want composed description", function.Description())
 	}
 
-	if customTool.ToolID().String() != canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindCustom, "workspace/apply_patch").String() {
-		t.Fatalf("custom tool id = %q, want workspace/apply_patch", customTool.ToolID())
+	if customTool.Key().String() != canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "workspace/apply_patch").String() {
+		t.Fatalf("custom tool id = %q, want workspace/apply_patch", customTool.Key())
 	}
-	if customTool.ToolDescription() != "workspace tools\n\nedit files" {
-		t.Fatalf("custom tool description = %q, want composed description", customTool.ToolDescription())
-	}
-	if customTool.Owner() != canonical.ToolOwnerExternal {
-		t.Fatalf("custom tool owner = %q, want external", customTool.Owner())
+	custom, _ := customTool.Custom()
+	if custom.Description() != "workspace tools\n\nedit files" {
+		t.Fatalf("custom tool description = %q, want composed description", custom.Description())
 	}
 
 	policy := got.ToolPolicy()
@@ -100,10 +81,10 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesProjectedToolChoice(t *t
 	if !ok {
 		t.Fatal("tool policy specific is missing")
 	}
-	if specific.String() != functionTool.ToolID().String() {
-		t.Fatalf("tool policy specific = %q, want %q", specific, functionTool.ToolID())
+	if specific.String() != functionTool.Key().String() {
+		t.Fatalf("tool policy specific = %q, want %q", specific, functionTool.Key())
 	}
-	if specificType, ok := policy.SpecificToolType(); !ok || specificType != canonical.ToolTypeFunction {
+	if specificType := string(specific.Kind()); specificType != canonical.ToolTypeFunction {
 		t.Fatalf("tool policy specific type = %q, want function", specificType)
 	}
 }
@@ -140,11 +121,11 @@ func TestDecodeRequest_RejectsNamespaceWithoutSupportedChildren(t *testing.T) {
 	if !errors.As(err, &compatErr) {
 		t.Fatalf("expected canonical.Error, got %T", err)
 	}
-	if compatErr.Code != canonical.ErrorCodeUnsupportedOperation {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeUnsupportedOperation)
+	if compatErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
 	}
-	if !strings.Contains(compatErr.Message, "no supported child tools") {
-		t.Fatalf("error message = %q, want namespace child failure", compatErr.Message)
+	if !strings.Contains(compatErr.Message, "unsupported tool type") {
+		t.Fatalf("error message = %q, want unsupported type failure", compatErr.Message)
 	}
 }
 
@@ -176,11 +157,12 @@ func TestDecodeRequest_DecodesUnnamespacedFlatFunctionToolName(t *testing.T) {
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
 	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "Ping")
-	if functionTool.ToolID().String() != canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "Ping").String() {
-		t.Fatalf("function tool id = %q, want Ping", functionTool.ToolID())
+	if functionTool.Key().String() != canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Ping").String() {
+		t.Fatalf("function tool id = %q, want Ping", functionTool.Key())
 	}
-	if functionTool.ToolDescription() != "search text" {
-		t.Fatalf("function tool description = %q, want raw description", functionTool.ToolDescription())
+	function, _ := functionTool.Function()
+	if function.Description() != "search text" {
+		t.Fatalf("function tool description = %q, want raw description", function.Description())
 	}
 }
 
@@ -213,9 +195,9 @@ func TestDecodeRequest_DecodesLeadingUnderscorePlainFunctionToolNameRaw(t *testi
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
 	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "__bash__cdaxodhis2")
-	wantID := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "__bash__cdaxodhis2").String()
-	if functionTool.ToolID().String() != wantID {
-		t.Fatalf("function tool id = %q, want %q", functionTool.ToolID(), wantID)
+	wantID := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "__bash__cdaxodhis2").String()
+	if functionTool.Key().String() != wantID {
+		t.Fatalf("function tool id = %q, want %q", functionTool.Key(), wantID)
 	}
 
 	policy := got.ToolPolicy()
@@ -229,7 +211,7 @@ func TestDecodeRequest_DecodesLeadingUnderscorePlainFunctionToolNameRaw(t *testi
 	if specific.String() != wantID {
 		t.Fatalf("tool policy specific = %q, want %q", specific, wantID)
 	}
-	if specificType, ok := policy.SpecificToolType(); !ok || specificType != canonical.ToolTypeFunction {
+	if specificType := string(specific.Kind()); specificType != canonical.ToolTypeFunction {
 		t.Fatalf("tool policy specific type = %q, want function", specificType)
 	}
 }
@@ -263,9 +245,9 @@ func TestDecodeRequest_DecodesProjectedLookingFlatFunctionToolNameAsRaw(t *testi
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
 	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "exec_command__bogus")
-	wantID := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "exec_command__bogus").String()
-	if functionTool.ToolID().String() != wantID {
-		t.Fatalf("function tool id = %q, want %q", functionTool.ToolID(), wantID)
+	wantID := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "exec_command__bogus").String()
+	if functionTool.Key().String() != wantID {
+		t.Fatalf("function tool id = %q, want %q", functionTool.Key(), wantID)
 	}
 
 	policy := got.ToolPolicy()
@@ -279,18 +261,18 @@ func TestDecodeRequest_DecodesProjectedLookingFlatFunctionToolNameAsRaw(t *testi
 	if specific.String() != wantID {
 		t.Fatalf("tool policy specific = %q, want %q", specific, wantID)
 	}
-	if specificType, ok := policy.SpecificToolType(); !ok || specificType != canonical.ToolTypeFunction {
+	if specificType := string(specific.Kind()); specificType != canonical.ToolTypeFunction {
 		t.Fatalf("tool policy specific type = %q, want function", specificType)
 	}
 }
 
-func requireToolDecl(t *testing.T, tools []canonical.ToolDecl, wantType, wantName string) canonical.ToolDecl {
+func requireToolDecl(t *testing.T, tools []canonical.ToolDeclaration, wantType, wantName string) canonical.ToolDeclaration {
 	t.Helper()
 	for _, tool := range tools {
-		if canonical.ToolDeclKind(tool) == wantType && tool.ToolName() == wantName {
+		if string(tool.Kind()) == wantType && tool.Key().Name() == wantName {
 			return tool
 		}
 	}
 	t.Fatalf("tool %s/%s not found", wantType, wantName)
-	return nil
+	return canonical.ToolDeclaration{}
 }

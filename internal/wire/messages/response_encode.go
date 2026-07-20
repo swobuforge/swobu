@@ -10,36 +10,39 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	items := output.Items()
 	content := make([]messagesResponsePartDTO, 0, len(items))
 	for _, item := range items {
 		switch item.Kind() {
-		case canonical.ItemKindText:
-			text, ok := item.TextItem()
-			if !ok {
-				return wire.ClientDocumentResult{}, canonical.InternalError("messages text item payload is invalid")
+		case canonical.ItemKindMessage:
+			message, _ := item.Message()
+			if message.Role() != canonical.MessageRoleAssistant {
+				return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("messages response items must be assistant-authored")
 			}
-			content = append(content, messagesResponsePartDTO{Type: "text", Text: text.Text})
-		case canonical.ItemKindToolUse:
-			toolUse, ok := item.ToolUse()
-			if !ok {
-				return wire.ClientDocumentResult{}, canonical.InternalError("messages tool-use item payload is invalid")
-			}
-			if toolUse.ToolType != "" && toolUse.ToolType != canonical.ToolTypeFunction {
-				return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("messages protocol only supports function tool output")
-			}
-			input := map[string]any{}
-			if raw := toolUse.Input.RawObject(); raw != "" {
-				if err := json.Unmarshal([]byte(raw), &input); err != nil {
-					return wire.ClientDocumentResult{}, canonical.BadRequest("messages tool_use input is invalid JSON object")
+			for _, part := range message.Content() {
+				text, ok := part.Text()
+				if !ok {
+					return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("messages response image output is not implemented")
 				}
+				content = append(content, messagesResponsePartDTO{Type: "text", Text: text.Text()})
+			}
+		case canonical.ItemKindToolCall:
+			call, _ := item.ToolCall()
+			tool := call.Tool()
+			if tool.Kind() != canonical.ToolKindFunction {
+				return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("messages response only supports function tool calls")
+			}
+			name := tool.Name()
+			object, ok := call.Input().Object()
+			if !ok {
+				return wire.ClientDocumentResult{}, canonical.BadRequest("messages response function call requires object input")
 			}
 			content = append(content, messagesResponsePartDTO{
 				Type:  "tool_use",
-				ID:    toolUse.UseID,
-				Name:  toolUse.Name,
-				Input: input,
+				ID:    call.CallID().String(),
+				Name:  name,
+				Input: json.RawMessage(object.Bytes()),
 			})
 		case canonical.ItemKindToolResult:
 			return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("messages protocol does not support tool result output items")
@@ -53,7 +56,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 		Role:       "assistant",
 		Model:      output.Model(),
 		Content:    content,
-		StopReason: messagesStopReasonForFinishReason(output.FinishReason(), sse.ContainsToolUseOutput(items)),
+		StopReason: messagesStopReasonForFinishReason(output.CompletionReason(), sse.ContainsToolUseOutput(items)),
 		Usage:      messagesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {

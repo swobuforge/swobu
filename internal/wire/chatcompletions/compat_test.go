@@ -25,7 +25,7 @@ func (legacyClientRequestDecoder) DecodeClientRequestWithDecisions(doc carrier.D
 
 type legacyResponseDocumentEncoder struct{}
 
-func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.Document, error) {
+func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (carrier.Document, error) {
 	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
 	return result.Document, err
 }
@@ -40,13 +40,13 @@ func (legacyResponseStreamEncoder) EncodeResponseStream(ctx context.Context, eve
 type legacyProviderDocumentDecoder struct{}
 
 func (legacyProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, doc carrier.Document, exchangeID string, _ compat.Sink) (canonical.ResponseStream, error) {
-	result, err := (ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, doc, exchangeID)
+	result, err := (ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, canonical.CanonicalRequest{}, doc, exchangeID)
 	return result.Stream, err
 }
 
 type legacyProviderEnvelopeDecoder struct{}
 
 func (legacyProviderEnvelopeDecoder) DecodeProviderEnvelope(stream carrier.ByteStream, exchangeID string, _ compat.Sink) canonical.ResponseStream {
-	result, _ := (ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(stream, exchangeID)
+	result, _ := (ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(canonical.CanonicalRequest{}, stream, exchangeID)
 	return result.Stream
 }

@@ -13,7 +13,7 @@ import (
 func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"{\"query\":\"hello\"}"}}]}]}`)
+	raw := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"search","parameters":{"type":"object"}}}],"messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"{\"query\":\"hello\"}"}}]}]}`)
 	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
@@ -23,25 +23,36 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	if items[0].Kind() != canonical.ItemKindToolUse {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolUse)
+	if items[0].Kind() != canonical.ItemKindToolCall {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolCall)
 	}
-	toolUse, _ := items[0].ToolUse()
-	if got := toolUse.UseID; got != "tc_1" {
+	toolUse, _ := items[0].ToolCall()
+	if got := toolUse.CallID().String(); got != "tc_1" {
 		t.Fatalf("items[0].ToolUseID = %q, want tc_1", got)
 	}
-	if got := toolUse.Name; got != "search" {
-		t.Fatalf("items[0].Name = %q, want search", got)
-	}
-	if got := toolUse.Input.RawObject(); got != `{"query":"hello"}` {
+	object, _ := toolUse.Input().Object()
+	if got := object.String(); got != `{"query":"hello"}` {
 		t.Fatalf("items[0].Input.RawObject() = %q, want normalized object JSON", got)
+	}
+}
+
+func TestDecodeClientRequest_AcceptsHistoricalToolCallsWithoutCurrentTools(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"assistant","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":{"q":"hello"}}}]}]}`)
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	call, ok := got.Items()[0].ToolCall()
+	if !ok || call.Tool().Namespace() != canonical.ToolNamespaceRequest || call.Tool().Name() != "search" {
+		t.Fatalf("historical call tool = %#v, want request/function/search", call.Tool())
 	}
 }
 
 func TestDecodeClientRequest_RejectsNonJSONObjectFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"oops"}}]}]}`)
+	raw := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"search","parameters":{"type":"object"}}}],"messages":[{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"oops"}}]}]}`)
 	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err == nil {
 		t.Fatal("DecodeClientRequest returned nil error, want BAD_REQUEST")
@@ -70,15 +81,17 @@ func TestDecodeClientRequest_PreservesSystemAndDeveloperMessagesAsInstructions(t
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
-	if got.Instructions() != "You are a coding agent.\n\nUse native tools for file edits." {
-		t.Fatalf("instructions = %q", got.Instructions())
+	instructions := got.Instructions().Instructions()
+	if len(instructions) != 2 || instructions[0].Role() != canonical.MessageRoleSystem || instructions[0].Text() != "You are a coding agent." || instructions[1].Role() != canonical.MessageRoleDeveloper || instructions[1].Text() != "Use native tools for file edits." {
+		t.Fatalf("instructions = %#v", instructions)
 	}
 	items := got.Items()
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want only user message", len(items))
 	}
-	text, _ := items[0].TextItem()
-	if items[0].Author() != canonical.ItemAuthorUser || text.Text != "inspect files" {
+	message, _ := items[0].Message()
+	text, _ := message.Content()[0].Text()
+	if message.Role() != canonical.MessageRoleUser || text.Text() != "inspect files" {
 		t.Fatalf("item = %#v, want user inspect files", items[0])
 	}
 }

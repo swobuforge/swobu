@@ -8,20 +8,17 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
 
 func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
-	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
-	projectedName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "gpt-4o-mini",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Tools: []canonical.ToolDecl{
-			functionTool,
-		},
+		Model: canonical.Specify("gpt-4o-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -57,18 +54,15 @@ func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
-	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
-	projectedName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"` + projectedName + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
 	tools := got.Tools()
-	if len(tools) != 1 || tools[0].ToolName() != "get_weather" {
-		t.Fatalf("tools = %#v", tools)
+	if len(tools) != 1 || tools[0].Key().Name() != "get_weather" {
+		t.Fatalf("tools = %#v key=%q", tools, tools[0].Key().String())
 	}
 }

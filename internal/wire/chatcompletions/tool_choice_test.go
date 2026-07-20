@@ -7,61 +7,55 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
 
 func TestDecodeChatCompletionsToolChoice_DefaultsBySurface(t *testing.T) {
 	t.Parallel()
 
-	functionTool := canonical.NewFunctionToolDecl(
-		"codex/grep",
-		"grep",
-		"search text",
-		canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`),
-	)
-	customTool := canonical.NewCustomToolDecl(
-		"codex/apply_patch",
-		"apply_patch",
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction,
+		"grep"),
+		"search text", canonicaltest.Schema(t, `{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
+
+	customTool := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom,
+		"apply_patch"),
+
 		"edit files",
-		canonical.NewToolFormatObject(`{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`),
-	)
-	projectedFunctionName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
-	projectedCustomName, err := canonical.ProjectedToolName(customTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(custom) returned error: %v", err)
-	}
+		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
+
+	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
+	projectedCustomName := providertest.ProjectedToolName(t, customTool)
 
 	tests := []struct {
 		name         string
 		raw          string
-		tools        []canonical.ToolDecl
+		tools        []canonical.ToolDeclaration
 		wantMode     canonical.ToolPolicyMode
 		wantSpecific string
 		wantType     string
 	}{
 		{name: "empty without tools", raw: "", wantMode: canonical.ToolPolicyNone},
 		{name: "null without tools", raw: "null", wantMode: canonical.ToolPolicyNone},
-		{name: "empty with tools", raw: "", tools: []canonical.ToolDecl{functionTool}, wantMode: canonical.ToolPolicyAuto},
-		{name: "null with tools", raw: "null", tools: []canonical.ToolDecl{functionTool}, wantMode: canonical.ToolPolicyAuto},
-		{name: "string none", raw: `"none"`, tools: []canonical.ToolDecl{functionTool}, wantMode: canonical.ToolPolicyNone},
-		{name: "string auto", raw: `"auto"`, tools: []canonical.ToolDecl{functionTool}, wantMode: canonical.ToolPolicyAuto},
-		{name: "string required", raw: `"required"`, tools: []canonical.ToolDecl{functionTool}, wantMode: canonical.ToolPolicyRequired},
+		{name: "empty with tools", raw: "", tools: []canonical.ToolDeclaration{functionTool}, wantMode: canonical.ToolPolicyAuto},
+		{name: "null with tools", raw: "null", tools: []canonical.ToolDeclaration{functionTool}, wantMode: canonical.ToolPolicyAuto},
+		{name: "string none", raw: `"none"`, tools: []canonical.ToolDeclaration{functionTool}, wantMode: canonical.ToolPolicyNone},
+		{name: "string auto", raw: `"auto"`, tools: []canonical.ToolDeclaration{functionTool}, wantMode: canonical.ToolPolicyAuto},
+		{name: "string required", raw: `"required"`, tools: []canonical.ToolDeclaration{functionTool}, wantMode: canonical.ToolPolicyRequired},
 		{
 			name:         "object function",
 			raw:          `{"type":"function","function":{"name":"` + projectedFunctionName + `"}}`,
-			tools:        []canonical.ToolDecl{functionTool},
+			tools:        []canonical.ToolDeclaration{functionTool},
 			wantMode:     canonical.ToolPolicySpecific,
-			wantSpecific: functionTool.ToolID().String(),
+			wantSpecific: functionTool.Key().String(),
 			wantType:     canonical.ToolTypeFunction,
 		},
 		{
 			name:         "object custom",
 			raw:          `{"type":"custom","custom":{"name":"` + projectedCustomName + `"}}`,
-			tools:        []canonical.ToolDecl{customTool},
+			tools:        []canonical.ToolDeclaration{customTool},
 			wantMode:     canonical.ToolPolicySpecific,
-			wantSpecific: customTool.ToolID().String(),
+			wantSpecific: customTool.Key().String(),
 			wantType:     canonical.ToolTypeCustom,
 		},
 	}
@@ -90,7 +84,7 @@ func TestDecodeChatCompletionsToolChoice_DefaultsBySurface(t *testing.T) {
 				t.Fatalf("tool policy specific = %q, want %q", specific, tc.wantSpecific)
 			}
 			if tc.wantType != "" {
-				if specificType, ok := got.SpecificToolType(); !ok || specificType != tc.wantType {
+				if specificType := string(specific.Kind()); specificType != tc.wantType {
 					t.Fatalf("tool policy specific type = %q, want %q", specificType, tc.wantType)
 				}
 			}
@@ -101,46 +95,38 @@ func TestDecodeChatCompletionsToolChoice_DefaultsBySurface(t *testing.T) {
 func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 	t.Parallel()
 
-	functionTool := canonical.NewFunctionToolDecl(
-		"codex/grep",
-		"grep",
-		"search text",
-		canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`),
-	)
-	customTool := canonical.NewCustomToolDecl(
-		"codex/apply_patch",
-		"apply_patch",
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction,
+		"grep"),
+		"search text", canonicaltest.Schema(t, `{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
+
+	customTool := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom,
+		"apply_patch"),
+
 		"edit files",
-		canonical.NewToolFormatObject(`{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`),
-	)
-	projectedFunctionName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
-	projectedCustomName, err := canonical.ProjectedToolName(customTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(custom) returned error: %v", err)
-	}
+		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
+
+	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
+	projectedCustomName := providertest.ProjectedToolName(t, customTool)
 
 	tests := []struct {
 		name   string
 		policy canonical.ToolPolicy
-		tools  []canonical.ToolDecl
+		tools  []canonical.ToolDeclaration
 		want   string
 	}{
-		{name: "none", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), tools: []canonical.ToolDecl{functionTool}, want: `"none"`},
-		{name: "auto", policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), tools: []canonical.ToolDecl{functionTool}, want: `"auto"`},
-		{name: "required", policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), tools: []canonical.ToolDecl{functionTool}, want: `"required"`},
+		{name: "none", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), tools: []canonical.ToolDeclaration{functionTool}, want: `"none"`},
+		{name: "auto", policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), tools: []canonical.ToolDeclaration{functionTool}, want: `"auto"`},
+		{name: "required", policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), tools: []canonical.ToolDeclaration{functionTool}, want: `"required"`},
 		{
 			name:   "specific function",
-			policy: specificToolPolicy(functionTool.ToolID(), canonical.ToolTypeFunction),
-			tools:  []canonical.ToolDecl{functionTool},
+			policy: specificToolPolicy(functionTool.Key(), canonical.ToolTypeFunction),
+			tools:  []canonical.ToolDeclaration{functionTool},
 			want:   `{"type":"function","function":{"name":"` + projectedFunctionName + `"}}`,
 		},
 		{
 			name:   "specific custom",
-			policy: specificToolPolicy(customTool.ToolID(), canonical.ToolTypeCustom),
-			tools:  []canonical.ToolDecl{customTool},
+			policy: specificToolPolicy(customTool.Key(), canonical.ToolTypeCustom),
+			tools:  []canonical.ToolDeclaration{customTool},
 			want:   `{"type":"custom","custom":{"name":"` + projectedCustomName + `"}}`,
 		},
 	}
@@ -214,10 +200,9 @@ func mustJSONString(t *testing.T, v any) string {
 	return string(raw)
 }
 
-func specificToolPolicy(id canonical.SemanticToolID, toolType string) canonical.ToolPolicy {
-	policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &id)
-	policy.SpecificType = toolType
-	return policy
+func specificToolPolicy(id canonical.ToolKey, toolType string) canonical.ToolPolicy {
+	_ = toolType
+	return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &id)
 }
 
 func assertJSONEqual(t *testing.T, gotRaw, wantRaw string) {

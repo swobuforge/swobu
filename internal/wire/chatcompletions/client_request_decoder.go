@@ -1,6 +1,8 @@
 package chatcompletions
 
-type ClientRequestDecoder struct{}
+import shared "github.com/swobuforge/swobu/internal/wire/shared"
+
+type ClientRequestDecoder struct{ ImageLimits shared.ImageDecodeLimitPolicy }
 type ResponseDocumentEncoder struct{}
 type ResponseStreamEncoder struct{}
 type ProviderRequestDocumentEncoder struct{}

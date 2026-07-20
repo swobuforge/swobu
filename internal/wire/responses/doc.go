@@ -9,6 +9,8 @@
 // owns semantic success-stream decoding for
 // responses-specific behavior such as function-call argument streaming and
 // reasoning-token usage accounting.
+// User-message and tool-result images preserve URL or inline sources; tool
+// results retain ordered mixed content through Responses content arrays.
 // Responses reasoning output is not part of the current canonical v0 band and
 // must fail closed with a response.reasoning rejection decision instead of
 // disappearing from decode. Client request decoding uses the shared ingress

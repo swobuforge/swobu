@@ -9,12 +9,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestResponseDocumentEncoder_RefusalLowersToStopReason(t *testing.T) {
 	t.Parallel()
 
-	output := canonical.NewConversationOutput("msg_1", "claude-x", nil, "refusal")
+	output := canonicaltest.Response(t, "msg_1", "claude-x", nil, "refusal")
 	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
 	if err != nil {
 		t.Fatalf("EncodeResponseDocument returned error: %v", err)

@@ -21,6 +21,8 @@ import (
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
@@ -97,10 +99,10 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 
 	success := newTestHandler(staticRequestIngress{
 		envelope: testProviderIngressFromOutput(
-			canonical.NewConversationOutput(
+			canonicaltest.Response(t,
 				"chatcmpl_1",
 				"m",
-				[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+				[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 				"stop",
 			),
 		),
@@ -300,10 +302,10 @@ func TestHandler_RejectsNonGETModelsRequests(t *testing.T) {
 
 func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
 	resp := testProviderIngressFromOutput(
-		canonical.NewConversationOutput(
+		canonicaltest.MustResponse(
 			"chatcmpl_1",
 			"resolved-model",
-			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 			"stop",
 		),
 	)
@@ -330,7 +332,7 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	handler := newTestHandler(capturing)
 	var encoded bytes.Buffer
 	gz := gzip.NewWriter(&encoded)
-	_, _ = gz.Write([]byte(`{"model":"m","messages":[{"role":"assistant","content":[{"type":"text","text":"working"},{"type":"tool_use","id":"toolu_1","name":"calc","input":{"expr":"2+2"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"4"}]}]}`))
+	_, _ = gz.Write([]byte(`{"model":"m","tools":[{"name":"calc","description":"calculate","input_schema":{"type":"object"}}],"messages":[{"role":"assistant","content":[{"type":"text","text":"working"},{"type":"tool_use","id":"toolu_1","name":"calc","input":{"expr":"2+2"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"4"}]}]}`))
 	_ = gz.Close()
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewReader(encoded.Bytes()))
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -347,11 +349,12 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	if len(items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind(); got != canonical.ItemKindToolUse {
-		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolUse)
+	if got := items[1].Kind(); got != canonical.ItemKindToolCall {
+		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolCall)
 	}
-	if got := items[0].Author(); got != canonical.ItemAuthorAssistant {
-		t.Fatalf("author = %q, want %q", got, canonical.ItemAuthorAssistant)
+	message, _ := items[0].Message()
+	if got := message.Role(); got != canonical.MessageRoleAssistant {
+		t.Fatalf("author = %q, want %q", got, canonical.MessageRoleAssistant)
 	}
 	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
@@ -417,16 +420,17 @@ func TestHandler_AcceptsUnexpectedTopLevelFieldInRequestBody(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	text, _ := items[0].TextItem()
-	if text.Text != "hi" {
-		t.Fatalf("item text = %q, want %q", text.Text, "hi")
+	message, _ := items[0].Message()
+	text, _ := message.Content()[0].Text()
+	if text.Text() != "hi" {
+		t.Fatalf("item text = %q, want %q", text.Text(), "hi")
 	}
 }
 
 func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","prompt_cache_key":"repo-alpha","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},{"type":"function_call","call_id":"call_1","name":"grep","arguments":{"pattern":"TODO"}},{"type":"function_call_output","call_id":"call_1","output":"2 hits"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","prompt_cache_key":"repo-alpha","tools":[{"type":"function","name":"grep","parameters":{"type":"object"}}],"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},{"type":"function_call","call_id":"call_1","name":"grep","arguments":{"pattern":"TODO"}},{"type":"function_call_output","call_id":"call_1","output":"2 hits"}]}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -442,8 +446,8 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("conversation len = %d, want 3", len(items))
 	}
-	if got := items[1].Kind(); got != canonical.ItemKindToolUse {
-		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolUse)
+	if got := items[1].Kind(); got != canonical.ItemKindToolCall {
+		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolCall)
 	}
 	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
@@ -470,11 +474,8 @@ func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolPolicy(t *test
 func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	functionTool := canonical.NewFunctionToolDecl("grep", "grep", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))
-	projectedFunctionName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "grep"), "search text", canonicaltest.MustSchema(`{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tools":[{"type":"function","name":"`+projectedFunctionName+`","description":"search text","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}],"tool_choice":{"type":"function","name":"`+projectedFunctionName+`"},"input":"continue"}`))
 	rec := httptest.NewRecorder()
 
@@ -487,7 +488,7 @@ func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *te
 	if got := typed.ToolPolicy(); got.Mode != canonical.ToolPolicySpecific {
 		t.Fatalf("tool policy mode = %q, want %q", got.Mode, canonical.ToolPolicySpecific)
 	}
-	wantSpecific := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindFunction, "grep").String()
+	wantSpecific := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "grep").String()
 	if specific, ok := typed.ToolPolicy().SpecificID(); !ok || specific.String() != wantSpecific {
 		t.Fatalf("tool policy specific = %q, want %q", specific, wantSpecific)
 	}
@@ -614,7 +615,7 @@ func TestHandler_AcceptsResponsesWebSocketClient(t *testing.T) {
 	if !strings.Contains(joined, `"type":"response.output_text.delta"`) {
 		t.Fatalf("frames = %q, want response.output_text.delta", joined)
 	}
-	if !strings.Contains(joined, `"item_id":"text_0"`) {
+	if !strings.Contains(joined, `"item_id":"item_0"`) {
 		t.Fatalf("frames = %q, want item_id linkage", joined)
 	}
 	if !strings.Contains(joined, `"type":"response.output_item.done"`) {
@@ -697,8 +698,8 @@ func TestHandler_RejectsUnsupportedAnthropicMessagePartType(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "unsupported part type") {
-		t.Fatalf("body = %q, want unsupported part type failure", body)
+	if body := rec.Body.String(); !strings.Contains(body, "image source is invalid") {
+		t.Fatalf("body = %q, want invalid image source failure", body)
 	}
 }
 
@@ -706,7 +707,7 @@ func TestHandler_EncodesToolCallStreamingForResponses(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: testStreamingToolResponse("resp_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TO`, `DO"}`}, "completed"),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","tools":[{"type":"function","name":"grep","parameters":{"type":"object"}}],"stream":true}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -836,7 +837,7 @@ func TestHandler_EncodesToolCallStreamingForMessages(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: testStreamingToolResponse("msg_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TODO"}`}, "tool_use"),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","tools":[{"name":"grep","description":"search","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
 
@@ -871,11 +872,11 @@ func (h *capturingRequestIngress) HandleRequest(ctx context.Context, in exchange
 		return exchange.RequestOutput{}, err
 	}
 	out, err := synthesizeRequestOutputFromEnvelope(ctx, clones[2], testProviderIngressFromOutput(
-		canonical.NewConversationOutput(
+		canonicaltest.MustResponse(
 			"chatcmpl_1",
 			"m",
-			[]canonical.OutputItem{
-				canonical.NewTextOutputItem("text_0", "ok"),
+			[]canonical.CanonicalItem{
+				canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok"),
 			},
 			"stop",
 		),
@@ -917,13 +918,13 @@ func (h staticRequestIngress) HandleRequest(ctx context.Context, in exchange.Req
 	return h.out, h.err
 }
 
-func testProviderIngressFromOutput(output canonical.CanonicalOutput) canonical.ResponseStream {
+func testProviderIngressFromOutput(output canonical.CanonicalResponse) canonical.ResponseStream {
 	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		"test_buffered:httpapi",
 		output.Response(),
 		output.Model(),
 		output.Items(),
-		output.FinishReason(),
+		output.CompletionReason(),
 		output.Usage(),
 	))
 }
@@ -943,12 +944,13 @@ func testDebugLogger() (restore func(), out *bytes.Buffer) {
 }
 
 func testStreamingTextResponse(resultID string, model string, itemID string, text string, finish string) canonical.ResponseStream {
+	item := canonicaltest.MustMessage(canonical.MessageRoleAssistant, text)
 	events := canonical.EventSequence{
-		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
-		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
-		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventEnvelopeStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, Meta: canonical.EventMetadataFields{NativeID: itemID}},
-		{ExchangeID: "test_exchange", Seq: 4, Kind: canonical.EventTextDelta, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.TextDeltaPayload{Text: text}},
-		{ExchangeID: "test_exchange", Seq: 5, Kind: canonical.EventEnvelopeEnd, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvMessage, Status: canonical.EnvelopeStatusCompleted}},
+		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: model}},
+		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventResponseIdentity, EnvID: "res_1", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(resultID)}}},
+		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventItemStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonicaltest.MustMessageStart(canonical.MessageRoleAssistant)}, Meta: canonical.EventMetadataFields{NativeID: itemID}},
+		{ExchangeID: "test_exchange", Seq: 4, Kind: canonical.EventTextDelta, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.TextDeltaPayload{Text: text}}},
+		{ExchangeID: "test_exchange", Seq: 5, Kind: canonical.EventItemCompleted, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: item}}},
 		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
 		{ExchangeID: "test_exchange", Seq: 7, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	}
@@ -956,18 +958,34 @@ func testStreamingTextResponse(resultID string, model string, itemID string, tex
 }
 
 func testStreamingToolResponse(resultID string, model string, itemID string, toolUseID string, name string, argDeltas []string, finish string) canonical.ResponseStream {
+	callID, err := canonical.NewToolCallID(toolUseID)
+	if err != nil {
+		panic(err)
+	}
+	toolID := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, name)
+	tool := toolID
 	events := canonical.EventSequence{
-		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}},
-		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventMetadata, EnvID: "res_1", Payload: canonical.MetadataPayload{Values: map[string]string{"result_id": resultID, "model": model}}},
-		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventEnvelopeStart, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: name, ToolUseID: toolUseID}, Meta: canonical.EventMetadataFields{NativeID: itemID}},
+		{ExchangeID: "test_exchange", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "res_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: model}},
+		{ExchangeID: "test_exchange", Seq: 2, Kind: canonical.EventResponseIdentity, EnvID: "res_1", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(resultID)}}},
+		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventItemStart, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonicaltest.MustToolCallStart(callID, tool)}, Meta: canonical.EventMetadataFields{NativeID: itemID}},
 	}
 	seq := int64(4)
+	arguments := ""
 	for _, delta := range argDeltas {
-		events = append(events, canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventArgsDelta, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.ArgsDeltaPayload{Args: delta}})
+		arguments += delta
+		events = append(events, canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventArgsDelta, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ArgsDeltaPayload{Args: delta}}})
 		seq++
 	}
+	object, err := canonical.ParseJSONObject([]byte(arguments))
+	if err != nil {
+		panic(err)
+	}
+	item, err := canonical.NewToolCallItem(callID, tool, canonical.NewJSONObjectToolInput(object))
+	if err != nil {
+		panic(err)
+	}
 	events = append(events,
-		canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventEnvelopeEnd, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvToolCall, Status: canonical.EnvelopeStatusCompleted}},
+		canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventItemCompleted, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: item}}},
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 1, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 2, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	)
@@ -983,11 +1001,11 @@ type modelsCapableHandler struct {
 func (h *modelsCapableHandler) HandleRequest(_ context.Context, _ exchange.RequestInput) (exchange.RequestOutput, error) {
 	return exchange.RequestOutput{Response: exchange.NewBufferedResponse(testDocumentFromOutput(
 		canonical.ClientFamilyChatCompletions,
-		canonical.NewConversationOutput(
+		canonicaltest.MustResponse(
 			"chatcmpl_1",
 			"m",
-			[]canonical.OutputItem{
-				canonical.NewTextOutputItem("text_0", "ok"),
+			[]canonical.CanonicalItem{
+				canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok"),
 			},
 			"stop",
 		),
@@ -995,7 +1013,7 @@ func (h *modelsCapableHandler) HandleRequest(_ context.Context, _ exchange.Reque
 }
 
 func synthesizeRequestOutputFromEnvelope(ctx context.Context, in exchange.RequestInput, envelope canonical.ResponseStream) (exchange.RequestOutput, error) {
-	request, clientDelivery := mustDecodeCapturedRequest(in)
+	_, clientDelivery := mustDecodeCapturedRequest(in)
 	doc, err := buildRequestDocumentForTest(in)
 	if err != nil {
 		return exchange.RequestOutput{}, err
@@ -1026,8 +1044,7 @@ func synthesizeRequestOutputFromEnvelope(ctx context.Context, in exchange.Reques
 	if err != nil {
 		return exchange.RequestOutput{}, err
 	}
-	_ = request
-	responseDoc := testDocumentFromOutput(clientFamily, output)
+	responseDoc := testDocumentFromOutput(clientFamily, *output)
 	return exchange.RequestOutput{Response: exchange.NewBufferedResponse(responseDoc)}, nil
 }
 
@@ -1126,7 +1143,7 @@ func normalizeStreamingDeliveryForTest(clientDelivery delivery.Delivery, framing
 	return delivery.StreamingDelivery(framing)
 }
 
-func testDocumentFromOutput(family canonical.ClientFamily, output canonical.CanonicalOutput) carrier.Document {
+func testDocumentFromOutput(family canonical.ClientFamily, output canonical.CanonicalResponse) carrier.Document {
 	doc, err := testResponseDocumentEncoderForFamily(family).EncodeResponseDocument(output)
 	if err != nil {
 		panic(err)
@@ -1135,27 +1152,27 @@ func testDocumentFromOutput(family canonical.ClientFamily, output canonical.Cano
 }
 
 type responseDocumentEncoderForTest struct {
-	encode func(canonical.CanonicalOutput) (carrier.Document, error)
+	encode func(canonical.CanonicalResponse) (carrier.Document, error)
 }
 
-func (e responseDocumentEncoderForTest) EncodeResponseDocument(output canonical.CanonicalOutput) (carrier.Document, error) {
+func (e responseDocumentEncoderForTest) EncodeResponseDocument(output canonical.CanonicalResponse) (carrier.Document, error) {
 	return e.encode(output)
 }
 
 func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) responseDocumentEncoderForTest {
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.Document, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalResponse) (carrier.Document, error) {
 			result, err := chatcompletions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Document, err
 		}}
 	case canonical.ClientFamilyResponses:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.Document, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalResponse) (carrier.Document, error) {
 			result, err := responses.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Document, err
 		}}
 	case canonical.ClientFamilyMessages:
-		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalOutput) (carrier.Document, error) {
+		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalResponse) (carrier.Document, error) {
 			result, err := messages.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
 			return result.Document, err
 		}}

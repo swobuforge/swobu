@@ -1,9 +1,6 @@
 package canonical
 
-import (
-	"encoding/json"
-	"strings"
-)
+import "strings"
 
 // ToolCallBatchMode names the request-side tool batching lowerings currently
 // supported by the canonical request grammar.
@@ -39,29 +36,5 @@ func (p ToolCallBatchPolicy) Validate() error {
 		return nil
 	default:
 		return BadRequest("tool call batch policy mode is invalid")
-	}
-}
-
-type requestToolCallBatchMetadataDTO struct {
-	Mode string `json:"mode"`
-}
-
-func decodeToolCallBatchMetadata(raw string) (ToolCallBatchPolicy, error) {
-	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
-	if trimmed == "" || trimmed == "null" {
-		return ToolCallBatchPolicy{}, nil
-	}
-	var dto requestToolCallBatchMetadataDTO
-	if err := json.Unmarshal([]byte(trimmed), &dto); err != nil {
-		return ToolCallBatchPolicy{}, BadRequest("canonical request tool call batch policy is invalid")
-	}
-	mode := ToolCallBatchMode(strings.TrimSpace(dto.Mode)) // swobu:io-string source=domain
-	switch mode {
-	case ToolCallBatchUnspecified:
-		return ToolCallBatchPolicy{}, BadRequest("canonical request tool call batch policy mode is required")
-	case ToolCallBatchAtMostOne:
-		return ToolCallBatchPolicy{Mode: mode}, nil
-	default:
-		return ToolCallBatchPolicy{}, BadRequest("canonical request tool call batch policy mode is invalid")
 	}
 }

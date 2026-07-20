@@ -5,6 +5,10 @@
 //   - Client request ingress (wire decode, endpoint resolution)
 //   - Routing orchestration (one reducer-owned state lifecycle per request)
 //   - Ordered provider-call attempts and all selection of further provider work
+//   - One exchange-scoped URL fetch cache reused by candidate attempts without
+//     becoming replay truth
+//   - Winning-attempt media bindings, merged only with inherited durable
+//     bindings and retained by exact request-part occurrence
 //   - Explicit workspace-slug partitioning for the daemon-global replay store
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
@@ -28,5 +32,6 @@
 // closed transitions only when an implemented alternative exists. Attempt
 // requirements record issued-call facts; generic provider errors never infer
 // which feature caused a failure. Alternatives do not add nested retry loops,
-// synchronized route cursors, or phase booleans.
+// synchronized route cursors, or phase booleans. Candidate-scoped preparation
+// failure advances routing; malformed request-global media fails the exchange.
 package exchange

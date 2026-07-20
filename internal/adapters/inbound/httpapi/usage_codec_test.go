@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
@@ -12,10 +13,9 @@ import (
 
 func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 100, 7, 64, 5)
-	output := canonical.NewConversationOutputWithUsage(
-		"chatcmpl_1",
+	output := canonicaltest.ResponseWithUsage(t, "chatcmpl_1",
 		"m",
-		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 		"stop",
 		usage,
 	)
@@ -45,10 +45,9 @@ func TestChatCompletionsCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTokenUsage returned error: %v", err)
 	}
-	output := canonical.NewConversationOutputWithUsage(
-		"chatcmpl_reasoning",
+	output := canonicaltest.ResponseWithUsage(t, "chatcmpl_reasoning",
 		"m",
-		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 		"stop",
 		usage,
 	)
@@ -65,10 +64,9 @@ func TestChatCompletionsCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 
 func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 80, 9, 33, 2)
-	output := canonical.NewConversationOutputWithUsage(
-		"resp_1",
+	output := canonicaltest.ResponseWithUsage(t, "resp_1",
 		"m",
-		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 		"completed",
 		usage,
 	)
@@ -98,10 +96,9 @@ func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTokenUsage returned error: %v", err)
 	}
-	output := canonical.NewConversationOutputWithUsage(
-		"resp_reasoning",
+	output := canonicaltest.ResponseWithUsage(t, "resp_reasoning",
 		"m",
-		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 		"completed",
 		usage,
 	)
@@ -123,10 +120,9 @@ func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPrese
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
-	outputValue := canonical.NewConversationOutputWithUsage(
-		"resp_compat",
+	outputValue := canonicaltest.ResponseWithUsage(t, "resp_compat",
 		"m",
-		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 		"completed",
 		usage,
 	)
@@ -143,10 +139,9 @@ func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPrese
 
 func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	usage := mustUsage(t, 51, 4, 20, 10)
-	output := canonical.NewConversationOutputWithUsage(
-		"msg_1",
+	output := canonicaltest.ResponseWithUsage(t, "msg_1",
 		"claude",
-		[]canonical.CanonicalItem{canonical.NewTextOutputItem("text_0", "ok")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 		"end_turn",
 		usage,
 	)

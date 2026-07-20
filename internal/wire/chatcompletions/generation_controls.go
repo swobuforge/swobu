@@ -41,7 +41,7 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 
 func decodeChatCompletionsMaxOutputTokens(dto chatCompletionsRequestDTO) (*int, error) {
 	// GPT-5-series reasoning models use the newer field name on chat completions.
-	// Prefer it when present, then fall back to the legacy name for older models.
+	// Prefer it when present, then fall back to max_tokens for compatible backends.
 	maxCompletionTokens, err := openaiwire.DecodeOptionalInt(dto.MaxCompletionTokens, "chat completions request max_completion_tokens is invalid")
 	if err != nil {
 		return nil, err

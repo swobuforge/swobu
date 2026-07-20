@@ -12,8 +12,9 @@ import (
 // current delta. Exact backend resolution chooses which representation is safe
 // to send; replay lookup never predicts backend compatibility.
 type Prepared struct {
-	Semantic canonical.CanonicalRequest
-	Delta    canonical.CanonicalRequest
+	Semantic      canonical.CanonicalRequest
+	Delta         canonical.CanonicalRequest
+	ResolvedMedia ResolvedMedia
 }
 
 // PreferredForTarget selects canonical replay content for one exact target
@@ -44,7 +45,7 @@ func PreviousSwobuResponseID(request canonical.CanonicalRequest) (canonical.Swob
 // does not reference a prior replay record.
 func PrepareCurrent(request canonical.CanonicalRequest) Prepared {
 	complete := withoutPreviousResponse(request)
-	return Prepared{Semantic: complete, Delta: complete.Clone()}
+	return Prepared{Semantic: complete, Delta: requestWithoutPreviousResponse(request)}
 }
 
 // PrepareFromRecord materializes one immutable replay snapshot already loaded
@@ -60,59 +61,79 @@ func PrepareFromRecord(request canonical.CanonicalRequest, requestedSwobuRespons
 	if response.SwobuID != requestedSwobuResponseID {
 		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
 	}
+	if err := previous.ResolvedMedia.ValidateForRequest(previous.Request); err != nil {
+		return Prepared{}, fmt.Errorf("invalid replay record media: %w", err)
+	}
 	return Prepared{
-		Semantic: materialize(previous, request),
-		Delta:    inheritRequestBands(previous.Request, request, &response),
+		Semantic:      materialize(previous, request),
+		Delta:         inheritRequestBands(previous.Request, request, &response),
+		ResolvedMedia: previous.ResolvedMedia.Clone(),
 	}, nil
 }
 
 func withoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         request.Model(),
-		Instructions:  request.Instructions(),
+		Model:         canonical.Specify(request.Model()),
+		Instructions:  canonical.Specify(request.Instructions()),
 		Items:         cloneCanonicalItems(request.Items()),
-		Tools:         cloneToolDecls(request.Tools()),
-		ToolPolicy:    request.ToolPolicy(),
-		ToolCallBatch: request.ToolCallBatch(),
+		Tools:         canonical.Specify(mustToolSet(request.Tools())),
+		ToolPolicy:    canonical.Specify(request.EffectiveToolPolicy()),
+		ToolCallBatch: canonical.Specify(request.ToolCallBatch()),
 		Controls:      request.Controls(),
-		OutputFormat:  request.OutputFormat(),
-		Presence:      request.Presence(),
+		OutputFormat:  canonical.Specify(request.OutputFormat()),
+	})
+}
+
+func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:         request.ModelField(),
+		Instructions:  request.InstructionsField(),
+		Items:         cloneCanonicalItems(request.Items()),
+		Tools:         request.ToolsField(),
+		ToolPolicy:    request.ToolPolicyField(),
+		ToolCallBatch: request.ToolCallBatchField(),
+		Controls:      request.Controls(),
+		OutputFormat:  request.OutputFormatField(),
 	})
 }
 
 func inheritRequestBands(previous canonical.CanonicalRequest, current canonical.CanonicalRequest, previousResponse *canonical.ResponseRef) canonical.CanonicalRequest {
-	presence := current.Presence()
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:            inheritString(presence.Model, current.Model(), previous.Model()),
-		Instructions:     inheritString(presence.Instructions, current.Instructions(), previous.Instructions()),
+		Model:            canonical.Specify(inheritString(current.ModelSpecified(), current.Model(), previous.Model())),
+		Instructions:     canonical.Specify(inheritInstructions(current.InstructionsSpecified(), current.Instructions(), previous.Instructions())),
 		Items:            cloneCanonicalItems(current.Items()),
-		Tools:            inheritToolDecls(presence.Tools, current.Tools(), previous.Tools()),
+		Tools:            canonical.Specify(mustToolSet(inheritToolDecls(current.ToolsSpecified(), current.Tools(), previous.Tools()))),
 		PreviousResponse: previousResponse,
-		ToolPolicy:       inheritCloneable(presence.ToolPolicy, current.ToolPolicy(), previous.ToolPolicy()),
-		ToolCallBatch:    inheritCloneable(presence.ToolCallBatch, current.ToolCallBatch(), previous.ToolCallBatch()),
-		Controls:         inheritControls(presence.Controls, current.Controls(), previous.Controls()),
-		OutputFormat:     inheritCloneable(presence.OutputFormat, current.OutputFormat(), previous.OutputFormat()),
-		Presence:         presence,
+		ToolPolicy:       canonical.Specify(inheritCloneable(current.ToolPolicySpecified(), current.ToolPolicy(), previous.ToolPolicy())),
+		ToolCallBatch:    canonical.Specify(inheritCloneable(current.ToolCallBatchSpecified(), current.ToolCallBatch(), previous.ToolCallBatch())),
+		Controls:         inheritControls(current.Controls(), previous.Controls()),
+		OutputFormat:     canonical.Specify(inheritCloneable(current.OutputFormatSpecified(), current.OutputFormat(), previous.OutputFormat())),
 	})
 }
 
 func materialize(previous Record, current canonical.CanonicalRequest) canonical.CanonicalRequest {
-	presence := current.Presence()
 	items := cloneCanonicalItems(previous.Request.Items())
 	items = append(items, cloneCanonicalItems(previous.Response.Items())...)
 	items = append(items, cloneCanonicalItems(current.Items())...)
 
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         inheritString(presence.Model, current.Model(), previous.Request.Model()),
-		Instructions:  inheritString(presence.Instructions, current.Instructions(), previous.Request.Instructions()),
+		Model:         canonical.Specify(inheritString(current.ModelSpecified(), current.Model(), previous.Request.Model())),
+		Instructions:  canonical.Specify(inheritInstructions(current.InstructionsSpecified(), current.Instructions(), previous.Request.Instructions())),
 		Items:         items,
-		Tools:         inheritToolDecls(presence.Tools, current.Tools(), previous.Request.Tools()),
-		ToolPolicy:    inheritCloneable(presence.ToolPolicy, current.ToolPolicy(), previous.Request.ToolPolicy()),
-		ToolCallBatch: inheritCloneable(presence.ToolCallBatch, current.ToolCallBatch(), previous.Request.ToolCallBatch()),
-		Controls:      inheritControls(presence.Controls, current.Controls(), previous.Request.Controls()),
-		OutputFormat:  inheritCloneable(presence.OutputFormat, current.OutputFormat(), previous.Request.OutputFormat()),
-		Presence:      presence,
+		Tools:         canonical.Specify(mustToolSet(inheritToolDecls(current.ToolsSpecified(), current.Tools(), previous.Request.Tools()))),
+		ToolPolicy:    canonical.Specify(inheritCloneable(current.ToolPolicySpecified(), current.ToolPolicy(), previous.Request.ToolPolicy())),
+		ToolCallBatch: canonical.Specify(inheritCloneable(current.ToolCallBatchSpecified(), current.ToolCallBatch(), previous.Request.ToolCallBatch())),
+		Controls:      inheritControls(current.Controls(), previous.Request.Controls()),
+		OutputFormat:  canonical.Specify(inheritCloneable(current.OutputFormatSpecified(), current.OutputFormat(), previous.Request.OutputFormat())),
 	})
+}
+
+func mustToolSet(tools []canonical.ToolDeclaration) canonical.ToolSet {
+	set, err := canonical.NewToolSet(tools)
+	if err != nil {
+		panic("replay received invalid canonical tool declarations: " + err.Error())
+	}
+	return set
 }
 
 func cloneCanonicalItems(items []canonical.CanonicalItem) []canonical.CanonicalItem {
@@ -126,21 +147,18 @@ func cloneCanonicalItems(items []canonical.CanonicalItem) []canonical.CanonicalI
 	return cloned
 }
 
-func cloneToolDecls(tools []canonical.ToolDecl) []canonical.ToolDecl {
+func cloneToolDecls(tools []canonical.ToolDeclaration) []canonical.ToolDeclaration {
 	if tools == nil {
 		return nil
 	}
-	cloned := make([]canonical.ToolDecl, len(tools))
+	cloned := make([]canonical.ToolDeclaration, len(tools))
 	for i := range tools {
-		if tools[i] == nil {
-			continue
-		}
 		cloned[i] = tools[i].Clone()
 	}
 	return cloned
 }
 
-func inheritToolDecls(present bool, current, previous []canonical.ToolDecl) []canonical.ToolDecl {
+func inheritToolDecls(present bool, current, previous []canonical.ToolDeclaration) []canonical.ToolDeclaration {
 	if present {
 		return cloneToolDecls(current)
 	}
@@ -152,6 +170,13 @@ func inheritString(present bool, current, previous string) string {
 		return current
 	}
 	return previous
+}
+
+func inheritInstructions(present bool, current, previous canonical.InstructionSet) canonical.InstructionSet {
+	if present {
+		return current.Clone()
+	}
+	return previous.Clone()
 }
 
 // cloneabler is a constraint for types that have a Clone() T method.
@@ -167,18 +192,18 @@ func inheritCloneable[T cloneabler[T]](present bool, current, previous T) T {
 	return previous.Clone()
 }
 
-func inheritControls(presence canonical.GenerationControlsPresence, current, previous canonical.GenerationControls) canonical.GenerationControls {
+func inheritControls(current, previous canonical.GenerationControls) canonical.GenerationControls {
 	out := previous.Clone()
-	if presence.MaxOutputTokens {
+	if !current.Limits.MaxOutputTokens.IsZero() {
 		out.Limits.MaxOutputTokens = current.Limits.MaxOutputTokens.Clone()
 	}
-	if presence.StopSequences {
+	if current.Limits.StopSequences != nil {
 		out.Limits.StopSequences = append([]string(nil), current.Limits.StopSequences...)
 	}
-	if presence.Temperature {
+	if !current.Sampling.Temperature.IsZero() {
 		out.Sampling.Temperature = current.Sampling.Temperature.Clone()
 	}
-	if presence.TopP {
+	if !current.Sampling.TopP.IsZero() {
 		out.Sampling.TopP = current.Sampling.TopP.Clone()
 	}
 	return out

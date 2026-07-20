@@ -8,24 +8,25 @@ import (
 
 // OutputText concatenates textual output items in order for families that expose
 // a single flat text field in their batch response shape.
-func OutputText(items []canonical.OutputItem) string {
+func OutputText(items []canonical.CanonicalItem) string {
 	out := ""
 	for _, item := range items {
-		if item.Kind() != canonical.OutputItemText {
-			continue
-		}
-		text, ok := item.TextItem()
+		message, ok := item.Message()
 		if !ok {
 			continue
 		}
-		out += text.Text
+		for _, part := range message.Content() {
+			if text, ok := part.Text(); ok {
+				out += text.Text()
+			}
+		}
 	}
 	return out
 }
 
-func ContainsToolUseOutput(items []canonical.OutputItem) bool {
+func ContainsToolUseOutput(items []canonical.CanonicalItem) bool {
 	for _, item := range items {
-		if item.Kind() == canonical.OutputItemToolUse {
+		if item.Kind() == canonical.ItemKindToolCall {
 			return true
 		}
 	}

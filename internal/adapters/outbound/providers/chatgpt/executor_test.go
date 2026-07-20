@@ -22,6 +22,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 type stubCredentialResolver struct{}
@@ -278,8 +279,8 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
@@ -333,8 +334,8 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	sink := &recordingDecisionSink{}
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
@@ -389,8 +390,8 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
@@ -422,8 +423,8 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 	exec := NewExecutor(srv.Client(), failingCredentialResolver{})
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
@@ -493,8 +494,8 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	exec := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
@@ -545,8 +546,8 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "gpt-5.4-mini",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		}),
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),

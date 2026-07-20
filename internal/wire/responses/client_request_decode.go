@@ -1,3 +1,4 @@
+// swobu:lint ignore file-length because=Responses request decoding keeps the protocol DTO-to-canonical boundary cohesive
 package responses
 
 import (
@@ -19,9 +20,9 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, "")
+		request, delivery, err := decoder.decodeClientRequestWithDecisions(doc, sink, "")
 		return wire.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
@@ -30,7 +31,8 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.Clie
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+// swobu:lint ignore function-complexity because=Responses request decoding validates all request bands at one protocol boundary.
+func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto responsesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "responses request", nil); err != nil {
@@ -39,16 +41,12 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if len(bytes.TrimSpace(dto.Store)) != 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.UnsupportedOperation("responses store is not supported")
 	}
-	presence, err := decodeResponsesRequestPresence(raw)
+	supplied, err := decodeResponsesSuppliedFields(raw)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseWireID)) // swobu:io-string source=boundary
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "responses")
-	if err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
-	}
-	inputText, conversation, err := decodeResponsesInput(dto.Input, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -64,12 +62,23 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 		}
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses conversation is not supported in swobu v0")
 	}
-	if inputText == "" && len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseWireID) == "" { // swobu:io-string source=boundary
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request is missing required fields")
-	}
 	tools, err := decodeResponsesTools(dto.Tools, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	toolSet, err := canonical.NewToolSet(tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses tools are invalid")
+	}
+	conversation, err := decodeResponsesInput(dto.Input, tools, sink, exchangeID, decoder.ImageLimits)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	if err := shared.ValidateImageDecodeLimits(conversation, decoder.ImageLimits); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request image limits are exceeded")
+	}
+	if len(conversation) == 0 && strings.TrimSpace(dto.PreviousResponseWireID) == "" { // swobu:io-string source=boundary
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request is missing required fields")
 	}
 	slog.Debug("responses request tools",
 		"component", "httpapi",
@@ -77,9 +86,6 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 		"tool_count", len(tools),
 		"function_tool_count", responsesToolKindCount(tools, canonical.ToolTypeFunction),
 		"custom_tool_count", responsesToolKindCount(tools, canonical.ToolTypeCustom),
-		"capability_tool_count", responsesCapabilityToolCount(tools),
-		"capability_tool_names", strings.Join(responsesCapabilityToolNames(tools), ","),
-		"capability_tool_configs", strings.Join(responsesCapabilityToolConfigs(tools), " | "),
 	)
 	toolPolicy, err := DecodeResponsesToolPolicy(dto.ToolChoice, tools, sink, exchangeID)
 	if err != nil {
@@ -109,55 +115,35 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if !clientPreviousSwobuResponseID.IsZero() {
 		previousResponse = &canonical.ResponseRef{SwobuID: clientPreviousSwobuResponseID}
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:            strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		Instructions:     instructions,
-		InputText:        inputText,
+	params := canonical.RequestParams{
 		Items:            conversation,
-		Tools:            tools,
-		ToolPolicy:       toolPolicy,
-		ToolCallBatch:    toolCallBatch,
 		Controls:         controls,
-		OutputFormat:     outputFormat,
 		PreviousResponse: previousResponse,
-		Presence:         presence,
-	})
+	}
+	if supplied.Model {
+		params.Model = canonical.Specify(strings.TrimSpace(dto.Model)) // swobu:io-string source=boundary
+	} // swobu:io-string source=boundary
+	if supplied.Instructions {
+		params.Instructions = canonical.Specify(canonical.NewSystemInstructionSet(instructions))
+	}
+	if supplied.Tools {
+		params.Tools = canonical.Specify(toolSet)
+	}
+	if supplied.ToolPolicy {
+		params.ToolPolicy = canonical.Specify(toolPolicy)
+	}
+	if supplied.ToolCallBatch {
+		params.ToolCallBatch = canonical.Specify(toolCallBatch)
+	}
+	if supplied.OutputFormat {
+		params.OutputFormat = canonical.Specify(outputFormat)
+	}
+	request := canonical.NewCanonicalRequest(params)
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
 	return request, resolvedDelivery, nil
-}
-
-func decodeResponsesRequestPresence(raw []byte) (canonical.RequestPresence, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return canonical.RequestPresence{}, canonical.BadRequest("responses request is invalid")
-	}
-	_, model := fields["model"]
-	_, instructions := fields["instructions"]
-	_, tools := fields["tools"]
-	_, toolPolicy := fields["tool_choice"]
-	_, toolCallBatch := fields["parallel_tool_calls"]
-	_, outputFormat := fields["text"]
-	_, maxOutputTokens := fields["max_output_tokens"]
-	_, stopSequences := fields["stop"]
-	_, temperature := fields["temperature"]
-	_, topP := fields["top_p"]
-	return canonical.RequestPresence{
-		Model:         model,
-		Instructions:  instructions,
-		Tools:         tools,
-		ToolPolicy:    toolPolicy,
-		ToolCallBatch: toolCallBatch,
-		OutputFormat:  outputFormat,
-		Controls: canonical.GenerationControlsPresence{
-			MaxOutputTokens: maxOutputTokens,
-			StopSequences:   stopSequences,
-			Temperature:     temperature,
-			TopP:            topP,
-		},
-	}, nil
 }
 
 func decodeResponsesInstructions(raw json.RawMessage) (string, error) {
@@ -174,42 +160,52 @@ func decodeResponsesInstructions(raw json.RawMessage) (string, error) {
 
 func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
 	raw := strings.TrimSpace(string(input)) // swobu:io-string source=boundary
-	if raw == "" {
-		raw = "null"
+	shape := "null"
+	if raw != "" && raw != "null" {
+		switch raw[0] {
+		case '[':
+			shape = "array"
+		case '{':
+			shape = "object"
+		case '"':
+			shape = "string"
+		default:
+			shape = "other"
+		}
 	}
-	normalized := raw
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, []byte(raw)); err == nil {
-		normalized = compact.String()
-	}
-	slog.Debug("responses raw input",
+	slog.Debug("responses input summary",
 		"component", "httpapi",
-		"event", "responses_raw_input",
+		"event", "responses_input_summary",
 		"has_previous_response_id", previousResponseID != "",
-		"raw_input_json", normalized,
+		"input_shape", shape,
+		"encoded_bytes", len(input),
 	)
 }
 
 // swobu:lint ignore function-complexity because=responses input decoding keeps all acceptance branches in one protocol boundary helper.
-func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID string) (string, []canonical.CanonicalItem, error) {
+func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
-		return "", nil, nil
+		return nil, nil
 	}
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		return text, nil, nil
+		message, err := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart(text)})
+		if err != nil {
+			return nil, canonical.BadRequest("responses request input text is invalid")
+		}
+		return []canonical.CanonicalItem{message}, nil
 	}
 	var items []responsesInputItemDTO
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return "", nil, canonical.BadRequest("responses request input is invalid")
+		return nil, canonical.BadRequest("responses request input is invalid")
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(items))
 	for idx, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
 		if itemType == "" {
 			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Approx, responsesInputSubject(idx, "type")); err != nil {
-				return "", nil, err
+				return nil, err
 			}
 			itemType = "message"
 		}
@@ -217,14 +213,20 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 		case "message":
 			role := strings.TrimSpace(item.Role) // swobu:io-string source=boundary
 			if role == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsAuthor, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
-					return "", nil, err
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsMessageRole, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
+					return nil, err
 				}
 				role = "user"
 			}
-			parts, err := openaiwire.DecodeTextContentItems(item.Content, "responses", openaiwire.AuthorForRole(role))
+			author := openaiwire.AuthorForRole(role)
+			if role == "system" {
+				author = canonical.MessageRoleSystem
+			} else if role == "developer" {
+				author = canonical.MessageRoleDeveloper
+			}
+			parts, err := openaiwire.DecodeTextContentItems(item.Content, "responses", author, imageLimits)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 			decoded = append(decoded, parts...)
 		case "function_call":
@@ -233,101 +235,79 @@ func decodeResponsesInput(raw json.RawMessage, sink compat.Sink, exchangeID stri
 				callID = strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			}
 			if callID == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
-					return "", nil, err
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
+					return nil, err
 				}
 				callID = openaiwire.GeneratedToolUseID(idx, 0)
 			} else if strings.TrimSpace(item.CallID) == "" { // swobu:io-string source=boundary
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
-					return "", nil, err
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
+					return nil, err
 				}
 			}
 			if strings.TrimSpace(item.Name) == "" { // swobu:io-string source=boundary
-				return "", nil, canonical.BadRequest("responses request function_call items require a name")
+				return nil, canonical.BadRequest("responses request function_call items require a name")
 			}
 			input, err := decodeResponsesFunctionCallArguments(item.Arguments)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
-			args, err := json.Marshal(input)
+			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, item.Name, canonical.ToolKindFunction)
 			if err != nil {
-				return "", nil, canonical.BadRequest("responses request function_call arguments are invalid")
+				return nil, canonical.BadRequest("responses request function_call has an invalid tool identity")
 			}
-			decoded = append(decoded, canonical.NewToolUseItem(canonical.ItemAuthorAssistant, "", callID, strings.TrimSpace(item.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+			canonicalCallID, _ := canonical.NewToolCallID(callID)
+			call, err := canonical.NewToolCallItem(canonicalCallID, toolKey, canonical.NewJSONObjectToolInput(input))
+			if err != nil {
+				return nil, canonical.BadRequest("responses request function_call is invalid")
+			}
+			decoded = append(decoded, call)
 		case "function_call_output":
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			if callID == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolResultUseID, compat.Reject, responsesInputSubject(idx, "call_id")); err != nil {
-					return "", nil, err
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolResultCallID, compat.Reject, responsesInputSubject(idx, "call_id")); err != nil {
+					return nil, err
 				}
-				return "", nil, canonical.BadRequest("responses request function_call_output items require call_id")
+				return nil, canonical.BadRequest("responses request function_call_output items require call_id")
 			}
-			output, err := decodeResponseOutputText(item.Output)
+			output, err := decodeResponseOutputParts(item.Output, imageLimits)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
-			decoded = append(decoded, canonical.NewToolResultItem(canonical.ItemAuthorTool, callID, output))
+			canonicalCallID, _ := canonical.NewToolCallID(callID)
+			result, err := canonical.NewToolResultItem(canonicalCallID, output, false)
+			if err != nil {
+				return nil, canonical.BadRequest("responses request function_call_output is invalid")
+			}
+			decoded = append(decoded, result)
 		default:
 			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Reject, responsesInputSubject(idx, "type")); err != nil {
-				return "", nil, err
+				return nil, err
 			}
-			return "", nil, canonical.BadRequest("responses request input contains an unsupported item type")
+			return nil, canonical.BadRequest("responses request input contains an unsupported item type")
 		}
 	}
-	return "", decoded, nil
-}
-
-func responsesCapabilityToolNames(tools []canonical.ToolDecl) []string {
-	if len(tools) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		switch decl := tool.(type) {
-		case canonical.CapabilityToolDecl:
-			out = append(out, strings.TrimSpace(decl.ToolName()))
-		case *canonical.CapabilityToolDecl:
-			if decl != nil {
-				out = append(out, strings.TrimSpace(decl.ToolName()))
-			}
-		}
-	}
-	return out
-}
-
-func responsesCapabilityToolConfigs(tools []canonical.ToolDecl) []string {
-	if len(tools) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		switch decl := tool.(type) {
-		case canonical.CapabilityToolDecl:
-			out = append(out, strings.TrimSpace(decl.CapabilityConfig().RawObject()))
-		case *canonical.CapabilityToolDecl:
-			if decl != nil {
-				out = append(out, strings.TrimSpace(decl.CapabilityConfig().RawObject()))
-			}
-		}
-	}
-	return out
+	return decoded, nil
 }
 
 // OpenAI-family Responses bridges may stringify function_call.arguments when
 // they rebuild a request item from a prior response. Accept either the raw
 // object or the stringified object and normalize to one canonical JSON object
 // at the request boundary.
-func decodeResponsesFunctionCallArguments(raw json.RawMessage) (map[string]any, error) {
-	input, err := sse.DecodeJSONObject(raw, "responses request function_call arguments are invalid")
+func decodeResponsesFunctionCallArguments(raw json.RawMessage) (canonical.JSONObject, error) {
+	input, err := canonical.ParseJSONObject(raw)
 	if err == nil {
 		return input, nil
 	}
 	var stringified string
 	if err := json.Unmarshal(raw, &stringified); err != nil {
-		return nil, canonical.BadRequest("responses request function_call arguments are invalid")
+		return canonical.JSONObject{}, canonical.BadRequest("responses request function_call arguments are invalid")
 	}
 	trimmedStringified := strings.TrimSpace(stringified) // swobu:io-string source=boundary
-	return sse.DecodeJSONObject(json.RawMessage(trimmedStringified), "responses request function_call arguments are invalid")
+	input, err = canonical.ParseJSONObject([]byte(trimmedStringified))
+	if err != nil {
+		return canonical.JSONObject{}, canonical.BadRequest("responses request function_call arguments are invalid")
+	}
+	return input, nil
 }
 
 func emitResponsesCompatibilityDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
@@ -357,22 +337,42 @@ func responsesInputSubject(index int, field string) compat.Subject {
 	return compat.Subject("wire:/input/" + strconv.Itoa(index) + "/" + field)
 }
 
-func decodeResponseOutputText(raw json.RawMessage) (string, error) {
+func decodeResponseOutputParts(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		return text, nil
+		return []canonical.ToolResultPart{canonical.NewTextToolResultPart(text)}, nil
 	}
-	var content []responsesOutputTextPartDTO
+	var content []openaiwire.ContentPartItem
 	if err := json.Unmarshal(raw, &content); err != nil {
-		return "", canonical.BadRequest("responses request function_call_output is invalid")
+		return nil, canonical.BadRequest("responses request function_call_output is invalid")
 	}
-	var builder strings.Builder
+	parts := make([]canonical.ToolResultPart, 0, len(content))
 	for _, part := range content {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
-		if partType != "" && partType != "text" && partType != "output_text" {
-			return "", canonical.BadRequest("responses request function_call_output must contain text only")
+		switch partType {
+		case "", "text", "input_text", "output_text":
+			value := part.Text
+			if value == "" {
+				value = part.InputText
+			}
+			if value == "" {
+				value = part.OutputText
+			}
+			parts = append(parts, canonical.NewTextToolResultPart(value))
+		case "input_image", "image_url":
+			if strings.TrimSpace(part.FileID) != "" { // swobu:io-string source=provider-wire
+				return nil, canonical.BadRequest("responses request function_call_output provider-scoped image file IDs are not portable")
+			}
+			image, err := openaiwire.DecodeOpenAIImage(part.ImageURL, "responses function_call_output", imageLimits, part.Detail)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, canonical.NewImageToolResultPart(image))
+		case "input_file", "file":
+			return nil, canonical.BadRequest("responses request function_call_output file content is not portable")
+		default:
+			return nil, canonical.BadRequest("responses request function_call_output contains an unsupported part type")
 		}
-		builder.WriteString(part.Text)
 	}
-	return builder.String(), nil
+	return parts, nil
 }

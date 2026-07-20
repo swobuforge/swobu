@@ -19,6 +19,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolKind) provider.TargetSnapshot {
@@ -40,7 +41,7 @@ func TestBedrockChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "model", InputText: "hi", Controls: controls})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls})
 	target := newBedrockTarget("https://bedrock-runtime.us-east-1.amazonaws.com", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.ChatCompletions)
 	target.Model = request.Model()
 	backend, err := NewExecutor(nil).ResolveBackend(target)
@@ -63,6 +64,30 @@ func TestBedrockChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 	}
 }
 
+func TestBedrockMantleMessagesUsesInlineImagePolyfill(t *testing.T) {
+	target := newBedrockTarget("https://bedrock-runtime.us-east-1.amazonaws.com", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages)
+	target.Model = "model"
+	backend, err := NewExecutor(nil).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestForImage := func(image canonical.ImagePart) canonical.CanonicalRequest {
+		message, err := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{message}})
+	}
+	inlineImage, _ := canonical.NewInlineImage(canonical.ImageMediaPNG, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}, canonical.Unspecified[canonical.ImageDetail]())
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: requestForImage(inlineImage), Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatalf("Bedrock Mantle Messages rejected inline image: %v", err)
+	}
+	if !strings.Contains(string(document.RawBytes()), `"type":"base64"`) {
+		t.Fatalf("inline image did not lower as base64: %s", document.RawBytes())
+	}
+}
+
 type testProviderRequest struct {
 	Request      canonical.CanonicalRequest
 	Contract     exchange.ExecutionContract
@@ -82,8 +107,8 @@ func newTestProviderRequest(exchangeID string, _ any, request canonical.Canonica
 func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) testProviderRequest {
 	t.Helper()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:     "openai.gpt-4.1-mini",
-		InputText: "ping",
+		Model: canonical.Specify("openai.gpt-4.1-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "ping")},
 	})
 	return newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,
@@ -485,9 +510,9 @@ func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *test
 	defer upstream.Close()
 
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "openai.gpt-4.1-mini",
+		Model: canonical.Specify("openai.gpt-4.1-mini"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "ping"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "ping"),
 		},
 	})
 	exec := NewExecutor(upstream.Client())

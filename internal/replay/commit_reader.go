@@ -25,25 +25,22 @@ type TerminalCommitConfig struct {
 	WorkspaceSlug string
 	// ExchangeID is the logical exchange identifier (for projection/logging only).
 	ExchangeID string
-	// SwobuResponseID is the Swobu client-visible response ID allocated early.
-	SwobuResponseID canonical.SwobuResponseID
-	// TargetID and TargetVersion bind a protocol-native response handle to the
-	// exact backend generation that produced it.
-	TargetID      string
-	TargetVersion uint64
+	// Binding is the same identity tuple already applied by the upstream binder.
+	Binding canonical.ResponseBinding
 	// Store receives the built record.
 	Store Store
 	// SemanticRequest is the complete semantic state that produced this response.
-	SemanticRequest canonical.CanonicalRequest
+	SemanticRequest  canonical.CanonicalRequest
+	ResolvedMedia    ResolvedMedia
+	MaxSemanticBytes int64
 }
 
 // CommitReader wraps a canonical event stream and stores a replay record at
 // terminal success. Non-terminal events stream immediately. Terminal success
 // is only returned after Store.Put succeeds.
 //
-// IDENTITY ENRICHMENT: the response envelope start receives the allocated
-// Swobu ResponseID. Any Responses-native refinement is bound to the exact
-// target generation before downstream client projection sees the event.
+// IDENTITY OBSERVATION: identity is already bound before this reader. Replay
+// validates it and never rewrites client-visible or native refinement facts.
 //
 // FAILURE: If Store.Put fails after partial streaming, the terminal event is
 // replaced with EventError followed by a synthetic EnvelopeEnd{Status: Error},
@@ -73,8 +70,11 @@ func (c TerminalCommitConfig) Validate() error {
 	if strings.TrimSpace(c.WorkspaceSlug) == "" { // swobu:io-string source=domain
 		return errors.New("replay commit workspace slug is empty")
 	}
-	if err := (canonical.ResponseRef{SwobuID: c.SwobuResponseID}).ValidateCommittedResponse(); err != nil {
+	if err := (canonical.ResponseRef{SwobuID: c.Binding.SwobuID}).ValidateCommittedResponse(); err != nil {
 		return fmt.Errorf("replay commit response reference: %w", err)
+	}
+	if c.MaxSemanticBytes <= 0 {
+		return errors.New("replay commit semantic size limit must be positive")
 	}
 	return nil
 }
@@ -120,19 +120,20 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 		return canonical.Event{}, err
 	}
 
-	// Enrich streaming identity before the first response event is visible.
+	// Track response start and validate the already-bound identity.
 	if ev.Kind == canonical.EventEnvelopeStart {
 		if payload, ok := ev.Payload.(canonical.EnvelopeStartPayload); ok && payload.Kind == canonical.EnvResponse {
 			r.startedResponse = true
-			payload.Response.SwobuID = r.config.SwobuResponseID
-			if payload.Response.Responses != nil {
-				responses := *payload.Response.Responses
-				responses.TargetID = r.config.TargetID
-				responses.TargetVersion = r.config.TargetVersion
-				payload.Response.Responses = &responses
-			}
-			ev.Payload = payload
 			ev.Meta.NativeID = ""
+		}
+	}
+	if ev.Kind == canonical.EventResponseIdentity {
+		payload, ok := ev.Payload.(canonical.ResponseIdentityPayload)
+		if !ok || payload.Response.SwobuID != r.config.Binding.SwobuID {
+			return canonical.Event{}, fmt.Errorf("replay response identity does not match configured record ID")
+		}
+		if payload.Response.Responses != nil && (payload.Response.Responses.TargetID != r.config.Binding.TargetID || payload.Response.Responses.TargetVersion != r.config.Binding.TargetVersion) {
+			return canonical.Event{}, fmt.Errorf("replay response identity refinement does not match attempted target")
 		}
 	}
 
@@ -181,7 +182,7 @@ func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code stri
 		"event", "replay_terminal_failure",
 		"code", code,
 		"exchange_id", base.ExchangeID,
-		"response_id", r.config.SwobuResponseID,
+		"response_id", r.config.Binding.SwobuID,
 		"failure_origin", terminalFailureOrigin(code),
 		"response_started", r.startedResponse,
 		"last_event_kind", base.Kind,
@@ -236,16 +237,16 @@ func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code stri
 }
 
 func terminalFailureOrigin(code string) string {
-	switch code {
-	case "provider_stream_decode_failed":
+	if code == "provider_stream_decode_failed" {
 		return "provider_stream_read_error"
-	case "provider_stream_incomplete":
-		return "provider_stream_eof_before_terminal"
-	case "replay_capture_failed":
-		return "replay_commit"
-	default:
-		return "unknown"
 	}
+	if code == "provider_stream_incomplete" {
+		return "provider_stream_eof_before_terminal"
+	}
+	if code == "replay_capture_failed" {
+		return "replay_commit"
+	}
+	return "unknown"
 }
 
 func responseEnvelopeEndStatus(ev canonical.Event) (canonical.EnvelopeStatus, bool) {
@@ -279,9 +280,13 @@ func (r *CommitReader) doCommit(ctx context.Context) error {
 	}
 
 	record := Record{
-		Request:   r.config.SemanticRequest.Clone(),
-		Response:  *output,
-		CreatedAt: time.Now().UTC(),
+		Request:       r.config.SemanticRequest.Clone(),
+		Response:      *output,
+		ResolvedMedia: r.config.ResolvedMedia.Clone(),
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := validateRecordSizeLimit(record, r.config.MaxSemanticBytes); err != nil {
+		return err
 	}
 
 	return r.config.Store.Put(ctx, r.config.WorkspaceSlug, record)

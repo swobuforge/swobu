@@ -1,60 +1,16 @@
 package responses
 
 import (
-	"errors"
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"strings"
 	"testing"
-
-	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeClientRequestWithDecisions_RecordsResponsesRequestScars(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte(`{
-		"model":"gpt-4o-mini",
-		"input":[
-			{"content":"hello"},
-			{"type":"function_call","name":"search","arguments":{"query":"hello"}},
-			{"type":"function_call_output","output":"ok"}
-		]
-	}`)
-	sink := &recordingDecisionSink{}
-
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.Responses, Raw: raw}, sink, "ex_responses_decode")
-	if err == nil {
-		t.Fatal("expected DecodeClientRequestWithDecisions to reject missing function_call_output call_id")
-	}
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("expected canonical.Error, got %T", err)
-	}
-	if compatErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
-	}
-	if !strings.Contains(compatErr.Message, "call_id") {
-		t.Fatalf("error message = %q, want call_id to be mentioned", compatErr.Message)
-	}
-	if len(sink.effects) != 4 {
-		t.Fatalf("captured effects len=%d want=4", len(sink.effects))
-	}
-	want := []struct {
-		feature compat.Feature
-		outcome compat.Outcome
-		subject compat.Subject
-	}{
-		{feature: compat.RequestItemsKind, outcome: compat.Approx, subject: compat.Subject("wire:/input/0/type")},
-		{feature: compat.RequestItemsAuthor, outcome: compat.Approx, subject: compat.Subject("wire:/input/0/role")},
-		{feature: compat.RequestItemsToolUseID, outcome: compat.Approx, subject: compat.Subject("wire:/input/1/call_id")},
-		{feature: compat.RequestItemsToolResultUseID, outcome: compat.Reject, subject: compat.Subject("wire:/input/2/call_id")},
-	}
-	for i, effectItem := range sink.effects {
-		compatEffect := effectItem
-		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome || compatEffect.Subject != want[i].subject {
-			t.Fatalf("effect[%d] = %#v, want %s %s %q", i, compatEffect, want[i].feature, want[i].outcome, want[i].subject)
-		}
+func TestDecodeClientRequestRejectsMissingToolResultCallID(t *testing.T) {
+	raw := []byte(`{"model":"m","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],"input":[{"type":"function_call","call_id":"call_1","name":"search","arguments":{"query":"hello"}},{"type":"function_call_output","output":"ok"}]}`)
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	if err == nil || !strings.Contains(err.Error(), "call_id") {
+		t.Fatalf("error=%v", err)
 	}
 }

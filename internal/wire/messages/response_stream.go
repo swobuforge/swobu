@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +17,7 @@ import (
 )
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.
-func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink compat.Sink) *messagesEventReader {
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *messagesEventReader {
 	recording := &compat.RecordingSink{Delegate: sink}
 	return &messagesEventReader{
 		exchangeID:  exchangeID,
@@ -28,6 +27,7 @@ func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink com
 		reader:      core.NewSSEReader(stream.Body),
 		blocks:      map[int]streamContentBlock{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
+		request:     request.Clone(),
 	}
 }
 
@@ -46,6 +46,7 @@ type messagesEventReader struct {
 	latestUsage  canonical.TokenUsage
 	seq          int64
 	completed    bool
+	request      canonical.CanonicalRequest
 }
 
 func (s *messagesEventReader) Decisions() []compat.Decision {
@@ -56,10 +57,12 @@ func (s *messagesEventReader) Decisions() []compat.Decision {
 }
 
 type streamContentBlock struct {
-	ItemID    string
-	ItemKind  canonical.ItemKind
-	ToolUseID string
-	Name      string
+	ItemKind     canonical.ItemKind
+	CallID       canonical.ToolCallID
+	Tool         canonical.ToolKey
+	text         strings.Builder
+	args         strings.Builder
+	initialInput json.RawMessage
 }
 
 type streamEnvelope struct {
@@ -76,9 +79,10 @@ type messageStartFrame struct {
 type contentBlockStartFrame struct {
 	Index        int `json:"index"`
 	ContentBlock struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		Type  string          `json:"type"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content_block"`
 }
 
@@ -111,9 +115,6 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 			if err == io.EOF && s.started && !s.completed {
 				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
-				for idx, block := range s.blocks {
-					s.enqueueEnvelopeEnd(s.blockEnvID(idx), s.blockKind(block), canonical.EnvelopeStatusError)
-				}
 				s.blocks = map[int]streamContentBlock{}
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 				s.completed = true
@@ -182,12 +183,8 @@ func (s *messagesEventReader) handleMessageStart(raw string) error {
 	s.started = true
 	s.resultID = payload.Message.ID
 	s.model = payload.Message.Model
-	s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse})
-	s.enqueue(canonical.Event{
-		Kind:    canonical.EventMetadata,
-		EnvID:   s.responseID,
-		Payload: canonical.MetadataPayload{Values: map[string]string{"model": s.model}},
-	})
+	s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: s.model})
+	s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseID, Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{}}})
 	return nil
 }
 
@@ -196,24 +193,37 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_start frame is invalid")
 	}
-	block := streamContentBlock{ItemID: "block_" + strconv.Itoa(payload.Index)}
+	block := streamContentBlock{}
 	contentBlockType := strings.TrimSpace(payload.ContentBlock.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 	switch contentBlockType {
 	case "text":
-		block.ItemKind = canonical.ItemKindText
-		block.ItemID = "text_" + strconv.Itoa(payload.Index)
-		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvMessage, Role: canonical.ItemAuthorAssistant}, canonical.EventMetadataFields{NativeID: block.ItemID})
-	case "tool_use":
-		block.ItemKind = canonical.ItemKindToolUse
-		block.ToolUseID = strings.TrimSpace(payload.ContentBlock.ID) // swobu:io-string source=boundary
-		if block.ToolUseID == "" {
-			block.ToolUseID = "toolu_swobu_" + strconv.Itoa(payload.Index)
+		block.ItemKind = canonical.ItemKindMessage
+		start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)
+		if err != nil {
+			return err
 		}
-		block.Name = strings.TrimSpace(payload.ContentBlock.Name) // swobu:io-string source=boundary
-		block.ItemID = block.ToolUseID
-		s.enqueueEnvelopeStart(s.blockEnvID(payload.Index), s.responseID, canonical.EnvelopeStartPayload{Kind: canonical.EnvToolCall, Name: block.Name, ToolUseID: block.ToolUseID}, canonical.EventMetadataFields{NativeID: block.ItemID})
+		s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: start}})
+		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}}})
+	case "tool_use":
+		block.ItemKind = canonical.ItemKindToolCall
+		callID, err := canonical.NewToolCallID(payload.ContentBlock.ID)
+		if err != nil {
+			return canonical.InternalError("messages stream tool_use is missing id")
+		}
+		resolved, _, err := canonical.ResolveToolDeclarationByName(s.request.Tools(), payload.ContentBlock.Name, canonical.ToolTypeFunction)
+		if err != nil {
+			return canonical.InternalError("messages stream tool_use references an unknown or ambiguous tool")
+		}
+		block.CallID = callID
+		block.Tool = resolved.Key()
+		block.initialInput = append(json.RawMessage(nil), payload.ContentBlock.Input...)
+		start, err := canonical.NewToolCallStart(callID, block.Tool)
+		if err != nil {
+			return err
+		}
+		s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: start}})
 	case "server_tool_use", "web_search_tool_result":
-		return nil
+		return canonical.UnsupportedOperation("messages provider tool lifecycle streaming is not implemented")
 	default:
 		return canonical.InternalError("messages stream content block type is unsupported")
 	}
@@ -226,27 +236,33 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_delta frame is invalid")
 	}
-	_, ok := s.blocks[payload.Index]
+	block, ok := s.blocks[payload.Index]
 	if !ok {
 		return nil
 	}
 	deltaType := strings.TrimSpace(payload.Delta.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 	switch deltaType {
 	case "text_delta":
+		block.text.WriteString(payload.Delta.Text)
 		s.enqueue(canonical.Event{
 			Kind:    canonical.EventTextDelta,
 			EnvID:   s.blockEnvID(payload.Index),
-			Payload: canonical.TextDeltaPayload{Text: payload.Delta.Text},
+			Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.TextDeltaPayload{Text: payload.Delta.Text}},
 		})
 	case "input_json_delta":
+		if len(block.initialInput) > 0 && string(block.initialInput) != "{}" {
+			return canonical.InternalError("messages stream tool_use mixed initial input with argument deltas")
+		}
+		block.args.WriteString(payload.Delta.PartialJSON)
 		s.enqueue(canonical.Event{
 			Kind:    canonical.EventArgsDelta,
 			EnvID:   s.blockEnvID(payload.Index),
-			Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON},
+			Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON}},
 		})
 	default:
 		return canonical.InternalError("messages stream delta type is unsupported")
 	}
+	s.blocks[payload.Index] = block
 	return nil
 }
 
@@ -259,7 +275,36 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 	if !ok {
 		return nil
 	}
-	s.enqueueEnvelopeEnd(s.blockEnvID(payload.Index), s.blockKind(block), canonical.EnvelopeStatusCompleted)
+	var item canonical.CanonicalItem
+	var err error
+	switch block.ItemKind {
+	case canonical.ItemKindMessage:
+		item, err = canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(block.text.String())})
+	case canonical.ItemKindToolCall:
+		if block.args.Len() == 0 {
+			raw := block.initialInput
+			if len(raw) == 0 {
+				raw = json.RawMessage(`{}`)
+			}
+			block.args.Write(raw)
+			s.enqueue(canonical.Event{
+				Kind:    canonical.EventArgsDelta,
+				EnvID:   s.blockEnvID(payload.Index),
+				Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ArgsDeltaPayload{Args: string(raw)}},
+			})
+		}
+		object, parseErr := canonical.ParseJSONObject([]byte(block.args.String()))
+		if parseErr != nil {
+			return canonical.InternalError("messages streamed tool_use input is invalid")
+		}
+		item, err = canonical.NewToolCallItem(block.CallID, block.Tool, canonical.NewJSONObjectToolInput(object))
+	default:
+		return canonical.InternalError("messages streamed content block kind is invalid")
+	}
+	if err != nil {
+		return canonical.InternalError("messages streamed content block is invalid")
+	}
+	s.enqueue(canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ItemCompletedPayload{Item: item}}})
 	delete(s.blocks, payload.Index)
 	return nil
 }
@@ -321,11 +366,4 @@ func (s *messagesEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind c
 
 func (s *messagesEventReader) blockEnvID(index int) canonical.EnvelopeID {
 	return canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseID, index))
-}
-
-func (s *messagesEventReader) blockKind(block streamContentBlock) canonical.EnvelopeKind {
-	if block.ItemKind == canonical.ItemKindToolUse {
-		return canonical.EnvToolCall
-	}
-	return canonical.EnvMessage
 }
