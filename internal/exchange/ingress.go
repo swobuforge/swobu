@@ -228,7 +228,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, workspace, in.Timing)
+	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, workspace, in.Timing)
 	if err != nil {
 		return out, err
 	}

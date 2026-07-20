@@ -24,12 +24,43 @@ const (
 )
 
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+	var dto messagesRequestDTO
+	if err := sse.DecodePermissiveJSON(doc.RawBytes(), &dto, "messages request", nil); err != nil {
+		return wire.ClientDecodeResult{}, err
+	}
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := decoder.decodeClientRequestWithDecisions(doc, sink, "")
-		return wire.ClientRequestResult{
-			Request:  request,
-			Delivery: delivery,
-		}, err
+		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, "")
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
+		// Explicit predecessor selection makes the entire supplied messages
+		// array the current contribution. Role morphology must not partition it
+		// into a second, competing predecessor.
+		if strings.TrimSpace(dto.PreviousResponseWireID) != "" { // swobu:io-string source=boundary
+			requestFingerprint, err := fingerprintMessagesRequest(dto.Messages)
+			return wire.ClientRequestResult{
+				Request: request, Delivery: delivery, RequestFingerprint: requestFingerprint,
+			}, err
+		}
+		history, err := fingerprintMessagesHistory(dto.Messages)
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
+		result := wire.ClientRequestResult{Request: request, Delivery: delivery, RequestFingerprint: history.request}
+		if history.previous != nil {
+			rebasedDTO := dto
+			rebasedDTO.Messages = history.current
+			raw, err := json.Marshal(rebasedDTO)
+			if err != nil {
+				return wire.ClientRequestResult{}, err
+			}
+			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, "")
+			if err != nil {
+				return wire.ClientRequestResult{}, err
+			}
+			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased}
+		}
+		return result, nil
 	})
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
@@ -40,6 +71,10 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
+}
+
+func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto messagesRequestDTO, raw []byte, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
 	}
@@ -83,6 +118,14 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	var previousResponse *canonical.ResponseRef
+	previousResponseID := canonical.NewSwobuResponseID(dto.PreviousResponseWireID)
+	if dto.PreviousResponseWireID != "" && previousResponseID.IsZero() { // swobu:io-string source=boundary
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("previous_response_id is empty")
+	}
+	if !previousResponseID.IsZero() {
+		previousResponse = &canonical.ResponseRef{SwobuID: previousResponseID}
+	}
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
@@ -92,9 +135,10 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages tools are invalid")
 	}
 	params := canonical.RequestParams{
-		Model:    canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
-		Items:    items,
-		Controls: controls,
+		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
+		Items:            items,
+		Controls:         controls,
+		PreviousResponse: previousResponse,
 	}
 	if len(dto.System) > 0 {
 		params.Instructions = canonical.Specify(canonical.NewSystemInstructionSet(instructions))

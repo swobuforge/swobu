@@ -13,9 +13,10 @@ import (
 func TestEncodedResponseMessagesPreservesEveryEncodedMessageBoundary(t *testing.T) {
 	large := bytes.Repeat([]byte("x"), 5000)
 	events := canonical.NewSliceEventReader([]canonical.Event{{Kind: canonical.EventTextDelta}})
+	completion, _, fail := NewResponseCompletion()
 	stream := NewEncodedResponseMessages(events, func(canonical.Event) ([][]byte, error) {
 		return [][]byte{[]byte(`{"type":"first"}`), large}, nil
-	})
+	}, completion, fail)
 
 	first, err := stream.Next(context.Background())
 	if err != nil || string(first) != `{"type":"first"}` {

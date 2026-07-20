@@ -16,4 +16,7 @@
 // grammar a provider identity.
 // Provider auth, base URL, and transport behavior stay in provider wiring
 // packages.
+// Ordered messages define the private messages history fingerprint scheme.
+// Top-level system and generation fields remain on rebased requests but do not
+// identify history.
 package messages

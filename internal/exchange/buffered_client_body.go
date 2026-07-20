@@ -18,6 +18,7 @@ type bufferedClientBody struct {
 	call       providerCall
 	envelope   canonical.ResponseStream
 	sink       compat.Sink
+	committer  *checkpointCommitter
 	initialize sync.Once
 	close      sync.Once
 	reader     *bytes.Reader
@@ -25,8 +26,8 @@ type bufferedClientBody struct {
 	consumed   bool
 }
 
-func newBufferedClientBody(ctx context.Context, call providerCall, envelope canonical.ResponseStream, sink compat.Sink) *bufferedClientBody {
-	return &bufferedClientBody{ctx: ctx, call: call, envelope: envelope, sink: sink}
+func newBufferedClientBody(ctx context.Context, call providerCall, envelope canonical.ResponseStream, sink compat.Sink, committer *checkpointCommitter) *bufferedClientBody {
+	return &bufferedClientBody{ctx: ctx, call: call, envelope: envelope, sink: sink, committer: committer}
 }
 
 func (b *bufferedClientBody) Read(p []byte) (int, error) {
@@ -41,24 +42,16 @@ func (b *bufferedClientBody) prepare() {
 	response, err := projectClientDocument(b.ctx, b.envelope)
 	b.consumed = true
 	if err != nil {
-		if commitAware, ok := b.envelope.(interface{ CommitError() error }); ok {
-			if commitErr := commitAware.CommitError(); commitErr != nil {
-				b.err = commitErr
-				return
-			}
-		}
 		b.err = err
 		return
-	}
-	if commitAware, ok := b.envelope.(interface{ CommitError() error }); ok {
-		if err := commitAware.CommitError(); err != nil {
-			b.err = err
-			return
-		}
 	}
 	document, err := b.call.clientCodec.EncodeResponseDocument(response)
 	commitDecisionsBestEffort(b.ctx, b.sink, b.call.exchangeID, document.Decisions)
 	if err != nil {
+		b.err = err
+		return
+	}
+	if err := b.committer.commitDocument(b.ctx, document.ResponseFingerprint); err != nil {
 		b.err = err
 		return
 	}

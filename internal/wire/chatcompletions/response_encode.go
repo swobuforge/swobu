@@ -15,6 +15,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
+	responseFingerprint, err := fingerprintChatCompletionsResponse(output)
+	if err != nil {
+		return wire.ClientDocumentResult{}, err
+	}
 	raw, err := json.Marshal(chatCompletionsResponseDTO{
 		ID:     sse.FallbackID(output.Response().SwobuID.String(), "chatcmpl_swobu"),
 		Object: "chat.completion",
@@ -29,5 +33,8 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
-	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{})}, nil
+	return wire.ClientDocumentResult{
+		Document:            carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{}),
+		ResponseFingerprint: &responseFingerprint,
+	}, nil
 }

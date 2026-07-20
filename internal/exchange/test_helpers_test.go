@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
@@ -23,6 +25,22 @@ import (
 // production provider-only execution surface or shadow call authority.
 type Runner = runtimeBundle
 
+func testHistoryRequest(material []byte) historyfingerprint.Request {
+	fingerprint, err := historyfingerprint.FingerprintRequest("responses", material)
+	if err != nil {
+		panic(err)
+	}
+	return fingerprint
+}
+
+func testHistoryResponse(material []byte) *historyfingerprint.Response {
+	fingerprint, err := historyfingerprint.FingerprintResponse("responses", material)
+	if err != nil {
+		panic(err)
+	}
+	return &fingerprint
+}
+
 type ExchangeInput struct {
 	ExchangeID       string
 	ClientFamily     canonical.ClientFamily
@@ -34,6 +52,14 @@ type ExchangeInput struct {
 	Contract         ExecutionContract
 	ProviderProtocol protocolkind.ProtocolKind
 	ProviderDelivery delivery.Delivery
+}
+
+func testDecodedRequest(request canonical.CanonicalRequest) wire.ClientRequestResult {
+	return wire.ClientRequestResult{
+		Request:            request,
+		Delivery:           delivery.BufferedDelivery(),
+		RequestFingerprint: testHistoryRequest([]byte("test-request")),
+	}
 }
 
 func ClientTransportForTest(response ClientResponse) transportpkg.Response {
@@ -89,6 +115,7 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		backend: backend, request: request, clientCodec: clientCodec,
 		clientDelivery: in.ClientDelivery, exchangeID: in.ExchangeID,
 		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Full.Clone(),
+		advance: &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
 	}
 	document, decisions, err := backend.Codec.Encode(request)
 	call.document = document
@@ -158,6 +185,10 @@ func newTransportRequestWithTurn(method, url string, turn string, body map[strin
 }
 
 func withRuntime(providerTransport testProviderTransport) Runner {
+	// This helper installs testClientCodec for lifecycle-only tests. Protocol
+	// wire assertions must use runtimeWithProviderIngress with the real
+	// codecresolver.RuntimeCodecResolver; ClientFamily alone does not replace
+	// this fake codec.
 	return Runner{
 		Runtime: testExecutionRuntime{
 			testRuntimeResolver: testRuntimeResolver{},
@@ -300,7 +331,8 @@ func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDec
 				Items:            items,
 				PreviousResponse: previousResponse,
 			}),
-			Delivery: delivery.BufferedDelivery(),
+			Delivery:           delivery.BufferedDelivery(),
+			RequestFingerprint: testHistoryRequest(doc.RawBytes()),
 		},
 	}, nil
 }
@@ -326,26 +358,37 @@ func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalResponse
 	}
 	resultID := output.Response().SwobuID.String()
 	if resultID != "" {
-		return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"id":"`+resultID+`","output_text":"`+text+`"}`), carrier.Meta{})}, nil
+		return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"id":"`+resultID+`","output_text":"`+text+`"}`), carrier.Meta{}), ResponseFingerprint: testHistoryResponse([]byte(text))}, nil
 	}
-	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{})}, nil
+	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{}), ResponseFingerprint: testHistoryResponse([]byte(text))}, nil
 }
 
 func (testClientCodec) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
-	_ = events
 	_ = d
-	raw := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
-		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
-	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream",
-		Body: io.NopCloser(strings.NewReader(raw)),
-	}}, nil
+	completion, complete, fail := wire.NewResponseCompletion()
+	body := wire.NewEncodedResponseBody(ctx, events, func(event canonical.Event) ([][]byte, error) {
+		if status, terminal := responseTerminalStatus(event); terminal {
+			if status == canonical.EnvelopeStatusCompleted {
+				complete(testHistoryResponse([]byte("ok")))
+				return [][]byte{[]byte("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n")}, nil
+			} else {
+				fail(errors.New("terminal response failed"))
+			}
+		}
+		return [][]byte{[]byte("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")}, nil
+	}, completion, fail)
+	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}, Completion: completion}, nil
 }
 
 func (testClientCodec) EncodeResponseMessages(_ context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientMessageResult, error) {
-	messages := wire.NewEncodedResponseMessages(events, func(canonical.Event) ([][]byte, error) {
+	completion, complete, fail := wire.NewResponseCompletion()
+	messages := wire.NewEncodedResponseMessages(events, func(event canonical.Event) ([][]byte, error) {
+		if status, terminal := responseTerminalStatus(event); terminal && status == canonical.EnvelopeStatusCompleted {
+			complete(testHistoryResponse([]byte("ok")))
+		}
 		return [][]byte{[]byte(`{"type":"test.event"}`)}, nil
-	})
-	return wire.ClientMessageResult{Response: carrier.MessageResponse{MediaType: "application/json", Messages: messages}}, nil
+	}, completion, fail)
+	return wire.ClientMessageResult{Response: carrier.MessageResponse{MediaType: "application/json", Messages: messages}, Completion: completion}, nil
 }
 
 type testProviderRequestDocumentEncoder struct{}

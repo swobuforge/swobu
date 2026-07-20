@@ -9,7 +9,83 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
+
+func TestMemoryStoreFindsAndReplacesExactHistoryIndexWithinStoreAndWorkspace(t *testing.T) {
+	store := newMemoryStore()
+	fingerprint := testCheckpointFingerprint(t, "one")
+	first := storeRecord("resp_first")
+	first.HistoryFingerprint = &fingerprint
+	if err := store.Put(context.Background(), "alpha", first); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
+	if err != nil || !found || got.Response.Response().SwobuID != "resp_first" {
+		t.Fatalf("first lookup = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
+	}
+	if _, found, err := store.FindByHistory(context.Background(), "beta", fingerprint); err != nil || found {
+		t.Fatalf("cross-workspace lookup = (%t, %v), want miss", found, err)
+	}
+	if _, found, err := newMemoryStore().FindByHistory(context.Background(), "alpha", fingerprint); err != nil || found {
+		t.Fatalf("cross-store lookup = (%t, %v), want miss", found, err)
+	}
+
+	second := storeRecord("resp_second")
+	second.HistoryFingerprint = &fingerprint
+	if err := store.Put(context.Background(), "alpha", second); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err = store.FindByHistory(context.Background(), "alpha", fingerprint)
+	if err != nil || !found || got.Response.Response().SwobuID != "resp_second" {
+		t.Fatalf("replacement lookup = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
+	}
+}
+
+func TestMemoryStoreExpiryRemovesFingerprintIndexWithoutRemovingReplacement(t *testing.T) {
+	store := newMemoryStore()
+	current := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return current }
+	fingerprint := testCheckpointFingerprint(t, "shared")
+	oldExpiry := current.Add(time.Minute)
+	old := storeRecord("resp_old")
+	old.HistoryFingerprint, old.ExpiresAt = &fingerprint, &oldExpiry
+	if err := store.Put(context.Background(), "alpha", old); err != nil {
+		t.Fatal(err)
+	}
+	newExpiry := current.Add(time.Hour)
+	newer := storeRecord("resp_new")
+	newer.HistoryFingerprint, newer.ExpiresAt = &fingerprint, &newExpiry
+	if err := store.Put(context.Background(), "alpha", newer); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(2 * time.Minute)
+	got, found, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
+	if err != nil || !found || got.Response.Response().SwobuID != "resp_new" {
+		t.Fatalf("lookup after old expiry = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
+	}
+	current = current.Add(time.Hour)
+	if _, found, err := store.FindByHistory(context.Background(), "alpha", fingerprint); err != nil || found {
+		t.Fatalf("lookup after replacement expiry = (%t, %v), want miss", found, err)
+	}
+}
+
+func testCheckpointFingerprint(t *testing.T, material string) historyfingerprint.History {
+	t.Helper()
+	request, err := historyfingerprint.FingerprintRequest("responses", []byte("request:"+material))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := historyfingerprint.FingerprintResponse("responses", []byte("response:"+material))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := historyfingerprint.Advance(nil, request, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fingerprint
+}
 
 func TestMemoryStoreConcurrentAccess(t *testing.T) {
 	store := NewMemoryStore()

@@ -3,11 +3,11 @@ package messages
 import (
 	"context"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
-	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
 func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
@@ -16,7 +16,13 @@ func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 
 func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	state := e.newStreamState()
-	return openaiwire.EncodeEnvelopeStream(ctx, events, state)
+	completion, complete, fail := wire.NewResponseCompletion()
+	encoder := messagesFingerprintingEncoder(state.EncodeEnvelopeEvent, complete, fail)
+	body := wire.NewEncodedResponseBody(ctx, events, encoder, completion, fail)
+	return wire.ClientByteStreamResult{
+		Stream:     carrier.ByteStream{MediaType: "text/event-stream", Body: body},
+		Completion: completion,
+	}, nil
 }
 
 func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {

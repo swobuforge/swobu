@@ -6,6 +6,7 @@ type messagesRequestDTO struct {
 	Model                  string               `json:"model"`
 	System                 json.RawMessage      `json:"system,omitempty"`
 	Messages               []messagesMessageDTO `json:"messages"`
+	PreviousResponseWireID string               `json:"previous_response_id"`
 	Tools                  []messagesToolDTO    `json:"tools,omitempty"`
 	ToolChoice             json.RawMessage      `json:"tool_choice,omitempty"`
 	DisableParallelToolUse json.RawMessage      `json:"disable_parallel_tool_use,omitempty"`

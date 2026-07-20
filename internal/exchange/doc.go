@@ -10,6 +10,9 @@
 //   - Winning-attempt media bindings, merged only with inherited durable
 //     bindings and retained by exact request-part occurrence
 //   - Explicit workspace-slug partitioning for the daemon-global checkpoint store
+//   - Explicit-ID versus exact client-history predecessor selection, atomic
+//     rebased-request handling, history composition, canonical response capture,
+//     and post-client-encode commit
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
 //   - The reducer-owned provider-result edge where future concrete tool

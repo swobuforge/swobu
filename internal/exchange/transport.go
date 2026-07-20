@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/session"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -104,10 +103,6 @@ func cloneHeader(in http.Header) http.Header {
 func deliveryIsIncremental(clientDelivery delivery.Delivery, providerDelivery delivery.Delivery) bool {
 	return clientDelivery.IsStreaming() && providerDelivery.IsStreaming()
 }
-
-// IsCheckpointCommitFailure classifies the session checkpoint gate's terminal
-// error without exposing storage details to inbound delivery adapters.
-func IsCheckpointCommitFailure(err error) bool { return session.IsCheckpointCommitFailure(err) }
 
 func commitDecisionsBestEffort(ctx context.Context, sink compat.Sink, exchangeID string, decisions []compat.Decision) {
 	if sink == nil || len(decisions) == 0 {

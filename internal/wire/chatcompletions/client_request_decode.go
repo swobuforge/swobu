@@ -18,12 +18,43 @@ import (
 )
 
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+	var dto chatCompletionsRequestDTO
+	if err := sse.DecodePermissiveJSON(doc.RawBytes(), &dto, "chat completions request", nil); err != nil {
+		return wire.ClientDecodeResult{}, err
+	}
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := decoder.decodeClientRequestWithDecisions(doc, sink, "")
-		return wire.ClientRequestResult{
-			Request:  request,
-			Delivery: delivery,
-		}, err
+		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, "")
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
+		// An explicit selector defines the predecessor semantically. Every
+		// supplied message is therefore current contribution, regardless of
+		// whether its roles resemble completed implicit history.
+		if strings.TrimSpace(dto.PreviousResponseWireID) != "" { // swobu:io-string source=boundary
+			requestFingerprint, err := fingerprintChatCompletionsRequest(dto.Messages)
+			return wire.ClientRequestResult{
+				Request: request, Delivery: delivery, RequestFingerprint: requestFingerprint,
+			}, err
+		}
+		history, err := fingerprintChatCompletionsHistory(dto.Messages)
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
+		result := wire.ClientRequestResult{Request: request, Delivery: delivery, RequestFingerprint: history.request}
+		if history.previous != nil {
+			rebasedDTO := dto
+			rebasedDTO.Messages = history.current
+			raw, err := json.Marshal(rebasedDTO)
+			if err != nil {
+				return wire.ClientRequestResult{}, err
+			}
+			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, "")
+			if err != nil {
+				return wire.ClientRequestResult{}, err
+			}
+			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased}
+		}
+		return result, nil
 	})
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
@@ -34,6 +65,10 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 	if err := sse.DecodePermissiveJSON(raw, &dto, "chat completions request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
+}
+
+func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chatCompletionsRequestDTO, raw []byte, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request is missing required fields")
 	}
@@ -65,6 +100,14 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	var previousResponse *canonical.ResponseRef
+	previousResponseID := canonical.NewSwobuResponseID(dto.PreviousResponseWireID)
+	if dto.PreviousResponseWireID != "" && previousResponseID.IsZero() { // swobu:io-string source=boundary
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("previous_response_id is empty")
+	}
+	if !previousResponseID.IsZero() {
+		previousResponse = &canonical.ResponseRef{SwobuID: previousResponseID}
+	}
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
@@ -74,9 +117,10 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions tools are invalid")
 	}
 	params := canonical.RequestParams{
-		Model:    canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
-		Items:    items,
-		Controls: controls,
+		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
+		Items:            items,
+		Controls:         controls,
+		PreviousResponse: previousResponse,
 	}
 	if len(instructions) > 0 {
 		set, err := canonical.NewInstructionSet(instructions)

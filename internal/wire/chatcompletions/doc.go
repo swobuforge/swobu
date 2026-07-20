@@ -19,4 +19,7 @@
 // User images preserve URL or inline sources. Tool-result images reject, and
 // unsupported explicit detail is approximated only under an explicit codec
 // option with compatibility evidence.
+// Client-visible messages define the private chat-completions history
+// fingerprint scheme. Root invocation fields remain on rebased requests but do
+// not identify history; response envelopes do not participate.
 package chatcompletions

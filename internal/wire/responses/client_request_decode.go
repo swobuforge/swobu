@@ -21,12 +21,35 @@ import (
 )
 
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+	var dto responsesRequestDTO
+	if err := sse.DecodePermissiveJSON(doc.RawBytes(), &dto, "responses request", nil); err != nil {
+		return wire.ClientDecodeResult{}, err
+	}
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := decoder.decodeClientRequestWithDecisions(doc, sink, "")
-		return wire.ClientRequestResult{
-			Request:  request,
-			Delivery: delivery,
-		}, err
+		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, "")
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
+		explicit := strings.TrimSpace(dto.PreviousResponseWireID) != "" // swobu:io-string source=boundary
+		history, err := fingerprintResponsesHistory(dto.Input, explicit)
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
+		result := wire.ClientRequestResult{Request: request, Delivery: delivery, RequestFingerprint: history.request}
+		if !explicit && history.previous != nil {
+			rebasedDTO := dto
+			rebasedDTO.Input = history.current
+			raw, err := json.Marshal(rebasedDTO)
+			if err != nil {
+				return wire.ClientRequestResult{}, err
+			}
+			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, "")
+			if err != nil {
+				return wire.ClientRequestResult{}, err
+			}
+			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased}
+		}
+		return result, nil
 	})
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
@@ -38,6 +61,11 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 	if err := sse.DecodePermissiveJSON(raw, &dto, "responses request", nil); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
+}
+
+// swobu:lint ignore function-complexity because=Responses request decoding validates all request bands at one protocol boundary.
+func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto responsesRequestDTO, raw []byte, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	if len(bytes.TrimSpace(dto.Store)) != 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.UnsupportedOperation("responses store is not supported")
 	}
@@ -224,7 +252,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			} else if role == "developer" {
 				author = canonical.MessageRoleDeveloper
 			}
-			parts, err := openaiwire.DecodeTextContentItems(item.Content, "responses", author, imageLimits)
+			parts, err := decodeResponsesMessageContent(item.Content, author, imageLimits)
 			if err != nil {
 				return nil, err
 			}
@@ -287,6 +315,56 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		}
 	}
 	return decoded, nil
+}
+
+// decodeResponsesMessageContent preserves the scalar-input acceptance surface:
+// an explicit empty input_text is the appendable history form of input: "".
+// Other OpenAI-family codecs retain their own empty-part validity rules.
+func decodeResponsesMessageContent(raw json.RawMessage, author canonical.MessageRole, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, error) {
+	parts, err := openaiwire.DecodeContentParts(raw, "responses message content is invalid")
+	if err != nil {
+		return nil, err
+	}
+	content := make([]canonical.MessagePart, 0, len(parts))
+	for _, part := range parts {
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
+		if partType == "" {
+			partType = "text"
+		}
+		switch partType {
+		case "text", "input_text", "output_text":
+			value := part.Text
+			if value == "" {
+				value = part.InputText
+			}
+			if value == "" {
+				value = part.OutputText
+			}
+			content = append(content, canonical.NewTextMessagePart(value))
+		case "image_url", "input_image":
+			if author != canonical.MessageRoleUser {
+				return nil, canonical.BadRequest("responses image input is only valid in user messages")
+			}
+			if strings.TrimSpace(part.FileID) != "" { // swobu:io-string source=provider-wire
+				return nil, canonical.BadRequest("responses provider-scoped image file IDs are not portable")
+			}
+			image, err := openaiwire.DecodeOpenAIImage(part.ImageURL, "responses", imageLimits, part.Detail)
+			if err != nil {
+				return nil, err
+			}
+			content = append(content, canonical.NewImageMessagePart(image))
+		default:
+			return nil, canonical.BadRequest("responses message content contains an unsupported part type")
+		}
+	}
+	if len(content) == 0 {
+		return nil, nil
+	}
+	message, err := canonical.NewMessageItem(author, content)
+	if err != nil {
+		return nil, canonical.BadRequest("responses message author is invalid")
+	}
+	return []canonical.CanonicalItem{message}, nil
 }
 
 // OpenAI-family Responses bridges may stringify function_call.arguments when

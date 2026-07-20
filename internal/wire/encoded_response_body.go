@@ -17,17 +17,19 @@ type ResponseEventEncoder func(canonical.Event) ([][]byte, error)
 // delivery owner drives canonical consumption through Read; no forwarding
 // goroutine competes for stream ownership. Close propagates exactly once.
 type EncodedResponseBody struct {
-	ctx      context.Context
-	events   canonical.ResponseStream
-	encode   ResponseEventEncoder
-	pending  []byte
-	terminal error
-	close    sync.Once
-	closeErr error
+	ctx        context.Context
+	events     canonical.ResponseStream
+	encode     ResponseEventEncoder
+	completion ResponseCompletion
+	fail       func(error)
+	pending    []byte
+	terminal   error
+	close      sync.Once
+	closeErr   error
 }
 
-func NewEncodedResponseBody(ctx context.Context, events canonical.ResponseStream, encode ResponseEventEncoder) *EncodedResponseBody {
-	return &EncodedResponseBody{ctx: ctx, events: events, encode: encode}
+func NewEncodedResponseBody(ctx context.Context, events canonical.ResponseStream, encode ResponseEventEncoder, completion ResponseCompletion, fail func(error)) *EncodedResponseBody {
+	return &EncodedResponseBody{ctx: ctx, events: events, encode: encode, completion: completion, fail: fail}
 }
 
 func (b *EncodedResponseBody) Read(p []byte) (int, error) {
@@ -36,20 +38,24 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 	}
 	for len(b.pending) == 0 {
 		if b.ctx == nil || b.events == nil || b.encode == nil {
-			return 0, errors.New("encoded response body is incomplete")
+			err := errors.New("encoded response body is incomplete")
+			b.fail(err)
+			return 0, err
 		}
 		if err := b.ctx.Err(); err != nil {
+			b.fail(err)
 			return 0, err
 		}
 		event, err := b.events.Next(b.ctx)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				b.terminal = responseStreamTerminalError(b.events)
+			if errors.Is(err, io.EOF) && b.completion.Snapshot().State == CompletionPending {
+				b.fail(io.ErrUnexpectedEOF)
 			}
 			return 0, err
 		}
 		encoded, err := b.encode(event)
 		if err != nil {
+			b.fail(err)
 			return 0, err
 		}
 		for _, bytes := range encoded {
@@ -63,6 +69,9 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 
 func (b *EncodedResponseBody) Close() error {
 	b.close.Do(func() {
+		if b.completion.Snapshot().State == CompletionPending {
+			b.fail(io.ErrClosedPipe)
+		}
 		if b.events != nil {
 			b.closeErr = b.events.Close(b.ctx)
 		}
@@ -70,14 +79,6 @@ func (b *EncodedResponseBody) Close() error {
 	return b.closeErr
 }
 
-// TerminalError reports a checkpoint or provider terminal failure discovered only
-// after the encoded body was consumed.
+// TerminalError reports a terminal failure discovered only after the encoded
+// body was consumed.
 func (b *EncodedResponseBody) TerminalError() error { return b.terminal }
-
-func responseStreamTerminalError(events canonical.ResponseStream) error {
-	type terminalErrorSource interface{ CommitError() error }
-	if source, ok := events.(terminalErrorSource); ok {
-		return source.CommitError()
-	}
-	return nil
-}

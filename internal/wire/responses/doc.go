@@ -16,4 +16,7 @@
 // disappearing from decode. Client request decoding uses the shared ingress
 // helper for top-level request parsing and normalizes stringified
 // function_call.arguments payloads emitted by OpenAI-family client bridges.
+// Ordered input and appendable output items define the private responses
+// history fingerprint scheme. Top-level invocation fields remain on rebased
+// requests but do not identify history; response envelopes do not participate.
 package responses

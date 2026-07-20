@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
@@ -96,6 +97,11 @@ func (s *countingCheckpointStore) Get(ctx context.Context, workspace string, id 
 
 func (s *countingCheckpointStore) Put(ctx context.Context, workspace string, record session.Checkpoint) error {
 	return s.base.Put(ctx, workspace, record)
+}
+
+func (s *countingCheckpointStore) FindByHistory(ctx context.Context, workspace string, history historyfingerprint.History) (session.Checkpoint, bool, error) {
+	s.getCalls++
+	return s.base.FindByHistory(ctx, workspace, history)
 }
 
 func reducerTestState(t *testing.T) exchangeState {
@@ -820,7 +826,7 @@ func TestBackendLocalUnsupportedAdvancesRoute(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testCanonicalRequest("a"), workspace, nil)
+	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -847,7 +853,7 @@ func TestCompatibilityRejectDoesNotMakeFailureFallbackEligible(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testCanonicalRequest("a"), workspace, nil)
+	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil)
 	if err == nil {
 		t.Fatal("unmarked codec rejection unexpectedly succeeded through fallback")
 	}
@@ -895,7 +901,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
 	})
 
-	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), request, workspace, nil)
+	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), workspace, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

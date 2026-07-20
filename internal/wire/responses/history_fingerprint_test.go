@@ -1,0 +1,449 @@
+package responses
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
+)
+
+func TestHistoryFingerprintRoundTrip(t *testing.T) {
+	first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi")}, "completed")
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded.ResponseFingerprint == nil {
+		t.Fatal("buffered response fingerprint is nil")
+	}
+	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := decodeResponsesFingerprintRequest(t, `{
+		"model":"other","instructions":"changed","temperature":1,
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},
+			{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}
+		]}`)
+	if second.RebasedRequest == nil || second.RebasedRequest.Previous != wantPrevious {
+		t.Fatalf("rebased request = %#v, want history %#v", second.RebasedRequest, wantPrevious)
+	}
+	if len(second.RebasedRequest.Request.Items()) != 1 || second.RebasedRequest.Request.Model() != "other" || second.RebasedRequest.Request.Instructions().IsEmpty() {
+		t.Fatalf("rebased invocation did not preserve current fields: %#v", second.RebasedRequest.Request)
+	}
+	changed := decodeResponsesFingerprintRequest(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"changed"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`)
+	if changed.RebasedRequest == nil || changed.RebasedRequest.Previous == wantPrevious {
+		t.Fatal("changed historical output did not change predecessor")
+	}
+	explicit := decodeResponsesFingerprintRequest(t, `{"model":"m","previous_response_id":"swobu_1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`)
+	if explicit.RebasedRequest != nil {
+		t.Fatalf("explicit request returned implicit rebasing %#v", explicit.RebasedRequest)
+	}
+}
+
+func TestScalarInputFingerprintMatchesItsFutureHistoryItem(t *testing.T) {
+	first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":"hello"}`)
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{
+		canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi"),
+	}, "completed")
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := decodeResponsesFingerprintRequest(t, `{
+		"model":"m",
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},
+			{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}
+		]}`)
+	if second.RebasedRequest == nil || second.RebasedRequest.Previous != wantPrevious {
+		t.Fatalf("scalar predecessor = %#v, want %#v", second.RebasedRequest, wantPrevious)
+	}
+}
+
+func TestRequestFingerprintAppendAndReconstructLaw(t *testing.T) {
+	textResponse := func(t *testing.T) canonical.CanonicalResponse {
+		return canonicaltest.Response(t, "swobu_text", "m", []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi"),
+		}, "completed")
+	}
+	toolResponse := func(t *testing.T) canonical.CanonicalResponse {
+		key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
+		call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
+		return canonicaltest.Response(t, "swobu_tool", "m", []canonical.CanonicalItem{call}, "tool_calls")
+	}
+	tests := []struct {
+		name              string
+		firstInput        string
+		appendableRequest string
+		response          func(*testing.T) canonical.CanonicalResponse
+		nextContribution  string
+	}{
+		{
+			name:       "scalar text normalizes to input message",
+			firstInput: `"hello"`,
+			appendableRequest: `[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+			]`,
+			response:         textResponse,
+			nextContribution: `[{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]`,
+		},
+		{
+			name:       "scalar escaping and unicode",
+			firstInput: `"line\n雪"`,
+			appendableRequest: `[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"line\n雪"}]}
+			]`,
+			response:         textResponse,
+			nextContribution: `[{"type":"message","role":"user","content":"again"}]`,
+		},
+		{
+			name:              "structured text item",
+			firstInput:        `[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`,
+			appendableRequest: `[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`,
+			response:          textResponse,
+			nextContribution:  `[{"type":"message","role":"user","content":"again"}]`,
+		},
+		{
+			name:              "multimodal ordered content",
+			firstInput:        `[{"type":"message","role":"user","content":[{"type":"input_text","text":"see"},{"type":"input_image","image_url":"https://example.test/image.png"}]}]`,
+			appendableRequest: `[{"type":"message","role":"user","content":[{"type":"input_text","text":"see"},{"type":"input_image","image_url":"https://example.test/image.png"}]}]`,
+			response:          textResponse,
+			nextContribution:  `[{"type":"message","role":"user","content":"again"}]`,
+		},
+		{
+			name: "multiple ordered request items",
+			firstInput: `[
+				{"type":"message","role":"user","content":"one"},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"two"}]}
+			]`,
+			appendableRequest: `[
+				{"type":"message","role":"user","content":"one"},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"two"}]}
+			]`,
+			response:         textResponse,
+			nextContribution: `[{"type":"message","role":"user","content":"again"}]`,
+		},
+		{
+			name:              "tool response closes before current function output",
+			firstInput:        `"start"`,
+			appendableRequest: `[{"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]}]`,
+			response:          toolResponse,
+			nextContribution:  `[{"type":"function_call_output","call_id":"call_1","output":"result"}]`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":`+test.firstInput+`}`)
+			encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(test.response(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if encoded.ResponseFingerprint == nil {
+				t.Fatal("encoded response fingerprint is nil")
+			}
+			want, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var responseDocument struct {
+				Output []json.RawMessage `json:"output"`
+			}
+			if err := json.Unmarshal(encoded.Document.RawBytes(), &responseDocument); err != nil {
+				t.Fatal(err)
+			}
+			var input []json.RawMessage
+			if err := json.Unmarshal([]byte(test.appendableRequest), &input); err != nil {
+				t.Fatal(err)
+			}
+			input = append(input, responseDocument.Output...)
+			var next []json.RawMessage
+			if err := json.Unmarshal([]byte(test.nextContribution), &next); err != nil {
+				t.Fatal(err)
+			}
+			input = append(input, next...)
+			nextRaw, err := json.Marshal(struct {
+				Model string            `json:"model"`
+				Input []json.RawMessage `json:"input"`
+			}{Model: "m", Input: input})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reconstructed := decodeResponsesFingerprintRequest(t, string(nextRaw))
+			if reconstructed.RebasedRequest == nil || reconstructed.RebasedRequest.Previous != want {
+				t.Fatalf("reconstructed predecessor = %#v, want %#v\nrequest: %s", reconstructed.RebasedRequest, want, nextRaw)
+			}
+		})
+	}
+}
+
+func FuzzScalarInputAppendAndReconstructLaw(f *testing.F) {
+	for _, seed := range []string{"hello", "", "  padded  ", "line\n雪", `quotes " and slash \\`, strings.Repeat("x", 4096)} {
+		f.Add(seed)
+	}
+	response := canonicaltest.Response(f, "swobu_fuzz", "m", []canonical.CanonicalItem{
+		canonicaltest.Message(f, canonical.MessageRoleAssistant, "hi"),
+	}, "completed")
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	if err != nil {
+		f.Fatal(err)
+	}
+	var responseDocument struct {
+		Output []json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(encoded.Document.RawBytes(), &responseDocument); err != nil {
+		f.Fatal(err)
+	}
+
+	f.Fuzz(func(t *testing.T, scalar string) {
+		scalarRaw, err := json.Marshal(scalar)
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstRaw, err := json.Marshal(struct {
+			Model string          `json:"model"`
+			Input json.RawMessage `json:"input"`
+		}{Model: "m", Input: scalarRaw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		decodedFirst, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", nil, firstRaw, carrier.Meta{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		first := decodedFirst.Request
+		want, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, err := json.Marshal([]map[string]string{{"type": "input_text", "text": scalar}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestItem, err := json.Marshal(map[string]any{
+			"type": "message", "role": "user", "content": json.RawMessage(content),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := []json.RawMessage{requestItem}
+		input = append(input, responseDocument.Output...)
+		input = append(input, json.RawMessage(`{"type":"message","role":"user","content":"again"}`))
+		nextRaw, err := json.Marshal(struct {
+			Model string            `json:"model"`
+			Input []json.RawMessage `json:"input"`
+		}{Model: "m", Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reconstructed := decodeResponsesFingerprintRequest(t, string(nextRaw))
+		if reconstructed.RebasedRequest == nil || reconstructed.RebasedRequest.Previous != want {
+			t.Fatalf("scalar %q reconstructed predecessor = %#v, want %#v", scalar, reconstructed.RebasedRequest, want)
+		}
+	})
+}
+
+func TestBufferedAndStreamingResponseFingerprintsConverge(t *testing.T) {
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi")}, "completed")
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex", response.Response(), response.Model(), response.Items(), response.CompletionReason(), response.Usage())
+	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(streamed.Stream.Body); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := streamed.Completion.Snapshot()
+	if snapshot.State != wire.CompletionCompleted || snapshot.ResponseFingerprint == nil || buffered.ResponseFingerprint == nil || *snapshot.ResponseFingerprint != *buffered.ResponseFingerprint {
+		t.Fatalf("stream completion = %#v, want %#v", snapshot, buffered.ResponseFingerprint)
+	}
+}
+
+func TestBufferedAndStreamingToolResponseFingerprintsConvergeAcrossCarriers(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{call}, "tool_calls")
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, framing := range []delivery.Framing{delivery.FramingSSE, delivery.FramingWebSocket} {
+		t.Run(string(framing), func(t *testing.T) {
+			events := canonical.SynthesizeResponseEnvelopeEvents("ex", response.Response(), response.Model(), response.Items(), response.CompletionReason(), response.Usage())
+			if framing == delivery.FramingSSE {
+				streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(framing))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.ReadAll(streamed.Stream.Body); err != nil {
+					t.Fatal(err)
+				}
+				assertResponsesCompletionFingerprint(t, streamed.Completion, buffered.ResponseFingerprint)
+				return
+			}
+			streamed, err := (ResponseStreamEncoder{}).EncodeResponseMessages(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(framing))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for {
+				_, err := streamed.Response.Messages.Next(context.Background())
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertResponsesCompletionFingerprint(t, streamed.Completion, buffered.ResponseFingerprint)
+		})
+	}
+}
+
+func assertResponsesCompletionFingerprint(t *testing.T, completion wire.ResponseCompletion, want *historyfingerprint.Response) {
+	t.Helper()
+	got := completion.Snapshot()
+	if got.State != wire.CompletionCompleted || got.ResponseFingerprint == nil || want == nil || *got.ResponseFingerprint != *want {
+		t.Fatalf("tool stream completion = %#v, want %#v", got, want)
+	}
+}
+
+func TestResponsesHistoryGroupsMultipleCallsOutputsAndRelationshipIDs(t *testing.T) {
+	base := `{
+		"model":"m",
+		"tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+			{"type":"function_call","id":"item_1","call_id":"call_1","name":"search","arguments":"{\"q\":\"one\"}"},
+			{"type":"function_call","id":"item_2","call_id":"call_2","name":"search","arguments":"{\"q\":\"two\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"one"},
+			{"type":"function_call_output","call_id":"call_2","output":"two"},
+			{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"done"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
+		]}`
+	decoded := decodeResponsesFingerprintRequest(t, base)
+	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 1 {
+		t.Fatalf("grouped rebased request = %#v, want only current user contribution", decoded.RebasedRequest)
+	}
+
+	changedID := strings.Replace(base, `"call_id":"call_2"`, `"call_id":"call_changed"`, 1)
+	changed := decodeResponsesFingerprintRequest(t, changedID)
+	if changed.RebasedRequest == nil || changed.RebasedRequest.Previous == decoded.RebasedRequest.Previous {
+		t.Fatal("changing a response relationship id did not change completed history")
+	}
+
+	reordered := strings.Replace(base,
+		`{"type":"function_call","id":"item_1","call_id":"call_1","name":"search","arguments":"{\"q\":\"one\"}"},
+			{"type":"function_call","id":"item_2","call_id":"call_2","name":"search","arguments":"{\"q\":\"two\"}"}`,
+		`{"type":"function_call","id":"item_2","call_id":"call_2","name":"search","arguments":"{\"q\":\"two\"}"},
+			{"type":"function_call","id":"item_1","call_id":"call_1","name":"search","arguments":"{\"q\":\"one\"}"}`, 1)
+	reorderedResult := decodeResponsesFingerprintRequest(t, reordered)
+	if reorderedResult.RebasedRequest == nil || reorderedResult.RebasedRequest.Previous == decoded.RebasedRequest.Previous {
+		t.Fatal("changing response item order did not change completed history")
+	}
+}
+
+func TestResponsesHistoryResumesAtCurrentFunctionCallOutput(t *testing.T) {
+	first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":"start"}`)
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{call}, "tool_calls")
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := decodeResponsesFingerprintRequest(t, `{
+		"model":"m",
+		"tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+			{"type":"function_call","id":"call_1","call_id":"call_1","status":"completed","name":"search","arguments":"{\"q\":\"one\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"result"}
+		]}`)
+	assertCurrentResponsesToolResult(t, second, wantPrevious)
+	direct := decodeResponsesFingerprintRequest(t, `{
+		"model":"m","previous_response_id":"swobu_1",
+		"input":[{"type":"function_call_output","call_id":"call_1","output":"result"}]
+	}`)
+	if second.RequestFingerprint != direct.RequestFingerprint {
+		t.Fatal("rebased function-call-output fingerprint differs from the same direct contribution")
+	}
+}
+
+func TestFunctionCallArgumentRepresentationsFingerprintEqually(t *testing.T) {
+	object, err := fingerprintResponsesResponseValue([]responsesHistoryItemDTO{{
+		Type: "function_call", CallID: "call_1", Name: "search", Arguments: json.RawMessage(`{"q":"one"}`),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stringified, err := fingerprintResponsesResponseValue([]responsesHistoryItemDTO{{
+		Type: "function_call", CallID: "call_1", Name: "search", Arguments: json.RawMessage(`"{\"q\":\"one\"}"`),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if object != stringified {
+		t.Fatal("object and stringified function arguments produced different history fingerprints")
+	}
+}
+
+func assertCurrentResponsesToolResult(t *testing.T, decoded wire.ClientRequestResult, previous historyfingerprint.History) {
+	t.Helper()
+	if decoded.RebasedRequest == nil || decoded.RebasedRequest.Previous != previous {
+		t.Fatalf("rebased predecessor = %#v, want %#v", decoded.RebasedRequest, previous)
+	}
+	items := decoded.RebasedRequest.Request.Items()
+	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("rebased items = %#v, want one current tool result", items)
+	}
+	result, _ := items[0].ToolResult()
+	if result.CallID().String() != "call_1" {
+		t.Fatalf("tool result call ID = %q", result.CallID().String())
+	}
+}
+
+func TestResponsesHistoryPreservesMultimodalContent(t *testing.T) {
+	base := `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"see"},{"type":"input_image","image_url":"https://example.test/one.png"}]},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"seen"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]}`
+	decoded := decodeResponsesFingerprintRequest(t, base)
+	changed := decodeResponsesFingerprintRequest(t, strings.Replace(base, "one.png", "two.png", 1))
+	if decoded.RebasedRequest == nil || changed.RebasedRequest == nil || decoded.RebasedRequest.Previous == changed.RebasedRequest.Previous {
+		t.Fatal("changing historical image content did not change completed history")
+	}
+}
+
+func decodeResponsesFingerprintRequest(t *testing.T, raw string) wire.ClientRequestResult {
+	t.Helper()
+	result, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(raw), carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Request
+}

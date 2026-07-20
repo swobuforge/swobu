@@ -3,19 +3,20 @@ package chatcompletions
 import "encoding/json"
 
 type chatCompletionsRequestDTO struct {
-	Model               string                             `json:"model"`
-	Messages            []chatCompletionsMessageDTO        `json:"messages"`
-	Tools               []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
-	ToolChoice          json.RawMessage                    `json:"tool_choice,omitempty"`
-	ParallelToolCalls   json.RawMessage                    `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat      json.RawMessage                    `json:"response_format,omitempty"`
-	Temperature         json.RawMessage                    `json:"temperature,omitempty"`
-	MaxTokens           json.RawMessage                    `json:"max_tokens,omitempty"`
-	MaxCompletionTokens json.RawMessage                    `json:"max_completion_tokens,omitempty"`
-	TopP                json.RawMessage                    `json:"top_p,omitempty"`
-	Stop                json.RawMessage                    `json:"stop,omitempty"`
-	Stream              json.RawMessage                    `json:"stream,omitempty"`
-	StreamOptions       json.RawMessage                    `json:"stream_options,omitempty"`
+	Model                  string                             `json:"model"`
+	Messages               []chatCompletionsMessageDTO        `json:"messages"`
+	PreviousResponseWireID string                             `json:"previous_response_id"`
+	Tools                  []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
+	ToolChoice             json.RawMessage                    `json:"tool_choice,omitempty"`
+	ParallelToolCalls      json.RawMessage                    `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat         json.RawMessage                    `json:"response_format,omitempty"`
+	Temperature            json.RawMessage                    `json:"temperature,omitempty"`
+	MaxTokens              json.RawMessage                    `json:"max_tokens,omitempty"`
+	MaxCompletionTokens    json.RawMessage                    `json:"max_completion_tokens,omitempty"`
+	TopP                   json.RawMessage                    `json:"top_p,omitempty"`
+	Stop                   json.RawMessage                    `json:"stop,omitempty"`
+	Stream                 json.RawMessage                    `json:"stream,omitempty"`
+	StreamOptions          json.RawMessage                    `json:"stream_options,omitempty"`
 }
 
 type chatCompletionsMessageDTO struct {
@@ -99,6 +100,24 @@ type chatCompletionsResponseMessageDTO struct {
 	Role      string                               `json:"role"`
 	Content   string                               `json:"content,omitempty"`
 	ToolCalls []chatCompletionsResponseToolCallDTO `json:"tool_calls,omitempty"`
+}
+
+// MarshalJSON makes the actual appendable Chat history value explicit:
+// tool-only assistant messages carry content:null, while text and mixed
+// messages carry their text string.
+func (m chatCompletionsResponseMessageDTO) MarshalJSON() ([]byte, error) {
+	type responseMessage struct {
+		Role      string                               `json:"role"`
+		Content   any                                  `json:"content,omitempty"`
+		ToolCalls []chatCompletionsResponseToolCallDTO `json:"tool_calls,omitempty"`
+	}
+	var content any
+	if m.Content != "" {
+		content = m.Content
+	} else if len(m.ToolCalls) > 0 {
+		content = json.RawMessage("null")
+	}
+	return json.Marshal(responseMessage{Role: m.Role, Content: content, ToolCalls: m.ToolCalls})
 }
 
 type chatCompletionsResponseToolCallDTO struct {

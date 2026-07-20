@@ -1,0 +1,331 @@
+package responses
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/wire"
+)
+
+const fingerprintScheme historyfingerprint.Scheme = "responses"
+
+// responsesHistoryItemDTO is the private superset of input/output item fields
+// needed to reproduce the ordered output sequence a client appends to input.
+type responsesHistoryItemDTO struct {
+	Type        string          `json:"type"`
+	ID          string          `json:"id,omitempty"`
+	Status      string          `json:"status,omitempty"`
+	Role        string          `json:"role,omitempty"`
+	Content     json.RawMessage `json:"content,omitempty"`
+	CallID      string          `json:"call_id,omitempty"`
+	Name        string          `json:"name,omitempty"`
+	Arguments   json.RawMessage `json:"arguments,omitempty"`
+	Input       string          `json:"input,omitempty"`
+	Output      json.RawMessage `json:"output,omitempty"`
+	ServerLabel string          `json:"server_label,omitempty"`
+}
+
+type responsesHistoryResult struct {
+	previous *historyfingerprint.History
+	request  historyfingerprint.Request
+	current  json.RawMessage
+}
+
+func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (responsesHistoryResult, error) {
+	trimmed := bytes.TrimSpace(input)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		request, err := fingerprintResponsesRequestValue(nil)
+		return responsesHistoryResult{request: request, current: json.RawMessage("null")}, err
+	}
+	if trimmed[0] != '[' {
+		var text string
+		if err := json.Unmarshal(trimmed, &text); err != nil {
+			return responsesHistoryResult{}, err
+		}
+		content, err := json.Marshal([]struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{{Type: "input_text", Text: text}})
+		if err != nil {
+			return responsesHistoryResult{}, err
+		}
+		request, err := fingerprintResponsesRequestValue([]responsesHistoryItemDTO{{
+			Type: "message", Role: "user", Content: content,
+		}})
+		return responsesHistoryResult{request: request, current: append(json.RawMessage(nil), trimmed...)}, err
+	}
+	var items []responsesHistoryItemDTO
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		return responsesHistoryResult{}, err
+	}
+	if explicitPrevious {
+		request, err := fingerprintResponsesRequestValue(items)
+		return responsesHistoryResult{request: request, current: append(json.RawMessage(nil), trimmed...)}, err
+	}
+
+	var previous *historyfingerprint.History
+	requestStart := 0
+	for index := 0; index < len(items); {
+		if !isResponsesHistoryOutput(items[index]) {
+			index++
+			continue
+		}
+		responseEnd := index + 1
+		for responseEnd < len(items) && isResponsesHistoryOutput(items[responseEnd]) {
+			responseEnd++
+		}
+		// A terminal assistant/output value may be current prefill. Later request
+		// input is the evidence that closes this response contribution.
+		if responseEnd == len(items) {
+			break
+		}
+		request, err := fingerprintResponsesRequestValue(items[requestStart:index])
+		if err != nil {
+			return responsesHistoryResult{}, err
+		}
+		response, err := fingerprintResponsesResponseValue(items[index:responseEnd])
+		if err != nil {
+			return responsesHistoryResult{}, err
+		}
+		history, err := historyfingerprint.Advance(previous, request, response)
+		if err != nil {
+			return responsesHistoryResult{}, err
+		}
+		previous = &history
+		requestStart = responseEnd
+		index = responseEnd
+	}
+	current, err := fingerprintResponsesRequestValue(items[requestStart:])
+	if err != nil {
+		return responsesHistoryResult{}, err
+	}
+	currentRaw, err := json.Marshal(items[requestStart:])
+	if err != nil {
+		return responsesHistoryResult{}, err
+	}
+	return responsesHistoryResult{previous: previous, request: current, current: currentRaw}, nil
+}
+
+func isResponsesHistoryOutput(item responsesHistoryItemDTO) bool {
+	typeName := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
+	if typeName == "message" {
+		return strings.TrimSpace(item.Role) == "assistant" // swobu:io-string source=boundary
+	}
+	// swobu:lint ignore string-switch because=protocol boundary partitions Responses history item variants.
+	switch typeName {
+	case "function_call", "custom_tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func fingerprintResponsesRequestValue(items []responsesHistoryItemDTO) (historyfingerprint.Request, error) {
+	normalized, err := normalizeResponsesHistoryItems(items)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	return historyfingerprint.FingerprintRequest(fingerprintScheme, raw)
+}
+
+func fingerprintResponsesResponseValue(items []responsesHistoryItemDTO) (historyfingerprint.Response, error) {
+	normalized, err := normalizeResponsesHistoryItems(items)
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	return historyfingerprint.FingerprintResponse(fingerprintScheme, raw)
+}
+
+func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]responsesHistoryItemDTO, error) {
+	normalized := append([]responsesHistoryItemDTO(nil), items...)
+	for index := range normalized {
+		var err error
+		normalized[index].Content, err = normalizeResponsesRawJSON(items[index].Content)
+		if err != nil {
+			return nil, err
+		}
+		if normalized[index].Type == "function_call" && len(items[index].Arguments) > 0 {
+			arguments, err := decodeResponsesFunctionCallArguments(items[index].Arguments)
+			if err != nil {
+				return nil, err
+			}
+			normalized[index].Arguments, err = json.Marshal(arguments.String())
+		} else {
+			normalized[index].Arguments, err = normalizeResponsesRawJSON(items[index].Arguments)
+		}
+		if err != nil {
+			return nil, err
+		}
+		normalized[index].Output, err = normalizeResponsesRawJSON(items[index].Output)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+func normalizeResponsesRawJSON(source json.RawMessage) (json.RawMessage, error) {
+	if len(source) == 0 {
+		return nil, nil
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(source))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
+}
+
+func fingerprintResponsesResponse(output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
+	state := responsesResponseHistoryState{finishReason: output.CompletionReason()}
+	for _, item := range output.Items() {
+		if err := state.appendItem(item); err != nil {
+			return historyfingerprint.Response{}, err
+		}
+	}
+	return state.fingerprint()
+}
+
+// responsesResponseHistoryState owns only the appendable private output-item
+// representation. It deliberately models the currently supported output
+// subset; future reasoning items require an explicit grammar extension.
+type responsesResponseHistoryState struct {
+	items        []responsesHistoryItemDTO
+	finishReason string
+}
+
+func (s *responsesResponseHistoryState) appendItem(item canonical.CanonicalItem) error {
+	switch item.Kind() {
+	case canonical.ItemKindMessage:
+		message, _ := item.Message()
+		if message.Role() != canonical.MessageRoleAssistant {
+			return canonical.UnsupportedOperation("responses output messages must be assistant-authored")
+		}
+		content := make([]responsesOutputTextItemDTO, 0, len(message.Content()))
+		for _, part := range message.Content() {
+			text, ok := part.Text()
+			if !ok {
+				return canonical.UnsupportedOperation("responses image output is not implemented")
+			}
+			content = append(content, responsesOutputTextItemDTO{Type: "output_text", Text: text.Text()})
+		}
+		raw, err := json.Marshal(content)
+		if err != nil {
+			return err
+		}
+		s.items = append(s.items, responsesHistoryItemDTO{Type: "message", Role: "assistant", Content: raw})
+		return nil
+	case canonical.ItemKindToolCall:
+		call, _ := item.ToolCall()
+		tool := call.Tool()
+		history := responsesHistoryItemDTO{
+			ID: call.CallID().String(), CallID: call.CallID().String(), Name: tool.Name(),
+		}
+		switch tool.Kind() {
+		case canonical.ToolKindFunction:
+			object, ok := call.Input().Object()
+			if !ok {
+				return canonical.InternalError("responses output function call requires object input")
+			}
+			history.Type = "function_call"
+			arguments, err := json.Marshal(object.String())
+			if err != nil {
+				return err
+			}
+			history.Arguments = arguments
+		case canonical.ToolKindCustom:
+			input, ok := call.Input().Text()
+			if !ok {
+				return canonical.InternalError("responses output custom call requires text input")
+			}
+			history.Type = "custom_tool_call"
+			history.Input = input
+		default:
+			return canonical.UnsupportedOperation("responses output tool kind is unsupported")
+		}
+		s.items = append(s.items, history)
+		return nil
+	default:
+		return canonical.UnsupportedOperation("responses output item kind is unsupported")
+	}
+}
+
+func (s *responsesResponseHistoryState) fingerprint() (historyfingerprint.Response, error) {
+	status, _ := responsesWireStatusForFinishReason(s.finishReason)
+	items := append([]responsesHistoryItemDTO(nil), s.items...)
+	for index := range items {
+		items[index].Status = status
+	}
+	return fingerprintResponsesResponseValue(items)
+}
+
+// responsesFingerprintingEncoder marks completion in the same Encode call
+// that returns response.completed. Byte and message delivery wrappers gate
+// that exact terminal output on checkpoint commit.
+func responsesFingerprintingEncoder(encode wire.ResponseEventEncoder, complete func(*historyfingerprint.Response), fail func(error)) wire.ResponseEventEncoder {
+	state := &responsesResponseHistoryState{}
+	return func(event canonical.Event) ([][]byte, error) {
+		encoded, err := encode(event)
+		if err != nil {
+			fail(err)
+			return nil, err
+		}
+		switch event.Kind {
+		case canonical.EventItemCompleted:
+			itemEvent, ok := event.Payload.(canonical.ItemEvent)
+			completed, valid := itemEvent.Payload.(canonical.ItemCompletedPayload)
+			if !ok || !valid {
+				err := errors.New("responses item completion payload is invalid")
+				fail(err)
+				return nil, err
+			}
+			if err := state.appendItem(completed.Item); err != nil {
+				fail(err)
+				return nil, err
+			}
+		case canonical.EventFinish:
+			if payload, ok := event.Payload.(canonical.FinishPayload); ok {
+				state.finishReason = payload.Reason
+			}
+		}
+		status, terminal := responsesFingerprintTerminalStatus(event)
+		if !terminal {
+			return encoded, nil
+		}
+		if status != canonical.EnvelopeStatusCompleted {
+			fail(errors.New("responses response did not complete successfully"))
+			return encoded, nil
+		}
+		fingerprint, err := state.fingerprint()
+		if err != nil {
+			fail(err)
+			return encoded, nil
+		}
+		complete(&fingerprint)
+		return encoded, nil
+	}
+}
+
+func responsesFingerprintTerminalStatus(event canonical.Event) (canonical.EnvelopeStatus, bool) {
+	if event.Kind != canonical.EventEnvelopeEnd {
+		return "", false
+	}
+	payload, ok := event.Payload.(canonical.EnvelopeEndPayload)
+	if !ok || payload.Kind != canonical.EnvResponse {
+		return "", false
+	}
+	return payload.Status, true
+}

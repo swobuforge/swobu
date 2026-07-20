@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,24 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
-
-type deliveryCheckpointStore struct {
-	putCalls int
-	putErr   error
-}
-
-func (*deliveryCheckpointStore) Get(context.Context, string, canonical.SwobuResponseID) (session.Checkpoint, bool, error) {
-	return session.Checkpoint{}, false, nil
-}
-
-func (s *deliveryCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
-	s.putCalls++
-	return s.putErr
-}
 
 func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	out := canonicaltest.Response(t,
@@ -113,6 +97,13 @@ func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testin
 	}
 }
 
+func TestClassifyDeliveryFailurePreservesCheckpointCommitKind(t *testing.T) {
+	result := classifyDeliveryFailure(context.Background(), nil, exchange.CheckpointCommitError{}, nil)
+	if result.Kind != transportpkg.DeliveryCheckpointCommitFailed {
+		t.Fatalf("delivery kind = %q, want %q", result.Kind, transportpkg.DeliveryCheckpointCommitFailed)
+	}
+}
+
 func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -140,106 +131,5 @@ func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testin
 	}
 	if writer.writeCount == 0 {
 		t.Fatal("body was not written")
-	}
-}
-
-func TestWriteSuccessResponse_CheckpointCommitFailureIsNotDeliverySuccess(t *testing.T) {
-	store := &deliveryCheckpointStore{putErr: errors.New("store unavailable")}
-	response := canonicaltest.Response(t,
-		"provider_response_1",
-		"m",
-		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
-		"completed",
-	)
-	var events canonical.ResponseStream = canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		"ex_checkpoint_failure",
-		response.Response(),
-		response.Model(),
-		response.Items(),
-		response.CompletionReason(),
-		response.Usage(),
-	))
-	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_checkpoint_failure")}
-	events = canonical.NewBoundResponseIdentityStream(events, binding)
-	committed := session.NewCheckpointStream(events, session.CheckpointConfig{
-		WorkspaceSlug: "alpha",
-		ExchangeID:    "ex_checkpoint_failure",
-		Binding:       binding,
-		Store:         store,
-		MaxBytes:      exchange.DefaultRuntimeLimits().MaxCheckpointBytes,
-		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("m"),
-			Items: []canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
-		}),
-	})
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(
-		context.Background(), committed, delivery.StreamingDelivery(delivery.FramingSSE),
-	)
-	if err != nil {
-		t.Fatalf("EncodeResponseStream error: %v", err)
-	}
-
-	result := writeSuccessResponse(context.Background(), httptest.NewRecorder(), "req_checkpoint_failure", canonical.ClientFamilyResponses, exchange.RequestOutput{
-		Response: exchange.NewStreamingResponse(stream),
-	})
-
-	if result.Kind != transportpkg.DeliveryCheckpointCommitFailed || result.Err == nil {
-		t.Fatalf("delivery result = %#v, want checkpoint commit failure", result)
-	}
-	if store.putCalls != 1 {
-		t.Fatalf("checkpoint put calls = %d, want 1", store.putCalls)
-	}
-}
-
-func TestWriteSuccessResponse_ClientCancellationDoesNotCommitCheckpoint(t *testing.T) {
-	store := &deliveryCheckpointStore{}
-	response := canonicaltest.Response(t,
-		"provider_response_2",
-		"m",
-		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
-		"completed",
-	)
-	var events canonical.ResponseStream = canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		"ex_cancel",
-		response.Response(),
-		response.Model(),
-		response.Items(),
-		response.CompletionReason(),
-		response.Usage(),
-	))
-	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_cancel")}
-	events = canonical.NewBoundResponseIdentityStream(events, binding)
-	committed := session.NewCheckpointStream(
-		events,
-		session.CheckpointConfig{
-			WorkspaceSlug: "alpha",
-			ExchangeID:    "ex_cancel",
-			Binding:       binding,
-			Store:         store,
-			MaxBytes:      exchange.DefaultRuntimeLimits().MaxCheckpointBytes,
-			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model: canonical.Specify("m"),
-				Items: []canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
-			}),
-		},
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(
-		ctx, committed, delivery.StreamingDelivery(delivery.FramingSSE),
-	)
-	if err != nil {
-		t.Fatalf("EncodeResponseStream error: %v", err)
-	}
-	writer := &writeHeaderCountingResponseWriter{cancelAfterWriteCount: 1, cancel: cancel}
-
-	result := writeSuccessResponse(ctx, writer, "req_cancel", canonical.ClientFamilyResponses, exchange.RequestOutput{
-		Response: exchange.NewStreamingResponse(stream),
-	})
-
-	if result.Kind != transportpkg.DeliveryClientCancelled {
-		t.Fatalf("delivery result = %#v, want client cancellation", result)
-	}
-	if store.putCalls != 0 {
-		t.Fatalf("checkpoint put calls = %d, want 0", store.putCalls)
 	}
 }
