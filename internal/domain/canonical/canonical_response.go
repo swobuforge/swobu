@@ -16,7 +16,7 @@ type CanonicalResponse struct {
 }
 
 // NewCanonicalResponse constructs the legal model-output subset of canonical
-// items. Assistant messages and tool calls are response-producing branches;
+// items. Assistant messages, reasoning, and tool calls are response-producing branches;
 // tool results and non-assistant messages are request transcript input.
 func NewCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) (CanonicalResponse, error) {
 	if response.SwobuID.IsZero() {
@@ -46,6 +46,10 @@ func validateResponseItem(index int, item CanonicalItem) error {
 	case ItemKindToolCall:
 		if _, ok := item.ToolCall(); !ok {
 			return fmt.Errorf("canonical response item %d is an invalid tool call", index)
+		}
+	case ItemKindReasoning:
+		if _, ok := item.Reasoning(); !ok || item.Owner() != TurnOwnerAssistant {
+			return fmt.Errorf("canonical response item %d is invalid reasoning", index)
 		}
 	case ItemKindToolResult:
 		return fmt.Errorf("canonical response item %d is a request-only tool result", index)

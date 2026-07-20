@@ -35,7 +35,7 @@ func (id ResponsesNativeResponseID) isBlank() bool {
 }
 
 // ResponseRef is the shared identity of a completed response and a later
-// request that selects it. Protocol refinements remain optional typed children.
+// request that selects it. Provider-native handles remain optional typed children.
 type ResponseRef struct {
 	SwobuID   SwobuResponseID
 	Responses *ResponsesNativeRef
@@ -59,7 +59,7 @@ func (r ResponseRef) ValidatePreviousResponseSelector() error {
 }
 
 // ValidateCommittedResponse requires checkpoint identity and a fully bound native
-// refinement when one was captured.
+// handle when one was captured.
 func (r ResponseRef) ValidateCommittedResponse() error {
 	if r.SwobuID.IsZero() {
 		return errors.New("committed response requires a Swobu response ID")

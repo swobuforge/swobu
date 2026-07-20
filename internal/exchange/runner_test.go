@@ -388,7 +388,7 @@ func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []comp
 	var err error
 	switch c.protocol {
 	case protocolkind.ChatCompletions:
-		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithTokenField(input, req.Delivery, "", chatcompletions.MaxOutputTokensFieldCompletion)
+		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", chatcompletions.EncodeOptions{})
 	case protocolkind.Responses:
 		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	case protocolkind.Messages:
@@ -436,11 +436,11 @@ type testClientCodec struct {
 		DecodeClientRequest(carrier.Document) (wire.ClientDecodeResult, error)
 	}
 	doc interface {
-		EncodeResponseDocument(canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
+		EncodeResponseDocument(canonical.CanonicalRequest, canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
 	}
 	stream interface {
-		EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
-		EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error)
+		EncodeResponseStream(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
+		EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error)
 	}
 }
 
@@ -448,16 +448,16 @@ func (c testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientD
 	return c.req.DecodeClientRequest(doc)
 }
 
-func (c testClientCodec) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
-	return c.doc.EncodeResponseDocument(output)
+func (c testClientCodec) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+	return c.doc.EncodeResponseDocument(request, output)
 }
 
-func (c testClientCodec) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
-	return c.stream.EncodeResponseStream(ctx, events, d)
+func (c testClientCodec) EncodeResponseStream(ctx context.Context, request canonical.CanonicalRequest, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
+	return c.stream.EncodeResponseStream(ctx, request, events, d)
 }
 
-func (c testClientCodec) EncodeResponseMessages(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientMessageResult, error) {
-	return c.stream.EncodeResponseMessages(ctx, events, d)
+func (c testClientCodec) EncodeResponseMessages(ctx context.Context, request canonical.CanonicalRequest, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientMessageResult, error) {
+	return c.stream.EncodeResponseMessages(ctx, request, events, d)
 }
 
 func testCanonicalRequest(model string) canonical.CanonicalRequest {

@@ -21,13 +21,17 @@ type StreamEvent struct {
 	ResultID string
 	Model    string
 
-	ItemKind canonical.ItemKind
-	ItemID   string
+	ItemKind      canonical.ItemKind
+	ItemID        string
+	CompletedItem *canonical.CanonicalItem
 	// ItemOrdinal and PartOrdinal preserve canonical stream topology through
 	// the family-specific client encoders.
 	ItemOrdinal uint32
 	PartOrdinal uint32
-	PartKind    canonical.PartKind
+	// Exactly one part kind is populated for content_started. Keeping the
+	// parent-specific types distinct prevents reasoning from becoming message
+	// text inside family-specific encoders.
+	PartKind canonical.PartKind
 
 	TextDelta string
 

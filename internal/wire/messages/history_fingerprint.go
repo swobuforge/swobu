@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -9,6 +10,21 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/wire"
 )
+
+type messagesHistoryPartDTO struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	Thinking  *string         `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
+	Source    json.RawMessage `json:"source,omitempty"`
+}
 
 const fingerprintScheme historyfingerprint.Scheme = "messages"
 
@@ -54,7 +70,11 @@ func fingerprintMessagesHistory(messages []messagesMessageDTO) (messagesHistoryR
 }
 
 func fingerprintMessagesRequest(messages []messagesMessageDTO) (historyfingerprint.Request, error) {
-	raw, err := json.Marshal(messages)
+	normalized, err := normalizeMessagesHistory(messages)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	raw, err := json.Marshal(normalized)
 	if err != nil {
 		return historyfingerprint.Request{}, err
 	}
@@ -62,15 +82,67 @@ func fingerprintMessagesRequest(messages []messagesMessageDTO) (historyfingerpri
 }
 
 func fingerprintMessagesResponseValue(message messagesMessageDTO) (historyfingerprint.Response, error) {
-	raw, err := json.Marshal(message)
+	normalized, err := normalizeMessagesHistory([]messagesMessageDTO{message})
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	raw, err := json.Marshal(normalized[0])
 	if err != nil {
 		return historyfingerprint.Response{}, err
 	}
 	return historyfingerprint.FingerprintResponse(fingerprintScheme, raw)
 }
 
-func fingerprintMessagesResponse(output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
-	state := messagesResponseHistoryState{}
+func normalizeMessagesHistory(messages []messagesMessageDTO) ([]messagesMessageDTO, error) {
+	normalized := append([]messagesMessageDTO(nil), messages...)
+	for index := range normalized {
+		trimmed := bytes.TrimSpace(normalized[index].Content)
+		if len(trimmed) == 0 || trimmed[0] != '[' {
+			continue
+		}
+		var parts []messagesHistoryPartDTO
+		if err := json.Unmarshal(trimmed, &parts); err != nil {
+			return nil, err
+		}
+		for partIndex := range parts {
+			var err error
+			parts[partIndex].Input, err = normalizeMessagesRawJSON(parts[partIndex].Input)
+			if err != nil {
+				return nil, err
+			}
+			parts[partIndex].Content, err = normalizeMessagesRawJSON(parts[partIndex].Content)
+			if err != nil {
+				return nil, err
+			}
+			parts[partIndex].Source, err = normalizeMessagesRawJSON(parts[partIndex].Source)
+			if err != nil {
+				return nil, err
+			}
+		}
+		content, err := json.Marshal(parts)
+		if err != nil {
+			return nil, err
+		}
+		normalized[index].Content = content
+	}
+	return normalized, nil
+}
+
+func normalizeMessagesRawJSON(source json.RawMessage) (json.RawMessage, error) {
+	if len(source) == 0 {
+		return nil, nil
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(source))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
+}
+
+func fingerprintMessagesResponse(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
+	state := messagesResponseHistoryState{request: request.Clone()}
 	for _, item := range output.Items() {
 		if err := state.appendItem(item); err != nil {
 			return historyfingerprint.Response{}, err
@@ -83,6 +155,7 @@ func fingerprintMessagesResponse(output canonical.CanonicalResponse) (historyfin
 // client appends to a later Messages request.
 type messagesResponseHistoryState struct {
 	content []messagesResponsePartDTO
+	request canonical.CanonicalRequest
 }
 
 func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) error {
@@ -116,6 +189,47 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		return nil
 	case canonical.ItemKindToolResult:
 		return canonical.UnsupportedOperation("messages protocol does not support tool result output items")
+	case canonical.ItemKindReasoning:
+		reasoning, _ := item.Reasoning()
+		opaque, ok := reasoning.Opaque().Messages()
+		if !ok {
+			// A foreign opaque-thinking branch is not a Messages thinking block.
+			// Keep it in session truth and omit the inexpressible
+			// client view; never reinterpret it from a format label.
+			return nil
+		}
+		var native messagesResponsePartDTO
+		if err := json.Unmarshal(opaque, &native); err != nil {
+			return canonical.InternalError("messages opaque thinking is invalid")
+		}
+		if native.Type == "redacted_thinking" {
+			s.content = append(s.content, native)
+			return nil
+		}
+		disclosure, specified := s.request.Reasoning().DisclosureField().Get()
+		if native.Type != "thinking" {
+			return canonical.InternalError("messages opaque thinking is invalid")
+		}
+		if specified && disclosure == canonical.ReasoningDisclosureNone {
+			empty := ""
+			native.Thinking = &empty
+			native.Text = ""
+			s.content = append(s.content, native)
+			return nil
+		}
+		if specified && disclosure == canonical.ReasoningDisclosureSummary {
+			empty := ""
+			native.Thinking = &empty
+			for _, part := range reasoning.Parts() {
+				if part.Kind() == canonical.ReasoningPartSummary {
+					text := part.Text()
+					native.Thinking = &text
+					break
+				}
+			}
+		}
+		s.content = append(s.content, native)
+		return nil
 	default:
 		return canonical.UnsupportedOperation("messages protocol does not support this output item kind")
 	}
@@ -132,8 +246,8 @@ func (s *messagesResponseHistoryState) fingerprint() (historyfingerprint.Respons
 // messagesFingerprintingEncoder marks completion in the same Encode call that
 // returns message_delta and message_stop. The exchange delivery wrapper gates
 // those exact bytes on checkpoint commit.
-func messagesFingerprintingEncoder(encode wire.ResponseEventEncoder, complete func(*historyfingerprint.Response), fail func(error)) wire.ResponseEventEncoder {
-	state := &messagesResponseHistoryState{}
+func messagesFingerprintingEncoder(request canonical.CanonicalRequest, encode wire.ResponseEventEncoder, complete func(*historyfingerprint.Response), fail func(error)) wire.ResponseEventEncoder {
+	state := &messagesResponseHistoryState{request: request.Clone()}
 	return func(event canonical.Event) ([][]byte, error) {
 		encoded, err := encode(event)
 		if err != nil {

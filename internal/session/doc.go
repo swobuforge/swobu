@@ -4,9 +4,15 @@
 // Each successfully client-encoded response may commit one checkpoint keyed by
 // its Swobu response ID and partitioned by workspace. An optional opaque
 // client-history fingerprint provides one exact secondary lookup. Resolution
-// preserves the complete client request and may build a native-resumption
-// delta from the codec-rebased current request when the matched checkpoint
-// contains a valid exact-target provider refinement.
+// materializes canonical checkpoint truth plus the codec-rebased current
+// invocation, restoring opaque thinking hidden from client projection. It may also
+// build a native-resumption delta when the matched checkpoint contains a valid
+// exact-target provider handle. Current reasoning controls and effort are
+// normally remain per invocation. When matching tool results continue an
+// unfinished assistant turn, omitted compute and effort are resolved from the
+// checkpoint request directly into the effective Full and Delta requests;
+// explicit conflicts reject. Partial result batches are legal, while duplicate
+// or foreign call IDs are malformed continuations.
 //
 // Checkpoints also retain validated external-media bytes bound to exact
 // canonical request occurrences, so resumed execution never depends on

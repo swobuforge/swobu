@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,202 @@ func TestBeginRejectsPreviousResponse(t *testing.T) {
 	request := makeRequest("gpt-4o", makeItems("hello"), &canonical.ResponseRef{SwobuID: "resp_old"})
 	if _, err := Begin(request); err == nil || err.Error() != "session begin request contains previous response" {
 		t.Fatalf("Begin error = %v", err)
+	}
+}
+
+func TestResumeDoesNotInheritReasoningControlsAndPreservesOpaqueThinking(t *testing.T) {
+	previousReasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute()), Disclosure: canonical.Specify(canonical.ReasoningDisclosureSummary),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effort := canonical.InferenceEffortHigh
+	previousControls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: makeItems("one"), Controls: previousControls, Reasoning: previousReasoning,
+	})
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"summary","signature":"durable-signature"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoningItem, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpoint("resp_previous", previousRequest, makeResponse(reasoningItem), nil)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: makeItems("two"), PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, request := range map[string]canonical.CanonicalRequest{"full": resolved.Full, "delta": resolved.Delta} {
+		if _, ok := request.Reasoning().ComputeField().Get(); ok {
+			t.Fatalf("%s inherited omitted reasoning compute", name)
+		}
+		if _, ok := request.Controls().Effort.Get(); ok {
+			t.Fatalf("%s inherited omitted inference effort", name)
+		}
+	}
+	items := resolved.Full.Items()
+	if len(items) != 3 || items[1].Kind() != canonical.ItemKindReasoning {
+		t.Fatalf("materialized reasoning items = %#v", items)
+	}
+	restored, _ := items[1].Reasoning()
+	messages, ok := restored.Opaque().Messages()
+	if !ok {
+		t.Fatal("materialization lost Messages opaque thinking")
+	}
+	if !ok || !strings.Contains(string(messages), "durable-signature") {
+		t.Fatal("materialization lost exact signature bytes")
+	}
+}
+
+func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
+	previousReasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effort := canonical.InferenceEffortHigh
+	previousControls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: makeItems("one"), Controls: previousControls, Reasoning: previousReasoning})
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	record := checkpoint("resp_previous", previousRequest, makeResponse(call), nil)
+	callID, _ := canonical.NewToolCallID("call_1")
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"}})
+
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, request := range map[string]canonical.CanonicalRequest{"full": resolved.Full, "delta": resolved.Delta} {
+		compute, computeSet := request.Reasoning().ComputeField().Get()
+		gotEffort, effortSet := request.Controls().Effort.Get()
+		if !computeSet || compute.Kind() != canonical.ReasoningAutomatic || !effortSet || gotEffort != effort {
+			t.Fatalf("%s did not carry effective unfinished-turn compute", name)
+		}
+	}
+
+	unrelatedID, _ := canonical.NewToolCallID("call_other")
+	unrelated, _ := canonical.NewToolResultItem(unrelatedID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	unrelatedRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{unrelated}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"}})
+	if _, err := Resume(unrelatedRequest, record); err == nil {
+		t.Fatal("foreign tool result silently abandoned unfinished turn")
+	}
+	secondCall := canonicaltest.ToolCall(t, "call_2", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	multipleRecord := checkpoint("resp_previous", previousRequest, makeResponse(call, secondCall), nil)
+	if _, err := Resume(current, multipleRecord); err != nil {
+		t.Fatalf("partial valid tool results were rejected: %v", err)
+	}
+	duplicate := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result, result}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+	if _, err := Resume(duplicate, multipleRecord); err == nil {
+		t.Fatal("duplicate tool results silently abandoned unfinished turn")
+	}
+}
+
+func TestResumeRejectsToolResultWhenCheckpointHasNoToolCall(t *testing.T) {
+	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: makeItems("one"),
+	})
+	record := checkpoint("resp_previous", previousRequest, makeResponse(
+		mustMessageItem(canonical.MessageRoleAssistant, "done"),
+	), nil)
+	foreignID, err := canonical.NewToolCallID("call_foreign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := canonical.NewToolResultItem(foreignID, []canonical.ToolResultPart{
+		canonical.NewTextToolResultPart("unexpected"),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{foreign},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+
+	if _, err := Resume(current, record); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("Resume error = %v, want foreign tool-result rejection", err)
+	}
+}
+
+func TestResumeAcceptsPartialResultsForInterleavedToolCalls(t *testing.T) {
+	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: makeItems("one")})
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	callOne := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	callTwo := canonicaltest.ToolCall(t, "call_2", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	partA, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "A")
+	partB, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "B")
+	reasoningA, _ := canonical.NewReasoningItem([]canonical.ReasoningPart{partA}, canonical.OpaqueThinking{})
+	reasoningB, _ := canonical.NewReasoningItem([]canonical.ReasoningPart{partB}, canonical.OpaqueThinking{})
+	record := checkpoint("resp_previous", previousRequest, makeResponse(reasoningA, callOne, reasoningB, callTwo), nil)
+	callOneID, _ := canonical.NewToolCallID("call_1")
+	callTwoID, _ := canonical.NewToolCallID("call_2")
+	resultOne, _ := canonical.NewToolResultItem(callOneID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("one")}, false)
+	resultTwo, _ := canonical.NewToolResultItem(callTwoID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("two")}, false)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:            canonical.Specify("m"),
+		Items:            []canonical.CanonicalItem{resultOne},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatalf("interleaved prior response did not resume: %v", err)
+	}
+	if len(resolved.Full.Items()) != 6 {
+		t.Fatalf("materialized items = %d, want checkpoint request + full interleaved response + partial result", len(resolved.Full.Items()))
+	}
+	_ = resultTwo
+	_ = callTwoID
+}
+
+func TestResumeExplicitDisabledReasoningClearsInheritedDisclosure(t *testing.T) {
+	previousReasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute:    canonical.Specify(canonical.NewAutomaticReasoningCompute()),
+		Disclosure: canonical.Specify(canonical.ReasoningDisclosureSummary),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewDisabledReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: makeItems("one"), Reasoning: previousReasoning})
+	record := checkpoint("resp_previous", previousRequest, makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "answer")), nil)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: makeItems("two"), PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"}, Reasoning: disabled,
+	})
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := resolved.Delta.Reasoning().DisclosureField().Get(); present {
+		t.Fatal("explicit disabled reasoning retained inherited disclosure")
 	}
 }
 
@@ -192,14 +389,14 @@ func TestResumeInheritsUnspecifiedBands(t *testing.T) {
 	}
 }
 
-func TestResolvedRequestUsesDeltaOnlyForExactTargetGeneration(t *testing.T) {
+func TestResolvedRequestUsesDeltaOnlyForApplicableNativeContinuation(t *testing.T) {
 	target := testBackendTarget(t, "gpt-4o")
 	prepared := ResolvedRequest{
 		Full:  makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), nil),
 		Delta: makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev", Responses: nativeResponses(target, "provider_prev")}),
 	}
 	if got := prepared.ForTarget(target); len(got.Items()) != 1 {
-		t.Fatalf("exact target items=%d, want delta", len(got.Items()))
+		t.Fatalf("native continuation items=%d, want delta", len(got.Items()))
 	}
 	target.TargetVersion++
 	if got := prepared.ForTarget(target); len(got.Items()) != 3 {

@@ -37,11 +37,6 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	if clientCodec == nil {
 		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.UnsupportedOperation("required client codec not resolved")
 	}
-	// Reject already-known checkpoint material before attempt preparation performs
-	// URL fetch I/O or the provider is invoked.
-	if err := session.ValidateResolvedRequestSize(s.prepared.Full, s.prepared.ResolvedMedia, runner.Policy.Limits.MaxCheckpointBytes); err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("checkpoint preflight: %w", err)
-	}
 	var canonicalRequest canonical.CanonicalRequest
 	switch selection.requestChoice {
 	case providerRequestPreferred:
@@ -87,9 +82,6 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	resolvedMedia, err := s.prepared.ResolvedMedia.Merge(usedMedia)
 	if err != nil {
 		return providerCall{}, path.target, evidence, nil, fmt.Errorf("resolved media provenance: %w", err)
-	}
-	if err := session.ValidateResolvedRequestSize(s.prepared.Full, resolvedMedia, runner.Policy.Limits.MaxCheckpointBytes); err != nil {
-		return providerCall{}, path.target, evidence, nil, preparationError(PreparationRequest, "checkpoint prepared-request preflight: %w", err)
 	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
@@ -145,7 +137,7 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	capture := newCheckpointCaptureResponseStream(events, binding)
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
-		store: runner.CheckpointStore, maxBytes: runner.Policy.Limits.MaxCheckpointBytes,
+		store:   runner.CheckpointStore,
 		request: call.fullRequest.Clone(), resolvedMedia: call.resolvedMedia.Clone(),
 		advance: call.advance, capture: capture,
 	}

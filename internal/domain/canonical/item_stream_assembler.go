@@ -54,8 +54,8 @@ func (a *itemStreamAssembler) apply(kind EventKind, event ItemEvent) error {
 		}
 		state.args += delta.Args
 	case EventContentStart, EventTextDelta:
-		if state == nil || state.start.Kind() != ItemKindMessage || state.completed != nil {
-			return fmt.Errorf("%s ordinal %d has no open message start", kind, event.Position.Item)
+		if state == nil || state.completed != nil || state.start.Kind() != ItemKindMessage {
+			return fmt.Errorf("%s ordinal %d has no open content-bearing item start", kind, event.Position.Item)
 		}
 		if kind == EventContentStart {
 			content, ok := event.Payload.(ContentStartPayload)
@@ -68,14 +68,18 @@ func (a *itemStreamAssembler) apply(kind EventKind, event ItemEvent) error {
 			if event.Position.Part != uint32(len(state.parts)) {
 				return fmt.Errorf("content.start item ordinal %d part ordinal %d is non-contiguous", event.Position.Item, event.Position.Part)
 			}
-			state.parts[event.Position.Part] = &itemStreamPartState{kind: content.Kind}
+			part, err := newItemStreamPartState(state.start.Kind(), content)
+			if err != nil {
+				return fmt.Errorf("content.start item ordinal %d part ordinal %d: %w", event.Position.Item, event.Position.Part, err)
+			}
+			state.parts[event.Position.Part] = part
 		} else {
 			delta, ok := event.Payload.(TextDeltaPayload)
 			if !ok {
 				return fmt.Errorf("text.delta ordinal %d has payload %T", event.Position.Item, event.Payload)
 			}
 			part := state.parts[event.Position.Part]
-			if part == nil || part.kind != PartKindText {
+			if part == nil || !part.acceptsText() {
 				return fmt.Errorf("text.delta item ordinal %d part ordinal %d has no open text content", event.Position.Item, event.Position.Part)
 			}
 			part.text += delta.Text
@@ -86,7 +90,7 @@ func (a *itemStreamAssembler) apply(kind EventKind, event ItemEvent) error {
 			return fmt.Errorf("item.completed ordinal %d has invalid payload %T", event.Position.Item, event.Payload)
 		}
 		if state == nil {
-			if completed.Item.Kind() != ItemKindToolResult {
+			if completed.Item.Kind() != ItemKindToolResult && completed.Item.Kind() != ItemKindReasoning {
 				return fmt.Errorf("item.completed ordinal %d has no start", event.Position.Item)
 			}
 			state = &itemStreamState{}
@@ -106,8 +110,24 @@ func (a *itemStreamAssembler) apply(kind EventKind, event ItemEvent) error {
 	return nil
 }
 
+func newItemStreamPartState(parent ItemKind, content ContentStartPayload) (*itemStreamPartState, error) {
+	switch parent {
+	case ItemKindMessage:
+		if content.Kind == "" {
+			return nil, fmt.Errorf("message content kind is empty")
+		}
+		return &itemStreamPartState{kind: content.Kind}, nil
+	default:
+		return nil, fmt.Errorf("item kind %q cannot contain content", parent)
+	}
+}
+
+func (p *itemStreamPartState) acceptsText() bool {
+	return p != nil && p.kind == PartKindText
+}
+
 func validateCompletedItem(state *itemStreamState, item CanonicalItem) error {
-	if item.Kind() == ItemKindToolResult && state.start.Kind() == "" {
+	if (item.Kind() == ItemKindToolResult || item.Kind() == ItemKindReasoning) && state.start.Kind() == "" {
 		return nil
 	}
 	if item.Kind() != state.start.Kind() {

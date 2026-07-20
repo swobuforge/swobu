@@ -24,7 +24,6 @@ type checkpointCommitter struct {
 	exchangeID    string
 	workspaceSlug string
 	store         session.Store
-	maxBytes      int64
 	request       canonical.CanonicalRequest
 	resolvedMedia session.ResolvedMedia
 	advance       *historyAdvance
@@ -54,7 +53,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response *hist
 	return c.commit(ctx, wire.ResponseCompletionSnapshot{State: wire.CompletionCompleted, ResponseFingerprint: response})
 }
 
-func (c *checkpointCommitter) commitIfReady(ctx context.Context, completion wire.ResponseCompletion) error {
+func (c *checkpointCommitter) commitIfReady(ctx context.Context, completion *wire.ResponseCompletion) error {
 	if completion == nil {
 		return nil
 	}
@@ -87,11 +86,6 @@ func (c *checkpointCommitter) commit(ctx context.Context, completion wire.Respon
 			} else {
 				record.HistoryFingerprint = &history
 			}
-		}
-		if err := session.ValidateCheckpointSize(record, c.maxBytes); err != nil {
-			c.logFailure("size", err)
-			c.err = checkpointCommitError(fmt.Errorf("checkpoint size validation failed: %w", err))
-			return
 		}
 		if err := c.store.Put(ctx, c.workspaceSlug, record); err != nil {
 			c.logFailure("store", err)

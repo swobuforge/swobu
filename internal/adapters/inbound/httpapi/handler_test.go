@@ -1021,7 +1021,7 @@ func synthesizeRequestOutputFromEnvelope(ctx context.Context, in exchange.Reques
 	clientFamily := canonical.ClientFamily(doc.Family)
 	if clientDelivery.Mode == delivery.Streaming {
 		if clientDelivery.Framing == delivery.FramingWebSocket {
-			result, err := responses.ResponseStreamEncoder{}.EncodeResponseMessages(ctx, envelope, clientDelivery)
+			result, err := responses.ResponseStreamEncoder{}.EncodeResponseMessages(ctx, canonical.CanonicalRequest{}, envelope, clientDelivery)
 			if err != nil {
 				return exchange.RequestOutput{}, err
 			}
@@ -1163,17 +1163,17 @@ func testResponseDocumentEncoderForFamily(family canonical.ClientFamily) respons
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
 		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalResponse) (carrier.Document, error) {
-			result, err := chatcompletions.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			result, err := chatcompletions.ResponseDocumentEncoder{}.EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 			return result.Document, err
 		}}
 	case canonical.ClientFamilyResponses:
 		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalResponse) (carrier.Document, error) {
-			result, err := responses.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			result, err := responses.ResponseDocumentEncoder{}.EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 			return result.Document, err
 		}}
 	case canonical.ClientFamilyMessages:
 		return responseDocumentEncoderForTest{encode: func(output canonical.CanonicalResponse) (carrier.Document, error) {
-			result, err := messages.ResponseDocumentEncoder{}.EncodeResponseDocument(output)
+			result, err := messages.ResponseDocumentEncoder{}.EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 			return result.Document, err
 		}}
 	default:
@@ -1193,17 +1193,17 @@ func testResponseStreamEncoderForFamily(family canonical.ClientFamily) responseS
 	switch family {
 	case canonical.ClientFamilyChatCompletions:
 		return responseStreamEncoderForTest{encode: func(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (carrier.ByteStream, error) {
-			result, err := chatcompletions.ResponseStreamEncoder{}.EncodeResponseStream(ctx, events, d)
+			result, err := chatcompletions.ResponseStreamEncoder{}.EncodeResponseStream(ctx, canonical.CanonicalRequest{}, events, d)
 			return result.Stream, err
 		}}
 	case canonical.ClientFamilyResponses:
 		return responseStreamEncoderForTest{encode: func(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (carrier.ByteStream, error) {
-			result, err := responses.ResponseStreamEncoder{}.EncodeResponseStream(ctx, events, d)
+			result, err := responses.ResponseStreamEncoder{}.EncodeResponseStream(ctx, canonical.CanonicalRequest{}, events, d)
 			return result.Stream, err
 		}}
 	case canonical.ClientFamilyMessages:
 		return responseStreamEncoderForTest{encode: func(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (carrier.ByteStream, error) {
-			result, err := messages.ResponseStreamEncoder{}.EncodeResponseStream(ctx, events, d)
+			result, err := messages.ResponseStreamEncoder{}.EncodeResponseStream(ctx, canonical.CanonicalRequest{}, events, d)
 			return result.Stream, err
 		}}
 	default:

@@ -6,9 +6,16 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func toolOrdinal(index int) uint32 {
-	// Ordinal zero is reserved for optional assistant content.
-	return uint32(index + 1)
+func (s *chatCompletionsEventReader) textOrdinal() uint32 {
+	return 0
+}
+
+func (s *chatCompletionsEventReader) toolOrdinal(index int) uint32 {
+	ordinal := uint32(index)
+	if s.textEnvID != "" {
+		ordinal++
+	}
+	return ordinal
 }
 
 func (s *chatCompletionsEventReader) nextSeq() int64 { s.seq++; return s.seq }
@@ -20,6 +27,10 @@ func (s *chatCompletionsEventReader) enqueue(ev canonical.Event) {
 
 func (s *chatCompletionsEventReader) enqueueItem(kind canonical.EventKind, envID canonical.EnvelopeID, ordinal uint32, payload canonical.ItemEventPayload) {
 	s.enqueue(canonical.Event{Kind: kind, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: payload}})
+}
+
+func (s *chatCompletionsEventReader) enqueueItemPart(kind canonical.EventKind, envID canonical.EnvelopeID, item, part uint32, payload canonical.ItemEventPayload) {
+	s.enqueue(canonical.Event{Kind: kind, EnvID: envID, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: item, Part: part}, Payload: payload}})
 }
 
 func (s *chatCompletionsEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {

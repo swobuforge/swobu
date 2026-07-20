@@ -21,8 +21,12 @@ func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.P
 }
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
+	return (ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, d, exchangeID, options, nil)
+}
+
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithMutation(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions, mutate RequestMutation) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request}, d, sink, exchangeID, options)
+		return EncodeCarrierWithMutation(EncodeInput{Request: input.Request}, d, sink, exchangeID, options, mutate)
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
@@ -45,7 +49,7 @@ func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(request canonical.Canonica
 		carrierErr.Details = map[string]string{"wire_stream_invariant": err.Error()}
 		return wire.ProviderDecodeResult{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
-	reader, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (*responsesEventReader, error) {
+	reader, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (*responsesResponseStream, error) {
 		return decodeResponseStream(request, stream, exchangeID, sink), nil
 	})
 	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, TerminalDecisions: reader}, err

@@ -12,10 +12,10 @@ import (
 )
 
 type bufferedResponseBody struct {
-	ID         string                     `json:"id"`
-	Model      string                     `json:"model"`
-	Content    []bufferedContentBlockBody `json:"content"`
-	StopReason string                     `json:"stop_reason"`
+	ID         string            `json:"id"`
+	Model      string            `json:"model"`
+	Content    []json.RawMessage `json:"content"`
+	StopReason string            `json:"stop_reason"`
 }
 
 type bufferedContentBlockBody struct {
@@ -25,6 +25,9 @@ type bufferedContentBlockBody struct {
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
+	Thinking  string          `json:"thinking"`
+	Signature string          `json:"signature"`
+	Data      string          `json:"data"`
 }
 
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
@@ -75,7 +78,11 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		textParts = nil
 		return nil
 	}
-	for _, block := range dto.Content {
+	for _, rawBlock := range dto.Content {
+		var block bufferedContentBlockBody
+		if err := json.Unmarshal(rawBlock, &block); err != nil {
+			return nil, canonical.InternalError("messages response content block is invalid")
+		}
 		blockType := strings.TrimSpace(block.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		switch blockType {
 		case "text":
@@ -99,6 +106,40 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use is invalid")
+			}
+			items = append(items, item)
+		case "thinking":
+			if err := flushMessage(); err != nil {
+				return nil, canonical.InternalError("messages response message item is invalid")
+			}
+			opaque, err := canonical.NewMessagesOpaqueThinking(rawBlock)
+			if err != nil {
+				return nil, canonical.InternalError("messages response thinking signature is invalid")
+			}
+			var parts []canonical.ReasoningPart
+			if block.Thinking != "" {
+				part, err := canonical.NewReasoningPart(messagesResponseReasoningKind(request), block.Thinking)
+				if err != nil {
+					return nil, canonical.InternalError("messages response thinking text is invalid")
+				}
+				parts = []canonical.ReasoningPart{part}
+			}
+			item, err := canonical.NewReasoningItem(parts, opaque)
+			if err != nil {
+				return nil, canonical.InternalError("messages response thinking block is invalid")
+			}
+			items = append(items, item)
+		case "redacted_thinking":
+			if err := flushMessage(); err != nil {
+				return nil, canonical.InternalError("messages response message item is invalid")
+			}
+			opaque, err := canonical.NewMessagesOpaqueThinking(rawBlock)
+			if err != nil {
+				return nil, canonical.InternalError("messages response redacted thinking data is invalid")
+			}
+			item, err := canonical.NewReasoningItem(nil, opaque)
+			if err != nil {
+				return nil, canonical.InternalError("messages response redacted thinking block is invalid")
 			}
 			items = append(items, item)
 		case "server_tool_use", "web_search_tool_result":
@@ -126,4 +167,11 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		dto.StopReason,
 		usage,
 	)), nil
+}
+
+func messagesResponseReasoningKind(request canonical.CanonicalRequest) canonical.ReasoningPartKind {
+	if disclosure, ok := request.Reasoning().DisclosureField().Get(); ok && disclosure == canonical.ReasoningDisclosureSummary {
+		return canonical.ReasoningPartSummary
+	}
+	return canonical.ReasoningPartTrace
 }

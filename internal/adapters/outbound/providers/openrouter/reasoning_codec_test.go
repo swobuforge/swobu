@@ -1,0 +1,336 @@
+package openrouter
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+)
+
+func TestOpenRouterAutomaticReasoningIsExactUnderStrictCompatibility(t *testing.T) {
+	reasoning, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute())})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Reasoning: reasoning})
+	backend := openRouterBackend(t, request.Model())
+	document, decisions, err := backend.Codec.Encode(provider.Request{
+		Canonical: request, Delivery: delivery.BufferedDelivery(),
+		Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(document.RawBytes()), `"reasoning":{"enabled":true}`) {
+		t.Fatalf("automatic reasoning = %s", document.RawBytes())
+	}
+	for _, decision := range decisions {
+		if decision.Feature == compat.RequestReasoning && decision.Outcome != compat.Exact {
+			t.Fatalf("reasoning decision = %#v, want exact", decision)
+		}
+	}
+}
+
+func TestOpenRouterRequestMutationPreservesRawJSONIntegers(t *testing.T) {
+	request := canonicaltest.LargeIntegerRequest(t, "model")
+	backend := openRouterBackend(t, request.Model())
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(document.RawBytes(), []byte("9007199254740993")); got != 3 {
+		t.Fatalf("large integer occurrences = %d, want 3: %s", got, document.RawBytes())
+	}
+}
+
+func TestOpenRouterResponseTransformsPreserveUnownedRawJSON(t *testing.T) {
+	raw := []byte(`{"id":"resp","usage":{"extension":9007199254740993},"choices":[{"message":{"role":"assistant","content":"ok","reasoning":"think","extension":{"constant":9007199254740993}}}]}`)
+	document := carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{})
+	cleaned, _, err := extractBufferedOpenRouterReasoning(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(cleaned.RawBytes(), []byte("9007199254740993")); got != 2 {
+		t.Fatalf("buffered large integer occurrences = %d, want 2: %s", got, cleaned.RawBytes())
+	}
+
+	streamRaw := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think\",\"extension\":{\"constant\":9007199254740993}}}]}\n\ndata: [DONE]\n\n"
+	transformed, err := io.ReadAll(newOpenRouterSSEBody(io.NopCloser(strings.NewReader(streamRaw))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(transformed, []byte("9007199254740993")) {
+		t.Fatalf("stream transform changed large integer: %s", transformed)
+	}
+}
+
+func TestOpenRouterCodecOwnsReasoningRequestAndOpaqueReplay(t *testing.T) {
+	effort := canonical.InferenceEffortHigh
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoningControls, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaque, err := canonical.NewOpenRouterOpaqueThinking([]byte(`[{"type":"reasoning.summary","summary":"prior"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "prior")
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant := messageItem(t, canonical.MessageRoleAssistant, "answer")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{reasoning, assistant},
+		Controls: controls, Reasoning: reasoningControls,
+	})
+	backend := openRouterBackend(t, request.Model())
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	wireReasoning, _ := payload["reasoning"].(map[string]any)
+	if wireReasoning["enabled"] != true || wireReasoning["effort"] != "high" {
+		t.Fatalf("reasoning = %#v", wireReasoning)
+	}
+	if _, leaked := payload["reasoning_effort"]; leaked {
+		t.Fatalf("standard reasoning_effort leaked into OpenRouter request: %s", document.RawBytes())
+	}
+	messages, _ := payload["messages"].([]any)
+	first, _ := messages[0].(map[string]any)
+	if _, ok := first["reasoning_details"].([]any); !ok {
+		t.Fatalf("opaque reasoning_details were not replayed: %s", document.RawBytes())
+	}
+}
+
+func TestOpenRouterOpaqueReplayFollowsMixedAssistantTextAndToolTurns(t *testing.T) {
+	reasoningOne := openRouterReasoningItem(t, "first")
+	reasoningTwo := openRouterReasoningItem(t, "second")
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	callID, err := canonical.NewToolCallID("call_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
+		canonical.NewTextToolResultPart("result"),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{
+			reasoningOne, messageItem(t, canonical.MessageRoleAssistant, "first answer"), call,
+			result, reasoningTwo, messageItem(t, canonical.MessageRoleAssistant, "second answer"),
+		},
+	})
+	backend := openRouterBackend(t, request.Model())
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, message := range payload.Messages {
+		if message["role"] != "assistant" {
+			continue
+		}
+		details, _ := message["reasoning_details"].([]any)
+		if len(details) == 0 {
+			got = append(got, "")
+			continue
+		}
+		entry, _ := details[0].(map[string]any)
+		got = append(got, entry["summary"].(string))
+	}
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("assistant reasoning replay = %#v, want [first second]; document=%s", got, document.RawBytes())
+	}
+}
+
+func TestOpenRouterBufferedReasoningCompletesAtomicallyBeforeAnswer(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})
+	document := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{
+  "id":"chat_1","model":"model","choices":[{"message":{"role":"assistant","reasoning_details":[{"type":"reasoning.summary","summary":"brief"}],"content":"answer"},"finish_reason":"stop"}]
+}`), carrier.Meta{})
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: request}, provider.DocumentIngress{Document: document})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainEvents(t, decoded.Stream)
+	reasoningIndex, answerIndex := -1, -1
+	for index, event := range events {
+		itemEvent, ok := event.Payload.(canonical.ItemEvent)
+		if !ok {
+			continue
+		}
+		if completed, ok := itemEvent.Payload.(canonical.ItemCompletedPayload); ok && completed.Item.Kind() == canonical.ItemKindReasoning {
+			reasoningIndex = index
+			reasoning, _ := completed.Item.Reasoning()
+			if _, ok := reasoning.Opaque().OpenRouter(); !ok {
+				t.Fatal("reasoning item lost OpenRouter opaque replay unit")
+			}
+		}
+		if event.Kind == canonical.EventItemStart && itemEvent.Position.Item == 1 {
+			answerIndex = index
+		}
+	}
+	if reasoningIndex < 0 || answerIndex < 0 || reasoningIndex >= answerIndex {
+		t.Fatalf("reasoning/answer order = %d/%d; events=%#v", reasoningIndex, answerIndex, events)
+	}
+}
+
+func TestOpenRouterStreamingBuffersOnlyReasoningArtifact(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"role":"assistant","reasoning_details":[{"type":"reasoning.text","text":"trace"}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: request}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainEvents(t, decoded.Stream)
+	reasoningIndex, textIndex := -1, -1
+	for index, event := range events {
+		if event.Kind == canonical.EventItemCompleted {
+			itemEvent := event.Payload.(canonical.ItemEvent)
+			completed := itemEvent.Payload.(canonical.ItemCompletedPayload)
+			if completed.Item.Kind() == canonical.ItemKindReasoning {
+				reasoningIndex = index
+			}
+		}
+		if event.Kind == canonical.EventTextDelta {
+			textIndex = index
+		}
+	}
+	if reasoningIndex < 0 || textIndex < 0 || reasoningIndex >= textIndex {
+		t.Fatalf("reasoning/text order = %d/%d; events=%#v", reasoningIndex, textIndex, events)
+	}
+}
+
+func TestOpenRouterStreamingDoesNotFinalizeOnEmptyContentBeforeReasoning(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":"brief"}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{
+		ExchangeID: "ex", Canonical: request,
+	}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range drainEvents(t, decoded.Stream) {
+		if event.Kind != canonical.EventItemCompleted {
+			continue
+		}
+		itemEvent := event.Payload.(canonical.ItemEvent)
+		completed := itemEvent.Payload.(canonical.ItemCompletedPayload)
+		if completed.Item.Kind() == canonical.ItemKindReasoning {
+			return
+		}
+	}
+	t.Fatal("stream dropped reasoning after an empty content delta")
+}
+
+func openRouterReasoningItem(t *testing.T, summary string) canonical.CanonicalItem {
+	t.Helper()
+	raw, err := json.Marshal([]map[string]string{{"type": "reasoning.summary", "summary": summary}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaque, err := canonical.NewOpenRouterOpaqueThinking(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func openRouterBackend(t *testing.T, model string) provider.Backend {
+	t.Helper()
+	target := provider.NewTargetSnapshot("openrouter", string(profile.ProviderSpecOpenRouter), "https://openrouter.test/api/v1", "env:OPENROUTER_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
+	target.Model = model
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend
+}
+
+func messageItem(t *testing.T, role canonical.MessageRole, text string) canonical.CanonicalItem {
+	t.Helper()
+	item, err := canonical.NewMessageItem(role, []canonical.MessagePart{canonical.NewTextMessagePart(text)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func drainEvents(t *testing.T, stream canonical.ResponseStream) []canonical.Event {
+	t.Helper()
+	defer stream.Close(context.Background())
+	var events []canonical.Event
+	for {
+		event, err := stream.Next(context.Background())
+		if err == io.EOF {
+			return events
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+}

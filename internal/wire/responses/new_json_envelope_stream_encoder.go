@@ -7,8 +7,8 @@ import (
 
 // NewJSONEnvelopeStreamEncoder bridges canonical envelope events to the
 // Responses wire event stream encoder.
-func NewJSONEnvelopeStreamEncoder() sse.EnvelopeStreamEncoder {
-	wire := NewResponseStreamWireEncoder()
+func NewJSONEnvelopeStreamEncoder(request ...canonical.CanonicalRequest) sse.EnvelopeStreamEncoder {
+	wire := NewResponseStreamWireEncoder(request...)
 	return &jsonEnvelopeStreamEncoder{
 		wire:    &wire,
 		adapter: sse.NewEnvelopeEventAdapter(),

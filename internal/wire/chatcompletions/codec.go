@@ -201,6 +201,11 @@ func chatMessageFromOutput(output canonical.CanonicalResponse) (chatCompletionsR
 				return chatCompletionsResponseMessageDTO{}, err
 			}
 			toolCalls = append(toolCalls, wire)
+		case canonical.ItemKindReasoning:
+			// Standard Chat Completions has no reasoning item representation.
+			// The canonical item and opaque thinking remain in session truth;
+			// the client projection never exposes backend dialect fields.
+			continue
 		default:
 			return chatCompletionsResponseMessageDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports text and tool use output items")
 		}

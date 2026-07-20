@@ -7,7 +7,7 @@ import (
 )
 
 func TestResponsesEventReaderRejectsMCPStreamFrames(t *testing.T) {
-	s := &responsesEventReader{exchangeID: "ex", responseEnvID: "r", toolStates: map[string]responsesToolState{}, toolInputs: map[string]string{}, latestUsage: canonical.NewUnknownTokenUsage()}
+	s := &responsesResponseStream{exchangeID: "ex", responseEnvID: "r", toolStates: map[string]responsesToolState{}, toolInputs: map[string]string{}, latestUsage: canonical.NewUnknownTokenUsage()}
 	frame := streamFrame{Type: "response.output_item.added"}
 	frame.Item.Type = "mcp_call"
 	frame.Item.ID = "mcp_1"

@@ -55,7 +55,7 @@ func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.E
 			return canonical.Event{}, err
 		}
 		if payload.Response.Responses != nil && (payload.Response.Responses.TargetID != s.binding.TargetID || payload.Response.Responses.TargetVersion != s.binding.TargetVersion) {
-			err := errors.New("response identity refinement does not match attempted target")
+			err := errors.New("response native handle does not match attempted target")
 			s.fail(err)
 			return canonical.Event{}, err
 		}

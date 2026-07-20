@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -16,17 +17,20 @@ const fingerprintScheme historyfingerprint.Scheme = "responses"
 // responsesHistoryItemDTO is the private superset of input/output item fields
 // needed to reproduce the ordered output sequence a client appends to input.
 type responsesHistoryItemDTO struct {
-	Type        string          `json:"type"`
-	ID          string          `json:"id,omitempty"`
-	Status      string          `json:"status,omitempty"`
-	Role        string          `json:"role,omitempty"`
-	Content     json.RawMessage `json:"content,omitempty"`
-	CallID      string          `json:"call_id,omitempty"`
-	Name        string          `json:"name,omitempty"`
-	Arguments   json.RawMessage `json:"arguments,omitempty"`
-	Input       string          `json:"input,omitempty"`
-	Output      json.RawMessage `json:"output,omitempty"`
-	ServerLabel string          `json:"server_label,omitempty"`
+	Type             string                         `json:"type"`
+	ID               string                         `json:"id,omitempty"`
+	Status           string                         `json:"status,omitempty"`
+	Role             string                         `json:"role,omitempty"`
+	Content          json.RawMessage                `json:"content,omitempty"`
+	CallID           string                         `json:"call_id,omitempty"`
+	Name             string                         `json:"name,omitempty"`
+	Arguments        json.RawMessage                `json:"arguments,omitempty"`
+	Input            string                         `json:"input,omitempty"`
+	Output           json.RawMessage                `json:"output,omitempty"`
+	ServerLabel      string                         `json:"server_label,omitempty"`
+	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
+	EncryptedContent string                         `json:"encrypted_content,omitempty"`
+	Phase            string                         `json:"phase,omitempty"`
 }
 
 type responsesHistoryResult struct {
@@ -117,7 +121,7 @@ func isResponsesHistoryOutput(item responsesHistoryItemDTO) bool {
 	}
 	// swobu:lint ignore string-switch because=protocol boundary partitions Responses history item variants.
 	switch typeName {
-	case "function_call", "custom_tool_call":
+	case "function_call", "custom_tool_call", "reasoning":
 		return true
 	default:
 		return false
@@ -189,10 +193,10 @@ func normalizeResponsesRawJSON(source json.RawMessage) (json.RawMessage, error) 
 	return json.Marshal(value)
 }
 
-func fingerprintResponsesResponse(output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
+func fingerprintResponsesResponse(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
 	state := responsesResponseHistoryState{finishReason: output.CompletionReason()}
-	for _, item := range output.Items() {
-		if err := state.appendItem(item); err != nil {
+	for ordinal, item := range output.Items() {
+		if err := state.appendItem(request, ordinal, item); err != nil {
 			return historyfingerprint.Response{}, err
 		}
 	}
@@ -207,7 +211,7 @@ type responsesResponseHistoryState struct {
 	finishReason string
 }
 
-func (s *responsesResponseHistoryState) appendItem(item canonical.CanonicalItem) error {
+func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRequest, ordinal int, item canonical.CanonicalItem) error {
 	switch item.Kind() {
 	case canonical.ItemKindMessage:
 		message, _ := item.Message()
@@ -226,7 +230,8 @@ func (s *responsesResponseHistoryState) appendItem(item canonical.CanonicalItem)
 		if err != nil {
 			return err
 		}
-		s.items = append(s.items, responsesHistoryItemDTO{Type: "message", Role: "assistant", Content: raw})
+		history := responsesHistoryItemDTO{Type: "message", Role: "assistant", Content: raw}
+		s.items = append(s.items, history)
 		return nil
 	case canonical.ItemKindToolCall:
 		call, _ := item.ToolCall()
@@ -258,6 +263,25 @@ func (s *responsesResponseHistoryState) appendItem(item canonical.CanonicalItem)
 		}
 		s.items = append(s.items, history)
 		return nil
+	case canonical.ItemKindReasoning:
+		reasoning, _ := item.Reasoning()
+		disclosure, disclosureSet := request.Reasoning().DisclosureField().Get()
+		history := responsesHistoryItemDTO{Type: "reasoning"}
+		// This presentation identity is client-local and never enters provider
+		// replay because P0 supports only native ResponseRef continuation.
+		history.ID = fmt.Sprintf("rs_swobu_%d", ordinal)
+		history.Status = "completed"
+		for _, part := range reasoning.Parts() {
+			if disclosureSet && disclosure == canonical.ReasoningDisclosureNone {
+				continue
+			}
+			if part.Kind() != canonical.ReasoningPartSummary {
+				continue
+			}
+			history.Summary = append(history.Summary, responsesReasoningSummaryDTO{Type: "summary_text", Text: part.Text()})
+		}
+		s.items = append(s.items, history)
+		return nil
 	default:
 		return canonical.UnsupportedOperation("responses output item kind is unsupported")
 	}
@@ -267,7 +291,9 @@ func (s *responsesResponseHistoryState) fingerprint() (historyfingerprint.Respon
 	status, _ := responsesWireStatusForFinishReason(s.finishReason)
 	items := append([]responsesHistoryItemDTO(nil), s.items...)
 	for index := range items {
-		items[index].Status = status
+		if items[index].Status == "" {
+			items[index].Status = status
+		}
 	}
 	return fingerprintResponsesResponseValue(items)
 }
@@ -275,7 +301,7 @@ func (s *responsesResponseHistoryState) fingerprint() (historyfingerprint.Respon
 // responsesFingerprintingEncoder marks completion in the same Encode call
 // that returns response.completed. Byte and message delivery wrappers gate
 // that exact terminal output on checkpoint commit.
-func responsesFingerprintingEncoder(encode wire.ResponseEventEncoder, complete func(*historyfingerprint.Response), fail func(error)) wire.ResponseEventEncoder {
+func responsesFingerprintingEncoder(request canonical.CanonicalRequest, encode wire.ResponseEventEncoder, complete func(*historyfingerprint.Response), fail func(error)) wire.ResponseEventEncoder {
 	state := &responsesResponseHistoryState{}
 	return func(event canonical.Event) ([][]byte, error) {
 		encoded, err := encode(event)
@@ -292,7 +318,7 @@ func responsesFingerprintingEncoder(encode wire.ResponseEventEncoder, complete f
 				fail(err)
 				return nil, err
 			}
-			if err := state.appendItem(completed.Item); err != nil {
+			if err := state.appendItem(request, int(itemEvent.Position.Item), completed.Item); err != nil {
 				fail(err)
 				return nil, err
 			}

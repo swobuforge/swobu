@@ -15,10 +15,8 @@ import (
 )
 
 type EncodeOptions struct {
-	Instructions         string
-	ForceStructuredInput bool
-	Store                *bool
-	Compatibility        compat.CompatibilityPolicy
+	Instructions  string
+	Compatibility compat.CompatibilityPolicy
 }
 
 type inputMessageItem struct {
@@ -27,6 +25,7 @@ type inputMessageItem struct {
 	Status  string `json:"status,omitempty"`
 	Role    string `json:"role"`
 	Content any    `json:"content"`
+	Phase   string `json:"phase,omitempty"`
 }
 
 type functionCallItem struct {
@@ -34,6 +33,8 @@ type functionCallItem struct {
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+	ID        string `json:"id,omitempty"`
+	Status    string `json:"status,omitempty"`
 }
 
 type functionCallOutputItem struct {
@@ -47,6 +48,8 @@ type customToolCallItem struct {
 	CallID string `json:"call_id"`
 	Name   string `json:"name"`
 	Input  string `json:"input"`
+	ID     string `json:"id,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
@@ -55,10 +58,25 @@ type EncodeInput struct {
 	Request canonical.CanonicalRequest
 }
 
+// ProviderRequestDocument is the standard Responses lowering before its
+// single serialization boundary.
+type ProviderRequestDocument struct {
+	Payload map[string]any
+}
+
+// RequestMutation changes provider-owned dialect fields after standard
+// protocol lowering and before serialization.
+type RequestMutation func(*ProviderRequestDocument) error
+
 // swobu:lint ignore function-complexity because=Responses encoding lowers every canonical request band into one atomic wire document.
 func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
-	req := input.Request
+	return EncodeCarrierWithMutation(input, d, sink, exchangeID, options, nil)
+}
 
+// EncodeCarrierWithMutation lowers the standard protocol document, applies
+// one provider dialect mutation, and serializes once.
+func EncodeCarrierWithMutation(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions, mutate RequestMutation) (carrier.Document, error) {
+	req := input.Request
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -77,7 +95,7 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 		}
 		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(req, options.ForceStructuredInput, options.Compatibility, sink, exchangeID)
+	payloadInput, err := encodeInput(req, options.Compatibility, sink, exchangeID)
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -87,9 +105,7 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	}
 	logResponsesEncodeShape(req, payloadInput, choice, d)
 
-	payload := map[string]any{
-		"model": req.Model(),
-	}
+	payload := map[string]any{"model": req.Model()}
 	if payloadInput != nil {
 		payload["input"] = payloadInput
 	}
@@ -120,6 +136,12 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
 		return carrier.Document{}, err
 	}
+	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort); err != nil {
+		if decisionErr := emitResponsesRequestDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
+			return carrier.Document{}, decisionErr
+		}
+		return carrier.Document{}, err
+	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
 		return carrier.Document{}, err
 	} else if text != nil {
@@ -130,13 +152,16 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	if responsesRefined {
 		payload["previous_response_id"] = previous.Responses.ProviderResponseID
 	}
-	if options.Store != nil {
-		payload["store"] = *options.Store
-	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
-	raw, err := json.Marshal(payload)
+	document := ProviderRequestDocument{Payload: payload}
+	if mutate != nil {
+		if err := mutate(&document); err != nil {
+			return carrier.Document{}, err
+		}
+	}
+	raw, err := json.Marshal(document.Payload)
 	if err != nil {
 		return carrier.Document{}, canonical.BadRequest("response request could not be encoded for the responses protocol")
 	}
@@ -255,21 +280,19 @@ func responsesWireToolChoice(choice any) string {
 	return "object"
 }
 
-func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) (any, error) {
 	items := req.Items()
 	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasResumptionInput(items) { // swobu:io-string source=boundary
 		return nil, nil
 	}
-	if !forceStructuredInput {
-		if input, ok, err := encodeSimpleInput(items); ok || err != nil {
-			return input, err
-		}
+	if input, ok, err := encodeSimpleInput(items); ok || err != nil {
+		return input, err
 	}
 	switch len(items) {
 	case 0:
 		return nil, nil
 	default:
-		return encodeConversation(items, req.Tools(), policy, sink, exchangeID)
+		return encodeConversation(req, items, req.Tools(), policy, sink, exchangeID)
 	}
 }
 
@@ -316,7 +339,7 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
-func encodeConversation(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) ([]any, error) {
+func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	for _, current := range items {
 		switch current.Kind() {
@@ -345,13 +368,15 @@ func encodeConversation(items []canonical.CanonicalItem, tools []canonical.ToolD
 				if !ok {
 					return nil, canonical.BadRequest("responses function calls require object input")
 				}
-				encoded = append(encoded, functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: name, Arguments: object.String()})
+				item := functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: name, Arguments: object.String()}
+				encoded = append(encoded, item)
 			case canonical.ToolKindCustom:
 				text, ok := call.Input().Text()
 				if !ok {
 					return nil, canonical.BadRequest("responses custom tool calls require text input")
 				}
-				encoded = append(encoded, customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: name, Input: text})
+				item := customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: name, Input: text}
+				encoded = append(encoded, item)
 			default:
 				return nil, canonical.UnsupportedOperation("responses protocol does not lower this tool-call kind")
 			}
@@ -378,6 +403,11 @@ func encodeConversation(items []canonical.CanonicalItem, tools []canonical.ToolD
 				CallID: result.CallID().String(),
 				Output: content,
 			})
+		case canonical.ItemKindReasoning:
+			// Manual Responses reasoning replay is outside P0. Native
+			// continuation is carried by ResponseRef; portable reasoning remains
+			// in checkpoint truth when full history is materialized.
+			continue
 		default:
 			return nil, canonical.UnsupportedOperation("canonical item is not supported on the responses protocol")
 		}

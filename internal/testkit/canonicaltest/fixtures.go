@@ -141,3 +141,25 @@ func ToolCall(t testing.TB, callID string, key canonical.ToolKey, input canonica
 	}
 	return item
 }
+
+// LargeIntegerRequest exercises every raw JSON-bearing request surface through
+// provider dialect mutation without allowing float64 reinterpretation.
+func LargeIntegerRequest(t testing.TB, model string) canonical.CanonicalRequest {
+	t.Helper()
+	const large = "9007199254740993"
+	key := MustRequestToolKey(canonical.ToolKindFunction, "probe")
+	tool := MustFunctionTool(key, "probe", Schema(t, `{"type":"object","properties":{"value":{"enum":[`+large+`]}}}`), canonical.Unspecified[bool]())
+	call := ToolCall(t, "call_probe", key, canonical.NewJSONObjectToolInput(Object(t, `{"value":`+large+`}`)))
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind: canonical.OutputFormatJSONSchema, Name: "probe_result",
+		Schema: canonical.NewRawJSONObject(`{"type":"object","properties":{"value":{"enum":[` + large + `]}}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify(model),
+		Items: []canonical.CanonicalItem{Message(t, canonical.MessageRoleUser, "probe"), call},
+		Tools: SpecifiedToolSet(t, tool), OutputFormat: canonical.Specify(format),
+	})
+}

@@ -74,15 +74,20 @@ func runExchange(
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	switch c := cmd.(type) {
 	case loadCheckpointCommand:
-		var record session.Checkpoint
-		var found bool
+		var match session.HistoryMatch
 		var err error
 		if c.explicit {
-			record, found, err = c.store.Get(ctx, c.workspaceSlug, c.reference)
+			record, found, getErr := c.store.Get(ctx, c.workspaceSlug, c.reference)
+			err = getErr
+			if found {
+				match = session.UniqueHistoryMatch(record)
+			} else {
+				match = session.MissingHistoryMatch()
+			}
 		} else {
-			record, found, err = c.store.FindByHistory(ctx, c.workspaceSlug, c.history)
+			match, err = c.store.FindByHistory(ctx, c.workspaceSlug, c.history)
 		}
-		return checkpointLoaded{record: record, found: found, err: err}
+		return checkpointLoaded{match: match, err: err}
 	case prepareProviderAttemptCommand:
 		preparationCtx := ctx
 		cancel := func() {}

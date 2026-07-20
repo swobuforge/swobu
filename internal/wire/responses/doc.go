@@ -11,9 +11,12 @@
 // reasoning-token usage accounting.
 // User-message and tool-result images preserve URL or inline sources; tool
 // results retain ordered mixed content through Responses content arrays.
-// Responses reasoning output is not part of the current canonical v0 band and
-// must fail closed with a response.reasoning rejection decision instead of
-// disappearing from decode. Client request decoding uses the shared ingress
+// Responses summary output maps through portable canonical reasoning. P0 does
+// not admit reasoning context, reasoning_text, encrypted_content, or manual
+// reasoning-item replay; native previous_response_id remains the sole exact
+// continuation mechanism. Synthetic response item IDs are presentation-only.
+// Buffered and streaming
+// paths complete the same canonical items. Client request decoding uses the shared ingress
 // helper for top-level request parsing and normalizes stringified
 // function_call.arguments payloads emitted by OpenAI-family client bridges.
 // Ordered input and appendable output items define the private responses

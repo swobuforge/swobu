@@ -2,8 +2,30 @@ package canonical
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
+
+func TestSynthesizeAndProjectReasoningIsIdentity(t *testing.T) {
+	block, err := NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"summary","signature":"signature"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := NewReasoningItem([]ReasoningPart{mustReasoningPart(t, ReasoningPartSummary, "summary")}, block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := ResponseRef{SwobuID: NewSwobuResponseID("resp_reasoning")}
+	events := SynthesizeResponseEnvelopeEvents("ex", response, "model", []CanonicalItem{reasoning}, "stop", NewUnknownTokenUsage())
+	closed := &ClosedEnvelope{Kind: EnvResponse, Events: events}
+	projected, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projected.Items(); !reflect.DeepEqual(got, []CanonicalItem{reasoning}) {
+		t.Fatalf("projected items differ from buffered truth: %#v", got)
+	}
+}
 
 func TestSynthesizedResponseProjectsOnlyCompletedCheckpoints(t *testing.T) {
 	message, _ := NewMessageItem(MessageRoleAssistant, []MessagePart{NewTextMessagePart("hello")})

@@ -25,7 +25,7 @@ func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.Byt
 		sink:        recording,
 		recording:   recording,
 		reader:      core.NewSSEReader(stream.Body),
-		blocks:      map[int]streamContentBlock{},
+		blocks:      map[int]*streamContentBlock{},
 		latestUsage: canonical.NewUnknownTokenUsage(),
 		request:     request.Clone(),
 	}
@@ -42,7 +42,7 @@ type messagesEventReader struct {
 	finishReason string
 	started      bool
 	pending      canonical.EventSequence
-	blocks       map[int]streamContentBlock
+	blocks       map[int]*streamContentBlock
 	latestUsage  canonical.TokenUsage
 	seq          int64
 	completed    bool
@@ -57,12 +57,15 @@ func (s *messagesEventReader) Decisions() []compat.Decision {
 }
 
 type streamContentBlock struct {
-	ItemKind     canonical.ItemKind
-	CallID       canonical.ToolCallID
-	Tool         canonical.ToolKey
-	text         strings.Builder
-	args         strings.Builder
-	initialInput json.RawMessage
+	ItemKind      canonical.ItemKind
+	CallID        canonical.ToolCallID
+	Tool          canonical.ToolKey
+	text          strings.Builder
+	args          strings.Builder
+	initialInput  json.RawMessage
+	reasoningType string
+	signature     strings.Builder
+	data          string
 }
 
 type streamEnvelope struct {
@@ -79,10 +82,13 @@ type messageStartFrame struct {
 type contentBlockStartFrame struct {
 	Index        int `json:"index"`
 	ContentBlock struct {
-		Type  string          `json:"type"`
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
+		Type      string          `json:"type"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Input     json.RawMessage `json:"input"`
+		Thinking  string          `json:"thinking"`
+		Signature string          `json:"signature"`
+		Data      string          `json:"data"`
 	} `json:"content_block"`
 }
 
@@ -92,6 +98,8 @@ type contentBlockDeltaFrame struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
 		PartialJSON string `json:"partial_json"`
+		Thinking    string `json:"thinking"`
+		Signature   string `json:"signature"`
 	} `json:"delta"`
 }
 
@@ -115,7 +123,7 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 			if err == io.EOF && s.started && !s.completed {
 				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
-				s.blocks = map[int]streamContentBlock{}
+				s.blocks = map[int]*streamContentBlock{}
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 				s.completed = true
 				if len(s.pending) > 0 {
@@ -193,7 +201,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return canonical.InternalError("messages stream content_block_start frame is invalid")
 	}
-	block := streamContentBlock{}
+	block := &streamContentBlock{}
 	contentBlockType := strings.TrimSpace(payload.ContentBlock.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 	switch contentBlockType {
 	case "text":
@@ -203,7 +211,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 			return err
 		}
 		s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: start}})
-		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}}})
+		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
 	case "tool_use":
 		block.ItemKind = canonical.ItemKindToolCall
 		callID, err := canonical.NewToolCallID(payload.ContentBlock.ID)
@@ -222,6 +230,17 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 			return err
 		}
 		s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: start}})
+	case "thinking":
+		block.ItemKind = canonical.ItemKindReasoning
+		block.reasoningType = "thinking"
+		block.signature.WriteString(payload.ContentBlock.Signature)
+		if payload.ContentBlock.Thinking != "" {
+			block.text.WriteString(payload.ContentBlock.Thinking)
+		}
+	case "redacted_thinking":
+		block.ItemKind = canonical.ItemKindReasoning
+		block.reasoningType = "redacted_thinking"
+		block.data = payload.ContentBlock.Data
 	case "server_tool_use", "web_search_tool_result":
 		return canonical.UnsupportedOperation("messages provider tool lifecycle streaming is not implemented")
 	default:
@@ -259,6 +278,14 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 			EnvID:   s.blockEnvID(payload.Index),
 			Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON}},
 		})
+	case "thinking_delta":
+		text := payload.Delta.Thinking
+		if text == "" {
+			text = payload.Delta.Text
+		}
+		block.text.WriteString(text)
+	case "signature_delta":
+		block.signature.WriteString(payload.Delta.Signature)
 	default:
 		return canonical.InternalError("messages stream delta type is unsupported")
 	}
@@ -298,6 +325,41 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 			return canonical.InternalError("messages streamed tool_use input is invalid")
 		}
 		item, err = canonical.NewToolCallItem(block.CallID, block.Tool, canonical.NewJSONObjectToolInput(object))
+	case canonical.ItemKindReasoning:
+		wireBlock := contentID{Type: block.reasoningType}
+		if block.reasoningType == "redacted_thinking" {
+			wireBlock.Data = block.data
+			raw, marshalErr := json.Marshal(wireBlock)
+			if marshalErr != nil {
+				return canonical.InternalError("messages streamed redacted thinking block is invalid")
+			}
+			opaque, refineErr := canonical.NewMessagesOpaqueThinking(raw)
+			if refineErr != nil {
+				return canonical.InternalError("messages streamed redacted thinking data is invalid")
+			}
+			item, err = canonical.NewReasoningItem(nil, opaque)
+		} else {
+			text := block.text.String()
+			wireBlock.Thinking = &text
+			wireBlock.Signature = block.signature.String()
+			raw, marshalErr := json.Marshal(wireBlock)
+			if marshalErr != nil {
+				return canonical.InternalError("messages streamed thinking block is invalid")
+			}
+			opaque, refineErr := canonical.NewMessagesOpaqueThinking(raw)
+			if refineErr != nil {
+				return canonical.InternalError("messages streamed thinking signature is invalid")
+			}
+			var parts []canonical.ReasoningPart
+			if block.text.Len() > 0 {
+				part, partErr := canonical.NewReasoningPart(messagesResponseReasoningKind(s.request), block.text.String())
+				if partErr != nil {
+					return canonical.InternalError("messages streamed thinking text is invalid")
+				}
+				parts = []canonical.ReasoningPart{part}
+			}
+			item, err = canonical.NewReasoningItem(parts, opaque)
+		}
 	default:
 		return canonical.InternalError("messages streamed content block kind is invalid")
 	}

@@ -18,7 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestExactBackendOwnsChatCompletionsTokenFieldSpelling(t *testing.T) {
+func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 	maxTokens := 64
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &maxTokens})
 	if err != nil {
@@ -32,12 +32,11 @@ func TestExactBackendOwnsChatCompletionsTokenFieldSpelling(t *testing.T) {
 		name       string
 		providerID profile.ProviderID
 		policy     ProviderRoutePolicy
-		want       string
 	}{
-		{name: "official_openai", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), want: "max_completion_tokens"},
-		{name: "openrouter", providerID: profile.ProviderSpecOpenRouter, policy: NewOpenRouterPolicy(), want: "max_tokens"},
-		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy(), want: "max_tokens"},
-		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), want: "max_tokens"},
+		{name: "official_openai_kernel", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy()},
+		{name: "openrouter", providerID: profile.ProviderSpecOpenRouter, policy: NewOpenRouterPolicy()},
+		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy()},
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := provider.NewTargetSnapshot("backend", string(tc.providerID), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
@@ -54,15 +53,176 @@ func TestExactBackendOwnsChatCompletionsTokenFieldSpelling(t *testing.T) {
 			if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload[tc.want] != float64(maxTokens) {
-				t.Fatalf("%s = %#v, want %d", tc.want, payload[tc.want], maxTokens)
+			if payload["max_tokens"] != float64(maxTokens) {
+				t.Fatalf("max_tokens = %#v, want %d", payload["max_tokens"], maxTokens)
 			}
-			other := "max_tokens"
-			if tc.want == other {
-				other = "max_completion_tokens"
+			if _, exists := payload["max_completion_tokens"]; exists {
+				t.Fatalf("unexpected provider dialect field in standard kernel: %s", document.RawBytes())
 			}
-			if _, exists := payload[other]; exists {
-				t.Fatalf("unexpected %s in %s", other, document.RawBytes())
+		})
+	}
+}
+
+func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
+	effort := canonical.InferenceEffortHigh
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls,
+	})
+	for _, tc := range []struct {
+		name       string
+		providerID profile.ProviderID
+		policy     ProviderRoutePolicy
+		wantField  string
+	}{
+		{name: "openrouter_transport_kernel", providerID: profile.ProviderSpecOpenRouter, policy: NewOpenRouterPolicy(), wantField: "reasoning_effort"},
+		{name: "openai_standard_effort", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), wantField: "reasoning_effort"},
+		{name: "custom_standard_protocol", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), wantField: "reasoning_effort"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := provider.NewTargetSnapshot("backend", string(tc.providerID), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+			target.Model = request.Model()
+			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := payload[tc.wantField]; !present {
+				t.Fatalf("%s payload = %s", tc.name, document.RawBytes())
+			}
+			if _, present := payload["reasoning"]; present {
+				t.Fatalf("%s leaked provider dialect reasoning: %s", tc.name, document.RawBytes())
+			}
+		})
+	}
+}
+
+func TestOpenRouterBackendRejectsUnprovenReasoningTokenCeiling(t *testing.T) {
+	compute, err := canonical.NewBudgetReasoningCompute(2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(compute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:     canonical.Specify("model"),
+		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Reasoning: reasoning,
+	})
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenRouter), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil, nil, NewOpenRouterPolicy()).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()}); err == nil {
+		t.Fatal("OpenRouter backend accepted a hard ceiling without target proof")
+	}
+}
+
+func TestCustomMessagesReplaysProtocolOpaqueThinking(t *testing.T) {
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"brief","signature":"client-carried-signature"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "brief")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("compatible-model"),
+		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
+	})
+	target := provider.NewTargetSnapshot("custom-target", string(profile.ProviderSpecCustom), "https://example.test/v1", "", protocolkind.Messages, "", "messages")
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(document.RawBytes()), "client-carried-signature") {
+		t.Fatalf("custom Messages endpoint did not replay protocol state: %s", document.RawBytes())
+	}
+}
+
+func TestCustomMessagesReplaysOpaqueThinking(t *testing.T) {
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"brief","signature":"custom-provider-signature"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "brief")
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := provider.NewTargetSnapshot("custom-target", string(profile.ProviderSpecCustom), "https://example.test/v1", "", protocolkind.Messages, "", "messages")
+	target.Model = "compatible-model"
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify(target.Model),
+		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
+	})
+	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(document.RawBytes()), `"signature":"custom-provider-signature"`) {
+		t.Fatalf("custom target could not replay its exact state: %s", document.RawBytes())
+	}
+}
+
+func TestResponsesEncryptedCaptureIsComposedOnlyForOfficialOpenAI(t *testing.T) {
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "lookup", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("reasoning-model"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools: canonicaltest.SpecifiedToolSet(t, tool),
+	})
+	for _, tc := range []struct {
+		name       string
+		providerID profile.ProviderID
+		policy     ProviderRoutePolicy
+		want       bool
+	}{
+		{name: "official_openai", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), want: false},
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := provider.NewTargetSnapshot("target", string(tc.providerID), "https://example.test/v1", "", protocolkind.Responses, "", "responses")
+			target.Model = request.Model()
+			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Contains(string(document.RawBytes()), `"include":["reasoning.encrypted_content"]`)
+			if got != tc.want {
+				t.Fatalf("encrypted capture presence = %t, want %t: %s", got, tc.want, document.RawBytes())
 			}
 		})
 	}

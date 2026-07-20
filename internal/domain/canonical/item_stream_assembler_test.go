@@ -109,7 +109,7 @@ func TestItemStreamAssemblerRejectsCompletedTextThatDiffersFromStream(t *testing
 		event ItemEvent
 	}{
 		{EventItemStart, ItemEvent{Position: ItemPosition{Item: 0}, Payload: testMessageStart(MessageRoleAssistant)}},
-		{EventContentStart, ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: ContentStartPayload{Kind: PartKindText}}},
+		{EventContentStart, ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: NewMessageContentStart(PartKindText)}},
 		{EventTextDelta, ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: TextDeltaPayload{Text: "hello"}}},
 	}
 	for _, step := range steps {
@@ -142,7 +142,7 @@ func TestItemStreamAssemblerRejectsDuplicateItemAndPartOrdinals(t *testing.T) {
 	if err := assembler.apply(EventItemStart, start); err == nil {
 		t.Fatal("duplicate item ordinal was accepted")
 	}
-	part := ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: ContentStartPayload{Kind: PartKindText}}
+	part := ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: NewMessageContentStart(PartKindText)}
 	if err := assembler.apply(EventContentStart, part); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestItemStreamAssemblerRejectsCompletedPartTopologyMismatch(t *testing.T) {
 	if err := assembler.apply(EventItemStart, ItemEvent{Position: ItemPosition{Item: 0}, Payload: testMessageStart(MessageRoleAssistant)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := assembler.apply(EventContentStart, ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: ContentStartPayload{Kind: PartKindText}}); err != nil {
+	if err := assembler.apply(EventContentStart, ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: NewMessageContentStart(PartKindText)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := assembler.apply(EventTextDelta, ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: TextDeltaPayload{Text: "first"}}); err != nil {
@@ -169,6 +169,39 @@ func TestItemStreamAssemblerRejectsCompletedPartTopologyMismatch(t *testing.T) {
 	err := assembler.apply(EventItemCompleted, ItemEvent{Position: ItemPosition{Item: 0}, Payload: ItemCompletedPayload{Item: completed}})
 	if err == nil || !strings.Contains(err.Error(), "part count") {
 		t.Fatalf("completion error = %v, want part-count mismatch", err)
+	}
+}
+
+func TestItemStreamAssemblerAcceptsAtomicReadableReasoning(t *testing.T) {
+	completed, err := NewReasoningItem([]ReasoningPart{
+		mustReasoningPart(t, ReasoningPartSummary, "short summary"),
+		mustReasoningPart(t, ReasoningPartTrace, "long trace"),
+	}, OpaqueThinking{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assembler := newItemStreamAssembler()
+	if err := assembler.apply(EventItemCompleted, ItemEvent{Position: ItemPosition{Item: 0}, Payload: ItemCompletedPayload{Item: completed}}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := assembler.completedItems()
+	if err != nil || len(items) != 1 || items[0].Kind() != ItemKindReasoning {
+		t.Fatalf("completed reasoning = %#v, %v", items, err)
+	}
+}
+
+func TestItemStreamAssemblerAcceptsOpaqueOnlyReasoningAtCompletion(t *testing.T) {
+	block, err := NewMessagesOpaqueThinking([]byte(`{"type":"redacted_thinking","data":"opaque-state"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := NewReasoningItem(nil, block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assembler := newItemStreamAssembler()
+	if err := assembler.apply(EventItemCompleted, ItemEvent{Position: ItemPosition{Item: 0}, Payload: ItemCompletedPayload{Item: completed}}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -20,7 +20,7 @@ type EncodedResponseBody struct {
 	ctx        context.Context
 	events     canonical.ResponseStream
 	encode     ResponseEventEncoder
-	completion ResponseCompletion
+	completion *ResponseCompletion
 	fail       func(error)
 	pending    []byte
 	terminal   error
@@ -28,7 +28,7 @@ type EncodedResponseBody struct {
 	closeErr   error
 }
 
-func NewEncodedResponseBody(ctx context.Context, events canonical.ResponseStream, encode ResponseEventEncoder, completion ResponseCompletion, fail func(error)) *EncodedResponseBody {
+func NewEncodedResponseBody(ctx context.Context, events canonical.ResponseStream, encode ResponseEventEncoder, completion *ResponseCompletion, fail func(error)) *EncodedResponseBody {
 	return &EncodedResponseBody{ctx: ctx, events: events, encode: encode, completion: completion, fail: fail}
 }
 

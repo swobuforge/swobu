@@ -17,6 +17,7 @@ type ResponseStreamWireEncoder struct {
 	textItem        *responsesTextItemState
 	toolItems       map[string]*responsesToolItemState
 	outputItems     []any
+	request         canonical.CanonicalRequest
 }
 
 const (
@@ -39,9 +40,14 @@ type responsesToolItemState struct {
 	arguments   strings.Builder
 }
 
-func NewResponseStreamWireEncoder() ResponseStreamWireEncoder {
+func NewResponseStreamWireEncoder(request ...canonical.CanonicalRequest) ResponseStreamWireEncoder {
+	var effective canonical.CanonicalRequest
+	if len(request) > 0 {
+		effective = request[0].Clone()
+	}
 	return ResponseStreamWireEncoder{
 		toolItems: map[string]*responsesToolItemState{},
+		request:   effective,
 	}
 }
 
@@ -178,6 +184,8 @@ func (e *ResponseStreamWireEncoder) encodeItemStarted(event sse.StreamEvent) ([]
 		return append(frames, opened...), nil
 	case canonical.ItemKindToolCall:
 		return e.openToolItem(event.ItemID, event.ToolUseID, event.Name, event.ToolType)
+	case canonical.ItemKindReasoning:
+		return nil, nil
 	default:
 		return nil, nil
 	}
@@ -281,9 +289,51 @@ func (e *ResponseStreamWireEncoder) encodeItemCompleted(event sse.StreamEvent) (
 			return nil, nil
 		}
 		return e.closeToolItem(itemID)
+	case canonical.ItemKindReasoning:
+		return e.closeReasoningItem(event)
 	default:
 		return nil, nil
 	}
+}
+
+func (e *ResponseStreamWireEncoder) closeReasoningItem(event sse.StreamEvent) ([][]byte, error) {
+	if event.CompletedItem == nil {
+		return nil, canonical.InternalError("responses reasoning completion is missing canonical item")
+	}
+	outputIndex := e.nextOutputIndex
+	e.nextOutputIndex++
+	projection := responsesResponseHistoryState{}
+	if err := projection.appendItem(e.request, int(event.ItemOrdinal), *event.CompletedItem); err != nil {
+		return nil, err
+	}
+	item := projection.items[0]
+	frames := make([][]byte, 0, len(item.Summary)+2)
+	added := item
+	added.Status = "in_progress"
+	added.Summary = nil
+	added.Content = nil
+	raw, err := json.Marshal(responsesOutputItemEventDTO{Type: "response.output_item.added", OutputIndex: outputIndex, Item: added})
+	if err != nil {
+		return nil, canonical.InternalError("responses reasoning event encoding failed")
+	}
+	frames = append(frames, raw)
+	for index, part := range item.Summary {
+		raw, err = json.Marshal(map[string]any{
+			"type": "response.reasoning_summary_part.added", "item_id": item.ID,
+			"output_index": outputIndex, "summary_index": index, "part": part,
+		})
+		if err != nil {
+			return nil, canonical.InternalError("responses reasoning event encoding failed")
+		}
+		frames = append(frames, raw)
+	}
+	raw, err = json.Marshal(responsesOutputItemEventDTO{Type: "response.output_item.done", OutputIndex: outputIndex, Item: item})
+	if err != nil {
+		return nil, canonical.InternalError("responses reasoning event encoding failed")
+	}
+	frames = append(frames, raw)
+	e.outputItems = append(e.outputItems, item)
+	return frames, nil
 }
 
 func (e *ResponseStreamWireEncoder) ensureTextItem(itemID string) ([][]byte, error) {

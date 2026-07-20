@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 const swobuCallerUAHeaderValue = "swobu/dev"
@@ -50,7 +49,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 
 // ResolveBackend composes one exact Bedrock Mantle backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind, Options: protocolcodec.Options{ChatCompletionsTokenField: chatcompletions.MaxOutputTokensFieldLegacy}}, Transport: provider.BindTransport(target, e.Send)}
+	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, e.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

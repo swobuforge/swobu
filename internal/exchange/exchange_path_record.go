@@ -54,6 +54,7 @@ func bindRequestToTarget(request canonical.CanonicalRequest, modelID string) can
 		ToolPolicy:       request.ToolPolicyField(),
 		ToolCallBatch:    request.ToolCallBatchField(),
 		Controls:         request.Controls(),
+		Reasoning:        request.Reasoning(),
 		OutputFormat:     request.OutputFormatField(),
 	})
 }

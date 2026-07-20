@@ -14,7 +14,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire/messages"
 )
@@ -86,46 +85,6 @@ func TestPrepareImagesTreatsAllMaterializationFailuresAsRequestScoped(t *testing
 				t.Fatalf("materialization error scope = %q, want request: %v", preparationErrorScope(err), err)
 			}
 		})
-	}
-}
-
-func TestPreparedCheckpointOverflowIsRequestScoped(t *testing.T) {
-	request, imageBytes := testURLImageRequest(t, "https://example.test/checkpoint.png")
-	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{DeclaredMediaType: canonical.ImageMediaPNG, Bytes: imageBytes}}
-	preparedRequest, _, usedMedia, _, err := prepareImages(
-		context.Background(), request, protocolkind.Responses,
-		provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	prepared := mustBeginSession(t, request)
-	limit := int64(1)
-	for ; limit < 1<<20; limit++ {
-		if session.ValidateResolvedRequestSize(prepared.Full, session.ResolvedMedia{}, limit) == nil {
-			break
-		}
-	}
-	if err := session.ValidateResolvedRequestSize(prepared.Full, usedMedia, limit); err == nil {
-		t.Fatal("materialized checkpoint unexpectedly fits the request-only limit")
-	}
-
-	state := reducerTestState(t)
-	state.input.request = request
-	state.route = routePlan{targets: []routing.Target{requestpathTarget(t, "checkpoint-overflow")}}
-	state.prepared = &prepared
-	runner := reducerRuntime()
-	runner.Policy.Limits.MaxCheckpointBytes = limit
-	_, _, _, _, err = prepareProviderCall(state, providerCallSelection{}, runner, &providerAttemptPrepared{
-		request:   preparedRequest,
-		usedMedia: usedMedia,
-	})
-	if preparationErrorScope(err) != PreparationRequest {
-		t.Fatalf("checkpoint overflow scope = %q, want request: %v", preparationErrorScope(err), err)
-	}
-	if !strings.Contains(err.Error(), "checkpoint prepared-request preflight") {
-		t.Fatalf("checkpoint overflow error = %v", err)
 	}
 }
 

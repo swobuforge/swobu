@@ -15,6 +15,7 @@ type CanonicalRequest struct {
 	toolPolicy       Specified[ToolPolicy]
 	toolBatch        Specified[ToolCallBatchPolicy]
 	controls         GenerationControls
+	reasoning        ReasoningControls
 	outputFormat     Specified[OutputFormat]
 }
 
@@ -29,6 +30,7 @@ type RequestParams struct {
 	ToolPolicy       Specified[ToolPolicy]
 	ToolCallBatch    Specified[ToolCallBatchPolicy]
 	Controls         GenerationControls
+	Reasoning        ReasoningControls
 	OutputFormat     Specified[OutputFormat]
 }
 
@@ -42,6 +44,7 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		toolPolicy:       cloneSpecified(params.ToolPolicy, ToolPolicy.Clone),
 		toolBatch:        cloneSpecified(params.ToolCallBatch, ToolCallBatchPolicy.Clone),
 		controls:         params.Controls.Clone(),
+		reasoning:        params.Reasoning.Clone(),
 		outputFormat:     cloneSpecified(params.OutputFormat, OutputFormat.Clone),
 	}
 }
@@ -105,6 +108,7 @@ func (r CanonicalRequest) ToolCallBatchField() Specified[ToolCallBatchPolicy] {
 	return cloneSpecified(r.toolBatch, ToolCallBatchPolicy.Clone)
 }
 func (r CanonicalRequest) Controls() GenerationControls { return r.controls.Clone() }
+func (r CanonicalRequest) Reasoning() ReasoningControls { return r.reasoning.Clone() }
 func (r CanonicalRequest) OutputFormat() OutputFormat   { return specifiedValue(r.outputFormat).Clone() }
 func (r CanonicalRequest) OutputFormatSpecified() bool  { return r.outputFormat.IsSpecified() }
 func (r CanonicalRequest) OutputFormatField() Specified[OutputFormat] {
@@ -128,6 +132,7 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 		ToolPolicy:       cloneSpecified(r.toolPolicy, ToolPolicy.Clone),
 		ToolCallBatch:    cloneSpecified(r.toolBatch, ToolCallBatchPolicy.Clone),
 		Controls:         r.controls,
+		Reasoning:        r.reasoning,
 		OutputFormat:     cloneSpecified(r.outputFormat, OutputFormat.Clone),
 	})
 }

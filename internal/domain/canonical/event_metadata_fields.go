@@ -187,6 +187,15 @@ type ContentStartPayload struct {
 	Kind PartKind
 }
 
+// NewMessageContentStart constructs a content start for one message part.
+func NewMessageContentStart(kind PartKind) ContentStartPayload {
+	return ContentStartPayload{Kind: kind}
+}
+
+func messageContentStartFromValidatedPart(kind PartKind) ContentStartPayload {
+	return ContentStartPayload{Kind: kind}
+}
+
 // ItemCompletedPayload is the lossless canonical checkpoint used by buffered
 // projection and checkpoint commit.
 type ItemCompletedPayload struct {

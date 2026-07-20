@@ -20,24 +20,36 @@ import (
 	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
-// Codec lowers canonical semantics through one configured protocol family.
-// Provider-specific variants remain explicit through Options.
+// Codec lowers canonical semantics through one standard protocol family.
 type Codec struct {
 	ProviderID string
 	Protocol   protocolkind.ProtocolKind
-	Options    Options
-}
-
-// Options describes exact-backend wire behavior, not a global capability
-// snapshot. Each option changes the concrete codec composition itself.
-type Options struct {
-	ForceStructuredInput      bool
-	Store                     *bool
-	ChatCompletionsTokenField chatcompletions.MaxOutputTokensField
 }
 
 // Encode implements provider.Codec.
 func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+	return c.encode(req, nil, nil)
+}
+
+// EncodeChat applies a provider-owned Chat Completions dialect mutation at
+// the typed, pre-serialization protocol boundary.
+func (c Codec) EncodeChat(req provider.Request, mutate chatcompletions.RequestMutation) (carrier.Document, []compat.Decision, error) {
+	if c.Protocol != protocolkind.ChatCompletions {
+		return carrier.Document{}, nil, canonical.BadEndpoint("provider codec is not configured for chat completions")
+	}
+	return c.encode(req, mutate, nil)
+}
+
+// EncodeResponses applies a provider-owned Responses dialect mutation at the
+// typed, pre-serialization protocol boundary.
+func (c Codec) EncodeResponses(req provider.Request, mutate responses.RequestMutation) (carrier.Document, []compat.Decision, error) {
+	if c.Protocol != protocolkind.Responses {
+		return carrier.Document{}, nil, canonical.BadEndpoint("provider codec is not configured for responses")
+	}
+	return c.encode(req, nil, mutate)
+}
+
+func (c Codec) encode(req provider.Request, chatMutation chatcompletions.RequestMutation, responsesMutation responses.RequestMutation) (carrier.Document, []compat.Decision, error) {
 	var decisions []compat.Decision
 	var err error
 	if err := req.Delivery.Validate(); err != nil {
@@ -47,22 +59,16 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.UnsupportedDelivery("provider codec supports only SSE streaming delivery"))
 	}
 	input := wire.ProviderEncodeInput{Request: req.Canonical}
-
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", chatcompletions.EncodeOptions{
-			MaxOutputTokensField: c.Options.ChatCompletionsTokenField,
-			Compatibility:        req.Compatibility,
-		})
+		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, req.Delivery, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility}, chatMutation)
 	case protocolkind.Responses:
-		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", responses.EncodeOptions{
-			ForceStructuredInput: c.Options.ForceStructuredInput,
-			Store:                c.Options.Store,
-			Compatibility:        req.Compatibility,
-		})
+		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, req.Delivery, "", responses.EncodeOptions{Compatibility: req.Compatibility}, responsesMutation)
 	case protocolkind.Messages:
-		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{Compatibility: req.Compatibility})
+		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{
+			Compatibility: req.Compatibility,
+		})
 	default:
 		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.BadEndpoint("selected provider protocol has no request codec"))
 	}
@@ -120,7 +126,7 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 	exchangeID := request.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
+		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, doc, exchangeID)
 	case protocolkind.Responses:
 		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
 	case protocolkind.Messages:
@@ -134,7 +140,7 @@ func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request)
 	exchangeID := request.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
+		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, stream, exchangeID)
 	case protocolkind.Responses:
 		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
 	case protocolkind.Messages:

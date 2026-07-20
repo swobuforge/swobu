@@ -2,6 +2,7 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -125,27 +126,9 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
 		switch itemType {
 		case "message":
-			parts, err := openaiwire.DecodeContentParts(item.Content, "responses message content is invalid")
-			if err != nil {
-				return nil, canonical.InternalError("responses message content is invalid")
-			}
-			content := make([]canonical.MessagePart, 0, len(parts))
-			err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
-				partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
-				switch partType {
-				case "text", "output_text", "input_text":
-					content = append(content, canonical.NewTextMessagePart(part.Text))
-				default:
-					return canonical.UnsupportedOperation("responses output item content part type is not implemented")
-				}
-				return nil
-			})
+			message, err := decodeResponsesMessageOutputItem(item)
 			if err != nil {
 				return nil, err
-			}
-			message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, content)
-			if err != nil {
-				return nil, canonical.InternalError("responses message item is invalid")
 			}
 			output = append(output, message)
 		case "function_call":
@@ -188,7 +171,13 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 		case "mcp_call":
 			return nil, canonical.UnsupportedOperation("responses MCP output is not implemented")
 		case "reasoning":
-			return nil, canonical.UnsupportedOperation("responses reasoning output is not supported by swobu v0")
+			reasoning, present, err := decodeResponsesReasoningItem(item)
+			if err != nil {
+				return nil, err
+			}
+			if present {
+				output = append(output, reasoning)
+			}
 		default:
 			return nil, canonical.UnsupportedOperation("responses output item type is not implemented")
 		}
@@ -201,4 +190,72 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 		output = append(output, message)
 	}
 	return output, nil
+}
+
+func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO) (canonical.CanonicalItem, error) {
+	parts, err := openaiwire.DecodeContentParts(item.Content, "responses message content is invalid")
+	if err != nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("responses message content is invalid")
+	}
+	content := make([]canonical.MessagePart, 0, len(parts))
+	err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
+		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
+		switch partType {
+		case "text", "output_text", "input_text":
+			content = append(content, canonical.NewTextMessagePart(part.Text))
+		default:
+			return canonical.UnsupportedOperation("responses output item content part type is not implemented")
+		}
+		return nil
+	})
+	if err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, content)
+	if err != nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("responses message item is invalid")
+	}
+	return message, nil
+}
+
+// swobu:lint ignore string-switch because=Responses provider-wire summary types select canonical reasoning part kinds.
+func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.CanonicalItem, bool, error) {
+	content, err := decodeResponsesReasoningContent(item.Content)
+	if err != nil {
+		return canonical.CanonicalItem{}, false, err
+	}
+	if len(content) > 0 || item.EncryptedContent != "" {
+		return canonical.CanonicalItem{}, false, canonical.UnsupportedOperation("responses manual reasoning state is not supported in P0")
+	}
+	parts := make([]canonical.ReasoningPart, 0, len(item.Summary))
+	for _, summary := range item.Summary {
+		if strings.TrimSpace(summary.Type) != "summary_text" { // swobu:io-string source=provider-wire
+			return canonical.CanonicalItem{}, false, canonical.UnsupportedOperation("responses reasoning summary part type is not implemented")
+		}
+		part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary.Text)
+		if err != nil {
+			return canonical.CanonicalItem{}, false, canonical.InternalError("responses reasoning part is invalid")
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return canonical.CanonicalItem{}, false, nil
+	}
+	reasoning, err := canonical.NewReasoningItem(parts, canonical.OpaqueThinking{})
+	if err != nil {
+		return canonical.CanonicalItem{}, false, canonical.InternalError("responses reasoning item is invalid")
+	}
+	return reasoning, true, nil
+}
+
+func decodeResponsesReasoningContent(raw json.RawMessage) ([]responsesReasoningTextDTO, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var content []responsesReasoningTextDTO
+	if err := json.Unmarshal(trimmed, &content); err != nil {
+		return nil, canonical.InternalError("responses reasoning content is invalid")
+	}
+	return content, nil
 }

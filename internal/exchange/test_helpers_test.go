@@ -337,7 +337,7 @@ func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDec
 	}, nil
 }
 
-func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+func (testClientCodec) EncodeResponseDocument(_ canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	text := ""
 	if textual, ok := any(output).(interface{ Text() string }); ok {
 		text = textual.Text()
@@ -363,7 +363,7 @@ func (testClientCodec) EncodeResponseDocument(output canonical.CanonicalResponse
 	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"output_text":"`+text+`"}`), carrier.Meta{}), ResponseFingerprint: testHistoryResponse([]byte(text))}, nil
 }
 
-func (testClientCodec) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
+func (testClientCodec) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	_ = d
 	completion, complete, fail := wire.NewResponseCompletion()
 	body := wire.NewEncodedResponseBody(ctx, events, func(event canonical.Event) ([][]byte, error) {
@@ -380,7 +380,7 @@ func (testClientCodec) EncodeResponseStream(ctx context.Context, events canonica
 	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}, Completion: completion}, nil
 }
 
-func (testClientCodec) EncodeResponseMessages(_ context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientMessageResult, error) {
+func (testClientCodec) EncodeResponseMessages(_ context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientMessageResult, error) {
 	completion, complete, fail := wire.NewResponseCompletion()
 	messages := wire.NewEncodedResponseMessages(events, func(event canonical.Event) ([][]byte, error) {
 		if status, terminal := responseTerminalStatus(event); terminal && status == canonical.EnvelopeStatusCompleted {
@@ -446,7 +446,7 @@ func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 			Seq:        4,
 			Time:       now,
 			Kind:       canonical.EventContentStart,
-			Payload:    canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0, Part: 0}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}},
+			Payload:    canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0, Part: 0}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)},
 		},
 		{
 			ExchangeID: exchangeID,

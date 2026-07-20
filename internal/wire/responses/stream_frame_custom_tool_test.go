@@ -2,6 +2,7 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -11,7 +12,7 @@ import (
 func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 	t.Parallel()
 
-	s := &responsesEventReader{
+	s := &responsesResponseStream{
 		exchangeID:    "ex",
 		responseEnvID: "ex:response:0",
 		toolStates:    map[string]responsesToolState{},
@@ -23,13 +24,17 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 	handled, _, err := s.handleFrame(context.Background(), streamFrame{
 		Type: "response.output_item.added",
 		Item: struct {
-			ID          string `json:"id"`
-			Type        string `json:"type"`
-			CallID      string `json:"call_id"`
-			Name        string `json:"name"`
-			Arguments   string `json:"arguments"`
-			Input       string `json:"input"`
-			ServerLabel string `json:"server_label"`
+			ID               string                         `json:"id"`
+			Type             string                         `json:"type"`
+			CallID           string                         `json:"call_id"`
+			Name             string                         `json:"name"`
+			Arguments        string                         `json:"arguments"`
+			Input            string                         `json:"input"`
+			ServerLabel      string                         `json:"server_label"`
+			Status           string                         `json:"status"`
+			Summary          []responsesReasoningSummaryDTO `json:"summary"`
+			Content          json.RawMessage                `json:"content"`
+			EncryptedContent string                         `json:"encrypted_content"`
 		}{
 			ID:     "custom_1",
 			Type:   "custom_tool_call",
@@ -74,13 +79,17 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 		Input:     "patch contents",
 		Arguments: "",
 		Item: struct {
-			ID          string `json:"id"`
-			Type        string `json:"type"`
-			CallID      string `json:"call_id"`
-			Name        string `json:"name"`
-			Arguments   string `json:"arguments"`
-			Input       string `json:"input"`
-			ServerLabel string `json:"server_label"`
+			ID               string                         `json:"id"`
+			Type             string                         `json:"type"`
+			CallID           string                         `json:"call_id"`
+			Name             string                         `json:"name"`
+			Arguments        string                         `json:"arguments"`
+			Input            string                         `json:"input"`
+			ServerLabel      string                         `json:"server_label"`
+			Status           string                         `json:"status"`
+			Summary          []responsesReasoningSummaryDTO `json:"summary"`
+			Content          json.RawMessage                `json:"content"`
+			EncryptedContent string                         `json:"encrypted_content"`
 		}{
 			ID:     "custom_1",
 			Type:   "custom_tool_call",

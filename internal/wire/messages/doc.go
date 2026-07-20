@@ -14,6 +14,14 @@
 // Direct Messages lowering accepts URL and inline images; exact provider
 // composition may select inline-only lowering without teaching this reusable
 // grammar a provider identity.
+// Thinking controls map to canonical compute, disclosure, and effort.
+// Absent display remains unspecified; summarized and omitted are explicit.
+// Signed and redacted thinking blocks complete as reasoning items only after
+// their signature/data is available. Each complete block is retained as typed
+// Messages opaque thinking and replays unchanged through any Messages lowerer;
+// no target or model allowlist is inferred.
+// Omitted client projection retains an empty thinking block and exact signature,
+// preserving the native protocol graph for history replay.
 // Provider auth, base URL, and transport behavior stay in provider wiring
 // packages.
 // Ordered messages define the private messages history fingerprint scheme.

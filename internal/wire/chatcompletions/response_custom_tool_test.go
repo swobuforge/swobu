@@ -14,7 +14,7 @@ func TestCustomToolResponseRoundTrip(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("call_1")
 	call, _ := canonical.NewToolCallItem(callID, decl.Key(), canonical.NewTextToolInput("patch contents"))
 	output := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{call}, "stop")
-	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatal(err)
 	}

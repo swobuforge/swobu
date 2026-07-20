@@ -1,0 +1,49 @@
+package responses
+
+import (
+	"fmt"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+)
+
+func (s *responsesResponseStream) enqueueCompletedOutputItems(items []canonical.CanonicalItem) error {
+	for _, item := range items {
+		ordinal := s.nextOrdinal
+		s.nextOrdinal++
+		envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, ordinal))
+		switch item.Kind() {
+		case canonical.ItemKindMessage:
+			message, _ := item.Message()
+			start, err := canonical.NewMessageStart(message.Role())
+			if err != nil {
+				return err
+			}
+			s.enqueueItemStart(envID, ordinal, start)
+			for _, part := range message.Content() {
+				if text, ok := part.Text(); ok {
+					s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
+					s.enqueueTextDelta(envID, ordinal, text.Text())
+				}
+			}
+			s.enqueueItemCompleted(envID, ordinal, item)
+		case canonical.ItemKindToolCall:
+			call, _ := item.ToolCall()
+			start, err := canonical.NewToolCallStart(call.CallID(), call.Tool())
+			if err != nil {
+				return err
+			}
+			s.enqueueItemStart(envID, ordinal, start)
+			if object, ok := call.Input().Object(); ok {
+				s.enqueueArgsDelta(envID, ordinal, object.String())
+			} else if text, ok := call.Input().Text(); ok {
+				s.enqueueArgsDelta(envID, ordinal, text)
+			}
+			s.enqueueItemCompleted(envID, ordinal, item)
+		case canonical.ItemKindReasoning:
+			s.enqueueItemCompleted(envID, ordinal, item)
+		default:
+			return canonical.UnsupportedOperation("responses completed output item kind is unsupported")
+		}
+	}
+	return nil
+}

@@ -75,11 +75,11 @@ type clientCodecBundle struct {
 		DecodeClientRequest(carrier.Document) (wire.ClientDecodeResult, error)
 	}
 	document interface {
-		EncodeResponseDocument(canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
+		EncodeResponseDocument(canonical.CanonicalRequest, canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
 	}
 	stream interface {
-		EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
-		EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error)
+		EncodeResponseStream(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
+		EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error)
 	}
 }
 
@@ -87,14 +87,14 @@ func (b clientCodecBundle) DecodeClientRequest(doc carrier.Document) (wire.Clien
 	return b.request.DecodeClientRequest(doc)
 }
 
-func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
-	return b.document.EncodeResponseDocument(output)
+func (b clientCodecBundle) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+	return b.document.EncodeResponseDocument(request, output)
 }
 
-func (b clientCodecBundle) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
-	return b.stream.EncodeResponseStream(ctx, events, d)
+func (b clientCodecBundle) EncodeResponseStream(ctx context.Context, request canonical.CanonicalRequest, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientByteStreamResult, error) {
+	return b.stream.EncodeResponseStream(ctx, request, events, d)
 }
 
-func (b clientCodecBundle) EncodeResponseMessages(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientMessageResult, error) {
-	return b.stream.EncodeResponseMessages(ctx, events, d)
+func (b clientCodecBundle) EncodeResponseMessages(ctx context.Context, request canonical.CanonicalRequest, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientMessageResult, error) {
+	return b.stream.EncodeResponseMessages(ctx, request, events, d)
 }

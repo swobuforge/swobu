@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 // FIXME swobuCallerUAHeaderValue must be DRY across all providers. Consider centralizing if more providers need it.
@@ -93,7 +92,7 @@ func (r azureBackendAdapter) ResolveBackend(target provider.TargetSnapshot) (pro
 	if err != nil {
 		return provider.Backend{}, canonical.BadEndpoint("azure resource locator is required")
 	}
-	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind, Options: protocolcodec.Options{ChatCompletionsTokenField: chatcompletions.MaxOutputTokensFieldLegacy}}, Transport: provider.BindTransport(target, r.Send)}
+	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, r.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

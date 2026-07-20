@@ -18,6 +18,7 @@ type messagesEnvelopeStreamEncoder struct {
 	blockIndexByID map[string]int
 	sawToolUse     bool
 	adapter        *sse.EnvelopeEventAdapter
+	request        canonical.CanonicalRequest
 }
 
 func (s *messagesEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
@@ -93,6 +94,8 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 				logMessagesEgressStreamFrame(frame)
 			}
 			return frames, nil
+		case canonical.ItemKindReasoning:
+			return nil, nil
 		default:
 			return nil, canonical.UnsupportedOperation("messages streaming output item kind is not implemented")
 		}
@@ -164,6 +167,9 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		}
 		return frames, nil
 	case sse.StreamEventItemCompleted:
+		if event.ItemKind == canonical.ItemKindReasoning {
+			return s.encodeCompletedReasoning(event)
+		}
 		frames := make([][]byte, 0, 1)
 		for key, index := range s.blockIndexByID {
 			if key != event.ItemID && !strings.HasPrefix(key, event.ItemID+"#") {
@@ -226,6 +232,42 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 	default:
 		return nil, canonical.UnsupportedOperation("messages streaming event is not implemented")
 	}
+}
+
+func (s *messagesEnvelopeStreamEncoder) encodeCompletedReasoning(event sse.StreamEvent) ([][]byte, error) {
+	if event.CompletedItem == nil {
+		return nil, canonical.InternalError("messages reasoning completion is missing canonical item")
+	}
+	state := messagesResponseHistoryState{request: s.request.Clone()}
+	if err := state.appendItem(*event.CompletedItem); err != nil {
+		return nil, err
+	}
+	frames := make([][]byte, 0, len(state.content)*4)
+	for _, block := range state.content {
+		index := s.nextIndex
+		s.nextIndex++
+		startBlock := messagesContentBlockBodyDTO{Type: block.Type, Thinking: block.Thinking, Data: block.Data}
+		if block.Type == "thinking" {
+			empty := ""
+			startBlock.Thinking = &empty
+		}
+		raw, _ := json.Marshal(messagesContentBlockStartDTO{Type: "content_block_start", Index: index, ContentBlock: startBlock})
+		frames = append(frames, sse.SSEEventFrame("content_block_start", raw))
+		if block.Type == "thinking" && block.Thinking != nil && *block.Thinking != "" {
+			raw, _ = json.Marshal(messagesContentBlockDeltaDTO{Type: "content_block_delta", Index: index, Delta: messagesContentBlockDeltaBodyDTO{Type: "thinking_delta", Thinking: *block.Thinking}})
+			frames = append(frames, sse.SSEEventFrame("content_block_delta", raw))
+		}
+		if block.Type == "thinking" && block.Signature != "" {
+			raw, _ = json.Marshal(messagesContentBlockDeltaDTO{Type: "content_block_delta", Index: index, Delta: messagesContentBlockDeltaBodyDTO{Type: "signature_delta", Signature: block.Signature}})
+			frames = append(frames, sse.SSEEventFrame("content_block_delta", raw))
+		}
+		raw, _ = json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
+		frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
+	}
+	for _, frame := range frames {
+		logMessagesEgressStreamFrame(frame)
+	}
+	return frames, nil
 }
 
 func (s *messagesEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }

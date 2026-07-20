@@ -3,7 +3,7 @@ package canonical
 import "context"
 
 // BoundResponseIdentityStream binds the exchange-allocated public identity to
-// provider-decoded response identity while preserving typed native refinements.
+// provider-decoded response identity while preserving typed native handles.
 type BoundResponseIdentityStream struct {
 	upstream ResponseStream
 	binding  ResponseBinding

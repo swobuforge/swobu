@@ -9,15 +9,15 @@ import (
 )
 
 func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.GenerationControls, error) {
-	maxOutputTokens, err := decodeOptionalIntMessage(dto.MaxOutputTokens, "responses request max_output_tokens is invalid")
+	maxOutputTokens, err := openaiwire.DecodeOptionalInt(dto.MaxOutputTokens, "responses request max_output_tokens is invalid")
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	temperature, err := decodeOptionalFloatMessage(dto.Temperature, "responses request temperature is invalid")
+	temperature, err := openaiwire.DecodeOptionalFloat(dto.Temperature, "responses request temperature is invalid")
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	topP, err := decodeOptionalFloatMessage(dto.TopP, "responses request top_p is invalid")
+	topP, err := openaiwire.DecodeOptionalFloat(dto.TopP, "responses request top_p is invalid")
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
@@ -30,12 +30,102 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 		// closed rather than silently dropping supported user intent.
 		return canonical.GenerationControls{}, canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
 	}
+	var effort *canonical.InferenceEffort
+	if dto.Reasoning != nil && strings.TrimSpace(dto.Reasoning.Effort) != "" && strings.TrimSpace(dto.Reasoning.Effort) != "none" { // swobu:io-string source=boundary
+		value := canonical.InferenceEffort(strings.TrimSpace(dto.Reasoning.Effort)) // swobu:io-string source=boundary
+		effort = &value
+	}
 	return canonical.NewGenerationControls(canonical.GenerationControlsParams{
 		MaxOutputTokens: maxOutputTokens,
 		StopSequences:   stopSequences,
 		Temperature:     temperature,
 		TopP:            topP,
+		Effort:          effort,
 	})
+}
+
+func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json.RawMessage) (canonical.ReasoningControls, error) {
+	params := canonical.ReasoningControlsParams{}
+	if dto != nil {
+		switch value := strings.TrimSpace(dto.Effort); value { // swobu:io-string source=boundary
+		case "":
+		case "none":
+			params.Compute = canonical.Specify(canonical.NewDisabledReasoningCompute())
+		case "minimal", "low", "medium", "high", "xhigh", "max":
+			params.Compute = canonical.Specify(canonical.NewAutomaticReasoningCompute())
+		default:
+			return canonical.ReasoningControls{}, canonical.BadRequest("responses reasoning effort is invalid")
+		}
+		switch value := strings.TrimSpace(dto.Summary); value { // swobu:io-string source=boundary
+		case "":
+		case "concise", "detailed", "auto":
+			params.Disclosure = canonical.Specify(canonical.ReasoningDisclosureSummary)
+		default:
+			return canonical.ReasoningControls{}, canonical.BadRequest("responses reasoning summary is invalid")
+		}
+		if value := strings.TrimSpace(dto.Context); value != "" { // swobu:io-string source=boundary
+			return canonical.ReasoningControls{}, canonical.UnsupportedOperation("responses reasoning context is not supported in P0")
+		}
+	}
+	includeEncrypted, err := decodeResponsesReasoningInclude(includeRaw)
+	if err != nil {
+		return canonical.ReasoningControls{}, err
+	}
+	if includeEncrypted {
+		return canonical.ReasoningControls{}, canonical.UnsupportedOperation("responses encrypted reasoning continuation is not supported in P0")
+	}
+	return canonical.NewReasoningControls(params)
+}
+
+func decodeResponsesReasoningInclude(raw json.RawMessage) (bool, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return false, nil
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return false, canonical.BadRequest("responses include is invalid")
+	}
+	includeEncrypted := false
+	for _, value := range values {
+		if value != "reasoning.encrypted_content" {
+			return false, canonical.UnsupportedOperation("responses include entry is unsupported")
+		}
+		includeEncrypted = true
+	}
+	return includeEncrypted, nil
+}
+
+func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort]) error {
+	wireReasoning := map[string]any{}
+	if compute, ok := reasoning.ComputeField().Get(); ok {
+		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
+			return canonical.UnsupportedOperation("unfinished disabled Responses reasoning cannot satisfy readable disclosure")
+		}
+		switch compute.Kind() {
+		case canonical.ReasoningDisabled:
+			wireReasoning["effort"] = "none"
+		case canonical.ReasoningAutomatic:
+			if !effortField.IsSpecified() {
+				return canonical.UnsupportedOperation("Responses target has no proof that omitted effort enables dynamic reasoning")
+			}
+		case canonical.ReasoningBudget:
+			return canonical.UnsupportedOperation("Responses protocol cannot preserve a numeric reasoning budget")
+		}
+	}
+	if effort, ok := effortField.Get(); ok {
+		if existing, disabled := wireReasoning["effort"]; disabled && existing == "none" {
+			return canonical.BadRequest("disabled reasoning conflicts with inference effort")
+		}
+		wireReasoning["effort"] = effort
+	}
+	if disclosure, ok := reasoning.DisclosureField().Get(); ok && disclosure == canonical.ReasoningDisclosureSummary {
+		wireReasoning["summary"] = "auto"
+	}
+	if len(wireReasoning) > 0 {
+		payload["reasoning"] = wireReasoning
+	}
+	return nil
 }
 
 func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls) error {
@@ -52,30 +142,6 @@ func encodeResponsesGenerationControls(payload map[string]any, controls canonica
 		return canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
 	}
 	return nil
-}
-
-func decodeOptionalIntMessage(raw json.RawMessage, invalidMessage string) (*int, error) {
-	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
-	if trimmed == "" || trimmed == "null" {
-		return nil, nil
-	}
-	var value int
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, canonical.BadRequest(invalidMessage)
-	}
-	return &value, nil
-}
-
-func decodeOptionalFloatMessage(raw json.RawMessage, invalidMessage string) (*float64, error) {
-	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
-	if trimmed == "" || trimmed == "null" {
-		return nil, nil
-	}
-	var value float64
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, canonical.BadRequest(invalidMessage)
-	}
-	return &value, nil
 }
 
 func isRawControlSet(raw json.RawMessage) bool {

@@ -80,7 +80,7 @@ func TestValidatedResponseStreamRejectsDeltaAfterCompletion(t *testing.T) {
 		{Kind: EventEnvelopeStart, EnvID: "response", Payload: EnvelopeStartPayload{Kind: EnvResponse}},
 		{Kind: EventResponseIdentity, EnvID: "response", Payload: ResponseIdentityPayload{Response: ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}}},
 		{Kind: EventItemStart, Payload: ItemEvent{Position: ItemPosition{Item: 0}, Payload: testMessageStart(MessageRoleAssistant)}},
-		{Kind: EventContentStart, Payload: ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: ContentStartPayload{Kind: PartKindText}}},
+		{Kind: EventContentStart, Payload: ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: NewMessageContentStart(PartKindText)}},
 		{Kind: EventTextDelta, Payload: ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: TextDeltaPayload{Text: "ok"}}},
 		{Kind: EventItemCompleted, Payload: ItemEvent{Position: ItemPosition{Item: 0}, Payload: ItemCompletedPayload{Item: message}}},
 		{Kind: EventTextDelta, Payload: ItemEvent{Position: ItemPosition{Item: 0, Part: 0}, Payload: TextDeltaPayload{Text: "late"}}},

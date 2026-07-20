@@ -108,7 +108,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	_, cacheWritePresent := usage.CacheWriteTokens()
 	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
-		items, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls)
+		items, err := decodeChatChoiceItems(request, choice)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +121,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			usage,
 		)), nil
 	}
-	items, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls)
+	items, err := decodeChatChoiceItems(request, choice)
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +168,15 @@ type chatCompletionsEventReader struct {
 	latestUsage canonical.TokenUsage
 	seq         int64
 	request     canonical.CanonicalRequest
+}
+
+func decodeChatChoiceItems(request canonical.CanonicalRequest, choice streamChoiceBody) ([]canonical.CanonicalItem, error) {
+	items := make([]canonical.CanonicalItem, 0, 2+len(choice.Message.ToolCalls))
+	output, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls)
+	if err != nil {
+		return nil, err
+	}
+	return append(items, output...), nil
 }
 
 func (s *chatCompletionsEventReader) Decisions() []compat.Decision {
@@ -267,6 +276,9 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 
 func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) error {
 	if choice.Delta.Content != "" {
+		if len(s.toolCalls) > 0 {
+			return canonical.InternalError("chat completions text began after tool output")
+		}
 		if !s.textOpen {
 			start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)
 			if err != nil {
@@ -274,11 +286,11 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 			}
 			s.textOpen = true
 			s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:text_0", s.responseID))
-			s.enqueueItem(canonical.EventItemStart, s.textEnvID, 0, start)
-			s.enqueueItem(canonical.EventContentStart, s.textEnvID, 0, canonical.ContentStartPayload{Kind: canonical.PartKindText})
+			s.enqueueItem(canonical.EventItemStart, s.textEnvID, s.textOrdinal(), start)
+			s.enqueueItem(canonical.EventContentStart, s.textEnvID, s.textOrdinal(), canonical.NewMessageContentStart(canonical.PartKindText))
 		}
 		s.text.WriteString(choice.Delta.Content)
-		s.enqueueItem(canonical.EventTextDelta, s.textEnvID, 0, canonical.TextDeltaPayload{Text: choice.Delta.Content})
+		s.enqueueItem(canonical.EventTextDelta, s.textEnvID, s.textOrdinal(), canonical.TextDeltaPayload{Text: choice.Delta.Content})
 	}
 	for _, call := range choice.Delta.ToolCalls {
 		if err := s.queueToolCallDelta(call); err != nil {
@@ -297,7 +309,7 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		if err != nil {
 			return canonical.InternalError("chat completions streamed message is invalid")
 		}
-		s.enqueueItem(canonical.EventItemCompleted, s.textEnvID, 0, canonical.ItemCompletedPayload{Item: item})
+		s.enqueueItem(canonical.EventItemCompleted, s.textEnvID, s.textOrdinal(), canonical.ItemCompletedPayload{Item: item})
 		s.textOpen = false
 	}
 	indices := make([]int, 0, len(s.toolCalls))
@@ -318,7 +330,7 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		if err != nil {
 			return canonical.InternalError("chat completions streamed tool call is invalid")
 		}
-		s.enqueueItem(canonical.EventItemCompleted, state.EnvID, toolOrdinal(idx), canonical.ItemCompletedPayload{Item: item})
+		s.enqueueItem(canonical.EventItemCompleted, state.EnvID, s.toolOrdinal(idx), canonical.ItemCompletedPayload{Item: item})
 		delete(s.toolCalls, idx)
 	}
 	s.completed = true
@@ -385,11 +397,11 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 		if err != nil {
 			return err
 		}
-		s.enqueueItem(canonical.EventItemStart, state.EnvID, toolOrdinal(call.Index), start)
+		s.enqueueItem(canonical.EventItemStart, state.EnvID, s.toolOrdinal(call.Index), start)
 	}
 	for _, delta := range state.PendingArgs {
 		state.Args.WriteString(delta)
-		s.enqueueItem(canonical.EventArgsDelta, state.EnvID, toolOrdinal(call.Index), canonical.ArgsDeltaPayload{Args: delta})
+		s.enqueueItem(canonical.EventArgsDelta, state.EnvID, s.toolOrdinal(call.Index), canonical.ArgsDeltaPayload{Args: delta})
 	}
 	state.PendingArgs = nil
 	s.toolCalls[call.Index] = state

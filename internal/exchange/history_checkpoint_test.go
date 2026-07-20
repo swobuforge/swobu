@@ -18,7 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
-func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsExactTargetDelta(t *testing.T) {
+func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationDelta(t *testing.T) {
 	store := session.NewMemoryStore()
 	target := provider.NewTargetSnapshot("openai", "target-a", "https://example.test", "cred", protocolkind.Responses, "m", "responses")
 	target.TargetVersion = 7
@@ -109,7 +109,7 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsExactTargetDelta(t 
 		t.Fatal(err)
 	}
 	committer := &checkpointCommitter{
-		exchangeID: "next", workspaceSlug: "dev", store: store, maxBytes: 1 << 20,
+		exchangeID: "next", workspaceSlug: "dev", store: store,
 		request: prepared.Full, resolvedMedia: prepared.ResolvedMedia,
 		capture: &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{
 			state: checkpointCaptureCompleted, response: nextResponse,
@@ -150,6 +150,47 @@ func TestImplicitFingerprintMissExecutesFullRequestAndRetainsCompositionBase(t *
 	}
 	if resolved.nextState.advance == nil || resolved.nextState.advance.Previous == nil || *resolved.nextState.advance.Previous != missing {
 		t.Fatal("miss did not retain decoded predecessor as composition base")
+	}
+}
+
+func TestImplicitFingerprintAmbiguityNeverSelectsHiddenCheckpointState(t *testing.T) {
+	store := session.NewMemoryStore()
+	history := testExchangeHistoryFingerprint(t, "responses", "indistinguishable")
+	for _, id := range []canonical.SwobuResponseID{"resp_hidden_a", "resp_hidden_b"} {
+		response, err := canonical.NewCanonicalResponse(
+			canonical.ResponseRef{SwobuID: id}, "m", nil, "completed", canonical.NewUnknownTokenUsage(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Put(context.Background(), "dev", session.Checkpoint{
+			HistoryFingerprint: &history,
+			Request:            testCanonicalRequest("m"),
+			Response:           response,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := reducerTestState(t)
+	s.input.rebasedRequest = &wire.RebasedRequest{Previous: history, Request: s.input.request.Clone()}
+	s.input.requestFingerprint = testHistoryRequest([]byte("current"))
+	runner := reducerRuntime()
+	runner.CheckpointStore = store
+	started, err := reduceStarting(s, exchangeStarted{}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := executeCommand(context.Background(), started.command)
+	resolved, err := reduceLoadingCheckpoint(started.nextState, started.nextState.phase.(loadingCheckpointPhase), loaded, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, ok := resolved.nextState.phase.(failedPhase)
+	if !ok || failed.problem == nil || !strings.Contains(failed.problem.Error(), "requires previous_response_id") {
+		t.Fatalf("ambiguous lookup outcome = %#v", resolved.nextState.phase)
+	}
+	if resolved.nextState.prepared != nil {
+		t.Fatal("ambiguous visible history selected a checkpoint")
 	}
 }
 
@@ -278,7 +319,8 @@ func TestBufferedCheckpointCommitsOnlyAfterClientEncoding(t *testing.T) {
 	if err != nil || !found || record.HistoryFingerprint == nil {
 		t.Fatalf("checkpoint after body encoding = (%#v, %t, %v)", record.HistoryFingerprint, found, err)
 	}
-	indexed, found, err := store.FindByHistory(context.Background(), "alpha", *record.HistoryFingerprint)
+	match, err := store.FindByHistory(context.Background(), "alpha", *record.HistoryFingerprint)
+	indexed, found := match.Unique()
 	if err != nil || !found || indexed.Response.Response().SwobuID != record.Response.Response().SwobuID {
 		t.Fatalf("fingerprint index lookup = (%q, %t, %v)", indexed.Response.Response().SwobuID, found, err)
 	}
@@ -378,7 +420,7 @@ func TestCompletedResponseWithoutHistoryFingerprintStillCommitsExplicitCheckpoin
 		state: checkpointCaptureCompleted, response: response,
 	}}
 	committer := &checkpointCommitter{
-		exchangeID: "no_history", workspaceSlug: "alpha", store: store, maxBytes: 1 << 20,
+		exchangeID: "no_history", workspaceSlug: "alpha", store: store,
 		request: testCanonicalRequest("m"), advance: &historyAdvance{Request: testHistoryRequest([]byte("request"))},
 		capture: capture,
 	}
@@ -394,33 +436,6 @@ func TestCompletedResponseWithoutHistoryFingerprintStillCommitsExplicitCheckpoin
 	}
 }
 
-func TestCheckpointCommitterRejectsOversizeCanonicalCheckpoint(t *testing.T) {
-	store := session.NewMemoryStore()
-	response, err := canonical.NewCanonicalResponse(
-		canonical.ResponseRef{SwobuID: "swobu_oversize"},
-		"m",
-		[]canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "ok")},
-		"completed",
-		canonical.NewUnknownTokenUsage(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	committer := &checkpointCommitter{
-		exchangeID: "oversize", workspaceSlug: "alpha", store: store, maxBytes: 1,
-		request: testCanonicalRequest("m"),
-		capture: &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{
-			state: checkpointCaptureCompleted, response: response,
-		}},
-	}
-	if err := committer.commitDocument(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "checkpoint size validation failed") {
-		t.Fatalf("oversize commit error = %v", err)
-	}
-	if _, found, err := store.Get(context.Background(), "alpha", "swobu_oversize"); err != nil || found {
-		t.Fatalf("oversize checkpoint lookup = (%t, %v), want absent", found, err)
-	}
-}
-
 func TestHistoryComposeFailureUsesOptionalIndexDiagnosticAndStillCommits(t *testing.T) {
 	store := session.NewMemoryStore()
 	response, err := canonical.NewCanonicalResponse(
@@ -433,7 +448,7 @@ func TestHistoryComposeFailureUsesOptionalIndexDiagnosticAndStillCommits(t *test
 	}
 	base := testExchangeHistoryFingerprint(t, "messages", "base")
 	committer := &checkpointCommitter{
-		exchangeID: "compose_failure", workspaceSlug: "alpha", store: store, maxBytes: 1 << 20,
+		exchangeID: "compose_failure", workspaceSlug: "alpha", store: store,
 		request: testCanonicalRequest("m"),
 		advance: &historyAdvance{Previous: &base, Request: testHistoryRequest([]byte("request"))},
 		capture: &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{
