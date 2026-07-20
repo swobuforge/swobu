@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 )
 
 func requestHasImages(request canonical.CanonicalRequest) bool {
@@ -26,7 +26,7 @@ type mediaPreparationState struct {
 	count      int
 	totalBytes int64
 	fetchCache mediaFetchCache
-	used       replay.ResolvedMedia
+	used       session.ResolvedMedia
 }
 
 // prepareImages resolves one candidate request. The URL cache is transient;
@@ -39,8 +39,8 @@ func prepareImages(
 	limits provider.MediaLimits,
 	fetcher provider.ImageFetcher,
 	fetchCache mediaFetchCache,
-	historical replay.ResolvedMedia,
-) (canonical.CanonicalRequest, mediaFetchCache, replay.ResolvedMedia, []compat.Decision, error) {
+	historical session.ResolvedMedia,
+) (canonical.CanonicalRequest, mediaFetchCache, session.ResolvedMedia, []compat.Decision, error) {
 	state := mediaPreparationState{fetchCache: cloneMediaFetchCache(fetchCache)}
 	decisions := make([]compat.Decision, 0)
 	prepared, err := canonical.RewriteRequestImages(request, func(position canonical.RequestPartRef, placement canonical.ImagePlacement, image canonical.ImagePart) (canonical.ImagePart, error) {
@@ -96,10 +96,10 @@ func prepareImages(
 	return prepared, state.fetchCache, state.used, decisions, err
 }
 
-func bindPreparedAsset(state *mediaPreparationState, position canonical.RequestPartRef, sourceURL string, original canonical.ImagePart, asset replay.ResolvedMediaAsset, limits provider.MediaLimits, decisions *[]compat.Decision, placement canonical.ImagePlacement) (canonical.ImagePart, error) {
+func bindPreparedAsset(state *mediaPreparationState, position canonical.RequestPartRef, sourceURL string, original canonical.ImagePart, asset session.ResolvedMediaAsset, limits provider.MediaLimits, decisions *[]compat.Decision, placement canonical.ImagePlacement) (canonical.ImagePart, error) {
 	inspected, err := provider.InspectImage(asset.MediaType(), asset.Bytes(), limits)
 	if err != nil {
-		return canonical.ImagePart{}, preparationError(PreparationRequest, "resolved replay media is invalid: %w", err)
+		return canonical.ImagePart{}, preparationError(PreparationRequest, "resolved checkpoint media is invalid: %w", err)
 	}
 	return bindPreparedImage(state, position, sourceURL, original, inspected, limits, decisions, placement)
 }

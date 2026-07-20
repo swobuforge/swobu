@@ -17,7 +17,7 @@ type ResponseBinding struct {
 }
 
 // NewBoundResponseIdentityStream is the sole response identity mutation point
-// before validation, replay capture, and projection.
+// before validation, checkpoint commit, and projection.
 func NewBoundResponseIdentityStream(upstream ResponseStream, binding ResponseBinding) *BoundResponseIdentityStream {
 	return &BoundResponseIdentityStream{upstream: upstream, binding: binding}
 }

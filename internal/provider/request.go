@@ -8,7 +8,7 @@ import (
 
 // Request contains only the provider-facing input for one provider call.
 // Canonical is either complete semantic state or an exact-target delta whose
-// previous-response refinement was already validated by replay preparation.
+// previous-response refinement was already validated by session resolution.
 type Request struct {
 	// ExchangeID correlates progressive response events for this invocation. It
 	// is execution context, not part of canonical request semantics.

@@ -8,7 +8,7 @@ import (
 )
 
 // ValidatedResponseStream enforces response/item/content lifecycle invariants
-// before each event reaches either client projection or replay capture.
+// before each event reaches either client projection or checkpoint commit.
 type ValidatedResponseStream struct {
 	upstream     ResponseStream
 	responseID   EnvelopeID
@@ -23,7 +23,7 @@ type ValidatedResponseStream struct {
 }
 
 // NewValidatedResponseStream wraps provider-decoded canonical events at the
-// shared delivery/replay seam.
+// shared delivery/checkpoint seam.
 func NewValidatedResponseStream(upstream ResponseStream) *ValidatedResponseStream {
 	return &ValidatedResponseStream{upstream: upstream}
 }

@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-const testReplaySemanticLimit = int64(40 << 20)
+const testCheckpointLimit = int64(40 << 20)
 
 func successfulResponseEvents(t *testing.T, nativeID string) []canonical.Event {
 	t.Helper()
@@ -32,11 +32,11 @@ func successfulResponseEvents(t *testing.T, nativeID string) []canonical.Event {
 	}
 }
 
-func TestCommitReaderStreamsBeforeCaptureAndCommitsBeforeTerminalSuccess(t *testing.T) {
+func TestCheckpointStreamStreamsBeforeCommitAndCommitsBeforeTerminalSuccess(t *testing.T) {
 	store := newSpyStore()
 	binding := canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_swobu")}
 	bound := canonical.NewBoundResponseIdentityStream(canonical.NewSliceEventReader(successfulResponseEvents(t, "")), binding)
-	reader := NewCommitReader(bound, TerminalCommitConfig{WorkspaceSlug: "workspace", Binding: binding, Store: store, MaxSemanticBytes: testReplaySemanticLimit})
+	reader := NewCheckpointStream(bound, CheckpointConfig{WorkspaceSlug: "workspace", Binding: binding, Store: store, MaxBytes: testCheckpointLimit})
 
 	for index := 0; index < 7; index++ {
 		event, err := reader.Next(context.Background())
@@ -60,11 +60,11 @@ func TestCommitReaderStreamsBeforeCaptureAndCommitsBeforeTerminalSuccess(t *test
 	}
 }
 
-func TestCommitReaderCloseBeforeTerminalDoesNotCommit(t *testing.T) {
+func TestCheckpointStreamCloseBeforeTerminalDoesNotCommit(t *testing.T) {
 	store := newSpyStore()
 	binding := canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_swobu")}
 	bound := canonical.NewBoundResponseIdentityStream(canonical.NewSliceEventReader(successfulResponseEvents(t, "")), binding)
-	reader := NewCommitReader(bound, TerminalCommitConfig{WorkspaceSlug: "workspace", Binding: binding, Store: store, MaxSemanticBytes: testReplaySemanticLimit})
+	reader := NewCheckpointStream(bound, CheckpointConfig{WorkspaceSlug: "workspace", Binding: binding, Store: store, MaxBytes: testCheckpointLimit})
 	if _, err := reader.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -72,11 +72,11 @@ func TestCommitReaderCloseBeforeTerminalDoesNotCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(store.calls) != 0 {
-		t.Fatalf("client cancellation committed replay: %v", store.calls)
+		t.Fatalf("client cancellation committed checkpoint: %v", store.calls)
 	}
 }
 
-func collectCommitReader(t *testing.T, reader *CommitReader) []canonical.Event {
+func collectCheckpointStream(t *testing.T, reader canonical.ResponseStream) []canonical.Event {
 	t.Helper()
 	var events []canonical.Event
 	for {
@@ -91,20 +91,20 @@ func collectCommitReader(t *testing.T, reader *CommitReader) []canonical.Event {
 	}
 }
 
-func TestCommitReaderObservesBoundIdentityAndStoresCompletedCheckpoints(t *testing.T) {
+func TestCheckpointStreamObservesBoundIdentityAndStoresCompletedCheckpoints(t *testing.T) {
 	store := newSpyStore()
 	binding := canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_swobu"), TargetID: "target", TargetVersion: 4}
 	bound := canonical.NewBoundResponseIdentityStream(canonical.NewSliceEventReader(successfulResponseEvents(t, "provider_1")), binding)
-	reader := NewCommitReader(bound, TerminalCommitConfig{
-		WorkspaceSlug:    "workspace",
-		Binding:          binding,
-		Store:            store,
-		SemanticRequest:  requestWithURLImage(t, "https://example.test/image.png"),
-		ResolvedMedia:    mustResolvedMedia(t, canonical.RequestPartRef{Item: 0, Part: 0}, "https://example.test/image.png", canonical.ImageMediaPNG, []byte("exact")),
-		MaxSemanticBytes: testReplaySemanticLimit,
+	reader := NewCheckpointStream(bound, CheckpointConfig{
+		WorkspaceSlug: "workspace",
+		Binding:       binding,
+		Store:         store,
+		Request:       requestWithURLImage(t, "https://example.test/image.png"),
+		ResolvedMedia: mustResolvedMedia(t, canonical.RequestPartRef{Item: 0, Part: 0}, "https://example.test/image.png", canonical.ImageMediaPNG, []byte("exact")),
+		MaxBytes:      testCheckpointLimit,
 	})
 
-	events := collectCommitReader(t, reader)
+	events := collectCheckpointStream(t, reader)
 	if len(events) != 8 {
 		t.Fatalf("events=%d, want 8", len(events))
 	}
@@ -151,10 +151,10 @@ func mustResolvedMedia(t *testing.T, position canonical.RequestPartRef, sourceUR
 
 type rejectingStore struct{ err error }
 
-func (s rejectingStore) Get(context.Context, string, canonical.SwobuResponseID) (Record, bool, error) {
-	return Record{}, false, nil
+func (s rejectingStore) Get(context.Context, string, canonical.SwobuResponseID) (Checkpoint, bool, error) {
+	return Checkpoint{}, false, nil
 }
-func (s rejectingStore) Put(context.Context, string, Record) error { return s.err }
+func (s rejectingStore) Put(context.Context, string, Checkpoint) error { return s.err }
 
 type failingResponseStream struct {
 	events []canonical.Event
@@ -172,33 +172,33 @@ func (s *failingResponseStream) Next(context.Context) (canonical.Event, error) {
 }
 func (*failingResponseStream) Close(context.Context) error { return nil }
 
-func TestCommitReaderReplacesCompletedTerminalWhenCommitFails(t *testing.T) {
+func TestCheckpointStreamReplacesCompletedTerminalWhenCommitFails(t *testing.T) {
 	binding := canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_swobu")}
 	bound := canonical.NewBoundResponseIdentityStream(canonical.NewSliceEventReader(successfulResponseEvents(t, "")), binding)
-	reader := NewCommitReader(bound, TerminalCommitConfig{
-		WorkspaceSlug:    "workspace",
-		Binding:          binding,
-		Store:            rejectingStore{err: errors.New("disk full")},
-		MaxSemanticBytes: testReplaySemanticLimit,
+	reader := NewCheckpointStream(bound, CheckpointConfig{
+		WorkspaceSlug: "workspace",
+		Binding:       binding,
+		Store:         rejectingStore{err: errors.New("disk full")},
+		MaxBytes:      testCheckpointLimit,
 	})
-	events := collectCommitReader(t, reader)
+	events := collectCheckpointStream(t, reader)
 	if len(events) != 9 {
 		t.Fatalf("events=%d, want 9", len(events))
 	}
 	failure, ok := events[len(events)-2].Payload.(canonical.ErrorPayload)
-	if !ok || failure.Code != "replay_capture_failed" {
+	if !ok || failure.Code != "checkpoint_commit_failed" {
 		t.Fatalf("failure=%#v", events[len(events)-2])
 	}
 	end := events[len(events)-1].Payload.(canonical.EnvelopeEndPayload)
-	if end.Status != canonical.EnvelopeStatusError || !IsTerminalCommitFailure(reader.CommitError()) {
+	if end.Status != canonical.EnvelopeStatusError || !IsCheckpointCommitFailure(reader.CommitError()) {
 		t.Fatalf("end=%#v commit error=%v", end, reader.CommitError())
 	}
 }
 
-func TestCommitReaderFailsClosedWhenProviderEndsBeforeTerminal(t *testing.T) {
+func TestCheckpointStreamFailsClosedWhenProviderEndsBeforeTerminal(t *testing.T) {
 	events := successfulResponseEvents(t, "")[:3]
-	reader := NewCommitReader(canonical.NewSliceEventReader(events), TerminalCommitConfig{})
-	got := collectCommitReader(t, reader)
+	reader := NewCheckpointStream(canonical.NewSliceEventReader(events), CheckpointConfig{})
+	got := collectCheckpointStream(t, reader)
 	if len(got) != 5 {
 		t.Fatalf("events=%d, want 5", len(got))
 	}
@@ -208,10 +208,10 @@ func TestCommitReaderFailsClosedWhenProviderEndsBeforeTerminal(t *testing.T) {
 	}
 }
 
-func TestCommitReaderTurnsProviderErrorAfterStartIntoTerminalFailure(t *testing.T) {
+func TestCheckpointStreamTurnsProviderErrorAfterStartIntoTerminalFailure(t *testing.T) {
 	upstream := &failingResponseStream{events: successfulResponseEvents(t, "")[:3], err: errors.New("decode failed")}
-	reader := NewCommitReader(upstream, TerminalCommitConfig{})
-	got := collectCommitReader(t, reader)
+	reader := NewCheckpointStream(upstream, CheckpointConfig{})
+	got := collectCheckpointStream(t, reader)
 	if len(got) != 5 {
 		t.Fatalf("events=%d, want 5", len(got))
 	}
@@ -221,20 +221,20 @@ func TestCommitReaderTurnsProviderErrorAfterStartIntoTerminalFailure(t *testing.
 	}
 }
 
-func TestCommitReaderRejectsOversizedSemanticRecordBeforeStore(t *testing.T) {
+func TestCheckpointStreamRejectsOversizedCheckpointBeforeStore(t *testing.T) {
 	store := newSpyStore()
 	binding := canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_swobu")}
 	bound := canonical.NewBoundResponseIdentityStream(canonical.NewSliceEventReader(successfulResponseEvents(t, "")), binding)
-	reader := NewCommitReader(bound, TerminalCommitConfig{
-		WorkspaceSlug:    "workspace",
-		Binding:          binding,
-		Store:            store,
-		SemanticRequest:  makeRequest("m", makeItems(strings.Repeat("x", int(testReplaySemanticLimit)+1)), nil),
-		MaxSemanticBytes: testReplaySemanticLimit,
+	reader := NewCheckpointStream(bound, CheckpointConfig{
+		WorkspaceSlug: "workspace",
+		Binding:       binding,
+		Store:         store,
+		Request:       makeRequest("m", makeItems(strings.Repeat("x", int(testCheckpointLimit)+1)), nil),
+		MaxBytes:      testCheckpointLimit,
 	})
-	got := collectCommitReader(t, reader)
+	got := collectCheckpointStream(t, reader)
 	failure := got[len(got)-2].Payload.(canonical.ErrorPayload)
-	if failure.Code != "replay_capture_failed" || len(store.calls) != 0 {
+	if failure.Code != "checkpoint_commit_failed" || len(store.calls) != 0 {
 		t.Fatalf("failure=%#v store calls=%v", failure, store.calls)
 	}
 }

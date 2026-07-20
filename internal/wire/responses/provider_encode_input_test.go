@@ -19,7 +19,7 @@ func TestEncode_UsesResponsesRefinementWhenPresent(t *testing.T) {
 	})
 
 	// The typed Responses refinement supplies the provider wire ID; the Swobu ID
-	// remains the replay/client identity.
+	// remains the checkpoint/client identity.
 	input := wire.ProviderEncodeInput{Request: req}
 	result, err := ProviderRequestDocumentEncoder{}.EncodeProviderRequestDocument(input, delivery.BufferedDelivery(), "ex-1")
 	if err != nil {

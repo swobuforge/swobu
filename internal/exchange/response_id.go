@@ -1,4 +1,4 @@
-package replay
+package exchange
 
 import (
 	"context"
@@ -10,7 +10,8 @@ import (
 )
 
 // defaultResponseIDGenerator produces opaque crypto-random IDs in production.
-// The exchange path allocates them early and treats them as external lookup keys.
+// Exchange allocates response identity before provider execution and checkpoint
+// commit; session storage only indexes the identity after it is bound.
 type defaultResponseIDGenerator struct{}
 
 func (defaultResponseIDGenerator) NewSwobuResponseID(_ context.Context, _ string) (canonical.SwobuResponseID, error) {
@@ -21,13 +22,13 @@ func (defaultResponseIDGenerator) NewSwobuResponseID(_ context.Context, _ string
 	return canonical.SwobuResponseID(fmt.Sprintf("resp_%s", hex.EncodeToString(entropy[:]))), nil
 }
 
-// NewDefaultSwobuResponseIDGenerator returns the default crypto-random response ID
-// generator suitable for production bootstrap.
-func NewDefaultSwobuResponseIDGenerator() SwobuResponseIDGenerator {
+// NewDefaultResponseIDGenerator returns the production response-ID generator.
+func NewDefaultResponseIDGenerator() ResponseIDGenerator {
 	return defaultResponseIDGenerator{}
 }
 
-// SwobuResponseIDGenerator allocates stable client-visible response IDs.
-type SwobuResponseIDGenerator interface {
+// ResponseIDGenerator allocates stable client-visible response IDs before
+// provider execution begins.
+type ResponseIDGenerator interface {
 	NewSwobuResponseID(ctx context.Context, exchangeID string) (canonical.SwobuResponseID, error)
 }

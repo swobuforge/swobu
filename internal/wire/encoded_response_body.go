@@ -70,7 +70,7 @@ func (b *EncodedResponseBody) Close() error {
 	return b.closeErr
 }
 
-// TerminalError reports a replay or provider terminal failure discovered only
+// TerminalError reports a checkpoint or provider terminal failure discovered only
 // after the encoded body was consumed.
 func (b *EncodedResponseBody) TerminalError() error { return b.terminal }
 

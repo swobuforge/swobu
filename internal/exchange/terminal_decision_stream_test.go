@@ -79,7 +79,7 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 		backend:     provider.Backend{Target: in.Target},
 		request:     provider.Request{Canonical: in.Request, Delivery: in.ProviderDelivery},
 		clientCodec: pullingClientCodec{}, clientDelivery: in.ClientDelivery,
-		exchangeID: in.ExchangeID, workspaceSlug: in.WorkspaceSlug, replayRequest: in.Request,
+		exchangeID: in.ExchangeID, workspaceSlug: in.WorkspaceSlug, fullRequest: in.Request,
 	}
 	out, err := encodeClientOutput(context.Background(), call, newTerminalCompatibilityStream(reader, decisions, sink, in.ExchangeID), true, sink)
 	if err != nil {

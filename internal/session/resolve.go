@@ -1,73 +1,80 @@
-package replay
+package session
 
 import (
+	"errors"
 	"fmt"
-	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
-// Prepared contains both the complete semantic request and the inherited
-// current delta. Exact backend resolution chooses which representation is safe
-// to send; replay lookup never predicts backend compatibility.
-type Prepared struct {
-	Semantic      canonical.CanonicalRequest
+// ResolvedRequest contains the complete canonical request and the current delta
+// with any exact-target native-resumption refinement inherited from a checkpoint.
+type ResolvedRequest struct {
+	Full          canonical.CanonicalRequest
 	Delta         canonical.CanonicalRequest
 	ResolvedMedia ResolvedMedia
 }
 
-// PreferredForTarget selects canonical replay content for one exact target
-// generation. Replay owns only Semantic-versus-Delta choice; exchange owns the
-// provider request and delivery construction.
-func (p Prepared) PreferredForTarget(target provider.TargetSnapshot) canonical.CanonicalRequest {
+// ForTarget returns the valid request representation for one exact target
+// generation. A matching native refinement selects Delta; every other target
+// receives Full for full-history execution.
+func (p ResolvedRequest) ForTarget(target provider.TargetSnapshot) canonical.CanonicalRequest {
 	if previous, ok := p.Delta.PreviousResponse(); ok && previous.Responses != nil &&
 		previous.Responses.AppliesTo(target.TargetID, target.TargetVersion) {
 		return p.Delta.Clone()
 	}
-	return p.Semantic.Clone()
+	return p.Full.Clone()
 }
 
-// PreviousSwobuResponseID returns the explicit workspace-local replay capability carried by
-// the canonical request, if present. It performs no store access.
+// PreviousSwobuResponseID returns the explicit workspace-local checkpoint key
+// carried by the canonical request, if present. It performs no store access.
 func PreviousSwobuResponseID(request canonical.CanonicalRequest) (canonical.SwobuResponseID, bool, error) {
 	prev, ok := request.PreviousResponse()
 	if !ok {
 		return "", false, nil
 	}
-	if err := prev.ValidateReplaySelector(); err != nil {
+	if err := prev.ValidatePreviousResponseSelector(); err != nil {
 		return "", false, canonical.BadRequest("previous_response_id is empty")
 	}
 	return prev.SwobuID, true, nil
 }
 
-// PrepareCurrent constructs target-independent replay state for a request that
-// does not reference a prior replay record.
-func PrepareCurrent(request canonical.CanonicalRequest) Prepared {
+// Begin resolves a request that has no predecessor checkpoint. A request that
+// names one belongs on the Resume path and is rejected as an orchestration bug.
+func Begin(request canonical.CanonicalRequest) (ResolvedRequest, error) {
+	if _, ok := request.PreviousResponse(); ok {
+		return ResolvedRequest{}, errors.New("session begin request contains previous response")
+	}
 	complete := withoutPreviousResponse(request)
-	return Prepared{Semantic: complete, Delta: requestWithoutPreviousResponse(request)}
+	return ResolvedRequest{Full: complete, Delta: requestWithoutPreviousResponse(request)}, nil
 }
 
-// PrepareFromRecord materializes one immutable replay snapshot already loaded
-// by exchange orchestration. It performs no store access.
-func PrepareFromRecord(request canonical.CanonicalRequest, requestedSwobuResponseID canonical.SwobuResponseID, previous Record) (Prepared, error) {
-	if previous.ExpiresAt != nil && !previous.ExpiresAt.After(time.Now().UTC()) {
-		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
+// Resume applies request to one already-loaded immutable checkpoint. The
+// request and checkpoint response are the two identity sources; equality is
+// proven here once and no store access occurs.
+func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (ResolvedRequest, error) {
+	requestedSwobuResponseID, found, err := PreviousSwobuResponseID(request)
+	if err != nil {
+		return ResolvedRequest{}, err
 	}
-	response := previous.Response.Response()
+	if !found {
+		return ResolvedRequest{}, canonical.BadRequest("unknown previous_response_id")
+	}
+	response := checkpoint.Response.Response()
 	if err := response.ValidateCommittedResponse(); err != nil {
-		return Prepared{}, fmt.Errorf("invalid replay record response reference: %w", err)
+		return ResolvedRequest{}, fmt.Errorf("invalid session checkpoint response reference: %w", err)
 	}
 	if response.SwobuID != requestedSwobuResponseID {
-		return Prepared{}, canonical.BadRequest("unknown previous_response_id")
+		return ResolvedRequest{}, canonical.BadRequest("unknown previous_response_id")
 	}
-	if err := previous.ResolvedMedia.ValidateForRequest(previous.Request); err != nil {
-		return Prepared{}, fmt.Errorf("invalid replay record media: %w", err)
+	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
+		return ResolvedRequest{}, fmt.Errorf("invalid session checkpoint media: %w", err)
 	}
-	return Prepared{
-		Semantic:      materialize(previous, request),
-		Delta:         inheritRequestBands(previous.Request, request, &response),
-		ResolvedMedia: previous.ResolvedMedia.Clone(),
+	return ResolvedRequest{
+		Full:          materialize(checkpoint, request),
+		Delta:         inheritRequestBands(checkpoint.Request, request, &response),
+		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
 	}, nil
 }
 
@@ -111,7 +118,7 @@ func inheritRequestBands(previous canonical.CanonicalRequest, current canonical.
 	})
 }
 
-func materialize(previous Record, current canonical.CanonicalRequest) canonical.CanonicalRequest {
+func materialize(previous Checkpoint, current canonical.CanonicalRequest) canonical.CanonicalRequest {
 	items := cloneCanonicalItems(previous.Request.Items())
 	items = append(items, cloneCanonicalItems(previous.Response.Items())...)
 	items = append(items, cloneCanonicalItems(current.Items())...)
@@ -131,7 +138,7 @@ func materialize(previous Record, current canonical.CanonicalRequest) canonical.
 func mustToolSet(tools []canonical.ToolDeclaration) canonical.ToolSet {
 	set, err := canonical.NewToolSet(tools)
 	if err != nil {
-		panic("replay received invalid canonical tool declarations: " + err.Error())
+		panic("session resolution received invalid canonical tool declarations: " + err.Error())
 	}
 	return set
 }

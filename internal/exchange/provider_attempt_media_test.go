@@ -14,7 +14,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire/messages"
 )
 
@@ -41,11 +42,11 @@ func TestPrepareImagesReusesResolvedBytesAcrossCandidates(t *testing.T) {
 	var data bytes.Buffer
 	_ = png.Encode(&data, image.NewNRGBA(image.Rect(0, 0, 1, 1)))
 	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{Bytes: data.Bytes(), DeclaredMediaType: canonical.ImageMediaPNG}}
-	_, cache, _, _, err := prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, replay.ResolvedMedia{})
+	_, cache, _, _, err := prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, err = prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, cache, replay.ResolvedMedia{})
+	_, _, _, _, err = prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, cache, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +59,11 @@ func TestPrepareImagesClassifiesMaterializationFailureWithoutURLPassThrough(t *t
 	urlImage, _ := canonical.NewURLImage("https://example.test/image.png", canonical.Unspecified[canonical.ImageDetail]())
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(urlImage)})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{message}})
-	_, _, _, _, err := prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), failingImageFetcher{err: context.DeadlineExceeded}, nil, replay.ResolvedMedia{})
+	_, _, _, _, err := prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), failingImageFetcher{err: context.DeadlineExceeded}, nil, session.ResolvedMedia{})
 	if preparationErrorScope(err) != PreparationRequest {
 		t.Fatalf("fetch error scope = %q, want request", preparationErrorScope(err))
 	}
-	_, _, _, _, err = prepareImages(context.Background(), request, protocolkind.Responses, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), failingImageFetcher{err: context.DeadlineExceeded}, nil, replay.ResolvedMedia{})
+	_, _, _, _, err = prepareImages(context.Background(), request, protocolkind.Responses, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), failingImageFetcher{err: context.DeadlineExceeded}, nil, session.ResolvedMedia{})
 	if preparationErrorScope(err) != PreparationRequest {
 		t.Fatalf("Responses materialization error scope = %q, want request", preparationErrorScope(err))
 	}
@@ -80,7 +81,7 @@ func TestPrepareImagesTreatsAllMaterializationFailuresAsRequestScoped(t *testing
 		"invalid bytes":   {policy: provider.DefaultImageFetchPolicy(), fetcher: invalidFetcher},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, _, _, err := prepareImages(context.Background(), request, protocolkind.Responses, test.policy, provider.DefaultMediaLimits(), test.fetcher, nil, replay.ResolvedMedia{})
+			_, _, _, _, err := prepareImages(context.Background(), request, protocolkind.Responses, test.policy, provider.DefaultMediaLimits(), test.fetcher, nil, session.ResolvedMedia{})
 			if preparationErrorScope(err) != PreparationRequest {
 				t.Fatalf("materialization error scope = %q, want request: %v", preparationErrorScope(err), err)
 			}
@@ -88,9 +89,49 @@ func TestPrepareImagesTreatsAllMaterializationFailuresAsRequestScoped(t *testing
 	}
 }
 
+func TestPreparedCheckpointOverflowIsRequestScoped(t *testing.T) {
+	request, imageBytes := testURLImageRequest(t, "https://example.test/checkpoint.png")
+	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{DeclaredMediaType: canonical.ImageMediaPNG, Bytes: imageBytes}}
+	preparedRequest, _, usedMedia, _, err := prepareImages(
+		context.Background(), request, protocolkind.Responses,
+		provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prepared := mustBeginSession(t, request)
+	limit := int64(1)
+	for ; limit < 1<<20; limit++ {
+		if session.ValidateResolvedRequestSize(prepared.Full, session.ResolvedMedia{}, limit) == nil {
+			break
+		}
+	}
+	if err := session.ValidateResolvedRequestSize(prepared.Full, usedMedia, limit); err == nil {
+		t.Fatal("materialized checkpoint unexpectedly fits the request-only limit")
+	}
+
+	state := reducerTestState(t)
+	state.input.request = request
+	state.route = routePlan{targets: []routing.Target{requestpathTarget(t, "checkpoint-overflow")}}
+	state.prepared = &prepared
+	runner := reducerRuntime()
+	runner.Policy.Limits.MaxCheckpointBytes = limit
+	_, _, _, _, err = prepareProviderCall(state, providerCallSelection{}, runner, &providerAttemptPrepared{
+		request:   preparedRequest,
+		usedMedia: usedMedia,
+	})
+	if preparationErrorScope(err) != PreparationRequest {
+		t.Fatalf("checkpoint overflow scope = %q, want request: %v", preparationErrorScope(err), err)
+	}
+	if !strings.Contains(err.Error(), "checkpoint prepared-request preflight") {
+		t.Fatalf("checkpoint overflow error = %v", err)
+	}
+}
+
 func TestPrepareImagesHistoricalBindingPreventsURLRefetch(t *testing.T) {
 	request, imageBytes := testURLImageRequest(t, "https://example.test/history.png")
-	historical, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/history.png", canonical.ImageMediaPNG, imageBytes)
+	historical, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/history.png", canonical.ImageMediaPNG, imageBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +151,7 @@ func TestPrepareImagesSameURLAtNewOccurrenceFetchesCurrentAsset(t *testing.T) {
 	first, bytesA := testURLImageRequest(t, "https://example.test/current.png")
 	secondMessage := first.Items()[0]
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{first.Items()[0], secondMessage}})
-	historical, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{Item: 0}, "https://example.test/current.png", canonical.ImageMediaPNG, bytesA)
+	historical, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{Item: 0}, "https://example.test/current.png", canonical.ImageMediaPNG, bytesA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +180,7 @@ func TestPrepareImagesSameURLAtNewOccurrenceFetchesCurrentAsset(t *testing.T) {
 	}
 }
 
-func TestNativeContinuationDoesNotApplyFullHistoryMediaCoordinates(t *testing.T) {
+func TestNativeResumptionDoesNotApplyFullHistoryMediaCoordinates(t *testing.T) {
 	request, imageBytes := testURLImageRequest(t, "https://example.test/current.png")
 	request = canonical.NewCanonicalRequest(canonical.RequestParams{
 		Items: request.Items(),
@@ -147,7 +188,7 @@ func TestNativeContinuationDoesNotApplyFullHistoryMediaCoordinates(t *testing.T)
 			ProviderResponseID: "provider_1", TargetID: "target", TargetVersion: 1,
 		}},
 	})
-	historical, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/current.png", canonical.ImageMediaPNG, imageBytes)
+	historical, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/current.png", canonical.ImageMediaPNG, imageBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,13 +197,13 @@ func TestNativeContinuationDoesNotApplyFullHistoryMediaCoordinates(t *testing.T)
 	}
 }
 
-func TestNativeContinuationMediaBindingsRebaseToSemanticSuffix(t *testing.T) {
+func TestNativeResumptionMediaBindingsRebaseToSemanticSuffix(t *testing.T) {
 	previous, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("previous")})
 	current, imageBytes := testURLImageRequest(t, "https://example.test/current.png")
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{previous, current.Items()[0]}})
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Items: current.Items()})
-	prepared := replay.Prepared{Semantic: semantic, Delta: delta}
-	used, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/current.png", canonical.ImageMediaPNG, imageBytes)
+	prepared := session.ResolvedRequest{Full: semantic, Delta: delta}
+	used, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/current.png", canonical.ImageMediaPNG, imageBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +220,7 @@ func TestNativeContinuationMediaBindingsRebaseToSemanticSuffix(t *testing.T) {
 	}
 }
 
-func TestNativeContinuationMediaRebasePreservesExistingHistoryAndPartIndexes(t *testing.T) {
+func TestNativeResumptionMediaRebasePreservesExistingHistoryAndPartIndexes(t *testing.T) {
 	previous, previousBytes := testURLImageRequest(t, "https://example.test/previous.png")
 	currentURL, currentBytes := testURLImageRequest(t, "https://example.test/current.png")
 	currentMessage, _ := currentURL.Items()[0].Message()
@@ -191,12 +232,12 @@ func TestNativeContinuationMediaRebasePreservesExistingHistoryAndPartIndexes(t *
 	})
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{previous.Items()[0], current}})
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{current}})
-	prepared := replay.Prepared{Semantic: semantic, Delta: delta}
-	historical, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/previous.png", canonical.ImageMediaPNG, previousBytes)
+	prepared := session.ResolvedRequest{Full: semantic, Delta: delta}
+	historical, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/previous.png", canonical.ImageMediaPNG, previousBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	used, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{Part: 1}, "https://example.test/current.png", canonical.ImageMediaPNG, currentBytes)
+	used, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{Part: 1}, "https://example.test/current.png", canonical.ImageMediaPNG, currentBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,22 +267,22 @@ func TestNativeContinuationMediaRebasePreservesExistingHistoryAndPartIndexes(t *
 	}
 }
 
-func TestNativeContinuationMediaRebaseRejectsNonSuffixDelta(t *testing.T) {
+func TestNativeResumptionMediaRebaseRejectsNonSuffixDelta(t *testing.T) {
 	semanticItem, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("semantic")})
 	deltaItem, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("different")})
-	prepared := replay.Prepared{
-		Semantic: canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{semanticItem}}),
-		Delta:    canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{deltaItem}}),
+	prepared := session.ResolvedRequest{
+		Full:  canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{semanticItem}}),
+		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{deltaItem}}),
 	}
-	if _, err := rebaseAttemptMedia(prepared, prepared.Delta, replay.ResolvedMedia{}); err == nil {
+	if _, err := rebaseAttemptMedia(prepared, prepared.Delta, session.ResolvedMedia{}); err == nil {
 		t.Fatal("non-suffix native delta was accepted")
 	}
 }
 
 func TestFullHistoryMediaBindingsKeepSemanticPositions(t *testing.T) {
 	request, imageBytes := testURLImageRequest(t, "https://example.test/full.png")
-	prepared := replay.Prepared{Semantic: request, Delta: canonical.NewCanonicalRequest(canonical.RequestParams{})}
-	used, err := (replay.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/full.png", canonical.ImageMediaPNG, imageBytes)
+	prepared := session.ResolvedRequest{Full: request, Delta: canonical.NewCanonicalRequest(canonical.RequestParams{})}
+	used, err := (session.ResolvedMedia{}).Bind(canonical.RequestPartRef{}, "https://example.test/full.png", canonical.ImageMediaPNG, imageBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +302,7 @@ func TestWinningAttemptReusesAndBindsPreviouslyFetchedAsset(t *testing.T) {
 		t.Fatal(err)
 	}
 	loserCache := mediaFetchCache{"https://example.test/winner.png": asset}
-	prepared, _, used, _, err := prepareImages(context.Background(), request, protocolkind.Responses, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, loserCache, replay.ResolvedMedia{})
+	prepared, _, used, _, err := prepareImages(context.Background(), request, protocolkind.Responses, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, loserCache, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +338,7 @@ func TestPrepareImagesRejectsInvalidInlineBytesAsRequestError(t *testing.T) {
 	inline, _ := canonical.NewInlineImage(canonical.ImageMediaPNG, []byte("not-a-png"), canonical.Unspecified[canonical.ImageDetail]())
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(inline)})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{message}})
-	_, _, _, _, err := prepareImages(context.Background(), request, protocolkind.Responses, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, nil, replay.ResolvedMedia{})
+	_, _, _, _, err := prepareImages(context.Background(), request, protocolkind.Responses, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, nil, session.ResolvedMedia{})
 	if preparationErrorScope(err) != PreparationRequest {
 		t.Fatalf("inline error scope = %q, want request", preparationErrorScope(err))
 	}
@@ -319,7 +360,7 @@ func TestPrepareImagesMaterializesURLForMessagesAndKeepsSourceRequest(t *testing
 	}
 	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{DeclaredMediaType: canonical.ImageMediaPNG, Bytes: imageBytes.Bytes()}}
 
-	prepared, _, resolved, decisions, err := prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, replay.ResolvedMedia{})
+	prepared, _, resolved, decisions, err := prepareImages(context.Background(), request, protocolkind.Messages, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +415,7 @@ func TestPrepareImagesRejectsChatCompletionsToolResultImagePlacement(t *testing.
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{result}})
-	_, _, _, _, err = prepareImages(context.Background(), request, protocolkind.ChatCompletions, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, nil, replay.ResolvedMedia{})
+	_, _, _, _, err = prepareImages(context.Background(), request, protocolkind.ChatCompletions, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, nil, session.ResolvedMedia{})
 	if err == nil {
 		t.Fatal("Chat Completions accepted a tool-result image by relocating it")
 	}

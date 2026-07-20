@@ -13,7 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
@@ -89,14 +89,14 @@ func TestDecodeStreamRetainsInvocationCancellation(t *testing.T) {
 	}
 }
 
-func continuationTestTarget(t *testing.T, protocol protocolkind.ProtocolKind) provider.TargetSnapshot {
+func resumptionTestTarget(t *testing.T, protocol protocolkind.ProtocolKind) provider.TargetSnapshot {
 	t.Helper()
 	target := provider.NewTargetSnapshot("target-test", "test", "https://example.test", "account-a", protocol, "")
 	target.Model = "m"
 	return target
 }
 
-func continuationPrepared(t *testing.T, target provider.TargetSnapshot, withResponsesRefinement bool) replay.Prepared {
+func resolvedSessionRequest(t *testing.T, target provider.TargetSnapshot, withResponsesRefinement bool) session.ResolvedRequest {
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{
 		canonicaltest.Message(t, canonical.MessageRoleUser, "turn one"),
 		canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one"),
@@ -109,10 +109,10 @@ func continuationPrepared(t *testing.T, target provider.TargetSnapshot, withResp
 		}}
 	}
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: previous})
-	return replay.Prepared{Semantic: semantic, Delta: delta}
+	return session.ResolvedRequest{Full: semantic, Delta: delta}
 }
 
-func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
+func TestStatelessBackendCodecsReceiveFullHistory(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		providerID string
@@ -122,8 +122,8 @@ func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
 		{name: "messages", providerID: "anthropic", protocol: protocolkind.Messages},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := continuationTestTarget(t, tc.protocol)
-			request := provider.Request{Canonical: continuationPrepared(t, target, false).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
+			target := resumptionTestTarget(t, tc.protocol)
+			request := provider.Request{Canonical: resolvedSessionRequest(t, target, false).ForTarget(target), Delivery: delivery.BufferedDelivery()}
 			codec := Codec{ProviderID: tc.providerID, Protocol: tc.protocol}
 			if tc.protocol == protocolkind.ChatCompletions {
 				codec.Options.ChatCompletionsTokenField = chatcompletions.MaxOutputTokensFieldCompletion
@@ -134,24 +134,24 @@ func TestStatelessBackendCodecsReceiveFullSemanticReplay(t *testing.T) {
 			}
 			raw := string(document.RawBytes())
 			if _, ok := request.Canonical.PreviousResponse(); ok || !strings.Contains(raw, "turn one") || !strings.Contains(raw, "answer one") || !strings.Contains(raw, "turn two") {
-				t.Fatalf("stateless replay lost semantic history: %s", raw)
+				t.Fatalf("full-history execution lost semantic history: %s", raw)
 			}
 		})
 	}
 }
 
 func TestResponsesBackendWithMatchingCanonicalRefinementSendsDeltaAndPreviousResponseID(t *testing.T) {
-	target := continuationTestTarget(t, protocolkind.Responses)
-	request := provider.Request{Canonical: continuationPrepared(t, target, true).PreferredForTarget(target), Delivery: delivery.BufferedDelivery()}
+	target := resumptionTestTarget(t, protocolkind.Responses)
+	request := provider.Request{Canonical: resolvedSessionRequest(t, target, true).ForTarget(target), Delivery: delivery.BufferedDelivery()}
 	document, _, err := (Codec{ProviderID: "openai", Protocol: protocolkind.Responses}).Encode(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw := string(document.RawBytes())
 	if !strings.Contains(raw, `"previous_response_id":"provider_previous"`) || !strings.Contains(raw, "turn two") {
-		t.Fatalf("native continuation was not lowered: %s", raw)
+		t.Fatalf("native resumption was not lowered: %s", raw)
 	}
 	if strings.Contains(raw, "turn one") || strings.Contains(raw, "answer one") {
-		t.Fatalf("native continuation redundantly sent semantic history: %s", raw)
+		t.Fatalf("native resumption redundantly sent semantic history: %s", raw)
 	}
 }

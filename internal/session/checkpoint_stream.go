@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"context"
@@ -12,16 +12,15 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-var errTerminalCommit = errors.New("replay terminal commit failed")
+var errCheckpointCommit = errors.New("checkpoint commit failed")
 
-// IsTerminalCommitFailure reports whether terminal response consumption failed
-// because the completed replay record could not be stored.
-func IsTerminalCommitFailure(err error) bool { return errors.Is(err, errTerminalCommit) }
+// IsCheckpointCommitFailure reports whether terminal response consumption
+// failed because the completed checkpoint could not be stored.
+func IsCheckpointCommitFailure(err error) bool { return errors.Is(err, errCheckpointCommit) }
 
-// TerminalCommitConfig configures how the CommitReader builds and stores a
-// replay record at terminal success.
-type TerminalCommitConfig struct {
-	// WorkspaceSlug is the validated replay partition resolved from the request URL.
+// CheckpointConfig configures construction of one checkpoint at terminal success.
+type CheckpointConfig struct {
+	// WorkspaceSlug is the validated checkpoint partition resolved from the request URL.
 	WorkspaceSlug string
 	// ExchangeID is the logical exchange identifier (for projection/logging only).
 	ExchangeID string
@@ -29,25 +28,27 @@ type TerminalCommitConfig struct {
 	Binding canonical.ResponseBinding
 	// Store receives the built record.
 	Store Store
-	// SemanticRequest is the complete semantic state that produced this response.
-	SemanticRequest  canonical.CanonicalRequest
-	ResolvedMedia    ResolvedMedia
-	MaxSemanticBytes int64
+	// Request is the complete semantic state that produced this response.
+	Request canonical.CanonicalRequest
+	// ResolvedMedia retains owned bytes bound to exact request occurrences.
+	ResolvedMedia ResolvedMedia
+	// MaxBytes bounds the estimated retained semantic state and owned media.
+	MaxBytes int64
 }
 
-// CommitReader wraps a canonical event stream and stores a replay record at
+// checkpointStream wraps a canonical event stream and stores a checkpoint at
 // terminal success. Non-terminal events stream immediately. Terminal success
 // is only returned after Store.Put succeeds.
 //
-// IDENTITY OBSERVATION: identity is already bound before this reader. Replay
-// validates it and never rewrites client-visible or native refinement facts.
+// IDENTITY OBSERVATION: identity is already bound before this stream. Session
+// commit validates it and never rewrites client-visible or native refinement facts.
 //
 // FAILURE: If Store.Put fails after partial streaming, the terminal event is
 // replaced with EventError followed by a synthetic EnvelopeEnd{Status: Error},
 // so every downstream encoder sees a proper terminal failure.
-type CommitReader struct {
+type checkpointStream struct {
 	upstream        canonical.ResponseStream
-	config          TerminalCommitConfig
+	config          CheckpointConfig
 	events          []canonical.Event // all events seen so far (for projection)
 	returned        int               // events already returned to downstream
 	committed       bool
@@ -55,32 +56,38 @@ type CommitReader struct {
 	commitErr       error
 }
 
-// NewCommitReader wraps upstream so that terminal success is gated on replay
-// store commit.
-func NewCommitReader(upstream canonical.ResponseStream, config TerminalCommitConfig) *CommitReader {
-	return &CommitReader{upstream: upstream, config: config}
+// CheckpointStream is a response stream whose terminal checkpoint commit
+// failure remains available to buffered and wire delivery adapters.
+type CheckpointStream interface {
+	canonical.ResponseStream
+	CommitError() error
 }
 
-// Validate reports whether the commit configuration can safely persist a
-// replay record.
-func (c TerminalCommitConfig) Validate() error {
+// NewCheckpointStream gates terminal success on checkpoint storage while
+// preserving immediate delivery of non-terminal response events.
+func NewCheckpointStream(upstream canonical.ResponseStream, config CheckpointConfig) CheckpointStream {
+	return &checkpointStream{upstream: upstream, config: config}
+}
+
+// Validate reports whether the configuration can safely persist a checkpoint.
+func (c CheckpointConfig) Validate() error {
 	if c.Store == nil {
-		return errors.New("replay commit store is nil")
+		return errors.New("checkpoint store is nil")
 	}
 	if strings.TrimSpace(c.WorkspaceSlug) == "" { // swobu:io-string source=domain
-		return errors.New("replay commit workspace slug is empty")
+		return errors.New("checkpoint workspace slug is empty")
 	}
 	if err := (canonical.ResponseRef{SwobuID: c.Binding.SwobuID}).ValidateCommittedResponse(); err != nil {
-		return fmt.Errorf("replay commit response reference: %w", err)
+		return fmt.Errorf("checkpoint response reference: %w", err)
 	}
-	if c.MaxSemanticBytes <= 0 {
-		return errors.New("replay commit semantic size limit must be positive")
+	if c.MaxBytes <= 0 {
+		return errors.New("checkpoint size limit must be positive")
 	}
 	return nil
 }
 
 // Next implements canonical.ResponseStream.
-func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
+func (r *checkpointStream) Next(ctx context.Context) (canonical.Event, error) {
 	if r.committed && r.returned < len(r.events) {
 		ev := r.events[r.returned]
 		r.returned++
@@ -93,7 +100,7 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 	ev, err := r.upstream.Next(ctx)
 	if errors.Is(err, io.EOF) {
 		if r.startedResponse && len(r.events) > 0 {
-			// A replay-addressed response that stops before terminal completion
+			// A checkpoint-producing response that stops before terminal completion
 			// must fail closed instead of surfacing a truncated success shape.
 			return r.synthesizeTerminalFailure(
 				r.events[len(r.events)-1],
@@ -130,10 +137,10 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 	if ev.Kind == canonical.EventResponseIdentity {
 		payload, ok := ev.Payload.(canonical.ResponseIdentityPayload)
 		if !ok || payload.Response.SwobuID != r.config.Binding.SwobuID {
-			return canonical.Event{}, fmt.Errorf("replay response identity does not match configured record ID")
+			return canonical.Event{}, fmt.Errorf("response identity does not match configured checkpoint ID")
 		}
 		if payload.Response.Responses != nil && (payload.Response.Responses.TargetID != r.config.Binding.TargetID || payload.Response.Responses.TargetVersion != r.config.Binding.TargetVersion) {
-			return canonical.Event{}, fmt.Errorf("replay response identity refinement does not match attempted target")
+			return canonical.Event{}, fmt.Errorf("response identity refinement does not match attempted target")
 		}
 	}
 
@@ -144,8 +151,8 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 			if err := r.doCommit(ctx); err != nil {
 				return r.synthesizeTerminalFailure(
 					ev,
-					"replay_capture_failed",
-					"response could not be captured for replay",
+					"checkpoint_commit_failed",
+					"response could not be saved for session resumption",
 					err,
 					true,
 				), nil
@@ -162,7 +169,7 @@ func (r *CommitReader) Next(ctx context.Context) (canonical.Event, error) {
 }
 
 // Close implements io.Closer semantics.
-func (r *CommitReader) Close(ctx context.Context) error {
+func (r *checkpointStream) Close(ctx context.Context) error {
 	if r.upstream == nil {
 		return nil
 	}
@@ -170,16 +177,16 @@ func (r *CommitReader) Close(ctx context.Context) error {
 }
 
 // CommitError returns the store error if terminal commit failed, or nil.
-func (r *CommitReader) CommitError() error { return r.commitErr }
+func (r *checkpointStream) CommitError() error { return r.commitErr }
 
-func (r *CommitReader) synthesizeTerminalFailure(base canonical.Event, code string, message string, err error, replaceLast bool) canonical.Event {
-	if code == "replay_capture_failed" {
-		err = fmt.Errorf("%w: %v", errTerminalCommit, err)
+func (r *checkpointStream) synthesizeTerminalFailure(base canonical.Event, code string, message string, err error, replaceLast bool) canonical.Event {
+	if code == "checkpoint_commit_failed" {
+		err = fmt.Errorf("%w: %v", errCheckpointCommit, err)
 	}
 	r.commitErr = err
-	slog.Warn("replay terminal failure",
-		"component", "replay",
-		"event", "replay_terminal_failure",
+	slog.Warn("response terminal failure",
+		"component", "session",
+		"event", "response_terminal_failure",
 		"code", code,
 		"exchange_id", base.ExchangeID,
 		"response_id", r.config.Binding.SwobuID,
@@ -243,8 +250,8 @@ func terminalFailureOrigin(code string) string {
 	if code == "provider_stream_incomplete" {
 		return "provider_stream_eof_before_terminal"
 	}
-	if code == "replay_capture_failed" {
-		return "replay_commit"
+	if code == "checkpoint_commit_failed" {
+		return "checkpoint_commit"
 	}
 	return "unknown"
 }
@@ -263,7 +270,7 @@ func responseEnvelopeEndStatus(ev canonical.Event) (canonical.EnvelopeStatus, bo
 	return payload.Status, true
 }
 
-func (r *CommitReader) doCommit(ctx context.Context) error {
+func (r *checkpointStream) doCommit(ctx context.Context) error {
 	if err := r.config.Validate(); err != nil {
 		return err
 	}
@@ -272,20 +279,20 @@ func (r *CommitReader) doCommit(ctx context.Context) error {
 	closed, err := canonical.ReadClosedEnvelope(ctx,
 		canonical.NewSliceEventReader(append([]canonical.Event(nil), r.events...)), canonical.EnvResponse)
 	if err != nil {
-		return fmt.Errorf("projecting response for replay commit: %w", err)
+		return fmt.Errorf("projecting response for checkpoint commit: %w", err)
 	}
 	output, err := closed.ProjectResponse()
 	if err != nil {
-		return fmt.Errorf("projecting response for replay commit: %w", err)
+		return fmt.Errorf("projecting response for checkpoint commit: %w", err)
 	}
 
-	record := Record{
-		Request:       r.config.SemanticRequest.Clone(),
+	record := Checkpoint{
+		Request:       r.config.Request.Clone(),
 		Response:      *output,
 		ResolvedMedia: r.config.ResolvedMedia.Clone(),
 		CreatedAt:     time.Now().UTC(),
 	}
-	if err := validateRecordSizeLimit(record, r.config.MaxSemanticBytes); err != nil {
+	if err := validateCheckpointSize(record, r.config.MaxBytes); err != nil {
 		return err
 	}
 

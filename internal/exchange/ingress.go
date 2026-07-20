@@ -16,8 +16,8 @@ import (
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/session"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -34,8 +34,8 @@ type RequestIngress struct {
 type RuntimePoliciesSpec struct {
 	ObservationStore observation.Store
 	DecisionSink     compat.Sink
-	ReplayStore      replay.Store
-	SwobuResponseIDs replay.SwobuResponseIDGenerator
+	CheckpointStore  session.Store
+	ResponseIDs      ResponseIDGenerator
 	ImageFetcher     provider.ImageFetcher
 	PolicyResolver   WorkspacePolicyResolver
 }
@@ -90,11 +90,11 @@ type ExecutionRuntime interface {
 }
 
 func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
-	if policies.ReplayStore == nil {
-		policies.ReplayStore = replay.NewMemoryStore()
+	if policies.CheckpointStore == nil {
+		policies.CheckpointStore = session.NewMemoryStore()
 	}
-	if policies.SwobuResponseIDs == nil {
-		policies.SwobuResponseIDs = replay.NewDefaultSwobuResponseIDGenerator()
+	if policies.ResponseIDs == nil {
+		policies.ResponseIDs = NewDefaultResponseIDGenerator()
 	}
 	policyResolver := policies.PolicyResolver
 	if policyResolver == nil {
@@ -111,12 +111,12 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	return RequestIngress{
 		workspaces: workspaces,
 		runner: runtimeBundle{
-			Runtime:          runtime,
-			DecisionSink:     sink,
-			ReplayStore:      policies.ReplayStore,
-			SwobuResponseIDs: policies.SwobuResponseIDs,
-			ImageFetcher:     policies.ImageFetcher,
-			PolicyResolver:   policyResolver,
+			Runtime:         runtime,
+			DecisionSink:    sink,
+			CheckpointStore: policies.CheckpointStore,
+			ResponseIDs:     policies.ResponseIDs,
+			ImageFetcher:    policies.ImageFetcher,
+			PolicyResolver:  policyResolver,
 		},
 	}
 }

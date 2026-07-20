@@ -13,7 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -28,7 +28,7 @@ type ExchangeInput struct {
 	ClientFamily     canonical.ClientFamily
 	ClientDelivery   delivery.Delivery
 	Request          canonical.CanonicalRequest
-	Prepared         replay.Prepared
+	Prepared         session.ResolvedRequest
 	WorkspaceSlug    string
 	Target           provider.TargetSnapshot
 	Contract         ExecutionContract
@@ -62,20 +62,20 @@ func ClientMessageTransportForTest(response ClientResponse) transportpkg.Message
 	return transportpkg.MessageResponse{}
 }
 
-type deterministicSwobuResponseIDGenerator struct{}
+type deterministicResponseIDGenerator struct{}
 
-func (deterministicSwobuResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
+func (deterministicResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
 	return canonical.SwobuResponseID("swobu_" + exchangeID), nil
 }
 
 func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeInput) (ClientResponse, error) {
-	if in.Prepared.Semantic.Model() == "" {
-		in.Prepared = replay.Prepared{Semantic: in.Request.Clone(), Delta: in.Request.Clone()}
+	if in.Prepared.Full.Model() == "" {
+		in.Prepared = session.ResolvedRequest{Full: in.Request.Clone(), Delta: in.Request.Clone()}
 	}
-	if err := validateReplayInput(runner, in.WorkspaceSlug); err != nil {
+	if err := validateCheckpointInput(runner, in.WorkspaceSlug); err != nil {
 		return nil, err
 	}
-	responseID, err := allocateSwobuResponseID(ctx, in.ExchangeID, runner.SwobuResponseIDs)
+	responseID, err := allocateResponseID(ctx, in.ExchangeID, runner.ResponseIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -84,11 +84,11 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		return nil, err
 	}
 	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
-	request := provider.Request{Canonical: in.Prepared.PreferredForTarget(backend.Target), Delivery: in.ProviderDelivery}
+	request := provider.Request{Canonical: in.Prepared.ForTarget(backend.Target), Delivery: in.ProviderDelivery}
 	call := providerCall{
 		backend: backend, request: request, clientCodec: clientCodec,
 		clientDelivery: in.ClientDelivery, exchangeID: in.ExchangeID,
-		workspaceSlug: in.WorkspaceSlug, replayRequest: in.Prepared.Semantic.Clone(),
+		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Full.Clone(),
 	}
 	document, decisions, err := backend.Codec.Encode(request)
 	call.document = document
@@ -163,9 +163,9 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
 		},
-		ReplayStore:      replay.NewMemoryStore(),
-		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
-		Policy:           DefaultWorkspacePolicy(),
+		CheckpointStore: session.NewMemoryStore(),
+		ResponseIDs:     deterministicResponseIDGenerator{},
+		Policy:          DefaultWorkspacePolicy(),
 	}
 }
 
@@ -178,13 +178,13 @@ func (r runtimeWithProviderIngress) ResolveBackend(target provider.TargetSnapsho
 	return newTestBackend(target, r.providerTransport)
 }
 
-func (r Runner) WithReplayStore(store replay.Store) Runner {
-	r.ReplayStore = store
+func (r Runner) WithCheckpointStore(store session.Store) Runner {
+	r.CheckpointStore = store
 	return r
 }
 
-func (r Runner) WithSwobuResponseIDs(gen replay.SwobuResponseIDGenerator) Runner {
-	r.SwobuResponseIDs = gen
+func (r Runner) WithResponseIDs(gen ResponseIDGenerator) Runner {
+	r.ResponseIDs = gen
 	return r
 }
 

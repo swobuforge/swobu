@@ -82,7 +82,7 @@ func (r CanonicalRequest) ToolPolicy() ToolPolicy {
 }
 
 // EffectiveToolPolicy resolves the protocol-default policy without changing
-// the stored source fact. Replay materialization writes this value explicitly
+// the stored source fact. Session resolution writes this value explicitly
 // before a successful attempt is committed.
 func (r CanonicalRequest) EffectiveToolPolicy() ToolPolicy {
 	if r.ToolPolicySpecified() {

@@ -11,21 +11,21 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
-type deliveryReplayStore struct {
+type deliveryCheckpointStore struct {
 	putCalls int
 	putErr   error
 }
 
-func (*deliveryReplayStore) Get(context.Context, string, canonical.SwobuResponseID) (replay.Record, bool, error) {
-	return replay.Record{}, false, nil
+func (*deliveryCheckpointStore) Get(context.Context, string, canonical.SwobuResponseID) (session.Checkpoint, bool, error) {
+	return session.Checkpoint{}, false, nil
 }
 
-func (s *deliveryReplayStore) Put(context.Context, string, replay.Record) error {
+func (s *deliveryCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
 	s.putCalls++
 	return s.putErr
 }
@@ -143,8 +143,8 @@ func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testin
 	}
 }
 
-func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing.T) {
-	store := &deliveryReplayStore{putErr: errors.New("store unavailable")}
+func TestWriteSuccessResponse_CheckpointCommitFailureIsNotDeliverySuccess(t *testing.T) {
+	store := &deliveryCheckpointStore{putErr: errors.New("store unavailable")}
 	response := canonicaltest.Response(t,
 		"provider_response_1",
 		"m",
@@ -152,22 +152,22 @@ func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing
 		"completed",
 	)
 	var events canonical.ResponseStream = canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		"ex_replay_failure",
+		"ex_checkpoint_failure",
 		response.Response(),
 		response.Model(),
 		response.Items(),
 		response.CompletionReason(),
 		response.Usage(),
 	))
-	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_replay_failure")}
+	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_checkpoint_failure")}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
-	committed := replay.NewCommitReader(events, replay.TerminalCommitConfig{
-		WorkspaceSlug:    "alpha",
-		ExchangeID:       "ex_replay_failure",
-		Binding:          binding,
-		Store:            store,
-		MaxSemanticBytes: exchange.DefaultRuntimeLimits().MaxReplayBytes,
-		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+	committed := session.NewCheckpointStream(events, session.CheckpointConfig{
+		WorkspaceSlug: "alpha",
+		ExchangeID:    "ex_checkpoint_failure",
+		Binding:       binding,
+		Store:         store,
+		MaxBytes:      exchange.DefaultRuntimeLimits().MaxCheckpointBytes,
+		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("m"),
 			Items: []canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
 		}),
@@ -179,20 +179,20 @@ func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
 
-	result := writeSuccessResponse(context.Background(), httptest.NewRecorder(), "req_replay_failure", canonical.ClientFamilyResponses, exchange.RequestOutput{
+	result := writeSuccessResponse(context.Background(), httptest.NewRecorder(), "req_checkpoint_failure", canonical.ClientFamilyResponses, exchange.RequestOutput{
 		Response: exchange.NewStreamingResponse(stream),
 	})
 
-	if result.Kind != transportpkg.DeliveryReplayCommitFailed || result.Err == nil {
-		t.Fatalf("delivery result = %#v, want replay commit failure", result)
+	if result.Kind != transportpkg.DeliveryCheckpointCommitFailed || result.Err == nil {
+		t.Fatalf("delivery result = %#v, want checkpoint commit failure", result)
 	}
 	if store.putCalls != 1 {
-		t.Fatalf("replay put calls = %d, want 1", store.putCalls)
+		t.Fatalf("checkpoint put calls = %d, want 1", store.putCalls)
 	}
 }
 
-func TestWriteSuccessResponse_ClientCancellationDoesNotCommitReplay(t *testing.T) {
-	store := &deliveryReplayStore{}
+func TestWriteSuccessResponse_ClientCancellationDoesNotCommitCheckpoint(t *testing.T) {
+	store := &deliveryCheckpointStore{}
 	response := canonicaltest.Response(t,
 		"provider_response_2",
 		"m",
@@ -209,15 +209,15 @@ func TestWriteSuccessResponse_ClientCancellationDoesNotCommitReplay(t *testing.T
 	))
 	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_cancel")}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
-	committed := replay.NewCommitReader(
+	committed := session.NewCheckpointStream(
 		events,
-		replay.TerminalCommitConfig{
-			WorkspaceSlug:    "alpha",
-			ExchangeID:       "ex_cancel",
-			Binding:          binding,
-			Store:            store,
-			MaxSemanticBytes: exchange.DefaultRuntimeLimits().MaxReplayBytes,
-			SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
+		session.CheckpointConfig{
+			WorkspaceSlug: "alpha",
+			ExchangeID:    "ex_cancel",
+			Binding:       binding,
+			Store:         store,
+			MaxBytes:      exchange.DefaultRuntimeLimits().MaxCheckpointBytes,
+			Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model: canonical.Specify("m"),
 				Items: []canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
 			}),
@@ -240,6 +240,6 @@ func TestWriteSuccessResponse_ClientCancellationDoesNotCommitReplay(t *testing.T
 		t.Fatalf("delivery result = %#v, want client cancellation", result)
 	}
 	if store.putCalls != 0 {
-		t.Fatalf("replay put calls = %d, want 0", store.putCalls)
+		t.Fatalf("checkpoint put calls = %d, want 0", store.putCalls)
 	}
 }

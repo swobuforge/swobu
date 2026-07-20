@@ -27,8 +27,8 @@ func TestResponseRefBoundaryValidation(t *testing.T) {
 		"whitespace": {SwobuID: "   "},
 	} {
 		t.Run("selector/"+name, func(t *testing.T) {
-			if err := ref.ValidateReplaySelector(); err == nil {
-				t.Fatal("empty replay selector accepted")
+			if err := ref.ValidatePreviousResponseSelector(); err == nil {
+				t.Fatal("empty previous-response selector accepted")
 			}
 		})
 		t.Run("committed/"+name, func(t *testing.T) {

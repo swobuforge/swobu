@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"bytes"
@@ -36,7 +36,7 @@ type resolvedMediaBindingRef struct {
 	asset     resolvedMediaAssetID
 }
 
-// ResolvedMedia is replay evidence with private occurrence bindings and owned
+// ResolvedMedia is checkpoint media with private occurrence bindings and owned
 // assets. Bind and Merge normalize identical assets; a future persistence
 // decoder must rebuild values through those checked operations.
 type ResolvedMedia struct {

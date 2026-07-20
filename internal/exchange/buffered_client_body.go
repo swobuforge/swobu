@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// bufferedClientBody defers canonical consumption and replay commit until the
+// bufferedClientBody defers canonical consumption and checkpoint commit until the
 // inbound delivery owner reads the response body. Exchange selects the client
 // codec, but it does not consume the response stream during reduction.
 type bufferedClientBody struct {

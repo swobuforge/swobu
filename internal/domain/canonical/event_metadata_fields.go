@@ -188,7 +188,7 @@ type ContentStartPayload struct {
 }
 
 // ItemCompletedPayload is the lossless canonical checkpoint used by buffered
-// projection and replay capture.
+// projection and checkpoint commit.
 type ItemCompletedPayload struct {
 	Item CanonicalItem
 }

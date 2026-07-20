@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"strings"
@@ -14,7 +14,7 @@ func TestValidateRequestSizeRejectsKnownOversizeMaterialBeforeCapture(t *testing
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{message}})
-	if err := ValidateRequestSizeLimit(request, limit); err == nil {
-		t.Fatal("oversize known request material passed replay preflight")
+	if err := ValidateRequestSize(request, limit); err == nil {
+		t.Fatal("oversize known request material passed checkpoint preflight")
 	}
 }

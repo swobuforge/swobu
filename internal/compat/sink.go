@@ -3,7 +3,7 @@ package compat
 import "context"
 
 // Sink persists or locally accumulates compatibility decisions only. It is not
-// an execution-effect bus and cannot carry replay, provider state, or control.
+// an execution-effect bus and cannot carry session, provider state, or control.
 type Sink interface {
 	Commit(context.Context, string, []Decision) error
 }

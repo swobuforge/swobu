@@ -6,11 +6,11 @@ import (
 )
 
 // SwobuResponseID is the Swobu-owned public identity for one completed response.
-// The same value addresses replay and appears in a later previous_response_id.
+// The same value addresses a session checkpoint and appears in a later previous_response_id.
 type SwobuResponseID string
 
 // NewSwobuResponseID preserves one client-visible response identity exactly.
-// Validation rejects blank values at replay and persistence boundaries.
+// Validation rejects blank values at checkpoint lookup and persistence boundaries.
 func NewSwobuResponseID(raw string) SwobuResponseID {
 	return SwobuResponseID(raw)
 }
@@ -21,7 +21,7 @@ func (id SwobuResponseID) IsZero() bool {
 }
 
 // ResponsesNativeResponseID is an opaque response identity issued by one
-// Responses-compatible provider. It is never a Swobu replay key or client ID.
+// Responses-compatible provider. It is never a Swobu checkpoint key or client ID.
 type ResponsesNativeResponseID string
 
 // NewResponsesNativeResponseID preserves one provider-issued identity exactly.
@@ -49,15 +49,16 @@ type ResponsesNativeRef struct {
 	TargetVersion      uint64
 }
 
-// ValidateReplaySelector requires the public Swobu identity used for lookup.
-func (r ResponseRef) ValidateReplaySelector() error {
+// ValidatePreviousResponseSelector requires the public Swobu identity used for
+// checkpoint lookup.
+func (r ResponseRef) ValidatePreviousResponseSelector() error {
 	if r.SwobuID.IsZero() {
 		return errors.New("response reference requires a Swobu response ID")
 	}
 	return nil
 }
 
-// ValidateCommittedResponse requires replay identity and a fully bound native
+// ValidateCommittedResponse requires checkpoint identity and a fully bound native
 // refinement when one was captured.
 func (r ResponseRef) ValidateCommittedResponse() error {
 	if r.SwobuID.IsZero() {

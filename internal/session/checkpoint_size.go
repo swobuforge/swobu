@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"fmt"
@@ -7,7 +7,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func validateRecordSizeLimit(record Record, limit int64) error {
+func validateCheckpointSize(record Checkpoint, limit int64) error {
+	// This estimate bounds retained semantic state and owned media; it is not a
+	// serialized storage-byte measurement.
 	size, err := requestSemanticSize(record.Request)
 	if err != nil {
 		return err
@@ -34,20 +36,22 @@ func validateRecordSizeLimit(record Record, limit int64) error {
 	if err != nil {
 		return err
 	}
-	return enforceReplaySemanticSize(size, limit)
+	return enforceCheckpointSize(size, limit)
 }
 
-func ValidateRequestSizeLimit(request canonical.CanonicalRequest, limit int64) error {
+// ValidateRequestSize rejects canonical request state that cannot fit within
+// the configured checkpoint retention bound.
+func ValidateRequestSize(request canonical.CanonicalRequest, limit int64) error {
 	size, err := requestSemanticSize(request)
 	if err != nil {
 		return err
 	}
-	return enforceReplaySemanticSize(size, limit)
+	return enforceCheckpointSize(size, limit)
 }
 
-// ValidateResolvedRequestSizeLimit includes durable external-media resolution
+// ValidateResolvedRequestSize includes durable external-media resolution
 // bytes already known before provider execution.
-func ValidateResolvedRequestSizeLimit(request canonical.CanonicalRequest, media ResolvedMedia, limit int64) error {
+func ValidateResolvedRequestSize(request canonical.CanonicalRequest, media ResolvedMedia, limit int64) error {
 	size, err := requestSemanticSize(request)
 	if err != nil {
 		return err
@@ -63,7 +67,7 @@ func ValidateResolvedRequestSizeLimit(request canonical.CanonicalRequest, media 
 	for _, binding := range media.bindings {
 		size += 32 + len(binding.sourceURL) + 8
 	}
-	return enforceReplaySemanticSize(size, limit)
+	return enforceCheckpointSize(size, limit)
 }
 
 func requestSemanticSize(request canonical.CanonicalRequest) (int, error) {
@@ -82,7 +86,7 @@ func requestSemanticSize(request canonical.CanonicalRequest) (int, error) {
 		} else if custom, ok := tool.Custom(); ok {
 			size += len(custom.Description()) + len(custom.Format().RawObject())
 		} else {
-			return 0, fmt.Errorf("replay record contains unsupported tool declaration")
+			return 0, fmt.Errorf("session checkpoint contains unsupported tool declaration")
 		}
 	}
 	policy := request.ToolPolicy()
@@ -120,12 +124,12 @@ func requestSemanticSize(request canonical.CanonicalRequest) (int, error) {
 	return size, nil
 }
 
-func enforceReplaySemanticSize(size int, limit int64) error {
+func enforceCheckpointSize(size int, limit int64) error {
 	if limit <= 0 {
-		return fmt.Errorf("replay semantic size limit must be positive")
+		return fmt.Errorf("checkpoint size limit must be positive")
 	}
 	if int64(size) > limit {
-		return fmt.Errorf("replay record exceeds maximum semantic size of %d bytes", limit)
+		return fmt.Errorf("session checkpoint exceeds maximum size of %d bytes", limit)
 	}
 	return nil
 }
@@ -149,7 +153,7 @@ func addItemBytes(size int, items []canonical.CanonicalItem) (int, error) {
 			} else if text, ok := call.Input().Text(); ok {
 				size += len(text)
 			} else {
-				return 0, fmt.Errorf("replay record contains invalid tool input")
+				return 0, fmt.Errorf("session checkpoint contains invalid tool input")
 			}
 		case canonical.ItemKindToolResult:
 			result, _ := item.ToolResult()
@@ -160,7 +164,7 @@ func addItemBytes(size int, items []canonical.CanonicalItem) (int, error) {
 				return 0, err
 			}
 		default:
-			return 0, fmt.Errorf("replay record contains unsupported item kind %q", item.Kind())
+			return 0, fmt.Errorf("session checkpoint contains unsupported item kind %q", item.Kind())
 		}
 	}
 	return size, nil
@@ -175,7 +179,7 @@ func addToolResultContentBytes(size int, parts []canonical.ToolResultPart) (int,
 		}
 		image, ok := part.Image()
 		if !ok {
-			return 0, fmt.Errorf("replay record contains unsupported tool result content kind %q", part.Kind())
+			return 0, fmt.Errorf("session checkpoint contains unsupported tool result content kind %q", part.Kind())
 		}
 		if rawURL, ok := image.Source().URL(); ok {
 			size += len(rawURL.String())
@@ -191,7 +195,7 @@ func addToolResultContentBytes(size int, parts []canonical.ToolResultPart) (int,
 			}
 			continue
 		}
-		return 0, fmt.Errorf("replay record contains invalid tool result image source")
+		return 0, fmt.Errorf("session checkpoint contains invalid tool result image source")
 	}
 	return size, nil
 }
@@ -205,7 +209,7 @@ func addContentBytes(size int, parts []canonical.MessagePart) (int, error) {
 		}
 		image, ok := part.Image()
 		if !ok {
-			return 0, fmt.Errorf("replay record contains unsupported content kind %q", part.Kind())
+			return 0, fmt.Errorf("session checkpoint contains unsupported content kind %q", part.Kind())
 		}
 		if rawURL, ok := image.Source().URL(); ok {
 			size += len(rawURL.String())
@@ -221,7 +225,7 @@ func addContentBytes(size int, parts []canonical.MessagePart) (int, error) {
 			}
 			continue
 		}
-		return 0, fmt.Errorf("replay record contains invalid image source")
+		return 0, fmt.Errorf("session checkpoint contains invalid image source")
 	}
 	return size, nil
 }

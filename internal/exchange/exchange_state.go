@@ -13,8 +13,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/session"
 )
 
 // exchangeState is the complete control truth for one exchange. Only reduce
@@ -22,7 +22,7 @@ import (
 type exchangeState struct {
 	input                exchangeInput
 	swobuResponseID      canonical.SwobuResponseID
-	prepared             *replay.Prepared
+	prepared             *session.ResolvedRequest
 	mediaFetchCache      mediaFetchCache
 	route                routePlan
 	providerCallAttempts []providerCallAttempt
@@ -61,11 +61,11 @@ type startingPhase struct{}
 
 func (startingPhase) isPhase() {}
 
-type loadingReplayPhase struct {
+type loadingCheckpointPhase struct {
 	reference canonical.SwobuResponseID
 }
 
-func (loadingReplayPhase) isPhase() {}
+func (loadingCheckpointPhase) isPhase() {}
 
 type preparingProviderAttemptPhase struct {
 	selection providerCallSelection
@@ -102,20 +102,20 @@ type exchangeStarted struct{}
 
 func (exchangeStarted) isExchangeEvent() {}
 
-type replayLoaded struct {
-	record replay.Record
+type checkpointLoaded struct {
+	record session.Checkpoint
 	found  bool
 	err    error
 }
 
-func (replayLoaded) isExchangeEvent() {}
+func (checkpointLoaded) isExchangeEvent() {}
 
 type providerAttemptPrepared struct {
 	selection  providerCallSelection
 	request    canonical.CanonicalRequest
 	decisions  []compat.Decision
 	fetchCache mediaFetchCache
-	usedMedia  replay.ResolvedMedia
+	usedMedia  session.ResolvedMedia
 	err        error
 }
 
@@ -137,13 +137,13 @@ func (providerCallFailed) isExchangeEvent() {}
 
 type command interface{ isCommand() }
 
-type loadReplayCommand struct {
-	store         replay.Store
+type loadCheckpointCommand struct {
+	store         session.Store
 	workspaceSlug string
 	reference     canonical.SwobuResponseID
 }
 
-func (loadReplayCommand) isCommand() {}
+func (loadCheckpointCommand) isCommand() {}
 
 type prepareProviderAttemptCommand struct {
 	selection  providerCallSelection
@@ -154,7 +154,7 @@ type prepareProviderAttemptCommand struct {
 	limits     provider.MediaLimits
 	fetcher    provider.ImageFetcher
 	fetchCache mediaFetchCache
-	historical replay.ResolvedMedia
+	historical session.ResolvedMedia
 }
 
 func (prepareProviderAttemptCommand) isCommand() {}
@@ -179,8 +179,8 @@ type providerCall struct {
 	clientDelivery delivery.Delivery
 	exchangeID     string
 	workspaceSlug  string
-	replayRequest  canonical.CanonicalRequest
-	resolvedMedia  replay.ResolvedMedia
+	fullRequest    canonical.CanonicalRequest
+	resolvedMedia  session.ResolvedMedia
 }
 
 type reducerOutcome struct {
@@ -202,8 +202,8 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 	switch p := s.phase.(type) {
 	case startingPhase:
 		return reduceStarting(s, event, runner)
-	case loadingReplayPhase:
-		return reduceLoadingReplay(s, p, event, runner)
+	case loadingCheckpointPhase:
+		return reduceLoadingCheckpoint(s, p, event, runner)
 	case preparingProviderAttemptPhase:
 		return reducePreparingProviderAttempt(s, p, event, runner)
 	case callingProviderPhase:
@@ -267,24 +267,28 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 		return reducerOutcome{nextState: s}, nil
 	}
 	s.route = newRoutePlan(route.Name(), routing.BuildPlan(s.input.exchangeID, route))
-	if reference, ok, err := replay.PreviousSwobuResponseID(s.input.request); err != nil {
+	if reference, ok, err := session.PreviousSwobuResponseID(s.input.request); err != nil {
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	} else if ok {
-		s.phase = loadingReplayPhase{reference: reference}
-		return reducerOutcome{nextState: s, command: loadReplayCommand{
-			store: runner.ReplayStore, workspaceSlug: s.input.workspace.Slug().String(), reference: reference,
+		s.phase = loadingCheckpointPhase{reference: reference}
+		return reducerOutcome{nextState: s, command: loadCheckpointCommand{
+			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), reference: reference,
 		}}, nil
 	}
-	prepared := replay.PrepareCurrent(s.input.request)
+	prepared, err := session.Begin(s.input.request)
+	if err != nil {
+		s.phase = failedPhase{problem: err}
+		return reducerOutcome{nextState: s}, nil
+	}
 	s.prepared = &prepared
 	return advanceProviderExecution(s, runner)
 }
 
-func reduceLoadingReplay(s exchangeState, phase loadingReplayPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
-	loaded, ok := event.(replayLoaded)
+func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
+	loaded, ok := event.(checkpointLoaded)
 	if !ok {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: loading replay received %T", event)
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: loading checkpoint received %T", event)
 	}
 	if loaded.err != nil {
 		s.phase = failedPhase{problem: loaded.err}
@@ -294,7 +298,7 @@ func reduceLoadingReplay(s exchangeState, phase loadingReplayPhase, event exchan
 		s.phase = failedPhase{problem: canonical.BadRequest("unknown previous_response_id")}
 		return reducerOutcome{nextState: s}, nil
 	}
-	prepared, err := replay.PrepareFromRecord(s.input.request, phase.reference, loaded.record)
+	prepared, err := session.Resume(s.input.request, loaded.record)
 	if err != nil {
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
@@ -372,7 +376,7 @@ type providerCallSelection struct {
 // provider execution. It performs deterministic preparation but never I/O.
 func advanceProviderExecution(s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
 	if s.prepared == nil {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: provider preparation requires loaded replay state")
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: provider preparation requires resolved session request")
 	}
 	selection, ok := selectNextProviderCall(s)
 	if !ok {
@@ -496,7 +500,7 @@ func attemptRequires(attempt providerCallAttempt, feature compat.Feature) bool {
 
 // previousResponseHandoffEvidence describes only the winning representation.
 // Failed and preparation paths do not call this function.
-func previousResponseHandoffEvidence(prepared replay.Prepared, winner providerCallAttempt, attemptID providerCallAttemptID) []compat.Decision {
+func previousResponseHandoffEvidence(prepared session.ResolvedRequest, winner providerCallAttempt, attemptID providerCallAttemptID) []compat.Decision {
 	previous, hasPrevious := prepared.Delta.PreviousResponse()
 	if !hasPrevious || previous.Responses == nil {
 		return nil

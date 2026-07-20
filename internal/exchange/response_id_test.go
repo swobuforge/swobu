@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,17 +15,35 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 )
 
-type failingReplayStore struct{}
-
-func (failingReplayStore) Get(context.Context, string, canonical.SwobuResponseID) (replay.Record, bool, error) {
-	return replay.Record{}, false, nil
+func TestDefaultResponseIDGeneratorAllocatesPrefixedID(t *testing.T) {
+	gen := NewDefaultResponseIDGenerator()
+	id, err := gen.NewSwobuResponseID(context.Background(), "ex-42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(string(id), "resp_") {
+		t.Fatalf("expected resp_ prefix, got %q", id)
+	}
+	suffix := strings.TrimPrefix(string(id), "resp_")
+	if len(suffix) != 32 {
+		t.Fatalf("expected 32 hex chars after resp_, got %q", id)
+	}
+	if _, err := hex.DecodeString(suffix); err != nil {
+		t.Fatalf("expected hex suffix, got %q: %v", id, err)
+	}
 }
 
-func (failingReplayStore) Put(context.Context, string, replay.Record) error {
-	return errors.New("forced replay store failure")
+type failingCheckpointStore struct{}
+
+func (failingCheckpointStore) Get(context.Context, string, canonical.SwobuResponseID) (session.Checkpoint, bool, error) {
+	return session.Checkpoint{}, false, nil
+}
+
+func (failingCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
+	return errors.New("forced checkpoint store failure")
 }
 
 // TestRunner_SwobuResponseIDReplacesProviderID proves that when the exchange
@@ -32,9 +51,9 @@ func (failingReplayStore) Put(context.Context, string, replay.Record) error {
 // the Swobu ID instead of the provider-native one.
 func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 	// The provider ingress contains provider-native ID "resp_1".
-	store := replay.NewMemoryStore()
+	store := session.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
-		WithReplayStore(store)
+		WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "test_ex",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -76,7 +95,7 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 		t.Fatalf("store.Get error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected replay record to be committed")
+		t.Fatal("expected checkpoint to be committed")
 	}
 	if rec.Response.Response().SwobuID.String() != "swobu_test_ex" {
 		t.Fatalf("stored response id=%q, want swobu_test_ex", rec.Response.Response().SwobuID.String())
@@ -84,9 +103,9 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 }
 
 func TestRunner_SwobuResponseIDPassedByInput(t *testing.T) {
-	store := replay.NewMemoryStore()
+	store := session.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
-		WithReplayStore(store)
+		WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "ex_gen",
 		ClientFamily:     canonical.ClientFamilyResponses,
@@ -112,7 +131,7 @@ func TestRunner_SwobuResponseIDPassedByInput(t *testing.T) {
 	}
 }
 
-func TestRunnerWithoutReplayStoreRejectsBeforeProviderIngress(t *testing.T) {
+func TestRunnerWithoutCheckpointStoreRejectsBeforeProviderIngress(t *testing.T) {
 	calls := 0
 	runner := Runner{
 		Runtime: runtimeWithProviderIngress{
@@ -124,11 +143,11 @@ func TestRunnerWithoutReplayStoreRejectsBeforeProviderIngress(t *testing.T) {
 				}}, nil
 			},
 		},
-		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
+		ResponseIDs: deterministicResponseIDGenerator{},
 	}
 
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
-		ExchangeID:       "no_replay_store",
+		ExchangeID:       "no_checkpoint_store",
 		ClientFamily:     canonical.ClientFamilyResponses,
 		ClientDelivery:   delivery.BufferedDelivery(),
 		Request:          testCanonicalRequest("m"),
@@ -139,17 +158,17 @@ func TestRunnerWithoutReplayStoreRejectsBeforeProviderIngress(t *testing.T) {
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
-		t.Fatal("expected missing replay store to reject before provider ingress")
+		t.Fatal("expected missing checkpoint store to reject before provider ingress")
 	}
-	if !strings.Contains(err.Error(), "replay store is required") {
-		t.Fatalf("error = %v, want replay store rejection", err)
+	if !strings.Contains(err.Error(), "checkpoint store is required") {
+		t.Fatalf("error = %v, want checkpoint store rejection", err)
 	}
 	if calls != 0 {
 		t.Fatalf("provider ingress calls = %d, want 0", calls)
 	}
 }
 
-func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
+func TestRunnerWithoutCheckpointStoreRejectsPreviousResponseID(t *testing.T) {
 	calls := 0
 	runner := Runner{
 		Runtime: runtimeWithProviderIngress{
@@ -159,10 +178,10 @@ func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
 				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
-		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
+		ResponseIDs: deterministicResponseIDGenerator{},
 	}
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
-		ExchangeID: "no_replay_store_previous",
+		ExchangeID: "no_checkpoint_store_previous",
 		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:            canonical.Specify("m"),
 			Items:            []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")},
@@ -170,17 +189,17 @@ func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
 		}),
 	})
 	if err == nil {
-		t.Fatal("expected previous_response_id to reject when replay store is missing")
+		t.Fatal("expected previous_response_id to reject when checkpoint store is missing")
 	}
-	if !strings.Contains(err.Error(), "replay store is required") {
-		t.Fatalf("error = %v, want replay store rejection", err)
+	if !strings.Contains(err.Error(), "checkpoint store is required") {
+		t.Fatalf("error = %v, want checkpoint store rejection", err)
 	}
 	if calls != 0 {
 		t.Fatalf("provider ingress calls = %d, want 0", calls)
 	}
 }
 
-func TestRunnerRejectsEmptyReplayWorkspaceSlugBeforeProviderIngress(t *testing.T) {
+func TestRunnerRejectsEmptyCheckpointWorkspaceSlugBeforeProviderIngress(t *testing.T) {
 	calls := 0
 	runner := Runner{
 		Runtime: runtimeWithProviderIngress{
@@ -190,8 +209,8 @@ func TestRunnerRejectsEmptyReplayWorkspaceSlugBeforeProviderIngress(t *testing.T
 				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
-		ReplayStore:      replay.NewMemoryStore(),
-		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
+		CheckpointStore: session.NewMemoryStore(),
+		ResponseIDs:     deterministicResponseIDGenerator{},
 	}
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "empty_scope_ns",
@@ -205,21 +224,21 @@ func TestRunnerRejectsEmptyReplayWorkspaceSlugBeforeProviderIngress(t *testing.T
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
-		t.Fatal("expected empty replay workspace slug to reject before provider ingress")
+		t.Fatal("expected empty checkpoint workspace slug to reject before provider ingress")
 	}
-	if !strings.Contains(err.Error(), "replay workspace slug is required") {
-		t.Fatalf("error = %v, want replay workspace slug rejection", err)
+	if !strings.Contains(err.Error(), "checkpoint workspace slug is required") {
+		t.Fatalf("error = %v, want checkpoint workspace slug rejection", err)
 	}
 	if calls != 0 {
 		t.Fatalf("provider ingress calls = %d, want 0", calls)
 	}
 }
 
-func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) {
-	store := replay.NewMemoryStore()
+func TestRunnerWithCheckpointStoreAllocatesResponseIDWhenInputMissing(t *testing.T) {
+	store := session.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
-		WithReplayStore(store).
-		WithSwobuResponseIDs(deterministicSwobuResponseIDGenerator{})
+		WithCheckpointStore(store).
+		WithResponseIDs(deterministicResponseIDGenerator{})
 
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "alloc_missing",
@@ -255,17 +274,17 @@ func TestRunnerWithReplayStoreAllocatesResponseIDWhenInputMissing(t *testing.T) 
 		t.Fatalf("store.Get error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected replay record to be committed")
+		t.Fatal("expected checkpoint to be committed")
 	}
 	if rec.Response.Response().SwobuID.String() != "swobu_alloc_missing" {
 		t.Fatalf("stored response id = %q, want swobu_alloc_missing", rec.Response.Response().SwobuID.String())
 	}
 }
 
-func TestRunnerReplayCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing.T) {
+func TestRunnerCheckpointCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing.T) {
 	runner := withRuntime(bufferedProviderTransport(nil)).
-		WithReplayStore(failingReplayStore{}).
-		WithSwobuResponseIDs(deterministicSwobuResponseIDGenerator{})
+		WithCheckpointStore(failingCheckpointStore{}).
+		WithResponseIDs(deterministicResponseIDGenerator{})
 
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID:       "commit_failure",
@@ -282,8 +301,8 @@ func TestRunnerReplayCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing
 		t.Fatalf("Run() error = %v, want delivery-owned terminal failure", err)
 	}
 	raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
-	if readErr == nil || !IsReplayCommitFailure(readErr) {
-		t.Fatalf("read error = %v, want replay commit failure", readErr)
+	if readErr == nil || !IsCheckpointCommitFailure(readErr) {
+		t.Fatalf("read error = %v, want checkpoint commit failure", readErr)
 	}
 	if strings.Contains(string(raw), "ok") || strings.Contains(string(raw), "response.completed") {
 		t.Fatalf("commit failure returned successful-looking body: %s", string(raw))

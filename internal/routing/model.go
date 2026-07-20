@@ -65,7 +65,7 @@ func (id TargetID) String() string { return id.value }
 // state ownership, model/deployment, credentials, codec options, or
 // provider-specific request options creates a new version.
 //
-// Persistent replay is unsupported while TargetVersion is process-local.
+// Persistent session checkpoints are unsupported while TargetVersion is process-local.
 type TargetVersion uint64
 
 const initialTargetVersion TargetVersion = 1

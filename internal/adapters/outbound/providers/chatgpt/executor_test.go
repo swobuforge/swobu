@@ -173,7 +173,7 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 	}
 }
 
-func TestResolveBackendResponsesNeedsNoContinuationCallback(t *testing.T) {
+func TestResolveBackendResponsesNeedsNoResumptionCallback(t *testing.T) {
 	target := provider.NewTargetSnapshot(
 		"chatgpt-default",
 		string(profile.ProviderSpecChatGPT),
