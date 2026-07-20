@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
 // ErrCheckpointExists reports that Put was asked to overwrite an immutable
@@ -19,6 +20,9 @@ type Store interface {
 	// Expired checkpoints are never returned; the bool indicates whether an
 	// available checkpoint was found.
 	Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Checkpoint, bool, error)
+	// FindByHistory performs one exact workspace-local secondary-index
+	// lookup. It never searches prefixes, ancestors, or canonical history.
+	FindByHistory(ctx context.Context, workspaceSlug string, history historyfingerprint.History) (Checkpoint, bool, error)
 	// Put writes one immutable checkpoint. Duplicate response IDs are rejected.
 	Put(ctx context.Context, workspaceSlug string, checkpoint Checkpoint) error
 }

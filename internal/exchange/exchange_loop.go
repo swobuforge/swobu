@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func runExchange(
@@ -19,7 +20,7 @@ func runExchange(
 	clientHandler trafficevidence.ClientHandler,
 	clientFamily canonical.ClientFamily,
 	clientDelivery delivery.Delivery,
-	request canonical.CanonicalRequest,
+	decoded wire.ClientRequestResult,
 	workspace routing.Workspace,
 	timing *trafficevidence.Timing,
 ) (RequestOutput, error) {
@@ -30,11 +31,20 @@ func runExchange(
 	if err != nil {
 		return RequestOutput{}, err
 	}
+	var rebased *wire.RebasedRequest
+	if decoded.RebasedRequest != nil {
+		value := *decoded.RebasedRequest
+		value.Request = value.Request.Clone()
+		rebased = &value
+	}
 	s := exchangeState{
 		input: exchangeInput{
 			exchangeID: exchangeID, clientHandler: clientHandler,
 			clientFamily: clientFamily, clientDelivery: clientDelivery,
-			request: canonical.CloneCanonicalRequest(request), workspace: workspace, timing: timing,
+			request:            canonical.CloneCanonicalRequest(decoded.Request),
+			rebasedRequest:     rebased,
+			requestFingerprint: decoded.RequestFingerprint,
+			workspace:          workspace, timing: timing,
 		},
 		swobuResponseID: responseID,
 		phase:           startingPhase{},
@@ -64,7 +74,14 @@ func runExchange(
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	switch c := cmd.(type) {
 	case loadCheckpointCommand:
-		record, found, err := c.store.Get(ctx, c.workspaceSlug, c.reference)
+		var record session.Checkpoint
+		var found bool
+		var err error
+		if c.explicit {
+			record, found, err = c.store.Get(ctx, c.workspaceSlug, c.reference)
+		} else {
+			record, found, err = c.store.FindByHistory(ctx, c.workspaceSlug, c.history)
+		}
 		return checkpointLoaded{record: record, found: found, err: err}
 	case prepareProviderAttemptCommand:
 		preparationCtx := ctx

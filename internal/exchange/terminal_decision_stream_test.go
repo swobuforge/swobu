@@ -28,10 +28,14 @@ type testDecisionSource struct{ decisions []compat.Decision }
 type pullingClientCodec struct{ testClientCodec }
 
 func (pullingClientCodec) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
-	body := wire.NewEncodedResponseBody(ctx, events, func(canonical.Event) ([][]byte, error) {
+	completion, complete, fail := wire.NewResponseCompletion()
+	body := wire.NewEncodedResponseBody(ctx, events, func(event canonical.Event) ([][]byte, error) {
+		if event.Kind == canonical.EventEnvelopeEnd {
+			complete(testHistoryResponse([]byte("ok")))
+		}
 		return [][]byte{[]byte("event\n")}, nil
-	})
-	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}}, nil
+	}, completion, fail)
+	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}, Completion: completion}, nil
 }
 
 func (s testDecisionSource) Decisions() []compat.Decision {
@@ -81,7 +85,7 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 		clientCodec: pullingClientCodec{}, clientDelivery: in.ClientDelivery,
 		exchangeID: in.ExchangeID, workspaceSlug: in.WorkspaceSlug, fullRequest: in.Request,
 	}
-	out, err := encodeClientOutput(context.Background(), call, newTerminalCompatibilityStream(reader, decisions, sink, in.ExchangeID), true, sink)
+	out, err := encodeClientOutput(context.Background(), call, newTerminalCompatibilityStream(reader, decisions, sink, in.ExchangeID), true, sink, nil)
 	if err != nil {
 		t.Fatalf("encodeClientOutput returned error: %v", err)
 	}

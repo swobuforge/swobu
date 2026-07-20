@@ -78,6 +78,30 @@ func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Resolved
 	}, nil
 }
 
+// ResumeHistory preserves the complete supplied request as fallback authority
+// and combines a codec-rebased current invocation with an exact checkpoint's
+// native refinement. Protocol history partitioning never occurs in session.
+func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.CanonicalRequest, checkpoint Checkpoint) (ResolvedRequest, error) {
+	if _, ok := complete.PreviousResponse(); ok {
+		return ResolvedRequest{}, errors.New("implicit history request contains explicit previous response")
+	}
+	if _, ok := rebased.PreviousResponse(); ok {
+		return ResolvedRequest{}, errors.New("rebased history request contains explicit previous response")
+	}
+	response := checkpoint.Response.Response()
+	if err := response.ValidateCommittedResponse(); err != nil {
+		return ResolvedRequest{}, fmt.Errorf("invalid history checkpoint response reference: %w", err)
+	}
+	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
+		return ResolvedRequest{}, fmt.Errorf("invalid history checkpoint media: %w", err)
+	}
+	return ResolvedRequest{
+		Full:          complete.Clone(),
+		Delta:         inheritRequestBands(checkpoint.Request, rebased, &response),
+		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
+	}, nil
+}
+
 func withoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         canonical.Specify(request.Model()),

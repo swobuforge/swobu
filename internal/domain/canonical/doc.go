@@ -19,12 +19,6 @@
 // only assistant messages and tool calls; request-only tool results cannot
 // become provider output. Completed items remain response-projection checkpoints.
 
-// Transcript-prefix fingerprints describe prior semantic items without
-// retaining quadratic prefix material; candidate verification bytes are
-// recomputed on demand. Invocation fingerprints require already-materialized
-// requests and include the current ordered request environment. Neither is
-// provider cache identity.
-//
 // Provider wire names, aliases, transport DTOs, and runtime mechanics remain
 // outside this package. ResponseRef is the typed exception for response identity
 // and exact-target native-resumption refinement.

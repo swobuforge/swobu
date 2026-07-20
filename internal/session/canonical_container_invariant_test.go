@@ -23,7 +23,7 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"HistoryFingerprint", "Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
 	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"Full", "Delta", "ResolvedMedia"})
 }
 

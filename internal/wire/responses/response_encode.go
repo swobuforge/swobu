@@ -11,6 +11,35 @@ import (
 )
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+	encoded, outputText, status, incompleteReason, err := encodeResponsesOutput(output)
+	if err != nil {
+		return wire.ClientDocumentResult{}, err
+	}
+	responseFingerprint, err := fingerprintResponsesResponse(output)
+	if err != nil {
+		return wire.ClientDocumentResult{}, err
+	}
+	encodedBody, err := json.Marshal(responsesResponseDTO{
+		ID:                sse.FallbackID(output.Response().SwobuID.String(), "resp_swobu"),
+		Object:            "response",
+		Model:             output.Model(),
+		Status:            status,
+		IncompleteDetails: responsesIncompleteDetailsForStatus(status, incompleteReason),
+		OutputText:        outputText,
+		Output:            encoded,
+		Usage:             responsesUsageFromCanonical(output.Usage()),
+	})
+	if err != nil {
+		return wire.ClientDocumentResult{}, err
+	}
+	logResponsesEgressBuffered(encodedBody)
+	return wire.ClientDocumentResult{
+		Document:            carrier.NewDocument(protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{}),
+		ResponseFingerprint: &responseFingerprint,
+	}, nil
+}
+
+func encodeResponsesOutput(output canonical.CanonicalResponse) ([]any, string, string, string, error) {
 	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
 	status, incompleteReason := responsesWireStatusForFinishReason(output.CompletionReason())
@@ -22,7 +51,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 			for _, part := range message.Content() {
 				textPart, ok := part.Text()
 				if !ok {
-					return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("responses image output is not implemented")
+					return nil, "", "", "", canonical.UnsupportedOperation("responses image output is not implemented")
 				}
 				text := textPart.Text()
 				outputText += text
@@ -44,7 +73,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 			} else if text, ok := call.Input().Text(); ok {
 				input = text
 			} else {
-				return wire.ClientDocumentResult{}, canonical.InternalError("responses output tool input is invalid")
+				return nil, "", "", "", canonical.InternalError("responses output tool input is invalid")
 			}
 			encoded = append(encoded, responsesWireToolItem(
 				call.CallID().String(),
@@ -55,24 +84,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 				input,
 			))
 		default:
-			return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("responses output item kind is unsupported")
+			return nil, "", "", "", canonical.UnsupportedOperation("responses output item kind is unsupported")
 		}
 	}
-	encodedBody, err := json.Marshal(responsesResponseDTO{
-		ID:                sse.FallbackID(output.Response().SwobuID.String(), "resp_swobu"),
-		Object:            "response",
-		Model:             output.Model(),
-		Status:            status,
-		IncompleteDetails: responsesIncompleteDetailsForStatus(status, incompleteReason),
-		OutputText:        outputText,
-		Output:            encoded,
-		Usage:             responsesUsageFromCanonical(output.Usage()),
-	})
-	if err != nil {
-		return wire.ClientDocumentResult{}, err
-	}
-	logResponsesEgressBuffered(encodedBody)
-	return wire.ClientDocumentResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{})}, nil
+	return encoded, outputText, status, incompleteReason, nil
 }
 
 func responsesWireStatusForFinishReason(finishReason string) (string, string) {

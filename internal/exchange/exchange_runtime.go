@@ -56,7 +56,7 @@ func validateCheckpointInput(r runtimeBundle, workspaceSlug string) error {
 
 // ---- helpers used by provider-round execution ----
 
-func encodeClientOutput(ctx context.Context, call providerCall, envelope canonical.ResponseStream, incremental bool, sink compat.Sink) (ClientResponse, error) {
+func encodeClientOutput(ctx context.Context, call providerCall, envelope canonical.ResponseStream, incremental bool, sink compat.Sink, committer *checkpointCommitter) (ClientResponse, error) {
 	commitDecisionsBestEffort(ctx, sink, call.exchangeID, deliveryCompatibilityDecisions(call, incremental))
 
 	if call.clientDelivery.Mode == delivery.Streaming {
@@ -66,6 +66,9 @@ func encodeClientOutput(ctx context.Context, call providerCall, envelope canonic
 			if err != nil {
 				return nil, err
 			}
+			messageResult.Response.Messages = &checkpointingMessageStream{
+				inner: messageResult.Response.Messages, committer: committer, completion: messageResult.Completion,
+			}
 			return NewMessageStreamingResponse(messageResult.Response), nil
 		}
 		streamResult, err := call.clientCodec.EncodeResponseStream(ctx, envelope, call.clientDelivery)
@@ -73,7 +76,10 @@ func encodeClientOutput(ctx context.Context, call providerCall, envelope canonic
 		if err != nil {
 			return nil, err
 		}
+		streamResult.Stream.Body = &checkpointingReadCloser{
+			ctx: ctx, inner: streamResult.Stream.Body, committer: committer, completion: streamResult.Completion,
+		}
 		return NewStreamingResponse(streamResult.Stream), nil
 	}
-	return newBufferedClientResponse(newBufferedClientBody(ctx, call, envelope, sink)), nil
+	return newBufferedClientResponse(newBufferedClientBody(ctx, call, envelope, sink, committer)), nil
 }

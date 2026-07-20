@@ -10,11 +10,13 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // exchangeState is the complete control truth for one exchange. Only reduce
@@ -27,16 +29,27 @@ type exchangeState struct {
 	route                routePlan
 	providerCallAttempts []providerCallAttempt
 	phase                phase
+	advance              *historyAdvance
+}
+
+// historyAdvance is the complete optional input for composing the completed
+// exchange into client-visible history. Nil means composition is unavailable;
+// a nil Previous inside a present value denotes genesis.
+type historyAdvance struct {
+	Previous *historyfingerprint.History
+	Request  historyfingerprint.Request
 }
 
 type exchangeInput struct {
-	exchangeID     string
-	clientHandler  trafficevidence.ClientHandler
-	clientFamily   canonical.ClientFamily
-	clientDelivery delivery.Delivery
-	request        canonical.CanonicalRequest
-	workspace      routing.Workspace
-	timing         *trafficevidence.Timing
+	exchangeID         string
+	clientHandler      trafficevidence.ClientHandler
+	clientFamily       canonical.ClientFamily
+	clientDelivery     delivery.Delivery
+	request            canonical.CanonicalRequest
+	rebasedRequest     *wire.RebasedRequest
+	requestFingerprint historyfingerprint.Request
+	workspace          routing.Workspace
+	timing             *trafficevidence.Timing
 }
 
 type routePlan struct {
@@ -62,7 +75,9 @@ type startingPhase struct{}
 func (startingPhase) isPhase() {}
 
 type loadingCheckpointPhase struct {
+	explicit  bool
 	reference canonical.SwobuResponseID
+	history   historyfingerprint.History
 }
 
 func (loadingCheckpointPhase) isPhase() {}
@@ -140,7 +155,9 @@ type command interface{ isCommand() }
 type loadCheckpointCommand struct {
 	store         session.Store
 	workspaceSlug string
+	explicit      bool
 	reference     canonical.SwobuResponseID
+	history       historyfingerprint.History
 }
 
 func (loadCheckpointCommand) isCommand() {}
@@ -181,6 +198,7 @@ type providerCall struct {
 	workspaceSlug  string
 	fullRequest    canonical.CanonicalRequest
 	resolvedMedia  session.ResolvedMedia
+	advance        *historyAdvance
 }
 
 type reducerOutcome struct {
@@ -271,9 +289,15 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	} else if ok {
-		s.phase = loadingCheckpointPhase{reference: reference}
+		s.phase = loadingCheckpointPhase{explicit: true, reference: reference}
 		return reducerOutcome{nextState: s, command: loadCheckpointCommand{
-			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), reference: reference,
+			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), explicit: true, reference: reference,
+		}}, nil
+	}
+	if s.input.rebasedRequest != nil {
+		s.phase = loadingCheckpointPhase{history: s.input.rebasedRequest.Previous}
+		return reducerOutcome{nextState: s, command: loadCheckpointCommand{
+			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), history: s.input.rebasedRequest.Previous,
 		}}, nil
 	}
 	prepared, err := session.Begin(s.input.request)
@@ -282,6 +306,7 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 		return reducerOutcome{nextState: s}, nil
 	}
 	s.prepared = &prepared
+	s.advance = &historyAdvance{Request: s.input.requestFingerprint}
 	return advanceProviderExecution(s, runner)
 }
 
@@ -294,11 +319,29 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		s.phase = failedPhase{problem: loaded.err}
 		return reducerOutcome{nextState: s}, nil
 	}
-	if !loaded.found {
+	if phase.explicit && !loaded.found {
 		s.phase = failedPhase{problem: canonical.BadRequest("unknown previous_response_id")}
 		return reducerOutcome{nextState: s}, nil
 	}
-	prepared, err := session.Resume(s.input.request, loaded.record)
+	var prepared session.ResolvedRequest
+	var err error
+	if phase.explicit {
+		prepared, err = session.Resume(s.input.request, loaded.record)
+		if loaded.record.HistoryFingerprint != nil && loaded.record.HistoryFingerprint.Scheme() == s.input.requestFingerprint.Scheme() {
+			history := *loaded.record.HistoryFingerprint
+			s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
+		}
+	} else if loaded.found {
+		// The codec-rebased request is a candidate only. ForTarget selects it
+		// solely when the checkpoint has an exact usable native refinement.
+		prepared, err = session.ResumeHistory(s.input.request, s.input.rebasedRequest.Request, loaded.record)
+		history := phase.history
+		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
+	} else {
+		prepared, err = session.Begin(s.input.request)
+		history := phase.history
+		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
+	}
 	if err != nil {
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil

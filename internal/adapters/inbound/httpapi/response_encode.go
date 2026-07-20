@@ -137,11 +137,12 @@ func classifyClientWriteFailure(ctx context.Context, err error, closeDone <-chan
 }
 
 func classifyDeliveryFailure(ctx context.Context, body io.ReadCloser, err error, closeDone <-chan struct{}) transportpkg.DeliveryResult {
-	if exchange.IsCheckpointCommitFailure(err) {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryCheckpointCommitFailed, Err: err}
-	}
 	if streamDownstreamClosed(ctx, closeDone) || errors.Is(err, context.Canceled) {
 		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientCancelled, Err: err}
+	}
+	var checkpointErr exchange.CheckpointCommitError
+	if errors.As(err, &checkpointErr) {
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryCheckpointCommitFailed, Err: err}
 	}
 	_ = body
 	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: err}

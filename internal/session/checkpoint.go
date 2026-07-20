@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
 const defaultCheckpointTTL = 24 * time.Hour
@@ -19,10 +20,13 @@ const defaultCheckpointTTL = 24 * time.Hour
 //   - Attachment bag
 //   - Mutable session head
 type Checkpoint struct {
-	Request       canonical.CanonicalRequest
-	Response      canonical.CanonicalResponse
-	ResolvedMedia ResolvedMedia
-	CreatedAt     time.Time
+	// HistoryFingerprint is the optional completed visible-history value used
+	// for exact implicit lookup. Its absence never prevents explicit resumption.
+	HistoryFingerprint *historyfingerprint.History
+	Request            canonical.CanonicalRequest
+	Response           canonical.CanonicalResponse
+	ResolvedMedia      ResolvedMedia
+	CreatedAt          time.Time
 	// ExpiresAt bounds how long the checkpoint remains resumable.
 	ExpiresAt *time.Time
 }
@@ -34,6 +38,10 @@ func (r Checkpoint) Clone() Checkpoint {
 		Response:      r.Response.Clone(),
 		ResolvedMedia: r.ResolvedMedia.Clone(),
 		CreatedAt:     r.CreatedAt,
+	}
+	if r.HistoryFingerprint != nil {
+		history := *r.HistoryFingerprint
+		cloned.HistoryFingerprint = &history
 	}
 	if r.ExpiresAt != nil {
 		expiresAt := *r.ExpiresAt

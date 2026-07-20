@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -44,6 +45,10 @@ func (failingCheckpointStore) Get(context.Context, string, canonical.SwobuRespon
 
 func (failingCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
 	return errors.New("forced checkpoint store failure")
+}
+
+func (failingCheckpointStore) FindByHistory(context.Context, string, historyfingerprint.History) (session.Checkpoint, bool, error) {
+	return session.Checkpoint{}, false, nil
 }
 
 // TestRunner_SwobuResponseIDReplacesProviderID proves that when the exchange
@@ -281,7 +286,7 @@ func TestRunnerWithCheckpointStoreAllocatesResponseIDWhenInputMissing(t *testing
 	}
 }
 
-func TestRunnerCheckpointCommitFailureDoesNotReturnSuccessfulBufferedBody(t *testing.T) {
+func TestRunnerCheckpointCommitFailureRejectsBufferedBodyBeforePublication(t *testing.T) {
 	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithCheckpointStore(failingCheckpointStore{}).
 		WithResponseIDs(deterministicResponseIDGenerator{})
@@ -301,10 +306,179 @@ func TestRunnerCheckpointCommitFailureDoesNotReturnSuccessfulBufferedBody(t *tes
 		t.Fatalf("Run() error = %v, want delivery-owned terminal failure", err)
 	}
 	raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
-	if readErr == nil || !IsCheckpointCommitFailure(readErr) {
-		t.Fatalf("read error = %v, want checkpoint commit failure", readErr)
+	if readErr == nil || !strings.Contains(readErr.Error(), "checkpoint store failed") {
+		t.Fatalf("read = (%q, %v), want checkpoint store failure before publication", raw, readErr)
 	}
-	if strings.Contains(string(raw), "ok") || strings.Contains(string(raw), "response.completed") {
-		t.Fatalf("commit failure returned successful-looking body: %s", string(raw))
+	var checkpointErr CheckpointCommitError
+	if !errors.As(readErr, &checkpointErr) {
+		t.Fatalf("read error type = %T, want CheckpointCommitError", readErr)
+	}
+	if len(raw) != 0 {
+		t.Fatalf("published body on failed checkpoint commit: %s", raw)
+	}
+}
+
+func TestRunnerCheckpointCommitFailureReplacesStreamingTerminalSuccess(t *testing.T) {
+	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader("ignored")))).
+		WithCheckpointStore(failingCheckpointStore{}).
+		WithResponseIDs(deterministicResponseIDGenerator{})
+
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
+		ExchangeID:       "stream_commit_failure",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Request:          testCanonicalRequest("m"),
+		WorkspaceSlug:    "alpha",
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want delivery-owned terminal failure", err)
+	}
+	raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
+	if readErr == nil || !strings.Contains(readErr.Error(), "checkpoint store failed") {
+		t.Fatalf("stream read = (%q, %v), want terminal checkpoint failure", raw, readErr)
+	}
+	if len(raw) == 0 {
+		t.Fatal("stream checkpoint failure erased already-published non-terminal chunks")
+	}
+	if strings.Contains(string(raw), `"status":"completed"`) {
+		t.Fatalf("published terminal success on failed checkpoint commit: %s", raw)
+	}
+}
+
+func TestCheckpointCommitFailureSuppressesEveryProtocolTerminalMarker(t *testing.T) {
+	tests := []struct {
+		name      string
+		family    canonical.ClientFamily
+		forbidden []string
+	}{
+		{name: "chat completions", family: canonical.ClientFamilyChatCompletions, forbidden: []string{`"finish_reason"`, "data: [DONE]"}},
+		{name: "messages", family: canonical.ClientFamilyMessages, forbidden: []string{"event: message_delta", "event: message_stop", `"type":"message_stop"`}},
+		{name: "responses", family: canonical.ClientFamilyResponses, forbidden: []string{"event: response.completed", `"type":"response.completed"`}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner := Runner{
+				Runtime: runtimeWithProviderIngress{
+					RuntimeResolver:   codecresolver.NewRuntimeCodecResolver(),
+					providerTransport: streamingProviderTransport(io.NopCloser(strings.NewReader("ignored"))),
+				},
+				CheckpointStore: failingCheckpointStore{},
+				ResponseIDs:     deterministicResponseIDGenerator{},
+				Policy:          DefaultWorkspacePolicy(),
+			}
+			out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
+				ExchangeID:       "marker_" + strings.ReplaceAll(test.name, " ", "_"),
+				ClientFamily:     test.family,
+				ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+				Request:          testCanonicalRequest("m"),
+				WorkspaceSlug:    "alpha",
+				ProviderProtocol: protocolkind.Responses,
+				ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+				Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+				Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, readErr := io.ReadAll(ClientTransportForTest(out).Body)
+			if readErr == nil || !strings.Contains(readErr.Error(), "checkpoint store failed") {
+				t.Fatalf("stream read = (%q, %v), want checkpoint failure", raw, readErr)
+			}
+			if len(raw) == 0 {
+				t.Fatal("checkpoint failure erased every non-terminal protocol frame")
+			}
+			for _, marker := range test.forbidden {
+				if strings.Contains(string(raw), marker) {
+					t.Fatalf("published terminal marker %q before checkpoint commit:\n%s", marker, raw)
+				}
+			}
+		})
+	}
+}
+
+func TestRunnerCheckpointCommitFailureReplacesMessageTerminalSuccess(t *testing.T) {
+	runner := withRuntime(bufferedProviderTransport(nil)).
+		WithCheckpointStore(failingCheckpointStore{}).
+		WithResponseIDs(deterministicResponseIDGenerator{})
+
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
+		ExchangeID:       "message_commit_failure",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingWebSocket),
+		Request:          testCanonicalRequest("m"),
+		WorkspaceSlug:    "alpha",
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.BufferedDelivery(),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want delivery-owned terminal failure", err)
+	}
+	stream := ClientMessageTransportForTest(out).Messages
+	published := 0
+	for {
+		message, nextErr := stream.Next(context.Background())
+		if nextErr != nil {
+			if !strings.Contains(nextErr.Error(), "checkpoint store failed") {
+				t.Fatalf("message terminal error = %v", nextErr)
+			}
+			break
+		}
+		published++
+		if strings.Contains(string(message), `"status":"completed"`) {
+			t.Fatalf("published terminal success on failed checkpoint commit: %s", message)
+		}
+	}
+	if published == 0 {
+		t.Fatal("message checkpoint failure erased already-published non-terminal messages")
+	}
+}
+
+func TestCheckpointCommitFailureSuppressesResponsesWebSocketTerminalMessage(t *testing.T) {
+	runner := Runner{
+		Runtime: runtimeWithProviderIngress{
+			RuntimeResolver:   codecresolver.NewRuntimeCodecResolver(),
+			providerTransport: bufferedProviderTransport(nil),
+		},
+		CheckpointStore: failingCheckpointStore{},
+		ResponseIDs:     deterministicResponseIDGenerator{},
+		Policy:          DefaultWorkspacePolicy(),
+	}
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
+		ExchangeID:       "responses_websocket_marker",
+		ClientFamily:     canonical.ClientFamilyResponses,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingWebSocket),
+		Request:          testCanonicalRequest("m"),
+		WorkspaceSlug:    "alpha",
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.BufferedDelivery(),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := ClientMessageTransportForTest(out).Messages
+	published := 0
+	for {
+		message, nextErr := stream.Next(context.Background())
+		if nextErr != nil {
+			if !strings.Contains(nextErr.Error(), "checkpoint store failed") {
+				t.Fatalf("websocket terminal error = %v", nextErr)
+			}
+			break
+		}
+		published++
+		if strings.Contains(string(message), `"type":"response.completed"`) {
+			t.Fatalf("published response.completed before checkpoint commit: %s", message)
+		}
+	}
+	if published == 0 {
+		t.Fatal("checkpoint failure erased every non-terminal websocket message")
 	}
 }

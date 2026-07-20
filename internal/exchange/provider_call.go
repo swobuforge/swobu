@@ -96,6 +96,7 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
 		workspaceSlug: workspaceSlug, fullRequest: s.prepared.Full.Clone(),
 		resolvedMedia: resolvedMedia,
+		advance:       s.advance,
 	}, path.target, evidence, nil, nil
 }
 
@@ -140,16 +141,15 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	binding := canonical.ResponseBinding{SwobuID: swobuResponseID, TargetID: call.backend.Target.TargetID, TargetVersion: call.backend.Target.TargetVersion}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	events = canonical.NewValidatedResponseStream(events)
-	events = session.NewCheckpointStream(events, session.CheckpointConfig{
-		WorkspaceSlug: call.workspaceSlug,
-		ExchangeID:    call.exchangeID,
-		Binding:       binding,
-		Store:         runner.CheckpointStore,
-		Request:       call.fullRequest.Clone(),
-		ResolvedMedia: call.resolvedMedia,
-		MaxBytes:      runner.Policy.Limits.MaxCheckpointBytes,
-	})
-	response, err := encodeClientOutput(ctx, call, events, incremental, runner.DecisionSink)
+	events = newTerminalResponseStream(events)
+	capture := newCheckpointCaptureResponseStream(events, binding)
+	committer := &checkpointCommitter{
+		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
+		store: runner.CheckpointStore, maxBytes: runner.Policy.Limits.MaxCheckpointBytes,
+		request: call.fullRequest.Clone(), resolvedMedia: call.resolvedMedia.Clone(),
+		advance: call.advance, capture: capture,
+	}
+	response, err := encodeClientOutput(ctx, call, capture, incremental, runner.DecisionSink, committer)
 	return response, decoded.Decisions, err
 }
 

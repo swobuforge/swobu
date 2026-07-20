@@ -7,7 +7,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func validateCheckpointSize(record Checkpoint, limit int64) error {
+// ValidateCheckpointSize bounds one fully captured checkpoint before exchange
+// attempts storage.
+func ValidateCheckpointSize(record Checkpoint, limit int64) error {
 	// This estimate bounds retained semantic state and owned media; it is not a
 	// serialized storage-byte measurement.
 	size, err := requestSemanticSize(record.Request)
@@ -24,6 +26,9 @@ func validateCheckpointSize(record Checkpoint, limit int64) error {
 		size += 32 + len(binding.sourceURL) + 8
 	}
 	size += 64 + len(record.Response.Response().SwobuID.String()) + len(record.Response.Model()) + len(record.Response.CompletionReason())
+	if record.HistoryFingerprint != nil {
+		size += 32 + len(record.HistoryFingerprint.Scheme())
+	}
 	if native := record.Response.Response().Responses; native != nil {
 		size += len(native.ProviderResponseID.String()) + len(native.TargetID) + 8
 	}
