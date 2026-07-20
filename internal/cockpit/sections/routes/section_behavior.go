@@ -32,6 +32,7 @@ type SectionView struct {
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
 	DeleteTarget         func(context.Context, ports.DeleteTargetRequest) (readmodel.RouteReadModel, error)
+	OnWorkspacePersisted func(readmodel.WorkspaceReadModel)
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *SectionView {
@@ -39,7 +40,7 @@ func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *
 		Model:         model,
 		Expanded:      tui.NewState(true),
 		State:         NewRouteSectionState(model.Routes),
-		TargetConfigs: NewTargetConfigMounts(model.ID),
+		TargetConfigs: NewTargetConfigMounts(model.RoutingWorkspaceID()),
 	}
 	section.TargetConfigs.ProviderOptions = model.ProviderOptions
 	section.configureTargetConfigMounts()
@@ -91,6 +92,7 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.SaveRoute = f.SaveRoute
 	s.DeleteRoute = f.DeleteRoute
 	s.DeleteTarget = f.DeleteTarget
+	s.OnWorkspacePersisted = f.OnWorkspacePersisted
 	if s.State == nil {
 		s.State = f.State
 	} else if f.State != nil {
@@ -109,7 +111,7 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 		s.DraftRoute = f.DraftRoute
 	}
 	if s.TargetConfigs == nil {
-		s.TargetConfigs = NewTargetConfigMounts(s.Model.ID)
+		s.TargetConfigs = NewTargetConfigMounts(s.Model.RoutingWorkspaceID())
 	}
 	s.TargetConfigs.UpdateFrom(f.TargetConfigs)
 	// ProviderOptions are readmodel-props, not query results. They must flow from
@@ -144,12 +146,15 @@ func TargetConfigComponent(config *target_config.TargetConfig) *target_config.Ta
 
 func (s *SectionView) configureTargetConfigMounts() {
 	if s.TargetConfigs == nil {
-		s.TargetConfigs = NewTargetConfigMounts(s.Model.ID)
+		s.TargetConfigs = NewTargetConfigMounts(s.Model.RoutingWorkspaceID())
 	}
-	s.TargetConfigs.WorkspaceID = s.Model.ID
-	s.TargetConfigs.Callbacks.OnCreated = func(route readmodel.RouteReadModel) {
-		s.applyRouteUpsert(route)
+	s.TargetConfigs.WorkspaceID = s.Model.RoutingWorkspaceID()
+	s.TargetConfigs.Callbacks.OnCreated = func(result ports.SaveTargetResult) {
+		s.applyRouteUpsert(result.Route)
 		s.State.AddTargetRoute.Set("")
+		if s.Model.IsDraft() && result.Workspace.ID != "" && s.OnWorkspacePersisted != nil {
+			s.OnWorkspacePersisted(result.Workspace)
+		}
 	}
 	s.TargetConfigs.Callbacks.OnSaved = func(route readmodel.RouteReadModel) {
 		s.applyRouteUpsert(route)
@@ -196,7 +201,7 @@ func (s *SectionView) expandedRoute() (readmodel.RouteReadModel, bool) {
 }
 
 func (s *SectionView) addRoute() {
-	s.DraftRoute = NewDraftRoute(s.Model.ID)
+	s.DraftRoute = NewDraftRoute(s.Model.RoutingWorkspaceID())
 	s.DraftRoute.Open()
 	if s.AddRouteRow != nil {
 		s.AddRouteRow.AutoFocus = false
@@ -293,7 +298,7 @@ func (s *SectionView) deleteTargetAndClose(routeID readmodel.RouteID, targetID r
 		return errTargetDeleteNotWired
 	}
 	committed, err := s.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
-		WorkspaceID: s.Model.ID,
+		WorkspaceID: s.Model.RoutingWorkspaceID(),
 		RouteID:     routeID,
 		TargetID:    targetID,
 	})
@@ -373,11 +378,18 @@ func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 	if existing.ID == "" {
 		return
 	}
+	if s.Model.IsDraft() {
+		saved := existing
+		saved.ID = readmodel.RouteID(name)
+		saved.ModelName = name
+		s.saveRoute(routeID, saved)
+		return
+	}
 	if s.SaveRoute == nil {
 		return
 	}
 	saved, err := s.SaveRoute(context.Background(), ports.SaveRouteRequest{
-		WorkspaceID: s.Model.ID,
+		WorkspaceID: s.Model.RoutingWorkspaceID(),
 		RouteID:     routeID,
 		ModelName:   name,
 		Enabled:     existing.Enabled,
@@ -403,7 +415,7 @@ func (s *SectionView) setRouteDefault(routeID readmodel.RouteID) {
 		return
 	}
 	saved, err := s.SaveRoute(context.Background(), ports.SaveRouteRequest{
-		WorkspaceID: s.Model.ID,
+		WorkspaceID: s.Model.RoutingWorkspaceID(),
 		RouteID:     routeID,
 		ModelName:   existing.ModelName,
 		Enabled:     existing.Enabled,
@@ -417,11 +429,15 @@ func (s *SectionView) setRouteDefault(routeID readmodel.RouteID) {
 }
 
 func (s *SectionView) confirmDeleteRoute(routeID readmodel.RouteID) error {
+	if s.Model.IsDraft() {
+		s.deleteRoute(routeID)
+		return nil
+	}
 	if s.DeleteRoute == nil {
 		return nil
 	}
 	if err := s.DeleteRoute(context.Background(), ports.DeleteRouteRequest{
-		WorkspaceID: s.Model.ID,
+		WorkspaceID: s.Model.RoutingWorkspaceID(),
 		RouteID:     routeID,
 	}); err != nil {
 		return err
@@ -462,7 +478,7 @@ func (s *SectionView) routeNameRowKey(route readmodel.RouteReadModel) string {
 func DraftParentRowComponent(s *SectionView) *ui.SelectableRow {
 	draft := s.DraftRoute
 	if draft == nil {
-		draft = NewDraftRoute(s.Model.ID)
+		draft = NewDraftRoute(s.Model.RoutingWorkspaceID())
 	}
 	label := draft.ModelName()
 	if label == "" {
@@ -483,7 +499,7 @@ func DraftParentRowComponent(s *SectionView) *ui.SelectableRow {
 func DraftNameRowComponent(s *SectionView) *ui.EditableRow {
 	draft := s.DraftRoute
 	if draft == nil {
-		draft = NewDraftRoute(s.Model.ID)
+		draft = NewDraftRoute(s.Model.RoutingWorkspaceID())
 	}
 	value := draft.Name
 	row := ui.NewEditableRow("draft-name", "name", value)

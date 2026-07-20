@@ -246,6 +246,8 @@ func targetUsesInteractiveAuth(w *TargetConfig) bool { return w.RequiresInteract
 func targetCatalogLoading(w *TargetConfig) bool      { return w.catalogLoading() }
 func targetCatalogFailed(w *TargetConfig) bool       { return w.catalogFailed() }
 func targetCreateFailed(w *TargetConfig) bool        { return w.createFailed() }
+func targetReadyToCreate(w *TargetConfig) bool       { return w.readyToCreate() }
+func targetSaveVerb(w *TargetConfig) string          { return w.saveVerb() }
 func targetAuthPending(w *TargetConfig) bool         { return w.authSessionPending() }
 func targetAuthFailed(w *TargetConfig) bool          { return w.authSessionFailed() }
 

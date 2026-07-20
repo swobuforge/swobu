@@ -33,13 +33,11 @@ func NewModelReloader(ctx context.Context, query ports.WorkspaceQueries, timeout
 	return &ModelReloader{ctx: ctx, query: query, timeout: timeout}
 }
 
-// RefreshAfterSave loads a fresh cockpit projection after a workspace save.
-// It returns the reconciled model and a notice. Draft-to-existing promotion
-// stays local because the daemon does not own that transition yet, but the
-// promoted workspace still gets the derived launch affordances the daemon
-// projection would normally supply. When the daemon is unreachable for ordinary
-// saves, it patches the current model in place and reports a stale notice so
-// the UI does not silently hide the mutation.
+// RefreshAfterSave reconciles a workspace projection after a rename or the
+// authoritative first-target response. Local draft naming also uses the local
+// projection path but never queries or mutates the daemon. When the daemon is
+// unreachable for persisted renames, it patches the current model and reports
+// a stale notice so the UI does not silently hide the mutation.
 func (r *ModelReloader) RefreshAfterSave(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) (readmodel.CockpitReadModel, readmodel.Notice) {
 	if r.query == nil || current.SelectedWorkspace.IsDraft() {
 		return r.localSaveProjection(current, saved), readmodel.Notice{}
@@ -85,17 +83,15 @@ func (r *ModelReloader) refreshContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(base, r.timeout)
 }
 
-// localSaveProjection promotes a saved workspace into the current cockpit
-// model without querying the daemon. Draft create uses this path because the
-// workspace tab is still local when the first save completes, but the promoted
-// workspace still needs a usable client base URL and run-command projection so
-// the operator can launch immediately.
+// localSaveProjection applies a command result without querying the daemon.
+// Naming retains the [+] draft identity; the first-target result carries an
+// authoritative persisted workspace and promotes it to a normal tab.
 func (r *ModelReloader) localSaveProjection(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
 	merged := mergeWorkspaceProjection(current.SelectedWorkspace, saved)
-	if merged.ClientBaseURL == "" {
+	if !merged.IsDraft() && merged.ClientBaseURL == "" {
 		merged.ClientBaseURL = derivedClientBaseURL(current, merged.Slug)
 	}
-	if len(merged.RunCommands) == 0 && merged.ClientBaseURL != "" {
+	if !merged.IsDraft() && len(merged.RunCommands) == 0 && merged.ClientBaseURL != "" {
 		merged.RunCommands = runCommandsForBaseURL(merged.ClientBaseURL)
 	}
 	return selectWorkspace(updateWorkspaceInModel(current, merged), saved.ID)

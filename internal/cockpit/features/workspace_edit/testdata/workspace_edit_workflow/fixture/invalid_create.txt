@@ -1,8 +1,0 @@
-> slug              _dev!                                                   invalid
-                    use lowercase letters, numbers, and hyphens
-
-
-
-
-
-

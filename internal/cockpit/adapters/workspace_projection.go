@@ -27,7 +27,7 @@ func (a *LiveOperatorAdapter) headerRight() string {
 	return a.addr
 }
 func draftWorkspace() readmodel.WorkspaceReadModel {
-	return readmodel.WorkspaceReadModel{ID: "+", State: readmodel.WorkspaceDraft, ProviderOptions: operatorProviderOptions()}
+	return readmodel.NewDraftWorkspace(operatorProviderOptions())
 }
 func runCommands(baseURL string) []readmodel.RunCommandReadModel {
 	profiles := clientprofile.Catalog()

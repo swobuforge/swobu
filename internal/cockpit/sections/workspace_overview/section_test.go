@@ -91,6 +91,33 @@ func TestSection_DraftHeaderUsesLayoutGutter(t *testing.T) {
 	}
 }
 
+func TestSection_DraftNameEnterAdvancesLocally(t *testing.T) {
+	section := Section(readmodel.WorkspaceReadModel{ID: "+", State: readmodel.WorkspaceDraft})
+	var savedRequest ports.RenameWorkspaceRequest
+	section.RenameWorkspace = func(_ context.Context, request ports.RenameWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+		savedRequest = request
+		return readmodel.WorkspaceReadModel{ID: readmodel.WorkspaceID(request.Slug), Slug: request.Slug, State: readmodel.WorkspaceExisting}, nil
+	}
+	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
+	defer h.Close()
+
+	for _, r := range "buildweek" {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: r})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	if savedRequest.Slug != "" {
+		t.Fatalf("draft naming crossed rename port: %#v", savedRequest)
+	}
+	if section.Model.Slug != "buildweek" || !section.Model.IsDraft() {
+		t.Fatalf("named draft = %#v", section.Model)
+	}
+	frame := h.Frame()
+	if !strings.Contains(frame, "new workspace") || !strings.Contains(frame, "name              buildweek") || !strings.Contains(frame, "discard") {
+		t.Fatalf("Enter should leave named draft onboarding visible, got:\n%s", frame)
+	}
+}
+
 func TestSection_DoesNotStorePersistentFeatureRefs(t *testing.T) {
 	sectionType := reflect.TypeOf(SectionView{})
 	for i := 0; i < sectionType.NumField(); i++ {
@@ -191,7 +218,7 @@ func TestSection_EnterActivatesSlugRow(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
-	testkit.AssertFocusedFrame(t, frameBefore, "> slug")
+	testkit.AssertFocusedFrame(t, frameBefore, "> name")
 
 	testkit.AssertFocusVisible(t, h, func() {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
@@ -227,7 +254,7 @@ func TestSection_SpaceActivatesSlugRow(t *testing.T) {
 
 	frame := h.Frame()
 	if !strings.Contains(frame, "save ↵") {
-		t.Fatalf("expected slug edit mode after Space, got:\n%s", frame)
+		t.Fatalf("expected workspace name edit mode after Space, got:\n%s", frame)
 	}
 }
 

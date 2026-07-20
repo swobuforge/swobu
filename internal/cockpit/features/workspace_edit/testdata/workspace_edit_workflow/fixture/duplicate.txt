@@ -1,7 +1,6 @@
-> slug              _dev                                                    duplicate
+> name              _dev                                                    duplicate
                     name conflict
-
-
+  endpoint          after first target              preview
 
 
 

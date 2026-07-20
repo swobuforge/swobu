@@ -75,8 +75,8 @@ func TestEditableRow_HelperTextUsesCallerOwnedCopy(t *testing.T) {
 		t.Fatalf("helper text without caller copy = %q, want empty", got)
 	}
 
-	row.ValidationText = " enter a workspace slug "
-	if got := row.HelperText(); got != "enter a workspace slug" {
+	row.ValidationText = " enter a workspace name "
+	if got := row.HelperText(); got != "enter a workspace name" {
 		t.Fatalf("helper text = %q, want caller-owned copy", got)
 	}
 }
@@ -85,14 +85,14 @@ func TestEditableRow_HelperLineAlignsWithValueColumn(t *testing.T) {
 	value := tui.NewState("")
 	row := NewEditableRow("slug", "slug", value)
 	row.Validation = EditableRowValidationRequired
-	row.ValidationText = "enter a workspace slug"
+	row.ValidationText = "enter a workspace name"
 
 	rendered := testkit.RenderMountedTrimmed(t, row, 90, 4)
 	lines := strings.Split(rendered, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("frame missing helper line:\n%s", rendered)
 	}
-	wantPrefix := strings.Repeat(" ", 20) + "enter a workspace slug"
+	wantPrefix := strings.Repeat(" ", 20) + "enter a workspace name"
 	if !strings.HasPrefix(lines[1], wantPrefix) {
 		t.Fatalf("helper line misaligned:\n%s\nwant prefix %q", rendered, wantPrefix)
 	}
@@ -309,6 +309,54 @@ func (r *freshEditableRowRoot) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
 		tui.OnStop(tui.KeyDown, SelectNext),
 		tui.OnStop(tui.KeyUp, SelectPrevious),
+	}
+}
+
+// enteredEditableRemountRoot models a semantic owner replacement after the app
+// has already applied selection elsewhere. The replacement editor must own
+// actual dispatch selection, not only paint an entered marker.
+type enteredEditableRemountRoot struct {
+	showEditor bool
+	submitted  string
+}
+
+func (r *enteredEditableRemountRoot) Render(app *tui.App) *tui.Element {
+	root := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
+		tui.WithWidthPercent(100),
+	)
+	if !r.showEditor {
+		root.AddChild(app.Mount(r, "before", func() tui.Component {
+			return NewSelectableRow("before", "before", "", "", nil)
+		}))
+		return root
+	}
+	root.AddChild(app.Mount(r, "replacement-before", func() tui.Component {
+		return NewSelectableRow("replacement-before", "replacement before", "", "", nil)
+	}))
+	root.AddChild(app.Mount(r, "editor", func() tui.Component {
+		row := NewEditableRow("editor", "name", tui.NewState(""))
+		row.Open()
+		row.OnSubmit = func(value string) { r.submitted = value }
+		return row
+	}))
+	return root
+}
+
+func TestEditableRow_EnteredRemountOwnsDispatchSelection(t *testing.T) {
+	root := &enteredEditableRemountRoot{}
+	h := makeEditableHarness(t, root)
+	h.FocusNext()
+
+	root.showEditor = true
+	if frame := h.Frame(); strings.Count(frame, "> ") != 1 {
+		t.Fatalf("entered remount must replace sibling selection:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: 'd'})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	if root.submitted != "d" {
+		t.Fatalf("entered remount submitted %q, want d; painted entry must own dispatch selection", root.submitted)
 	}
 }
 

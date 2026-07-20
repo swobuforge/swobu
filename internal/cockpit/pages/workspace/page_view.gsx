@@ -17,6 +17,7 @@ type PageView struct {
 	ActivitySection *activitysection.SectionView
 	OnWorkspaceSaved       func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted     func(readmodel.WorkspaceID)
+	OnWorkspaceDiscarded   func()
 }
 
 // Page composes one workspace surface from explicit ports.
@@ -43,6 +44,8 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 	}
 	page.OverviewSection.OnWorkspaceSaved = page.workspaceSaved
 	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
+	page.OverviewSection.OnWorkspaceDiscarded = page.workspaceDiscarded
+	page.RoutesSection.OnWorkspacePersisted = page.workspacePersisted
 	return page
 }
 
@@ -66,6 +69,18 @@ func (v *PageView) workspaceSaved(workspace readmodel.WorkspaceReadModel) {
 func (v *PageView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
 	if v.OnWorkspaceDeleted != nil {
 		v.OnWorkspaceDeleted(workspaceID)
+	}
+}
+
+func (v *PageView) workspaceDiscarded() {
+	if v.OnWorkspaceDiscarded != nil {
+		v.OnWorkspaceDiscarded()
+	}
+}
+
+func (v *PageView) workspacePersisted(workspace readmodel.WorkspaceReadModel) {
+	if v.OnWorkspaceSaved != nil {
+		v.OnWorkspaceSaved(workspace)
 	}
 }
 
@@ -102,14 +117,16 @@ func (v *PageView) backOut(event tui.KeyEvent) {
 templ (v *PageView) Render() {
 	<div class="flex-col w-full">
 		@v.OverviewSection
-		if !v.OverviewSection.Model.IsDraft() {
+		if !v.OverviewSection.Model.IsDraft() || v.OverviewSection.Model.Slug != "" {
 			if consumeAddRouteFocusAfterSave(v.OverviewSection.Model) {
 				v.RoutesSection.RequestAddRouteFocus()
 			}
 			<br />
 			@v.RoutesSection
-			<br />
-			@v.ActivitySection
+			if !v.OverviewSection.Model.IsDraft() {
+				<br />
+				@v.ActivitySection
+			}
 		}
 		<br />
 		<br />

@@ -43,7 +43,7 @@ type TargetConfigCommands struct {
 // TargetConfigCallbacks report local target config lifecycle events back to the
 // routes section that mounted the target config.
 type TargetConfigCallbacks struct {
-	OnCreated         func(readmodel.RouteReadModel)
+	OnCreated         func(ports.SaveTargetResult)
 	OnSaved           func(readmodel.RouteReadModel)
 	OnDeleteConfirmed func(readmodel.RouteID, readmodel.TargetID) error
 	OnAddClose        func(readmodel.RouteID)
@@ -228,7 +228,7 @@ func (h *TargetConfigMounts) newAdd(route readmodel.RouteReadModel) *target_conf
 	h.refreshAddConfig(wf, route)
 	wf.OnCreated = func(result ports.SaveTargetResult) {
 		if h.Callbacks.OnCreated != nil {
-			h.Callbacks.OnCreated(result.Route)
+			h.Callbacks.OnCreated(result)
 		}
 	}
 	return wf
@@ -249,7 +249,7 @@ func (h *TargetConfigMounts) newEdit(route readmodel.RouteReadModel, target read
 	h.refreshEditConfig(wf, route, target)
 	wf.OnCreated = func(result ports.SaveTargetResult) {
 		if h.Callbacks.OnCreated != nil {
-			h.Callbacks.OnCreated(result.Route)
+			h.Callbacks.OnCreated(result)
 		}
 	}
 	wf.OnSaved = func(result ports.SaveTargetResult) {

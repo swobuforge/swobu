@@ -19,6 +19,23 @@ type WorkspaceReadModel struct {
 	ProviderOptions []ProviderOptionReadModel
 }
 
+// NewDraftWorkspace constructs the canonical [+] workspace projection.
+// Provider options are ambient operator capabilities, not authored workspace
+// setup, so callers supply the hydrated catalog separately from draft input.
+func NewDraftWorkspace(providerOptions []ProviderOptionReadModel) WorkspaceReadModel {
+	return WorkspaceReadModel{
+		ID:              "+",
+		State:           WorkspaceDraft,
+		ProviderOptions: append([]ProviderOptionReadModel(nil), providerOptions...),
+	}
+}
+
+// ResetDraftInput clears operator-authored onboarding state while preserving
+// ambient capabilities required to start the next setup journey.
+func (w WorkspaceReadModel) ResetDraftInput() WorkspaceReadModel {
+	return NewDraftWorkspace(w.ProviderOptions)
+}
+
 // WorkspaceTabReadModel is the tab-rail projection for an existing, draft, or
 // help tab.
 type WorkspaceTabReadModel struct {
@@ -49,6 +66,16 @@ const (
 // IsDraft reports whether the workspace body is the [+] creation state.
 func (w WorkspaceReadModel) IsDraft() bool {
 	return w.State == WorkspaceDraft
+}
+
+// RoutingWorkspaceID returns the namespace that draft route/target commands
+// will create atomically. The [+] ID remains the Cockpit draft identity; its
+// validated name becomes the future routing identity only at the command edge.
+func (w WorkspaceReadModel) RoutingWorkspaceID() WorkspaceID {
+	if w.IsDraft() && w.Slug != "" {
+		return WorkspaceID(w.Slug)
+	}
+	return w.ID
 }
 
 // HasRoutes reports whether the workspace can render route rows.

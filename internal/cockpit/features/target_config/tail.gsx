@@ -194,14 +194,8 @@ func DeleteControl(w *TargetConfig) *ui.SelectableRow {
 }
 
 func CreateControl(w *TargetConfig) *ui.SelectableRow {
-	action := w.saveVerb() + " ↵"
-	activate := func() { w.Create(w.actionContext()) }
-	if !w.readyToCreate() {
-		action = "complete setup"
-		activate = func() { w.Error.Set("complete setup") }
-	}
-	row := ui.NewSelectableRow(TargetAddMountKey(w, "create"), w.saveVerb(), "", action, activate)
-	row.AutoFocus = action == w.saveVerb()+" ↵"
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "create"), w.saveVerb(), "", w.saveVerb()+" ↵", func() { w.Create(w.actionContext()) })
+	row.AutoFocus = true
 	return row
 }
 
@@ -262,8 +256,10 @@ templ (t *targetTail) Render() {
 			@DeleteControl(t.root)
 		} else if targetCreateFailed(t.root) {
 			@CreateRetryControl(t.root)
-		} else {
+		} else if targetReadyToCreate(t.root) {
 			@CreateControl(t.root)
+		} else {
+			@InertTargetField(targetSaveVerb(t.root), "", "complete setup")
 		}
 	</div>
 }

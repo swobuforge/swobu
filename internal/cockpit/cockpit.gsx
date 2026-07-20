@@ -167,9 +167,10 @@ func activityQueryPort(query ports.WorkspaceQueries) ports.ActivityQueries {
 }
 
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
+	active := c.activeModel()
 	previousPage := c.currentWorkspacePage()
-	wasDraft := c.Model.SelectedWorkspace.IsDraft()
-	model, notice := c.Reloader.RefreshAfterSave(c.Model, saved)
+	wasDraft := active.SelectedWorkspace.IsDraft()
+	model, notice := c.Reloader.RefreshAfterSave(active, saved)
 	c.RefreshNotice.Set(notice)
 	c.replaceModel(model, !wasDraft)
 	if previousPage != nil && !wasDraft {
@@ -189,6 +190,21 @@ func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
 	model, notice := c.Reloader.RefreshAfterDelete(c.Model, deleted)
 	c.RefreshNotice.Set(notice)
 	c.replaceModel(model, true)
+}
+
+// discardWorkspaceDraft resets the selected [+] onboarding draft without
+// crossing the daemon boundary. Draft input is Cockpit-owned until the first
+// target is committed atomically.
+func (c *Cockpit) discardWorkspaceDraft() {
+	model := c.activeModel()
+	for i := range model.Tabs {
+		if model.Tabs[i].Kind == readmodel.WorkspaceTabDraft {
+			model.Tabs[i].Slug = ""
+		}
+	}
+	model.SelectedWorkspaceID = "+"
+	model.SelectedWorkspace = model.SelectedWorkspace.ResetDraftInput()
+	c.replaceModel(model, false)
 }
 
 func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel, preserveDraftPages bool) {
@@ -241,7 +257,11 @@ func ActiveWorkspacePage(c *Cockpit, model readmodel.CockpitReadModel) *workspac
 }
 
 func activeWorkspaceMountKey(model readmodel.CockpitReadModel) string {
-	return "workspace-page:" + string(model.SelectedWorkspaceID)
+	key := "workspace-page:" + string(model.SelectedWorkspaceID)
+	if model.SelectedWorkspace.IsDraft() && model.SelectedWorkspace.Slug != "" {
+		return key + ":" + model.SelectedWorkspace.Slug
+	}
+	return key
 }
 
 templ (c *Cockpit) Render() {
@@ -338,6 +358,7 @@ func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspa
 	)
 	page.OnWorkspaceSaved = c.refreshAfterWorkspaceSave
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
+	page.OnWorkspaceDiscarded = c.discardWorkspaceDraft
 	return page
 }
 
@@ -375,11 +396,13 @@ func targetCredentialCommandsPort(commands ports.WorkspaceCommands) ports.Target
 
 func workspaceForTab(model readmodel.CockpitReadModel, tab readmodel.WorkspaceTabReadModel) readmodel.WorkspaceReadModel {
 	if tab.Kind == readmodel.WorkspaceTabDraft {
-		return readmodel.WorkspaceReadModel{
-			ID:    tab.ID,
-			Slug:  "",
-			State: readmodel.WorkspaceDraft,
+		draft := readmodel.NewDraftWorkspace(model.SelectedWorkspace.ProviderOptions)
+		draft.ID = tab.ID
+		draft.Slug = tab.Slug
+		if model.SelectedWorkspace.IsDraft() && model.SelectedWorkspace.ID == tab.ID {
+			draft = mergeWorkspaceProjection(model.SelectedWorkspace, draft)
 		}
+		return draft
 	}
 	if tab.ID == model.SelectedWorkspaceID {
 		return model.SelectedWorkspace

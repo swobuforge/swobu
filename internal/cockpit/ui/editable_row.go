@@ -40,7 +40,7 @@ type EditableRow struct {
 	Validation EditableRowValidation
 	// ValidationText is caller-owned helper copy for validation states.
 	// EditableRow owns taxonomy and row layout; feature workflows own field
-	// meaning such as workspace-slug guidance or backend conflict text.
+	// meaning such as workspace-name guidance or backend conflict text.
 	ValidationText string
 	// AutoFocus seeds the shell as selected on mount, or on the first
 	// transition from false to true on an already-mounted row.
@@ -137,17 +137,21 @@ func (r *EditableRow) Cancel() {
 	r.Close()
 }
 
-// Init seeds focus when the harness or app mounts this component with
-// AutoFocus set, matching SelectableRow behavior.
+// Init gives actual selection to a freshly mounted row that is declaratively
+// auto-selected or already entered.
 func (r *EditableRow) Init() func() {
 	if r.StartEditing && !r.IsEditing() {
 		r.Open()
+		return nil
 	}
 	if !r.AutoFocus && !r.IsEditing() {
 		return nil
 	}
-	r.target.FocusedState().Set(true)
-	r.target.Init()
+	// An entered editor is the keyboard owner, not merely a painted active
+	// descendant. Reconcile actual selection on every fresh mount because
+	// go-tui preserves focus by tree index and may otherwise select a sibling
+	// that replaced the previously focused row.
+	r.target.Focus(r.target.App())
 	return nil
 }
 

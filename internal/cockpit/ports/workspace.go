@@ -14,13 +14,13 @@ type WorkspaceQueries interface {
 
 // WorkspaceCommands mutates workspace-level configuration.
 type WorkspaceCommands interface {
-	SaveWorkspace(ctx context.Context, request SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error)
+	RenameWorkspace(ctx context.Context, request RenameWorkspaceRequest) (readmodel.WorkspaceReadModel, error)
 	DeleteWorkspace(ctx context.Context, request DeleteWorkspaceRequest) error
 }
 
-// SaveWorkspaceRequest describes a create or edit request for a Cockpit
-// workspace.
-type SaveWorkspaceRequest struct {
+// RenameWorkspaceRequest describes a persisted workspace rename. Draft naming is
+// local Cockpit state and does not cross this command boundary.
+type RenameWorkspaceRequest struct {
 	ID   readmodel.WorkspaceID
 	Slug string
 }

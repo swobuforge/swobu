@@ -156,6 +156,29 @@ func TestTargetConfigCoreFileRolesStayNarrow(t *testing.T) {
 	}
 }
 
+func TestCreateControlRepresentsOnlyAReadyCreateAction(t *testing.T) {
+	src := mustReadFile(t, "tail.gsx")
+	start := strings.Index(src, "func CreateControl")
+	if start < 0 {
+		t.Fatal("CreateControl source start not found")
+	}
+	end := strings.Index(src[start:], "func (w *TargetConfig) saveVerb")
+	if end < 0 {
+		t.Fatal("CreateControl source end not found")
+	}
+	body := src[start : start+end]
+	for _, forbidden := range []string{"readyToCreate", "complete setup", "Error.Set"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("CreateControl must represent only a valid create action; found %q", forbidden)
+		}
+	}
+	for _, required := range []string{"if targetReadyToCreate(t.root)", "@CreateControl(t.root)", `@InertTargetField(targetSaveVerb(t.root), "", "complete setup")`} {
+		if !strings.Contains(src, required) {
+			t.Fatalf("target tail must render incomplete create as inert status; missing %q", required)
+		}
+	}
+}
+
 // isForbiddenGrammar reports whether a non-test, non-generated .go filename
 // matches a forbidden file kind per file-grammar-canon.md.
 func isForbiddenGrammar(name string) bool {

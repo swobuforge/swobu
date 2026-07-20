@@ -3,7 +3,7 @@
 > workspace ▾
      endpoint                                                                                             copy ↵
                        OpenAI · Anthropic
-     slug              lab                                                                                edit ↵
+     name              lab                                                                                edit ↵
      delete            workspace                                                                          delete ↵
 
   model routes ▾

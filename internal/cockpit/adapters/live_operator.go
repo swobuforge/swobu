@@ -116,18 +116,13 @@ func (a *LiveOperatorAdapter) LoadWorkspace(ctx context.Context, id readmodel.Wo
 	}
 	return a.workspaceFromView(ctx, workspace)
 }
-func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+func (a *LiveOperatorAdapter) RenameWorkspace(ctx context.Context, request ports.RenameWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
 	slug := strings.TrimSpace(request.Slug)
 	if slug == "" {
 		return readmodel.WorkspaceReadModel{}, errors.New("workspace slug is required")
 	}
 	if request.ID == "" || request.ID == "+" {
-		draft := draftWorkspace()
-		draft.ID = readmodel.WorkspaceID(slug)
-		draft.Slug = slug
-		draft.State = readmodel.WorkspaceExisting
-		draft.ClientBaseURL = a.clientBaseURL(slug)
-		return draft, nil
+		return readmodel.WorkspaceReadModel{}, errors.New("workspace draft naming is local to Cockpit")
 	}
 	if string(request.ID) == slug {
 		workspace, err := a.client.GetWorkspace(ctx, slug)
@@ -143,10 +138,25 @@ func (a *LiveOperatorAdapter) SaveWorkspace(ctx context.Context, request ports.S
 	return a.workspaceFromView(ctx, workspace)
 }
 func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports.DeleteWorkspaceRequest) error {
-	if err := a.client.DeleteWorkspace(ctx, string(request.ID)); err != nil {
+	err := a.client.DeleteWorkspace(ctx, string(request.ID))
+	if err == nil {
+		return nil
+	}
+	if !operatorclient.IsNotFound(err) {
 		return adapterFailure("delete workspace", err)
 	}
-	return nil
+	// Only persisted workspaces reach this adapter. A delete 404 is therefore
+	// stale-projection evidence, not draft-discard behavior. Re-read the
+	// authoritative object: absence satisfies the requested postcondition;
+	// presence preserves the original delete failure.
+	_, reconcileErr := a.client.GetWorkspace(ctx, string(request.ID))
+	if operatorclient.IsNotFound(reconcileErr) {
+		return nil
+	}
+	if reconcileErr != nil {
+		return adapterFailure("reconcile workspace delete", reconcileErr)
+	}
+	return adapterFailure("delete workspace", err)
 }
 func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
 	if request.RouteID == "" {
@@ -253,7 +263,11 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 	}
 	for _, route := range workspace.Routes {
 		if route.Name == routeID {
-			return ports.SaveTargetResult{Target: committedTarget, Route: routeFromWorkspaceRoute(workspace.DefaultRoute, route)}, nil
+			workspaceModel, projectionErr := a.workspaceFromView(ctx, workspace)
+			if projectionErr != nil {
+				return ports.SaveTargetResult{}, projectionErr
+			}
+			return ports.SaveTargetResult{Target: committedTarget, Route: routeFromWorkspaceRoute(workspace.DefaultRoute, route), Workspace: workspaceModel}, nil
 		}
 	}
 	return ports.SaveTargetResult{}, errors.New("committed route missing from workspace response")

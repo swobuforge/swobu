@@ -1,4 +1,4 @@
-> slug              dev_-2                                                  duplicate
+> name              dev_-2                                                  duplicate
                     name conflict
 
 

@@ -3,7 +3,7 @@
   workspace ▾
      endpoint          http://127.0.0.1:7926/c/lab                                    copy ↵
                        OpenAI · Anthropic
-     slug              lab                                                            edit ↵
+     name              lab                                                            edit ↵
      delete            workspace                                                      delete ↵
 
   model routes ▾
