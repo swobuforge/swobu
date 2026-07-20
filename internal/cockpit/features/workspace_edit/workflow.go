@@ -13,18 +13,10 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
-// SaveFunc is the narrow command boundary for create and edit submissions.
-type SaveFunc func(context.Context, ports.SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error)
+// RenameFunc is the narrow command boundary for persisted workspace renames.
+type RenameFunc func(context.Context, ports.RenameWorkspaceRequest) (readmodel.WorkspaceReadModel, error)
 
-// Mode describes whether the shared workflow is creating or editing.
-type Mode int
-
-const (
-	ModeEdit Mode = iota
-	ModeCreate
-)
-
-// Phase is the workspace slug row lifecycle.
+// Phase is the workspace name row lifecycle.
 type Phase int
 
 const (
@@ -34,19 +26,18 @@ const (
 	PhaseFailed
 )
 
-// Workflow owns the workspace slug lifecycle row.
+// Workflow owns the operator-facing workspace name lifecycle row.
 //
 // The shared EditableRow component owns the focus shell, cursor, and inline
-// text editing. Workflow owns the higher-level create/edit lifecycle, submit
-// seam, and validation projection that turns slug state into RFC grammar.
+// text editing. Workflow owns local draft naming, persisted rename submission,
+// and validation projection that turns the URL-safe name into RFC grammar.
 type Workflow struct {
 	Workspace   readmodel.WorkspaceReadModel
 	Phase       *tui.State[Phase]
-	Mode        *tui.State[Mode]
 	WorkspaceID *tui.State[readmodel.WorkspaceID]
 	Slug        *tui.State[string]
 	Error       *tui.State[string]
-	Save        SaveFunc
+	Rename      RenameFunc
 	OnSaved     func(readmodel.WorkspaceReadModel)
 
 	row *ui.EditableRow
@@ -62,18 +53,17 @@ func workflowKey(workspace readmodel.WorkspaceReadModel) string {
 	return "workspace-edit:+"
 }
 
-func NewWorkflow(workspace readmodel.WorkspaceReadModel, save SaveFunc, onSaved func(readmodel.WorkspaceReadModel)) *Workflow {
+func NewWorkflow(workspace readmodel.WorkspaceReadModel, save RenameFunc, onSaved func(readmodel.WorkspaceReadModel)) *Workflow {
 	w := &Workflow{
 		Workspace:   workspace,
 		Phase:       tui.NewState(PhaseViewing),
-		Mode:        tui.NewState(ModeEdit),
 		WorkspaceID: tui.NewState(workspace.ID),
 		Slug:        tui.NewState(workspace.Slug),
 		Error:       tui.NewState(""),
-		Save:        save,
+		Rename:      save,
 		OnSaved:     onSaved,
 	}
-	w.row = ui.NewEditableRow(workflowKey(workspace), "slug", w.Slug)
+	w.row = ui.NewEditableRow(workflowKey(workspace), "name", w.Slug)
 	w.row.PublishWhileEditing = true
 	w.row.ValueWidth = 32
 	w.row.OnActivate = func() { w.Activate() }
@@ -89,9 +79,9 @@ func (w *Workflow) UpdateProps(fresh tui.Component) {
 	if !ok {
 		return
 	}
-	reseed := w.Workspace.ID != f.Workspace.ID || w.Workspace.State != f.Workspace.State
+	reseed := w.Workspace.ID != f.Workspace.ID || w.Workspace.State != f.Workspace.State || w.Workspace.Slug != f.Workspace.Slug
 	w.Workspace = f.Workspace
-	w.Save = f.Save
+	w.Rename = f.Rename
 	w.OnSaved = f.OnSaved
 	if reseed {
 		w.seedFromWorkspace(f.Workspace)
@@ -101,21 +91,19 @@ func (w *Workflow) UpdateProps(fresh tui.Component) {
 
 func (w *Workflow) OpenEditor(workspace readmodel.WorkspaceReadModel) {
 	w.seedFromWorkspace(workspace)
-	w.Mode.Set(ModeEdit)
 	w.Phase.Set(PhaseEditing)
 	w.row.Open()
 	w.syncRow()
 }
 
-func (w *Workflow) OpenCreate() {
-	w.seedFromWorkspace(readmodel.WorkspaceReadModel{State: readmodel.WorkspaceDraft})
+func (w *Workflow) OpenDraft() {
+	w.seedFromWorkspace(readmodel.NewDraftWorkspace(nil))
 	w.row.Open()
 	w.syncRow()
 }
 
 func (w *Workflow) BindApp(app *tui.App) {
 	w.Phase.BindApp(app)
-	w.Mode.BindApp(app)
 	w.WorkspaceID.BindApp(app)
 	w.Slug.BindApp(app)
 	w.Error.BindApp(app)
@@ -154,13 +142,11 @@ func (w *Workflow) seedFromWorkspace(workspace readmodel.WorkspaceReadModel) {
 	w.WorkspaceID.Set(workspace.ID)
 	w.Slug.Set(workspace.Slug)
 	w.Error.Set("")
-	if workspace.IsDraft() {
-		w.Mode.Set(ModeCreate)
+	if workspace.IsDraft() && strings.TrimSpace(workspace.Slug) == "" {
 		w.Phase.Set(PhaseEditing)
 		w.row.Open()
 		return
 	}
-	w.Mode.Set(ModeEdit)
 	w.Phase.Set(PhaseViewing)
 	w.row.Close()
 }
@@ -197,7 +183,7 @@ func (w *Workflow) Activate() {
 		return
 	}
 	slug := strings.TrimSpace(w.Slug.Get())
-	if w.Mode.Get() == ModeEdit && slug == w.Workspace.Slug {
+	if !w.Workspace.IsDraft() && slug == w.Workspace.Slug {
 		w.closeEdit()
 		return
 	}
@@ -212,7 +198,16 @@ func (w *Workflow) Submit(ctx context.Context) {
 		w.syncRow()
 		return
 	}
-	if w.Save == nil {
+	if w.Workspace.IsDraft() {
+		workspace := w.Workspace
+		workspace.ID = "+"
+		workspace.Slug = slug
+		workspace.State = readmodel.WorkspaceDraft
+		workspace.ClientBaseURL = w.ClientBaseURLPreview()
+		w.finishSubmit(workspace)
+		return
+	}
+	if w.Rename == nil {
 		w.Error.Set("workspace save is not wired yet")
 		w.Phase.Set(PhaseFailed)
 		w.syncRow()
@@ -220,22 +215,25 @@ func (w *Workflow) Submit(ctx context.Context) {
 	}
 	w.Error.Set("")
 	w.Phase.Set(PhaseSubmitting)
-	workspace, err := w.Save(ctx, ports.SaveWorkspaceRequest{ID: w.WorkspaceID.Get(), Slug: slug})
+	workspace, err := w.Rename(ctx, ports.RenameWorkspaceRequest{ID: w.WorkspaceID.Get(), Slug: slug})
 	if err != nil {
 		w.Error.Set(err.Error())
 		w.Phase.Set(PhaseFailed)
 		w.syncRow()
 		return
 	}
-	if w.OnSaved != nil {
-		w.OnSaved(workspace)
-	}
+	w.finishSubmit(workspace)
+}
+
+func (w *Workflow) finishSubmit(workspace readmodel.WorkspaceReadModel) {
 	w.Workspace = workspace
 	w.WorkspaceID.Set(workspace.ID)
 	w.Slug.Set(workspace.Slug)
-	w.Mode.Set(ModeEdit)
 	w.closeEdit()
 	w.syncRow()
+	if w.OnSaved != nil {
+		w.OnSaved(workspace)
+	}
 }
 
 func (w *Workflow) SubmitSlug(value string) {
@@ -245,7 +243,7 @@ func (w *Workflow) SubmitSlug(value string) {
 
 func (w *Workflow) ActionLabel() string {
 	if msg := strings.TrimSpace(w.ErrorMessage()); msg != "" {
-		if msg == "enter a workspace slug" {
+		if msg == "enter a workspace name" {
 			return "required"
 		}
 		if isDuplicateError(msg) {
@@ -253,10 +251,10 @@ func (w *Workflow) ActionLabel() string {
 		}
 		return "invalid"
 	}
-	if w.Mode.Get() == ModeCreate {
-		return "create ↵"
-	}
 	if w.IsEditing() {
+		if w.Workspace.IsDraft() {
+			return "continue ↵"
+		}
 		return "save ↵"
 	}
 	return "edit ↵"
@@ -275,8 +273,8 @@ func (w *Workflow) ErrorMessage() string {
 	}
 	slug := strings.TrimSpace(w.Slug.Get())
 	if slug == "" {
-		if w.Mode.Get() == ModeCreate {
-			return "enter a workspace slug"
+		if w.Workspace.IsDraft() {
+			return "enter a workspace name"
 		}
 		return ""
 	}
@@ -292,11 +290,11 @@ func (w *Workflow) visibleError() string {
 
 func (w *Workflow) ClientBaseURLPreview() string {
 	if msg := strings.TrimSpace(w.ErrorMessage()); msg != "" {
-		return "after create"
+		return "after first target"
 	}
 	slug, err := NormalizeSlug(w.Slug.Get())
 	if err != nil {
-		return "after create"
+		return "after first target"
 	}
 	baseURL := w.Workspace.ClientBaseURL
 	if baseURL == "" {
@@ -313,14 +311,14 @@ func (w *Workflow) syncRow() {
 	if w.row == nil {
 		return
 	}
-	w.row.Label = "slug"
+	w.row.Label = "name"
 	w.row.Value = w.Slug
 	w.row.ValueWidth = 32
 	w.row.Validation = w.rowValidation()
 	w.row.ValidationText = w.ErrorMessage()
-	if w.Mode.Get() == ModeCreate {
-		w.row.ViewAction = "create ↵"
-		w.row.EditAction = "create ↵"
+	if w.Workspace.IsDraft() {
+		w.row.ViewAction = "edit ↵"
+		w.row.EditAction = "continue ↵"
 		return
 	}
 	w.row.ViewAction = "edit ↵"
@@ -332,7 +330,7 @@ func (w *Workflow) rowValidation() ui.EditableRowValidation {
 	if msg == "" {
 		return ui.EditableRowValidationNone
 	}
-	if msg == "enter a workspace slug" {
+	if msg == "enter a workspace name" {
 		return ui.EditableRowValidationRequired
 	}
 	if isDuplicateError(msg) {
@@ -352,7 +350,7 @@ func isDuplicateError(msg string) bool {
 func NormalizeSlug(raw string) (string, error) {
 	slug := strings.TrimSpace(raw)
 	if slug == "" {
-		return "", errors.New("enter a workspace slug")
+		return "", errors.New("enter a workspace name")
 	}
 	for _, r := range slug {
 		if unicode.IsLower(r) || unicode.IsDigit(r) || r == '-' {
@@ -361,10 +359,10 @@ func NormalizeSlug(raw string) (string, error) {
 		return "", fmt.Errorf("use lowercase letters, numbers, and hyphens")
 	}
 	if slug[0] == '-' || slug[len(slug)-1] == '-' {
-		return "", errors.New("slug cannot start or end with hyphen")
+		return "", errors.New("name cannot start or end with hyphen")
 	}
 	if strings.Contains(slug, "--") {
-		return "", errors.New("slug cannot contain consecutive hyphens")
+		return "", errors.New("name cannot contain consecutive hyphens")
 	}
 	return slug, nil
 }

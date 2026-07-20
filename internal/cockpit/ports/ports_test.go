@@ -17,7 +17,7 @@ func (fakeWorkspacePorts) LoadWorkspace(context.Context, readmodel.WorkspaceID) 
 	return readmodel.WorkspaceReadModel{}, nil
 }
 
-func (fakeWorkspacePorts) SaveWorkspace(context.Context, SaveWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
+func (fakeWorkspacePorts) RenameWorkspace(context.Context, RenameWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
 	return readmodel.WorkspaceReadModel{}, nil
 }
 

@@ -46,7 +46,7 @@ func TestAddTargetModelSelectionStaysLocalOnRequiredProtocol(t *testing.T) {
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	frame = h.Frame()
-	if !strings.Contains(frame, "> create") || strings.Contains(frame, "> protocol") {
-		t.Fatalf("protocol handoff must be one-shot and allow continued traversal:\n%s", frame)
+	if !strings.Contains(frame, "> add model route") || strings.Contains(frame, "> protocol") || strings.Contains(frame, "> create") {
+		t.Fatalf("protocol handoff must skip incomplete create and continue to the next action:\n%s", frame)
 	}
 }

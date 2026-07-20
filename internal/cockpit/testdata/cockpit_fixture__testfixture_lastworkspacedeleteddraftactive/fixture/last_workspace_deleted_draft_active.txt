@@ -1,8 +1,8 @@
 ⛉ SWOBU  [› +] [?]
 ────────────────────────────────────────────────────────────────────────────────
   workspace ▾
->    slug              _                             create ↵
-     endpoint          (derived from slug)
+>    name              _                             create ↵
+     endpoint          (derived from name)
 
   model routes ▾
      (no routes)

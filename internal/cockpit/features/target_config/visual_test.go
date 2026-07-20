@@ -23,7 +23,7 @@ var requiredProviderAuthoringVisualNames = []string{
 	"custom_loopback_anonymous", "custom_remote_credential_required", "custom_credential_header_picker", "custom_credential_header_open_value", "custom_ready",
 	"custom_manual_model",
 	"bedrock_aws_identity", "bedrock_environment_api_key", "bedrock_target_api_key", "bedrock_auth_failure", "bedrock_credential_menu",
-	"azure_project_required", "azure_credential_required", "azure_ready",
+	"azure_project_required", "azure_credential_required", "azure_protocol_required", "azure_ready",
 	"ollama_default_url", "ollama_editing_url",
 	"chatgpt_signed_out", "chatgpt_pending", "chatgpt_signed_in", "chatgpt_failed",
 	"model_picker", "deployment_picker", "protocol_picker", "ready_to_create",
@@ -213,6 +213,14 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			return authoringConfig(t, profile.ProviderSpecAzure, "", "")
 		}},
 		{name: "azure_credential_required", render: renderAzureCredentialRequired},
+		{name: "azure_protocol_required", build: func(t *testing.T) tui.Component {
+			w := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
+			w.Route = readmodel.RouteReadModel{ID: "openai"}
+			deployment := readmodel.ModelDeploymentReadModel{ID: "gpt-5.6-sol", Name: "gpt-5.6-sol", ModelName: "gpt-5.6-sol"}
+			w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{deployment}}})
+			w.SelectModel(deployment)
+			return w
+		}},
 		{name: "azure_ready", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
 			selectReadyModel(w, "claude-opus-4-8", "messages_stream")

@@ -17,10 +17,11 @@ type SectionView struct {
 	Model                    readmodel.WorkspaceReadModel
 	Expanded                 *tui.State[bool]
 	CopiedEndpoint           *tui.State[bool]
-	SaveWorkspace            workspace_edit.SaveFunc
+	RenameWorkspace          workspace_edit.RenameFunc
 	DeleteWorkspace          workspace_delete.DeleteFunc
 	OnWorkspaceSaved         func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted       func(readmodel.WorkspaceID)
+	OnWorkspaceDiscarded     func()
 	// PendingDeleteWorkspaceID seeds the delete confirmation child while the
 	// delete row is armed. The parent keeps the request here so Back() can clear
 	// it without holding a persistent child reference.
@@ -35,7 +36,7 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
 	}
 	if len(commands) > 0 && commands[0] != nil {
-		section.SaveWorkspace = commands[0].SaveWorkspace
+		section.RenameWorkspace = commands[0].RenameWorkspace
 		section.DeleteWorkspace = commands[0].DeleteWorkspace
 	}
 	return section
@@ -61,6 +62,13 @@ func (s *SectionView) workspaceDeleted(workspaceID readmodel.WorkspaceID) {
 	if s.OnWorkspaceDeleted != nil {
 		s.OnWorkspaceDeleted(workspaceID)
 	}
+}
+
+func (s *SectionView) workspaceDiscarded() error {
+	if s.OnWorkspaceDiscarded != nil {
+		s.OnWorkspaceDiscarded()
+	}
+	return nil
 }
 
 func (s *SectionView) copyEndpoint() {
@@ -98,7 +106,7 @@ func (s *SectionView) OpenDeleteConfirmation(workspaceID readmodel.WorkspaceID) 
 func WorkspaceEdit(s *SectionView) *workspace_edit.Workflow {
 	return workspace_edit.NewWorkflow(
 		s.Model,
-		s.SaveWorkspace,
+		s.RenameWorkspace,
 		s.workspaceSaved,
 	)
 }
@@ -119,6 +127,16 @@ func DeleteConfirmation(s *SectionView) *workspace_delete.ConfirmationView {
 		s.closeDelete()
 	}
 	return confirmation
+}
+
+func DraftDiscardComponent(s *SectionView) *ui.ConfirmActionRow {
+	copy := ui.ConfirmActionCopy{
+		Label: "discard", IdleValue: "setup", IdleAction: "discard ↵",
+		ConfirmValue: "discard " + s.Model.Slug + "?", ConfirmAction: "confirm ↵",
+		SubmittingValue: "discarding setup…", SubmittingHint: "wait",
+		FailedValue: "discard failed", FailedAction: "retry ↵",
+	}
+	return ui.NewConfirmActionRow("workspace-discard:+", copy, s.workspaceDiscarded)
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +186,11 @@ templ (s *SectionView) Render() {
 					<div key={workspaceEditKey(s)} class="w-full">
 						@WorkspaceEdit(s)
 					</div>
-					@InertRow("endpoint", WorkspaceEdit(s).ClientBaseURLPreview(), "")
+					if s.Model.Slug != "" {
+						<div key={"workspace-discard:+"} class="w-full">
+							@DraftDiscardComponent(s)
+						</div>
+					}
 				} else {
 					<div key={endpointRowKey(s)} class="w-full">
 						@EndpointRowComponent(s)
@@ -193,14 +215,5 @@ templ DraftWorkspaceHeader() {
 	<div class="flex-row w-full">
 		<span class="w-2"></span>
 		<span>new workspace</span>
-	</div>
-}
-
-templ InertRow(label string, value string, action string) {
-	<div class="flex-row w-full">
-		<span class="w-2"></span>
-		<span class="w-18">{label}</span>
-		<span class="w-32">{value}</span>
-		<span>{action}</span>
 	</div>
 }

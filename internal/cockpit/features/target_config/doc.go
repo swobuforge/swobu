@@ -20,6 +20,8 @@
 // login-session workflow.
 // Custom Endpoint treats catalog discovery as best-effort and uses the shared
 // open-set model picker so an operator-authored model ID remains sufficient.
+// An incomplete create row is status, not an interaction target; only a ready
+// create action participates in selection and Enter dispatch.
 //
 // GSX files own visible template hierarchy. Target-config transitions live in
 // effects.go, and pure projections accept concrete values rather than reading

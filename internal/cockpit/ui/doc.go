@@ -73,7 +73,7 @@
 //	row := ui.NewEditableRow("id", "label", valueState)
 //	row.OnSubmit = func(s string) { ... }
 //	row.Validation = ui.EditableRowValidationRequired
-//	row.ValidationText = "enter a workspace slug"
+//	row.ValidationText = "enter a workspace name"
 //
 // Example (InlineEditor, for custom Components):
 //

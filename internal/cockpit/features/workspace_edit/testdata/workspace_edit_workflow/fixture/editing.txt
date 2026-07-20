@@ -1,4 +1,4 @@
-> slug              dev_                                                    save ↵
+> name              dev_                                                    save ↵
 
 
 
