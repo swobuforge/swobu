@@ -164,8 +164,8 @@ func TestRunnerWithoutReplayStoreRejectsPreviousResponseID(t *testing.T) {
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
 		ExchangeID: "no_replay_store_previous",
 		Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model:            "m",
-			Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			Model:            canonical.Specify("m"),
+			Items:            []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")},
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_prev"},
 		}),
 	})

@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestEncode_PreservesGenerationControls(t *testing.T) {
@@ -25,8 +26,8 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 		t.Fatalf("NewGenerationControls returned error: %v", err)
 	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:    "claude-3-5",
-		Items:    []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model:    canonical.Specify("claude-3-5"),
+		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		Controls: controls,
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -54,9 +55,9 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 
 func TestEncode_PreservesInstructionsAsTopLevelSystem(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "claude-3-5",
-		Instructions: "Use native tools for filesystem work.",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "inspect files")},
+		Model:        canonical.Specify("claude-3-5"),
+		Instructions: canonical.Specify(canonical.NewSystemInstructionSet("Use native tools for filesystem work.")),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -78,12 +79,13 @@ func TestDecodeRequest_PreservesTopLevelSystemAsInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
-	if got.Instructions() != "Use native tools for filesystem work." {
-		t.Fatalf("instructions = %q, want top-level system", got.Instructions())
+	if canonicaltest.InstructionSetText(got.Instructions()) != "Use native tools for filesystem work." {
+		t.Fatalf("instructions = %q, want top-level system", canonicaltest.InstructionSetText(got.Instructions()))
 	}
 	items := got.Items()
-	text, textOK := items[0].TextItem()
-	if len(items) != 1 || !textOK || text.Text != "inspect files" {
+	message, _ := items[0].Message()
+	text, textOK := message.Content()[0].Text()
+	if len(items) != 1 || !textOK || text.Text() != "inspect files" {
 		t.Fatalf("items = %#v, want user request only", items)
 	}
 }
@@ -119,9 +121,9 @@ func TestEncode_RejectsStructuredOutputFormat(t *testing.T) {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
 	_, err = EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "claude-3-5",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		OutputFormat: format,
+		Model:        canonical.Specify("claude-3-5"),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		OutputFormat: canonical.Specify(format),
 	}), delivery.BufferedDelivery())
 	if err == nil || !strings.Contains(err.Error(), "structured output") {
 		t.Fatalf("EncodeCarrier err=%v, want structured-output rejection", err)

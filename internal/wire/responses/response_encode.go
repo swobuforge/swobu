@@ -10,41 +10,52 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	encoded := make([]any, 0, len(output.Items()))
 	outputText := ""
-	status, incompleteReason := responsesWireStatusForFinishReason(output.FinishReason())
+	status, incompleteReason := responsesWireStatusForFinishReason(output.CompletionReason())
 	for _, item := range output.Items() {
 		switch item.Kind() {
-		case canonical.ItemKindText:
-			textItem, ok := item.TextItem()
-			if !ok {
-				return wire.ClientDocumentResult{}, canonical.InternalError("responses text item payload is invalid")
+		case canonical.ItemKindMessage:
+			message, _ := item.Message()
+			parts := make([]responsesOutputTextItemDTO, 0, len(message.Content()))
+			for _, part := range message.Content() {
+				textPart, ok := part.Text()
+				if !ok {
+					return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("responses image output is not implemented")
+				}
+				text := textPart.Text()
+				outputText += text
+				parts = append(parts, responsesOutputTextItemDTO{Type: "output_text", Text: text})
 			}
-			text := textItem.Text
-			outputText += text
 			encoded = append(encoded, responsesOutputItemDTO{
-				Type:   "message",
-				Status: status,
-				Role:   "assistant",
-				Content: []responsesOutputTextItemDTO{{
-					Type: "output_text",
-					Text: text,
-				}},
+				Type:    "message",
+				Status:  status,
+				Role:    string(message.Role()),
+				Content: parts,
 			})
-		case canonical.ItemKindToolUse:
-			toolUse, ok := item.ToolUse()
-			if !ok {
-				return wire.ClientDocumentResult{}, canonical.InternalError("responses tool-use item payload is invalid")
+		case canonical.ItemKindToolCall:
+			call, _ := item.ToolCall()
+			tool := call.Tool()
+			name := tool.Name()
+			input := ""
+			if object, ok := call.Input().Object(); ok {
+				input = object.String()
+			} else if text, ok := call.Input().Text(); ok {
+				input = text
+			} else {
+				return wire.ClientDocumentResult{}, canonical.InternalError("responses output tool input is invalid")
 			}
 			encoded = append(encoded, responsesWireToolItem(
-				sse.FallbackID(item.ItemID(), toolUse.UseID),
-				toolUse.UseID,
-				toolUse.Name,
-				toolUse.ToolType,
+				call.CallID().String(),
+				call.CallID().String(),
+				name,
+				string(tool.Kind()),
 				status,
-				toolUse.Input.RawObject(),
+				input,
 			))
+		default:
+			return wire.ClientDocumentResult{}, canonical.UnsupportedOperation("responses output item kind is unsupported")
 		}
 	}
 	encodedBody, err := json.Marshal(responsesResponseDTO{

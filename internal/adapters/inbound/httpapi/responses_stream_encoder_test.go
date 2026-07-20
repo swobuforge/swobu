@@ -144,9 +144,9 @@ func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T)
 	encoder := responses.NewResponseStreamWireEncoder()
 	events := []sse.StreamEvent{
 		{Kind: sse.StreamEventStarted, ResultID: "resp_2", Model: "m"},
-		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
-		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolCall, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
+		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolCall, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
+		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolCall, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
 		{Kind: sse.StreamEventCompleted, FinishReason: "completed"},
 	}
 	frames := encodeAllFrames(t, &encoder, events)
@@ -199,9 +199,9 @@ func TestResponsesWireEventEncoder_CustomToolLifecycleUsesInputField(t *testing.
 	encoder := responses.NewResponseStreamWireEncoder()
 	events := []sse.StreamEvent{
 		{Kind: sse.StreamEventStarted, ResultID: "resp_3", Model: "m"},
-		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolUse, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
-		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolUse, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom, ArgumentsDelta: "{\"patch\":\"x\"}"},
-		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolUse, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
+		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolCall, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
+		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolCall, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom, ArgumentsDelta: "{\"patch\":\"x\"}"},
+		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolCall, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
 		{Kind: sse.StreamEventCompleted, FinishReason: "completed"},
 	}
 	frames := encodeAllFrames(t, &encoder, events)

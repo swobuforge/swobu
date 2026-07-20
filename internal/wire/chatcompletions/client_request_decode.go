@@ -17,9 +17,9 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, "")
+		request, delivery, err := decoder.decodeClientRequestWithDecisions(doc, sink, "")
 		return wire.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
@@ -28,7 +28,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.Clie
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "chat completions request", nil); err != nil {
@@ -53,25 +53,9 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	items := make([]canonical.CanonicalItem, 0, len(dto.Messages))
-	instructionParts := make([]string, 0, 2)
-	for idx, msg := range dto.Messages {
-		role := strings.TrimSpace(msg.Role) // swobu:io-string source=boundary
-		if role == "system" || role == "developer" {
-			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", canonical.ItemAuthorUser)
-			if err != nil {
-				return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
-			}
-			if text := strings.TrimSpace(joinItemText(textItems)); text != "" { // swobu:io-string source=boundary
-				instructionParts = append(instructionParts, text)
-			}
-			continue
-		}
-		decoded, err := decodeChatCompletionsItems(sink, exchangeID, msg.Role, msg.Content, msg.ToolCalls, msg.ToolCallID, idx)
-		if err != nil {
-			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
-		}
-		items = append(items, decoded...)
+	items, instructions, err := decodeChatConversation(dto.Messages, tools, sink, exchangeID, decoder.ImageLimits)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	controls, err := decodeChatCompletionsGenerationControls(dto)
 	if err != nil {
@@ -85,50 +69,124 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		Instructions:  strings.Join(instructionParts, "\n\n"),
-		Items:         items,
-		Tools:         tools,
-		ToolPolicy:    toolPolicy,
-		ToolCallBatch: toolCallBatch,
-		Controls:      controls,
-		OutputFormat:  outputFormat,
-	}), resolvedDelivery, nil
+	toolSet, err := canonical.NewToolSet(tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions tools are invalid")
+	}
+	params := canonical.RequestParams{
+		Model:    canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
+		Items:    items,
+		Controls: controls,
+	}
+	if len(instructions) > 0 {
+		set, err := canonical.NewInstructionSet(instructions)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		params.Instructions = canonical.Specify(set)
+	}
+	if dto.Tools != nil {
+		params.Tools = canonical.Specify(toolSet)
+	}
+	if len(dto.ToolChoice) > 0 {
+		params.ToolPolicy = canonical.Specify(toolPolicy)
+	}
+	if len(dto.ParallelToolCalls) > 0 {
+		params.ToolCallBatch = canonical.Specify(toolCallBatch)
+	}
+	if len(dto.ResponseFormat) > 0 {
+		params.OutputFormat = canonical.Specify(outputFormat)
+	}
+	return newChatCanonicalRequest(params, resolvedDelivery, decoder.ImageLimits)
+}
+
+func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []canonical.Instruction, error) {
+	items := make([]canonical.CanonicalItem, 0, len(messages))
+	instructions := make([]canonical.Instruction, 0, 2)
+	leadingInstructions := true
+	for idx, msg := range messages {
+		role := strings.TrimSpace(msg.Role) // swobu:io-string source=boundary
+		if leadingInstructions && (role == "system" || role == "developer") {
+			author := canonical.MessageRoleSystem
+			instructionRole := canonical.MessageRoleSystem
+			if role == "developer" {
+				author = canonical.MessageRoleDeveloper
+				instructionRole = canonical.MessageRoleDeveloper
+			}
+			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", author, imageLimits)
+			if err != nil {
+				return nil, nil, err
+			}
+			instruction, err := canonical.NewInstruction(instructionRole, joinItemText(textItems))
+			if err != nil {
+				return nil, nil, err
+			}
+			instructions = append(instructions, instruction)
+			continue
+		}
+		leadingInstructions = false
+		decoded, err := decodeChatCompletionsItems(sink, exchangeID, tools, msg.Role, msg.Content, msg.ToolCalls, msg.ToolCallID, idx, imageLimits)
+		if err != nil {
+			return nil, nil, err
+		}
+		items = append(items, decoded...)
+	}
+	return items, instructions, nil
+}
+
+func newChatCanonicalRequest(params canonical.RequestParams, resolvedDelivery delivery.Delivery, imageLimits shared.ImageDecodeLimitPolicy) (canonical.CanonicalRequest, delivery.Delivery, error) {
+	if err := shared.ValidateImageDecodeLimits(params.Items, imageLimits); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request image limits are exceeded")
+	}
+	return canonical.NewCanonicalRequest(params), resolvedDelivery, nil
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes wire tool-call kinds.
+// swobu:lint ignore function-complexity because=chat completions item decoding keeps all wire item variants at one boundary seam.
 func decodeChatCompletionsItems(
 	sink compat.Sink,
 	exchangeID string,
-	role string,
+	tools []canonical.ToolDeclaration, role string,
 	content json.RawMessage,
 	toolCalls []chatCompletionsToolCallDTO,
 	toolCallID string,
 	msgIdx int,
+	imageLimits shared.ImageDecodeLimitPolicy,
 ) ([]canonical.CanonicalItem, error) {
-	author := openaiwire.AuthorForRole(role)
-	textItems, err := openaiwire.DecodeTextContentItems(content, "chat completions", author)
-	if err != nil {
-		return nil, err
-	}
 	role = strings.TrimSpace(role) // swobu:io-string source=boundary
 	if role == "tool" {
 		if strings.TrimSpace(toolCallID) == "" { // swobu:io-string source=boundary
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, chatCompletionsToolSubject(msgIdx, 0, "tool_call_id")); err != nil {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, 0, "tool_call_id")); err != nil {
 				return nil, err
 			}
 			return nil, canonical.BadRequest("chat completions tool messages require tool_call_id")
 		}
-		return []canonical.CanonicalItem{
-			canonical.NewToolResultItem(canonical.ItemAuthorTool, strings.TrimSpace(toolCallID), joinItemText(textItems)), // swobu:io-string source=boundary
-		}, nil
+		callID, _ := canonical.NewToolCallID(toolCallID)
+		parts, err := decodeChatCompletionsTextParts(content, imageLimits)
+		if err != nil {
+			return nil, err
+		}
+		result, err := canonical.NewToolResultItem(callID, parts, false)
+		if err != nil {
+			return nil, canonical.BadRequest("chat completions tool result is invalid")
+		}
+		return []canonical.CanonicalItem{result}, nil
+	}
+	author := openaiwire.AuthorForRole(role)
+	if role == "system" {
+		author = canonical.MessageRoleSystem
+	} else if role == "developer" {
+		author = canonical.MessageRoleDeveloper
+	}
+	textItems, err := openaiwire.DecodeTextContentItems(content, "chat completions", author, imageLimits)
+	if err != nil {
+		return nil, err
 	}
 	items := append([]canonical.CanonicalItem(nil), textItems...)
 	for idx, call := range toolCalls {
 		id := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if id == "" {
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolUseID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
 				return nil, err
 			}
 			id = openaiwire.GeneratedToolUseID(msgIdx, idx)
@@ -136,7 +194,7 @@ func decodeChatCompletionsItems(
 		switch strings.ToLower(strings.TrimSpace(call.Type)) { // swobu:io-string source=domain
 		case "", "function":
 			if call.Function == nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
 					return nil, err
 				}
 				return nil, canonical.BadRequest("chat completions tool calls require a function body")
@@ -146,22 +204,24 @@ func decodeChatCompletionsItems(
 			}
 			input, err := decodeChatCompletionsFunctionArguments(call.Function.Arguments)
 			if err != nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
 					return nil, err
 				}
 				return nil, err
 			}
-			args, err := json.Marshal(input)
+			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, call.Function.Name, canonical.ToolKindFunction)
 			if err != nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
-					return nil, err
-				}
-				return nil, canonical.BadRequest("chat completions tool call arguments are invalid")
+				return nil, canonical.BadRequest("chat completions tool call has an invalid function identity")
 			}
-			items = append(items, canonical.NewToolUseItem(author, "", id, strings.TrimSpace(call.Function.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+			callID, _ := canonical.NewToolCallID(id)
+			item, err := canonical.NewToolCallItem(callID, toolKey, canonical.NewJSONObjectToolInput(input))
+			if err != nil {
+				return nil, canonical.BadRequest("chat completions tool call is invalid")
+			}
+			items = append(items, item)
 		case "custom":
 			if call.Custom == nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "custom/input")); err != nil {
+				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "custom/input")); err != nil {
 					return nil, err
 				}
 				return nil, canonical.BadRequest("chat completions custom tool calls require a custom body")
@@ -169,9 +229,18 @@ func decodeChatCompletionsItems(
 			if strings.TrimSpace(call.Custom.Name) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("chat completions custom tool calls require a custom name")
 			}
-			items = append(items, canonical.NewCustomToolUseItem(author, "", id, strings.TrimSpace(call.Custom.Name), canonical.NewToolArgumentsObject(call.Custom.Input))) // swobu:io-string source=boundary
+			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, call.Custom.Name, canonical.ToolKindCustom)
+			if err != nil {
+				return nil, canonical.BadRequest("chat completions custom tool call has an invalid identity")
+			}
+			callID, _ := canonical.NewToolCallID(id)
+			item, err := canonical.NewToolCallItem(callID, toolKey, canonical.NewTextToolInput(call.Custom.Input))
+			if err != nil {
+				return nil, canonical.BadRequest("chat completions custom tool call is invalid")
+			}
+			items = append(items, item)
 		default:
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolType, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallTool, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
 				return nil, err
 			}
 			return nil, canonical.BadRequest("chat completions request contains an unsupported tool call type")
@@ -183,17 +252,21 @@ func decodeChatCompletionsItems(
 // OpenCode and other OpenAI-family chat-completions bridges may stringify
 // function call arguments when they reconstruct a prior tool call. Accept both
 // the wire object and the stringified object, then normalize to canonical JSON.
-func decodeChatCompletionsFunctionArguments(raw json.RawMessage) (map[string]any, error) {
-	input, err := sse.DecodeJSONObject(raw, "chat completions tool call arguments are invalid")
+func decodeChatCompletionsFunctionArguments(raw json.RawMessage) (canonical.JSONObject, error) {
+	input, err := canonical.ParseJSONObject(raw)
 	if err == nil {
 		return input, nil
 	}
 	var stringified string
 	if err := json.Unmarshal(raw, &stringified); err != nil {
-		return nil, canonical.BadRequest("chat completions tool call arguments are invalid")
+		return canonical.JSONObject{}, canonical.BadRequest("chat completions tool call arguments are invalid")
 	}
 	trimmedStringified := strings.TrimSpace(stringified) // swobu:io-string source=boundary
-	return sse.DecodeJSONObject(json.RawMessage(trimmedStringified), "chat completions tool call arguments are invalid")
+	input, err = canonical.ParseJSONObject([]byte(trimmedStringified))
+	if err != nil {
+		return canonical.JSONObject{}, canonical.BadRequest("chat completions tool call arguments are invalid")
+	}
+	return input, nil
 }
 
 func emitChatCompletionsCompatibilityDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
@@ -226,12 +299,35 @@ func chatCompletionsToolSubject(msgIdx int, toolIdx int, field string) compat.Su
 func joinItemText(items []canonical.CanonicalItem) string {
 	var builder strings.Builder
 	for _, item := range items {
-		if item.Kind() != canonical.ItemKindText {
+		message, ok := item.Message()
+		if !ok {
 			continue
 		}
-		if text, ok := item.TextItem(); ok {
-			builder.WriteString(text.Text)
+		for _, part := range message.Content() {
+			if text, ok := part.Text(); ok {
+				builder.WriteString(text.Text())
+			}
 		}
 	}
 	return builder.String()
+}
+
+func decodeChatCompletionsTextParts(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
+	items, err := openaiwire.DecodeTextContentItems(raw, "chat completions", canonical.MessageRoleUser, imageLimits)
+	if err != nil || len(items) == 0 {
+		return nil, err
+	}
+	message, ok := items[0].Message()
+	if !ok {
+		return nil, canonical.BadRequest("chat completions tool result content is invalid")
+	}
+	content := make([]canonical.ToolResultPart, 0, len(message.Content()))
+	for _, part := range message.Content() {
+		text, ok := part.Text()
+		if !ok {
+			return nil, canonical.BadRequest("chat completions tool result content must be text")
+		}
+		content = append(content, canonical.NewTextToolResultPart(text.Text()))
+	}
+	return content, nil
 }

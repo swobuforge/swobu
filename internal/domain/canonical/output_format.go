@@ -251,32 +251,3 @@ func validateOutputFormatSchemaEnum(value any) error {
 	}
 	return nil
 }
-
-func decodeOutputFormatMetadata(raw string) (OutputFormat, error) {
-	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
-	if trimmed == "" || trimmed == "null" {
-		return OutputFormat{}, nil
-	}
-	type outputFormatMetadataDTO struct {
-		Kind        string          `json:"kind"`
-		Name        string          `json:"name,omitempty"`
-		Description string          `json:"description,omitempty"`
-		Schema      json.RawMessage `json:"schema,omitempty"`
-		Strict      *bool           `json:"strict,omitempty"`
-	}
-	var dto outputFormatMetadataDTO
-	if err := json.Unmarshal([]byte(trimmed), &dto); err != nil {
-		return OutputFormat{}, BadRequest("canonical request output format is invalid")
-	}
-	strict := false
-	if dto.Strict != nil {
-		strict = *dto.Strict
-	}
-	return NewOutputFormat(OutputFormatParams{
-		Kind:        OutputFormatKind(dto.Kind),
-		Name:        dto.Name,
-		Description: dto.Description,
-		Schema:      NewRawJSONObject(string(dto.Schema)),
-		Strict:      strict,
-	})
-}

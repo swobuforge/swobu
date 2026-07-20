@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestExactBackendOwnsChatCompletionsTokenFieldSpelling(t *testing.T) {
@@ -24,7 +25,7 @@ func TestExactBackendOwnsChatCompletionsTokenFieldSpelling(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "model", Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")}, Controls: controls,
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls,
 	})
 
 	for _, tc := range []struct {

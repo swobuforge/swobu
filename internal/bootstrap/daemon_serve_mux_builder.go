@@ -7,6 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
+	mediaadapter "github.com/swobuforge/swobu/internal/adapters/outbound/media"
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
@@ -26,7 +27,7 @@ func buildDaemonServeMux(
 	exchangeIngress := exchange.NewIngress(
 		daemon.configStore,
 		runtime,
-		exchange.RuntimePoliciesSpec{},
+		exchange.RuntimePoliciesSpec{ImageFetcher: mediaadapter.NewPublicImageFetcher()},
 	)
 	mux := http.NewServeMux()
 	mux.Handle("/c/", httpapi.NewHandler(exchangeIngress, trafficEventSink))

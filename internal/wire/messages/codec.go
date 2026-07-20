@@ -3,6 +3,8 @@ package messages
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
@@ -19,7 +21,10 @@ type messagesEnvelopeStreamEncoder struct {
 }
 
 func (s *messagesEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
-	streamEvents := s.adapter.Translate(event)
+	streamEvents, err := s.adapter.Translate(event)
+	if err != nil {
+		return nil, err
+	}
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
 		emitted, err := s.Encode(streamEvent)
@@ -64,27 +69,14 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			more, err := s.Encode(event)
 			return append(frames, more...), err
 		}
-		index := s.nextIndex
-		s.nextIndex++
-		s.blockIndexByID[event.ItemID] = index
-		s.activeBlockID = event.ItemID
 		switch event.ItemKind {
-		case canonical.ItemKindText:
-			s.activeTextID = event.ItemID
-			raw, _ := json.Marshal(messagesContentBlockStartDTO{
-				Type:  "content_block_start",
-				Index: index,
-				ContentBlock: messagesContentBlockBodyDTO{
-					Type: "text",
-					Text: "",
-				},
-			})
-			frames := [][]byte{sse.SSEEventFrame("content_block_start", raw)}
-			for _, frame := range frames {
-				logMessagesEgressStreamFrame(frame)
-			}
-			return frames, nil
-		case canonical.ItemKindToolUse:
+		case canonical.ItemKindMessage:
+			return nil, nil
+		case canonical.ItemKindToolCall:
+			index := s.nextIndex
+			s.nextIndex++
+			s.blockIndexByID[event.ItemID] = index
+			s.activeBlockID = event.ItemID
 			s.sawToolUse = true
 			raw, _ := json.Marshal(messagesContentBlockStartDTO{
 				Type:  "content_block_start",
@@ -93,7 +85,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 					Type:  "tool_use",
 					ID:    event.ToolUseID,
 					Name:  event.Name,
-					Input: map[string]any{},
+					Input: json.RawMessage(`{}`),
 				},
 			})
 			frames := [][]byte{sse.SSEEventFrame("content_block_start", raw)}
@@ -104,19 +96,32 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		default:
 			return nil, canonical.UnsupportedOperation("messages streaming output item kind is not implemented")
 		}
+	case sse.StreamEventContentStarted:
+		if event.PartKind != canonical.PartKindText {
+			return nil, canonical.UnsupportedOperation("messages streaming content part kind is not implemented")
+		}
+		key := messagesStreamPartKey(event.ItemID, event.PartOrdinal)
+		if _, exists := s.blockIndexByID[key]; exists {
+			return nil, nil
+		}
+		index := s.nextIndex
+		s.nextIndex++
+		s.blockIndexByID[key] = index
+		raw, _ := json.Marshal(messagesContentBlockStartDTO{Type: "content_block_start", Index: index, ContentBlock: messagesContentBlockBodyDTO{Type: "text", Text: ""}})
+		frame := sse.SSEEventFrame("content_block_start", raw)
+		logMessagesEgressStreamFrame(frame)
+		return [][]byte{frame}, nil
 	case sse.StreamEventTextDelta:
-		if !s.started || s.activeTextID == "" {
-			frames, _ := s.Encode(sse.StreamEvent{
-				Kind:     sse.StreamEventItemStarted,
-				ItemKind: canonical.ItemKindText,
-				ResultID: event.ResultID,
-				Model:    event.Model,
-				ItemID:   sse.FallbackID(event.ItemID, "text_0"),
-			})
+		key := messagesStreamPartKey(event.ItemID, event.PartOrdinal)
+		if _, ok := s.blockIndexByID[key]; !ok {
+			frames, err := s.Encode(sse.StreamEvent{Kind: sse.StreamEventContentStarted, ItemID: event.ItemID, ItemOrdinal: event.ItemOrdinal, PartOrdinal: event.PartOrdinal, PartKind: canonical.PartKindText})
+			if err != nil {
+				return nil, err
+			}
 			more, err := s.Encode(event)
 			return append(frames, more...), err
 		}
-		index := s.blockIndexByID[s.activeTextID]
+		index := s.blockIndexByID[key]
 		raw, _ := json.Marshal(messagesContentBlockDeltaDTO{
 			Type:  "content_block_delta",
 			Index: index,
@@ -135,7 +140,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		if !ok {
 			frames, _ := s.Encode(sse.StreamEvent{
 				Kind:      sse.StreamEventItemStarted,
-				ItemKind:  canonical.ItemKindToolUse,
+				ItemKind:  canonical.ItemKindToolCall,
 				ResultID:  event.ResultID,
 				Model:     event.Model,
 				ItemID:    event.ItemID,
@@ -159,16 +164,15 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		}
 		return frames, nil
 	case sse.StreamEventItemCompleted:
-		index, ok := s.blockIndexByID[event.ItemID]
-		if !ok {
-			return nil, nil
+		frames := make([][]byte, 0, 1)
+		for key, index := range s.blockIndexByID {
+			if key != event.ItemID && !strings.HasPrefix(key, event.ItemID+"#") {
+				continue
+			}
+			delete(s.blockIndexByID, key)
+			raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
+			frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
 		}
-		delete(s.blockIndexByID, event.ItemID)
-		if s.activeTextID == event.ItemID {
-			s.activeTextID = ""
-		}
-		raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
-		frames := [][]byte{sse.SSEEventFrame("content_block_stop", raw)}
 		for _, frame := range frames {
 			logMessagesEgressStreamFrame(frame)
 		}
@@ -225,3 +229,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 }
 
 func (s *messagesEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
+
+func messagesStreamPartKey(itemID string, part uint32) string {
+	return itemID + "#" + strconv.FormatUint(uint64(part), 10)
+}

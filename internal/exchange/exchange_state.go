@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
@@ -22,6 +23,7 @@ type exchangeState struct {
 	input                exchangeInput
 	swobuResponseID      canonical.SwobuResponseID
 	prepared             *replay.Prepared
+	mediaFetchCache      mediaFetchCache
 	route                routePlan
 	providerCallAttempts []providerCallAttempt
 	phase                phase
@@ -65,6 +67,13 @@ type loadingReplayPhase struct {
 
 func (loadingReplayPhase) isPhase() {}
 
+type preparingProviderAttemptPhase struct {
+	selection providerCallSelection
+	target    provider.TargetSnapshot
+}
+
+func (preparingProviderAttemptPhase) isPhase() {}
+
 type callingProviderPhase struct {
 	attemptID providerCallAttemptID
 	call      providerCall
@@ -101,6 +110,17 @@ type replayLoaded struct {
 
 func (replayLoaded) isExchangeEvent() {}
 
+type providerAttemptPrepared struct {
+	selection  providerCallSelection
+	request    canonical.CanonicalRequest
+	decisions  []compat.Decision
+	fetchCache mediaFetchCache
+	usedMedia  replay.ResolvedMedia
+	err        error
+}
+
+func (providerAttemptPrepared) isExchangeEvent() {}
+
 type providerIngressReceived struct {
 	attemptID providerCallAttemptID
 	ingress   provider.Ingress
@@ -125,6 +145,20 @@ type loadReplayCommand struct {
 
 func (loadReplayCommand) isCommand() {}
 
+type prepareProviderAttemptCommand struct {
+	selection  providerCallSelection
+	request    canonical.CanonicalRequest
+	semantic   canonical.CanonicalRequest
+	protocol   protocolkind.ProtocolKind
+	policy     provider.ImageFetchPolicy
+	limits     provider.MediaLimits
+	fetcher    provider.ImageFetcher
+	fetchCache mediaFetchCache
+	historical replay.ResolvedMedia
+}
+
+func (prepareProviderAttemptCommand) isCommand() {}
+
 // callProviderCommand is the irreducible provider I/O operation. Its document
 // is final; the handler may only invoke the selected backend transport.
 type callProviderCommand struct {
@@ -146,6 +180,7 @@ type providerCall struct {
 	exchangeID     string
 	workspaceSlug  string
 	replayRequest  canonical.CanonicalRequest
+	resolvedMedia  replay.ResolvedMedia
 }
 
 type reducerOutcome struct {
@@ -169,6 +204,8 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reduceStarting(s, event, runner)
 	case loadingReplayPhase:
 		return reduceLoadingReplay(s, p, event, runner)
+	case preparingProviderAttemptPhase:
+		return reducePreparingProviderAttempt(s, p, event, runner)
 	case callingProviderPhase:
 		return reduceCallingProvider(ctx, s, p, event, runner)
 	case completedPhase, failedPhase:
@@ -176,6 +213,48 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 	default:
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: unknown phase %T", s.phase)
 	}
+}
+
+func reducePreparingProviderAttempt(s exchangeState, phase preparingProviderAttemptPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
+	prepared, ok := event.(providerAttemptPrepared)
+	if !ok {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: preparing provider attempt received %T", event)
+	}
+	if prepared.selection != phase.selection {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: prepared provider selection changed")
+	}
+	if prepared.err != nil {
+		s.mediaFetchCache = cloneMediaFetchCache(prepared.fetchCache)
+		if preparationErrorScope(prepared.err) == PreparationCandidate {
+			next := providerCallSelection{candidateIndex: phase.selection.candidateIndex + 1, requestChoice: providerRequestPreferred}
+			if _, exists := s.route.at(next.candidateIndex); exists {
+				outcome, err := advanceProviderExecutionFrom(s, runner, next)
+				outcome.evidence = exchangeEvidence{decisions: prepared.decisions}.append(outcome.evidence)
+				return outcome, err
+			}
+		}
+		s.phase = failedPhase{problem: prepared.err, target: phase.target}
+		return reducerOutcome{nextState: s, evidence: exchangeEvidence{decisions: prepared.decisions}}, nil
+	}
+	s.mediaFetchCache = cloneMediaFetchCache(prepared.fetchCache)
+	call, target, evidence, preparation, err := prepareProviderCall(s, phase.selection, runner, &prepared)
+	evidence.decisions = append(prepared.decisions, evidence.decisions...)
+	if preparation != nil {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: prepared request requested media preparation again")
+	}
+	if err != nil {
+		if preparationErrorScope(err) == PreparationCandidate {
+			next := providerCallSelection{candidateIndex: phase.selection.candidateIndex + 1, requestChoice: providerRequestPreferred}
+			if _, exists := s.route.at(next.candidateIndex); exists {
+				outcome, advanceErr := advanceProviderExecutionFrom(s, runner, next)
+				outcome.evidence = evidence.append(outcome.evidence)
+				return outcome, advanceErr
+			}
+		}
+		s.phase = failedPhase{problem: err, target: target}
+		return reducerOutcome{nextState: s, evidence: evidence}, nil
+	}
+	return beginProviderCallAttempt(s, phase.selection, call, evidence)
 }
 
 func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
@@ -299,10 +378,18 @@ func advanceProviderExecution(s exchangeState, runner runtimeBundle) (reducerOut
 	if !ok {
 		return terminateProviderExecution(s), nil
 	}
+	return advanceProviderExecutionFrom(s, runner, selection)
+}
+
+func advanceProviderExecutionFrom(s exchangeState, runner runtimeBundle, selection providerCallSelection) (reducerOutcome, error) {
 	evidence := exchangeEvidence{}
 	for {
-		call, target, preparedEvidence, err := prepareProviderCall(s, selection, runner)
+		call, target, preparedEvidence, preparation, err := prepareProviderCall(s, selection, runner, nil)
 		evidence = evidence.append(preparedEvidence)
+		if preparation != nil {
+			s.phase = preparingProviderAttemptPhase{selection: selection, target: target}
+			return reducerOutcome{nextState: s, command: *preparation, evidence: evidence}, nil
+		}
 		if err == nil {
 			return beginProviderCallAttempt(s, selection, call, evidence)
 		}

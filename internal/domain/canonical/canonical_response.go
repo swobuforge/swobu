@@ -1,0 +1,71 @@
+package canonical
+
+import (
+	"fmt"
+	"strings"
+)
+
+// CanonicalResponse is the fully materialized canonical success value.
+// Construction rejects request-only item states before replay or encoding.
+type CanonicalResponse struct {
+	response     ResponseRef
+	model        string
+	items        []CanonicalItem
+	finishReason string
+	usage        TokenUsage
+}
+
+// NewCanonicalResponse constructs the legal model-output subset of canonical
+// items. Assistant messages and tool calls are response-producing branches;
+// tool results and non-assistant messages are request transcript input.
+func NewCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) (CanonicalResponse, error) {
+	if response.SwobuID.IsZero() {
+		return CanonicalResponse{}, fmt.Errorf("canonical response identity is required")
+	}
+	if strings.TrimSpace(model) == "" { // swobu:io-string source=domain
+		return CanonicalResponse{}, fmt.Errorf("canonical response model is required")
+	}
+	if strings.TrimSpace(finishReason) == "" { // swobu:io-string source=domain
+		return CanonicalResponse{}, fmt.Errorf("canonical response completion reason is required")
+	}
+	for index, item := range items {
+		if err := validateResponseItem(index, item); err != nil {
+			return CanonicalResponse{}, err
+		}
+	}
+	return newCanonicalResponse(response, model, items, finishReason, usage), nil
+}
+
+func validateResponseItem(index int, item CanonicalItem) error {
+	switch item.Kind() {
+	case ItemKindMessage:
+		message, ok := item.Message()
+		if !ok || message.Role() != MessageRoleAssistant {
+			return fmt.Errorf("canonical response item %d must be an assistant message", index)
+		}
+	case ItemKindToolCall:
+		if _, ok := item.ToolCall(); !ok {
+			return fmt.Errorf("canonical response item %d is an invalid tool call", index)
+		}
+	case ItemKindToolResult:
+		return fmt.Errorf("canonical response item %d is a request-only tool result", index)
+	default:
+		return fmt.Errorf("canonical response item %d kind %q is unsupported", index, item.Kind())
+	}
+	return nil
+}
+
+func newCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalResponse {
+	return CanonicalResponse{response: response.Clone(), model: model, items: cloneCanonicalItems(items), finishReason: finishReason, usage: usage}
+}
+
+func (o CanonicalResponse) Response() ResponseRef    { return o.response.Clone() }
+func (o CanonicalResponse) Model() string            { return o.model }
+func (o CanonicalResponse) CompletionReason() string { return o.finishReason }
+func (o CanonicalResponse) Items() []CanonicalItem   { return cloneCanonicalItems(o.items) }
+func (o CanonicalResponse) Usage() TokenUsage        { return o.usage }
+
+// Clone returns a deep copy suitable for cross-boundary handoff.
+func (o CanonicalResponse) Clone() CanonicalResponse {
+	return newCanonicalResponse(o.response, o.model, o.items, o.finishReason, o.usage)
+}

@@ -101,6 +101,9 @@ func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Reco
 	if err := responseRef.ValidateCommittedResponse(); err != nil {
 		return fmt.Errorf("invalid replay record response reference: %w", err)
 	}
+	if err := record.ResolvedMedia.ValidateForRequest(record.Request); err != nil {
+		return fmt.Errorf("invalid replay record media: %w", err)
+	}
 	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: responseRef.SwobuID}
 	if _, exists := s.records[key]; exists {
 		return ErrReplayRecordExists

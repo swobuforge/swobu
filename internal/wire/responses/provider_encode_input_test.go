@@ -7,13 +7,14 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestEncode_UsesResponsesRefinementWhenPresent(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:            "m",
-		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model:            canonical.Specify("m"),
+		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		PreviousResponse: testResponsesPrevious("swobu_resp_123", "provider_resp_789"),
 	})
 
@@ -35,8 +36,8 @@ func TestEncode_UsesResponsesRefinementWhenPresent(t *testing.T) {
 
 func TestEncode_RejectsSwobuSelectorWithoutResponsesRefinement(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:            "m",
-		Items:            []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model:            canonical.Specify("m"),
+		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123"},
 	})
 
@@ -57,7 +58,7 @@ func TestEncode_RejectsMalformedResponsesRefinement(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model: "m",
+				Model: canonical.Specify("m"),
 				PreviousResponse: &canonical.ResponseRef{
 					SwobuID: "swobu_resp_123", Responses: &tc.native,
 				},
@@ -71,8 +72,7 @@ func TestEncode_RejectsMalformedResponsesRefinement(t *testing.T) {
 }
 
 func TestClientResponseExposesSwobuIDAndNeverProviderID(t *testing.T) {
-	output := canonical.NewOutputWithUsage(
-		canonical.SemanticKindConversation,
+	output := canonicaltest.ResponseWithRef(t,
 		canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 			ProviderResponseID: "provider_resp_789", TargetID: "target-a", TargetVersion: 1,
 		}},
@@ -96,10 +96,10 @@ func testResponsesPrevious(swobuID, providerID string) *canonical.ResponseRef {
 
 func TestEncode_EncodesCanonicalRequestAlways(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "test-model",
+		Model: canonical.Specify("test-model"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hello"),
-			canonical.NewTextItem(canonical.ItemAuthorAssistant, "world"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hello"),
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "world"),
 		},
 	})
 

@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
@@ -182,9 +183,9 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			client := rewritingClientForServer(t, srv)
 			registry := mustProviderRegistry(t, client, testCredentialResolver{})
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model: "m",
+				Model: canonical.Specify("m"),
 				Items: []canonical.CanonicalItem{
-					canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+					canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 				},
 			})
 			req := newTestProviderRequest(
@@ -212,11 +213,11 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					t.Fatalf("provider transport returned %T, want provider.DocumentIngress", ingress)
 				}
 				doc := documentIngress.Document
-				decoded, err := providerCodec.Decode(context.Background(), "ex_terminal_matrix", provider.DocumentIngress{Document: doc})
+				decoded, err := providerCodec.Decode(context.Background(), provider.Request{ExchangeID: "ex_terminal_matrix", Canonical: request}, provider.DocumentIngress{Document: doc})
 				if err != nil {
 					t.Fatalf("DecodeProviderDocument returned error: %v", err)
 				}
-				reader := decoded.Stream
+				reader := canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_terminal_matrix")})
 				closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 				if err != nil {
 					t.Fatalf("ReadClosedEnvelope returned error: %v", err)
@@ -225,10 +226,10 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ProjectResponse returned error: %v", err)
 				}
-				if got := out.FinishReason(); got != tc.wantOutputReason {
+				if got := out.CompletionReason(); got != tc.wantOutputReason {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
-				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseDocument(out)
+				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseDocument(*out)
 				if err != nil {
 					t.Fatalf("EncodeResponseDocument returned error: %v", err)
 				}
@@ -244,11 +245,11 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					t.Fatalf("provider transport returned %T, want provider.StreamIngress", ingress)
 				}
 				stream := streamIngress.Stream
-				decoded, err := providerCodec.Decode(context.Background(), "ex_terminal_matrix", provider.StreamIngress{Stream: stream})
+				decoded, err := providerCodec.Decode(context.Background(), provider.Request{ExchangeID: "ex_terminal_matrix", Canonical: request}, provider.StreamIngress{Stream: stream})
 				if err != nil {
 					t.Fatalf("DecodeProviderEnvelope returned error: %v", err)
 				}
-				reader := decoded.Stream
+				reader := canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_terminal_matrix")})
 				closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
 				if err != nil {
 					t.Fatalf("ReadClosedEnvelope returned error: %v", err)
@@ -257,10 +258,10 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ProjectResponse returned error: %v", err)
 				}
-				if got := out.FinishReason(); got != tc.wantOutputReason {
+				if got := out.CompletionReason(); got != tc.wantOutputReason {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
-				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.Response(), out.Model(), out.Items(), out.FinishReason(), out.Usage())
+				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())
 				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), tc.providerDelivery)
 				if err != nil {
 					t.Fatalf("EncodeResponseStream returned error: %v", err)
@@ -297,8 +298,8 @@ func TestProviderIngress_AzurePromptContentFilterReturnsBackendError(t *testing.
 	client := rewritingClientForServer(t, srv)
 	registry := mustProviderRegistry(t, client, testCredentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	req := newTestProviderRequest(
 		"ex_prompt",

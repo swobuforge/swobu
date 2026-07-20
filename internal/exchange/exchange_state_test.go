@@ -60,7 +60,7 @@ func (decisionOnlyRejectCodec) Encode(provider.Request) (carrier.Document, []com
 	}}, canonical.UnsupportedOperation("request was rejected without a backend-local marker")
 }
 
-func (decisionOnlyRejectCodec) Decode(context.Context, string, provider.Ingress) (provider.DecodedResponse, error) {
+func (decisionOnlyRejectCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
 	panic("rejected request must never reach transport")
 }
 
@@ -74,13 +74,13 @@ func (unsupportedTestCodec) Encode(provider.Request) (carrier.Document, []compat
 	}}, provider.UnsupportedByBackend(canonical.UnsupportedOperation("candidate cannot represent requested output"))
 }
 
-func (unsupportedTestCodec) Decode(context.Context, string, provider.Ingress) (provider.DecodedResponse, error) {
+func (unsupportedTestCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
 	panic("incompatible candidate must never be called")
 }
 
 type decodeUnavailableCodec struct{ provider.Codec }
 
-func (c decodeUnavailableCodec) Decode(context.Context, string, provider.Ingress) (provider.DecodedResponse, error) {
+func (c decodeUnavailableCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
 	return provider.DecodedResponse{}, provider.Unavailable(canonical.NewBackendError("decode-unavailable-a", http.StatusServiceUnavailable, "decode unavailable", ""))
 }
 
@@ -265,12 +265,12 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "a",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "complete history")},
+		Model: canonical.Specify("a"),
+		Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "complete history")},
 	})
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "a",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "current delta")},
+		Model: canonical.Specify("a"),
+		Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
 		PreviousResponse: &canonical.ResponseRef{
 			SwobuID: "swobu_resp_123",
 			Responses: &canonical.ResponsesNativeRef{
@@ -316,8 +316,9 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	if _, ok := retryAttempt.call.request.Canonical.PreviousResponse(); ok {
 		t.Fatal("retry without native reference retained previous response reference")
 	}
-	text, _ := retryAttempt.call.request.Canonical.Items()[0].TextItem()
-	if got := text.Text; got != "complete history" {
+	message, _ := retryAttempt.call.request.Canonical.Items()[0].Message()
+	text, _ := message.Content()[0].Text()
+	if got := text.Text(); got != "complete history" {
 		t.Fatalf("full provider request item = %q", got)
 	}
 	ingress, err := retryAttempt.call.backend.Transport.Send(context.Background(), retryAttempt.call.document)
@@ -362,10 +363,10 @@ func TestReducerRetriesUnstructured400WithoutNativeReference(t *testing.T) {
 	s.route = routePlan{targets: []routing.Target{target}}
 	s.prepared = &replay.Prepared{
 		Semantic: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a", Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "complete history")},
+			Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "complete history")},
 		}),
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a", Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "current delta")},
+			Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
@@ -396,7 +397,7 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 	s.prepared = &replay.Prepared{
 		Semantic: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a",
+			Model: canonical.Specify("a"),
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: nativeTarget.ID().String(), TargetVersion: uint64(nativeTarget.Version()),
 			}},
@@ -462,7 +463,7 @@ func TestReducerDoesNotRetryNativePreviousResponseWithoutReferenceOn500(t *testi
 	s.prepared = &replay.Prepared{
 		Semantic: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a",
+			Model: canonical.Specify("a"),
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
@@ -491,7 +492,7 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 	s.prepared = &replay.Prepared{
 		Semantic: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a",
+			Model: canonical.Specify("a"),
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()) + 1,
 			}},
@@ -527,7 +528,7 @@ func TestNativeRequestDecodeFailureDoesNotTriggerSemanticRetry(t *testing.T) {
 	s.prepared = &replay.Prepared{
 		Semantic: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a",
+			Model: canonical.Specify("a"),
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
@@ -663,6 +664,33 @@ func TestFallbackEligiblePreparationFailureSkipsCandidateWithoutConsumingAttempt
 	}
 }
 
+func TestCandidateScopedAsyncPreparationFailureAdvancesRoute(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "media-a"),
+		requestpathTarget(t, "media-b"),
+	}}
+	prepared := replay.PrepareCurrent(s.input.request)
+	s.prepared = &prepared
+	s.phase = preparingProviderAttemptPhase{
+		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		target:    provider.TargetSnapshot{TargetID: "media-a"},
+	}
+	runner := withRuntime(nil)
+	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
+	outcome, err := reduce(context.Background(), s, providerAttemptPrepared{
+		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		err:       preparationError(PreparationCandidate, "candidate protocol cannot preserve image placement"),
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := activeProviderAttempt(t, outcome.nextState)
+	if attempt.candidateIndex != 1 || attempt.target.TargetID != "media-b" {
+		t.Fatalf("candidate fallback = %#v", attempt.providerCallAttempt)
+	}
+}
+
 func TestBackendResolutionMustPreserveResolvedTargetProjection(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{requestpathTarget(t, "target-a")}}
@@ -690,7 +718,7 @@ func TestProviderCallRequirementsAndEvidenceSubjectUseActualAttempt(t *testing.T
 	s.prepared = &replay.Prepared{
 		Semantic: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a",
+			Model: canonical.Specify("a"),
 			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
@@ -719,7 +747,7 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	s.prepared = &replay.Prepared{
 		Semantic: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "a", PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			Model: canonical.Specify("a"), PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
 		}),
@@ -832,11 +860,15 @@ func TestExchangeLoadsReplayOnceAcrossProviderFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &countingReplayStore{base: replay.NewMemoryStore()}
+	previousResponse, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_previous"}, "a", []canonical.CanonicalItem{
+		testMessage(canonical.MessageRoleAssistant, "answer one"),
+	}, "stop", canonical.NewUnknownTokenUsage())
+	if err != nil {
+		t.Fatal(err)
+	}
 	previous := replay.Record{
-		Request: canonical.NewCanonicalRequest(canonical.RequestParams{Model: "a", InputText: "turn one"}),
-		Response: canonical.NewConversationOutput("resp_previous", "a", []canonical.OutputItem{
-			canonical.NewTextOutputItem("text_0", "answer one"),
-		}, "stop"),
+		Request:  canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn one")}}),
+		Response: previousResponse,
 	}
 	if err := store.Put(context.Background(), "dev", previous); err != nil {
 		t.Fatal(err)
@@ -851,7 +883,7 @@ func TestExchangeLoadsReplayOnceAcrossProviderFallback(t *testing.T) {
 	})
 	runner.ReplayStore = store
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "a", InputText: "turn two", PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
 	})
 
 	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), request, workspace, nil)

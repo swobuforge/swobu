@@ -6,15 +6,15 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func projectClientDocument(ctx context.Context, envelope canonical.ResponseStream) (canonical.CanonicalOutput, error) {
+func projectClientDocument(ctx context.Context, envelope canonical.ResponseStream) (canonical.CanonicalResponse, error) {
 	closed, err := canonical.ReadClosedEnvelope(ctx, envelope, canonical.EnvResponse)
 	_ = envelope.Close(ctx)
 	if err != nil {
-		return nil, err
+		return canonical.CanonicalResponse{}, err
 	}
 	output, err := closed.ProjectResponse()
 	if err != nil {
-		return nil, err
+		return canonical.CanonicalResponse{}, err
 	}
-	return output, nil
+	return *output, nil
 }

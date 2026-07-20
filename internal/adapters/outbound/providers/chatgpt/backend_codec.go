@@ -35,8 +35,8 @@ func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.D
 	return c.inner.Encode(req)
 }
 
-func (c backendCodec) Decode(ctx context.Context, exchangeID string, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return c.inner.Decode(ctx, exchangeID, ingress)
+func (c backendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	return c.inner.Decode(ctx, request, ingress)
 }
 
 var _ provider.Codec = backendCodec{}

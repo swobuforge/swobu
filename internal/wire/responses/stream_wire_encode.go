@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,7 +27,7 @@ const (
 type responsesTextItemState struct {
 	itemID      string
 	outputIndex int
-	content     strings.Builder
+	parts       map[uint32]*strings.Builder
 }
 
 type responsesToolItemState struct {
@@ -65,6 +66,8 @@ func (e *ResponseStreamWireEncoder) Encode(event sse.StreamEvent) ([][]byte, err
 		return [][]byte{raw}, nil
 	case sse.StreamEventItemStarted:
 		return e.encodeItemStarted(event)
+	case sse.StreamEventContentStarted:
+		return e.encodeContentStarted(event)
 	case sse.StreamEventTextDelta:
 		return e.encodeTextDelta(event)
 	case sse.StreamEventToolUseArgumentsDelta:
@@ -156,7 +159,7 @@ func (e *ResponseStreamWireEncoder) encodeFailed(event sse.StreamEvent, defaultC
 
 func (e *ResponseStreamWireEncoder) encodeItemStarted(event sse.StreamEvent) ([][]byte, error) {
 	switch event.ItemKind {
-	case canonical.ItemKindText:
+	case canonical.ItemKindMessage:
 		itemID := strings.TrimSpace(event.ItemID) // swobu:io-string source=boundary
 		if itemID == "" {
 			itemID = "msg_swobu_" + strconv.Itoa(e.nextOutputIndex)
@@ -173,7 +176,7 @@ func (e *ResponseStreamWireEncoder) encodeItemStarted(event sse.StreamEvent) ([]
 			return nil, err
 		}
 		return append(frames, opened...), nil
-	case canonical.ItemKindToolUse:
+	case canonical.ItemKindToolCall:
 		return e.openToolItem(event.ItemID, event.ToolUseID, event.Name, event.ToolType)
 	default:
 		return nil, nil
@@ -195,18 +198,35 @@ func (e *ResponseStreamWireEncoder) encodeTextDelta(event sse.StreamEvent) ([][]
 	if e.textItem == nil {
 		return frames, nil
 	}
-	e.textItem.content.WriteString(event.TextDelta)
+	partFrames, err := e.openTextPart(e.textItem, event.PartOrdinal)
+	if err != nil {
+		return nil, err
+	}
+	frames = append(frames, partFrames...)
+	e.textItem.parts[event.PartOrdinal].WriteString(event.TextDelta)
 	delta, err := json.Marshal(responsesTextDeltaEventDTO{
 		Type:         "response.output_text.delta",
 		ItemID:       e.textItem.itemID,
 		OutputIndex:  e.textItem.outputIndex,
-		ContentIndex: 0,
+		ContentIndex: int(event.PartOrdinal),
 		Delta:        event.TextDelta,
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
 	return append(frames, delta), nil
+}
+
+func (e *ResponseStreamWireEncoder) encodeContentStarted(event sse.StreamEvent) ([][]byte, error) {
+	if event.PartKind != canonical.PartKindText {
+		return nil, canonical.UnsupportedOperation("responses streaming content part kind is not implemented")
+	}
+	frames, err := e.ensureTextItem(event.ItemID)
+	if err != nil || e.textItem == nil {
+		return frames, err
+	}
+	partFrames, err := e.openTextPart(e.textItem, event.PartOrdinal)
+	return append(frames, partFrames...), err
 }
 
 func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEvent) ([][]byte, error) {
@@ -249,13 +269,13 @@ func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEve
 
 func (e *ResponseStreamWireEncoder) encodeItemCompleted(event sse.StreamEvent) ([][]byte, error) {
 	switch event.ItemKind {
-	case canonical.ItemKindText:
+	case canonical.ItemKindMessage:
 		itemID := strings.TrimSpace(event.ItemID) // swobu:io-string source=boundary
 		if e.textItem != nil && (itemID == "" || itemID == e.textItem.itemID) {
 			return e.flushOpenTextItem()
 		}
 		return nil, nil
-	case canonical.ItemKindToolUse:
+	case canonical.ItemKindToolCall:
 		itemID := strings.TrimSpace(event.ItemID) // swobu:io-string source=boundary
 		if itemID == "" {
 			return nil, nil
@@ -285,6 +305,7 @@ func (e *ResponseStreamWireEncoder) openTextItem(itemID string) ([][]byte, error
 	state := &responsesTextItemState{
 		itemID:      itemID,
 		outputIndex: e.nextOutputIndex,
+		parts:       map[uint32]*strings.Builder{},
 	}
 	e.nextOutputIndex++
 	e.textItem = state
@@ -302,11 +323,19 @@ func (e *ResponseStreamWireEncoder) openTextItem(itemID string) ([][]byte, error
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
+	return [][]byte{added}, nil
+}
+
+func (e *ResponseStreamWireEncoder) openTextPart(state *responsesTextItemState, ordinal uint32) ([][]byte, error) {
+	if state.parts[ordinal] != nil {
+		return nil, nil
+	}
+	state.parts[ordinal] = &strings.Builder{}
 	part, err := json.Marshal(responsesContentPartEventDTO{
 		Type:         "response.content_part.added",
 		ItemID:       state.itemID,
 		OutputIndex:  state.outputIndex,
-		ContentIndex: 0,
+		ContentIndex: int(ordinal),
 		Part: responsesOutputTextStreamDTO{
 			Type:        "output_text",
 			Text:        "",
@@ -316,7 +345,7 @@ func (e *ResponseStreamWireEncoder) openTextItem(itemID string) ([][]byte, error
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
-	return [][]byte{added, part}, nil
+	return [][]byte{part}, nil
 }
 
 func (e *ResponseStreamWireEncoder) flushOpenTextItem() ([][]byte, error) {
@@ -324,60 +353,48 @@ func (e *ResponseStreamWireEncoder) flushOpenTextItem() ([][]byte, error) {
 		return nil, nil
 	}
 	state := e.textItem
-	text := state.content.String()
-	textDone, err := json.Marshal(responsesTextDoneEventDTO{
-		Type:         "response.output_text.done",
-		ItemID:       state.itemID,
-		OutputIndex:  state.outputIndex,
-		ContentIndex: 0,
-		Text:         text,
-	})
-	if err != nil {
-		return nil, canonical.InternalError("responses event encoding failed")
+	ordinals := make([]int, 0, len(state.parts))
+	for ordinal := range state.parts {
+		ordinals = append(ordinals, int(ordinal))
 	}
-	partDone, err := json.Marshal(responsesContentPartEventDTO{
-		Type:         "response.content_part.done",
-		ItemID:       state.itemID,
-		OutputIndex:  state.outputIndex,
-		ContentIndex: 0,
-		Part: responsesOutputTextStreamDTO{
-			Type:        "output_text",
-			Text:        text,
-			Annotations: []any{},
-		},
-	})
-	if err != nil {
-		return nil, canonical.InternalError("responses event encoding failed")
+	sort.Ints(ordinals)
+	frames := make([][]byte, 0, len(ordinals)*2+1)
+	content := make([]responsesOutputTextStreamDTO, 0, len(ordinals))
+	for _, rawOrdinal := range ordinals {
+		text := state.parts[uint32(rawOrdinal)].String()
+		textDone, err := json.Marshal(responsesTextDoneEventDTO{Type: "response.output_text.done", ItemID: state.itemID, OutputIndex: state.outputIndex, ContentIndex: rawOrdinal, Text: text})
+		if err != nil {
+			return nil, canonical.InternalError("responses event encoding failed")
+		}
+		partValue := responsesOutputTextStreamDTO{Type: "output_text", Text: text, Annotations: []any{}}
+		partDone, err := json.Marshal(responsesContentPartEventDTO{Type: "response.content_part.done", ItemID: state.itemID, OutputIndex: state.outputIndex, ContentIndex: rawOrdinal, Part: partValue})
+		if err != nil {
+			return nil, canonical.InternalError("responses event encoding failed")
+		}
+		frames = append(frames, textDone, partDone)
+		content = append(content, partValue)
 	}
 	itemDone, err := json.Marshal(responsesOutputItemEventDTO{
 		Type:        "response.output_item.done",
 		OutputIndex: state.outputIndex,
 		Item: responsesOutputItemMessageDTO{
-			ID:     state.itemID,
-			Type:   "message",
-			Status: "completed",
-			Role:   "assistant",
-			Content: []responsesOutputTextStreamDTO{{
-				Type:        "output_text",
-				Text:        text,
-				Annotations: []any{},
-			}},
+			ID:      state.itemID,
+			Type:    "message",
+			Status:  "completed",
+			Role:    "assistant",
+			Content: content,
 		},
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
 	e.outputItems = append(e.outputItems, responsesOutputItemMessageDTO{
-		ID:     state.itemID,
-		Type:   "message",
-		Status: "completed",
-		Role:   "assistant",
-		Content: []responsesOutputTextStreamDTO{{
-			Type:        "output_text",
-			Text:        text,
-			Annotations: []any{},
-		}},
+		ID:      state.itemID,
+		Type:    "message",
+		Status:  "completed",
+		Role:    "assistant",
+		Content: content,
 	})
 	e.textItem = nil
-	return [][]byte{textDone, partDone, itemDone}, nil
+	return append(frames, itemDone), nil
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Messages tool_choice variants.
-func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
 		if len(tools) > 0 {
@@ -51,29 +51,18 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDecl, s
 		if name == "" {
 			return canonical.ToolPolicy{}, canonical.BadRequest("messages request tool_choice specific requires a tool name")
 		}
-		projected := strings.Contains(name, "__")
-		resolved, _, err := canonical.ResolveToolDeclByName(tools, name, canonical.ToolTypeFunction)
+		resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeFunction)
 		if err != nil {
-			if projected {
-				if emitErr := emitMessagesToolNameNamespaceDecision(sink, exchangeID, nil, compat.Reject, compat.Subject("wire:/tool_choice/name")); emitErr != nil {
-					return canonical.ToolPolicy{}, emitErr
-				}
-			}
 			return canonical.ToolPolicy{}, err
 		}
-		if projected {
-			if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tool_choice/name")); err != nil {
-				return canonical.ToolPolicy{}, err
-			}
-		}
-		specificID := resolved.ToolID()
+		specificID := resolved.Key()
 		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specificID), nil
 	default:
 		return canonical.ToolPolicy{}, canonical.BadRequest("messages request tool_choice is invalid")
 	}
 }
 
-func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (any, error) {
+func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -107,17 +96,11 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.Too
 		if !ok {
 			return nil, canonical.BadRequest("messages request tool_choice specific requires a tool id")
 		}
-		decl, _, err := canonical.ResolveToolDeclByID(tools, specific, canonical.ToolTypeFunction)
+		decl, _, err := canonical.ResolveToolDeclarationByKey(tools, specific, canonical.ToolTypeFunction)
 		if err != nil {
 			return nil, err
 		}
-		name, err := canonical.ProjectedToolName(decl)
-		if err != nil {
-			return nil, err
-		}
-		if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, decl, compat.Approx, compat.Subject("wire:/tool_choice/name")); err != nil {
-			return nil, err
-		}
+		name := decl.Key().Name()
 		return map[string]any{
 			"type": "tool",
 			"name": name,

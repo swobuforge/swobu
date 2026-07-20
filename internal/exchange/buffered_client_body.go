@@ -41,6 +41,12 @@ func (b *bufferedClientBody) prepare() {
 	response, err := projectClientDocument(b.ctx, b.envelope)
 	b.consumed = true
 	if err != nil {
+		if commitAware, ok := b.envelope.(interface{ CommitError() error }); ok {
+			if commitErr := commitAware.CommitError(); commitErr != nil {
+				b.err = commitErr
+				return
+			}
+		}
 		b.err = err
 		return
 	}

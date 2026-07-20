@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -65,6 +66,18 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	case loadReplayCommand:
 		record, found, err := c.store.Get(ctx, c.workspaceSlug, c.reference)
 		return replayLoaded{record: record, found: found, err: err}
+	case prepareProviderAttemptCommand:
+		preparationCtx := ctx
+		cancel := func() {}
+		if timeout := c.policy.TotalPreparationTimeout(); timeout > 0 {
+			preparationCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		defer cancel()
+		request, fetchCache, usedMedia, decisions, err := prepareImages(preparationCtx, c.request, c.protocol, c.policy, c.limits, c.fetcher, c.fetchCache, c.historical)
+		if err == nil {
+			usedMedia, err = rebaseAttemptMedia(replay.Prepared{Semantic: c.semantic}, c.request, usedMedia)
+		}
+		return providerAttemptPrepared{selection: c.selection, request: request, fetchCache: fetchCache, usedMedia: usedMedia, decisions: decisions, err: err}
 	case callProviderCommand:
 		ingress, err := c.backend.Transport.Send(ctx, c.document)
 		if err != nil {

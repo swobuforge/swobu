@@ -11,10 +11,12 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
+	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 // RuntimeCodecResolver composes client-facing codecs for all supported client
@@ -31,19 +33,21 @@ type RuntimeCodecResolver struct {
 
 // NewRuntimeCodecResolver returns a fully wired codec resolver.
 func NewRuntimeCodecResolver() RuntimeCodecResolver {
+	resources := provider.DefaultMediaLimits()
+	imageLimits := shared.ImageDecodeLimitPolicy{MaxInlineBytes: int(resources.MaxImageBytes), MaxImages: resources.MaxImages, MaxTotalImageBytes: int(resources.MaxTotalImageBytes)}
 	return RuntimeCodecResolver{
 		chatCompletionsClient: clientCodecBundle{
-			request:  chatcompletions.ClientRequestDecoder{},
+			request:  chatcompletions.ClientRequestDecoder{ImageLimits: imageLimits},
 			document: chatcompletions.ResponseDocumentEncoder{},
 			stream:   chatcompletions.ResponseStreamEncoder{},
 		},
 		responsesClient: clientCodecBundle{
-			request:  responses.ClientRequestDecoder{},
+			request:  responses.ClientRequestDecoder{ImageLimits: imageLimits},
 			document: responses.ResponseDocumentEncoder{},
 			stream:   responses.ResponseStreamEncoder{},
 		},
 		messagesClient: clientCodecBundle{
-			request:  messages.ClientRequestDecoder{},
+			request:  messages.ClientRequestDecoder{ImageLimits: imageLimits},
 			document: messages.ResponseDocumentEncoder{},
 			stream:   messages.ResponseStreamEncoder{},
 		},
@@ -71,7 +75,7 @@ type clientCodecBundle struct {
 		DecodeClientRequest(carrier.Document) (wire.ClientDecodeResult, error)
 	}
 	document interface {
-		EncodeResponseDocument(canonical.CanonicalOutput) (wire.ClientDocumentResult, error)
+		EncodeResponseDocument(canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
 	}
 	stream interface {
 		EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientByteStreamResult, error)
@@ -83,7 +87,7 @@ func (b clientCodecBundle) DecodeClientRequest(doc carrier.Document) (wire.Clien
 	return b.request.DecodeClientRequest(doc)
 }
 
-func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalOutput) (wire.ClientDocumentResult, error) {
+func (b clientCodecBundle) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	return b.document.EncodeResponseDocument(output)
 }
 

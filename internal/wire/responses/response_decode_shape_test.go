@@ -9,7 +9,7 @@ import (
 )
 
 func TestDecodeResponseBuffered_RejectsNonResponseJSON(t *testing.T) {
-	_, err := decodeResponseBuffered(context.Background(), []byte(`{"code":500,"message":"not a response"}`), "ex_invalid_shape", nil)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(`{"code":500,"message":"not a response"}`), "ex_invalid_shape", nil)
 	if err == nil {
 		t.Fatal("decodeResponseBuffered error = nil, want invalid response shape")
 	}

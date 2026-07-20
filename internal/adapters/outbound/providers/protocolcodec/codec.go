@@ -51,14 +51,18 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithTokenField(input, req.Delivery, "", c.Options.ChatCompletionsTokenField)
+		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", chatcompletions.EncodeOptions{
+			MaxOutputTokensField: c.Options.ChatCompletionsTokenField,
+			Compatibility:        req.Compatibility,
+		})
 	case protocolkind.Responses:
 		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", responses.EncodeOptions{
 			ForceStructuredInput: c.Options.ForceStructuredInput,
 			Store:                c.Options.Store,
+			Compatibility:        req.Compatibility,
 		})
 	case protocolkind.Messages:
-		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
+		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{Compatibility: req.Compatibility})
 	default:
 		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.BadEndpoint("selected provider protocol has no request codec"))
 	}
@@ -94,14 +98,14 @@ func markUnsupportedByBackend(err error) error {
 }
 
 // Decode implements provider.Codec.
-func (c Codec) Decode(ctx context.Context, exchangeID string, ingress provider.Ingress) (provider.DecodedResponse, error) {
+func (c Codec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
 	var result wire.ProviderDecodeResult
 	var err error
 	switch in := ingress.(type) {
 	case provider.DocumentIngress:
-		result, err = c.decodeDocument(ctx, exchangeID, in.Document)
+		result, err = c.decodeDocument(ctx, request, in.Document)
 	case provider.StreamIngress:
-		result, err = c.decodeStream(in.Stream, exchangeID)
+		result, err = c.decodeStream(in.Stream, request)
 	default:
 		return provider.DecodedResponse{}, fmt.Errorf("provider ingress %T is unsupported", ingress)
 	}
@@ -112,27 +116,29 @@ func (c Codec) Decode(ctx context.Context, exchangeID string, ingress provider.I
 	return decoded, err
 }
 
-func (c Codec) decodeDocument(ctx context.Context, exchangeID string, doc carrier.Document) (wire.ProviderDecodeResult, error) {
+func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc carrier.Document) (wire.ProviderDecodeResult, error) {
+	exchangeID := request.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, doc, exchangeID)
+		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
 	case protocolkind.Responses:
-		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, doc, exchangeID)
+		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
 	case protocolkind.Messages:
-		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, doc, exchangeID)
+		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
 	default:
 		return wire.ProviderDecodeResult{}, canonical.BadEndpoint("selected provider protocol has no document codec")
 	}
 }
 
-func (c Codec) decodeStream(stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
+func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request) (wire.ProviderDecodeResult, error) {
+	exchangeID := request.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(stream, exchangeID)
+		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
 	case protocolkind.Responses:
-		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(stream, exchangeID)
+		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
 	case protocolkind.Messages:
-		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(stream, exchangeID)
+		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
 	default:
 		return wire.ProviderDecodeResult{}, canonical.BadEndpoint("selected provider protocol has no stream codec")
 	}

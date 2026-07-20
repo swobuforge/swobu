@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
 )
 
@@ -17,6 +18,9 @@ type runtimeBundle struct {
 	DecisionSink     compat.Sink
 	ReplayStore      replay.Store
 	SwobuResponseIDs replay.SwobuResponseIDGenerator
+	Policy           WorkspacePolicy
+	ImageFetcher     provider.ImageFetcher
+	PolicyResolver   WorkspacePolicyResolver
 }
 
 func allocateSwobuResponseID(ctx context.Context, exchangeID string, gen replay.SwobuResponseIDGenerator) (canonical.SwobuResponseID, error) {

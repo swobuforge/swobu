@@ -18,7 +18,10 @@ type chatCompletionsEnvelopeStreamEncoder struct {
 }
 
 func (s *chatCompletionsEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
-	streamEvents := s.adapter.Translate(event)
+	streamEvents, err := s.adapter.Translate(event)
+	if err != nil {
+		return nil, err
+	}
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
 		emitted, err := s.Encode(streamEvent)
@@ -51,7 +54,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		})
 		return [][]byte{sse.SSEData(raw)}, nil
 	case sse.StreamEventItemStarted:
-		if event.ItemKind == canonical.ItemKindToolUse {
+		if event.ItemKind == canonical.ItemKindToolCall {
 			if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom { // swobu:io-string source=domain
 				return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
 			}
@@ -79,6 +82,10 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 			return [][]byte{sse.SSEData(raw)}, nil
 		}
 		return nil, nil
+	case sse.StreamEventContentStarted:
+		// Chat Completions has no content-part index; accepting the lifecycle
+		// marker does not erase its coordinates from protocols that do.
+		return nil, nil
 	case sse.StreamEventTextDelta:
 		if !s.started {
 			frames, _ := s.Encode(sse.StreamEvent{Kind: sse.StreamEventStarted, ResultID: s.resultID, Model: s.model})
@@ -103,7 +110,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		if !ok {
 			startFrames, err := s.Encode(sse.StreamEvent{
 				Kind:      sse.StreamEventItemStarted,
-				ItemKind:  canonical.ItemKindToolUse,
+				ItemKind:  canonical.ItemKindToolCall,
 				ResultID:  s.resultID,
 				Model:     s.model,
 				ItemID:    event.ItemID,
@@ -170,7 +177,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 
 func (s *chatCompletionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
 
-func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsResponseMessageDTO, error) {
+func chatMessageFromOutput(output canonical.CanonicalResponse) (chatCompletionsResponseMessageDTO, error) {
 	message := chatCompletionsResponseMessageDTO{
 		Role: "assistant",
 	}
@@ -178,13 +185,17 @@ func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsRes
 	toolCalls := make([]chatCompletionsResponseToolCallDTO, 0)
 	for _, item := range output.Items() {
 		switch item.Kind() {
-		case canonical.ItemKindText:
-			textItem, ok := item.TextItem()
-			if !ok {
-				return chatCompletionsResponseMessageDTO{}, canonical.InternalError("chat completions text item payload is invalid")
+		case canonical.ItemKindMessage:
+			messageItem, _ := item.Message()
+			if messageItem.Role() != canonical.MessageRoleAssistant {
+				return chatCompletionsResponseMessageDTO{}, canonical.UnsupportedOperation("chat completions response messages must be assistant-authored")
 			}
-			text.WriteString(textItem.Text)
-		case canonical.ItemKindToolUse:
+			content, err := textOnlyContent(messageItem.Content(), "chat completions responses")
+			if err != nil {
+				return chatCompletionsResponseMessageDTO{}, err
+			}
+			text.WriteString(content)
+		case canonical.ItemKindToolCall:
 			wire, err := chatToolCallFromOutputItem(item)
 			if err != nil {
 				return chatCompletionsResponseMessageDTO{}, err
@@ -204,37 +215,38 @@ func chatMessageFromOutput(output canonical.CanonicalOutput) (chatCompletionsRes
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
-func chatToolCallFromOutputItem(item canonical.OutputItem) (chatCompletionsResponseToolCallDTO, error) {
-	toolUse, ok := item.ToolUse()
+func chatToolCallFromOutputItem(item canonical.CanonicalItem) (chatCompletionsResponseToolCallDTO, error) {
+	call, ok := item.ToolCall()
 	if !ok {
-		return chatCompletionsResponseToolCallDTO{}, canonical.InternalError("chat completions tool-use item payload is invalid")
+		return chatCompletionsResponseToolCallDTO{}, canonical.InternalError("chat completions tool-call item payload is invalid")
 	}
-	toolUseID := strings.TrimSpace(toolUse.UseID) // swobu:io-string source=boundary
-	if toolUseID == "" {
-		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require tool_use_id")
-	}
-	name := strings.TrimSpace(toolUse.Name) // swobu:io-string source=boundary
-	if name == "" {
-		return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response tool calls require a name")
-	}
-	args := toolUse.Input.RawObject()
-	switch strings.ToLower(strings.TrimSpace(toolUse.ToolType)) { // swobu:io-string source=domain
-	case "", canonical.ToolTypeFunction:
+	tool := call.Tool()
+	name := tool.Name()
+	switch tool.Kind() {
+	case canonical.ToolKindFunction:
+		object, ok := call.Input().Object()
+		if !ok {
+			return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response function call requires object input")
+		}
 		return chatCompletionsResponseToolCallDTO{
-			ID:   toolUseID,
+			ID:   call.CallID().String(),
 			Type: "function",
 			Function: &chatCompletionsResponseFunctionDTO{
 				Name:      name,
-				Arguments: args,
+				Arguments: object.String(),
 			},
 		}, nil
-	case canonical.ToolTypeCustom:
+	case canonical.ToolKindCustom:
+		text, ok := call.Input().Text()
+		if !ok {
+			return chatCompletionsResponseToolCallDTO{}, canonical.BadRequest("chat completions response custom call requires text input")
+		}
 		return chatCompletionsResponseToolCallDTO{
-			ID:   toolUseID,
+			ID:   call.CallID().String(),
 			Type: "custom",
 			Custom: &chatCompletionsResponseCustomDTO{
 				Name:  name,
-				Input: args,
+				Input: text,
 			},
 		}, nil
 	default:

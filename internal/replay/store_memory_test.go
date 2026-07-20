@@ -64,7 +64,7 @@ func TestMemoryStoreDefensivelyCopiesResponsesRefinement(t *testing.T) {
 	scope := "alpha"
 	target := testBackendTarget(t, "m")
 	responses := nativeResponses(target, "provider_resp_1")
-	record := replayRecord("resp_1", makeRequest("m", makeItems("hello"), nil), makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")), responses)
+	record := replayRecord("resp_1", makeRequest("m", makeItems("hello"), nil), makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "ok")), responses)
 
 	if err := store.Put(context.Background(), scope, record); err != nil {
 		t.Fatalf("Put failed: %v", err)
@@ -100,7 +100,7 @@ func TestMemoryStoreDefensivelyCopiesExpiresAt(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	record := replayRecord("resp_expiry", makeRequest("m", makeItems("hello"), nil), makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")), nil)
+	record := replayRecord("resp_expiry", makeRequest("m", makeItems("hello"), nil), makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "ok")), nil)
 	record.ExpiresAt = &expiresAt
 	record.CreatedAt = time.Now().UTC()
 
@@ -139,7 +139,7 @@ func TestMemoryStoreRejectsExpiredRecord(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
 	expiredAt := time.Now().UTC().Add(-time.Minute)
-	record := replayRecord("resp_expired", makeRequest("m", makeItems("hello"), nil), makeResponse(canonical.NewTextItem(canonical.ItemAuthorAssistant, "ok")), nil)
+	record := replayRecord("resp_expired", makeRequest("m", makeItems("hello"), nil), makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "ok")), nil)
 	record.ExpiresAt = &expiredAt
 	record.CreatedAt = time.Now().UTC().Add(-2 * time.Minute)
 
@@ -237,5 +237,9 @@ func TestDaemonReplayStorePartitionsByWorkspaceSlug(t *testing.T) {
 }
 
 func storeRecord(id canonical.SwobuResponseID) Record {
-	return Record{Response: canonical.NewConversationOutput(canonical.NewSwobuResponseID(id.String()), "", nil, ""), CreatedAt: time.Now().UTC()}
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id.String())}, "test-model", nil, "stop", canonical.NewUnknownTokenUsage())
+	if err != nil {
+		panic(err)
+	}
+	return Record{Response: response, CreatedAt: time.Now().UTC()}
 }

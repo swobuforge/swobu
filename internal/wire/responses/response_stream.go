@@ -17,7 +17,7 @@ import (
 )
 
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
-func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesEventReader {
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesEventReader {
 	recording := &compat.RecordingSink{Delegate: sink}
 	return &responsesEventReader{
 		exchangeID:    exchangeID,
@@ -29,6 +29,7 @@ func decodeResponseStream(stream carrier.ByteStream, exchangeID string, sink com
 		toolInputs:    map[string]string{},
 		textOpen:      false,
 		latestUsage:   canonical.NewUnknownTokenUsage(),
+		request:       request.Clone(),
 	}
 }
 
@@ -48,6 +49,10 @@ type responsesEventReader struct {
 	completed     bool
 	latestUsage   canonical.TokenUsage
 	seq           int64
+	request       canonical.CanonicalRequest
+	textOrdinal   uint32
+	text          strings.Builder
+	nextOrdinal   uint32
 }
 
 func (s *responsesEventReader) Decisions() []compat.Decision {
@@ -59,7 +64,10 @@ func (s *responsesEventReader) Decisions() []compat.Decision {
 
 type responsesToolState struct {
 	envID         canonical.EnvelopeID
+	ordinal       uint32
 	toolType      string
+	callID        canonical.ToolCallID
+	tool          canonical.ToolKey
 	argumentsDone bool
 	outputDone    bool
 	closed        bool
@@ -158,12 +166,20 @@ func (s *responsesEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind 
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
 }
 
-func (s *responsesEventReader) enqueueTextDelta(id canonical.EnvelopeID, text string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, EnvID: id, Payload: canonical.TextDeltaPayload{Text: text}})
+func (s *responsesEventReader) enqueueTextDelta(id canonical.EnvelopeID, ordinal uint32, text string) {
+	s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.TextDeltaPayload{Text: text}}})
 }
 
-func (s *responsesEventReader) enqueueArgsDelta(id canonical.EnvelopeID, args string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, EnvID: id, Payload: canonical.ArgsDeltaPayload{Args: args}})
+func (s *responsesEventReader) enqueueArgsDelta(id canonical.EnvelopeID, ordinal uint32, args string) {
+	s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ArgsDeltaPayload{Args: args}}})
+}
+
+func (s *responsesEventReader) enqueueItemStart(id canonical.EnvelopeID, ordinal uint32, start canonical.ItemStartPayload) {
+	s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: start}})
+}
+
+func (s *responsesEventReader) enqueueItemCompleted(id canonical.EnvelopeID, ordinal uint32, item canonical.CanonicalItem) {
+	s.enqueue(canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ItemCompletedPayload{Item: item}}})
 }
 
 func (s *responsesEventReader) enqueueUsage(usage canonical.TokenUsage) {
@@ -172,10 +188,6 @@ func (s *responsesEventReader) enqueueUsage(usage canonical.TokenUsage) {
 
 func (s *responsesEventReader) enqueueFinish(reason string) {
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseEnvID, Payload: canonical.FinishPayload{Reason: reason}})
-}
-
-func (s *responsesEventReader) enqueueMetadata(values map[string]string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventMetadata, EnvID: s.responseEnvID, Payload: canonical.MetadataPayload{Values: values}})
 }
 
 func (s *responsesEventReader) enqueueError(code string, message string) {
@@ -211,44 +223,57 @@ func (s *responsesEventReader) handleTerminalCompletion(ctx context.Context, sta
 
 func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
 	if s.textOpen {
-		s.enqueueEnvelopeEnd(s.textEnvID, canonical.EnvMessage, status)
+		if status == canonical.EnvelopeStatusCompleted {
+			item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(s.text.String())})
+			if err == nil {
+				s.enqueueItemCompleted(s.textEnvID, s.textOrdinal, item)
+			}
+		}
 		s.textOpen = false
 		s.textEnvID = ""
+		s.text.Reset()
 	}
 }
 
 func (s *responsesEventReader) closeOpenTools(status canonical.EnvelopeStatus) {
-	for itemID, state := range s.toolStates {
-		if !state.closed {
-			s.enqueueEnvelopeEnd(state.envID, canonical.EnvToolCall, status)
-		}
+	for itemID := range s.toolStates {
 		delete(s.toolStates, itemID)
 		delete(s.toolInputs, itemID)
 	}
 }
 
-func (s *responsesEventReader) ensureToolState(itemID string, toolType string, callID string, name string) responsesToolState {
+func (s *responsesEventReader) ensureToolState(itemID string, ordinal uint32, toolType string, callID string, name string) (responsesToolState, error) {
 	if state, ok := s.toolStates[itemID]; ok {
 		if state.toolType == "" && strings.TrimSpace(toolType) != "" { // swobu:io-string source=domain
 			state.toolType = strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
 			s.toolStates[itemID] = state
 		}
-		return state
+		return state, nil
 	}
 	normalizedType := strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
 	if normalizedType == "" {
 		normalizedType = canonical.ToolTypeFunction
 	}
-	envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%s", s.responseEnvID, itemID))
-	state := responsesToolState{envID: envID, toolType: normalizedType}
+	if normalizedType != canonical.ToolTypeFunction && normalizedType != canonical.ToolTypeCustom {
+		return responsesToolState{}, canonical.UnsupportedOperation("responses stream tool-call kind is not implemented")
+	}
+	resolved, _, err := canonical.ResolveToolDeclarationByName(s.request.Tools(), name, normalizedType)
+	if err != nil {
+		return responsesToolState{}, canonical.InternalError("responses stream tool call references an unknown or ambiguous tool")
+	}
+	canonicalCallID, err := canonical.NewToolCallID(callID)
+	if err != nil {
+		return responsesToolState{}, canonical.InternalError("responses stream tool call is missing call_id")
+	}
+	envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, ordinal))
+	state := responsesToolState{envID: envID, ordinal: ordinal, toolType: normalizedType, callID: canonicalCallID, tool: resolved.Key()}
 	s.toolStates[itemID] = state
-	s.enqueueEnvelopeStart(envID, s.responseEnvID, canonical.EnvelopeStartPayload{
-		Kind:      canonical.EnvToolCall,
-		Name:      name,
-		ToolUseID: callID,
-		ToolType:  normalizedType,
-	}, canonical.EventMetadataFields{NativeID: itemID})
-	return state
+	start, err := canonical.NewToolCallStart(canonicalCallID, state.tool)
+	if err != nil {
+		return responsesToolState{}, err
+	}
+	s.enqueueItemStart(envID, ordinal, start)
+	return state, nil
 }
 
 func (s *responsesEventReader) markToolStateArgumentsDone(itemID string, state responsesToolState) responsesToolState {
@@ -272,7 +297,7 @@ func (s *responsesEventReader) enqueueToolArgs(itemID string, args string) {
 		return
 	}
 	s.toolInputs[itemID] += args
-	s.enqueueArgsDelta(state.envID, args)
+	s.enqueueArgsDelta(state.envID, state.ordinal, args)
 }
 
 func fallbackItemID(itemID string, callID string, outputIndex *int) string {
@@ -286,4 +311,20 @@ func fallbackItemID(itemID string, callID string, outputIndex *int) string {
 		return strings.TrimSpace(callID) // swobu:io-string source=boundary
 	}
 	return "tool_0"
+}
+
+func (s *responsesEventReader) ordinalFor(itemID string, outputIndex *int) uint32 {
+	if state, ok := s.toolStates[itemID]; ok {
+		return state.ordinal
+	}
+	if outputIndex != nil && *outputIndex >= 0 {
+		ordinal := uint32(*outputIndex)
+		if ordinal >= s.nextOrdinal {
+			s.nextOrdinal = ordinal + 1
+		}
+		return ordinal
+	}
+	ordinal := s.nextOrdinal
+	s.nextOrdinal++
+	return ordinal
 }

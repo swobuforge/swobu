@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,13 +11,14 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
+	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
 type EncodeOptions struct {
 	Instructions         string
 	ForceStructuredInput bool
 	Store                *bool
+	Compatibility        compat.CompatibilityPolicy
 }
 
 type inputMessageItem struct {
@@ -24,7 +26,7 @@ type inputMessageItem struct {
 	ID      string `json:"id,omitempty"`
 	Status  string `json:"status,omitempty"`
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
 }
 
 type functionCallItem struct {
@@ -37,7 +39,14 @@ type functionCallItem struct {
 type functionCallOutputItem struct {
 	Type   string `json:"type"`
 	CallID string `json:"call_id"`
-	Output string `json:"output"`
+	Output any    `json:"output"`
+}
+
+type customToolCallItem struct {
+	Type   string `json:"type"`
+	CallID string `json:"call_id"`
+	Name   string `json:"name"`
+	Input  string `json:"input"`
 }
 
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
@@ -46,14 +55,7 @@ type EncodeInput struct {
 	Request canonical.CanonicalRequest
 }
 
-// EncodeCarrier is a convenience that encodes a carrier document from a raw
-// canonical request without native replay support. It does not infer provider
-// continuation from a raw client selector.
-func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
-	input := EncodeInput{Request: req}
-	return EncodeCarrierWithDecisions(input, d, nil, "", EncodeOptions{})
-}
-
+// swobu:lint ignore function-complexity because=Responses encoding lowers every canonical request band into one atomic wire document.
 func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
 	req := input.Request
 
@@ -64,7 +66,6 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	}
 
 	tools := req.Tools()
-	presence := req.Presence()
 	previous, hasPrevious := req.PreviousResponse()
 	responsesRefined := false
 	if hasPrevious {
@@ -76,11 +77,11 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 		}
 		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(req, options.ForceStructuredInput)
+	payloadInput, err := encodeInput(req, options.ForceStructuredInput, options.Compatibility, sink, exchangeID)
 	if err != nil {
 		return carrier.Document{}, err
 	}
-	choice, err := encodeToolChoice(req.ToolPolicy(), tools, sink, exchangeID)
+	choice, err := encodeToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -92,7 +93,11 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	if payloadInput != nil {
 		payload["input"] = payloadInput
 	}
-	if instructions := mergedResponsesInstructions(req.Instructions(), options.Instructions); instructions != "" || responsesRefined && presence.Instructions {
+	loweredInstructions := flattenInstructionsForResponses(req.Instructions())
+	if err := commitResponsesInstructionDecisions(sink, exchangeID, loweredInstructions); err != nil {
+		return carrier.Document{}, err
+	}
+	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" || responsesRefined && req.InstructionsSpecified() {
 		payload["instructions"] = instructions
 	}
 	if choice != nil {
@@ -100,7 +105,7 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	}
 	if wireTools, err := encodeResponsesTools(tools, sink, exchangeID); err != nil {
 		return carrier.Document{}, err
-	} else if len(wireTools) > 0 || responsesRefined && presence.Tools {
+	} else if len(wireTools) > 0 || responsesRefined && req.ToolsSpecified() {
 		if wireTools == nil {
 			wireTools = []any{}
 		}
@@ -109,17 +114,17 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
 		return carrier.Document{}, err
 	}
-	if responsesRefined && presence.ToolCallBatch && req.ToolCallBatch().IsZero() && len(tools) > 0 {
+	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && len(tools) > 0 {
 		payload["parallel_tool_calls"] = true
 	}
-	if err := encodeResponsesGenerationControls(payload, req.Controls(), presence.Controls, responsesRefined); err != nil {
+	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
 		return carrier.Document{}, err
 	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
 		return carrier.Document{}, err
 	} else if text != nil {
 		payload["text"] = text
-	} else if responsesRefined && presence.OutputFormat {
+	} else if responsesRefined && req.OutputFormatSpecified() {
 		payload["text"] = &responsesTextDTO{Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)}}
 	}
 	if responsesRefined {
@@ -146,8 +151,6 @@ func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink com
 }
 
 func mergedResponsesInstructions(requestInstructions string, optionInstructions string) string {
-	requestInstructions = strings.TrimSpace(requestInstructions) // swobu:io-string source=boundary
-	optionInstructions = strings.TrimSpace(optionInstructions)   // swobu:io-string source=boundary
 	switch {
 	case requestInstructions == "":
 		return optionInstructions
@@ -162,7 +165,7 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice a
 	thread := req.Items()
 	encodedItems := thread
 	_, hasPrevious := req.PreviousResponse()
-	instructions := strings.TrimSpace(req.Instructions()) // swobu:io-string source=domain
+	instructions := strings.TrimSpace(flattenInstructionsForResponses(req.Instructions()).Text) // swobu:io-string source=domain
 	inputType := "nil"
 	if input != nil {
 		switch input.(type) {
@@ -189,9 +192,8 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice a
 		"tool_count", len(req.Tools()),
 		"function_tool_count", responsesToolKindCount(req.Tools(), canonical.ToolTypeFunction),
 		"custom_tool_count", responsesToolKindCount(req.Tools(), canonical.ToolTypeCustom),
-		"capability_tool_count", responsesCapabilityToolCount(req.Tools()),
-		"tool_policy", strings.TrimSpace(string(req.ToolPolicy().Mode)), // swobu:io-string source=domain
-		"tool_policy_specific", toolPolicySpecificID(req.ToolPolicy()),
+		"tool_policy", strings.TrimSpace(string(req.EffectiveToolPolicy().Mode)), // swobu:io-string source=domain
+		"tool_policy_specific", toolPolicySpecificID(req.EffectiveToolPolicy()),
 		"tool_choice_wired", responsesWireToolChoice(choice),
 		"parallel_tool_calls", strings.TrimSpace(string(req.ToolCallBatch().Mode)), // swobu:io-string source=domain
 	)
@@ -201,31 +203,19 @@ func responsesTailRole(items []canonical.CanonicalItem) string {
 	if len(items) == 0 {
 		return ""
 	}
-	tailAuthor := items[len(items)-1].Author()
-	if tailAuthor == canonical.ItemAuthorAssistant {
-		return "assistant"
-	}
-	if tailAuthor == canonical.ItemAuthorTool {
+	if items[len(items)-1].Kind() == canonical.ItemKindToolResult {
 		return "tool"
 	}
-	return "user"
-}
-
-func responsesToolKindCount(tools []canonical.ToolDecl, kind string) int {
-	count := 0
-	for _, tool := range tools {
-		if canonical.ToolDeclKind(tool) == kind {
-			count++
-		}
+	if message, ok := items[len(items)-1].Message(); ok {
+		return string(message.Role())
 	}
-	return count
+	return "assistant"
 }
 
-func responsesCapabilityToolCount(tools []canonical.ToolDecl) int {
+func responsesToolKindCount(tools []canonical.ToolDeclaration, kind string) int {
 	count := 0
 	for _, tool := range tools {
-		switch tool.(type) {
-		case canonical.CapabilityToolDecl, *canonical.CapabilityToolDecl:
+		if string(tool.Kind()) == kind {
 			count++
 		}
 	}
@@ -252,8 +242,8 @@ func responsesWireToolChoice(choice any) string {
 	case map[string]any:
 		if name, ok := v["name"].(string); ok {
 			toolType, _ := v["type"].(string)
-			toolType = strings.TrimSpace(toolType)
-			name = strings.TrimSpace(name)
+			toolType = strings.TrimSpace(toolType) // swobu:io-string source=boundary
+			name = strings.TrimSpace(name)         // swobu:io-string source=boundary
 			if toolType != "" && name != "" {
 				return toolType + ":" + name
 			}
@@ -265,7 +255,7 @@ func responsesWireToolChoice(choice any) string {
 	return "object"
 }
 
-func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) (any, error) {
 	items := req.Items()
 	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasContinuationDelta(items) { // swobu:io-string source=boundary
 		return nil, nil
@@ -279,7 +269,7 @@ func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool) (any
 	case 0:
 		return nil, nil
 	default:
-		return encodeConversation(items)
+		return encodeConversation(items, req.Tools(), policy, sink, exchangeID)
 	}
 }
 
@@ -290,7 +280,8 @@ func encodeSimpleInput(items []canonical.CanonicalItem) (any, bool, error) {
 	if len(items) != 1 {
 		return nil, false, nil
 	}
-	if items[0].Author() != "" && items[0].Author() != canonical.ItemAuthorUser {
+	message, ok := items[0].Message()
+	if !ok || message.Role() != canonical.MessageRoleUser {
 		return nil, false, nil
 	}
 	text, ok := textOnlyItem(items[0])
@@ -301,75 +292,92 @@ func encodeSimpleInput(items []canonical.CanonicalItem) (any, bool, error) {
 }
 
 func textOnlyItem(item canonical.CanonicalItem) (string, bool) {
-	payload, ok := item.TextItem()
-	return payload.Text, ok
+	message, ok := item.Message()
+	if !ok || len(message.Content()) != 1 {
+		return "", false
+	}
+	text, ok := message.Content()[0].Text()
+	if !ok {
+		return "", false
+	}
+	return text.Text(), true
 }
 
 func hasContinuationDelta(items []canonical.CanonicalItem) bool {
 	for _, item := range items {
-		if item.Author() == canonical.ItemAuthorUser || item.Author() == canonical.ItemAuthorTool {
+		if item.Kind() == canonical.ItemKindToolResult {
+			return true
+		}
+		if message, ok := item.Message(); ok && message.Role() == canonical.MessageRoleUser {
 			return true
 		}
 	}
 	return false
 }
 
-func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
+// swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
+func encodeConversation(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
-	for i := 0; i < len(items); {
-		start := i
-		current := items[i]
+	for _, current := range items {
 		switch current.Kind() {
-		case canonical.ItemKindText:
-			if _, ok := current.TextItem(); !ok {
-				return nil, canonical.InternalError("responses text item payload is invalid")
-			}
-			role := roleForResponsesItem(current)
-			var content strings.Builder
-			for i < len(items) && items[i].Kind() == canonical.ItemKindText && roleForResponsesItem(items[i]) == role {
-				text, ok := items[i].TextItem()
-				if !ok {
-					return nil, canonical.InternalError("responses text item payload is invalid")
-				}
-				content.WriteString(text.Text)
-				i++
+		case canonical.ItemKindMessage:
+			message, _ := current.Message()
+			content, err := encodeResponsesMessageContent(message.Role(), message.Content())
+			if err != nil {
+				return nil, err
 			}
 			item := inputMessageItem{
 				Type:    "message",
-				Role:    role,
-				Content: content.String(),
+				Role:    string(message.Role()),
+				Content: content,
 			}
-			if role == "assistant" {
-				item.ID = sse.FallbackID(current.ItemID(), fmt.Sprintf("msg_swobu_%d", start))
+			if message.Role() == canonical.MessageRoleAssistant {
 				item.Status = "completed"
 			}
 			encoded = append(encoded, item)
-		case canonical.ItemKindToolUse:
-			toolUse, ok := current.ToolUse()
-			if !ok {
-				return nil, canonical.InternalError("responses tool-use item payload is invalid")
+		case canonical.ItemKindToolCall:
+			call, _ := current.ToolCall()
+			tool := call.Tool()
+			name := tool.Name()
+			switch tool.Kind() {
+			case canonical.ToolKindFunction:
+				object, ok := call.Input().Object()
+				if !ok {
+					return nil, canonical.BadRequest("responses function calls require object input")
+				}
+				encoded = append(encoded, functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: name, Arguments: object.String()})
+			case canonical.ToolKindCustom:
+				text, ok := call.Input().Text()
+				if !ok {
+					return nil, canonical.BadRequest("responses custom tool calls require text input")
+				}
+				encoded = append(encoded, customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: name, Input: text})
+			default:
+				return nil, canonical.UnsupportedOperation("responses protocol does not lower this tool-call kind")
 			}
-			encoded = append(encoded, functionCallItem{
-				Type:      "function_call",
-				CallID:    toolUse.UseID,
-				Name:      toolUse.Name,
-				Arguments: toolUse.Input.RawObject(),
-			})
-			i++
 		case canonical.ItemKindToolResult:
-			toolResult, ok := current.ToolResult()
-			if !ok {
-				return nil, canonical.InternalError("responses tool-result item payload is invalid")
+			result, _ := current.ToolResult()
+			if result.IsError() {
+				outcome := compat.Approx
+				if policy.EffectiveMode() == compat.CompatibilityStrict {
+					outcome = compat.Reject
+				}
+				if err := emitResponsesRequestDecision(sink, exchangeID, compat.RequestItemsToolResultIsError, outcome); err != nil {
+					return nil, err
+				}
+				if outcome == compat.Reject {
+					return nil, canonical.UnsupportedOperation("responses protocol cannot preserve tool-result error state")
+				}
 			}
-			if strings.TrimSpace(toolResult.UseID) == "" { // swobu:io-string source=boundary
-				return nil, canonical.BadRequest("tool_result items require tool_use_id for the responses protocol")
+			content, err := encodeResponsesToolResultContent(result.Content())
+			if err != nil {
+				return nil, err
 			}
 			encoded = append(encoded, functionCallOutputItem{
 				Type:   "function_call_output",
-				CallID: toolResult.UseID,
-				Output: toolResult.Text,
+				CallID: result.CallID().String(),
+				Output: content,
 			})
-			i++
 		default:
 			return nil, canonical.UnsupportedOperation("canonical item is not supported on the responses protocol")
 		}
@@ -377,13 +385,86 @@ func encodeConversation(items []canonical.CanonicalItem) ([]any, error) {
 	return encoded, nil
 }
 
-func roleForResponsesItem(item canonical.CanonicalItem) string {
-	author := item.Author()
-	if author == canonical.ItemAuthorAssistant {
-		return "assistant"
+func emitResponsesRequestDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome) error {
+	if sink == nil {
+		return nil
 	}
-	if author == canonical.ItemAuthorTool {
-		return "tool"
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{{Feature: feature, Outcome: outcome, Subject: compat.Subject("canonical:" + string(feature))}}); err != nil {
+		return canonical.InternalError("compatibility decision sink commit failed")
 	}
-	return "user"
+	return nil
+}
+
+func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonical.MessagePart) (any, error) {
+	if len(parts) == 1 {
+		if text, ok := parts[0].Text(); ok {
+			return text.Text(), nil
+		}
+	}
+	out := make([]any, 0, len(parts))
+	for _, part := range parts {
+		if text, ok := part.Text(); ok {
+			out = append(out, map[string]any{"type": "input_text", "text": text.Text()})
+			continue
+		}
+		if part.Kind() == canonical.PartKindImage {
+			if author != canonical.MessageRoleUser {
+				return nil, canonical.UnsupportedOperation("responses protocol only accepts image input in user messages")
+			}
+			image, _ := part.Image()
+			rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
+			if err != nil {
+				return nil, canonical.InternalError("canonical image source is invalid")
+			}
+			wireImage := map[string]any{"type": "input_image", "image_url": rawURL}
+			if detail != "" {
+				wireImage["detail"] = string(detail)
+			}
+			out = append(out, wireImage)
+			continue
+		}
+		return nil, canonical.UnsupportedOperation("responses protocol cannot lower this content kind")
+	}
+	return out, nil
+}
+
+func responsesTextOnlyContent(parts []canonical.MessagePart, surface string) (string, error) {
+	var builder strings.Builder
+	for _, part := range parts {
+		text, ok := part.Text()
+		if !ok {
+			return "", canonical.UnsupportedOperation(surface + " does not support this content kind")
+		}
+		builder.WriteString(text.Text())
+	}
+	return builder.String(), nil
+}
+
+func encodeResponsesToolResultContent(parts []canonical.ToolResultPart) (any, error) {
+	if len(parts) == 1 {
+		if text, ok := parts[0].Text(); ok {
+			return text.Text(), nil
+		}
+	}
+	out := make([]any, 0, len(parts))
+	for _, part := range parts {
+		if text, ok := part.Text(); ok {
+			out = append(out, map[string]any{"type": "input_text", "text": text.Text()})
+			continue
+		}
+		image, ok := part.Image()
+		if !ok {
+			return nil, canonical.UnsupportedOperation("responses tool results do not support this content kind")
+		}
+		rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
+		if err != nil {
+			return nil, canonical.InternalError("canonical image source is invalid")
+		}
+		wireImage := map[string]any{"type": "input_image", "image_url": rawURL}
+		if detail != "" {
+			wireImage["detail"] = string(detail)
+		}
+		out = append(out, wireImage)
+	}
+	return out, nil
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
@@ -56,14 +57,12 @@ func TestDecodeRequest_RejectsParallelToolCallsWrongType(t *testing.T) {
 
 func TestEncodeCarrier_WiresParallelToolCallsWhenToolsExist(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude",
+		Model: canonical.Specify("claude"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
-		Tools: []canonical.ToolDecl{
-			canonical.NewFunctionToolDecl("tool_0", "search", "search the workspace", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`)),
-		},
-		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+		Tools:         canonicaltest.SpecifiedToolSet(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Unspecified[bool]())),
+		ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 	})
 	doc, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -81,11 +80,11 @@ func TestEncodeCarrier_WiresParallelToolCallsWhenToolsExist(t *testing.T) {
 
 func TestEncodeCarrier_OmitsParallelToolCallsWithoutTools(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude",
+		Model: canonical.Specify("claude"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
-		ToolCallBatch: canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne),
+		ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 	})
 	doc, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {

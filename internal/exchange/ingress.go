@@ -36,6 +36,45 @@ type RuntimePoliciesSpec struct {
 	DecisionSink     compat.Sink
 	ReplayStore      replay.Store
 	SwobuResponseIDs replay.SwobuResponseIDGenerator
+	ImageFetcher     provider.ImageFetcher
+	PolicyResolver   WorkspacePolicyResolver
+}
+
+// WorkspacePolicy is resolved once after workspace selection and then
+// remains immutable for every provider attempt in the exchange.
+type WorkspacePolicy struct {
+	Compatibility compat.CompatibilityPolicy
+	ImageFetch    provider.ImageFetchPolicy
+	Limits        RuntimeLimits
+}
+
+type WorkspacePolicyResolver interface {
+	ResolveWorkspacePolicy(context.Context, routing.Workspace) (WorkspacePolicy, error)
+}
+
+type StaticWorkspacePolicyResolver struct{ Policy WorkspacePolicy }
+
+func (r StaticWorkspacePolicyResolver) ResolveWorkspacePolicy(context.Context, routing.Workspace) (WorkspacePolicy, error) {
+	return r.Policy.Clone(), nil
+}
+
+func DefaultWorkspacePolicy() WorkspacePolicy {
+	return WorkspacePolicy{Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityCompat}, ImageFetch: provider.DefaultImageFetchPolicy(), Limits: DefaultRuntimeLimits()}
+}
+
+func (p WorkspacePolicy) Clone() WorkspacePolicy {
+	p.ImageFetch = p.ImageFetch.Clone()
+	return p
+}
+
+func (p WorkspacePolicy) Validate() error {
+	if err := p.Compatibility.Validate(); err != nil {
+		return err
+	}
+	if err := p.ImageFetch.Validate(); err != nil {
+		return err
+	}
+	return p.Limits.Validate()
 }
 
 // RuntimeResolver provides client codec lookup for request ingress and the
@@ -57,6 +96,10 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	if policies.SwobuResponseIDs == nil {
 		policies.SwobuResponseIDs = replay.NewDefaultSwobuResponseIDGenerator()
 	}
+	policyResolver := policies.PolicyResolver
+	if policyResolver == nil {
+		policyResolver = StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()}
+	}
 	sink := policies.DecisionSink
 	if sink == nil {
 		if policies.ObservationStore != nil {
@@ -72,6 +115,8 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 			DecisionSink:     sink,
 			ReplayStore:      policies.ReplayStore,
 			SwobuResponseIDs: policies.SwobuResponseIDs,
+			ImageFetcher:     policies.ImageFetcher,
+			PolicyResolver:   policyResolver,
 		},
 	}
 }
@@ -154,7 +199,21 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 		return RequestOutput{}, canonical.InternalError("exchange id is required")
 	}
 
-	requestDoc, err := newClientRequestDocument(clientFamily, in.Request)
+	runner := h.runner
+	resolver := runner.PolicyResolver
+	if resolver == nil {
+		resolver = StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()}
+	}
+	resolved, err := resolver.ResolveWorkspacePolicy(ctx, workspace)
+	if err != nil {
+		return RequestOutput{}, canonical.InternalError("workspace runtime policy could not be resolved")
+	}
+	if err := resolved.Validate(); err != nil {
+		return RequestOutput{}, canonical.InternalError("workspace policy is invalid")
+	}
+	runner.Policy = resolved.Clone()
+
+	requestDoc, err := newClientRequestDocument(clientFamily, in.Request, runner.Policy.Limits.MaxRequestBytes)
 	if err != nil {
 		return RequestOutput{}, err
 	}
@@ -169,7 +228,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	out, err := runExchange(ctx, h.runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, workspace, in.Timing)
+	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, request, workspace, in.Timing)
 	if err != nil {
 		return out, err
 	}
@@ -286,8 +345,8 @@ func requestOutcomeDiagnostics(err error) []string {
 	return []string{strings.TrimSpace(err.Error())} // swobu:io-string source=boundary
 }
 
-func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest) (carrier.Document, error) {
-	body, err := readTransportRequestBody(req.Body)
+func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest, maxBytes int64) (carrier.Document, error) {
+	body, err := readTransportRequestBody(req.Body, maxBytes)
 	if err != nil {
 		return carrier.Document{}, canonical.BadRequest("request body could not be read")
 	}
@@ -304,14 +363,20 @@ func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.Tr
 	), nil
 }
 
-func readTransportRequestBody(body io.ReadCloser) ([]byte, error) {
+func readTransportRequestBody(body io.ReadCloser, maxBytes int64) ([]byte, error) {
 	if body == nil {
 		return nil, nil
 	}
 	defer func() { _ = body.Close() }()
-	raw, err := io.ReadAll(body)
+	if maxBytes <= 0 {
+		maxBytes = DefaultRuntimeLimits().MaxRequestBytes
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("request body exceeds workspace limit")
 	}
 	return raw, nil
 }

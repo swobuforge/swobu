@@ -3,9 +3,11 @@ package openai
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 func TestDecodeContentParts_NormalizesStringIntoTextPart(t *testing.T) {
@@ -81,16 +83,65 @@ func TestDecodeTextContentItems_UsesWalker(t *testing.T) {
 	items, err := DecodeTextContentItems(json.RawMessage(`[
 		{"type":"input_text","input_text":"hello"},
 		{"type":"output_text","text":"world"}
-	]`), "surface", canonical.ItemAuthorAssistant)
+	]`), "surface", canonical.MessageRoleAssistant, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
 	if err != nil {
 		t.Fatalf("DecodeTextContentItems returned error: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("items len = %d, want 2", len(items))
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	first, _ := items[0].TextItem()
-	second, _ := items[1].TextItem()
-	if first.Text != "hello" || second.Text != "world" {
+	message, _ := items[0].Message()
+	parts := message.Content()
+	first, _ := parts[0].Text()
+	second, _ := parts[1].Text()
+	if first.Text() != "hello" || second.Text() != "world" {
 		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestOpenAIImageDetailSurvivesCanonicalRoundTrip(t *testing.T) {
+	image, err := DecodeOpenAIImage(json.RawMessage(`{"url":"https://example.test/image.png","detail":"high"}`), "surface", shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, ok := image.Detail().Get()
+	if !ok || detail != canonical.ImageDetailHigh {
+		t.Fatalf("detail = %q, want high", detail)
+	}
+	url, detail, err := EncodeOpenAIImageURL(image)
+	if err != nil || url != "https://example.test/image.png" || detail != canonical.ImageDetailHigh {
+		t.Fatalf("encoded image = %q detail=%q err=%v", url, detail, err)
+	}
+}
+
+func TestOpenAIImageAutoCollapsesAndMediaAliasNormalizes(t *testing.T) {
+	image, err := DecodeOpenAIImage(json.RawMessage(`{"url":"data:image/jpg;base64,/9j/","detail":"auto"}`), "surface", shared.ImageDecodeLimitPolicy{MaxInlineBytes: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image.Detail().IsSpecified() {
+		t.Fatal("wire auto survived as canonical detail")
+	}
+	inline, ok := image.Source().Inline()
+	if !ok || inline.MediaType() != canonical.ImageMediaJPEG {
+		t.Fatalf("inline image = %#v, want normalized JPEG", inline)
+	}
+}
+
+func TestDecodeTextContentItemsRejectsImageOutsideUserRole(t *testing.T) {
+	_, err := DecodeTextContentItems(json.RawMessage(`[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]`), "surface", canonical.MessageRoleAssistant, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
+	if err == nil {
+		t.Fatal("assistant image input was accepted")
+	}
+}
+
+func TestDecodeTextContentItemsRejectsProviderFileIDWithoutEchoingIt(t *testing.T) {
+	const fileID = "file_secret_123"
+	_, err := DecodeTextContentItems(json.RawMessage(`[{"type":"input_image","file_id":"`+fileID+`"}]`), "surface", canonical.MessageRoleUser, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
+	if err == nil {
+		t.Fatal("provider image file ID was accepted")
+	}
+	if strings.Contains(err.Error(), fileID) {
+		t.Fatalf("error echoed provider file ID: %v", err)
 	}
 }

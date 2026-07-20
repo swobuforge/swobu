@@ -20,11 +20,11 @@ func TestDecodeResponseBuffered_MapsInputOutputAndCacheUsage(t *testing.T) {
 	}`)
 	sink := &recordingDecisionSink{}
 
-	reader, err := decodeResponseBuffered(context.Background(), raw, "ex_usage", sink)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_usage", sink)
 	if err != nil {
 		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}
@@ -82,14 +82,14 @@ func TestDecodeResponseBuffered_MapsInputOutputAndCacheUsage(t *testing.T) {
 }
 
 func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
-	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\",\"usage\":{\"output_tokens\":2}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 
 	sink := &recordingDecisionSink{}
-	reader := decodeResponseStream(carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_usage", sink)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_usage", sink)
 
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}
@@ -120,9 +120,9 @@ func TestDecodeResponseStream_UsesCompletedOutputFallbackWhenNoDeltas(t *testing
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 
 	sink := &recordingDecisionSink{}
-	reader := decodeResponseStream(carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_fallback", sink)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_fallback", sink)
 
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}
@@ -134,11 +134,12 @@ func TestDecodeResponseStream_UsesCompletedOutputFallbackWhenNoDeltas(t *testing
 	if len(items) != 1 {
 		t.Fatalf("output items len=%d want=1", len(items))
 	}
-	if items[0].Kind() != canonical.ItemKindText {
-		t.Fatalf("output item kind=%s want=text", items[0].Kind())
+	if items[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("output item kind=%s want=message", items[0].Kind())
 	}
-	text, _ := items[0].TextItem()
-	if text.Text != "ok" {
-		t.Fatalf("output text=%q want ok", text.Text)
+	message, _ := items[0].Message()
+	text, _ := message.Content()[0].Text()
+	if text.Text() != "ok" {
+		t.Fatalf("output text=%q want ok", text.Text())
 	}
 }

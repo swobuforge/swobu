@@ -14,6 +14,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 type recordingWebsocketFrameWriter struct{ frames [][]byte }
@@ -193,10 +194,10 @@ func TestResponsesWebsocket_ProcessesQueuedCreatesSerially(t *testing.T) {
 
 func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
-		envelope: testProviderIngressFromOutput(canonical.NewConversationOutput(
+		envelope: testProviderIngressFromOutput(canonicaltest.Response(t,
 			"chatcmpl_1",
 			"model",
-			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 			"stop",
 		)),
 	})
@@ -213,10 +214,10 @@ func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 
 func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
-		envelope: testProviderIngressFromOutput(canonical.NewConversationOutput(
+		envelope: testProviderIngressFromOutput(canonicaltest.Response(t,
 			"chatcmpl_1",
 			"model",
-			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 			"stop",
 		)),
 	})
@@ -235,10 +236,10 @@ func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 
 func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
-		envelope: testProviderIngressFromOutput(canonical.NewConversationOutput(
+		envelope: testProviderIngressFromOutput(canonicaltest.Response(t,
 			"chatcmpl_1",
 			"model",
-			[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "ok")},
+			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
 			"stop",
 		)),
 	})

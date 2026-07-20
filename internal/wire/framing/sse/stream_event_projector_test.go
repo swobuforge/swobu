@@ -4,201 +4,71 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestEnvelopeEventAdapter_ErrorMapsToFailedEvent(t *testing.T) {
-	t.Parallel()
+func testProjectionRequest(t *testing.T) canonical.CanonicalRequest {
+	t.Helper()
+	object, err := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decl := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "weather"), "", canonical.NewToolSchemaObject(object), canonical.Unspecified[bool]())
+	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{decl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(tools)})
+}
 
+func TestAdapterProjectsResolvedToolIdentityBeforeArgs(t *testing.T) {
+	request := testProjectionRequest(t)
 	adapter := NewEnvelopeEventAdapter()
-	started := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeStart,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeStartPayload{
-			Kind: canonical.EnvResponse,
-		},
-	})
-	if len(started) != 1 || started[0].Kind != StreamEventStarted {
-		t.Fatalf("started events = %#v, want one started event", started)
+	if got, err := adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: "m"}}); err != nil || len(got) != 0 {
+		t.Fatalf("response open=%v err=%v", got, err)
 	}
-
-	failed := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventError,
-		EnvID: "resp_1",
-		Payload: canonical.ErrorPayload{
-			Code:    "stream_unexpected_eof",
-			Message: "output stream ended before completed",
-		},
-	})
-	if len(failed) != 1 {
-		t.Fatalf("failed events len = %d, want 1: %#v", len(failed), failed)
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
+	callID, _ := canonical.NewToolCallID("call_1")
+	tool := request.Tools()[0].Key()
+	started, err := adapter.Translate(canonical.Event{Kind: canonical.EventItemStart, EnvID: "i", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 7}, Payload: canonicaltest.MustToolCallStart(callID, tool)}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if failed[0].Kind != StreamEventFailed {
-		t.Fatalf("failed event kind = %q, want %q", failed[0].Kind, StreamEventFailed)
+	if len(started) != 1 || started[0].ToolUseID != "call_1" || started[0].Name != "weather" {
+		t.Fatalf("started events=%#v", started)
 	}
-	if failed[0].ErrorCode != "stream_unexpected_eof" {
-		t.Fatalf("failed error code = %q", failed[0].ErrorCode)
+	delta, err := adapter.Translate(canonical.Event{Kind: canonical.EventArgsDelta, EnvID: "i", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 7}, Payload: canonical.ArgsDeltaPayload{Args: `{"loc`}}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if failed[0].ErrorMessage != "output stream ended before completed" {
-		t.Fatalf("failed error message = %q", failed[0].ErrorMessage)
-	}
-
-	trailingEnd := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeEnd,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeEndPayload{
-			Kind:   canonical.EnvResponse,
-			Status: canonical.EnvelopeStatusError,
-		},
-	})
-	if len(trailingEnd) != 0 {
-		t.Fatalf("trailing error envelope end emitted %#v, want no success completion", trailingEnd)
+	if len(delta) != 1 || delta[0].ItemID != "item_7" {
+		t.Fatalf("delta=%#v", delta)
 	}
 }
 
-func TestEnvelopeEventAdapter_ErrorEnvelopeEndMapsToFailedEvent(t *testing.T) {
-	t.Parallel()
-
+func TestAdapterProjectsHistoricalToolWithoutCurrentDeclaration(t *testing.T) {
 	adapter := NewEnvelopeEventAdapter()
-	_ = adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeStart,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeStartPayload{
-			Kind: canonical.EnvResponse,
-		},
-	})
-
-	failed := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeEnd,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeEndPayload{
-			Kind:   canonical.EnvResponse,
-			Status: canonical.EnvelopeStatusError,
-		},
-	})
-	if len(failed) != 1 || failed[0].Kind != StreamEventFailed {
-		t.Fatalf("error envelope end emitted %#v, want one failed event", failed)
-	}
-	if failed[0].ErrorCode != "stream_error" {
-		t.Fatalf("default error code = %q, want stream_error", failed[0].ErrorCode)
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}})
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
+	callID, _ := canonical.NewToolCallID("call_1")
+	tool := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "missing")
+	events, err := adapter.Translate(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonicaltest.MustToolCallStart(callID, tool)}})
+	if err != nil || len(events) != 1 || events[0].Name != "missing" {
+		t.Fatalf("historical tool projection = %#v, err=%v", events, err)
 	}
 }
 
-func TestEnvelopeEventAdapter_UsageDoesNotCompleteBeforeResponseEnd(t *testing.T) {
-	t.Parallel()
-
+func TestAdapterPreservesContentPartCoordinates(t *testing.T) {
 	adapter := NewEnvelopeEventAdapter()
-	_ = adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeStart,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeStartPayload{
-			Kind: canonical.EnvResponse,
-		},
-	})
-
-	usageEvents := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventUsage,
-		EnvID: "resp_1",
-		Payload: canonical.UsagePayload{
-			Usage: canonical.NewUnknownTokenUsage(),
-		},
-	})
-	if len(usageEvents) != 0 {
-		t.Fatalf("usage emitted terminal events %#v, want none", usageEvents)
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}})
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 3}, Payload: canonicaltest.MustMessageStart(canonical.MessageRoleAssistant)}})
+	started, err := adapter.Translate(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 3, Part: 2}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}}})
+	if err != nil || len(started) != 1 || started[0].Kind != StreamEventContentStarted || started[0].ItemOrdinal != 3 || started[0].PartOrdinal != 2 {
+		t.Fatalf("content start = %#v, err=%v", started, err)
 	}
-
-	finishEvents := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventFinish,
-		EnvID: "resp_1",
-		Payload: canonical.FinishPayload{
-			Reason: "stop",
-		},
-	})
-	if len(finishEvents) != 0 {
-		t.Fatalf("finish emitted terminal events %#v, want none before response end", finishEvents)
-	}
-
-	completed := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeEnd,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeEndPayload{
-			Kind:   canonical.EnvResponse,
-			Status: canonical.EnvelopeStatusCompleted,
-		},
-	})
-	if len(completed) != 1 || completed[0].Kind != StreamEventCompleted {
-		t.Fatalf("response end emitted %#v, want one completed event", completed)
-	}
-	if completed[0].FinishReason != "stop" {
-		t.Fatalf("finish reason = %q, want stop", completed[0].FinishReason)
-	}
-}
-
-func TestEnvelopeEventAdapter_ResponseStartIgnoresNativeID(t *testing.T) {
-	t.Parallel()
-
-	adapter := NewEnvelopeEventAdapter()
-	started := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeStart,
-		EnvID: "resp_1",
-		Meta:  canonical.EventMetadataFields{NativeID: "resp_swobu_alloc"},
-		Payload: canonical.EnvelopeStartPayload{
-			Kind: canonical.EnvResponse,
-		},
-	})
-	if len(started) != 1 || started[0].Kind != StreamEventStarted {
-		t.Fatalf("started events = %#v, want one started event", started)
-	}
-	if started[0].ResultID != "" {
-		t.Fatalf("started result id = %q, want empty when ResultID is absent", started[0].ResultID)
-	}
-
-	completed := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeEnd,
-		EnvID: "resp_1",
-		Payload: canonical.EnvelopeEndPayload{
-			Kind:   canonical.EnvResponse,
-			Status: canonical.EnvelopeStatusCompleted,
-		},
-	})
-	if len(completed) != 1 || completed[0].Kind != StreamEventCompleted {
-		t.Fatalf("completed events = %#v, want one completed event", completed)
-	}
-	if completed[0].ResultID != "" {
-		t.Fatalf("completed result id = %q, want empty when ResultID is absent", completed[0].ResultID)
-	}
-}
-
-func TestEnvelopeEventAdapter_ResponseStartPrefersResultID(t *testing.T) {
-	t.Parallel()
-
-	adapter := NewEnvelopeEventAdapter()
-	started := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeStart,
-		EnvID: "resp_2",
-		Meta:  canonical.EventMetadataFields{NativeID: "provider_resp_2"},
-		Payload: canonical.EnvelopeStartPayload{
-			Kind: canonical.EnvResponse, Response: canonical.ResponseRef{SwobuID: "swobu_resp_2"},
-		},
-	})
-	if len(started) != 1 || started[0].Kind != StreamEventStarted {
-		t.Fatalf("started events = %#v, want one started event", started)
-	}
-	if started[0].ResultID != "swobu_resp_2" {
-		t.Fatalf("started result id = %q, want swobu_resp_2", started[0].ResultID)
-	}
-
-	completed := adapter.Translate(canonical.Event{
-		Kind:  canonical.EventEnvelopeEnd,
-		EnvID: "resp_2",
-		Payload: canonical.EnvelopeEndPayload{
-			Kind:   canonical.EnvResponse,
-			Status: canonical.EnvelopeStatusCompleted,
-		},
-	})
-	if len(completed) != 1 || completed[0].Kind != StreamEventCompleted {
-		t.Fatalf("completed events = %#v, want one completed event", completed)
-	}
-	if completed[0].ResultID != "swobu_resp_2" {
-		t.Fatalf("completed result id = %q, want swobu_resp_2", completed[0].ResultID)
+	delta, err := adapter.Translate(canonical.Event{Kind: canonical.EventTextDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 3, Part: 2}, Payload: canonical.TextDeltaPayload{Text: "hi"}}})
+	if err != nil || len(delta) != 1 || delta[0].ItemOrdinal != 3 || delta[0].PartOrdinal != 2 {
+		t.Fatalf("delta = %#v, err=%v", delta, err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
@@ -16,6 +17,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 		toolStates:    map[string]responsesToolState{},
 		toolInputs:    map[string]string{},
 		latestUsage:   canonical.NewUnknownTokenUsage(),
+		request:       canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonicaltest.SpecifiedToolSet(t, canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar"}`))))}),
 	}
 
 	handled, _, err := s.handleFrame(context.Background(), streamFrame{
@@ -93,10 +95,22 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 	if !handled {
 		t.Fatal("handleFrame(arguments.done) not handled")
 	}
+	if _, ok := s.toolStates["custom_1"]; !ok {
+		t.Fatal("tool state closed before output_item.done checkpoint")
+	}
+	frame := streamFrame{Type: "response.output_item.done"}
+	frame.Item.ID = "custom_1"
+	frame.Item.Type = "custom_tool_call"
+	frame.Item.CallID = "call_1"
+	frame.Item.Name = "apply_patch"
+	frame.Item.Input = "patch contents"
+	if handled, _, err := s.handleFrame(context.Background(), frame); err != nil || !handled {
+		t.Fatalf("output_item.done handled=%v err=%v", handled, err)
+	}
 	if _, ok := s.toolStates["custom_1"]; ok {
-		t.Fatal("tool state still present after done")
+		t.Fatal("tool state remained after completed checkpoint")
 	}
 	if _, ok := s.toolInputs["custom_1"]; ok {
-		t.Fatal("tool inputs still present after done")
+		t.Fatal("tool inputs remained after completed checkpoint")
 	}
 }

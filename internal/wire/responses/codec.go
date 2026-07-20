@@ -13,7 +13,7 @@ import (
 // DecodeResponsesToolPolicy maps responses tool_choice into canonical tool
 // policy. String auto/required values remain direct. Specific tool selection is
 // resolved against the declared tools so the semantic tool ID stays canonical.
-func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		if len(tools) > 0 {
@@ -71,9 +71,8 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDecl, 
 		if err != nil {
 			return canonical.ToolPolicy{}, err
 		}
-		specific := resolved.ToolID()
+		specific := resolved.Key()
 		policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific)
-		policy.SpecificType = normalizedType
 		return policy, nil
 	default:
 		return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice is invalid")
@@ -86,7 +85,10 @@ type sseEnvelopeStreamEncoder struct {
 }
 
 func (s *sseEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
-	streamEvents := s.adapter.Translate(event)
+	streamEvents, err := s.adapter.Translate(event)
+	if err != nil {
+		return nil, err
+	}
 	frames := make([][]byte, 0, len(streamEvents))
 	for _, streamEvent := range streamEvents {
 		emitted, err := s.Encode(streamEvent)

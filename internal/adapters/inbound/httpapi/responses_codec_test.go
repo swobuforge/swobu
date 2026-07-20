@@ -6,20 +6,21 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 	t.Parallel()
 
-	functionTool := canonical.NewFunctionToolDecl("tool_0", "grep", "search text", canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))
-	customTool := canonical.NewCustomToolDecl("apply_patch", "apply_patch", "edit files", canonical.NewToolFormatObject(`{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`))
-	wantFunctionSpecific := functionTool.ToolID().String()
-	wantCustomSpecific := canonical.NewSemanticToolIDFor(canonical.ToolOriginRequest, canonical.ToolKindCustom, "apply_patch").String()
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "grep"), "search text", canonicaltest.MustSchema(`{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	customTool := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "edit files", canonicaltest.MustToolFormat(`{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`))
+	wantFunctionSpecific := functionTool.Key().String()
+	wantCustomSpecific := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch").String()
 	tests := []struct {
 		name         string
 		raw          string
-		tools        []canonical.ToolDecl
+		tools        []canonical.ToolDeclaration
 		wantMode     canonical.ToolPolicyMode
 		wantSpecific string
 		wantType     string
@@ -29,13 +30,13 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 		{
 			name:     "empty with tools defaults to auto",
 			raw:      "",
-			tools:    []canonical.ToolDecl{functionTool},
+			tools:    []canonical.ToolDeclaration{functionTool},
 			wantMode: canonical.ToolPolicyAuto,
 		},
 		{
 			name:     "null with tools defaults to auto",
 			raw:      "null",
-			tools:    []canonical.ToolDecl{functionTool},
+			tools:    []canonical.ToolDeclaration{functionTool},
 			wantMode: canonical.ToolPolicyAuto,
 		},
 		{name: "string none", raw: `"none"`, wantMode: canonical.ToolPolicyNone},
@@ -46,7 +47,7 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 		{
 			name:         "object function",
 			raw:          `{"type":"function","name":"grep"}`,
-			tools:        []canonical.ToolDecl{functionTool},
+			tools:        []canonical.ToolDeclaration{functionTool},
 			wantMode:     canonical.ToolPolicySpecific,
 			wantSpecific: wantFunctionSpecific,
 			wantType:     "function",
@@ -54,7 +55,7 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 		{
 			name:         "object custom",
 			raw:          `{"type":"custom","name":"apply_patch"}`,
-			tools:        []canonical.ToolDecl{customTool},
+			tools:        []canonical.ToolDeclaration{customTool},
 			wantMode:     canonical.ToolPolicySpecific,
 			wantSpecific: wantCustomSpecific,
 			wantType:     "custom",
@@ -75,9 +76,6 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 				if specific, ok := got.SpecificID(); ok {
 					t.Fatalf("tool policy specific = %q, want none", specific)
 				}
-				if specificType, ok := got.SpecificToolType(); ok {
-					t.Fatalf("tool policy specific type = %q, want none", specificType)
-				}
 				return
 			}
 			specific, ok := got.SpecificID()
@@ -88,7 +86,7 @@ func TestDecodeResponsesToolPolicy_KnownValues(t *testing.T) {
 				t.Fatalf("tool policy specific = %q, want %q", specific, tc.wantSpecific)
 			}
 			if tc.wantType != "" {
-				if specificType, ok := got.SpecificToolType(); !ok || specificType != tc.wantType {
+				if specificType := string(specific.Kind()); specificType != tc.wantType {
 					t.Fatalf("tool policy specific type = %q, want %q", specificType, tc.wantType)
 				}
 			}

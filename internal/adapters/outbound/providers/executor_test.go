@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 type testCredentialResolver struct{}
@@ -126,8 +127,8 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 
 	openAIReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			Model: canonical.Specify("m"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
@@ -138,8 +139,8 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 
 	anthropicReq := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			Model: canonical.Specify("m"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "", "messages"),
@@ -186,8 +187,8 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 	composition := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
 	_, err := executeProviderRequest(composition, context.Background(), mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model:     "m",
-			InputText: "hi",
+			Model: canonical.Specify("m"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "", ""),
@@ -235,8 +236,8 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 	defer upstream.Close()
 
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -284,8 +285,8 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 	defer upstream.Close()
 
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -339,14 +340,12 @@ func TestServices_OpenAIFamilyEmitsStructuredOutputCompatibilityDecisions(t *tes
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
-	strict := true
-	tool := canonical.NewFunctionToolDecl("tool_0", "search", "search the workspace", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`))
-	tool.Strict = &strict
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "m",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Tools:        []canonical.ToolDecl{tool},
-		OutputFormat: outputFormat,
+		Model:        canonical.Specify("m"),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools:        canonicaltest.SpecifiedToolSet(t, tool),
+		OutputFormat: canonical.Specify(outputFormat),
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -383,13 +382,11 @@ func TestServices_BedrockEmitsToolSchemaStrictDropCompatibilityDecision(t *testi
 
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
 
-	strict := true
-	tool := canonical.NewFunctionToolDecl("tool_0", "search", "search the workspace", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`))
-	tool.Strict = &strict
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Tools: []canonical.ToolDecl{tool},
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools: canonicaltest.SpecifiedToolSet(t, tool),
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -423,13 +420,11 @@ func TestServices_AnthropicEmitsToolSchemaStrictDropCompatibilityDecision(t *tes
 	}))
 	defer upstream.Close()
 
-	strict := true
-	tool := canonical.NewFunctionToolDecl("tool_0", "search", "search the workspace", canonical.NewToolSchemaObject(`{"type":"object","properties":{"q":{"type":"string"}}}`))
-	tool.Strict = &strict
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "m",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Tools: []canonical.ToolDecl{tool},
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools: canonicaltest.SpecifiedToolSet(t, tool),
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -467,8 +462,8 @@ func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t 
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	req := mustProviderRequestWithDocument(t,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: "m",
-			Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
+			Model: canonical.Specify("m"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
@@ -497,9 +492,9 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        "m",
-		Items:        []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		OutputFormat: outputFormat,
+		Model:        canonical.Specify("m"),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		OutputFormat: canonical.Specify(outputFormat),
 	})
 	req := newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,

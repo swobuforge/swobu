@@ -59,7 +59,7 @@ func StructuredOutputDecisions(providerID string, protocol protocolkind.Protocol
 
 // EmitToolSchemaStrictDecision records whether strict function-tool schemas are
 // preserved exactly or dropped by the selected provider wire surface.
-func EmitToolSchemaStrictDecision(ctx context.Context, sink compat.Sink, exchangeID string, providerID string, protocol protocolkind.ProtocolKind, tools []canonical.ToolDecl, preserved bool) error {
+func EmitToolSchemaStrictDecision(ctx context.Context, sink compat.Sink, exchangeID string, providerID string, protocol protocolkind.ProtocolKind, tools []canonical.ToolDeclaration, preserved bool) error {
 	decision, ok := ToolSchemaStrictDecision(providerID, protocol, tools, preserved)
 	if sink == nil || !ok {
 		return nil
@@ -75,7 +75,7 @@ func EmitToolSchemaStrictDecision(ctx context.Context, sink compat.Sink, exchang
 }
 
 // ToolSchemaStrictDecision returns strict-schema lowering evidence without recording it.
-func ToolSchemaStrictDecision(providerID string, protocol protocolkind.ProtocolKind, tools []canonical.ToolDecl, preserved bool) (compat.Decision, bool) {
+func ToolSchemaStrictDecision(providerID string, protocol protocolkind.ProtocolKind, tools []canonical.ToolDeclaration, preserved bool) (compat.Decision, bool) {
 	if !hasStrictFunctionTool(tools) {
 		return compat.Decision{}, false
 	}
@@ -90,17 +90,15 @@ func ToolSchemaStrictDecision(providerID string, protocol protocolkind.ProtocolK
 	return compat.Decision{Feature: compat.RequestToolsSchemaStrict, Outcome: outcome, Subject: subject}, true
 }
 
-func hasStrictFunctionTool(tools []canonical.ToolDecl) bool {
+func hasStrictFunctionTool(tools []canonical.ToolDeclaration) bool {
 	for _, tool := range tools {
-		switch decl := tool.(type) {
-		case canonical.FunctionToolDecl:
-			if decl.Strict != nil && *decl.Strict {
-				return true
-			}
-		case *canonical.FunctionToolDecl:
-			if decl != nil && decl.Strict != nil && *decl.Strict {
-				return true
-			}
+		decl, ok := tool.Function()
+		if !ok {
+			continue
+		}
+		strict := decl.Strict()
+		if value, specified := strict.Get(); specified && value {
+			return true
 		}
 	}
 	return false

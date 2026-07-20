@@ -44,20 +44,25 @@ func logResponsesEgressStreamFrame(raw []byte) {
 	)
 }
 
-func logResponsesTerminalProjection(usedFallback bool, status string, rawOutputCount int, rawOutputTextPresent bool, items []canonical.OutputItem) {
+func logResponsesTerminalProjection(usedFallback bool, status string, rawOutputCount int, rawOutputTextPresent bool, items []canonical.CanonicalItem) {
 	fallbackTextCount := 0
 	fallbackToolUseCount := 0
 	textPreview := ""
 	for _, item := range items {
 		switch item.Kind() {
-		case canonical.ItemKindText:
+		case canonical.ItemKindMessage:
 			fallbackTextCount++
 			if textPreview == "" {
-				if text, ok := item.TextItem(); ok {
-					textPreview = strings.TrimSpace(text.Text) // swobu:io-string source=log-formatting
+				if message, ok := item.Message(); ok {
+					for _, part := range message.Content() {
+						if text, ok := part.Text(); ok {
+							textPreview = strings.TrimSpace(text.Text()) // swobu:io-string source=log-formatting
+							break
+						}
+					}
 				}
 			}
-		case canonical.ItemKindToolUse:
+		case canonical.ItemKindToolCall:
 			fallbackToolUseCount++
 		}
 	}

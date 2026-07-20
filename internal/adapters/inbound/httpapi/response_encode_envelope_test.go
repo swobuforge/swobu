@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -30,15 +31,15 @@ func (s *deliveryReplayStore) Put(context.Context, string, replay.Record) error 
 }
 
 func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
-	out := canonical.NewConversationOutput(
+	out := canonicaltest.Response(t,
 		"resp_env_http_1",
 		"m",
-		[]canonical.OutputItem{
-			canonical.NewTextOutputItem("text_0", "hello"),
+		[]canonical.CanonicalItem{
+			canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello"),
 		},
 		"completed",
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.Response(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
@@ -61,15 +62,15 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 }
 
 func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *testing.T) {
-	out := canonical.NewConversationOutput(
+	out := canonicaltest.Response(t,
 		"resp_env_http_2",
 		"m",
-		[]canonical.OutputItem{
-			canonical.NewTextOutputItem("text_0", "truth"),
+		[]canonical.CanonicalItem{
+			canonicaltest.MustMessage(canonical.MessageRoleAssistant, "truth"),
 		},
 		"completed",
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.Response(), out.Model(), out.Items(), out.FinishReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
@@ -144,28 +145,31 @@ func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testin
 
 func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing.T) {
 	store := &deliveryReplayStore{putErr: errors.New("store unavailable")}
-	response := canonical.NewConversationOutput(
+	response := canonicaltest.Response(t,
 		"provider_response_1",
 		"m",
-		[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "hello")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
 		"completed",
 	)
-	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+	var events canonical.ResponseStream = canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		"ex_replay_failure",
 		response.Response(),
 		response.Model(),
 		response.Items(),
-		response.FinishReason(),
+		response.CompletionReason(),
 		response.Usage(),
 	))
+	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_replay_failure")}
+	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	committed := replay.NewCommitReader(events, replay.TerminalCommitConfig{
-		WorkspaceSlug:   "alpha",
-		ExchangeID:      "ex_replay_failure",
-		SwobuResponseID: canonical.SwobuResponseID("swobu_replay_failure"),
-		Store:           store,
+		WorkspaceSlug:    "alpha",
+		ExchangeID:       "ex_replay_failure",
+		Binding:          binding,
+		Store:            store,
+		MaxSemanticBytes: exchange.DefaultRuntimeLimits().MaxReplayBytes,
 		SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model:     "m",
-			InputText: "hello",
+			Model: canonical.Specify("m"),
+			Items: []canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
 		}),
 	})
 	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(
@@ -189,29 +193,33 @@ func TestWriteSuccessResponse_ReplayCommitFailureIsNotDeliverySuccess(t *testing
 
 func TestWriteSuccessResponse_ClientCancellationDoesNotCommitReplay(t *testing.T) {
 	store := &deliveryReplayStore{}
-	response := canonical.NewConversationOutput(
+	response := canonicaltest.Response(t,
 		"provider_response_2",
 		"m",
-		[]canonical.OutputItem{canonical.NewTextOutputItem("text_0", "hello")},
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
 		"completed",
 	)
+	var events canonical.ResponseStream = canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		"ex_cancel",
+		response.Response(),
+		response.Model(),
+		response.Items(),
+		response.CompletionReason(),
+		response.Usage(),
+	))
+	binding := canonical.ResponseBinding{SwobuID: canonical.SwobuResponseID("swobu_cancel")}
+	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	committed := replay.NewCommitReader(
-		canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-			"ex_cancel",
-			response.Response(),
-			response.Model(),
-			response.Items(),
-			response.FinishReason(),
-			response.Usage(),
-		)),
+		events,
 		replay.TerminalCommitConfig{
-			WorkspaceSlug:   "alpha",
-			ExchangeID:      "ex_cancel",
-			SwobuResponseID: canonical.SwobuResponseID("swobu_cancel"),
-			Store:           store,
+			WorkspaceSlug:    "alpha",
+			ExchangeID:       "ex_cancel",
+			Binding:          binding,
+			Store:            store,
+			MaxSemanticBytes: exchange.DefaultRuntimeLimits().MaxReplayBytes,
 			SemanticRequest: canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model:     "m",
-				InputText: "hello",
+				Model: canonical.Specify("m"),
+				Items: []canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello")},
 			}),
 		},
 	)

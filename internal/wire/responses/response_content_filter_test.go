@@ -24,11 +24,11 @@ func TestDecodeResponseBuffered_ContentFilterPreservesTerminalReason(t *testing.
 		"output":[]
 	}`)
 
-	reader, err := decodeResponseBuffered(context.Background(), raw, "ex_content_filter", &recordingDecisionSink{})
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_content_filter", &recordingDecisionSink{})
 	if err != nil {
 		t.Fatalf("decodeResponseBuffered returned error: %v", err)
 	}
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestDecodeResponseBuffered_ContentFilterPreservesTerminalReason(t *testing.
 	if err != nil {
 		t.Fatalf("ProjectResponse returned error: %v", err)
 	}
-	if got := out.FinishReason(); got != "content_filter" {
+	if got := out.CompletionReason(); got != "content_filter" {
 		t.Fatalf("finish reason = %q, want content_filter", got)
 	}
 	if len(out.Items()) != 0 {
@@ -56,7 +56,7 @@ func TestDecodeResponseBuffered_PromptContentFilterReturnsBackendError(t *testin
 		"output":[]
 	}`)
 
-	reader, err := decodeResponseBuffered(context.Background(), raw, "ex_prompt_content_filter", &recordingDecisionSink{})
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_prompt_content_filter", &recordingDecisionSink{})
 	if err == nil {
 		t.Fatal("decodeResponseBuffered returned nil error, want backend error")
 	}
@@ -97,10 +97,10 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 				"event: " + tc.eventType + "\ndata: {\"type\":\"" + tc.eventType + "\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"" + tc.status + "\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"content_filters\":[{\"source_type\":\"completion\",\"blocked\":true}],\"output\":[]}}\n\n"
 
 			sink := &recordingDecisionSink{}
-			reader := decodeResponseStream(carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", sink)
+			reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", sink)
 			defer func() { _ = reader.Close(context.Background()) }()
 
-			closed, err := canonical.ReadClosedEnvelope(context.Background(), reader, canonical.EnvResponse)
+			closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 			if err != nil {
 				t.Fatalf("ReadClosedEnvelope returned error: %v", err)
 			}
@@ -108,7 +108,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 			if err != nil {
 				t.Fatalf("ProjectResponse returned error: %v", err)
 			}
-			if got := out.FinishReason(); got != "content_filter" {
+			if got := out.CompletionReason(); got != "content_filter" {
 				t.Fatalf("finish reason = %q, want content_filter", got)
 			}
 			if len(out.Items()) != 0 {

@@ -45,7 +45,17 @@ func bindRequestToTarget(request canonical.CanonicalRequest, modelID string) can
 	if previous, ok := request.PreviousResponse(); ok {
 		previousResponse = &previous
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{Model: modelID, Instructions: request.Instructions(), Items: request.Items(), Tools: request.Tools(), PreviousResponse: previousResponse, ToolPolicy: request.ToolPolicy(), ToolCallBatch: request.ToolCallBatch(), Controls: request.Controls(), OutputFormat: request.OutputFormat(), Presence: request.Presence()})
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:            canonical.Specify(modelID),
+		Instructions:     request.InstructionsField(),
+		Items:            request.Items(),
+		Tools:            request.ToolsField(),
+		PreviousResponse: previousResponse,
+		ToolPolicy:       request.ToolPolicyField(),
+		ToolCallBatch:    request.ToolCallBatchField(),
+		Controls:         request.Controls(),
+		OutputFormat:     request.OutputFormatField(),
+	})
 }
 
 // toProviderTarget is the single adapter from durable connection intent to

@@ -3,7 +3,6 @@ package messages
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -20,12 +19,12 @@ type bufferedResponseBody struct {
 }
 
 type bufferedContentBlockBody struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text"`
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Input     map[string]any `json:"input"`
-	ToolUseID string         `json:"tool_use_id"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
 }
 
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
@@ -56,33 +55,60 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
 	var dto bufferedResponseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("messages response is invalid JSON")
 	}
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
 	items := make([]canonical.CanonicalItem, 0, len(dto.Content))
-	for i, block := range dto.Content {
+	textParts := make([]canonical.MessagePart, 0)
+	flushMessage := func() error {
+		if len(textParts) == 0 {
+			return nil
+		}
+		message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, textParts)
+		if err != nil {
+			return err
+		}
+		items = append(items, message)
+		textParts = nil
+		return nil
+	}
+	for _, block := range dto.Content {
 		blockType := strings.TrimSpace(block.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		switch blockType {
 		case "text":
-			items = append(items, canonical.NewTextOutputItem("text_"+strconv.Itoa(i), block.Text))
+			textParts = append(textParts, canonical.NewTextMessagePart(block.Text))
 		case "tool_use":
-			itemID := strings.TrimSpace(block.ID) // swobu:io-string source=boundary
-			if itemID == "" {
-				itemID = "tool_" + strconv.Itoa(i)
+			if err := flushMessage(); err != nil {
+				return nil, canonical.InternalError("messages response message item is invalid")
 			}
-			args, marshalErr := json.Marshal(block.Input)
-			if marshalErr != nil {
+			callID, err := canonical.NewToolCallID(block.ID)
+			if err != nil {
+				return nil, canonical.InternalError("messages response tool_use is missing id")
+			}
+			object, err := canonical.ParseJSONObject(block.Input)
+			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use input is invalid JSON object")
 			}
-			items = append(items, canonical.NewToolUseOutputItem(itemID, strings.TrimSpace(block.ID), strings.TrimSpace(block.Name), canonical.NewToolArgumentsObject(string(args)))) // swobu:io-string source=boundary
+			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), strings.TrimSpace(block.Name), canonical.ToolTypeFunction) // swobu:io-string source=boundary
+			if err != nil {
+				return nil, canonical.InternalError("messages response tool_use references an unknown or ambiguous tool")
+			}
+			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
+			if err != nil {
+				return nil, canonical.InternalError("messages response tool_use is invalid")
+			}
+			items = append(items, item)
 		case "server_tool_use", "web_search_tool_result":
-			continue
+			return nil, canonical.UnsupportedOperation("messages provider tool lifecycle output is not implemented")
 		default:
 			return nil, canonical.InternalError("messages response content block is unsupported")
 		}
+	}
+	if err := flushMessage(); err != nil {
+		return nil, canonical.InternalError("messages response message item is invalid")
 	}
 	_, inputPresent := usage.InputTokens()
 	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))

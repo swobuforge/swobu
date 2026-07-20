@@ -13,6 +13,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
 
 type staticCredentialProvider struct {
@@ -53,13 +55,11 @@ func TestSendProviderRequest_UsesContractDeliveryForStreamingRequests(t *testing
 
 	adapter := NewExecutor(server.Client(), staticCredentialProvider{token: "test-token"})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-sonnet-4-20250514",
+		Model: canonical.Specify("claude-sonnet-4-20250514"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "ping"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "ping"),
 		},
-		Tools: []canonical.ToolDecl{
-			canonical.NewFunctionToolDecl("tool_0", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`)),
-		},
+		Tools: canonicaltest.SpecifiedToolSet(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())),
 	})
 	target := provider.NewTargetSnapshot(
 		"backend-a",
@@ -127,21 +127,16 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := canonical.NewFunctionToolDecl("Read", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`))
-	projectedToolName, err := canonical.ProjectedToolName(tool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName: %v", err)
-	}
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Read"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	projectedToolName := providertest.ProjectedToolName(t, tool)
 
 	adapter := NewExecutor(server.Client(), staticCredentialProvider{token: "test-token"})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-sonnet-4-20250514",
+		Model: canonical.Specify("claude-sonnet-4-20250514"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "ping"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "ping"),
 		},
-		Tools: []canonical.ToolDecl{
-			tool,
-		},
+		Tools: canonicaltest.SpecifiedToolSet(t, tool),
 	})
 	target := provider.NewTargetSnapshot(
 		"backend-a",

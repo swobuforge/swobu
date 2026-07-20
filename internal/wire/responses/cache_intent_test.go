@@ -8,16 +8,15 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestEncode_PreservesToolsAndOmitsProviderCacheFields(t *testing.T) {
-	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "gpt-4o-mini",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Tools: []canonical.ToolDecl{
-			functionTool,
-		},
+		Model: canonical.Specify("gpt-4o-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -58,14 +57,14 @@ func TestEncode_PreservesToolsAndOmitsProviderCacheFields(t *testing.T) {
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
-	functionTool := canonical.NewFunctionToolDecl("get_weather", "get_weather", "retrieve weather", canonical.NewToolSchemaObject(`{"type":"object","properties":{"location":{"type":"string"}}}`))
-	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","name":"` + functionTool.ToolName() + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","input":"hi"}`)
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","name":"` + functionTool.Key().Name() + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","input":"hi"}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
 	tools := got.Tools()
-	if len(tools) != 1 || tools[0].ToolName() != "get_weather" {
+	if len(tools) != 1 || tools[0].Key().Name() != "get_weather" {
 		t.Fatalf("tools = %#v", tools)
 	}
 }

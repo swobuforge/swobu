@@ -10,21 +10,17 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestClientRequestDecoder_DecodesToolChoiceBySurface(t *testing.T) {
 	t.Parallel()
 
-	functionToolDecl := canonical.NewFunctionToolDecl(
-		"codex/grep",
-		"grep",
-		"search text",
-		canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`),
-	)
-	projectedFunctionName, err := canonical.ProjectedToolName(functionToolDecl)
-	if err != nil {
-		t.Fatalf("ProjectedToolName returned error: %v", err)
-	}
+	functionToolDecl := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction,
+		"codex/grep"),
+		"search text", canonicaltest.Schema(t, `{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
+
+	projectedFunctionName := functionToolDecl.Key().Name()
 	functionTool := map[string]any{
 		"name":         projectedFunctionName,
 		"description":  "search text",
@@ -48,7 +44,7 @@ func TestClientRequestDecoder_DecodesToolChoiceBySurface(t *testing.T) {
 			toolChoice:   map[string]any{"type": "tool", "name": projectedFunctionName},
 			includeTools: true,
 			wantMode:     canonical.ToolPolicySpecific,
-			wantSpecific: functionToolDecl.ToolID().String(),
+			wantSpecific: canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, projectedFunctionName).String(),
 		},
 	}
 
@@ -69,13 +65,17 @@ func TestClientRequestDecoder_DecodesToolChoiceBySurface(t *testing.T) {
 			if resolvedDelivery.Mode != delivery.Buffered {
 				t.Fatalf("delivery mode = %s, want buffered", resolvedDelivery.Mode)
 			}
-			if got.ToolPolicy().Mode != tc.wantMode {
-				t.Fatalf("tool policy mode = %q, want %q", got.ToolPolicy().Mode, tc.wantMode)
+			policy := got.EffectiveToolPolicy()
+			if policy.Mode != tc.wantMode {
+				t.Fatalf("effective tool policy mode = %q, want %q", policy.Mode, tc.wantMode)
+			}
+			if tc.toolChoice == nil && got.ToolPolicySpecified() {
+				t.Fatal("omitted tool choice became a stored source fact")
 			}
 			if tc.wantSpecific == "" {
 				return
 			}
-			specific, ok := got.ToolPolicy().SpecificID()
+			specific, ok := policy.SpecificID()
 			if !ok {
 				t.Fatalf("tool policy specific is missing, want %q", tc.wantSpecific)
 			}
@@ -89,55 +89,50 @@ func TestClientRequestDecoder_DecodesToolChoiceBySurface(t *testing.T) {
 func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T) {
 	t.Parallel()
 
-	functionTool := canonical.NewFunctionToolDecl(
-		"codex/grep",
-		"grep",
-		"search text",
-		canonical.NewToolSchemaObject(`{"type":"object","properties":{"pattern":{"type":"string"}}}`),
-	)
-	projectedFunctionName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName returned error: %v", err)
-	}
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction,
+		"codex/grep"),
+		"search text", canonicaltest.Schema(t, `{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
+
+	projectedFunctionName := functionTool.Key().Name()
 	baseRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-haiku",
+		Model: canonical.Specify("claude-haiku"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
-		Tools: []canonical.ToolDecl{functionTool},
+		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
 	})
 
 	tests := []struct {
 		name     string
 		policy   canonical.ToolPolicy
-		tools    []canonical.ToolDecl
+		tools    []canonical.ToolDeclaration
 		wantJSON string
 	}{
 		{
 			name:     "none",
 			policy:   canonical.NewToolPolicy(canonical.ToolPolicyNone, nil),
-			tools:    []canonical.ToolDecl{functionTool},
+			tools:    []canonical.ToolDeclaration{functionTool},
 			wantJSON: `{"type":"none"}`,
 		},
 		{
 			name:     "auto",
 			policy:   canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil),
-			tools:    []canonical.ToolDecl{functionTool},
+			tools:    []canonical.ToolDeclaration{functionTool},
 			wantJSON: `{"type":"auto"}`,
 		},
 		{
 			name:     "required",
 			policy:   canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
-			tools:    []canonical.ToolDecl{functionTool},
+			tools:    []canonical.ToolDeclaration{functionTool},
 			wantJSON: `{"type":"any"}`,
 		},
 		{
 			name: "specific",
 			policy: specificToolPolicy(
-				functionTool.ToolID(),
+				functionTool.Key(),
 				canonical.ToolTypeFunction,
 			),
-			tools:    []canonical.ToolDecl{functionTool},
+			tools:    []canonical.ToolDeclaration{functionTool},
 			wantJSON: `{"type":"tool","name":"` + projectedFunctionName + `"}`,
 		},
 	}
@@ -146,10 +141,10 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			req := canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model:      baseRequest.Model(),
+				Model:      canonical.Specify(baseRequest.Model()),
 				Items:      baseRequest.Items(),
-				Tools:      tc.tools,
-				ToolPolicy: tc.policy,
+				Tools:      canonicaltest.SpecifiedToolSet(t, tc.tools...),
+				ToolPolicy: canonical.Specify(tc.policy),
 			})
 			wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 			if err != nil {
@@ -176,12 +171,12 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 		})
 	}
 
-	_, err = EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-haiku",
+	_, err := EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("claude-haiku"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
-		ToolPolicy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
 	}), delivery.BufferedDelivery())
 	if err == nil {
 		t.Fatal("expected required tool choice without tools to be rejected")
@@ -217,11 +212,11 @@ func TestEncodeCarrier_OmitsToolChoiceWhenToolSurfaceIsEmpty(t *testing.T) {
 			t.Parallel()
 
 			req := canonical.NewCanonicalRequest(canonical.RequestParams{
-				Model: "claude-haiku",
+				Model: canonical.Specify("claude-haiku"),
 				Items: []canonical.CanonicalItem{
-					canonical.NewTextItem(canonical.ItemAuthorUser, "hi"),
+					canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 				},
-				ToolPolicy: tc.policy,
+				ToolPolicy: canonical.Specify(tc.policy),
 			})
 			wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 			if err != nil {
@@ -260,10 +255,9 @@ func messagesToolChoiceRequestJSON(t *testing.T, toolChoice any, includeTools bo
 	return raw
 }
 
-func specificToolPolicy(id canonical.SemanticToolID, toolType string) canonical.ToolPolicy {
-	policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &id)
-	policy.SpecificType = toolType
-	return policy
+func specificToolPolicy(id canonical.ToolKey, toolType string) canonical.ToolPolicy {
+	_ = toolType
+	return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &id)
 }
 
 func assertJSONEqual(t *testing.T, gotRaw, wantRaw string) {

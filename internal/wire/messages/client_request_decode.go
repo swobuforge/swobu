@@ -16,9 +16,16 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+type messagesImageSourceType string
+
+const (
+	messagesImageSourceURL    messagesImageSourceType = "url"
+	messagesImageSourceBase64 messagesImageSourceType = "base64"
+)
+
+func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := (ClientRequestDecoder{}).decodeClientRequestWithDecisions(doc, sink, "")
+		request, delivery, err := decoder.decodeClientRequestWithDecisions(doc, sink, "")
 		return wire.ClientRequestResult{
 			Request:  request,
 			Delivery: delivery,
@@ -27,7 +34,7 @@ func (ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.Clie
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
 }
 
-func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
 	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
@@ -36,7 +43,7 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
 	}
-	instructions, err := decodeMessagesSystem(dto.System)
+	instructions, err := decodeMessagesSystem(dto.System, decoder.ImageLimits)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -62,12 +69,15 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	items := make([]canonical.CanonicalItem, 0, len(dto.Messages))
 	pendingToolUseIDs := make([]string, 0, len(dto.Messages))
 	for idx, msg := range dto.Messages {
-		decoded, nextPending, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role), pendingToolUseIDs) // swobu:io-string source=boundary
+		decoded, nextPending, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role), tools, pendingToolUseIDs, decoder.ImageLimits) // swobu:io-string source=boundary
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
 		items = append(items, decoded...)
 		pendingToolUseIDs = nextPending
+	}
+	if err := shared.ValidateImageDecodeLimits(items, decoder.ImageLimits); err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request image limits are exceeded")
 	}
 	controls, err := decodeMessagesGenerationControls(dto)
 	if err != nil {
@@ -77,18 +87,31 @@ func (ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Documen
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         strings.TrimSpace(dto.Model), // swobu:io-string source=boundary
-		Instructions:  instructions,
-		Items:         items,
-		Tools:         tools,
-		ToolPolicy:    toolPolicy,
-		ToolCallBatch: toolCallBatch,
-		Controls:      controls,
-	}), resolvedDelivery, nil
+	toolSet, err := canonical.NewToolSet(tools)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages tools are invalid")
+	}
+	params := canonical.RequestParams{
+		Model:    canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
+		Items:    items,
+		Controls: controls,
+	}
+	if len(dto.System) > 0 {
+		params.Instructions = canonical.Specify(canonical.NewSystemInstructionSet(instructions))
+	}
+	if dto.Tools != nil {
+		params.Tools = canonical.Specify(toolSet)
+	}
+	if len(dto.ToolChoice) > 0 {
+		params.ToolPolicy = canonical.Specify(toolPolicy)
+	}
+	if len(dto.DisableParallelToolUse) > 0 {
+		params.ToolCallBatch = canonical.Specify(toolCallBatch)
+	}
+	return canonical.NewCanonicalRequest(params), resolvedDelivery, nil
 }
 
-func decodeMessagesSystem(raw json.RawMessage) (string, error) {
+func decodeMessagesSystem(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy) (string, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" || trimmed == "null" {
 		return "", nil
@@ -97,7 +120,7 @@ func decodeMessagesSystem(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return strings.TrimSpace(text), nil // swobu:io-string source=boundary
 	}
-	parts, err := openaiwire.DecodeTextContentItems(raw, "messages system", canonical.ItemAuthorUser)
+	parts, err := openaiwire.DecodeTextContentItems(raw, "messages system", canonical.MessageRoleSystem, imageLimits)
 	if err != nil {
 		return "", err
 	}
@@ -107,16 +130,19 @@ func decodeMessagesSystem(raw json.RawMessage) (string, error) {
 func joinMessagesText(items []canonical.CanonicalItem) string {
 	var builder strings.Builder
 	for _, item := range items {
-		if item.Kind() == canonical.ItemKindText {
-			if text, ok := item.TextItem(); ok {
-				builder.WriteString(text.Text)
+		if message, ok := item.Message(); ok {
+			for _, part := range message.Content() {
+				if text, ok := part.Text(); ok {
+					builder.WriteString(text.Text())
+				}
 			}
 		}
 	}
 	return builder.String()
 }
 
-func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingToolUseIDs []string) ([]canonical.CanonicalItem, []string, error) {
+// swobu:lint ignore function-complexity because=Messages item decoding keeps all content-block variants at one boundary seam.
+func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []canonical.ToolDeclaration, pendingToolUseIDs []string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []string, error) {
 	if role == "" {
 		role = "user"
 	}
@@ -130,6 +156,19 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(parts))
 	pending := append([]string(nil), pendingToolUseIDs...)
+	messageParts := make([]canonical.MessagePart, 0)
+	flushMessage := func() error {
+		if len(messageParts) == 0 {
+			return nil
+		}
+		message, err := canonical.NewMessageItem(author, messageParts)
+		if err != nil {
+			return canonical.BadRequest("messages request message item is invalid")
+		}
+		decoded = append(decoded, message)
+		messageParts = nil
+		return nil
+	}
 	err = openaiwire.WalkContentParts(parts, func(partIdx int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=provider-wire
 		switch partType {
@@ -137,9 +176,21 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			if part.Text == "" {
 				return canonical.BadRequest("messages request text parts must not be empty")
 			}
-			decoded = append(decoded, canonical.NewTextItem(author, part.Text))
+			messageParts = append(messageParts, canonical.NewTextMessagePart(part.Text))
+		case "image":
+			if author != canonical.MessageRoleUser {
+				return canonical.BadRequest("messages request image input is only valid in user messages")
+			}
+			image, err := decodeMessagesImageSource(part.Source, imageLimits)
+			if err != nil {
+				return canonical.BadRequest("messages request image source is invalid")
+			}
+			messageParts = append(messageParts, canonical.NewImageMessagePart(image))
 		case "tool_use":
-			input, err := sse.DecodeJSONObject(part.Input, "messages request tool_use input is invalid")
+			if err := flushMessage(); err != nil {
+				return err
+			}
+			input, err := canonical.ParseJSONObject(part.Input)
 			if err != nil {
 				return err
 			}
@@ -147,26 +198,39 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 			if name == "" {
 				return canonical.BadRequest("messages request tool_use parts require a name")
 			}
-			args, err := json.Marshal(input)
-			if err != nil {
-				return canonical.BadRequest("messages request tool_use input is invalid")
-			}
 			toolUseID := strings.TrimSpace(part.ID) // swobu:io-string source=boundary
 			if toolUseID == "" {
 				toolUseID = openaiwire.GeneratedToolUseID(msgIdx, partIdx)
 			}
 			pending = append(pending, toolUseID)
-			decoded = append(decoded, canonical.NewToolUseItem(author, "", toolUseID, name, canonical.NewToolArgumentsObject(string(args))))
+			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, name, canonical.ToolKindFunction)
+			if err != nil {
+				return canonical.BadRequest("messages request tool_use has an invalid tool identity")
+			}
+			callID, _ := canonical.NewToolCallID(toolUseID)
+			item, err := canonical.NewToolCallItem(callID, toolKey, canonical.NewJSONObjectToolInput(input))
+			if err != nil {
+				return canonical.BadRequest("messages request tool_use is invalid")
+			}
+			decoded = append(decoded, item)
 		case "tool_result":
+			if err := flushMessage(); err != nil {
+				return err
+			}
 			toolUseID := strings.TrimSpace(part.ToolUseID) // swobu:io-string source=boundary
 			if toolUseID == "" {
 				return canonical.BadRequest("messages request tool_result parts require tool_use_id")
 			}
-			text, err := decodeToolResultText(part.Content)
+			content, err := decodeToolResultContent(part.Content, imageLimits)
 			if err != nil {
 				return err
 			}
-			decoded = append(decoded, canonical.NewToolResultItem(author, toolUseID, text)) // swobu:io-string source=boundary
+			callID, _ := canonical.NewToolCallID(toolUseID)
+			result, err := canonical.NewToolResultItem(callID, content, part.IsError)
+			if err != nil {
+				return canonical.BadRequest("messages request tool_result is invalid")
+			}
+			decoded = append(decoded, result)
 			pending = removePendingToolUseID(pending, toolUseID)
 		case "":
 			if len(strings.TrimSpace(string(part.CacheControl))) > 0 || len(strings.TrimSpace(string(part.CachePoint))) > 0 { // swobu:io-string source=boundary
@@ -181,38 +245,77 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, pendingTo
 	if err != nil {
 		return nil, pending, err
 	}
+	if err := flushMessage(); err != nil {
+		return nil, pending, err
+	}
 	return decoded, pending, nil
 }
 
-func decodeToolResultText(raw json.RawMessage) (string, error) {
+func decodeToolResultContent(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "messages request tool_result content is invalid")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var builder strings.Builder
+	content := make([]canonical.ToolResultPart, 0, len(parts))
 	err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		if partType == "" {
 			partType = "text"
 		}
-		if partType != "text" { // swobu:io-string source=boundary
-			return canonical.BadRequest("messages request tool_result content must contain text parts only")
+		switch partType {
+		case "text":
+			content = append(content, canonical.NewTextToolResultPart(part.Text))
+		case "image":
+			image, err := decodeMessagesImageSource(part.Source, imageLimits)
+			if err != nil {
+				return canonical.BadRequest("messages request tool_result image source is invalid")
+			}
+			content = append(content, canonical.NewImageToolResultPart(image))
+		default:
+			return canonical.BadRequest("messages request tool_result content contains an unsupported part type")
 		}
-		builder.WriteString(part.Text)
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return builder.String(), nil
+	return content, nil
 }
 
-func decodeMessagesTools(tools []messagesToolDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDecl, error) {
+func decodeMessagesImageSource(raw json.RawMessage, limits shared.ImageDecodeLimitPolicy) (canonical.ImagePart, error) {
+	var source struct {
+		Type      string `json:"type"`
+		URL       string `json:"url"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return canonical.ImagePart{}, err
+	}
+	switch messagesImageSourceType(strings.TrimSpace(source.Type)) { // swobu:io-string source=boundary
+	case messagesImageSourceURL:
+		return canonical.NewURLImage(source.URL, canonical.Unspecified[canonical.ImageDetail]())
+	case messagesImageSourceBase64:
+		data, err := shared.DecodeBase64Limited(source.Data, limits.MaxInlineBytes)
+		if err != nil {
+			return canonical.ImagePart{}, err
+		}
+		mediaType, err := shared.NormalizeImageMediaType(source.MediaType)
+		if err != nil {
+			return canonical.ImagePart{}, err
+		}
+		return canonical.NewInlineImage(mediaType, data, canonical.Unspecified[canonical.ImageDetail]())
+	default:
+		return canonical.ImagePart{}, fmt.Errorf("messages image source type is unsupported")
+	}
+}
+
+func decodeMessagesTools(tools []messagesToolDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
-	out := make([]canonical.ToolDecl, 0, len(tools))
-	for idx, tool := range tools {
+	out := make([]canonical.ToolDeclaration, 0, len(tools))
+	for _, tool := range tools {
 		schema, err := messagesToolSchemaFromWire(tool.InputSchema)
 		if err != nil {
 			return nil, err
@@ -221,13 +324,15 @@ func decodeMessagesTools(tools []messagesToolDTO, sink compat.Sink, exchangeID s
 		if name == "" {
 			return nil, canonical.BadRequest("messages request tool declarations require a name")
 		}
-		id, leaf, projected := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
-		if projected {
-			if err := emitMessagesToolNameNamespaceDecision(sink, exchangeID, nil, compat.Exact, compat.Subject("wire:/tools/"+fmt.Sprint(idx)+"/name")); err != nil {
-				return nil, err
-			}
+		id, err := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, canonical.NewFunctionToolDecl(id.String(), leaf, tool.Description, schema))
+		declaration, err := canonical.NewFunctionTool(id, tool.Description, schema, canonical.Unspecified[bool]())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, declaration)
 	}
 	return out, nil
 }

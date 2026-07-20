@@ -24,8 +24,10 @@ import (
 )
 
 const (
-	maxCompressedRequestBodyBytes int64 = 2 << 20
-	maxDecodedRequestBodyBytes    int64 = 8 << 20
+	// This is an absolute deployment safety ceiling. Workspace semantic limits
+	// are resolved and enforced independently by exchange ingress.
+	maxCompressedRequestBodyBytes int64 = 48 << 20
+	maxDecodedRequestBodyBytes    int64 = 48 << 20
 )
 
 type requestIngress interface {

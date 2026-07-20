@@ -1,7 +1,6 @@
 package canonical
 
 import (
-	"encoding/json"
 	"math"
 	"strings"
 )
@@ -169,30 +168,6 @@ func validateGenerationControlTopP(value float64) error {
 		return BadRequest("generation controls top_p must be between 0 and 1")
 	}
 	return nil
-}
-
-type generationControlsMetadataDTO struct {
-	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
-	StopSequences   []string `json:"stop_sequences,omitempty"`
-	Temperature     *float64 `json:"temperature,omitempty"`
-	TopP            *float64 `json:"top_p,omitempty"`
-}
-
-func decodeGenerationControlsMetadata(raw string) (GenerationControls, error) {
-	trimmed := strings.TrimSpace(raw) // swobu:io-string source=domain
-	if trimmed == "" || trimmed == "null" {
-		return GenerationControls{}, nil
-	}
-	var dto generationControlsMetadataDTO
-	if err := json.Unmarshal([]byte(trimmed), &dto); err != nil {
-		return GenerationControls{}, BadRequest("canonical request generation controls are invalid")
-	}
-	return NewGenerationControls(GenerationControlsParams{
-		MaxOutputTokens: dto.MaxOutputTokens,
-		StopSequences:   dto.StopSequences,
-		Temperature:     dto.Temperature,
-		TopP:            dto.TopP,
-	})
 }
 
 func cloneStrings(in []string) []string {

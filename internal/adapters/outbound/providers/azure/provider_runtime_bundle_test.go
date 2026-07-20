@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
@@ -22,7 +23,7 @@ func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "deployment", InputText: "hi", Controls: controls})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("deployment"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls})
 	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
 	target.Model = request.Model()
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
@@ -225,8 +226,8 @@ func TestSendProviderRequest_UsesAnthropicPathForMessages(t *testing.T) {
 
 	bundle := NewRuntime(rewritingClientForServer(t, srv), stubCredentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude-sonnet-4",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hello")},
+		Model: canonical.Specify("claude-sonnet-4"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 	})
 	target := provider.NewTargetSnapshot(
 		"draft",

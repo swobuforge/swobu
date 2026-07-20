@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestOfficialOpenAIResponsesUsesVersionedCanonicalRefinement(t *testing.T) {
@@ -27,14 +28,14 @@ func TestOfficialOpenAIResponsesUsesVersionedCanonicalRefinement(t *testing.T) {
 		t.Fatal(err)
 	}
 	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "gpt-test",
+		Model: canonical.Specify("gpt-test"),
 		Items: []canonical.CanonicalItem{
-			canonical.NewTextItem(canonical.ItemAuthorUser, "turn one"),
-			canonical.NewTextItem(canonical.ItemAuthorAssistant, "answer one"),
-			canonical.NewTextItem(canonical.ItemAuthorUser, "turn two"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "turn one"),
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "turn two"),
 		},
 	})
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: "gpt-test", InputText: "turn two", PreviousResponse: &canonical.ResponseRef{
+	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt-test"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{
 		SwobuID: "swobu_previous", Responses: &canonical.ResponsesNativeRef{
 			ProviderResponseID: "provider_response_from_previous_target_version", TargetID: backend.Target.TargetID, TargetVersion: backend.Target.TargetVersion,
 		},

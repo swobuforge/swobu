@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
@@ -24,17 +25,18 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
-	text, _ := items[0].TextItem()
-	if text.Text != "hi" {
-		t.Fatalf("item text = %q, want %q", text.Text, "hi")
+	message, _ := items[0].Message()
+	text, _ := message.Content()[0].Text()
+	if text.Text() != "hi" {
+		t.Fatalf("item text = %q, want %q", text.Text(), "hi")
 	}
 }
 
 func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	wantFormat := `{"type":"grammar", "syntax":"lark", "definition":"start: \"x\" LF\n%import common.LF"}`
-	customTool := canonical.NewCustomToolDecl("apply_patch", "apply_patch", "edit files", canonical.NewToolFormatObject(wantFormat))
-	req := []byte(`{"model":"gpt-4o-mini","input":"hi","tools":[{"type":"custom","name":"` + customTool.ToolName() + `","format":` + wantFormat + `}]}`)
+	customTool := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "edit files", canonical.NewToolFormatObject(canonicaltest.Object(t, wantFormat)))
+	req := []byte(`{"model":"gpt-4o-mini","input":"hi","tools":[{"type":"custom","name":"` + customTool.Key().Name() + `","format":` + wantFormat + `}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest: %v", err)
@@ -46,15 +48,15 @@ func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
 	if len(tools) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
-	custom, ok := tools[0].(canonical.CustomToolDecl)
+	custom, ok := tools[0].Custom()
 	if !ok {
-		t.Fatalf("tool = %T, want CustomToolDecl", tools[0])
+		t.Fatalf("tool = %T, want CustomTool declaration", tools[0])
 	}
-	if custom.ToolName() != "apply_patch" {
-		t.Fatalf("tool name = %q, want %q", custom.ToolName(), "apply_patch")
+	if custom.Key().Name() != "apply_patch" {
+		t.Fatalf("tool name = %q, want %q", custom.Key().Name(), "apply_patch")
 	}
-	if custom.Format.RawObject() != wantFormat {
-		t.Fatalf("custom format raw = %q, want %q", custom.Format.RawObject(), wantFormat)
+	if custom.Format().RawObject() != canonicaltest.Object(t, wantFormat).String() {
+		t.Fatalf("custom format raw = %q, want canonical object", custom.Format().RawObject())
 	}
 }
 
@@ -65,8 +67,8 @@ func TestDecodeRequest_PreservesTopLevelInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeClientRequest: %v", err)
 	}
-	if got.Instructions() != "Use tools for filesystem work." {
-		t.Fatalf("instructions = %q, want top-level instructions", got.Instructions())
+	if canonicaltest.InstructionSetText(got.Instructions()) != "Use tools for filesystem work." {
+		t.Fatalf("instructions = %q, want top-level instructions", canonicaltest.InstructionSetText(got.Instructions()))
 	}
 }
 

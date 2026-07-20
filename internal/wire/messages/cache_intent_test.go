@@ -8,20 +8,17 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
 
 func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
-	functionTool := canonical.NewFunctionToolDecl("Read", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`))
-	projectedName, err := canonical.ProjectedToolName(functionTool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName(function) returned error: %v", err)
-	}
+	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Read"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: "claude",
-		Items: []canonical.CanonicalItem{canonical.NewTextItem(canonical.ItemAuthorUser, "hi")},
-		Tools: []canonical.ToolDecl{
-			functionTool,
-		},
+		Model: canonical.Specify("claude"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -62,12 +59,9 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 
 func TestDecodeRequest_IgnoresAnthropicCacheMarkers(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
-	tool := canonical.NewFunctionToolDecl("Read", "Read", "read files", canonical.NewToolSchemaObject(`{"type":"object","properties":{"path":{"type":"string"}}}`))
-	projectedToolName, err := canonical.ProjectedToolName(tool)
-	if err != nil {
-		t.Fatalf("ProjectedToolName: %v", err)
-	}
-	req := []byte(`{"model":"claude","tools":[{"name":"` + projectedToolName + `","description":"read files","input_schema":{"type":"object","properties":{"path":{"type":"string"}}},"cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Read"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	wireToolName := providertest.ProjectedToolName(t, tool)
+	req := []byte(`{"model":"claude","tools":[{"name":"` + wireToolName + `","description":"read files","input_schema":{"type":"object","properties":{"path":{"type":"string"}}},"cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)

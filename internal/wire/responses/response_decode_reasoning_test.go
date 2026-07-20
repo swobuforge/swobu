@@ -29,7 +29,7 @@ func TestDecodeResponseBuffered_RejectsReasoningOutput(t *testing.T) {
 	}`)
 	sink := &recordingDecisionSink{}
 
-	_, err := decodeResponseBuffered(context.Background(), raw, "ex_reasoning", sink)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_reasoning", sink)
 	if err == nil {
 		t.Fatal("expected decodeResponseBuffered to reject reasoning output")
 	}
