@@ -27,7 +27,7 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, m
 			message, _ := item.Message()
 			events = append(events, next(EventItemStart, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: messageStartFromValidatedItem(message.Role())}))
 			for partIndex, part := range message.Content() {
-				events = append(events, next(EventContentStart, "", "", ItemEvent{Position: ItemPosition{Item: ordinal, Part: uint32(partIndex)}, Payload: ContentStartPayload{Kind: part.Kind()}}))
+				events = append(events, next(EventContentStart, "", "", ItemEvent{Position: ItemPosition{Item: ordinal, Part: uint32(partIndex)}, Payload: NewMessageContentStart(part.Kind())}))
 				if text, ok := part.Text(); ok {
 					events = append(events, next(EventTextDelta, "", "", ItemEvent{Position: ItemPosition{Item: ordinal, Part: uint32(partIndex)}, Payload: TextDeltaPayload{Text: text.Text()}}))
 				}
@@ -43,6 +43,8 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, m
 		case ItemKindToolResult:
 			// Tool results have no progressive start contract in this RFC. They
 			// cross this synthesized stream only as an atomic completed checkpoint.
+		case ItemKindReasoning:
+			// Reasoning enters the shared stream only as one complete artifact.
 		default:
 			events = append(events, next(EventError, responseID, "", ErrorPayload{Code: "invalid_canonical_item", Message: "canonical response contains an invalid item"}))
 			continue

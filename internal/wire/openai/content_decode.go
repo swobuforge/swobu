@@ -32,6 +32,9 @@ type ContentPartItem struct {
 	FileID       string                `json:"file_id,omitempty"`
 	Detail       canonical.ImageDetail `json:"detail,omitempty"`
 	Source       json.RawMessage       `json:"source,omitempty"`
+	Thinking     string                `json:"thinking,omitempty"`
+	Signature    string                `json:"signature,omitempty"`
+	Data         string                `json:"data,omitempty"`
 }
 
 func AuthorForRole(role string) canonical.MessageRole {

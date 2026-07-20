@@ -14,7 +14,7 @@ func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 	return &chatCompletionsEnvelopeStreamEncoder{adapter: sse.NewEnvelopeEventAdapter()}
 }
 
-func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
+func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	state := e.newStreamState()
 	completion, complete, fail := wire.NewResponseCompletion()
 	encoder := chatCompletionsFingerprintingEncoder(state.EncodeEnvelopeEvent, complete, fail)
@@ -25,6 +25,6 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events 
 	}, nil
 }
 
-func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {
+func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {
 	return wire.ClientMessageResult{}, canonical.UnsupportedDelivery("chat completions does not support message-oriented client delivery")
 }

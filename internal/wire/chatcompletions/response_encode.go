@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	message, err := chatMessageFromOutput(output)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
@@ -33,8 +34,19 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
-	return wire.ClientDocumentResult{
+	result := wire.ClientDocumentResult{
 		Document:            carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{}),
 		ResponseFingerprint: &responseFingerprint,
-	}, nil
+	}
+	for _, item := range output.Items() {
+		if item.Kind() == canonical.ItemKindReasoning {
+			result.Decisions = append(result.Decisions, compat.Decision{
+				Feature: compat.ResponseItemsReasoning,
+				Outcome: compat.Drop,
+				Subject: "client:chat_completions/response",
+			})
+			break
+		}
+	}
+	return result, nil
 }

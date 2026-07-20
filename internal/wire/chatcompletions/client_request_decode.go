@@ -92,7 +92,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	controls, err := decodeChatCompletionsGenerationControls(dto)
+	controls, reasoning, err := decodeChatCompletionsGenerationControls(dto)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -120,6 +120,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
 		Items:            items,
 		Controls:         controls,
+		Reasoning:        reasoning,
 		PreviousResponse: previousResponse,
 	}
 	if len(instructions) > 0 {

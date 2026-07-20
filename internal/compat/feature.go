@@ -46,6 +46,8 @@ const (
 	RequestControlsTemperature              Feature = "request.controls.temperature"
 	RequestControlsTopP                     Feature = "request.controls.top_p"
 	RequestControlsStopSequences            Feature = "request.controls.stop_sequences"
+	RequestControlsEffort                   Feature = "request.controls.effort"
+	RequestReasoning                        Feature = "request.reasoning"
 	RequestPreviousResponse                 Feature = "request.previous_response"
 	RequestPreviousResponseResponses        Feature = "request.previous_response.responses"
 
@@ -59,6 +61,7 @@ const (
 	ResponseItemsToolCallTool     Feature = "response.items.tool_call.tool.kind"
 	ResponseItemsToolCallName     Feature = "response.items.tool_call.tool.name"
 	ResponseItemsToolCallInput    Feature = "response.items.tool_call.input"
+	ResponseItemsReasoning        Feature = "response.items.reasoning"
 	ResponseFinishReason          Feature = "response.finish_reason"
 	ResponseUsageInputTokens      Feature = "response.usage.input_tokens"
 	ResponseUsageOutputTokens     Feature = "response.usage.output_tokens"

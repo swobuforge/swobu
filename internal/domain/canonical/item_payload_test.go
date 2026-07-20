@@ -18,7 +18,11 @@ func TestCanonicalItemTypedBranchesAreExclusiveAndClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range []CanonicalItem{message, call, result} {
+	reasoning, err := NewReasoningItem([]ReasoningPart{mustReasoningPart(t, ReasoningPartSummary, "summary")}, OpaqueThinking{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []CanonicalItem{message, call, result, reasoning} {
 		if item.Clone().Kind() != item.Kind() {
 			t.Fatalf("clone kind mismatch for %q", item.Kind())
 		}

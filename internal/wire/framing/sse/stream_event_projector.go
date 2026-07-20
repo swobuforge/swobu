@@ -140,10 +140,19 @@ func (a *EnvelopeEventAdapter) translateContentStart(ev canonical.Event, emitted
 		return fmt.Errorf("content.start payload type %T is unsupported", ev.Payload)
 	}
 	payload, ok := itemEvent.Payload.(canonical.ContentStartPayload)
-	if !ok || payload.Kind == "" {
+	if !ok {
 		return fmt.Errorf("content.start item payload type %T is unsupported", itemEvent.Payload)
 	}
-	*emitted = append(*emitted, StreamEvent{Kind: StreamEventContentStarted, ItemID: a.itemIDForOrdinal(itemEvent.Position.Item), ItemOrdinal: itemEvent.Position.Item, PartOrdinal: itemEvent.Position.Part, PartKind: payload.Kind})
+	if payload.Kind == "" {
+		return fmt.Errorf("content.start item payload has empty content kind")
+	}
+	*emitted = append(*emitted, StreamEvent{
+		Kind:        StreamEventContentStarted,
+		ItemID:      a.itemIDForOrdinal(itemEvent.Position.Item),
+		ItemOrdinal: itemEvent.Position.Item,
+		PartOrdinal: itemEvent.Position.Part,
+		PartKind:    payload.Kind,
+	})
 	return nil
 }
 
@@ -183,7 +192,8 @@ func (a *EnvelopeEventAdapter) translateItemCompleted(ev canonical.Event, emitte
 		return fmt.Errorf("item.completed ordinal %d is invalid", itemEvent.Position.Item)
 	}
 	itemID := a.itemIDForOrdinal(itemEvent.Position.Item)
-	*emitted = append(*emitted, StreamEvent{Kind: StreamEventItemCompleted, ItemID: itemID, ItemKind: payload.Item.Kind(), ItemOrdinal: itemEvent.Position.Item})
+	item := payload.Item.Clone()
+	*emitted = append(*emitted, StreamEvent{Kind: StreamEventItemCompleted, ItemID: itemID, ItemKind: payload.Item.Kind(), ItemOrdinal: itemEvent.Position.Item, CompletedItem: &item})
 	delete(a.itemKinds, itemEvent.Position.Item)
 	delete(a.itemIDs, itemEvent.Position.Item)
 	return nil

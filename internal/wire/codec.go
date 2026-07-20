@@ -30,9 +30,9 @@ import (
 // and canonical outputs back into client-facing wire documents or byte streams.
 type ClientCodec interface {
 	DecodeClientRequest(doc carrier.Document) (ClientDecodeResult, error)
-	EncodeResponseDocument(canonical.CanonicalResponse) (ClientDocumentResult, error)
-	EncodeResponseStream(context.Context, canonical.ResponseStream, delivery.Delivery) (ClientByteStreamResult, error)
-	EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (ClientMessageResult, error)
+	EncodeResponseDocument(canonical.CanonicalRequest, canonical.CanonicalResponse) (ClientDocumentResult, error)
+	EncodeResponseStream(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (ClientByteStreamResult, error)
+	EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (ClientMessageResult, error)
 }
 
 type ClientDecodeResult struct {
@@ -53,14 +53,14 @@ type ClientByteStreamResult struct {
 	Decisions []compat.Decision
 	// Completion reports whether the logical terminal response was encoded and,
 	// on success, carries its response fingerprint. Snapshot never blocks.
-	Completion ResponseCompletion
+	Completion *ResponseCompletion
 }
 
 type ClientMessageResult struct {
 	Response  carrier.MessageResponse
 	Decisions []compat.Decision
 	// Completion has the same lifecycle as ClientByteStreamResult.Completion.
-	Completion ResponseCompletion
+	Completion *ResponseCompletion
 }
 
 // ClientRequestResult is the payload returned by DecodeClientRequest.
@@ -102,26 +102,21 @@ type ResponseCompletionSnapshot struct {
 	ResponseFingerprint *historyfingerprint.Response
 }
 
-// ResponseCompletion exposes only observation of a codec-owned write-once
-// completion cell.
-type ResponseCompletion interface {
-	Snapshot() ResponseCompletionSnapshot
-}
-
-type responseCompletion struct {
+// ResponseCompletion is the codec-owned write-once completion cell.
+type ResponseCompletion struct {
 	mu       sync.RWMutex
 	snapshot ResponseCompletionSnapshot
 }
 
 // NewResponseCompletion returns a read-only observation plus codec-private
 // completion functions. Result carriers expose only the observation.
-func NewResponseCompletion() (ResponseCompletion, func(*historyfingerprint.Response), func(error)) {
-	cell := &responseCompletion{}
+func NewResponseCompletion() (*ResponseCompletion, func(*historyfingerprint.Response), func(error)) {
+	cell := &ResponseCompletion{}
 	return cell, cell.complete, cell.fail
 }
 
 // Complete records the only successful terminal response fingerprint.
-func (c *responseCompletion) complete(fingerprint *historyfingerprint.Response) {
+func (c *ResponseCompletion) complete(fingerprint *historyfingerprint.Response) {
 	if c == nil {
 		return
 	}
@@ -139,7 +134,7 @@ func (c *responseCompletion) complete(fingerprint *historyfingerprint.Response) 
 }
 
 // Fail records terminal encoding failure without a usable fingerprint.
-func (c *responseCompletion) fail(err error) {
+func (c *ResponseCompletion) fail(err error) {
 	if c == nil {
 		return
 	}
@@ -151,7 +146,7 @@ func (c *responseCompletion) fail(err error) {
 	c.snapshot = ResponseCompletionSnapshot{State: CompletionFailed, Err: err}
 }
 
-func (c *responseCompletion) Snapshot() ResponseCompletionSnapshot {
+func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
 	if c == nil {
 		return ResponseCompletionSnapshot{State: CompletionFailed}
 	}

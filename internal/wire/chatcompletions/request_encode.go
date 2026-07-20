@@ -13,19 +13,33 @@ import (
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
-// EncodeOptions selects exact-backend request spellings and image-detail
-// compatibility behavior for Chat Completions lowering.
+// EncodeOptions carries request-wide compatibility behavior.
 type EncodeOptions struct {
-	MaxOutputTokensField MaxOutputTokensField
-	Compatibility        compat.CompatibilityPolicy
+	Compatibility compat.CompatibilityPolicy
 }
 
-type messageBody struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"`
-	ToolCalls  []toolCallBody `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+// ProviderRequestMessage is one lowered Chat Completions message. SourceStart
+// and SourceEnd retain the canonical association for provider dialect fields
+// and are never serialized.
+type ProviderRequestMessage struct {
+	Role        string         `json:"role"`
+	Content     any            `json:"content,omitempty"`
+	ToolCalls   []toolCallBody `json:"tool_calls,omitempty"`
+	ToolCallID  string         `json:"tool_call_id,omitempty"`
+	SourceStart int            `json:"-"`
+	SourceEnd   int            `json:"-"`
 }
+
+// ProviderRequestDocument is the standard Chat Completions lowering before
+// its single serialization boundary.
+type ProviderRequestDocument struct {
+	Payload  map[string]any
+	Messages []ProviderRequestMessage
+}
+
+// RequestMutation changes provider-owned dialect fields before serialization
+// and reports whether it owns reasoning lowering for this dialect.
+type RequestMutation func(*ProviderRequestDocument) (reasoningHandled bool, err error)
 
 type toolCallBody struct {
 	ID       string            `json:"id,omitempty"`
@@ -45,12 +59,17 @@ type toolCustomBody struct {
 }
 
 func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
+	return EncodeCarrierWithMutation(req, d, sink, exchangeID, options, nil)
+}
+
+// EncodeCarrierWithMutation lowers the standard protocol document, applies
+// one provider dialect mutation, and serializes once.
+func EncodeCarrierWithMutation(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions, mutate RequestMutation) (carrier.Document, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
 		return carrier.Document{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
 	}
-
 	items := req.Items()
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items, tools, sink, exchangeID, options.Compatibility)
@@ -74,11 +93,11 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 		"messages": wireMessages,
 	}
 	if instructions := req.Instructions().Instructions(); len(instructions) > 0 {
-		prefix := make([]messageBody, 0, len(instructions))
+		prefix := make([]ProviderRequestMessage, 0, len(instructions))
 		for _, instruction := range instructions {
-			prefix = append(prefix, messageBody{Role: string(instruction.Role()), Content: instruction.Text()})
+			prefix = append(prefix, ProviderRequestMessage{Role: string(instruction.Role()), Content: instruction.Text(), SourceStart: -1, SourceEnd: -1})
 		}
-		payload["messages"] = append(prefix, wireMessages...)
+		wireMessages = append(prefix, wireMessages...)
 	}
 	if len(wireTools) > 0 {
 		payload["tools"] = wireTools
@@ -86,8 +105,26 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
 		return carrier.Document{}, err
 	}
-	if err := encodeChatCompletionsGenerationControls(payload, req.Controls(), options.MaxOutputTokensField); err != nil {
+	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
 		return carrier.Document{}, err
+	}
+	payload["messages"] = wireMessages
+	document := ProviderRequestDocument{Payload: payload, Messages: wireMessages}
+	reasoningHandled := false
+	if mutate != nil {
+		var mutationErr error
+		reasoningHandled, mutationErr = mutate(&document)
+		if mutationErr != nil {
+			return carrier.Document{}, mutationErr
+		}
+	}
+	if !reasoningHandled {
+		if err := encodeChatCompletionsReasoning(payload, req); err != nil {
+			if decisionErr := emitChatImageDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
+				return carrier.Document{}, decisionErr
+			}
+			return carrier.Document{}, err
+		}
 	}
 	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
 		return carrier.Document{}, err
@@ -101,7 +138,7 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := json.Marshal(document.Payload)
 	if err != nil {
 		return carrier.Document{}, canonical.BadRequest("conversation request could not be encoded for the chat completions protocol")
 	}
@@ -117,7 +154,7 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	), nil
 }
 
-func logChatCompletionsEncodeShape(req canonical.CanonicalRequest, wireMessages []messageBody, choice any, d delivery.Delivery) {
+func logChatCompletionsEncodeShape(req canonical.CanonicalRequest, wireMessages []ProviderRequestMessage, choice any, d delivery.Delivery) {
 	instructions := strings.TrimSpace(flattenInstructionsForChatLog(req.Instructions())) // swobu:io-string source=domain
 	policy := req.EffectiveToolPolicy()
 	toolChoiceMode := strings.TrimSpace(string(policy.Mode)) // swobu:io-string source=domain
@@ -185,9 +222,16 @@ func chatCompletionsWireToolChoice(choice any) string {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
-func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, policy compat.CompatibilityPolicy) ([]messageBody, error) {
-	out := make([]messageBody, 0, len(items))
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, policy compat.CompatibilityPolicy) ([]ProviderRequestMessage, error) {
+	out := make([]ProviderRequestMessage, 0, len(items))
 	for i := 0; i < len(items); {
+		sourceStart := i
+		for i < len(items) && items[i].Kind() == canonical.ItemKindReasoning {
+			i++
+		}
+		if i == len(items) {
+			break
+		}
 		item := items[i]
 		if item.Kind() == canonical.ItemKindToolResult {
 			result, ok := item.ToolResult()
@@ -230,15 +274,17 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, messageBody{
-				Role:       "tool",
-				Content:    text,
-				ToolCallID: result.CallID().String(),
+			out = append(out, ProviderRequestMessage{
+				Role:        "tool",
+				Content:     text,
+				ToolCallID:  result.CallID().String(),
+				SourceStart: sourceStart,
+				SourceEnd:   i + 1,
 			})
 			i++
 			continue
 		}
-		wire := messageBody{}
+		wire := ProviderRequestMessage{SourceStart: sourceStart}
 		if message, ok := item.Message(); ok {
 			wire.Role = string(message.Role())
 			content, err := encodeChatMessageContent(message.Role(), message.Content(), sink, exchangeID, policy)
@@ -263,6 +309,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 				i++
 			}
 		}
+		wire.SourceEnd = i
 		out = append(out, wire)
 	}
 	return out, nil

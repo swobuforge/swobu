@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 type terminalMatrixCase struct {
@@ -197,9 +196,6 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				provider.NewTargetSnapshot("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "", tc.providerProtocol),
 			)
 			providerCodec := protocolcodec.Codec{ProviderID: tc.providerID, Protocol: tc.protocolKind}
-			if tc.protocolKind == protocolkind.ChatCompletions {
-				providerCodec.Options.ChatCompletionsTokenField = chatcompletions.MaxOutputTokensFieldLegacy
-			}
 
 			ingress, err := executeProviderRequest(registry, context.Background(), req)
 			if err != nil {
@@ -229,7 +225,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if got := out.CompletionReason(); got != tc.wantOutputReason {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
-				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseDocument(*out)
+				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseDocument(canonical.CanonicalRequest{}, *out)
 				if err != nil {
 					t.Fatalf("EncodeResponseDocument returned error: %v", err)
 				}
@@ -262,7 +258,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
 				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())
-				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), tc.providerDelivery)
+				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), tc.providerDelivery)
 				if err != nil {
 					t.Fatalf("EncodeResponseStream returned error: %v", err)
 				}

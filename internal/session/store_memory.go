@@ -13,6 +13,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
+const maxMemoryStoreRecords = 1024
+
 // NewMemoryStore returns a thread-safe in-memory Store for production
 // bootstrap where persistent session storage is not yet wired. Checkpoints are bounded by
 // ExpiresAt and reclaimed opportunistically on every write as well as reads.
@@ -23,7 +25,7 @@ func NewMemoryStore() Store {
 type memoryStore struct {
 	mu        sync.RWMutex
 	records   map[workspaceRecordID]Checkpoint
-	byHistory map[workspaceHistoryKey]canonical.SwobuResponseID
+	byHistory map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}
 	expires   expirationHeap
 	now       func() time.Time
 }
@@ -41,7 +43,7 @@ type workspaceHistoryKey struct {
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		records:   make(map[workspaceRecordID]Checkpoint),
-		byHistory: make(map[workspaceHistoryKey]canonical.SwobuResponseID),
+		byHistory: make(map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}),
 		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -95,34 +97,48 @@ func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id canonica
 	return r.Clone(), true, nil
 }
 
-func (s *memoryStore) FindByHistory(_ context.Context, workspaceSlug string, history historyfingerprint.History) (Checkpoint, bool, error) {
+func (s *memoryStore) FindByHistory(_ context.Context, workspaceSlug string, history historyfingerprint.History) (HistoryMatch, error) {
 	workspaceSlug = strings.TrimSpace(workspaceSlug) // swobu:io-string source=boundary
 	if workspaceSlug == "" {
-		return Checkpoint{}, false, errors.New("session workspace slug is empty")
+		return HistoryMatch{}, errors.New("session workspace slug is empty")
 	}
 	if history.Scheme() == "" {
-		return Checkpoint{}, false, errors.New("session history fingerprint is invalid")
+		return HistoryMatch{}, errors.New("session history fingerprint is invalid")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
 	s.reclaimExpired(now)
 	indexKey := workspaceHistoryKey{workspaceSlug: workspaceSlug, history: history}
-	id, found := s.byHistory[indexKey]
+	ids, found := s.byHistory[indexKey]
 	if !found {
-		return Checkpoint{}, false, nil
+		return MissingHistoryMatch(), nil
 	}
-	recordKey := workspaceRecordID{workspaceSlug: workspaceSlug, id: id}
-	record, found := s.records[recordKey]
-	if !found {
+	available := make([]Checkpoint, 0, len(ids))
+	for id := range ids {
+		recordKey := workspaceRecordID{workspaceSlug: workspaceSlug, id: id}
+		record, exists := s.records[recordKey]
+		if !exists {
+			delete(ids, id)
+			continue
+		}
+		if record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
+			s.deleteRecord(recordKey, record)
+			continue
+		}
+		available = append(available, record)
+	}
+	if len(ids) == 0 {
 		delete(s.byHistory, indexKey)
-		return Checkpoint{}, false, nil
 	}
-	if record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
-		s.deleteRecord(recordKey, record)
-		return Checkpoint{}, false, nil
+	switch len(available) {
+	case 0:
+		return MissingHistoryMatch(), nil
+	case 1:
+		return UniqueHistoryMatch(available[0]), nil
+	default:
+		return AmbiguousHistoryMatch(), nil
 	}
-	return record.Clone(), true, nil
 }
 
 func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Checkpoint) error {
@@ -151,23 +167,45 @@ func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Chec
 		expiresAt := now.Add(defaultCheckpointTTL)
 		cloned.ExpiresAt = &expiresAt
 	}
+	if len(s.records) >= maxMemoryStoreRecords {
+		s.evictOldest()
+	}
 	s.records[key] = cloned
 	if cloned.HistoryFingerprint != nil {
-		s.byHistory[workspaceHistoryKey{workspaceSlug: workspaceSlug, history: *cloned.HistoryFingerprint}] = responseRef.SwobuID
+		indexKey := workspaceHistoryKey{workspaceSlug: workspaceSlug, history: *cloned.HistoryFingerprint}
+		if s.byHistory[indexKey] == nil {
+			s.byHistory[indexKey] = make(map[canonical.SwobuResponseID]struct{})
+		}
+		s.byHistory[indexKey][responseRef.SwobuID] = struct{}{}
 	}
 	heap.Push(&s.expires, expirationEntry{key: key, at: *cloned.ExpiresAt})
 	return nil
 }
 
-// deleteRecord keeps the primary record and optional secondary index in one
-// lock-owned mutation. A replacement index survives expiry of an older record.
+func (s *memoryStore) evictOldest() {
+	for s.expires.Len() > 0 {
+		entry := heap.Pop(&s.expires).(expirationEntry)
+		record, found := s.records[entry.key]
+		if !found || record.ExpiresAt == nil || !record.ExpiresAt.Equal(entry.at) {
+			continue
+		}
+		s.deleteRecord(entry.key, record)
+		return
+	}
+}
+
+// deleteRecord keeps the primary record and secondary membership set in one
+// lock-owned mutation. Other indistinguishable records survive independently.
 func (s *memoryStore) deleteRecord(key workspaceRecordID, record Checkpoint) {
 	delete(s.records, key)
 	if record.HistoryFingerprint == nil {
 		return
 	}
 	indexKey := workspaceHistoryKey{workspaceSlug: key.workspaceSlug, history: *record.HistoryFingerprint}
-	if indexedID, found := s.byHistory[indexKey]; found && indexedID == key.id {
-		delete(s.byHistory, indexKey)
+	if indexedIDs, found := s.byHistory[indexKey]; found {
+		delete(indexedIDs, key.id)
+		if len(indexedIDs) == 0 {
+			delete(s.byHistory, indexKey)
+		}
 	}
 }

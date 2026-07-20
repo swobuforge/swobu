@@ -17,45 +17,59 @@ import (
 )
 
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesEventReader {
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesResponseStream {
 	recording := &compat.RecordingSink{Delegate: sink}
-	return &responsesEventReader{
-		exchangeID:    exchangeID,
-		responseEnvID: canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:          recording,
-		recording:     recording,
-		reader:        core.NewSSEReader(stream.Body),
-		toolStates:    map[string]responsesToolState{},
-		toolInputs:    map[string]string{},
-		textOpen:      false,
-		latestUsage:   canonical.NewUnknownTokenUsage(),
-		request:       request.Clone(),
+	return &responsesResponseStream{
+		exchangeID:      exchangeID,
+		responseEnvID:   canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		sink:            recording,
+		recording:       recording,
+		reader:          core.NewSSEReader(stream.Body),
+		toolStates:      map[string]responsesToolState{},
+		toolInputs:      map[string]string{},
+		reasoningStates: map[string]*responsesReasoningState{},
+		textOpen:        false,
+		latestUsage:     canonical.NewUnknownTokenUsage(),
+		request:         request.Clone(),
 	}
 }
 
-type responsesEventReader struct {
-	exchangeID    string
-	responseEnvID canonical.EnvelopeID
-	sink          compat.Sink
-	recording     *compat.RecordingSink
-	reader        *core.SSEReaderCloser
-	pending       canonical.EventSequence
-	toolStates    map[string]responsesToolState
-	toolInputs    map[string]string
-	textOpen      bool
-	textEnvID     canonical.EnvelopeID
-	emittedOutput bool
-	started       bool
-	completed     bool
-	latestUsage   canonical.TokenUsage
-	seq           int64
-	request       canonical.CanonicalRequest
-	textOrdinal   uint32
-	text          strings.Builder
-	nextOrdinal   uint32
+type responsesResponseStream struct {
+	exchangeID      string
+	responseEnvID   canonical.EnvelopeID
+	sink            compat.Sink
+	recording       *compat.RecordingSink
+	reader          *core.SSEReaderCloser
+	pending         canonical.EventSequence
+	toolStates      map[string]responsesToolState
+	toolInputs      map[string]string
+	reasoningStates map[string]*responsesReasoningState
+	textOpen        bool
+	textEnvID       canonical.EnvelopeID
+	emittedOutput   bool
+	started         bool
+	completed       bool
+	latestUsage     canonical.TokenUsage
+	seq             int64
+	request         canonical.CanonicalRequest
+	textOrdinal     uint32
+	text            strings.Builder
+	nextOrdinal     uint32
 }
 
-func (s *responsesEventReader) Decisions() []compat.Decision {
+type responsesReasoningStreamPartState struct {
+	kind canonical.ReasoningPartKind
+	text strings.Builder
+}
+
+type responsesReasoningState struct {
+	ordinal uint32
+	id      string
+	status  string
+	parts   []*responsesReasoningStreamPartState
+}
+
+func (s *responsesResponseStream) Decisions() []compat.Decision {
 	if s.recording == nil {
 		return nil
 	}
@@ -76,7 +90,7 @@ type responsesToolState struct {
 // ordered state machine over text, tool calls, and terminal frames.
 // Reasoning is not part of the current canonical v0 grammar and must fail
 // closed instead of disappearing from decode.
-func (s *responsesEventReader) Next(ctx context.Context) (canonical.Event, error) {
+func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
 		s.pending = s.pending[1:]
@@ -138,23 +152,23 @@ func (s *responsesEventReader) Next(ctx context.Context) (canonical.Event, error
 	}
 }
 
-func (s *responsesEventReader) Close(context.Context) error {
+func (s *responsesResponseStream) Close(context.Context) error {
 	return s.reader.Close()
 }
 
-func (s *responsesEventReader) nextSeq() int64 {
+func (s *responsesResponseStream) nextSeq() int64 {
 	s.seq++
 	return s.seq
 }
 
-func (s *responsesEventReader) enqueue(ev canonical.Event) {
+func (s *responsesResponseStream) enqueue(ev canonical.Event) {
 	ev.ExchangeID = s.exchangeID
 	ev.Seq = s.nextSeq()
 	ev.Time = time.Now().UTC()
 	s.pending = append(s.pending, ev)
 }
 
-func (s *responsesEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {
+func (s *responsesResponseStream) enqueueEnvelopeStart(id canonical.EnvelopeID, parent canonical.EnvelopeID, payload canonical.EnvelopeStartPayload, meta ...canonical.EventMetadataFields) {
 	ev := canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: id, ParentID: parent, Payload: payload}
 	if len(meta) > 0 {
 		ev.Meta = meta[0]
@@ -162,39 +176,39 @@ func (s *responsesEventReader) enqueueEnvelopeStart(id canonical.EnvelopeID, par
 	s.enqueue(ev)
 }
 
-func (s *responsesEventReader) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
+func (s *responsesResponseStream) enqueueEnvelopeEnd(id canonical.EnvelopeID, kind canonical.EnvelopeKind, status canonical.EnvelopeStatus) {
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
 }
 
-func (s *responsesEventReader) enqueueTextDelta(id canonical.EnvelopeID, ordinal uint32, text string) {
+func (s *responsesResponseStream) enqueueTextDelta(id canonical.EnvelopeID, ordinal uint32, text string) {
 	s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.TextDeltaPayload{Text: text}}})
 }
 
-func (s *responsesEventReader) enqueueArgsDelta(id canonical.EnvelopeID, ordinal uint32, args string) {
+func (s *responsesResponseStream) enqueueArgsDelta(id canonical.EnvelopeID, ordinal uint32, args string) {
 	s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ArgsDeltaPayload{Args: args}}})
 }
 
-func (s *responsesEventReader) enqueueItemStart(id canonical.EnvelopeID, ordinal uint32, start canonical.ItemStartPayload) {
+func (s *responsesResponseStream) enqueueItemStart(id canonical.EnvelopeID, ordinal uint32, start canonical.ItemStartPayload) {
 	s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: start}})
 }
 
-func (s *responsesEventReader) enqueueItemCompleted(id canonical.EnvelopeID, ordinal uint32, item canonical.CanonicalItem) {
+func (s *responsesResponseStream) enqueueItemCompleted(id canonical.EnvelopeID, ordinal uint32, item canonical.CanonicalItem) {
 	s.enqueue(canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ItemCompletedPayload{Item: item}}})
 }
 
-func (s *responsesEventReader) enqueueUsage(usage canonical.TokenUsage) {
+func (s *responsesResponseStream) enqueueUsage(usage canonical.TokenUsage) {
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseEnvID, Payload: canonical.UsagePayload{Usage: usage}})
 }
 
-func (s *responsesEventReader) enqueueFinish(reason string) {
+func (s *responsesResponseStream) enqueueFinish(reason string) {
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseEnvID, Payload: canonical.FinishPayload{Reason: reason}})
 }
 
-func (s *responsesEventReader) enqueueError(code string, message string) {
+func (s *responsesResponseStream) enqueueError(code string, message string) {
 	s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseEnvID, Payload: canonical.ErrorPayload{Code: code, Message: message}})
 }
 
-func (s *responsesEventReader) handleUnexpectedEOF(ctx context.Context) {
+func (s *responsesResponseStream) handleUnexpectedEOF(ctx context.Context) {
 	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 	s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
 	s.closeOpenText(canonical.EnvelopeStatusError)
@@ -203,11 +217,11 @@ func (s *responsesEventReader) handleUnexpectedEOF(ctx context.Context) {
 	s.completed = true
 }
 
-func (s *responsesEventReader) handleStreamDone(ctx context.Context) {
+func (s *responsesResponseStream) handleStreamDone(ctx context.Context) {
 	s.handleTerminalCompletion(ctx, "completed")
 }
 
-func (s *responsesEventReader) handleTerminalCompletion(ctx context.Context, status string) {
+func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, status string) {
 	normalizedStatus := strings.TrimSpace(status) // swobu:io-string source=provider-wire
 	if normalizedStatus == "" {
 		normalizedStatus = "completed"
@@ -221,7 +235,7 @@ func (s *responsesEventReader) handleTerminalCompletion(ctx context.Context, sta
 	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 
-func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
+func (s *responsesResponseStream) closeOpenText(status canonical.EnvelopeStatus) {
 	if s.textOpen {
 		if status == canonical.EnvelopeStatusCompleted {
 			item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(s.text.String())})
@@ -235,14 +249,14 @@ func (s *responsesEventReader) closeOpenText(status canonical.EnvelopeStatus) {
 	}
 }
 
-func (s *responsesEventReader) closeOpenTools(status canonical.EnvelopeStatus) {
+func (s *responsesResponseStream) closeOpenTools(status canonical.EnvelopeStatus) {
 	for itemID := range s.toolStates {
 		delete(s.toolStates, itemID)
 		delete(s.toolInputs, itemID)
 	}
 }
 
-func (s *responsesEventReader) ensureToolState(itemID string, ordinal uint32, toolType string, callID string, name string) (responsesToolState, error) {
+func (s *responsesResponseStream) ensureToolState(itemID string, ordinal uint32, toolType string, callID string, name string) (responsesToolState, error) {
 	if state, ok := s.toolStates[itemID]; ok {
 		if state.toolType == "" && strings.TrimSpace(toolType) != "" { // swobu:io-string source=domain
 			state.toolType = strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
@@ -276,19 +290,19 @@ func (s *responsesEventReader) ensureToolState(itemID string, ordinal uint32, to
 	return state, nil
 }
 
-func (s *responsesEventReader) markToolStateArgumentsDone(itemID string, state responsesToolState) responsesToolState {
+func (s *responsesResponseStream) markToolStateArgumentsDone(itemID string, state responsesToolState) responsesToolState {
 	state.argumentsDone = true
 	s.toolStates[itemID] = state
 	return state
 }
 
-func (s *responsesEventReader) markToolStateOutputDone(itemID string, state responsesToolState) responsesToolState {
+func (s *responsesResponseStream) markToolStateOutputDone(itemID string, state responsesToolState) responsesToolState {
 	state.outputDone = true
 	s.toolStates[itemID] = state
 	return state
 }
 
-func (s *responsesEventReader) enqueueToolArgs(itemID string, args string) {
+func (s *responsesResponseStream) enqueueToolArgs(itemID string, args string) {
 	if args == "" { // swobu:io-string source=boundary
 		return
 	}
@@ -313,7 +327,7 @@ func fallbackItemID(itemID string, callID string, outputIndex *int) string {
 	return "tool_0"
 }
 
-func (s *responsesEventReader) ordinalFor(itemID string, outputIndex *int) uint32 {
+func (s *responsesResponseStream) ordinalFor(itemID string, outputIndex *int) uint32 {
 	if state, ok := s.toolStates[itemID]; ok {
 		return state.ordinal
 	}

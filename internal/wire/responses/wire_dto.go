@@ -3,21 +3,29 @@ package responses
 import "encoding/json"
 
 type responsesRequestDTO struct {
-	Model                  string                       `json:"model"`
-	Input                  json.RawMessage              `json:"input"`
-	ToolChoice             json.RawMessage              `json:"tool_choice"`
-	ParallelToolCalls      json.RawMessage              `json:"parallel_tool_calls,omitempty"`
-	Tools                  []responsesToolDefinitionDTO `json:"tools,omitempty"`
-	PreviousResponseWireID string                       `json:"previous_response_id"`
-	Conversation           string                       `json:"conversation"`
-	Instructions           json.RawMessage              `json:"instructions,omitempty"`
-	Text                   *responsesTextDTO            `json:"text,omitempty"`
-	Store                  json.RawMessage              `json:"store,omitempty"`
-	MaxOutputTokens        json.RawMessage              `json:"max_output_tokens,omitempty"`
-	Temperature            json.RawMessage              `json:"temperature,omitempty"`
-	TopP                   json.RawMessage              `json:"top_p,omitempty"`
-	Stop                   json.RawMessage              `json:"stop,omitempty"`
-	Stream                 json.RawMessage              `json:"stream,omitempty"`
+	Model                  string                        `json:"model"`
+	Input                  json.RawMessage               `json:"input"`
+	ToolChoice             json.RawMessage               `json:"tool_choice"`
+	ParallelToolCalls      json.RawMessage               `json:"parallel_tool_calls,omitempty"`
+	Tools                  []responsesToolDefinitionDTO  `json:"tools,omitempty"`
+	PreviousResponseWireID string                        `json:"previous_response_id"`
+	Conversation           string                        `json:"conversation"`
+	Instructions           json.RawMessage               `json:"instructions,omitempty"`
+	Text                   *responsesTextDTO             `json:"text,omitempty"`
+	Store                  json.RawMessage               `json:"store,omitempty"`
+	MaxOutputTokens        json.RawMessage               `json:"max_output_tokens,omitempty"`
+	Temperature            json.RawMessage               `json:"temperature,omitempty"`
+	TopP                   json.RawMessage               `json:"top_p,omitempty"`
+	Stop                   json.RawMessage               `json:"stop,omitempty"`
+	Stream                 json.RawMessage               `json:"stream,omitempty"`
+	Reasoning              *responsesReasoningRequestDTO `json:"reasoning,omitempty"`
+	Include                json.RawMessage               `json:"include,omitempty"`
+}
+
+type responsesReasoningRequestDTO struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 type responsesTextDTO struct {
@@ -33,27 +41,44 @@ type responsesTextFormatDTO struct {
 }
 
 type responsesWireOutputItemDTO struct {
-	Type        string          `json:"type"`
-	ID          string          `json:"id,omitempty"`
-	Status      string          `json:"status,omitempty"`
-	Role        string          `json:"role,omitempty"`
-	Content     json.RawMessage `json:"content,omitempty"`
-	CallID      string          `json:"call_id,omitempty"`
-	Name        string          `json:"name,omitempty"`
-	Arguments   string          `json:"arguments,omitempty"`
-	Input       string          `json:"input,omitempty"`
-	ServerLabel string          `json:"server_label,omitempty"`
+	Type             string                         `json:"type"`
+	ID               string                         `json:"id,omitempty"`
+	Status           string                         `json:"status,omitempty"`
+	Role             string                         `json:"role,omitempty"`
+	Content          json.RawMessage                `json:"content,omitempty"`
+	CallID           string                         `json:"call_id,omitempty"`
+	Name             string                         `json:"name,omitempty"`
+	Arguments        string                         `json:"arguments,omitempty"`
+	Input            string                         `json:"input,omitempty"`
+	ServerLabel      string                         `json:"server_label,omitempty"`
+	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
+	EncryptedContent string                         `json:"encrypted_content,omitempty"`
+	Phase            string                         `json:"phase,omitempty"`
+}
+
+type responsesReasoningSummaryDTO struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type responsesReasoningTextDTO struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type responsesInputItemDTO struct {
-	Type      string          `json:"type"`
-	Role      string          `json:"role"`
-	Content   json.RawMessage `json:"content"`
-	CallID    string          `json:"call_id"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-	Output    json.RawMessage `json:"output"`
+	Type             string                         `json:"type"`
+	Role             string                         `json:"role"`
+	Content          json.RawMessage                `json:"content"`
+	CallID           string                         `json:"call_id"`
+	ID               string                         `json:"id"`
+	Name             string                         `json:"name"`
+	Arguments        json.RawMessage                `json:"arguments"`
+	Output           json.RawMessage                `json:"output"`
+	Status           string                         `json:"status,omitempty"`
+	Phase            string                         `json:"phase,omitempty"`
+	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
+	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 }
 
 type responsesResponseDTO struct {
@@ -64,7 +89,7 @@ type responsesResponseDTO struct {
 	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 	OutputText        string                         `json:"output_text"`
-	Output            []any                          `json:"output"`
+	Output            any                            `json:"output"`
 	Usage             *responsesUsageDTO             `json:"usage,omitempty"`
 }
 

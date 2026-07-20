@@ -84,6 +84,44 @@ func TestResumeHistoryInheritsValidatedPredecessorMedia(t *testing.T) {
 	}
 }
 
+func TestResumeHistoryRestoresOpaqueThinkingHiddenFromClientProjection(t *testing.T) {
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "portable summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := canonical.NewOpenRouterOpaqueThinking([]byte(`[{"type":"reasoning.summary","summary":"portable summary"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := mustMessageItem(canonical.MessageRoleAssistant, "answer")
+	previousRequest := makeRequest("m", makeItems("one"), nil)
+	previousResponse := responseWithRef(t, makeResponse(reasoning, answer), canonical.ResponseRef{SwobuID: "resp_hidden"})
+	checkpoint := Checkpoint{Request: previousRequest, Response: previousResponse}
+	// Standard Chat history can contain only the visible answer.
+	complete := makeRequest("m", []canonical.CanonicalItem{
+		mustMessageItem(canonical.MessageRoleUser, "one"), answer,
+		mustMessageItem(canonical.MessageRoleUser, "again"),
+	}, nil)
+	rebased := makeRequest("m", makeItems("again"), nil)
+
+	resolved, err := ResumeHistory(complete, rebased, checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := resolved.Full.Items()
+	if len(items) != 4 || items[1].Kind() != canonical.ItemKindReasoning {
+		t.Fatalf("restored full history = %#v", items)
+	}
+	restored, _ := items[1].Reasoning()
+	if _, ok := restored.Opaque().OpenRouter(); !ok {
+		t.Fatal("implicit resume lost hidden OpenRouter opaque thinking")
+	}
+}
+
 func TestResumeHistoryRejectsMediaThatDoesNotMatchPredecessorRequest(t *testing.T) {
 	image, err := canonical.NewURLImage("https://example.test/request.png", canonical.Unspecified[canonical.ImageDetail]())
 	if err != nil {

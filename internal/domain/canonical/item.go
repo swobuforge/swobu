@@ -13,6 +13,7 @@ const (
 	ItemKindMessage    ItemKind = "message"
 	ItemKindToolCall   ItemKind = "tool_call"
 	ItemKindToolResult ItemKind = "tool_result"
+	ItemKindReasoning  ItemKind = "reasoning"
 )
 
 // TurnOwner identifies the conversational side that owns an ordered item.
@@ -41,6 +42,7 @@ type CanonicalItem struct {
 	message    *MessageItem
 	toolCall   *ToolCallItem
 	toolResult *ToolResultItem
+	reasoning  *ReasoningItem
 }
 
 // MessageItem owns one preserved wire message boundary and its ordered
@@ -84,6 +86,26 @@ type ToolResultItem struct {
 	callID  ToolCallID
 	content []ToolResultPart
 	isError bool
+}
+
+type ReasoningPartKind string
+
+const (
+	ReasoningPartSummary ReasoningPartKind = "summary"
+	ReasoningPartTrace   ReasoningPartKind = "trace"
+)
+
+// ReasoningPart is one non-empty readable artifact returned through a provider
+// reasoning channel. Summary and reasoning-channel text remain distinct.
+type ReasoningPart struct {
+	kind ReasoningPartKind
+	text string
+}
+
+// ReasoningItem is one assistant-owned ordered reasoning artifact.
+type ReasoningItem struct {
+	parts  []ReasoningPart
+	opaque OpaqueThinking
 }
 
 // ToolInput is the closed object-or-raw-text input grammar for a tool call.
@@ -153,6 +175,32 @@ func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool
 	return CanonicalItem{toolResult: &result}, nil
 }
 
+func NewReasoningPart(kind ReasoningPartKind, text string) (ReasoningPart, error) {
+	if kind != ReasoningPartSummary && kind != ReasoningPartTrace {
+		return ReasoningPart{}, fmt.Errorf("canonical reasoning part kind %q is invalid", kind)
+	}
+	if text == "" {
+		return ReasoningPart{}, fmt.Errorf("canonical reasoning part text is empty")
+	}
+	return ReasoningPart{kind: kind, text: text}, nil
+}
+
+// NewReasoningItem constructs one reasoning branch. Opaque-only reasoning is
+// legal when one complete typed replay branch is present.
+func NewReasoningItem(parts []ReasoningPart, opaque OpaqueThinking) (CanonicalItem, error) {
+	cloned, err := cloneValidatedReasoningParts(parts)
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	if err := opaque.validate(); err != nil {
+		return CanonicalItem{}, err
+	}
+	if len(cloned) == 0 && opaque.IsZero() {
+		return CanonicalItem{}, fmt.Errorf("canonical reasoning item requires readable parts or opaque thinking")
+	}
+	return CanonicalItem{reasoning: &ReasoningItem{parts: cloned, opaque: opaque.Clone()}}, nil
+}
+
 // NewJSONObjectToolInput constructs an object-semantic tool input.
 func NewJSONObjectToolInput(object JSONObject) ToolInput {
 	cloned := object.Clone()
@@ -169,12 +217,14 @@ func NewTextToolInput(text string) ToolInput {
 // package-local zero value.
 func (i CanonicalItem) Kind() ItemKind {
 	switch {
-	case i.message != nil && i.toolCall == nil && i.toolResult == nil:
+	case i.message != nil && i.toolCall == nil && i.toolResult == nil && i.reasoning == nil:
 		return ItemKindMessage
-	case i.message == nil && i.toolCall != nil && i.toolResult == nil:
+	case i.message == nil && i.toolCall != nil && i.toolResult == nil && i.reasoning == nil:
 		return ItemKindToolCall
-	case i.message == nil && i.toolCall == nil && i.toolResult != nil:
+	case i.message == nil && i.toolCall == nil && i.toolResult != nil && i.reasoning == nil:
 		return ItemKindToolResult
+	case i.message == nil && i.toolCall == nil && i.toolResult == nil && i.reasoning != nil:
+		return ItemKindReasoning
 	default:
 		return ""
 	}
@@ -196,6 +246,8 @@ func (i CanonicalItem) Owner() TurnOwner {
 		return TurnOwnerAssistant
 	case ItemKindToolResult:
 		return TurnOwnerUser
+	case ItemKindReasoning:
+		return TurnOwnerAssistant
 	}
 	return ""
 }
@@ -224,6 +276,13 @@ func (i CanonicalItem) ToolResult() (ToolResultItem, bool) {
 	return i.toolResult.Clone(), true
 }
 
+func (i CanonicalItem) Reasoning() (ReasoningItem, bool) {
+	if i.Kind() != ItemKindReasoning {
+		return ReasoningItem{}, false
+	}
+	return i.reasoning.Clone(), true
+}
+
 // Clone returns a deeply independent item.
 func (i CanonicalItem) Clone() CanonicalItem {
 	cloned := CanonicalItem{}
@@ -238,6 +297,10 @@ func (i CanonicalItem) Clone() CanonicalItem {
 	if i.toolResult != nil {
 		value := i.toolResult.Clone()
 		cloned.toolResult = &value
+	}
+	if i.reasoning != nil {
+		value := i.reasoning.Clone()
+		cloned.reasoning = &value
 	}
 	return cloned
 }
@@ -259,6 +322,13 @@ func (r ToolResultItem) Content() []ToolResultPart { return cloneToolResultParts
 func (r ToolResultItem) IsError() bool             { return r.isError }
 func (r ToolResultItem) Clone() ToolResultItem {
 	return ToolResultItem{callID: r.callID, content: cloneToolResultParts(r.content), isError: r.isError}
+}
+func (p ReasoningPart) Kind() ReasoningPartKind { return p.kind }
+func (p ReasoningPart) Text() string            { return p.text }
+func (r ReasoningItem) Parts() []ReasoningPart  { return cloneReasoningParts(r.parts) }
+func (r ReasoningItem) Opaque() OpaqueThinking  { return r.opaque.Clone() }
+func (r ReasoningItem) Clone() ReasoningItem {
+	return ReasoningItem{parts: cloneReasoningParts(r.parts), opaque: r.opaque.Clone()}
 }
 
 // Object returns an independent object input when populated.
@@ -310,4 +380,25 @@ func cloneCanonicalItems(items []CanonicalItem) []CanonicalItem {
 		cloned[index] = items[index].Clone()
 	}
 	return cloned
+}
+
+func cloneValidatedReasoningParts(parts []ReasoningPart) ([]ReasoningPart, error) {
+	cloned := make([]ReasoningPart, len(parts))
+	for index, part := range parts {
+		if part.kind != ReasoningPartSummary && part.kind != ReasoningPartTrace {
+			return nil, fmt.Errorf("canonical reasoning part %d kind %q is invalid", index, part.kind)
+		}
+		if part.text == "" {
+			return nil, fmt.Errorf("canonical reasoning part %d text is empty", index)
+		}
+		cloned[index] = part
+	}
+	return cloned, nil
+}
+
+func cloneReasoningParts(parts []ReasoningPart) []ReasoningPart {
+	if parts == nil {
+		return nil
+	}
+	return append([]ReasoningPart(nil), parts...)
 }

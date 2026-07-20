@@ -63,7 +63,7 @@ func TestAdapterPreservesContentPartCoordinates(t *testing.T) {
 	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}})
 	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
 	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 3}, Payload: canonicaltest.MustMessageStart(canonical.MessageRoleAssistant)}})
-	started, err := adapter.Translate(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 3, Part: 2}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}}})
+	started, err := adapter.Translate(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 3, Part: 2}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
 	if err != nil || len(started) != 1 || started[0].Kind != StreamEventContentStarted || started[0].ItemOrdinal != 3 || started[0].PartOrdinal != 2 {
 		t.Fatalf("content start = %#v, err=%v", started, err)
 	}

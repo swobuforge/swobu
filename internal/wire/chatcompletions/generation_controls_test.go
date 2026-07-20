@@ -37,11 +37,11 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 	if err := json.Unmarshal(wire.Raw, &body); err != nil {
 		t.Fatalf("json.Unmarshal returned error: %v", err)
 	}
-	if got, ok := body["max_completion_tokens"].(float64); !ok || got != 64 {
-		t.Fatalf("max_completion_tokens = %#v, want 64", body["max_completion_tokens"])
+	if got, ok := body["max_tokens"].(float64); !ok || got != 64 {
+		t.Fatalf("max_tokens = %#v, want 64", body["max_tokens"])
 	}
-	if _, ok := body["max_tokens"]; ok {
-		t.Fatalf("max_tokens = %#v, want absent", body["max_tokens"])
+	if _, ok := body["max_completion_tokens"]; ok {
+		t.Fatalf("max_completion_tokens = %#v, want absent", body["max_completion_tokens"])
 	}
 	if got, ok := body["temperature"].(float64); !ok || got != 0.25 {
 		t.Fatalf("temperature = %#v, want 0.25", body["temperature"])

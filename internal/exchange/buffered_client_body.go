@@ -45,7 +45,7 @@ func (b *bufferedClientBody) prepare() {
 		b.err = err
 		return
 	}
-	document, err := b.call.clientCodec.EncodeResponseDocument(response)
+	document, err := b.call.clientCodec.EncodeResponseDocument(b.call.fullRequest, response)
 	commitDecisionsBestEffort(b.ctx, b.sink, b.call.exchangeID, document.Decisions)
 	if err != nil {
 		b.err = err

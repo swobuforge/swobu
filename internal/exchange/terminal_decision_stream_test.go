@@ -27,7 +27,7 @@ type testDecisionSource struct{ decisions []compat.Decision }
 
 type pullingClientCodec struct{ testClientCodec }
 
-func (pullingClientCodec) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
+func (pullingClientCodec) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	completion, complete, fail := wire.NewResponseCompletion()
 	body := wire.NewEncodedResponseBody(ctx, events, func(event canonical.Event) ([][]byte, error) {
 		if event.Kind == canonical.EventEnvelopeEnd {

@@ -99,7 +99,7 @@ func (s *countingCheckpointStore) Put(ctx context.Context, workspace string, rec
 	return s.base.Put(ctx, workspace, record)
 }
 
-func (s *countingCheckpointStore) FindByHistory(ctx context.Context, workspace string, history historyfingerprint.History) (session.Checkpoint, bool, error) {
+func (s *countingCheckpointStore) FindByHistory(ctx context.Context, workspace string, history historyfingerprint.History) (session.HistoryMatch, error) {
 	s.getCalls++
 	return s.base.FindByHistory(ctx, workspace, history)
 }

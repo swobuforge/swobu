@@ -3,19 +3,31 @@ package messages
 import "encoding/json"
 
 type messagesRequestDTO struct {
-	Model                  string               `json:"model"`
-	System                 json.RawMessage      `json:"system,omitempty"`
-	Messages               []messagesMessageDTO `json:"messages"`
-	PreviousResponseWireID string               `json:"previous_response_id"`
-	Tools                  []messagesToolDTO    `json:"tools,omitempty"`
-	ToolChoice             json.RawMessage      `json:"tool_choice,omitempty"`
-	DisableParallelToolUse json.RawMessage      `json:"disable_parallel_tool_use,omitempty"`
-	ResponseFormat         json.RawMessage      `json:"response_format,omitempty"`
-	MaxTokens              json.RawMessage      `json:"max_tokens,omitempty"`
-	Temperature            json.RawMessage      `json:"temperature,omitempty"`
-	TopP                   json.RawMessage      `json:"top_p,omitempty"`
-	StopSequences          json.RawMessage      `json:"stop_sequences,omitempty"`
-	Stream                 json.RawMessage      `json:"stream,omitempty"`
+	Model                  string                   `json:"model"`
+	System                 json.RawMessage          `json:"system,omitempty"`
+	Messages               []messagesMessageDTO     `json:"messages"`
+	PreviousResponseWireID string                   `json:"previous_response_id"`
+	Tools                  []messagesToolDTO        `json:"tools,omitempty"`
+	ToolChoice             json.RawMessage          `json:"tool_choice,omitempty"`
+	DisableParallelToolUse json.RawMessage          `json:"disable_parallel_tool_use,omitempty"`
+	ResponseFormat         json.RawMessage          `json:"response_format,omitempty"`
+	MaxTokens              json.RawMessage          `json:"max_tokens,omitempty"`
+	Temperature            json.RawMessage          `json:"temperature,omitempty"`
+	TopP                   json.RawMessage          `json:"top_p,omitempty"`
+	StopSequences          json.RawMessage          `json:"stop_sequences,omitempty"`
+	Stream                 json.RawMessage          `json:"stream,omitempty"`
+	Thinking               *messagesThinkingDTO     `json:"thinking,omitempty"`
+	OutputConfig           *messagesOutputConfigDTO `json:"output_config,omitempty"`
+}
+
+type messagesThinkingDTO struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
+}
+
+type messagesOutputConfigDTO struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type messagesMessageDTO struct {
@@ -53,11 +65,14 @@ type messagesUsageDTO struct {
 }
 
 type messagesResponsePartDTO struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Thinking  *string         `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 }
 
 type messagesStartEventDTO struct {
@@ -97,11 +112,14 @@ type messagesContentBlockStartDTO struct {
 }
 
 type messagesContentBlockBodyDTO struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Thinking  *string         `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 }
 
 type messagesContentBlockDeltaDTO struct {
@@ -114,6 +132,8 @@ type messagesContentBlockDeltaBodyDTO struct {
 	Type        string `json:"type"`
 	Text        string `json:"text,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
 }
 
 type messagesContentBlockStopDTO struct {

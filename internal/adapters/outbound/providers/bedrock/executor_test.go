@@ -88,6 +88,38 @@ func TestBedrockMantleMessagesUsesInlineImagePolyfill(t *testing.T) {
 	}
 }
 
+func TestBedrockMessagesReplaysOpaqueThinking(t *testing.T) {
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"brief","signature":"portable-claude-signature"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "brief")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("anthropic.claude"),
+		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
+	})
+	target := newBedrockTarget("https://bedrock-runtime.us-east-1.amazonaws.com", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages)
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(document.RawBytes()), `"signature":"portable-claude-signature"`) {
+		t.Fatalf("Bedrock Messages composition did not admit Claude thinking state: %s", document.RawBytes())
+	}
+}
+
 type testProviderRequest struct {
 	Request      canonical.CanonicalRequest
 	Contract     exchange.ExecutionContract

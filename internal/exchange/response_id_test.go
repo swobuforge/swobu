@@ -47,8 +47,8 @@ func (failingCheckpointStore) Put(context.Context, string, session.Checkpoint) e
 	return errors.New("forced checkpoint store failure")
 }
 
-func (failingCheckpointStore) FindByHistory(context.Context, string, historyfingerprint.History) (session.Checkpoint, bool, error) {
-	return session.Checkpoint{}, false, nil
+func (failingCheckpointStore) FindByHistory(context.Context, string, historyfingerprint.History) (session.HistoryMatch, error) {
+	return session.MissingHistoryMatch(), nil
 }
 
 // TestRunner_SwobuResponseIDReplacesProviderID proves that when the exchange

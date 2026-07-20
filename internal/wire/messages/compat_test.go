@@ -27,14 +27,14 @@ func (legacyClientRequestDecoder) DecodeClientRequestWithDecisions(doc carrier.D
 type legacyResponseDocumentEncoder struct{}
 
 func (legacyResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (carrier.Document, error) {
-	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	return result.Document, err
 }
 
 type legacyResponseStreamEncoder struct{}
 
 func (legacyResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, d delivery.Delivery) (carrier.ByteStream, error) {
-	result, err := (ResponseStreamEncoder{}).EncodeResponseStream(ctx, events, d)
+	result, err := (ResponseStreamEncoder{}).EncodeResponseStream(ctx, canonical.CanonicalRequest{}, events, d)
 	return result.Stream, err
 }
 

@@ -100,6 +100,7 @@ func (s SamplingControls) IsZero() bool {
 type GenerationControls struct {
 	Limits   GenerationLimits
 	Sampling SamplingControls
+	Effort   Specified[InferenceEffort]
 }
 
 // GenerationControlsParams is the wire-edge input shape used to construct
@@ -109,6 +110,7 @@ type GenerationControlsParams struct {
 	StopSequences   []string
 	Temperature     *float64
 	TopP            *float64
+	Effort          *InferenceEffort
 }
 
 // NewGenerationControls validates and normalizes one generation-control band.
@@ -142,6 +144,12 @@ func NewGenerationControls(params GenerationControlsParams) (GenerationControls,
 		}
 		controls.Sampling.TopP = NewOptionalFloat64(*params.TopP)
 	}
+	if params.Effort != nil {
+		if !validInferenceEffort(*params.Effort) {
+			return GenerationControls{}, BadRequest("generation controls inference effort is invalid")
+		}
+		controls.Effort = Specify(*params.Effort)
+	}
 	return controls, nil
 }
 
@@ -149,11 +157,12 @@ func (c GenerationControls) Clone() GenerationControls {
 	return GenerationControls{
 		Limits:   c.Limits.Clone(),
 		Sampling: c.Sampling.Clone(),
+		Effort:   cloneSpecified(c.Effort, func(value InferenceEffort) InferenceEffort { return value }),
 	}
 }
 
 func (c GenerationControls) IsZero() bool {
-	return c.Limits.IsZero() && c.Sampling.IsZero()
+	return c.Limits.IsZero() && c.Sampling.IsZero() && !c.Effort.IsSpecified()
 }
 
 func validateGenerationControlTemperature(value float64) error {

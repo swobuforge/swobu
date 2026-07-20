@@ -2,6 +2,7 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -10,18 +11,20 @@ import (
 )
 
 type streamFrame struct {
-	Type        string `json:"type"`
-	ID          string `json:"id"`
-	Model       string `json:"model"`
-	Delta       string `json:"delta"`
-	Input       string `json:"input"`
-	Status      string `json:"status"`
-	CallID      string `json:"call_id"`
-	Name        string `json:"name"`
-	ItemID      string `json:"item_id"`
-	OutputIndex *int   `json:"output_index"`
-	Arguments   string `json:"arguments"`
-	Response    struct {
+	Type         string `json:"type"`
+	ID           string `json:"id"`
+	Model        string `json:"model"`
+	Delta        string `json:"delta"`
+	Input        string `json:"input"`
+	Status       string `json:"status"`
+	CallID       string `json:"call_id"`
+	Name         string `json:"name"`
+	ItemID       string `json:"item_id"`
+	OutputIndex  *int   `json:"output_index"`
+	SummaryIndex *int   `json:"summary_index"`
+	ContentIndex *int   `json:"content_index"`
+	Arguments    string `json:"arguments"`
+	Response     struct {
 		ID                string                         `json:"id"`
 		Model             string                         `json:"model"`
 		Status            string                         `json:"status"`
@@ -31,18 +34,22 @@ type streamFrame struct {
 		OutputText        string                         `json:"output_text,omitempty"`
 	} `json:"response"`
 	Item struct {
-		ID          string `json:"id"`
-		Type        string `json:"type"`
-		CallID      string `json:"call_id"`
-		Name        string `json:"name"`
-		Arguments   string `json:"arguments"`
-		Input       string `json:"input"`
-		ServerLabel string `json:"server_label"`
+		ID               string                         `json:"id"`
+		Type             string                         `json:"type"`
+		CallID           string                         `json:"call_id"`
+		Name             string                         `json:"name"`
+		Arguments        string                         `json:"arguments"`
+		Input            string                         `json:"input"`
+		ServerLabel      string                         `json:"server_label"`
+		Status           string                         `json:"status"`
+		Summary          []responsesReasoningSummaryDTO `json:"summary"`
+		Content          json.RawMessage                `json:"content"`
+		EncryptedContent string                         `json:"encrypted_content"`
 	} `json:"item"`
 }
 
 // swobu:lint ignore function-complexity because=Responses streaming dispatch keeps frame ordering and lifecycle ownership in one boundary function.
-func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFrame) (bool, canonical.Event, error) {
+func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamFrame) (bool, canonical.Event, error) {
 	frameType := strings.TrimSpace(frame.Type) // swobu:io-string source=provider-wire
 	switch frameType {
 	case "response.created":
@@ -55,6 +62,13 @@ func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFram
 			return false, canonical.Event{}, err
 		}
 		return true, canonical.Event{}, nil
+	case "response.reasoning_summary_text.delta":
+		if err := s.handleReasoningDelta(frame, canonical.ReasoningPartSummary); err != nil {
+			return false, canonical.Event{}, err
+		}
+		return true, canonical.Event{}, nil
+	case "response.reasoning_text.delta":
+		return false, canonical.Event{}, canonical.UnsupportedOperation("responses reasoning trace streaming is not supported in P0")
 	case "response.function_call_arguments.delta":
 		if err := s.handleToolArgumentsDelta(frame, canonical.ToolTypeFunction); err != nil {
 			return false, canonical.Event{}, err
@@ -117,7 +131,7 @@ func (s *responsesEventReader) handleFrame(ctx context.Context, frame streamFram
 	}
 }
 
-func (s *responsesEventReader) handleResponseCreated(ctx context.Context, frame streamFrame) error {
+func (s *responsesResponseStream) handleResponseCreated(ctx context.Context, frame streamFrame) error {
 	if s.started {
 		return nil
 	}
@@ -139,7 +153,7 @@ func (s *responsesEventReader) handleResponseCreated(ctx context.Context, frame 
 	return nil
 }
 
-func (s *responsesEventReader) handleOutputTextDelta(frame streamFrame) error {
+func (s *responsesResponseStream) handleOutputTextDelta(frame streamFrame) error {
 	s.emittedOutput = true
 	if s.textOpen && frame.OutputIndex != nil && uint32(*frame.OutputIndex) != s.textOrdinal {
 		s.closeOpenText(canonical.EnvelopeStatusCompleted)
@@ -153,14 +167,14 @@ func (s *responsesEventReader) handleOutputTextDelta(frame streamFrame) error {
 		s.textOrdinal = s.ordinalFor("text", frame.OutputIndex)
 		s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, s.textOrdinal))
 		s.enqueueItemStart(s.textEnvID, s.textOrdinal, start)
-		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: s.textOrdinal}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}}})
+		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: s.textOrdinal}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
 	}
 	s.text.WriteString(frame.Delta)
 	s.enqueueTextDelta(s.textEnvID, s.textOrdinal, frame.Delta)
 	return nil
 }
 
-func (s *responsesEventReader) handleToolArgumentsDelta(frame streamFrame, toolType string) error {
+func (s *responsesResponseStream) handleToolArgumentsDelta(frame streamFrame, toolType string) error {
 	s.emittedOutput = true
 	s.closeOpenText(canonical.EnvelopeStatusCompleted)
 	itemID := frame.ItemID
@@ -176,8 +190,19 @@ func (s *responsesEventReader) handleToolArgumentsDelta(frame streamFrame, toolT
 	return nil
 }
 
-func (s *responsesEventReader) handleOutputItemAdded(frame streamFrame) (bool, error) {
+func (s *responsesResponseStream) handleOutputItemAdded(frame streamFrame) (bool, error) {
 	itemType := strings.TrimSpace(frame.Item.Type) // swobu:io-string source=boundary
+	if itemType == "reasoning" {
+		s.emittedOutput = true
+		s.closeOpenText(canonical.EnvelopeStatusCompleted)
+		itemID := fallbackItemID(frame.Item.ID, "reasoning", frame.OutputIndex)
+		if _, exists := s.reasoningStates[itemID]; exists {
+			return false, nil
+		}
+		ordinal := s.ordinalFor(itemID, frame.OutputIndex)
+		s.reasoningStates[itemID] = &responsesReasoningState{ordinal: ordinal, id: frame.Item.ID, status: frame.Item.Status}
+		return true, nil
+	}
 	var toolType string
 	switch itemType {
 	case "function_call":
@@ -212,13 +237,15 @@ func (s *responsesEventReader) handleOutputItemAdded(frame streamFrame) (bool, e
 	return true, nil
 }
 
-func (s *responsesEventReader) handleToolArgumentsDone(frame streamFrame, toolType string) (bool, error) {
+func (s *responsesResponseStream) handleToolArgumentsDone(frame streamFrame, toolType string) (bool, error) {
 	return s.completeToolState(frame, toolType, true, false)
 }
 
-func (s *responsesEventReader) handleOutputItemDone(frame streamFrame) (bool, error) {
+func (s *responsesResponseStream) handleOutputItemDone(frame streamFrame) (bool, error) {
 	itemType := strings.TrimSpace(frame.Item.Type) // swobu:io-string source=boundary
 	switch itemType {
+	case "reasoning":
+		return s.completeReasoningState(frame)
 	case "function_call":
 		return s.completeToolState(frame, canonical.ToolTypeFunction, false, true)
 	case "custom_tool_call":
@@ -228,7 +255,7 @@ func (s *responsesEventReader) handleOutputItemDone(frame streamFrame) (bool, er
 	}
 }
 
-func (s *responsesEventReader) completeToolState(frame streamFrame, toolType string, argumentsDone bool, outputDone bool) (bool, error) {
+func (s *responsesResponseStream) completeToolState(frame streamFrame, toolType string, argumentsDone bool, outputDone bool) (bool, error) {
 	s.emittedOutput = true
 	itemID := frame.ItemID
 	if itemID == "" {
@@ -306,7 +333,7 @@ func (s *responsesEventReader) completeToolState(frame streamFrame, toolType str
 	return emitted, nil
 }
 
-func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame streamFrame) error {
+func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, frame streamFrame) error {
 	if !s.started {
 		if err := s.handleResponseCreated(ctx, frame); err != nil {
 			return err
@@ -349,48 +376,8 @@ func (s *responsesEventReader) handleResponseTerminal(ctx context.Context, frame
 	}
 }
 
-func (s *responsesEventReader) shiftPendingEvent() canonical.Event {
+func (s *responsesResponseStream) shiftPendingEvent() canonical.Event {
 	event := s.pending[0]
 	s.pending = s.pending[1:]
 	return event
-}
-
-func (s *responsesEventReader) enqueueCompletedOutputItems(items []canonical.CanonicalItem) error {
-	for _, item := range items {
-		ordinal := s.nextOrdinal
-		s.nextOrdinal++
-		envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, ordinal))
-		switch item.Kind() {
-		case canonical.ItemKindMessage:
-			message, _ := item.Message()
-			start, err := canonical.NewMessageStart(message.Role())
-			if err != nil {
-				return err
-			}
-			s.enqueueItemStart(envID, ordinal, start)
-			for _, part := range message.Content() {
-				if text, ok := part.Text(); ok {
-					s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ContentStartPayload{Kind: canonical.PartKindText}}})
-					s.enqueueTextDelta(envID, ordinal, text.Text())
-				}
-			}
-			s.enqueueItemCompleted(envID, ordinal, item)
-		case canonical.ItemKindToolCall:
-			call, _ := item.ToolCall()
-			start, err := canonical.NewToolCallStart(call.CallID(), call.Tool())
-			if err != nil {
-				return err
-			}
-			s.enqueueItemStart(envID, ordinal, start)
-			if object, ok := call.Input().Object(); ok {
-				s.enqueueArgsDelta(envID, ordinal, object.String())
-			} else if text, ok := call.Input().Text(); ok {
-				s.enqueueArgsDelta(envID, ordinal, text)
-			}
-			s.enqueueItemCompleted(envID, ordinal, item)
-		default:
-			return canonical.UnsupportedOperation("responses completed output item kind is unsupported")
-		}
-	}
-	return nil
 }

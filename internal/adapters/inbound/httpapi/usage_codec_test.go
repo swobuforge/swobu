@@ -19,7 +19,7 @@ func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		"stop",
 		usage,
 	)
-	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestChatCompletionsCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 		"stop",
 		usage,
 	)
-	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		"completed",
 		usage,
 	)
-	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 		"completed",
 		usage,
 	)
-	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPrese
 		"completed",
 		usage,
 	)
-	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(outputValue)
+	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, outputValue)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 		"end_turn",
 		usage,
 	)
-	doc, err := (messages.ResponseDocumentEncoder{}).EncodeResponseDocument(output)
+	doc, err := (messages.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatalf("encodeBuffered returned error: %v", err)
 	}

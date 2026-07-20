@@ -9,7 +9,7 @@ import (
 )
 
 // ResolvedRequest contains the complete canonical request and the current delta
-// with any exact-target native-resumption refinement inherited from a checkpoint.
+// with any exact-target native-resumption handle inherited from a checkpoint.
 type ResolvedRequest struct {
 	Full          canonical.CanonicalRequest
 	Delta         canonical.CanonicalRequest
@@ -17,7 +17,7 @@ type ResolvedRequest struct {
 }
 
 // ForTarget returns the valid request representation for one exact target
-// generation. A matching native refinement selects Delta; every other target
+// generation. A matching native handle selects Delta; every other target
 // receives Full for full-history execution.
 func (p ResolvedRequest) ForTarget(target provider.TargetSnapshot) canonical.CanonicalRequest {
 	if previous, ok := p.Delta.PreviousResponse(); ok && previous.Responses != nil &&
@@ -71,16 +71,21 @@ func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Resolved
 	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
 		return ResolvedRequest{}, fmt.Errorf("invalid session checkpoint media: %w", err)
 	}
+	effective, err := resolveToolContinuation(checkpoint, request)
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
 	return ResolvedRequest{
-		Full:          materialize(checkpoint, request),
-		Delta:         inheritRequestBands(checkpoint.Request, request, &response),
+		Full:          materialize(checkpoint, effective),
+		Delta:         inheritRequestBands(checkpoint.Request, effective, &response),
 		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
 	}, nil
 }
 
-// ResumeHistory preserves the complete supplied request as fallback authority
-// and combines a codec-rebased current invocation with an exact checkpoint's
-// native refinement. Protocol history partitioning never occurs in session.
+// ResumeHistory uses the complete supplied request only as the history value
+// whose fingerprint selected checkpoint. After that identity proof, checkpoint
+// canonical truth is authoritative: materialization restores hidden opaque thinking
+// that no client projection was allowed to carry.
 func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.CanonicalRequest, checkpoint Checkpoint) (ResolvedRequest, error) {
 	if _, ok := complete.PreviousResponse(); ok {
 		return ResolvedRequest{}, errors.New("implicit history request contains explicit previous response")
@@ -95,11 +100,96 @@ func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.Canoni
 	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
 		return ResolvedRequest{}, fmt.Errorf("invalid history checkpoint media: %w", err)
 	}
+	effective, err := resolveToolContinuation(checkpoint, rebased)
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
 	return ResolvedRequest{
-		Full:          complete.Clone(),
-		Delta:         inheritRequestBands(checkpoint.Request, rebased, &response),
+		Full:          materialize(checkpoint, effective),
+		Delta:         inheritRequestBands(checkpoint.Request, effective, &response),
 		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
 	}, nil
+}
+
+// resolveToolContinuation validates tool-result correlation and writes the
+// ongoing assistant turn's compute and effort into the one effective request.
+// The checkpoint request is the sole authority for omitted continuation values.
+func resolveToolContinuation(checkpoint Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+	pendingSet := make(map[canonical.ToolCallID]struct{})
+	for _, item := range checkpoint.Response.Items() {
+		call, ok := item.ToolCall()
+		if !ok {
+			continue
+		}
+		pendingSet[call.CallID()] = struct{}{}
+	}
+	matched := make(map[canonical.ToolCallID]struct{}, len(pendingSet))
+	for _, item := range current.Items() {
+		result, ok := item.ToolResult()
+		if !ok {
+			continue
+		}
+		if _, expected := pendingSet[result.CallID()]; !expected {
+			return canonical.CanonicalRequest{}, canonical.BadRequest("tool result does not belong to the unfinished assistant turn")
+		}
+		if _, duplicate := matched[result.CallID()]; duplicate {
+			return canonical.CanonicalRequest{}, canonical.BadRequest("unfinished assistant turn contains a duplicate tool result")
+		}
+		matched[result.CallID()] = struct{}{}
+	}
+	if len(matched) == 0 {
+		return current.Clone(), nil
+	}
+	compute := current.Reasoning().ComputeField()
+	priorCompute := checkpoint.Request.Reasoning().ComputeField()
+	if explicit, ok := compute.Get(); ok {
+		prior, priorSet := priorCompute.Get()
+		if !priorSet || !equalReasoningCompute(explicit, prior) {
+			return canonical.CanonicalRequest{}, canonical.UnsupportedOperation("current reasoning compute conflicts with unfinished tool turn")
+		}
+	} else {
+		compute = priorCompute
+	}
+	controls := current.Controls()
+	priorEffort := checkpoint.Request.Controls().Effort
+	if explicit, ok := controls.Effort.Get(); ok {
+		prior, priorSet := priorEffort.Get()
+		if !priorSet || explicit != prior {
+			return canonical.CanonicalRequest{}, canonical.UnsupportedOperation("current inference effort conflicts with unfinished tool turn")
+		}
+	} else {
+		controls.Effort = priorEffort
+	}
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: compute, Disclosure: current.Reasoning().DisclosureField(),
+	})
+	if err != nil {
+		return canonical.CanonicalRequest{}, err
+	}
+	return replaceComputeControls(current, controls, reasoning), nil
+}
+
+func equalReasoningCompute(left, right canonical.ReasoningCompute) bool {
+	if left.Kind() != right.Kind() || left.Kind() == "" {
+		return false
+	}
+	leftTokens, leftBudget := left.Tokens()
+	rightTokens, rightBudget := right.Tokens()
+	return leftBudget == rightBudget && (!leftBudget || leftTokens == rightTokens)
+}
+
+func replaceComputeControls(request canonical.CanonicalRequest, controls canonical.GenerationControls, reasoning canonical.ReasoningControls) canonical.CanonicalRequest {
+	previous, _ := request.PreviousResponse()
+	var previousPointer *canonical.ResponseRef
+	if _, ok := request.PreviousResponse(); ok {
+		previousPointer = &previous
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: request.Items(),
+		Tools: request.ToolsField(), PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
+		ToolCallBatch: request.ToolCallBatchField(), Controls: controls, Reasoning: reasoning,
+		OutputFormat: request.OutputFormatField(),
+	})
 }
 
 func withoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
@@ -111,6 +201,7 @@ func withoutPreviousResponse(request canonical.CanonicalRequest) canonical.Canon
 		ToolPolicy:    canonical.Specify(request.EffectiveToolPolicy()),
 		ToolCallBatch: canonical.Specify(request.ToolCallBatch()),
 		Controls:      request.Controls(),
+		Reasoning:     request.Reasoning(),
 		OutputFormat:  canonical.Specify(request.OutputFormat()),
 	})
 }
@@ -124,6 +215,7 @@ func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonica
 		ToolPolicy:    request.ToolPolicyField(),
 		ToolCallBatch: request.ToolCallBatchField(),
 		Controls:      request.Controls(),
+		Reasoning:     request.Reasoning(),
 		OutputFormat:  request.OutputFormatField(),
 	})
 }
@@ -138,6 +230,7 @@ func inheritRequestBands(previous canonical.CanonicalRequest, current canonical.
 		ToolPolicy:       canonical.Specify(inheritCloneable(current.ToolPolicySpecified(), current.ToolPolicy(), previous.ToolPolicy())),
 		ToolCallBatch:    canonical.Specify(inheritCloneable(current.ToolCallBatchSpecified(), current.ToolCallBatch(), previous.ToolCallBatch())),
 		Controls:         inheritControls(current.Controls(), previous.Controls()),
+		Reasoning:        current.Reasoning(),
 		OutputFormat:     canonical.Specify(inheritCloneable(current.OutputFormatSpecified(), current.OutputFormat(), previous.OutputFormat())),
 	})
 }
@@ -155,6 +248,7 @@ func materialize(previous Checkpoint, current canonical.CanonicalRequest) canoni
 		ToolPolicy:    canonical.Specify(inheritCloneable(current.ToolPolicySpecified(), current.ToolPolicy(), previous.Request.ToolPolicy())),
 		ToolCallBatch: canonical.Specify(inheritCloneable(current.ToolCallBatchSpecified(), current.ToolCallBatch(), previous.Request.ToolCallBatch())),
 		Controls:      inheritControls(current.Controls(), previous.Request.Controls()),
+		Reasoning:     current.Reasoning(),
 		OutputFormat:  canonical.Specify(inheritCloneable(current.OutputFormatSpecified(), current.OutputFormat(), previous.Request.OutputFormat())),
 	})
 }
@@ -237,5 +331,8 @@ func inheritControls(current, previous canonical.GenerationControls) canonical.G
 	if !current.Sampling.TopP.IsZero() {
 		out.Sampling.TopP = current.Sampling.TopP.Clone()
 	}
+	// Inference effort is a per-invocation reasoning control. Unlike ordinary
+	// generation limits, omission must remain omission across session resume.
+	out.Effort = current.Clone().Effort
 	return out
 }

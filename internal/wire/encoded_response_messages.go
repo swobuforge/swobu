@@ -15,14 +15,14 @@ import (
 type EncodedResponseMessages struct {
 	events     canonical.ResponseStream
 	encode     ResponseEventEncoder
-	completion ResponseCompletion
+	completion *ResponseCompletion
 	fail       func(error)
 	pending    [][]byte
 	close      sync.Once
 	closeErr   error
 }
 
-func NewEncodedResponseMessages(events canonical.ResponseStream, encode ResponseEventEncoder, completion ResponseCompletion, fail func(error)) *EncodedResponseMessages {
+func NewEncodedResponseMessages(events canonical.ResponseStream, encode ResponseEventEncoder, completion *ResponseCompletion, fail func(error)) *EncodedResponseMessages {
 	return &EncodedResponseMessages{events: events, encode: encode, completion: completion, fail: fail}
 }
 

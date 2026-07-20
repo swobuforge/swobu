@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
-func TestMemoryStoreFindsAndReplacesExactHistoryIndexWithinStoreAndWorkspace(t *testing.T) {
+func TestMemoryStoreFindsUniqueHistoryAndRejectsAmbiguousHistoryWithinWorkspace(t *testing.T) {
 	store := newMemoryStore()
 	fingerprint := testCheckpointFingerprint(t, "one")
 	first := storeRecord("resp_first")
@@ -20,15 +20,18 @@ func TestMemoryStoreFindsAndReplacesExactHistoryIndexWithinStoreAndWorkspace(t *
 	if err := store.Put(context.Background(), "alpha", first); err != nil {
 		t.Fatal(err)
 	}
-	got, found, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
+	match, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
+	got, found := match.Unique()
 	if err != nil || !found || got.Response.Response().SwobuID != "resp_first" {
 		t.Fatalf("first lookup = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
 	}
-	if _, found, err := store.FindByHistory(context.Background(), "beta", fingerprint); err != nil || found {
-		t.Fatalf("cross-workspace lookup = (%t, %v), want miss", found, err)
+	match, err = store.FindByHistory(context.Background(), "beta", fingerprint)
+	if err != nil || !match.IsMissing() {
+		t.Fatalf("cross-workspace lookup = (%#v, %v), want miss", match, err)
 	}
-	if _, found, err := newMemoryStore().FindByHistory(context.Background(), "alpha", fingerprint); err != nil || found {
-		t.Fatalf("cross-store lookup = (%t, %v), want miss", found, err)
+	match, err = newMemoryStore().FindByHistory(context.Background(), "alpha", fingerprint)
+	if err != nil || !match.IsMissing() {
+		t.Fatalf("cross-store lookup = (%#v, %v), want miss", match, err)
 	}
 
 	second := storeRecord("resp_second")
@@ -36,9 +39,9 @@ func TestMemoryStoreFindsAndReplacesExactHistoryIndexWithinStoreAndWorkspace(t *
 	if err := store.Put(context.Background(), "alpha", second); err != nil {
 		t.Fatal(err)
 	}
-	got, found, err = store.FindByHistory(context.Background(), "alpha", fingerprint)
-	if err != nil || !found || got.Response.Response().SwobuID != "resp_second" {
-		t.Fatalf("replacement lookup = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
+	match, err = store.FindByHistory(context.Background(), "alpha", fingerprint)
+	if err != nil || !match.IsAmbiguous() {
+		t.Fatalf("two indistinguishable checkpoints lookup = (%#v, %v), want ambiguous", match, err)
 	}
 }
 
@@ -60,13 +63,15 @@ func TestMemoryStoreExpiryRemovesFingerprintIndexWithoutRemovingReplacement(t *t
 		t.Fatal(err)
 	}
 	current = current.Add(2 * time.Minute)
-	got, found, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
+	match, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
+	got, found := match.Unique()
 	if err != nil || !found || got.Response.Response().SwobuID != "resp_new" {
 		t.Fatalf("lookup after old expiry = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
 	}
 	current = current.Add(time.Hour)
-	if _, found, err := store.FindByHistory(context.Background(), "alpha", fingerprint); err != nil || found {
-		t.Fatalf("lookup after replacement expiry = (%t, %v), want miss", found, err)
+	match, err = store.FindByHistory(context.Background(), "alpha", fingerprint)
+	if err != nil || !match.IsMissing() {
+		t.Fatalf("lookup after replacement expiry = (%#v, %v), want miss", match, err)
 	}
 }
 
@@ -92,7 +97,7 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 	scope := "alpha"
 
 	const goroutines = 32
-	const iterations = 64
+	const iterations = 16
 
 	start := make(chan struct{})
 	errCh := make(chan error, goroutines*iterations)
@@ -132,6 +137,31 @@ func TestMemoryStoreConcurrentAccess(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestMemoryStoreEvictsOldestExpiringRecordAtCapacity(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	for index := 0; index <= maxMemoryStoreRecords; index++ {
+		id := canonical.SwobuResponseID(fmt.Sprintf("resp_%04d", index))
+		record := storeRecord(id)
+		expiresAt := now.Add(time.Duration(index+1) * time.Minute)
+		record.ExpiresAt = &expiresAt
+		if err := store.Put(context.Background(), "alpha", record); err != nil {
+			t.Fatalf("Put(%s): %v", id, err)
+		}
+	}
+	if len(store.records) != maxMemoryStoreRecords {
+		t.Fatalf("record count = %d, want %d", len(store.records), maxMemoryStoreRecords)
+	}
+	if _, found, err := store.Get(context.Background(), "alpha", "resp_0000"); err != nil || found {
+		t.Fatalf("oldest record lookup = (found %t, err %v), want eviction", found, err)
+	}
+	newestID := canonical.SwobuResponseID(fmt.Sprintf("resp_%04d", maxMemoryStoreRecords))
+	if _, found, err := store.Get(context.Background(), "alpha", newestID); err != nil || !found {
+		t.Fatalf("newest record lookup = (found %t, err %v), want retained", found, err)
 	}
 }
 
@@ -270,8 +300,8 @@ func TestMemoryStoreWriteReclaimsHighVolumeExpiredRecordsWithoutReadingThem(t *t
 			t.Fatalf("Put %d: %v", i, err)
 		}
 	}
-	if got := len(store.records); got != recordCount {
-		t.Fatalf("records before expiry = %d, want %d", got, recordCount)
+	if got := len(store.records); got != maxMemoryStoreRecords {
+		t.Fatalf("records before expiry = %d, want bounded count %d", got, maxMemoryStoreRecords)
 	}
 
 	current = current.Add(2 * time.Minute)

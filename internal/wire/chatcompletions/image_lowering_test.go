@@ -14,12 +14,12 @@ func TestEncodeChatImageOriginal_StrictRejectsCompatMapsHighWithDecision(t *test
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
 
-	strict := EncodeOptions{MaxOutputTokensField: MaxOutputTokensFieldCompletion, Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}}
+	strict := EncodeOptions{Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}}
 	if _, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "", strict); err == nil {
 		t.Fatal("strict Chat Completions lowering accepted original image detail")
 	}
 	sink := &recordingDecisionSink{}
-	compatOptions := EncodeOptions{MaxOutputTokensField: MaxOutputTokensFieldCompletion}
+	compatOptions := EncodeOptions{}
 	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex", compatOptions)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestEncodeChatToolResultImageRejects(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("must not escape"), canonical.NewImageToolResultPart(image)}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
 	sink := &recordingDecisionSink{}
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex", EncodeOptions{MaxOutputTokensField: MaxOutputTokensFieldCompletion})
+	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex", EncodeOptions{})
 	if err == nil {
 		t.Fatal("Chat Completions accepted a tool-result image")
 	}
@@ -54,7 +54,7 @@ func TestEncodeChatUserImages_PreservesURLAndInlineSources(t *testing.T) {
 		canonical.NewImageMessagePart(urlImage), canonical.NewImageMessagePart(inlineImage),
 	})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "", EncodeOptions{MaxOutputTokensField: MaxOutputTokensFieldCompletion})
+	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

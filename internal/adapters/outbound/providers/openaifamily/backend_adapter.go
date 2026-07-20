@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 const maxBackendEvidence = 64 << 10
@@ -65,23 +64,14 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, canonical.BadEndpoint("provider policy is unsupported for exact backend")
 	}
 	backend := provider.Backend{
-		Target: target.Clone(),
-		Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind, Options: protocolcodec.Options{
-			ChatCompletionsTokenField: chatCompletionsTokenField(e.profile.ProviderID()),
-		}},
+		Target:    target.Clone(),
+		Codec:     protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind},
 		Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}
 	return backend, nil
-}
-
-func chatCompletionsTokenField(providerID profile.ProviderID) chatcompletions.MaxOutputTokensField {
-	if providerID == profile.ProviderSpecOpenAI {
-		return chatcompletions.MaxOutputTokensFieldCompletion
-	}
-	return chatcompletions.MaxOutputTokensFieldLegacy
 }
 
 // Send performs provider HTTP transport over an already-final wire document.

@@ -13,18 +13,22 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithTokenField(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, field MaxOutputTokensField) (wire.ProviderEncodeResult, error) {
-	return (ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, delivery, exchangeID, EncodeOptions{MaxOutputTokensField: field})
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
+	return (ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, delivery, exchangeID, options, nil)
 }
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithMutation(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, options EncodeOptions, mutate RequestMutation) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(input.Request, delivery, sink, exchangeID, options)
+		return EncodeCarrierWithMutation(input.Request, delivery, sink, exchangeID, options, mutate)
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
 
 func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, request canonical.CanonicalRequest, doc carrier.Document, exchangeID string) (wire.ProviderDecodeResult, error) {
+	return (ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request, doc, exchangeID)
+}
+
+func (ProviderDocumentDecoder) DecodeProviderDocumentWithOptions(ctx context.Context, request canonical.CanonicalRequest, doc carrier.Document, exchangeID string) (wire.ProviderDecodeResult, error) {
 	if err := core.ValidateResponseDocument(doc, protocolkind.ChatCompletions); err != nil {
 		carrierErr := canonical.InternalError("chat completions response wire carrier is invalid")
 		carrierErr.Details = map[string]string{"wire_document_invariant": err.Error()}
@@ -37,6 +41,10 @@ func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, reque
 }
 
 func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
+	return (ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request, stream, exchangeID)
+}
+
+func (ProviderEnvelopeDecoder) DecodeProviderEnvelopeWithOptions(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
 	if err := core.ValidateResponseSSEByteStream(stream); err != nil {
 		carrierErr := canonical.InternalError("chat completions stream wire carrier is invalid")
 		carrierErr.Details = map[string]string{"wire_stream_invariant": err.Error()}

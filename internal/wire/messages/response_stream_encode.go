@@ -14,10 +14,11 @@ func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 	return &messagesEnvelopeStreamEncoder{adapter: sse.NewEnvelopeEventAdapter()}
 }
 
-func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
+func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, request canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	state := e.newStreamState()
+	state.(*messagesEnvelopeStreamEncoder).request = request.Clone()
 	completion, complete, fail := wire.NewResponseCompletion()
-	encoder := messagesFingerprintingEncoder(state.EncodeEnvelopeEvent, complete, fail)
+	encoder := messagesFingerprintingEncoder(request, state.EncodeEnvelopeEvent, complete, fail)
 	body := wire.NewEncodedResponseBody(ctx, events, encoder, completion, fail)
 	return wire.ClientByteStreamResult{
 		Stream:     carrier.ByteStream{MediaType: "text/event-stream", Body: body},
@@ -25,6 +26,6 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, events 
 	}, nil
 }
 
-func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {
+func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {
 	return wire.ClientMessageResult{}, canonical.UnsupportedDelivery("messages does not support message-oriented client delivery")
 }

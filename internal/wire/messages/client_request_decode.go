@@ -118,6 +118,10 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	reasoning, err := decodeMessagesReasoning(dto.Thinking)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
 	var previousResponse *canonical.ResponseRef
 	previousResponseID := canonical.NewSwobuResponseID(dto.PreviousResponseWireID)
 	if dto.PreviousResponseWireID != "" && previousResponseID.IsZero() { // swobu:io-string source=boundary
@@ -138,6 +142,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
 		Items:            items,
 		Controls:         controls,
+		Reasoning:        reasoning,
 		PreviousResponse: previousResponse,
 	}
 	if len(dto.System) > 0 {
@@ -276,6 +281,58 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			}
 			decoded = append(decoded, result)
 			pending = removePendingToolUseID(pending, toolUseID)
+		case "thinking":
+			if author != canonical.MessageRoleAssistant {
+				return canonical.BadRequest("messages thinking blocks require assistant role")
+			}
+			if err := flushMessage(); err != nil {
+				return err
+			}
+			rawBlock, marshalErr := json.Marshal(part)
+			if marshalErr != nil {
+				return canonical.BadRequest("messages thinking block is invalid")
+			}
+			opaque, err := canonical.NewMessagesOpaqueThinking(rawBlock)
+			if err != nil {
+				return canonical.BadRequest("messages thinking signature is invalid")
+			}
+			value := part.Thinking
+			if value == "" {
+				value = part.Text
+			}
+			var reasoningParts []canonical.ReasoningPart
+			if value != "" {
+				reasoningPart, err := canonical.NewReasoningPart(canonical.ReasoningPartTrace, value)
+				if err != nil {
+					return canonical.BadRequest("messages thinking text is invalid")
+				}
+				reasoningParts = []canonical.ReasoningPart{reasoningPart}
+			}
+			item, err := canonical.NewReasoningItem(reasoningParts, opaque)
+			if err != nil {
+				return canonical.BadRequest("messages thinking block is invalid")
+			}
+			decoded = append(decoded, item)
+		case "redacted_thinking":
+			if author != canonical.MessageRoleAssistant {
+				return canonical.BadRequest("messages redacted thinking blocks require assistant role")
+			}
+			if err := flushMessage(); err != nil {
+				return err
+			}
+			rawBlock, marshalErr := json.Marshal(part)
+			if marshalErr != nil {
+				return canonical.BadRequest("messages redacted thinking block is invalid")
+			}
+			opaque, err := canonical.NewMessagesOpaqueThinking(rawBlock)
+			if err != nil {
+				return canonical.BadRequest("messages redacted thinking data is invalid")
+			}
+			item, err := canonical.NewReasoningItem(nil, opaque)
+			if err != nil {
+				return canonical.BadRequest("messages redacted thinking block is invalid")
+			}
+			decoded = append(decoded, item)
 		case "":
 			if len(strings.TrimSpace(string(part.CacheControl))) > 0 || len(strings.TrimSpace(string(part.CachePoint))) > 0 { // swobu:io-string source=boundary
 				return nil

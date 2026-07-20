@@ -118,9 +118,8 @@ type exchangeStarted struct{}
 func (exchangeStarted) isExchangeEvent() {}
 
 type checkpointLoaded struct {
-	record session.Checkpoint
-	found  bool
-	err    error
+	match session.HistoryMatch
+	err   error
 }
 
 func (checkpointLoaded) isExchangeEvent() {}
@@ -319,22 +318,30 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		s.phase = failedPhase{problem: loaded.err}
 		return reducerOutcome{nextState: s}, nil
 	}
-	if phase.explicit && !loaded.found {
+	if phase.explicit && loaded.match.IsMissing() {
 		s.phase = failedPhase{problem: canonical.BadRequest("unknown previous_response_id")}
 		return reducerOutcome{nextState: s}, nil
+	}
+	if loaded.match.IsAmbiguous() {
+		s.phase = failedPhase{problem: canonical.BadRequest("ambiguous client history requires previous_response_id")}
+		return reducerOutcome{nextState: s}, nil
+	}
+	record, found := loaded.match.Unique()
+	if !found && !loaded.match.IsMissing() {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: checkpoint lookup returned invalid match")
 	}
 	var prepared session.ResolvedRequest
 	var err error
 	if phase.explicit {
-		prepared, err = session.Resume(s.input.request, loaded.record)
-		if loaded.record.HistoryFingerprint != nil && loaded.record.HistoryFingerprint.Scheme() == s.input.requestFingerprint.Scheme() {
-			history := *loaded.record.HistoryFingerprint
+		prepared, err = session.Resume(s.input.request, record)
+		if record.HistoryFingerprint != nil && record.HistoryFingerprint.Scheme() == s.input.requestFingerprint.Scheme() {
+			history := *record.HistoryFingerprint
 			s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 		}
-	} else if loaded.found {
+	} else if found {
 		// The codec-rebased request is a candidate only. ForTarget selects it
-		// solely when the checkpoint has an exact usable native refinement.
-		prepared, err = session.ResumeHistory(s.input.request, s.input.rebasedRequest.Request, loaded.record)
+		// solely when the checkpoint has an exact usable native handle.
+		prepared, err = session.ResumeHistory(s.input.request, s.input.rebasedRequest.Request, record)
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	} else {

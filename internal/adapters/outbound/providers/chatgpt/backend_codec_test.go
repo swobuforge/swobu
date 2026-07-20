@@ -1,6 +1,7 @@
 package chatgpt
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,6 +14,19 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
+
+func TestBackendCodecPreservesRawJSONIntegers(t *testing.T) {
+	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: canonicaltest.LargeIntegerRequest(t, "gpt-5.4-mini"),
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(document.RawBytes(), []byte("9007199254740993")); got != 3 {
+		t.Fatalf("large integer occurrences = %d, want 3: %s", got, document.RawBytes())
+	}
+}
 
 func TestBackendCodecNormalizesCodexPayload(t *testing.T) {
 	t.Parallel()
@@ -73,7 +87,9 @@ func TestBackendInternalStoreFalseDoesNotSuppressNativeResponseCapture(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
+	target := provider.NewTargetSnapshot("chatgpt-target", "chatgpt", "https://chatgpt.test", "", "responses", "", "responses")
+	target.Model = "gpt-5.4-mini"
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{SwobuID: "resp_test", TargetID: target.TargetID, TargetVersion: target.TargetVersion}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,5 +100,21 @@ func TestBackendInternalStoreFalseDoesNotSuppressNativeResponseCapture(t *testin
 	responsesRef := output.Response().Responses
 	if responsesRef == nil || responsesRef.ProviderResponseID != "provider_resp_789" {
 		t.Fatalf("native response refinement = %#v", responsesRef)
+	}
+	next := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:            canonical.Specify("gpt-5.4-mini"),
+		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_test", Responses: responsesRef},
+	})
+	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{Canonical: next, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["previous_response_id"] != "provider_resp_789" {
+		t.Fatalf("native continuation payload = %s", document.RawBytes())
 	}
 }

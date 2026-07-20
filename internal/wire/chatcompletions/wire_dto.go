@@ -15,6 +15,7 @@ type chatCompletionsRequestDTO struct {
 	MaxCompletionTokens    json.RawMessage                    `json:"max_completion_tokens,omitempty"`
 	TopP                   json.RawMessage                    `json:"top_p,omitempty"`
 	Stop                   json.RawMessage                    `json:"stop,omitempty"`
+	ReasoningEffort        json.RawMessage                    `json:"reasoning_effort,omitempty"`
 	Stream                 json.RawMessage                    `json:"stream,omitempty"`
 	StreamOptions          json.RawMessage                    `json:"stream_options,omitempty"`
 }

@@ -17,7 +17,10 @@
 // inline bytes. Codecs receive prepared legal inline carriers and remain pure.
 // Attempt-local tool allocation reserves legal literal names before
 // assigning salted bounded aliases, so every valid tool set is projectable.
-// Protocol-specific response identity stays in typed canonical refinements.
-// Provider contracts carry no resumption sidecar; routing-owned target ID
-// and version are used only to test refinement applicability.
+// Protocol-specific response identity stays in typed canonical native handles.
+// Session resolution materializes unfinished tool-turn compute continuity into
+// the effective canonical request before this boundary. Routing-owned target
+// ID and version bind provider-owned native response handles. Self-contained
+// opaque thinking remains attached to its canonical reasoning item and replays
+// unchanged through the Messages protocol or exact OpenRouter provider hook.
 package provider

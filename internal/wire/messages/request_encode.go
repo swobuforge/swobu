@@ -30,6 +30,9 @@ type contentID struct {
 	IsError   bool            `json:"is_error,omitempty"`
 	Content   any             `json:"content,omitempty"`
 	Source    any             `json:"source,omitempty"`
+	Thinking  *string         `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 }
 
 // EncodeOptions selects destination-specific image behavior while keeping the
@@ -66,7 +69,13 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	} else if len(wireTools) > 0 {
 		payload["tools"] = wireTools
 	}
-	if err := encodeMessagesGenerationControls(payload, req.Controls()); err != nil {
+	if err := encodeMessagesGenerationControls(payload, req.Controls(), req.Reasoning()); err != nil {
+		return carrier.Document{}, err
+	}
+	if err := encodeMessagesReasoning(payload, req.Reasoning()); err != nil {
+		if decisionErr := emitMessagesDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
+			return carrier.Document{}, decisionErr
+		}
 		return carrier.Document{}, err
 	}
 	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
@@ -118,7 +127,9 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			}
 			i++
 		}
-		out = append(out, wire)
+		if len(wire.Content) > 0 {
+			out = append(out, wire)
+		}
 	}
 	return out, nil
 }
@@ -158,6 +169,17 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 			return nil, err
 		}
 		return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: content, IsError: result.IsError()}), nil
+	}
+	if reasoning, ok := item.Reasoning(); ok {
+		opaque, exact := reasoning.Opaque().Messages()
+		if !exact {
+			return blocks, nil
+		}
+		var block contentID
+		if err := json.Unmarshal(opaque, &block); err != nil || block.Type != "thinking" && block.Type != "redacted_thinking" {
+			return nil, canonical.InternalError("messages opaque thinking is invalid")
+		}
+		return append(blocks, block), nil
 	}
 	return nil, canonical.UnsupportedOperation("canonical item is not supported on the messages protocol")
 }
@@ -239,6 +261,10 @@ func encodeMessagesImage(image canonical.ImagePart, sink compat.Sink, exchangeID
 }
 
 func emitMessagesImageDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome) error {
+	return emitMessagesDecision(sink, exchangeID, feature, outcome)
+}
+
+func emitMessagesDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome) error {
 	if sink == nil {
 		return nil
 	}

@@ -20,7 +20,7 @@ import (
 func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
 	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi")}, "completed")
-	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestScalarInputFingerprintMatchesItsFutureHistoryItem(t *testing.T) {
 	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{
 		canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi"),
 	}, "completed")
-	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestRequestFingerprintAppendAndReconstructLaw(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":`+test.firstInput+`}`)
-			encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(test.response(t))
+			encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, test.response(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -204,7 +204,7 @@ func FuzzScalarInputAppendAndReconstructLaw(f *testing.F) {
 	response := canonicaltest.Response(f, "swobu_fuzz", "m", []canonical.CanonicalItem{
 		canonicaltest.Message(f, canonical.MessageRoleAssistant, "hi"),
 	}, "completed")
-	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -265,12 +265,12 @@ func FuzzScalarInputAppendAndReconstructLaw(f *testing.F) {
 
 func TestBufferedAndStreamingResponseFingerprintsConverge(t *testing.T) {
 	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi")}, "completed")
-	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := canonical.SynthesizeResponseEnvelopeEvents("ex", response.Response(), response.Model(), response.Items(), response.CompletionReason(), response.Usage())
-	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
+	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestBufferedAndStreamingToolResponseFingerprintsConvergeAcrossCarriers(t *t
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
 	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
 	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{call}, "tool_calls")
-	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestBufferedAndStreamingToolResponseFingerprintsConvergeAcrossCarriers(t *t
 		t.Run(string(framing), func(t *testing.T) {
 			events := canonical.SynthesizeResponseEnvelopeEvents("ex", response.Response(), response.Model(), response.Items(), response.CompletionReason(), response.Usage())
 			if framing == delivery.FramingSSE {
-				streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(framing))
+				streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), delivery.StreamingDelivery(framing))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -305,7 +305,7 @@ func TestBufferedAndStreamingToolResponseFingerprintsConvergeAcrossCarriers(t *t
 				assertResponsesCompletionFingerprint(t, streamed.Completion, buffered.ResponseFingerprint)
 				return
 			}
-			streamed, err := (ResponseStreamEncoder{}).EncodeResponseMessages(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(framing))
+			streamed, err := (ResponseStreamEncoder{}).EncodeResponseMessages(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), delivery.StreamingDelivery(framing))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -323,7 +323,7 @@ func TestBufferedAndStreamingToolResponseFingerprintsConvergeAcrossCarriers(t *t
 	}
 }
 
-func assertResponsesCompletionFingerprint(t *testing.T, completion wire.ResponseCompletion, want *historyfingerprint.Response) {
+func assertResponsesCompletionFingerprint(t *testing.T, completion *wire.ResponseCompletion, want *historyfingerprint.Response) {
 	t.Helper()
 	got := completion.Snapshot()
 	if got.State != wire.CompletionCompleted || got.ResponseFingerprint == nil || want == nil || *got.ResponseFingerprint != *want {
@@ -371,7 +371,7 @@ func TestResponsesHistoryResumesAtCurrentFunctionCallOutput(t *testing.T) {
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
 	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
 	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{call}, "tool_calls")
-	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(response)
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		t.Fatal(err)
 	}

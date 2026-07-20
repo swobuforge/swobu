@@ -10,12 +10,12 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
-	encoded, outputText, status, incompleteReason, err := encodeResponsesOutput(output)
+func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+	encoded, outputText, status, incompleteReason, err := encodeResponsesOutput(request, output)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
-	responseFingerprint, err := fingerprintResponsesResponse(output)
+	responseFingerprint, err := fingerprintResponsesResponseValue(encoded)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
@@ -39,55 +39,26 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(output canonical.Canonical
 	}, nil
 }
 
-func encodeResponsesOutput(output canonical.CanonicalResponse) ([]any, string, string, string, error) {
-	encoded := make([]any, 0, len(output.Items()))
+func encodeResponsesOutput(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]responsesHistoryItemDTO, string, string, string, error) {
+	state := responsesResponseHistoryState{finishReason: output.CompletionReason()}
 	outputText := ""
 	status, incompleteReason := responsesWireStatusForFinishReason(output.CompletionReason())
-	for _, item := range output.Items() {
-		switch item.Kind() {
-		case canonical.ItemKindMessage:
-			message, _ := item.Message()
-			parts := make([]responsesOutputTextItemDTO, 0, len(message.Content()))
+	for ordinal, item := range output.Items() {
+		if message, ok := item.Message(); ok {
 			for _, part := range message.Content() {
-				textPart, ok := part.Text()
-				if !ok {
-					return nil, "", "", "", canonical.UnsupportedOperation("responses image output is not implemented")
+				if text, textOK := part.Text(); textOK {
+					outputText += text.Text()
 				}
-				text := textPart.Text()
-				outputText += text
-				parts = append(parts, responsesOutputTextItemDTO{Type: "output_text", Text: text})
 			}
-			encoded = append(encoded, responsesOutputItemDTO{
-				Type:    "message",
-				Status:  status,
-				Role:    string(message.Role()),
-				Content: parts,
-			})
-		case canonical.ItemKindToolCall:
-			call, _ := item.ToolCall()
-			tool := call.Tool()
-			name := tool.Name()
-			input := ""
-			if object, ok := call.Input().Object(); ok {
-				input = object.String()
-			} else if text, ok := call.Input().Text(); ok {
-				input = text
-			} else {
-				return nil, "", "", "", canonical.InternalError("responses output tool input is invalid")
-			}
-			encoded = append(encoded, responsesWireToolItem(
-				call.CallID().String(),
-				call.CallID().String(),
-				name,
-				string(tool.Kind()),
-				status,
-				input,
-			))
-		default:
-			return nil, "", "", "", canonical.UnsupportedOperation("responses output item kind is unsupported")
+		}
+		if err := state.appendItem(request, ordinal, item); err != nil {
+			return nil, "", "", "", err
+		}
+		if state.items[len(state.items)-1].Status == "" {
+			state.items[len(state.items)-1].Status = status
 		}
 	}
-	return encoded, outputText, status, incompleteReason, nil
+	return state.items, outputText, status, incompleteReason, nil
 }
 
 func responsesWireStatusForFinishReason(finishReason string) (string, string) {

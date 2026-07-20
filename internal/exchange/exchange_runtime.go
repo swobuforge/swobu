@@ -61,7 +61,7 @@ func encodeClientOutput(ctx context.Context, call providerCall, envelope canonic
 
 	if call.clientDelivery.Mode == delivery.Streaming {
 		if call.clientDelivery.Framing == delivery.FramingWebSocket {
-			messageResult, err := call.clientCodec.EncodeResponseMessages(ctx, envelope, call.clientDelivery)
+			messageResult, err := call.clientCodec.EncodeResponseMessages(ctx, call.fullRequest, envelope, call.clientDelivery)
 			commitDecisionsBestEffort(ctx, sink, call.exchangeID, messageResult.Decisions)
 			if err != nil {
 				return nil, err
@@ -71,7 +71,7 @@ func encodeClientOutput(ctx context.Context, call providerCall, envelope canonic
 			}
 			return NewMessageStreamingResponse(messageResult.Response), nil
 		}
-		streamResult, err := call.clientCodec.EncodeResponseStream(ctx, envelope, call.clientDelivery)
+		streamResult, err := call.clientCodec.EncodeResponseStream(ctx, call.fullRequest, envelope, call.clientDelivery)
 		commitDecisionsBestEffort(ctx, sink, call.exchangeID, streamResult.Decisions)
 		if err != nil {
 			return nil, err

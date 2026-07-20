@@ -11,7 +11,10 @@
 // back into that canonical instruction band instead of user-authored
 // conversation items. The package also owns success-stream decoding for this
 // protocol only, including reasoning-token usage accounting when the wire shape
-// provides it. Empty tool surfaces omit tool_choice because the choice is inert
+// provides it. Standard reasoning_effort belongs to this protocol grammar.
+// Provider dialects and extensions remain outside this package and may wrap
+// this codec only at the exact-provider seam.
+// Empty tool surfaces omit tool_choice because the choice is inert
 // there and some backends reject an explicit no-tool field. It must not take on
 // endpoint selection, provider wiring, or non-chat public contract semantics.
 // Client request decoding also normalizes stringified function_call.arguments

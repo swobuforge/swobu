@@ -13,7 +13,7 @@ type checkpointingReadCloser struct {
 	ctx        context.Context
 	inner      io.ReadCloser
 	committer  *checkpointCommitter
-	completion wire.ResponseCompletion
+	completion *wire.ResponseCompletion
 }
 
 func (b *checkpointingReadCloser) Read(p []byte) (int, error) {
@@ -29,7 +29,7 @@ func (b *checkpointingReadCloser) Close() error { return b.inner.Close() }
 type checkpointingMessageStream struct {
 	inner      carrier.MessageStream
 	committer  *checkpointCommitter
-	completion wire.ResponseCompletion
+	completion *wire.ResponseCompletion
 	once       sync.Once
 }
 

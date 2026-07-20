@@ -136,6 +136,10 @@ func (s *chatCompletionsResponseHistoryState) appendItem(item canonical.Canonica
 		}
 		s.toolCalls = append(s.toolCalls, converted)
 		return nil
+	case canonical.ItemKindReasoning:
+		// Reasoning is intentionally invisible on the standard Chat client
+		// contract and therefore absent from its reconstructed history value.
+		return nil
 	default:
 		return canonical.UnsupportedOperation("chat completions protocol only supports text and tool use output items")
 	}
