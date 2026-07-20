@@ -17,8 +17,8 @@
 // protocol records the provider whose catalog admitted it and must match the
 // typed connection provider. Effective setting equality compares durable
 // fields explicitly. Target settings and credential-reference saves advance
-// the version; replay uses it to reject native handles captured before a target
-// save. Version is intentionally not persisted while replay itself is local.
+// the version; session resolution uses it to reject native handles captured
+// before a target save. Version is intentionally process-local.
 //
 // The canonical model lives in
 // docs/03-architecture/system-shape-and-request-flow/workspace-routing-configuration-and-local-persistence.md

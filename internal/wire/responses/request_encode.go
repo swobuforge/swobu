@@ -257,7 +257,7 @@ func responsesWireToolChoice(choice any) string {
 
 func encodeInput(req canonical.CanonicalRequest, forceStructuredInput bool, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) (any, error) {
 	items := req.Items()
-	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasContinuationDelta(items) { // swobu:io-string source=boundary
+	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasResumptionInput(items) { // swobu:io-string source=boundary
 		return nil, nil
 	}
 	if !forceStructuredInput {
@@ -303,7 +303,7 @@ func textOnlyItem(item canonical.CanonicalItem) (string, bool) {
 	return text.Text(), true
 }
 
-func hasContinuationDelta(items []canonical.CanonicalItem) bool {
+func hasResumptionInput(items []canonical.CanonicalItem) bool {
 	for _, item := range items {
 		if item.Kind() == canonical.ItemKindToolResult {
 			return true

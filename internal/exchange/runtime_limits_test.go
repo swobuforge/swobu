@@ -2,13 +2,13 @@ package exchange
 
 import "testing"
 
-func TestDefaultRuntimeLimitsSeparateTransportMediaAndReplayOwnership(t *testing.T) {
+func TestDefaultRuntimeLimitsSeparateTransportMediaAndCheckpointOwnership(t *testing.T) {
 	limits := DefaultRuntimeLimits()
 	if err := limits.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if limits.Media.MaxTotalImageBytes >= limits.MaxReplayBytes {
-		t.Fatalf("image aggregate %d leaves no replay structural budget below %d", limits.Media.MaxTotalImageBytes, limits.MaxReplayBytes)
+	if limits.Media.MaxTotalImageBytes >= limits.MaxCheckpointBytes {
+		t.Fatalf("image aggregate %d leaves no checkpoint structural budget below %d", limits.Media.MaxTotalImageBytes, limits.MaxCheckpointBytes)
 	}
 }
 

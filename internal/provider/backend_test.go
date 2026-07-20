@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestProviderContractsHaveNoContinuationSidecar(t *testing.T) {
+func TestProviderContractsHaveNoResumptionSidecar(t *testing.T) {
 	for name, typ := range map[string]reflect.Type{
 		"Request":         reflect.TypeOf(Request{}),
 		"Backend":         reflect.TypeOf(Backend{}),

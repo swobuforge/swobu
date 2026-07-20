@@ -38,7 +38,7 @@ func (t ToolProjectionTable) OriginalKey(attemptKey canonical.ToolKey) (canonica
 }
 
 // ProjectAttemptTools replaces declaration/call keys with request-scoped wire
-// aliases while retaining the reverse table outside canonical replay truth.
+// aliases while retaining the reverse table outside checkpoint truth.
 func ProjectAttemptTools(request canonical.CanonicalRequest) (canonical.CanonicalRequest, ToolProjectionTable, []compat.Decision, error) {
 	table := ToolProjectionTable{byCanonical: map[canonical.ToolKey]string{}, byWire: map[wireToolKey]canonical.ToolKey{}}
 	decisions := make([]compat.Decision, 0)

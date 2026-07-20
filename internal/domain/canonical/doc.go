@@ -11,13 +11,13 @@
 // Request-band omission is stored with each field through Specified values;
 // typed InstructionSet values preserve directive role and order. MessageRole
 // names message authorship; TurnOwner is deliberately only user or assistant.
-// Replay merges request bands explicitly and appends ordered items without a
+// Session resumption merges request bands explicitly and appends ordered items without a
 // parallel presence schema. RequestPartRef names durable request-tree
 // occurrences; ItemPosition is only a progressive stream coordinate. A
 // response stream has one response envelope, one finish, at most one usage,
 // and either completed success or terminal error. Response construction admits
 // only assistant messages and tool calls; request-only tool results cannot
-// become provider output. Completed items remain replay checkpoints.
+// become provider output. Completed items remain response-projection checkpoints.
 
 // Transcript-prefix fingerprints describe prior semantic items without
 // retaining quadratic prefix material; candidate verification bytes are
@@ -27,5 +27,5 @@
 //
 // Provider wire names, aliases, transport DTOs, and runtime mechanics remain
 // outside this package. ResponseRef is the typed exception for response identity
-// and exact-target native continuation refinement.
+// and exact-target native-resumption refinement.
 package canonical

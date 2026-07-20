@@ -6,7 +6,7 @@ import (
 )
 
 // CanonicalResponse is the fully materialized canonical success value.
-// Construction rejects request-only item states before replay or encoding.
+// Construction rejects request-only item states before checkpointing or encoding.
 type CanonicalResponse struct {
 	response     ResponseRef
 	model        string

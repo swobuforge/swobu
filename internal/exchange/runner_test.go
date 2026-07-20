@@ -16,7 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
@@ -46,9 +46,9 @@ func (r *blockingEnvelopeReader) Next(context.Context) (canonical.Event, error) 
 
 func (r *blockingEnvelopeReader) Close(context.Context) error { return nil }
 
-type deterministicSwobuResponseIDGenerator struct{}
+type deterministicResponseIDGenerator struct{}
 
-func (deterministicSwobuResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
+func (deterministicResponseIDGenerator) NewSwobuResponseID(_ context.Context, exchangeID string) (canonical.SwobuResponseID, error) {
 	return canonical.SwobuResponseID("swobu_" + exchangeID), nil
 }
 
@@ -326,9 +326,9 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
 		},
-		ReplayStore:      replay.NewMemoryStore(),
-		SwobuResponseIDs: deterministicSwobuResponseIDGenerator{},
-		Policy:           DefaultWorkspacePolicy(),
+		CheckpointStore: session.NewMemoryStore(),
+		ResponseIDs:     deterministicResponseIDGenerator{},
+		Policy:          DefaultWorkspacePolicy(),
 	}
 }
 

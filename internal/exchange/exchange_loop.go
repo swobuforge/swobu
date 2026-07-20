@@ -8,8 +8,8 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/session"
 )
 
 func runExchange(
@@ -23,10 +23,10 @@ func runExchange(
 	workspace routing.Workspace,
 	timing *trafficevidence.Timing,
 ) (RequestOutput, error) {
-	if err := validateReplayRuntime(runner); err != nil {
+	if err := validateCheckpointRuntime(runner); err != nil {
 		return RequestOutput{}, err
 	}
-	responseID, err := allocateSwobuResponseID(ctx, exchangeID, runner.SwobuResponseIDs)
+	responseID, err := allocateResponseID(ctx, exchangeID, runner.ResponseIDs)
 	if err != nil {
 		return RequestOutput{}, err
 	}
@@ -63,9 +63,9 @@ func runExchange(
 
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	switch c := cmd.(type) {
-	case loadReplayCommand:
+	case loadCheckpointCommand:
 		record, found, err := c.store.Get(ctx, c.workspaceSlug, c.reference)
-		return replayLoaded{record: record, found: found, err: err}
+		return checkpointLoaded{record: record, found: found, err: err}
 	case prepareProviderAttemptCommand:
 		preparationCtx := ctx
 		cancel := func() {}
@@ -75,7 +75,7 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 		defer cancel()
 		request, fetchCache, usedMedia, decisions, err := prepareImages(preparationCtx, c.request, c.protocol, c.policy, c.limits, c.fetcher, c.fetchCache, c.historical)
 		if err == nil {
-			usedMedia, err = rebaseAttemptMedia(replay.Prepared{Semantic: c.semantic}, c.request, usedMedia)
+			usedMedia, err = rebaseAttemptMedia(session.ResolvedRequest{Full: c.semantic}, c.request, usedMedia)
 		}
 		return providerAttemptPrepared{selection: c.selection, request: request, fetchCache: fetchCache, usedMedia: usedMedia, decisions: decisions, err: err}
 	case callProviderCommand:

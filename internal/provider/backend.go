@@ -60,7 +60,7 @@ type BackendResolver interface {
 	ResolveBackend(TargetSnapshot) (Backend, error)
 }
 
-// Backend binds one exact target to its continuation namespace, codec, and
+// Backend binds one exact target to its native-resumption identity, codec, and
 // document-only transport.
 type Backend struct {
 	Target    TargetSnapshot

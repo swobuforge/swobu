@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
@@ -105,9 +105,9 @@ func deliveryIsIncremental(clientDelivery delivery.Delivery, providerDelivery de
 	return clientDelivery.IsStreaming() && providerDelivery.IsStreaming()
 }
 
-// IsReplayCommitFailure classifies the replay gate's terminal error without
-// exposing replay implementation details to inbound delivery adapters.
-func IsReplayCommitFailure(err error) bool { return replay.IsTerminalCommitFailure(err) }
+// IsCheckpointCommitFailure classifies the session checkpoint gate's terminal
+// error without exposing storage details to inbound delivery adapters.
+func IsCheckpointCommitFailure(err error) bool { return session.IsCheckpointCommitFailure(err) }
 
 func commitDecisionsBestEffort(ctx context.Context, sink compat.Sink, exchangeID string, decisions []compat.Decision) {
 	if sink == nil || len(decisions) == 0 {

@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestContinuationUsesTypedProviderResponseRef(t *testing.T) {
+func TestPreviousResponseUsesTypedProviderResponseRef(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}, PreviousResponse: testResponsesPrevious("swobu_1", "provider_1")})
 	doc, err := EncodeCarrier(request, delivery.BufferedDelivery())
 	if err != nil {
@@ -24,7 +24,7 @@ func TestContinuationUsesTypedProviderResponseRef(t *testing.T) {
 	}
 }
 
-func TestContinuationEmitsExplicitEmptySpecifiedBands(t *testing.T) {
+func TestPreviousResponseEmitsExplicitEmptySpecifiedBands(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"), Instructions: canonical.Specify(canonical.InstructionSet{}), Tools: canonicaltest.SpecifiedToolSet(t),
 		ToolPolicy: canonical.Specify(canonical.ToolPolicy{}), ToolCallBatch: canonical.Specify(canonical.ToolCallBatchPolicy{}), OutputFormat: canonical.Specify(canonical.OutputFormat{}),

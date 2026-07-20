@@ -6,10 +6,10 @@
 //   - Routing orchestration (one reducer-owned state lifecycle per request)
 //   - Ordered provider-call attempts and all selection of further provider work
 //   - One exchange-scoped URL fetch cache reused by candidate attempts without
-//     becoming replay truth
+//     becoming checkpoint truth
 //   - Winning-attempt media bindings, merged only with inherited durable
 //     bindings and retained by exact request-part occurrence
-//   - Explicit workspace-slug partitioning for the daemon-global replay store
+//   - Explicit workspace-slug partitioning for the daemon-global checkpoint store
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
 //   - The reducer-owned provider-result edge where future concrete tool
@@ -22,7 +22,7 @@
 //     a generic tool runtime
 //
 // Import rules:
-//   - exchange → routing, provider, replay, profile, observation, domain
+//   - exchange → routing, provider, session, profile, observation, domain
 //   - Nothing may import exchange except adapters and bootstrap.
 //
 // Future external tool work must enter as a concrete command, event, and phase

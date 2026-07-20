@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"time"
@@ -6,30 +6,30 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-const defaultRecordTTL = 24 * time.Hour
+const defaultCheckpointTTL = 24 * time.Hour
 
-// Record is the full semantic request state persisted for replay.
-// A record exists only if replay capture succeeded at terminal success.
+// Checkpoint is one immutable successful-response boundary retained for session
+// resumption. Its identity is the Swobu ID in Response; no duplicate checkpoint
+// or session ID is stored.
 //
 // Intentionally absent:
 //   - Parent (no chain)
-//   - Status (a record implies completed)
-//   - Replayable bool (presence implies replayable)
+//   - Status (a checkpoint implies completed)
 //   - RequestDelta (full request is stored, not deltas)
 //   - Attachment bag
-//   - Continuation namespace
-type Record struct {
+//   - Mutable session head
+type Checkpoint struct {
 	Request       canonical.CanonicalRequest
 	Response      canonical.CanonicalResponse
 	ResolvedMedia ResolvedMedia
 	CreatedAt     time.Time
-	// ExpiresAt bounds how long the record remains replay-addressable.
+	// ExpiresAt bounds how long the checkpoint remains resumable.
 	ExpiresAt *time.Time
 }
 
-// Clone returns a deep copy of the replay record suitable for store handoff.
-func (r Record) Clone() Record {
-	cloned := Record{
+// Clone returns a deep copy suitable for crossing the storage boundary.
+func (r Checkpoint) Clone() Checkpoint {
+	cloned := Checkpoint{
 		Request:       r.Request.Clone(),
 		Response:      r.Response.Clone(),
 		ResolvedMedia: r.ResolvedMedia.Clone(),

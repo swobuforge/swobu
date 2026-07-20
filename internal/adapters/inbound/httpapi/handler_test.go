@@ -494,7 +494,7 @@ func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *te
 	}
 }
 
-func TestHandler_RejectsResponsesRequestsWithBothContinuationSelectors(t *testing.T) {
+func TestHandler_RejectsResponsesRequestsWithBothPreviousResponseSelectors(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","conversation":"conv_123","input":"continue"}`))

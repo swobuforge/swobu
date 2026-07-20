@@ -57,7 +57,7 @@ type NetworkPolicy struct {
 }
 
 // MediaLimits bounds image inspection and materialization independently of
-// ingress transport and replay-retention policy.
+// ingress transport and checkpoint-retention policy.
 type MediaLimits struct {
 	MaxImages          int
 	MaxImageBytes      int64

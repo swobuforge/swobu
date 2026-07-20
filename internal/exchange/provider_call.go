@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 )
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
@@ -37,28 +37,28 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	if clientCodec == nil {
 		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.UnsupportedOperation("required client codec not resolved")
 	}
-	// Reject already-known replay material before attempt preparation performs
+	// Reject already-known checkpoint material before attempt preparation performs
 	// URL fetch I/O or the provider is invoked.
-	if err := replay.ValidateResolvedRequestSizeLimit(s.prepared.Semantic, s.prepared.ResolvedMedia, runner.Policy.Limits.MaxReplayBytes); err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("replay preflight: %w", err)
+	if err := session.ValidateResolvedRequestSize(s.prepared.Full, s.prepared.ResolvedMedia, runner.Policy.Limits.MaxCheckpointBytes); err != nil {
+		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("checkpoint preflight: %w", err)
 	}
 	var canonicalRequest canonical.CanonicalRequest
 	switch selection.requestChoice {
 	case providerRequestPreferred:
-		canonicalRequest = s.prepared.PreferredForTarget(path.target)
+		canonicalRequest = s.prepared.ForTarget(path.target)
 	case providerRequestFullHistory:
-		canonicalRequest = s.prepared.Semantic.Clone()
+		canonicalRequest = s.prepared.Full.Clone()
 	default:
 		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
 	}
-	usedMedia := replay.ResolvedMedia{}
+	usedMedia := session.ResolvedMedia{}
 	if preparedOverride != nil {
 		canonicalRequest = preparedOverride.request.Clone()
 		usedMedia = preparedOverride.usedMedia.Clone()
 	} else if requestHasImages(canonicalRequest) {
 		historicalMedia := historicalMediaForAttempt(canonicalRequest, s.prepared.ResolvedMedia)
 		command := &prepareProviderAttemptCommand{
-			selection: selection, request: canonicalRequest.Clone(), semantic: s.prepared.Semantic.Clone(), protocol: backend.Target.ProtocolKind,
+			selection: selection, request: canonicalRequest.Clone(), semantic: s.prepared.Full.Clone(), protocol: backend.Target.ProtocolKind,
 			policy: runner.Policy.ImageFetch, limits: runner.Policy.Limits.Media,
 			fetcher: runner.ImageFetcher, fetchCache: cloneMediaFetchCache(s.mediaFetchCache), historical: historicalMedia,
 		}
@@ -72,7 +72,7 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	evidence := exchangeEvidence{}
 	evidence.decisions = append(evidence.decisions, projectionDecisions...)
 	workspaceSlug := s.input.workspace.Slug().String()
-	if err := validateReplayInput(runner, workspaceSlug); err != nil {
+	if err := validateCheckpointInput(runner, workspaceSlug); err != nil {
 		return providerCall{}, path.target, exchangeEvidence{}, nil, err
 	}
 	contract := NewExecutionContract(s.input.clientDelivery).WithProviderDelivery(path.delivery)
@@ -88,13 +88,13 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	if err != nil {
 		return providerCall{}, path.target, evidence, nil, fmt.Errorf("resolved media provenance: %w", err)
 	}
-	if err := replay.ValidateResolvedRequestSizeLimit(s.prepared.Semantic, resolvedMedia, runner.Policy.Limits.MaxReplayBytes); err != nil {
-		return providerCall{}, path.target, evidence, nil, preparationError(PreparationCandidate, "replay prepared-attempt preflight: %w", err)
+	if err := session.ValidateResolvedRequestSize(s.prepared.Full, resolvedMedia, runner.Policy.Limits.MaxCheckpointBytes); err != nil {
+		return providerCall{}, path.target, evidence, nil, preparationError(PreparationRequest, "checkpoint prepared-request preflight: %w", err)
 	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
-		workspaceSlug: workspaceSlug, replayRequest: s.prepared.Semantic.Clone(),
+		workspaceSlug: workspaceSlug, fullRequest: s.prepared.Full.Clone(),
 		resolvedMedia: resolvedMedia,
 	}, path.target, evidence, nil, nil
 }
@@ -102,25 +102,25 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 // rebaseAttemptMedia converts positions in the attempted request into the
 // durable semantic request coordinate space. An attempted native delta is
 // accepted only when its items are exactly the semantic transcript suffix.
-func rebaseAttemptMedia(prepared replay.Prepared, attempt canonical.CanonicalRequest, used replay.ResolvedMedia) (replay.ResolvedMedia, error) {
-	semanticItems := prepared.Semantic.Items()
+func rebaseAttemptMedia(prepared session.ResolvedRequest, attempt canonical.CanonicalRequest, used session.ResolvedMedia) (session.ResolvedMedia, error) {
+	semanticItems := prepared.Full.Items()
 	attemptItems := attempt.Items()
 	if len(attemptItems) > len(semanticItems) {
-		return replay.ResolvedMedia{}, fmt.Errorf("attempt items exceed semantic history")
+		return session.ResolvedMedia{}, fmt.Errorf("attempt items exceed semantic history")
 	}
 	offset := len(semanticItems) - len(attemptItems)
 	if !reflect.DeepEqual(semanticItems[offset:], attemptItems) {
-		return replay.ResolvedMedia{}, fmt.Errorf("attempt items are not the semantic history suffix")
+		return session.ResolvedMedia{}, fmt.Errorf("attempt items are not the semantic history suffix")
 	}
 	return used.ShiftItems(uint32(offset))
 }
 
-func historicalMediaForAttempt(request canonical.CanonicalRequest, media replay.ResolvedMedia) replay.ResolvedMedia {
+func historicalMediaForAttempt(request canonical.CanonicalRequest, media session.ResolvedMedia) session.ResolvedMedia {
 	if previous, ok := request.PreviousResponse(); ok && previous.Responses != nil {
-		// Native continuation does not resend historical request positions;
+		// Native resumption does not resend historical request positions;
 		// its delta positions begin at zero and must not collide with the
 		// full-history binding coordinate space.
-		return replay.ResolvedMedia{}
+		return session.ResolvedMedia{}
 	}
 	return media.Clone()
 }
@@ -140,14 +140,14 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	binding := canonical.ResponseBinding{SwobuID: swobuResponseID, TargetID: call.backend.Target.TargetID, TargetVersion: call.backend.Target.TargetVersion}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	events = canonical.NewValidatedResponseStream(events)
-	events = replay.NewCommitReader(events, replay.TerminalCommitConfig{
-		WorkspaceSlug:    call.workspaceSlug,
-		ExchangeID:       call.exchangeID,
-		Binding:          binding,
-		Store:            runner.ReplayStore,
-		SemanticRequest:  call.replayRequest.Clone(),
-		ResolvedMedia:    call.resolvedMedia,
-		MaxSemanticBytes: runner.Policy.Limits.MaxReplayBytes,
+	events = session.NewCheckpointStream(events, session.CheckpointConfig{
+		WorkspaceSlug: call.workspaceSlug,
+		ExchangeID:    call.exchangeID,
+		Binding:       binding,
+		Store:         runner.CheckpointStore,
+		Request:       call.fullRequest.Clone(),
+		ResolvedMedia: call.resolvedMedia,
+		MaxBytes:      runner.Policy.Limits.MaxCheckpointBytes,
 	})
 	response, err := encodeClientOutput(ctx, call, events, incremental, runner.DecisionSink)
 	return response, decoded.Decisions, err

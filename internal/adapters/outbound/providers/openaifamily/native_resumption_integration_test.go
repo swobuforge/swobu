@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -40,12 +40,12 @@ func TestOfficialOpenAIResponsesUsesVersionedCanonicalRefinement(t *testing.T) {
 			ProviderResponseID: "provider_response_from_previous_target_version", TargetID: backend.Target.TargetID, TargetVersion: backend.Target.TargetVersion,
 		},
 	}})
-	prepared := replay.Prepared{
-		Semantic: semantic,
-		Delta:    delta,
+	prepared := session.ResolvedRequest{
+		Full:  semantic,
+		Delta: delta,
 	}
 
-	request := provider.Request{Canonical: prepared.PreferredForTarget(backend.Target), Delivery: delivery.BufferedDelivery()}
+	request := provider.Request{Canonical: prepared.ForTarget(backend.Target), Delivery: delivery.BufferedDelivery()}
 	if previous, ok := request.Canonical.PreviousResponse(); !ok || previous.Responses == nil {
 		t.Fatal("matching target version did not reuse canonical Responses refinement")
 	}
@@ -55,9 +55,9 @@ func TestOfficialOpenAIResponsesUsesVersionedCanonicalRefinement(t *testing.T) {
 	}
 	wire := string(document.RawBytes())
 	if !strings.Contains(wire, `"previous_response_id":"provider_response_from_previous_target_version"`) {
-		t.Fatalf("native continuation missing: %s", wire)
+		t.Fatalf("native resumption missing: %s", wire)
 	}
 	if strings.Contains(wire, "turn one") || strings.Contains(wire, "answer one") || !strings.Contains(wire, "turn two") {
-		t.Fatalf("native continuation did not send only the current delta: %s", wire)
+		t.Fatalf("native resumption did not send only the current delta: %s", wire)
 	}
 }

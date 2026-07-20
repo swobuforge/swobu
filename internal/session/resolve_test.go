@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"testing"
@@ -16,12 +16,6 @@ func testBackendTarget(t *testing.T, model string) provider.TargetSnapshot {
 	target := provider.NewTargetSnapshot("target-"+model, "openai", "https://api.openai.com", "test", "responses", "")
 	target.Model = model
 	return target
-}
-
-func testBackend(t *testing.T, model string, continuation bool) provider.Backend {
-	t.Helper()
-	_ = continuation
-	return provider.Backend{Target: testBackendTarget(t, model)}
 }
 
 func makeRequest(model string, items []canonical.CanonicalItem, previous *canonical.ResponseRef) canonical.CanonicalRequest {
@@ -55,12 +49,12 @@ func makeResponse(items ...canonical.CanonicalItem) canonical.CanonicalResponse 
 	return response
 }
 
-func replayRecord(id canonical.SwobuResponseID, request canonical.CanonicalRequest, response canonical.CanonicalResponse, responses *canonical.ResponsesNativeRef) Record {
+func checkpoint(id canonical.SwobuResponseID, request canonical.CanonicalRequest, response canonical.CanonicalResponse, responses *canonical.ResponsesNativeRef) Checkpoint {
 	bound, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: id, Responses: responses}, response.Model(), response.Items(), response.CompletionReason(), response.Usage())
 	if err != nil {
 		panic(err)
 	}
-	return Record{Request: request, Response: bound}
+	return Checkpoint{Request: request, Response: bound}
 }
 
 func nativeResponses(target provider.TargetSnapshot, providerResponseID string) *canonical.ResponsesNativeRef {
@@ -76,21 +70,20 @@ func mustTestToolSet(t *testing.T, declarations ...canonical.ToolDeclaration) ca
 	return set
 }
 
-func TestPrepareCurrentRemovesPreviousResponse(t *testing.T) {
+func TestBeginRejectsPreviousResponse(t *testing.T) {
 	request := makeRequest("gpt-4o", makeItems("hello"), &canonical.ResponseRef{SwobuID: "resp_old"})
-	prepared := PrepareCurrent(request)
-	if _, ok := prepared.Semantic.PreviousResponse(); ok {
-		t.Fatal("previous response survived without replay")
-	}
-	if got := prepared.Semantic.Items(); len(got) != 1 || canonicalItemText(got[0]) != "hello" {
-		t.Fatalf("items=%#v", got)
+	if _, err := Begin(request); err == nil || err.Error() != "session begin request contains previous response" {
+		t.Fatalf("Begin error = %v", err)
 	}
 }
 
-func TestPrepareCurrentMaterializesEveryDefaultBearingBand(t *testing.T) {
+func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	source := canonical.NewCanonicalRequest(canonical.RequestParams{})
-	prepared := PrepareCurrent(source)
-	semantic := prepared.Semantic
+	prepared, err := Begin(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic := prepared.Full
 	for name, specified := range map[string]bool{
 		"model":              semantic.ModelSpecified(),
 		"instructions":       semantic.InstructionsSpecified(),
@@ -121,7 +114,11 @@ func TestPrepareCurrentMaterializesEveryDefaultBearingBand(t *testing.T) {
 		Model: canonical.Specify(""), Instructions: canonical.Specify(emptyInstructions), Tools: canonical.Specify(emptyTools),
 		ToolPolicy: canonical.Specify(canonical.ToolPolicy{}), ToolCallBatch: canonical.Specify(canonical.ToolCallBatchPolicy{}), OutputFormat: canonical.Specify(canonical.OutputFormat{}),
 	})
-	explicitDelta := PrepareCurrent(explicit).Delta
+	explicitPrepared, err := Begin(explicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitDelta := explicitPrepared.Delta
 	for name, specified := range map[string]bool{
 		"model":              explicitDelta.ModelSpecified(),
 		"instructions":       explicitDelta.InstructionsSpecified(),
@@ -136,20 +133,20 @@ func TestPrepareCurrentMaterializesEveryDefaultBearingBand(t *testing.T) {
 	}
 }
 
-func TestPrepareFromRecordMaterializesOrderedHistory(t *testing.T) {
+func TestResumeMaterializesOrderedHistory(t *testing.T) {
 	previous := makeRequest("gpt-4o", makeItems("turn1"), nil)
-	record := replayRecord("resp_prev", previous, makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "assistant1")), nil)
-	prepared, err := PrepareFromRecord(makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev"}), "resp_prev", record)
+	record := checkpoint("resp_prev", previous, makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "assistant1")), nil)
+	prepared, err := Resume(makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev"}), record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := prepared.Semantic.Items()
+	items := prepared.Full.Items()
 	if len(items) != 3 || canonicalItemText(items[0]) != "turn1" || canonicalItemText(items[1]) != "assistant1" || canonicalItemText(items[2]) != "turn2" {
 		t.Fatalf("semantic history=%#v", items)
 	}
 }
 
-func TestPrepareFromRecordUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
+func TestResumeUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search"), "", canonical.NewToolSchemaObject(mustJSONObject(t, `{"type":"object"}`)), canonical.Unspecified[bool]())
 	structured, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`)})
 	if err != nil {
@@ -174,51 +171,50 @@ func TestPrepareFromRecordUsesFieldLocalPresenceForExplicitClears(t *testing.T) 
 		Controls:         canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{}}},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_prev"},
 	})
-	prepared, err := PrepareFromRecord(current, "resp_prev", replayRecord("resp_prev", previous, makeResponse(), nil))
+	prepared, err := Resume(current, checkpoint("resp_prev", previous, makeResponse(), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Semantic.Model() != "" || canonicaltest.InstructionSetText(prepared.Semantic.Instructions()) != "" || len(prepared.Semantic.Tools()) != 0 || prepared.Semantic.Controls().Limits.StopSequences == nil || prepared.Semantic.ToolPolicy().Mode != canonical.ToolPolicyNone || prepared.Semantic.ToolCallBatch().Mode != canonical.ToolCallBatchUnspecified || prepared.Semantic.OutputFormat().Kind != canonical.OutputFormatText {
-		t.Fatalf("explicit clears not retained: %#v", prepared.Semantic)
+	if prepared.Full.Model() != "" || canonicaltest.InstructionSetText(prepared.Full.Instructions()) != "" || len(prepared.Full.Tools()) != 0 || prepared.Full.Controls().Limits.StopSequences == nil || prepared.Full.ToolPolicy().Mode != canonical.ToolPolicyNone || prepared.Full.ToolCallBatch().Mode != canonical.ToolCallBatchUnspecified || prepared.Full.OutputFormat().Kind != canonical.OutputFormatText {
+		t.Fatalf("explicit clears not retained: %#v", prepared.Full)
 	}
 }
 
-func TestPrepareFromRecordInheritsUnspecifiedBands(t *testing.T) {
+func TestResumeInheritsUnspecifiedBands(t *testing.T) {
 	previous := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("old"), Instructions: canonical.Specify(canonical.NewSystemInstructionSet("concise"))})
 	current := canonical.NewCanonicalRequest(canonical.RequestParams{Items: makeItems("turn2"), PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_prev"}})
-	prepared, err := PrepareFromRecord(current, "resp_prev", replayRecord("resp_prev", previous, makeResponse(), nil))
+	prepared, err := Resume(current, checkpoint("resp_prev", previous, makeResponse(), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Semantic.Model() != "old" || canonicaltest.InstructionSetText(prepared.Semantic.Instructions()) != "concise" {
-		t.Fatalf("bands not inherited: model=%q instructions=%q", prepared.Semantic.Model(), canonicaltest.InstructionSetText(prepared.Semantic.Instructions()))
+	if prepared.Full.Model() != "old" || canonicaltest.InstructionSetText(prepared.Full.Instructions()) != "concise" {
+		t.Fatalf("bands not inherited: model=%q instructions=%q", prepared.Full.Model(), canonicaltest.InstructionSetText(prepared.Full.Instructions()))
 	}
 }
 
-func TestPreparedUsesDeltaOnlyForExactTargetGeneration(t *testing.T) {
+func TestResolvedRequestUsesDeltaOnlyForExactTargetGeneration(t *testing.T) {
 	target := testBackendTarget(t, "gpt-4o")
-	prepared := Prepared{
-		Semantic: makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), nil),
-		Delta:    makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev", Responses: nativeResponses(target, "provider_prev")}),
+	prepared := ResolvedRequest{
+		Full:  makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), nil),
+		Delta: makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev", Responses: nativeResponses(target, "provider_prev")}),
 	}
-	if got := prepared.PreferredForTarget(target); len(got.Items()) != 1 {
+	if got := prepared.ForTarget(target); len(got.Items()) != 1 {
 		t.Fatalf("exact target items=%d, want delta", len(got.Items()))
 	}
 	target.TargetVersion++
-	if got := prepared.PreferredForTarget(target); len(got.Items()) != 3 {
+	if got := prepared.ForTarget(target); len(got.Items()) != 3 {
 		t.Fatalf("changed target items=%d, want full history", len(got.Items()))
 	}
 }
 
-func TestPrepareExpiredOrMismatchedPreviousIDRejects(t *testing.T) {
-	record := replayRecord("resp_prev", makeRequest("m", nil, nil), makeResponse(), nil)
+func TestResumeIsDeterministicOverStoreResolvedCheckpoint(t *testing.T) {
+	record := checkpoint("resp_prev", makeRequest("m", nil, nil), makeResponse(), nil)
 	expired := time.Now().UTC().Add(-time.Minute)
 	record.ExpiresAt = &expired
-	if _, err := PrepareFromRecord(makeRequest("m", nil, &canonical.ResponseRef{SwobuID: "resp_prev"}), "resp_prev", record); err == nil {
-		t.Fatal("expired record accepted")
+	if _, err := Resume(makeRequest("m", nil, &canonical.ResponseRef{SwobuID: "resp_prev"}), record); err != nil {
+		t.Fatalf("store-resolved checkpoint rejected: %v", err)
 	}
-	record.ExpiresAt = nil
-	if _, err := PrepareFromRecord(makeRequest("m", nil, &canonical.ResponseRef{SwobuID: "other"}), "other", record); err == nil {
+	if _, err := Resume(makeRequest("m", nil, &canonical.ResponseRef{SwobuID: "other"}), record); err == nil {
 		t.Fatal("mismatched record accepted")
 	}
 }

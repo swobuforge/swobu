@@ -9,21 +9,21 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/replay"
+	"github.com/swobuforge/swobu/internal/session"
 )
 
 // runtimeBundle contains the explicit dependencies used by exchange commands.
 type runtimeBundle struct {
-	Runtime          ExecutionRuntime
-	DecisionSink     compat.Sink
-	ReplayStore      replay.Store
-	SwobuResponseIDs replay.SwobuResponseIDGenerator
-	Policy           WorkspacePolicy
-	ImageFetcher     provider.ImageFetcher
-	PolicyResolver   WorkspacePolicyResolver
+	Runtime         ExecutionRuntime
+	DecisionSink    compat.Sink
+	CheckpointStore session.Store
+	ResponseIDs     ResponseIDGenerator
+	Policy          WorkspacePolicy
+	ImageFetcher    provider.ImageFetcher
+	PolicyResolver  WorkspacePolicyResolver
 }
 
-func allocateSwobuResponseID(ctx context.Context, exchangeID string, gen replay.SwobuResponseIDGenerator) (canonical.SwobuResponseID, error) {
+func allocateResponseID(ctx context.Context, exchangeID string, gen ResponseIDGenerator) (canonical.SwobuResponseID, error) {
 	if gen == nil {
 		return "", errors.New("exchange response id generator is required")
 	}
@@ -34,22 +34,22 @@ func allocateSwobuResponseID(ctx context.Context, exchangeID string, gen replay.
 	return responseID, nil
 }
 
-func validateReplayRuntime(r runtimeBundle) error {
-	if r.ReplayStore == nil {
-		return errors.New("exchange replay store is required")
+func validateCheckpointRuntime(r runtimeBundle) error {
+	if r.CheckpointStore == nil {
+		return errors.New("exchange checkpoint store is required")
 	}
-	if r.SwobuResponseIDs == nil {
+	if r.ResponseIDs == nil {
 		return errors.New("exchange response id generator is required")
 	}
 	return nil
 }
 
-func validateReplayInput(r runtimeBundle, workspaceSlug string) error {
-	if err := validateReplayRuntime(r); err != nil {
+func validateCheckpointInput(r runtimeBundle, workspaceSlug string) error {
+	if err := validateCheckpointRuntime(r); err != nil {
 		return err
 	}
 	if strings.TrimSpace(workspaceSlug) == "" { // swobu:io-string source=boundary
-		return errors.New("exchange replay workspace slug is required")
+		return errors.New("exchange checkpoint workspace slug is required")
 	}
 	return nil
 }

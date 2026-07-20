@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"os"
@@ -23,15 +23,31 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Record", reflect.TypeOf(Record{}), []string{"Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
-	assertFields("Prepared", reflect.TypeOf(Prepared{}), []string{"Semantic", "Delta", "ResolvedMedia"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
+	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"Full", "Delta", "ResolvedMedia"})
 }
 
-func TestProductionHasNoSupersededContinuationFossils(t *testing.T) {
+func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
 	t.Parallel()
 
 	root := filepath.Clean(filepath.Join("..", ".."))
 	forbidden := []string{
+		"ReplayStore",
+		"loadingReplayPhase",
+		"loadReplayCommand",
+		"replayLoaded",
+		"MaxReplayBytes",
+		"PrepareFromRecord",
+		"PrepareCurrent",
+		"PreferredForTarget",
+		"CommitReader",
+		"TerminalCommitConfig",
+		"ContinuationStore",
+		"ContinuationRecord",
+		"PrepareContinuation",
+		"nativeContinuation",
+		"continuationPrepared",
+		"reduceLoadingReplay",
 		"TurnRef",
 		"PreviousResponseID",
 		"replay.ID",

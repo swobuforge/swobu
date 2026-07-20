@@ -1,4 +1,4 @@
-package replay
+package session
 
 import (
 	"container/heap"
@@ -13,7 +13,7 @@ import (
 )
 
 // NewMemoryStore returns a thread-safe in-memory Store for production
-// bootstrap where persistent replay is not yet wired. Records are bounded by
+// bootstrap where persistent session storage is not yet wired. Checkpoints are bounded by
 // ExpiresAt and reclaimed opportunistically on every write as well as reads.
 func NewMemoryStore() Store {
 	return newMemoryStore()
@@ -21,7 +21,7 @@ func NewMemoryStore() Store {
 
 type memoryStore struct {
 	mu      sync.RWMutex
-	records map[workspaceRecordID]Record
+	records map[workspaceRecordID]Checkpoint
 	expires expirationHeap
 	now     func() time.Time
 }
@@ -33,7 +33,7 @@ type workspaceRecordID struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		records: make(map[workspaceRecordID]Record),
+		records: make(map[workspaceRecordID]Checkpoint),
 		now:     func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -67,27 +67,27 @@ func (s *memoryStore) reclaimExpired(now time.Time) {
 	}
 }
 
-func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Record, bool, error) {
+func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Checkpoint, bool, error) {
 	_ = ctx
 	workspaceSlug = strings.TrimSpace(workspaceSlug)
 	if workspaceSlug == "" {
-		return Record{}, false, errors.New("replay workspace slug is empty")
+		return Checkpoint{}, false, errors.New("session workspace slug is empty")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: id}
 	r, ok := s.records[key]
 	if !ok {
-		return Record{}, false, nil
+		return Checkpoint{}, false, nil
 	}
 	if r.ExpiresAt != nil && !r.ExpiresAt.After(s.now()) {
 		delete(s.records, key)
-		return Record{}, false, nil
+		return Checkpoint{}, false, nil
 	}
 	return r.Clone(), true, nil
 }
 
-func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Record) error {
+func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Checkpoint) error {
 	_ = ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -95,22 +95,22 @@ func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Reco
 	s.reclaimExpired(now)
 	workspaceSlug = strings.TrimSpace(workspaceSlug)
 	if workspaceSlug == "" {
-		return errors.New("replay workspace slug is empty")
+		return errors.New("session workspace slug is empty")
 	}
 	responseRef := record.Response.Response()
 	if err := responseRef.ValidateCommittedResponse(); err != nil {
-		return fmt.Errorf("invalid replay record response reference: %w", err)
+		return fmt.Errorf("invalid session checkpoint response reference: %w", err)
 	}
 	if err := record.ResolvedMedia.ValidateForRequest(record.Request); err != nil {
-		return fmt.Errorf("invalid replay record media: %w", err)
+		return fmt.Errorf("invalid session checkpoint media: %w", err)
 	}
 	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: responseRef.SwobuID}
 	if _, exists := s.records[key]; exists {
-		return ErrReplayRecordExists
+		return ErrCheckpointExists
 	}
 	cloned := record.Clone()
 	if cloned.ExpiresAt == nil {
-		expiresAt := now.Add(defaultRecordTTL)
+		expiresAt := now.Add(defaultCheckpointTTL)
 		cloned.ExpiresAt = &expiresAt
 	}
 	s.records[key] = cloned
