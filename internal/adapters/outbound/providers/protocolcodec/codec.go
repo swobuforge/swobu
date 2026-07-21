@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	providercompat "github.com/swobuforge/swobu/internal/adapters/outbound/providers/providercompat"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -22,75 +21,50 @@ import (
 
 // Codec lowers canonical semantics through one standard protocol family.
 type Codec struct {
-	ProviderID string
-	Protocol   protocolkind.ProtocolKind
+	Protocol protocolkind.ProtocolKind
 }
 
 // Encode implements provider.Codec.
 func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
-	return c.encode(req, nil, nil)
-}
-
-// EncodeChat applies a provider-owned Chat Completions dialect mutation at
-// the typed, pre-serialization protocol boundary.
-func (c Codec) EncodeChat(req provider.Request, mutate chatcompletions.RequestMutation) (carrier.Document, []compat.Decision, error) {
-	if c.Protocol != protocolkind.ChatCompletions {
-		return carrier.Document{}, nil, canonical.BadEndpoint("provider codec is not configured for chat completions")
-	}
-	return c.encode(req, mutate, nil)
-}
-
-// EncodeResponses applies a provider-owned Responses dialect mutation at the
-// typed, pre-serialization protocol boundary.
-func (c Codec) EncodeResponses(req provider.Request, mutate responses.RequestMutation) (carrier.Document, []compat.Decision, error) {
-	if c.Protocol != protocolkind.Responses {
-		return carrier.Document{}, nil, canonical.BadEndpoint("provider codec is not configured for responses")
-	}
-	return c.encode(req, nil, mutate)
-}
-
-func (c Codec) encode(req provider.Request, chatMutation chatcompletions.RequestMutation, responsesMutation responses.RequestMutation) (carrier.Document, []compat.Decision, error) {
 	var decisions []compat.Decision
 	var err error
-	if err := req.Delivery.Validate(); err != nil {
-		return carrier.Document{}, decisions, canonical.UnsupportedDelivery("provider delivery is invalid")
+	if err := ValidateEncodeRequest(req); err != nil {
+		return carrier.Document{}, decisions, err
 	}
-	if req.Delivery.IsStreaming() && req.Delivery.Framing != delivery.FramingSSE {
-		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.UnsupportedDelivery("provider codec supports only SSE streaming delivery"))
-	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical}
+	input := wire.ProviderEncodeInput{Request: req.Canonical, Responses: req.Responses.Clone()}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, req.Delivery, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility}, chatMutation)
+		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility})
 	case protocolkind.Responses:
-		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, req.Delivery, "", responses.EncodeOptions{Compatibility: req.Compatibility}, responsesMutation)
+		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", responses.EncodeOptions{Compatibility: req.Compatibility})
 	case protocolkind.Messages:
-		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{
-			Compatibility: req.Compatibility,
-		})
+		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{Compatibility: req.Compatibility})
 	default:
 		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.BadEndpoint("selected provider protocol has no request codec"))
 	}
 	decisions = append(decisions, result.Decisions...)
 	if err != nil {
-		if req.Canonical.OutputFormat().Kind == canonical.OutputFormatJSONSchema {
-			decisions = append(decisions, compat.Decision{
-				Feature: compat.RequestOutputFormat,
-				Outcome: compat.Reject,
-				Subject: providercompat.RouteSubject(c.ProviderID, string(c.Protocol)),
-			})
-		}
-		return result.Document, decisions, markUnsupportedByBackend(err)
-	}
-	decisions = append(decisions, providercompat.StructuredOutputDecisions(c.ProviderID, c.Protocol, req.Canonical.OutputFormat())...)
-	if strictDecision, ok := providercompat.ToolSchemaStrictDecision(c.ProviderID, c.Protocol, req.Canonical.Tools(), c.Protocol != protocolkind.Messages); ok {
-		decisions = append(decisions, strictDecision)
+		return result.Document, decisions, MarkUnsupportedByBackend(err)
 	}
 	return result.Document, decisions, err
 }
 
-func markUnsupportedByBackend(err error) error {
+// ValidateEncodeRequest enforces transport-independent protocol codec input
+// invariants for standard and exact-provider typed compositions.
+func ValidateEncodeRequest(req provider.Request) error {
+	if err := req.Delivery.Validate(); err != nil {
+		return canonical.UnsupportedDelivery("provider delivery is invalid")
+	}
+	if req.Delivery.IsStreaming() && req.Delivery.Framing != delivery.FramingSSE {
+		return provider.UnsupportedByBackend(canonical.UnsupportedDelivery("provider codec supports only SSE streaming delivery"))
+	}
+	return nil
+}
+
+// MarkUnsupportedByBackend retains backend-failover classification after an
+// exact provider has composed a typed protocol document.
+func MarkUnsupportedByBackend(err error) error {
 	var canonicalErr canonical.Error
 	if !errors.As(err, &canonicalErr) {
 		return err
@@ -117,7 +91,7 @@ func (c Codec) Decode(ctx context.Context, request provider.Request, ingress pro
 	}
 	decoded := provider.DecodedResponse{
 		Stream: result.Stream, Decisions: result.Decisions,
-		TerminalDecisions: result.TerminalDecisions,
+		TerminalDecisions: result.TerminalDecisions, ResponsesOutput: result.ResponsesOutput,
 	}
 	return decoded, err
 }

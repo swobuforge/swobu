@@ -1,8 +1,11 @@
 // Package session owns immutable state required to resume a logical model
 // session across independent requests.
 //
-// Each successfully client-encoded response may commit one checkpoint keyed by
-// its Swobu response ID and partitioned by workspace. An optional opaque
+// Each successfully client-encoded response must commit one checkpoint keyed by
+// its Swobu response ID and partitioned by workspace. Client wire storage hints
+// cannot suppress this correctness state: provider-specific opaque thinking and
+// resolved media may be absent from the client projection but required by a
+// later continuation. An optional opaque
 // client-history fingerprint provides one exact secondary lookup. Resolution
 // materializes canonical checkpoint truth plus the codec-rebased current
 // invocation, restoring opaque thinking hidden from client projection. It may also

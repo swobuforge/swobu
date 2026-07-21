@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -76,9 +77,73 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 			return nil, err
 		}
 		return []canonical.ToolDeclaration{decl}, nil
+	case "web_search", "web_search_preview":
+		if len(ctx.path) > 0 {
+			return nil, canonical.BadRequest("responses web-search tool cannot be nested or renamed")
+		}
+		decl, err := decodeResponsesWebSearchTool(tool, ctx.index, sink, exchangeID)
+		if err != nil {
+			return nil, err
+		}
+		return []canonical.ToolDeclaration{decl}, nil
 	default:
 		return nil, canonical.BadRequest("responses request contains an unsupported tool type")
 	}
+}
+
+func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, index int, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
+	if strings.TrimSpace(tool.Name) != "" || len(tool.Tools) > 0 || len(tool.Parameters) > 0 || len(tool.Format) > 0 { // swobu:io-string source=boundary
+		return canonical.ToolDeclaration{}, canonical.BadRequest("responses web-search tool has invalid declaration fields")
+	}
+	if len(tool.SearchContentTypes) > 0 {
+		for _, contentType := range tool.SearchContentTypes {
+			if strings.EqualFold(strings.TrimSpace(contentType), "image") {
+				return canonical.ToolDeclaration{}, canonical.UnsupportedOperation("responses image-search intent is not supported")
+			}
+		}
+		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/search_content_types", index))); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	if strings.TrimSpace(tool.OutputFormat) != "" { // swobu:io-string source=boundary
+		return canonical.ToolDeclaration{}, canonical.UnsupportedOperation("responses image-search output format is not supported")
+	}
+	if tool.ExternalWebAccess != nil {
+		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/external_web_access", index))); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	if tool.Filters != nil {
+		for field, values := range map[string][]string{"allowed_domains": tool.Filters.AllowedDomains, "blocked_domains": tool.Filters.BlockedDomains} {
+			for _, value := range values {
+				if strings.TrimSpace(value) == "" {
+					return canonical.ToolDeclaration{}, canonical.BadRequest("responses web-search domain filter is invalid")
+				}
+			}
+			if len(values) > 0 {
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/filters/%s", index, field))); err != nil {
+					return canonical.ToolDeclaration{}, err
+				}
+			}
+		}
+	}
+	if tool.UserLocation != nil {
+		if kind := strings.TrimSpace(tool.UserLocation.Type); kind != "" && kind != "approximate" {
+			return canonical.ToolDeclaration{}, canonical.BadRequest("responses web-search user_location type is invalid")
+		}
+		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/user_location", index))); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	if raw := strings.TrimSpace(tool.SearchContextSize); raw != "" { // swobu:io-string source=boundary
+		if raw != "low" && raw != "medium" && raw != "high" {
+			return canonical.ToolDeclaration{}, canonical.BadRequest("responses web-search search_context_size is invalid")
+		}
+		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/search_context_size", index))); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	return canonical.NewWebSearchDeclaration(), nil
 }
 
 func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {

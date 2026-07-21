@@ -255,7 +255,7 @@ func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 		_ = conn.Close()
 	}()
 
-	huge := bytes.Repeat([]byte("a"), maxWebsocketRequestBodyBytes+1)
+	huge := bytes.Repeat([]byte("a"), int(maxOperatorJSONBodyBytes)+1)
 	payload := `{"type":"response.create","model":"m","input":"` + string(huge) + `"}`
 	if err := websocket.Message.Send(conn, payload); err != nil {
 		// Either transport-level frame limit or app-level BAD_REQUEST is acceptable.

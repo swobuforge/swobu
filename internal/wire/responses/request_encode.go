@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -55,32 +56,38 @@ type customToolCallItem struct {
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
 // package does not import wire.
 type EncodeInput struct {
-	Request canonical.CanonicalRequest
+	Request   canonical.CanonicalRequest
+	Responses responsesnative.RequestState
 }
 
-// ProviderRequestDocument is the standard Responses lowering before its
-// single serialization boundary.
+// ProviderRequestDocument is the standard Responses lowering before an exact
+// provider owns any typed dialect adaptation.
 type ProviderRequestDocument struct {
-	Payload map[string]any
+	Payload        map[string]any
+	Input          any
+	InputSpecified bool
+	Tools          []ProviderRequestTool
+	ToolsSpecified bool
+	Store          *bool
 }
-
-// RequestMutation changes provider-owned dialect fields after standard
-// protocol lowering and before serialization.
-type RequestMutation func(*ProviderRequestDocument) error
 
 // swobu:lint ignore function-complexity because=Responses encoding lowers every canonical request band into one atomic wire document.
 func EncodeCarrierWithDecisions(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
-	return EncodeCarrierWithMutation(input, d, sink, exchangeID, options, nil)
+	document, err := LowerProviderRequestDocument(input, d, sink, exchangeID, options)
+	if err != nil {
+		return carrier.Document{}, err
+	}
+	return EncodeProviderRequestDocument(document)
 }
 
-// EncodeCarrierWithMutation lowers the standard protocol document, applies
-// one provider dialect mutation, and serializes once.
-func EncodeCarrierWithMutation(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions, mutate RequestMutation) (carrier.Document, error) {
+// LowerProviderRequestDocument produces a typed Responses document without
+// crossing the JSON boundary.
+func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (ProviderRequestDocument, error) {
 	req := input.Request
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.Document{}, canonical.UnsupportedDelivery("response requests do not implement the requested delivery mode on the responses protocol")
+		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("response requests do not implement the requested delivery mode on the responses protocol")
 	}
 
 	tools := req.Tools()
@@ -88,30 +95,37 @@ func EncodeCarrierWithMutation(input EncodeInput, d delivery.Delivery, sink comp
 	responsesRefined := false
 	if hasPrevious {
 		if previous.Responses == nil {
-			return carrier.Document{}, fmt.Errorf("responses provider encoding requires a native previous response refinement")
+			return ProviderRequestDocument{}, fmt.Errorf("responses provider encoding requires a native previous response refinement")
 		}
 		if err := previous.Responses.ValidateBound(); err != nil {
-			return carrier.Document{}, fmt.Errorf("responses provider encoding received an invalid native previous response refinement: %w", err)
+			return ProviderRequestDocument{}, fmt.Errorf("responses provider encoding received an invalid native previous response refinement: %w", err)
 		}
 		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(req, options.Compatibility, sink, exchangeID)
+	var payloadInput any
+	var err error
+	nativeHistory := input.Responses.History()
+	nativeInput := input.Responses.Input()
+	if !responsesRefined && (nativeHistory.Len() > 0 || !nativeInput.IsZero()) {
+		payloadInput, err = encodeStatelessResponsesInput(nativeHistory, req, nativeInput, options.Compatibility, sink, exchangeID)
+	} else if responsesRefined && !nativeInput.IsZero() {
+		payloadInput = rawResponsesInputItems(nativeInput)
+	} else {
+		payloadInput, err = encodeInput(req, options.Compatibility, sink, exchangeID)
+	}
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	choice, err := encodeToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	logResponsesEncodeShape(req, payloadInput, choice, d)
 
 	payload := map[string]any{"model": req.Model()}
-	if payloadInput != nil {
-		payload["input"] = payloadInput
-	}
 	loweredInstructions := flattenInstructionsForResponses(req.Instructions())
 	if err := commitResponsesInstructionDecisions(sink, exchangeID, loweredInstructions); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" || responsesRefined && req.InstructionsSpecified() {
 		payload["instructions"] = instructions
@@ -119,33 +133,44 @@ func EncodeCarrierWithMutation(input EncodeInput, d delivery.Delivery, sink comp
 	if choice != nil {
 		payload["tool_choice"] = choice
 	}
-	if wireTools, err := encodeResponsesTools(tools, sink, exchangeID); err != nil {
-		return carrier.Document{}, err
-	} else if len(wireTools) > 0 || responsesRefined && req.ToolsSpecified() {
-		if wireTools == nil {
-			wireTools = []any{}
-		}
-		payload["tools"] = wireTools
+	wireTools, err := encodeResponsesTools(tools, sink, exchangeID)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	toolsSpecified := len(wireTools) > 0 || responsesRefined && req.ToolsSpecified()
+	if toolsSpecified && wireTools == nil {
+		wireTools = []ProviderRequestTool{}
 	}
 	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && len(tools) > 0 {
 		payload["parallel_tool_calls"] = true
 	}
 	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort); err != nil {
 		if decisionErr := emitResponsesRequestDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
-			return carrier.Document{}, decisionErr
+			return ProviderRequestDocument{}, decisionErr
 		}
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
+	// Stateless continuation capture is protocol state, not readable reasoning
+	// disclosure. Ask every Responses-compatible target for the encrypted state
+	// it may require; runtime rejection remains attempt evidence.
+	payload["include"] = []string{"reasoning.encrypted_content"}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	} else if text != nil {
 		payload["text"] = text
+		if req.OutputFormat().Kind == canonical.OutputFormatJSONSchema {
+			for _, feature := range []compat.Feature{compat.RequestOutputFormat, compat.RequestOutputFormatSchema, compat.WireJSONMode} {
+				if err := emitResponsesRequestDecision(sink, exchangeID, feature, compat.Exact); err != nil {
+					return ProviderRequestDocument{}, err
+				}
+			}
+		}
 	} else if responsesRefined && req.OutputFormatSpecified() {
 		payload["text"] = &responsesTextDTO{Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)}}
 	}
@@ -155,11 +180,32 @@ func EncodeCarrierWithMutation(input EncodeInput, d delivery.Delivery, sink comp
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
-	document := ProviderRequestDocument{Payload: payload}
-	if mutate != nil {
-		if err := mutate(&document); err != nil {
-			return carrier.Document{}, err
-		}
+	return ProviderRequestDocument{
+		Payload:        payload,
+		Input:          payloadInput,
+		InputSpecified: payloadInput != nil,
+		Tools:          wireTools,
+		ToolsSpecified: toolsSpecified,
+	}, nil
+}
+
+// EncodeProviderRequestDocument performs the single serialization boundary
+// after standard lowering or exact-provider typed composition.
+func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Document, error) {
+	if document.InputSpecified {
+		document.Payload["input"] = document.Input
+	} else {
+		delete(document.Payload, "input")
+	}
+	if document.ToolsSpecified {
+		document.Payload["tools"] = document.Tools
+	} else {
+		delete(document.Payload, "tools")
+	}
+	if document.Store != nil {
+		document.Payload["store"] = *document.Store
+	} else {
+		delete(document.Payload, "store")
 	}
 	raw, err := json.Marshal(document.Payload)
 	if err != nil {
@@ -173,6 +219,15 @@ func EncodeCarrierWithMutation(input EncodeInput, d delivery.Delivery, sink comp
 		raw,
 		carrier.Meta{},
 	), nil
+}
+
+func rawResponsesInputItems(input responsesnative.Items) []any {
+	items := input.JSONObjects()
+	encoded := make([]any, len(items))
+	for index, raw := range items {
+		encoded[index] = json.RawMessage(raw)
+	}
+	return encoded
 }
 
 func mergedResponsesInstructions(requestInstructions string, optionInstructions string) string {
@@ -294,6 +349,38 @@ func encodeInput(req canonical.CanonicalRequest, policy compat.CompatibilityPoli
 	default:
 		return encodeConversation(req, items, req.Tools(), policy, sink, exchangeID)
 	}
+}
+
+func encodeStatelessResponsesInput(history responsesnative.History, current canonical.CanonicalRequest, nativeCurrent responsesnative.Items, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) ([]any, error) {
+	encoded := make([]any, 0)
+	for _, turn := range history.Turns() {
+		if native := turn.NativeInput(); !native.IsZero() {
+			for _, raw := range native.JSONObjects() {
+				encoded = append(encoded, json.RawMessage(raw))
+			}
+		} else {
+			canonicalInput := turn.CanonicalInput()
+			inputItems, err := encodeConversation(canonicalInput, canonicalInput.Items(), canonicalInput.Tools(), policy, sink, exchangeID)
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, inputItems...)
+		}
+		for _, raw := range turn.Output().JSONObjects() {
+			encoded = append(encoded, json.RawMessage(raw))
+		}
+	}
+	if !nativeCurrent.IsZero() {
+		for _, raw := range nativeCurrent.JSONObjects() {
+			encoded = append(encoded, json.RawMessage(raw))
+		}
+		return encoded, nil
+	}
+	currentItems, err := encodeConversation(current, current.Items(), current.Tools(), policy, sink, exchangeID)
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, currentItems...), nil
 }
 
 func encodeSimpleInput(items []canonical.CanonicalItem) (any, bool, error) {

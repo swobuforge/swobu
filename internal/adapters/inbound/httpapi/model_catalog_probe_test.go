@@ -51,6 +51,16 @@ func TestModelCatalogProbeHandlerRequiresTypedPOST(t *testing.T) {
 	}
 }
 
+func TestModelCatalogProbeHandlerRejectsTrailingJSON(t *testing.T) {
+	h := NewTargetProbeHandler(&stubTargetProber{})
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", strings.NewReader(`{"connection":{}} {}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testing.T) {
 	diagnostics := json.RawMessage(`{"authentication":"aws_identity"}`)
 	stub := &stubTargetProber{result: provider.TargetProbeResult{

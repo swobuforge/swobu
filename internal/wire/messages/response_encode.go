@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -12,7 +13,7 @@ import (
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	items := output.Items()
-	content, err := messagesResponseContent(request, output)
+	content, decisions, err := messagesResponseContent(request, output)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
@@ -35,18 +36,23 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 	logMessagesEgressBuffered(raw)
 	return wire.ClientDocumentResult{
 		Document:            carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}),
+		Decisions:           decisions,
 		ResponseFingerprint: &responseFingerprint,
 	}, nil
 }
 
-func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, error) {
+func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, []compat.Decision, error) {
+	items, decisions, err := projectMessagesWebSearchLifecycles(output.Items(), compat.ResponseItemsKind)
+	if err != nil {
+		return nil, nil, err
+	}
 	state := messagesResponseHistoryState{request: request.Clone()}
-	for _, item := range output.Items() {
+	for _, item := range items {
 		if err := state.appendItem(item); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return state.content, nil
+	return state.content, decisions, nil
 }
 
 func mustMarshalMessagesContent(content []messagesResponsePartDTO) json.RawMessage {

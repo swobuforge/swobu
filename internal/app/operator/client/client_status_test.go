@@ -30,6 +30,8 @@ func TestClientStatusProjection(t *testing.T) {
 				"observed_at":"15:04:05",
 				"model_requested":"gpt-4.1",
 				"model_resolved":"gpt-4.1",
+				"provider_spec":"anthropic",
+				"provider_model":"claude-sonnet-4-6",
 				"token_usage":{"input_tokens":120,"output_tokens":30},
 				"exchange_stage_reports":[{
 					"stage":"provider.wire.out",
@@ -55,7 +57,7 @@ func TestClientStatusProjection(t *testing.T) {
 		t.Fatalf("recent traffic rows = %d, want 1", len(out.RecentTraffic))
 	}
 	row := out.RecentTraffic[0]
-	if row.Endpoint != "dev" || row.ClientHandler != "codex" || row.ClientFamily != "responses" || row.ModelResolved != "gpt-4.1" {
+	if row.Endpoint != "dev" || row.ClientHandler != "codex" || row.ClientFamily != "responses" || row.ModelResolved != "gpt-4.1" || row.ProviderSpec != "anthropic" || row.ProviderModel != "claude-sonnet-4-6" {
 		t.Fatalf("unexpected row: %#v", row)
 	}
 	if row.TokenUsage == nil || row.TokenUsage.InputTokens == nil || *row.TokenUsage.InputTokens != 120 {

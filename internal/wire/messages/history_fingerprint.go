@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -170,14 +171,30 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 			if !ok {
 				return canonical.UnsupportedOperation("messages response image output is not implemented")
 			}
-			s.content = append(s.content, messagesResponsePartDTO{Type: "text", Text: text.Text()})
+			citations, err := encodeMessagesCitations(text.Text(), part.Citations())
+			if err != nil {
+				return err
+			}
+			s.content = append(s.content, messagesResponsePartDTO{Type: "text", Text: text.Text(), Citations: citations})
 		}
 		return nil
 	case canonical.ItemKindToolCall:
 		call, _ := item.ToolCall()
 		tool := call.Tool()
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			search, ok := call.Input().WebSearch()
+			if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
+				return canonical.UnsupportedOperation("messages response requires one search query per server-tool call")
+			}
+			input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
+			if err != nil {
+				return canonical.InternalError("messages web-search call could not be encoded")
+			}
+			s.content = append(s.content, messagesResponsePartDTO{Type: "server_tool_use", ID: call.CallID().String(), Name: "web_search", Input: input})
+			return nil
+		}
 		if tool.Kind() != canonical.ToolKindFunction {
-			return canonical.UnsupportedOperation("messages response only supports function tool calls")
+			return canonical.UnsupportedOperation("messages response tool-call kind is unsupported")
 		}
 		object, ok := call.Input().Object()
 		if !ok {
@@ -188,7 +205,17 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		})
 		return nil
 	case canonical.ItemKindToolResult:
-		return canonical.UnsupportedOperation("messages protocol does not support tool result output items")
+		result, _ := item.ToolResult()
+		search, ok := result.WebSearch()
+		if !ok {
+			return canonical.UnsupportedOperation("messages protocol does not support function tool-result output items")
+		}
+		content, err := encodeMessagesWebSearchResult(search)
+		if err != nil {
+			return err
+		}
+		s.content = append(s.content, messagesResponsePartDTO{Type: "web_search_tool_result", ToolUseID: result.CallID().String(), Content: content})
+		return nil
 	case canonical.ItemKindReasoning:
 		reasoning, _ := item.Reasoning()
 		opaque, ok := reasoning.Opaque().Messages()
@@ -248,6 +275,7 @@ func (s *messagesResponseHistoryState) fingerprint() (historyfingerprint.Respons
 // those exact bytes on checkpoint commit.
 func messagesFingerprintingEncoder(request canonical.CanonicalRequest, encode wire.ResponseEventEncoder, complete func(*historyfingerprint.Response), fail func(error)) wire.ResponseEventEncoder {
 	state := &messagesResponseHistoryState{request: request.Clone()}
+	var completedItems []canonical.CanonicalItem
 	return func(event canonical.Event) ([][]byte, error) {
 		encoded, err := encode(event)
 		if err != nil {
@@ -262,10 +290,7 @@ func messagesFingerprintingEncoder(request canonical.CanonicalRequest, encode wi
 				fail(err)
 				return nil, err
 			}
-			if err := state.appendItem(completed.Item); err != nil {
-				fail(err)
-				return nil, err
-			}
+			completedItems = append(completedItems, completed.Item.Clone())
 		}
 		status, terminal := messagesResponseTerminalStatus(event)
 		if !terminal {
@@ -274,6 +299,17 @@ func messagesFingerprintingEncoder(request canonical.CanonicalRequest, encode wi
 		if status != canonical.EnvelopeStatusCompleted {
 			fail(errors.New("messages response did not complete successfully"))
 			return encoded, nil
+		}
+		projected, _, err := projectMessagesWebSearchLifecycles(completedItems, compat.ResponseItemsKind)
+		if err != nil {
+			fail(err)
+			return nil, err
+		}
+		for _, item := range projected {
+			if err := state.appendItem(item); err != nil {
+				fail(err)
+				return nil, err
+			}
 		}
 		fingerprint, err := state.fingerprint()
 		if err != nil {

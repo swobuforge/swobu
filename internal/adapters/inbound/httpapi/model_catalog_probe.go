@@ -48,7 +48,7 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 
 	var input targetProbeRequest
-	if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
+	if err := decodeOperatorJSONObject(w, req, &input, "target probe request"); err != nil {
 		http.Error(w, "target probe request is invalid", http.StatusBadRequest)
 		return
 	}

@@ -23,8 +23,8 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"HistoryFingerprint", "Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
-	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"Full", "Delta", "ResolvedMedia"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"Predecessor", "InputSegment", "ResponsesInput", "ResponsesOutput", "HistoryFingerprint", "Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
+	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"Full", "Delta", "ResolvedMedia", "Responses", "CurrentInput", "Predecessor"})
 }
 
 func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {

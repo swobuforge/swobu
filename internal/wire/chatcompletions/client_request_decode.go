@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire"
-	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
@@ -19,7 +18,7 @@ import (
 
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	var dto chatCompletionsRequestDTO
-	if err := sse.DecodePermissiveJSON(doc.RawBytes(), &dto, "chat completions request", nil); err != nil {
+	if err := shared.DecodeExtensibleRequestObject(doc.RawBytes(), &dto, "chat completions request"); err != nil {
 		return wire.ClientDecodeResult{}, err
 	}
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
@@ -62,7 +61,7 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
-	if err := sse.DecodePermissiveJSON(raw, &dto, "chat completions request", nil); err != nil {
+	if err := shared.DecodeExtensibleRequestObject(raw, &dto, "chat completions request"); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)

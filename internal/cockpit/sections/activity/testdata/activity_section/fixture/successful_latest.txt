@@ -1,2 +1,2 @@
   activity ▾
-     latest            14:32:01 codex gpt 200 145ms
+     latest            14:32:01 codex gpt → openai/gpt-4.1 200 145ms

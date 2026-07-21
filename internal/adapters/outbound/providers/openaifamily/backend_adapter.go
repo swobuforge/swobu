@@ -65,7 +65,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 	}
 	backend := provider.Backend{
 		Target:    target.Clone(),
-		Codec:     protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind},
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
 		Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {
@@ -247,7 +247,7 @@ func detailErrorMessage(err error) string {
 }
 
 func logOpenAIFamilyOutboundRequest(providerSpec string, providerProtocol string, path string, body []byte) {
-	normalized, truncated := compactAndTruncateJSON(body, 4096)
+	normalized, truncated := compactAndTruncateJSON(redactProviderRequestInput(body), 4096)
 	slog.Debug("openaifamily outbound request",
 		"component", "provider",
 		"event", "outbound_request_shape",
@@ -258,6 +258,21 @@ func logOpenAIFamilyOutboundRequest(providerSpec string, providerProtocol string
 		"body_truncated", truncated,
 		"body_json", normalized,
 	)
+}
+
+func redactProviderRequestInput(body []byte) []byte {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return []byte(`{"request":"[REDACTED]"}`)
+	}
+	if _, present := payload["input"]; present {
+		payload["input"] = json.RawMessage(`"[REDACTED]"`)
+	}
+	redacted, err := json.Marshal(payload)
+	if err != nil {
+		return []byte(`{"request":"[REDACTED]"}`)
+	}
+	return redacted
 }
 
 func compactAndTruncateJSON(raw []byte, maxBytes int) (string, bool) {

@@ -27,13 +27,20 @@ type ActivityRowReadModel struct {
 	ClientLabel string
 	RouteID     RouteID
 	RouteLabel  string
-	Status      ActivityStatus
-	HTTPStatus  int
-	Duration    time.Duration
-	Error       bool
-	Attempts    []ActivityAttemptReadModel
-	TokensIn    int
-	TokensOut   int
+	// ProviderSpec and ProviderModel describe the target selected for this
+	// observed execution. They are historical evidence, not a live config lookup.
+	ProviderSpec  string
+	ProviderModel string
+	Status        ActivityStatus
+	HTTPStatus    int
+	// AttemptCount is the number of provider calls made while resolving this
+	// request. A value greater than one is operator-visible failover evidence.
+	AttemptCount int
+	Duration     time.Duration
+	Error        bool
+	Attempts     []ActivityAttemptReadModel
+	TokensIn     int
+	TokensOut    int
 }
 
 // ActivityStatus is the typed result state used by copy and styling.
@@ -83,6 +90,11 @@ func (a ActivityRowReadModel) RowValue() string {
 	if route == "" {
 		route = string(a.RouteID)
 	}
+	providerSpec := strings.TrimSpace(a.ProviderSpec)   // swobu:io-string source=boundary
+	providerModel := strings.TrimSpace(a.ProviderModel) // swobu:io-string source=boundary
+	if providerSpec != "" && providerModel != "" {
+		route += " → " + providerSpec + "/" + providerModel
+	}
 	observedAt := strings.TrimSpace(a.ObservedAt) // swobu:io-string source=boundary
 	if observedAt == "" {
 		observedAt = "unknown"
@@ -101,7 +113,11 @@ func (a ActivityRowReadModel) RowValue() string {
 			status = "ok"
 		}
 	}
-	return fmt.Sprintf("%s %s %s %s %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
+	value := fmt.Sprintf("%s %s %s %s %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
+	if a.AttemptCount > 1 {
+		value += fmt.Sprintf(" %d attempts", a.AttemptCount)
+	}
+	return value
 }
 
 // durationLabel renders the projected duration summary.

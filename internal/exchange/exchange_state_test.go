@@ -245,6 +245,35 @@ func TestReducerAloneChoosesRouteFailoverAttempt(t *testing.T) {
 	}
 }
 
+func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
+	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := reducerTestState(t)
+	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Tools: canonical.Specify(tools),
+	})
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "search-a"),
+		requestpathTarget(t, "search-b"),
+	}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		status:         providerCallAttemptFailed,
+		failure: &providerCallFailure{
+			Stage: providerCallFailureBeforeIngress,
+			Cause: provider.Unavailable(canonical.NewBackendError("search-a", 503, "unavailable", "")),
+		},
+	}}
+
+	selection, ok := selectNextProviderCall(s)
+	if !ok || selection.candidateIndex != 1 {
+		t.Fatalf("web-search failover = (%#v, %t), want second target", selection, ok)
+	}
+}
+
 func TestSynchronousCompletionFailureCanAdvanceRouteBeforeClientHandoff(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{

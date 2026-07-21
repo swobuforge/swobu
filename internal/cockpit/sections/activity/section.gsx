@@ -8,8 +8,8 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 )
 
-// SectionView renders a single static activity row under an always-expanded
-// header. V0: no click-through, no toggle, no focusable rows.
+// SectionView renders recent static activity rows under an always-expanded
+// header. Rows are evidence, not controls: no click-through or focus state.
 type SectionView struct {
 	Workspace     readmodel.WorkspaceReadModel
 	Ctx           context.Context
@@ -27,25 +27,25 @@ func Section(workspace readmodel.WorkspaceReadModel, ctx context.Context, activi
 	}
 }
 
-func (s *SectionView) activityText() string {
+func (s *SectionView) activityRows() []readmodel.ActivityRowReadModel {
 	activity := s.Workspace.Activity
 	if s.ActivityQuery != nil && !s.Workspace.IsDraft() {
-		q, err := s.ActivityQuery.ListActivity(s.Ctx, ports.ListActivityRequest{WorkspaceID: s.Workspace.ID, Limit: 1})
+		q, err := s.ActivityQuery.ListActivity(s.Ctx, ports.ListActivityRequest{WorkspaceID: s.Workspace.ID, Limit: 5})
 		if err == nil {
 			activity = q
 		}
 	}
+	if len(activity.Rows) > 0 {
+		return activity.Rows
+	}
 	latest, ok := activity.LatestRow()
 	if !ok {
-		return ""
+		return nil
 	}
-	return latest.RowValue()
+	return []readmodel.ActivityRowReadModel{latest}
 }
 
-func (s *SectionView) visibleActivityText() string {
-	if text := s.activityText(); text != "" {
-		return text
-	}
+func (s *SectionView) emptyActivityText() string {
 	if s.Workspace.IsDraft() {
 		return "(no activity)"
 	}
@@ -58,7 +58,17 @@ templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@ActivityHeader()
 		<div class="pl-3 flex-col w-full">
-			@ActivityRow("latest", s.visibleActivityText())
+			if rows := s.activityRows(); len(rows) > 0 {
+				for index, row := range rows {
+					if index == 0 {
+						@ActivityRow("latest", row.RowValue())
+					} else {
+						@ActivityRow("", row.RowValue())
+					}
+				}
+			} else {
+				@ActivityRow("latest", s.emptyActivityText())
+			}
 		</div>
 	</div>
 }

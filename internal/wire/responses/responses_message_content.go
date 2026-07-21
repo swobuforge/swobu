@@ -12,6 +12,9 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
+// decodeResponsesMessageContent preserves the scalar-input acceptance surface:
+// an explicit empty input_text is the appendable history form of input: "".
+// Other OpenAI-family codecs retain their own empty-part validity rules.
 func decodeResponsesMessageContent(raw json.RawMessage, author canonical.MessageRole, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "responses message content is invalid")
 	if err != nil {

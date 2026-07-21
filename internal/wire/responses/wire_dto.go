@@ -54,6 +54,7 @@ type responsesWireOutputItemDTO struct {
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 	Phase            string                         `json:"phase,omitempty"`
+	Action           json.RawMessage                `json:"action,omitempty"`
 }
 
 type responsesReasoningSummaryDTO struct {
@@ -79,6 +80,7 @@ type responsesInputItemDTO struct {
 	Phase            string                         `json:"phase,omitempty"`
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
+	Action           json.RawMessage                `json:"action,omitempty"`
 }
 
 type responsesResponseDTO struct {
@@ -139,11 +141,36 @@ type responsesOutputItemDTO struct {
 	CallID    string                       `json:"call_id,omitempty"`
 	Name      string                       `json:"name,omitempty"`
 	Arguments string                       `json:"arguments,omitempty"`
+	Action    json.RawMessage              `json:"action,omitempty"`
 }
 
 type responsesOutputTextItemDTO struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type        string                   `json:"type"`
+	Text        string                   `json:"text"`
+	Annotations []responsesAnnotationDTO `json:"annotations,omitempty"`
+}
+
+type responsesAnnotationDTO struct {
+	Type       string `json:"type"`
+	URL        string `json:"url,omitempty"`
+	Title      string `json:"title,omitempty"`
+	StartIndex *int   `json:"start_index,omitempty"`
+	EndIndex   *int   `json:"end_index,omitempty"`
+}
+
+type responsesWebSearchActionDTO struct {
+	Type    string          `json:"type"`
+	Query   string          `json:"query,omitempty"`
+	Queries []string        `json:"queries,omitempty"`
+	URL     string          `json:"url,omitempty"`
+	Pattern string          `json:"pattern,omitempty"`
+	Sources json.RawMessage `json:"sources,omitempty"`
+}
+
+type responsesWebSearchSourceDTO struct {
+	Type  string `json:"type,omitempty"`
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
 }
 
 type responsesCreatedEventDTO struct {
@@ -215,17 +242,33 @@ type responsesOutputItemCustomToolCallDTO struct {
 }
 
 type responsesToolDefinitionDTO struct {
-	Type               string                       `json:"type"`
-	Name               string                       `json:"name,omitempty"`
-	Description        string                       `json:"description,omitempty"`
-	Parameters         json.RawMessage              `json:"parameters,omitempty"`
-	Strict             *bool                        `json:"strict,omitempty"`
-	Format             json.RawMessage              `json:"format,omitempty"`
-	Tools              []responsesToolDefinitionDTO `json:"tools,omitempty"`
-	Execution          string                       `json:"execution,omitempty"`
-	ExternalWebAccess  *bool                        `json:"external_web_access,omitempty"`
-	SearchContentTypes []string                     `json:"search_content_types,omitempty"`
-	OutputFormat       string                       `json:"output_format,omitempty"`
+	Type               string                         `json:"type"`
+	Name               string                         `json:"name,omitempty"`
+	Description        string                         `json:"description,omitempty"`
+	Parameters         json.RawMessage                `json:"parameters,omitempty"`
+	Strict             *bool                          `json:"strict,omitempty"`
+	Format             json.RawMessage                `json:"format,omitempty"`
+	Tools              []responsesToolDefinitionDTO   `json:"tools,omitempty"`
+	Execution          string                         `json:"execution,omitempty"`
+	ExternalWebAccess  *bool                          `json:"external_web_access,omitempty"`
+	SearchContentTypes []string                       `json:"search_content_types,omitempty"`
+	OutputFormat       string                         `json:"output_format,omitempty"`
+	Filters            *responsesWebSearchFiltersDTO  `json:"filters,omitempty"`
+	UserLocation       *responsesWebSearchLocationDTO `json:"user_location,omitempty"`
+	SearchContextSize  string                         `json:"search_context_size,omitempty"`
+}
+
+type responsesWebSearchFiltersDTO struct {
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	BlockedDomains []string `json:"blocked_domains,omitempty"`
+}
+
+type responsesWebSearchLocationDTO struct {
+	Type     string `json:"type,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Region   string `json:"region,omitempty"`
+	City     string `json:"city,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
 }
 
 type responsesTextDeltaEventDTO struct {

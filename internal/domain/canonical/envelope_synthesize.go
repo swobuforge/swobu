@@ -41,8 +41,8 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, m
 				events = append(events, next(EventArgsDelta, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: ArgsDeltaPayload{Args: text}}))
 			}
 		case ItemKindToolResult:
-			// Tool results have no progressive start contract in this RFC. They
-			// cross this synthesized stream only as an atomic completed checkpoint.
+			// Exchange-resolved tool results cross the shared stream as atomic
+			// completed checkpoints; partial values never enter durable history.
 		case ItemKindReasoning:
 			// Reasoning enters the shared stream only as one complete artifact.
 		default:

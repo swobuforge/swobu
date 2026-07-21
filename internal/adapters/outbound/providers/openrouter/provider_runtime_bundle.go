@@ -30,6 +30,12 @@ func (r reasoningBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 			return provider.Backend{}, fmt.Errorf("OpenRouter chat completions backend has codec %T, want protocolcodec.Codec", backend.Codec)
 		}
 		backend.Codec = reasoningCodec{standard: standard}
+	} else if target.ProtocolKind == protocolkind.Responses {
+		standard, ok := backend.Codec.(protocolcodec.Codec)
+		if !ok {
+			return provider.Backend{}, fmt.Errorf("OpenRouter responses backend has codec %T, want protocolcodec.Codec", backend.Codec)
+		}
+		backend.Codec = responsesCodec{standard: standard}
 	}
 	return backend, backend.Validate()
 }

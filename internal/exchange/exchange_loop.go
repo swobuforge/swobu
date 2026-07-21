@@ -3,9 +3,11 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -42,6 +44,7 @@ func runExchange(
 			exchangeID: exchangeID, clientHandler: clientHandler,
 			clientFamily: clientFamily, clientDelivery: clientDelivery,
 			request:            canonical.CloneCanonicalRequest(decoded.Request),
+			responsesInput:     decoded.ResponsesInput.Clone(),
 			rebasedRequest:     rebased,
 			requestFingerprint: decoded.RequestFingerprint,
 			workspace:          workspace, timing: timing,
@@ -88,6 +91,15 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 			match, err = c.store.FindByHistory(ctx, c.workspaceSlug, c.history)
 		}
 		return checkpointLoaded{match: match, err: err}
+	case loadResponsesAncestryCommand:
+		history, err := loadResponsesHistory(ctx, c.store, c.workspaceSlug, c.latest)
+		if err != nil {
+			// Native replay is an optional Responses refinement. Store corruption or
+			// an unavailable predecessor must not invalidate portable continuation.
+			slog.Warn("Responses ancestry unavailable; using portable history", "component", "exchange", "event", "responses_ancestry_unavailable", "error", err)
+			history = responsesnative.History{}
+		}
+		return responsesAncestryLoaded{selection: c.selection, history: history}
 	case prepareProviderAttemptCommand:
 		preparationCtx := ctx
 		cancel := func() {}
@@ -109,6 +121,46 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	default:
 		panic(fmt.Sprintf("exchange invariant: unsupported closed command %T", cmd))
 	}
+}
+
+func loadResponsesHistory(ctx context.Context, store session.Store, workspaceSlug string, latest session.Checkpoint) (responsesnative.History, error) {
+	ancestry, err := loadCheckpointAncestry(ctx, store, workspaceSlug, latest)
+	if err != nil {
+		return responsesnative.History{}, err
+	}
+	resolved := session.WithResponsesHistory(session.ResolvedRequest{}, ancestry)
+	return resolved.Responses.History(), nil
+}
+
+func loadCheckpointAncestry(ctx context.Context, store session.Store, workspaceSlug string, latest session.Checkpoint) ([]session.Checkpoint, error) {
+	reversed := []session.Checkpoint{latest.Clone()}
+	seen := map[canonical.SwobuResponseID]struct{}{latest.Response.Response().SwobuID: {}}
+	current := latest
+	for current.Predecessor != nil {
+		id := *current.Predecessor
+		if _, duplicate := seen[id]; duplicate {
+			return nil, canonical.InternalError("checkpoint ancestry contains a cycle")
+		}
+		seen[id] = struct{}{}
+		predecessor, found, err := store.Get(ctx, workspaceSlug, id)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			// Bounded retention may prune an older checkpoint while the latest
+			// checkpoint remains complete portable truth. Native replay is an
+			// atomic refinement, so an unavailable predecessor selects portable
+			// materialization instead of invalidating the selected checkpoint.
+			return nil, nil
+		}
+		reversed = append(reversed, predecessor)
+		current = predecessor
+	}
+	ancestry := make([]session.Checkpoint, len(reversed))
+	for index := range reversed {
+		ancestry[len(reversed)-1-index] = reversed[index].Clone()
+	}
+	return ancestry, nil
 }
 
 func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, providerCallCount int) RequestOutput {

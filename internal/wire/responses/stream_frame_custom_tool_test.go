@@ -35,6 +35,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 			Summary          []responsesReasoningSummaryDTO `json:"summary"`
 			Content          json.RawMessage                `json:"content"`
 			EncryptedContent string                         `json:"encrypted_content"`
+			Action           json.RawMessage                `json:"action"`
 		}{
 			ID:     "custom_1",
 			Type:   "custom_tool_call",
@@ -90,6 +91,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 			Summary          []responsesReasoningSummaryDTO `json:"summary"`
 			Content          json.RawMessage                `json:"content"`
 			EncryptedContent string                         `json:"encrypted_content"`
+			Action           json.RawMessage                `json:"action"`
 		}{
 			ID:     "custom_1",
 			Type:   "custom_tool_call",

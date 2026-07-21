@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire"
-	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
@@ -25,7 +25,7 @@ const (
 
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	var dto messagesRequestDTO
-	if err := sse.DecodePermissiveJSON(doc.RawBytes(), &dto, "messages request", nil); err != nil {
+	if err := shared.DecodeExtensibleRequestObject(doc.RawBytes(), &dto, "messages request"); err != nil {
 		return wire.ClientDecodeResult{}, err
 	}
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
@@ -38,9 +38,7 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 		// into a second, competing predecessor.
 		if strings.TrimSpace(dto.PreviousResponseWireID) != "" { // swobu:io-string source=boundary
 			requestFingerprint, err := fingerprintMessagesRequest(dto.Messages)
-			return wire.ClientRequestResult{
-				Request: request, Delivery: delivery, RequestFingerprint: requestFingerprint,
-			}, err
+			return wire.ClientRequestResult{Request: request, Delivery: delivery, RequestFingerprint: requestFingerprint}, err
 		}
 		history, err := fingerprintMessagesHistory(dto.Messages)
 		if err != nil {
@@ -68,7 +66,7 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
-	if err := sse.DecodePermissiveJSON(raw, &dto, "messages request", nil); err != nil {
+	if err := shared.DecodeExtensibleRequestObject(raw, &dto, "messages request"); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
@@ -225,7 +223,17 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			if part.Text == "" {
 				return canonical.BadRequest("messages request text parts must not be empty")
 			}
-			messageParts = append(messageParts, canonical.NewTextMessagePart(part.Text))
+			var citations []messagesCitationDTO
+			if len(part.Citations) > 0 && string(part.Citations) != "null" {
+				if err := json.Unmarshal(part.Citations, &citations); err != nil {
+					return canonical.BadRequest("messages request text citations are invalid")
+				}
+			}
+			messagePart, err := decodeMessagesCitedText(part.Text, citations)
+			if err != nil {
+				return canonical.BadRequest("messages request text citations are invalid")
+			}
+			messageParts = append(messageParts, messagePart)
 		case "image":
 			if author != canonical.MessageRoleUser {
 				return canonical.BadRequest("messages request image input is only valid in user messages")
@@ -262,6 +270,26 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				return canonical.BadRequest("messages request tool_use is invalid")
 			}
 			decoded = append(decoded, item)
+		case "server_tool_use":
+			if author != canonical.MessageRoleAssistant {
+				return canonical.BadRequest("messages server_tool_use blocks require assistant role")
+			}
+			if err := flushMessage(); err != nil {
+				return err
+			}
+			if strings.TrimSpace(part.Name) != "web_search" { // swobu:io-string source=boundary
+				return canonical.UnsupportedOperation("messages server-tool type is unsupported")
+			}
+			toolUseID := strings.TrimSpace(part.ID) // swobu:io-string source=boundary
+			if toolUseID == "" {
+				return canonical.BadRequest("messages server_tool_use parts require an id")
+			}
+			item, err := decodeMessagesWebSearchCall(toolUseID, part.Input)
+			if err != nil {
+				return canonical.BadRequest("messages server_tool_use is invalid")
+			}
+			decoded = append(decoded, item)
+			pending = append(pending, toolUseID)
 		case "tool_result":
 			if err := flushMessage(); err != nil {
 				return err
@@ -280,6 +308,20 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				return canonical.BadRequest("messages request tool_result is invalid")
 			}
 			decoded = append(decoded, result)
+			pending = removePendingToolUseID(pending, toolUseID)
+		case "web_search_tool_result":
+			if err := flushMessage(); err != nil {
+				return err
+			}
+			toolUseID := strings.TrimSpace(part.ToolUseID) // swobu:io-string source=boundary
+			if toolUseID == "" {
+				return canonical.BadRequest("messages web_search_tool_result requires tool_use_id")
+			}
+			item, err := decodeMessagesWebSearchResult(toolUseID, part.Content, part.IsError)
+			if err != nil {
+				return canonical.BadRequest("messages web_search_tool_result is invalid")
+			}
+			decoded = append(decoded, item)
 			pending = removePendingToolUseID(pending, toolUseID)
 		case "thinking":
 			if author != canonical.MessageRoleAssistant {
@@ -411,12 +453,20 @@ func decodeMessagesImageSource(raw json.RawMessage, limits shared.ImageDecodeLim
 	}
 }
 
-func decodeMessagesTools(tools []messagesToolDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeMessagesTools(tools []ProviderRequestTool, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tools))
-	for _, tool := range tools {
+	for index, tool := range tools {
+		if strings.HasPrefix(strings.TrimSpace(tool.Type), "web_search_") { // swobu:io-string source=boundary
+			declaration, err := decodeMessagesWebSearchTool(tool, index, sink, exchangeID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, declaration)
+			continue
+		}
 		schema, err := messagesToolSchemaFromWire(tool.InputSchema)
 		if err != nil {
 			return nil, err
@@ -436,6 +486,67 @@ func decodeMessagesTools(tools []messagesToolDTO, sink compat.Sink, exchangeID s
 		out = append(out, declaration)
 	}
 	return out, nil
+}
+
+func decodeMessagesWebSearchTool(tool ProviderRequestTool, index int, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
+	if strings.TrimSpace(tool.Type) == "web_search_" { // swobu:io-string source=boundary
+		return canonical.ToolDeclaration{}, canonical.BadRequest("messages web-search version is invalid")
+	}
+	validateStrings := func(values []string) error {
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" { // swobu:io-string source=boundary
+				return canonical.BadRequest("messages web-search string option is empty")
+			}
+		}
+		return nil
+	}
+	for field, values := range map[string][]string{"allowed_domains": tool.AllowedDomains, "blocked_domains": tool.BlockedDomains, "allowed_callers": tool.AllowedCallers} {
+		if err := validateStrings(values); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+		if len(values) > 0 {
+			if err := emitMessagesWireDrop(sink, exchangeID, index, field); err != nil {
+				return canonical.ToolDeclaration{}, err
+			}
+		}
+	}
+	if tool.MaxUses != nil {
+		if *tool.MaxUses <= 0 {
+			return canonical.ToolDeclaration{}, canonical.BadRequest("messages web-search max_uses must be positive")
+		}
+		if err := emitMessagesWireDrop(sink, exchangeID, index, "max_uses"); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	if len(tool.UserLocation) > 0 && string(tool.UserLocation) != "null" {
+		var raw map[string]any
+		if err := json.Unmarshal(tool.UserLocation, &raw); err != nil {
+			return canonical.ToolDeclaration{}, canonical.BadRequest("messages web-search user_location is invalid")
+		}
+		if err := emitMessagesWireDrop(sink, exchangeID, index, "user_location"); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	if tool.ResponseInclusion != "" {
+		if err := emitMessagesWireDrop(sink, exchangeID, index, "response_inclusion"); err != nil {
+			return canonical.ToolDeclaration{}, err
+		}
+	}
+	return canonical.NewWebSearchDeclaration(), nil
+}
+
+func emitMessagesWireDrop(sink compat.Sink, exchangeID string, toolIndex int, field string) error {
+	if sink == nil {
+		return nil
+	}
+	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{{
+		Feature: compat.RequestTools,
+		Outcome: compat.Drop,
+		Subject: compat.Subject(fmt.Sprintf("wire:/tools/%d/%s", toolIndex, field)),
+	}}); err != nil {
+		return canonical.InternalError("compatibility decision sink commit failed")
+	}
+	return nil
 }
 
 func removePendingToolUseID(pending []string, toolUseID string) []string {

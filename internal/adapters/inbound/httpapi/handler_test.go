@@ -146,6 +146,16 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 	}
 }
 
+func TestExchangeFailureDeliveryResult_PreservesClientCancellation(t *testing.T) {
+	result := exchangeFailureDeliveryResult(provider.Cancelled(context.Canceled))
+	if result.Kind != transportpkg.DeliveryClientCancelled {
+		t.Fatalf("delivery kind = %q, want client cancellation", result.Kind)
+	}
+	if got := statusCodeForExchangeError(result.Err); got != clientClosedRequestStatus {
+		t.Fatalf("cancellation status = %d, want %d", got, clientClosedRequestStatus)
+	}
+}
+
 func TestHandler_LogsSwobuErrorDetailsOnFailure(t *testing.T) {
 	setDefaultLogger, logs := testDebugLogger()
 	defer setDefaultLogger()

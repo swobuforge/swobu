@@ -92,6 +92,7 @@ type TargetConfig struct {
 	// local component state (no disclosure control structs remain).
 	app                   *tui.App
 	catalogProbeSeq       int64
+	catalogProbeInFlight  bool
 	operationContext      context.Context
 	cancelOperations      context.CancelFunc
 	credentialReadDir     func(string) ([]ui.FileBrowserEntry, error)
@@ -153,8 +154,10 @@ func (w *TargetConfig) Open() {
 	if w.mode == targetConfigModeEdit && w.Draft.Get().ProviderSpec != "" && w.SelectedModel.Get().ModelName != "" {
 		if w.IsBedrockFlow() || w.IsAzureFlow() {
 			w.Lifecycle.Set(LifecycleOpen)
-			setup := w.refreshSetup()
-			w.ReadyAndProbe(setup.CredentialRef, w.BaseURL.Get())
+			// Persisted edit values are selection seeds, not stale setup input.
+			// Keep them visible until the current catalog either hydrates or
+			// rejects them; setup changes use ReadyAndProbe's destructive path.
+			w.startCatalogProbe()
 			return
 		}
 		w.Lifecycle.Set(LifecycleOpen)
@@ -295,6 +298,10 @@ func (w *TargetConfig) BindApp(app *tui.App) {
 	}
 	w.app = app
 	w.appState.bindApp(app)
+	// Routes opens an edit component before GSX mounts it. Resume the probe
+	// that Open marked pending now that async results can return through the
+	// app update loop.
+	w.launchPendingCatalogProbe()
 }
 
 // UnbindApp drops the live app handle. go-tui does not unbind State values, so

@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
+	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 // reasoningCodec owns the OpenRouter dialect around an otherwise standard
@@ -24,13 +25,24 @@ import (
 type reasoningCodec struct{ standard protocolcodec.Codec }
 
 func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
-	return c.standard.EncodeChat(req, func(document *chatcompletions.ProviderRequestDocument) (bool, error) {
-		delete(document.Payload, "reasoning_effort")
-		if err := applyOpenRouterReasoningRequest(document.Payload, req.Canonical); err != nil {
-			return true, err
-		}
-		return true, decorateOpenRouterThinking(document, req.Canonical.Items())
+	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
+		return carrier.Document{}, nil, err
+	}
+	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
+		return chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, sink, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility})
 	})
+	if err != nil {
+		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+	}
+	delete(document.Payload, "reasoning_effort")
+	if err := applyOpenRouterReasoningRequest(document.Payload, req.Canonical); err != nil {
+		return carrier.Document{}, decisions, err
+	}
+	if err := decorateOpenRouterThinking(&document, req.Canonical.Items()); err != nil {
+		return carrier.Document{}, decisions, err
+	}
+	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
+	return encoded, decisions, err
 }
 
 func (c reasoningCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {

@@ -31,6 +31,47 @@ type responsesHistoryItemDTO struct {
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 	Phase            string                         `json:"phase,omitempty"`
+	Action           json.RawMessage                `json:"action,omitempty"`
+	Unknown          map[string]json.RawMessage     `json:"-"`
+}
+
+func (d *responsesHistoryItemDTO) UnmarshalJSON(raw []byte) error {
+	type known responsesHistoryItemDTO
+	var decoded known
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	*d = responsesHistoryItemDTO(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"type", "id", "status", "role", "content", "call_id", "name", "arguments", "input", "output", "server_label", "summary", "encrypted_content", "phase", "action"} {
+		delete(fields, name)
+	}
+	if len(fields) > 0 {
+		d.Unknown = fields
+	}
+	return nil
+}
+
+func (d responsesHistoryItemDTO) MarshalJSON() ([]byte, error) {
+	type known responsesHistoryItemDTO
+	base, err := json.Marshal(known(d))
+	if err != nil {
+		return nil, err
+	}
+	if len(d.Unknown) == 0 {
+		return base, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(base, &fields); err != nil {
+		return nil, err
+	}
+	for name, value := range d.Unknown {
+		fields[name] = append(json.RawMessage(nil), value...)
+	}
+	return json.Marshal(fields)
 }
 
 type responsesHistoryResult struct {
@@ -65,6 +106,10 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (
 	var items []responsesHistoryItemDTO
 	if err := json.Unmarshal(trimmed, &items); err != nil {
 		return responsesHistoryResult{}, err
+	}
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(trimmed, &rawItems); err != nil || len(rawItems) != len(items) {
+		return responsesHistoryResult{}, errors.New("responses history input items are invalid")
 	}
 	if explicitPrevious {
 		request, err := fingerprintResponsesRequestValue(items)
@@ -107,7 +152,10 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (
 	if err != nil {
 		return responsesHistoryResult{}, err
 	}
-	currentRaw, err := json.Marshal(items[requestStart:])
+	// Rebase identity through normalized DTOs, but retain current native input
+	// from the original objects so unknown fields, nulls, and large numbers are
+	// not destroyed by fingerprint morphology.
+	currentRaw, err := json.Marshal(rawItems[requestStart:])
 	if err != nil {
 		return responsesHistoryResult{}, err
 	}
@@ -121,7 +169,7 @@ func isResponsesHistoryOutput(item responsesHistoryItemDTO) bool {
 	}
 	// swobu:lint ignore string-switch because=protocol boundary partitions Responses history item variants.
 	switch typeName {
-	case "function_call", "custom_tool_call", "reasoning":
+	case "function_call", "custom_tool_call", "web_search_call", "reasoning", "program", "program_output", "compaction":
 		return true
 	default:
 		return false
@@ -176,6 +224,10 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 		if err != nil {
 			return nil, err
 		}
+		normalized[index].Action, err = normalizeResponsesRawJSON(items[index].Action)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return normalized, nil
 }
@@ -224,7 +276,11 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 			if !ok {
 				return canonical.UnsupportedOperation("responses image output is not implemented")
 			}
-			content = append(content, responsesOutputTextItemDTO{Type: "output_text", Text: text.Text()})
+			annotations, err := encodeResponsesAnnotations(text.Text(), part.Citations())
+			if err != nil {
+				return err
+			}
+			content = append(content, responsesOutputTextItemDTO{Type: "output_text", Text: text.Text(), Annotations: annotations})
 		}
 		raw, err := json.Marshal(content)
 		if err != nil {
@@ -258,11 +314,42 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 			}
 			history.Type = "custom_tool_call"
 			history.Input = input
+		case canonical.ToolKindWebSearch:
+			input, ok := call.Input().WebSearch()
+			if !ok {
+				return canonical.InternalError("responses output web-search call requires typed input")
+			}
+			history.Type = "web_search_call"
+			history.CallID = ""
+			history.Name = ""
+			action, err := encodeResponsesWebSearchAction(input)
+			if err != nil {
+				return err
+			}
+			history.Action = action
 		default:
 			return canonical.UnsupportedOperation("responses output tool kind is unsupported")
 		}
 		s.items = append(s.items, history)
 		return nil
+	case canonical.ItemKindToolResult:
+		result, _ := item.ToolResult()
+		search, ok := result.WebSearch()
+		if !ok {
+			return canonical.UnsupportedOperation("responses output content tool results are request-only")
+		}
+		for index := len(s.items) - 1; index >= 0; index-- {
+			if s.items[index].Type != "web_search_call" || s.items[index].ID != result.CallID().String() {
+				continue
+			}
+			action, err := encodeResponsesWebSearchSources(search, s.items[index].Action)
+			if err != nil {
+				return err
+			}
+			s.items[index].Action = action
+			return nil
+		}
+		return canonical.InternalError("responses web-search result has no prior call")
 	case canonical.ItemKindReasoning:
 		reasoning, _ := item.Reasoning()
 		disclosure, disclosureSet := request.Reasoning().DisclosureField().Get()

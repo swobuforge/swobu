@@ -38,6 +38,7 @@ type responsesToolItemState struct {
 	name        string
 	toolType    string
 	arguments   strings.Builder
+	webAction   json.RawMessage
 }
 
 func NewResponseStreamWireEncoder(request ...canonical.CanonicalRequest) ResponseStreamWireEncoder {
@@ -250,6 +251,9 @@ func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEve
 	if state == nil {
 		return frames, nil
 	}
+	if state.toolType == canonical.ToolTypeWebSearch {
+		return nil, canonical.UnsupportedOperation("responses web-search stream cannot contain function arguments")
+	}
 	if state.callID == "" {
 		state.callID = event.ToolUseID
 	}
@@ -288,7 +292,12 @@ func (e *ResponseStreamWireEncoder) encodeItemCompleted(event sse.StreamEvent) (
 		if itemID == "" {
 			return nil, nil
 		}
+		if state := e.toolItems[itemID]; state != nil && state.toolType == canonical.ToolTypeWebSearch {
+			return e.completeWebSearchCall(itemID, event.CompletedItem)
+		}
 		return e.closeToolItem(itemID)
+	case canonical.ItemKindToolResult:
+		return e.completeWebSearchResult(event.CompletedItem)
 	case canonical.ItemKindReasoning:
 		return e.closeReasoningItem(event)
 	default:

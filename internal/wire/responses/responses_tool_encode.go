@@ -9,11 +9,32 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func encodeResponsesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]any, error) {
+// ProviderRequestTool is one typed Responses tool declaration before exact-
+// provider spelling and the single JSON serialization boundary.
+type ProviderRequestTool struct {
+	Type        string `json:"type"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Parameters  any    `json:"parameters,omitempty"`
+	Strict      *bool  `json:"strict,omitempty"`
+	Format      any    `json:"format,omitempty"`
+}
+
+func encodeResponsesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
-	out := make([]any, 0, len(tools))
+	for _, tool := range tools {
+		if decl, ok := tool.Function(); ok {
+			if strict, specified := decl.Strict().Get(); specified && strict {
+				if err := emitResponsesRequestDecision(sink, exchangeID, compat.RequestToolsSchemaStrict, compat.Exact); err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+	}
+	out := make([]ProviderRequestTool, 0, len(tools))
 	for _, tool := range tools {
 		wire, err := encodeResponsesTool(tool)
 		if err != nil {
@@ -24,9 +45,9 @@ func encodeResponsesTools(tools []canonical.ToolDeclaration, sink compat.Sink, e
 	return out, nil
 }
 
-func encodeResponsesTool(tool canonical.ToolDeclaration) (map[string]any, error) {
+func encodeResponsesTool(tool canonical.ToolDeclaration) (ProviderRequestTool, error) {
 	if tool.Kind() == "" {
-		return nil, canonical.BadRequest("response request tool declarations are invalid")
+		return ProviderRequestTool{}, canonical.BadRequest("response request tool declarations are invalid")
 	}
 	if decl, ok := tool.Function(); ok {
 		return encodeResponsesFunctionTool(tool, decl)
@@ -34,52 +55,55 @@ func encodeResponsesTool(tool canonical.ToolDeclaration) (map[string]any, error)
 	if decl, ok := tool.Custom(); ok {
 		return encodeResponsesCustomTool(tool, decl)
 	}
-	return nil, canonical.UnsupportedOperation("responses protocol only supports known tool declaration types")
+	if tool.Kind() == canonical.ToolKindWebSearch {
+		return ProviderRequestTool{Type: canonical.ToolTypeWebSearch}, nil
+	}
+	return ProviderRequestTool{}, canonical.UnsupportedOperation("responses protocol only supports known tool declaration types")
 }
 
-func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (map[string]any, error) {
+func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
 	name, err := responsesToolWireName(declaration)
 	if err != nil {
-		return nil, err
+		return ProviderRequestTool{}, err
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
-		return nil, canonical.BadRequest("response request tool declarations require a name")
+		return ProviderRequestTool{}, canonical.BadRequest("response request tool declarations require a name")
 	}
 	parameters, err := responsesToolParametersFromSchema(decl.InputSchema())
 	if err != nil {
-		return nil, err
+		return ProviderRequestTool{}, err
 	}
-	wire := map[string]any{
-		"type":        "function",
-		"name":        name,
-		"description": strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
-		"parameters":  parameters,
+	wire := ProviderRequestTool{
+		Type:        "function",
+		Name:        name,
+		Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
+		Parameters:  parameters,
 	}
 	if strict, ok := decl.Strict().Get(); ok {
-		wire["strict"] = strict
+		wire.Strict = &strict
 	}
 	return wire, nil
 }
 
-func encodeResponsesCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool) (map[string]any, error) {
+func encodeResponsesCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool) (ProviderRequestTool, error) {
 	name, err := responsesToolWireName(declaration)
 	if err != nil {
-		return nil, err
+		return ProviderRequestTool{}, err
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
-		return nil, canonical.BadRequest("response request custom tool declarations require a name")
+		return ProviderRequestTool{}, canonical.BadRequest("response request custom tool declarations require a name")
 	}
 	format, err := responsesToolFormatFromCanonical(decl.Format())
 	if err != nil {
-		return nil, err
+		return ProviderRequestTool{}, err
 	}
-	return map[string]any{
-		"type":        "custom",
-		"name":        name,
-		"description": strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
-		"format":      format,
+	return ProviderRequestTool{
+		Type:        "custom",
+		Name:        name,
+		Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
+		Format:      format,
 	}, nil
 }
 
@@ -106,7 +130,7 @@ func responsesToolFormatFromCanonical(format canonical.ToolFormat) (any, error) 
 }
 
 func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (any, error) {
-	if err := policy.Validate(); err != nil {
+	if err := policy.ValidateForTools(tools); err != nil {
 		return nil, err
 	}
 	switch policy.Mode {
@@ -128,6 +152,9 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclara
 		decl, resolvedType, err := canonical.ResolveToolDeclarationByKey(tools, specific, specificType)
 		if err != nil {
 			return nil, err
+		}
+		if resolvedType == canonical.ToolTypeWebSearch {
+			return map[string]any{"type": canonical.ToolTypeWebSearch}, nil
 		}
 		name, err := responsesToolWireName(decl)
 		if err != nil {

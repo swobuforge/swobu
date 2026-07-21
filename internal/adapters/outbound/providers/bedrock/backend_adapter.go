@@ -49,7 +49,8 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 
 // ResolveBackend composes one exact Bedrock Mantle backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, e.Send)}
+	codec := webSearchBackendCodec{standard: protocolcodec.Codec{Protocol: target.ProtocolKind}}
+	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

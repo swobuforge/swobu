@@ -46,3 +46,58 @@ func TestProviderToolProjectionStreamRestoresExactCanonicalKey(t *testing.T) {
 		t.Fatalf("completed key = %q, want %q", finishedCall.Tool(), original)
 	}
 }
+
+func TestProviderToolProjectionStreamPreservesWebSearchLifecycle(t *testing.T) {
+	declaration := canonical.NewWebSearchDeclaration()
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(set)})
+	_, table, _, err := provider.ProjectAttemptTools(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID, _ := canonical.NewToolCallID("search_1")
+	input, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{
+		Action:  canonical.WebSearchActionSearch,
+		Queries: []string{"deadline"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchResult, err := canonical.NewWebSearchResult(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewWebSearchResultItem(callID, searchResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []canonical.Event{
+		{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: call}}},
+		{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 1}, Payload: canonical.ItemCompletedPayload{Item: result}}},
+	}
+	stream := newCanonicalToolProjectionStream(canonical.NewSliceEventReader(events), table)
+
+	completedCall, err := stream.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectedCall, _ := completedCall.Payload.(canonical.ItemEvent).Payload.(canonical.ItemCompletedPayload).Item.ToolCall()
+	if projectedCall.Tool() != canonical.WebSearchToolKey() || projectedCall.CallID() != callID {
+		t.Fatalf("web-search call = %#v", projectedCall)
+	}
+	completedResult, err := stream.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectedResult, _ := completedResult.Payload.(canonical.ItemEvent).Payload.(canonical.ItemCompletedPayload).Item.ToolResult()
+	if projectedResult.CallID() != callID {
+		t.Fatalf("web-search result call ID = %q, want %q", projectedResult.CallID(), callID)
+	}
+}

@@ -265,6 +265,8 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportp
 		ModelRequested:        evidence.request.Model(),
 		ModelResolved:         evidence.request.Model(),
 		WorkspaceRouteModelID: evidence.routeName.String(),
+		ProviderSpec:          evidence.target.ProviderSpec,
+		ProviderModel:         evidence.target.Model,
 		ExchangeDiagnostics:   requestOutcomeDiagnostics(result.Err),
 	}
 	return trafficevidence.NewTerminalTrafficEvent(input)

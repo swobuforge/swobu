@@ -24,6 +24,17 @@
 // preserving the native protocol graph for history replay.
 // Provider auth, base URL, and transport behavior stay in provider wiring
 // packages.
+// Web search lowers first to a typed neutral {type:web_search,name:web_search}
+// request document; exact provider packages own any versioned final spelling
+// before this package's single serialization boundary. Messages
+// history can represent only a search action with exactly one query. A
+// completed unrepresentable call/result lifecycle is omitted atomically with
+// one compatibility decision, while an unresolved call rejects so routing may
+// fall back. The strict leaf call encoder never fabricates or skips an item.
+// Web-search result content preserves the Messages wire union: successful
+// searches use an array of result blocks, while failures use one error object.
+// Citation cited_text maps to canonical citation evidence, and Messages rune
+// indexes convert to canonical UTF-8 byte offsets at this boundary.
 // Ordered messages define the private messages history fingerprint scheme.
 // Top-level system and generation fields remain on rebased requests but do not
 // identify history.

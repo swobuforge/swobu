@@ -25,9 +25,12 @@ func (s *effectRecordingSink) Commit(_ context.Context, _ string, effects []comp
 
 type testDecisionSource struct{ decisions []compat.Decision }
 
-type pullingClientCodec struct{ testClientCodec }
+type pullingClientCodec struct {
+	testClientCodec
+	terminal provider.DecisionSource
+}
 
-func (pullingClientCodec) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
+func (c pullingClientCodec) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
 	completion, complete, fail := wire.NewResponseCompletion()
 	body := wire.NewEncodedResponseBody(ctx, events, func(event canonical.Event) ([][]byte, error) {
 		if event.Kind == canonical.EventEnvelopeEnd {
@@ -35,7 +38,7 @@ func (pullingClientCodec) EncodeResponseStream(ctx context.Context, _ canonical.
 		}
 		return [][]byte{[]byte("event\n")}, nil
 	}, completion, fail)
-	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}, Completion: completion}, nil
+	return wire.ClientByteStreamResult{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}, TerminalDecisions: c.terminal, Completion: completion}, nil
 }
 
 func (s testDecisionSource) Decisions() []compat.Decision {
@@ -66,6 +69,11 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 		Outcome: compat.Drop,
 		Subject: "test:terminal-stream",
 	}}}
+	clientDecisions := testDecisionSource{decisions: []compat.Decision{{
+		Feature: compat.ResponseItemsKind,
+		Outcome: compat.Drop,
+		Subject: "web_search:completed_pair",
+	}}}
 
 	in := ExchangeInput{
 		ExchangeID:       "ex_reader_effects",
@@ -82,7 +90,7 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 	call := providerCall{
 		backend:     provider.Backend{Target: in.Target},
 		request:     provider.Request{Canonical: in.Request, Delivery: in.ProviderDelivery},
-		clientCodec: pullingClientCodec{}, clientDelivery: in.ClientDelivery,
+		clientCodec: pullingClientCodec{terminal: clientDecisions}, clientDelivery: in.ClientDelivery,
 		exchangeID: in.ExchangeID, workspaceSlug: in.WorkspaceSlug, fullRequest: in.Request,
 	}
 	out, err := encodeClientOutput(context.Background(), call, newTerminalCompatibilityStream(reader, decisions, sink, in.ExchangeID), true, sink, nil)
@@ -96,16 +104,20 @@ func TestStreamingCommitsExplicitTerminalCompatibilityDecisions(t *testing.T) {
 		t.Fatalf("consume streaming body: %v", err)
 	}
 
-	found := false
+	foundProvider := false
+	foundClient := false
 	for _, decision := range sink.effects {
 		if decision.Feature == compat.ResponseUsageReasoningTokens {
-			found = true
+			foundProvider = true
 			if decision.Outcome != compat.Drop {
 				t.Fatalf("decision outcome = %q, want drop", decision.Outcome)
 			}
 		}
+		if decision.Feature == compat.ResponseItemsKind && decision.Subject == "web_search:completed_pair" {
+			foundClient = true
+		}
 	}
-	if !found {
-		t.Fatal("terminal compatibility decision was not committed")
+	if !foundProvider || !foundClient {
+		t.Fatalf("terminal compatibility decisions were not committed: %#v", sink.effects)
 	}
 }

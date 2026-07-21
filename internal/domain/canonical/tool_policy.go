@@ -101,3 +101,22 @@ func (p ToolPolicy) Validate() error {
 		return BadRequest("tool policy mode is invalid")
 	}
 }
+
+// ValidateForTools validates invocation semantics against the effective
+// declaration set. Required and specific policies cannot target an empty set,
+// and specific must resolve to the exact declared key.
+func (p ToolPolicy) ValidateForTools(tools []ToolDeclaration) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if (p.Mode == ToolPolicyRequired || p.Mode == ToolPolicySpecific) && len(tools) == 0 {
+		return BadRequest("tool policy requires a non-empty effective tool set")
+	}
+	if p.Mode == ToolPolicySpecific {
+		key, _ := p.SpecificID()
+		if _, _, err := ResolveToolDeclarationByKey(tools, key, string(key.Kind())); err != nil {
+			return err
+		}
+	}
+	return nil
+}

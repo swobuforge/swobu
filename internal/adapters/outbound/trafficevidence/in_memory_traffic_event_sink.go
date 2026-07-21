@@ -56,6 +56,7 @@ type RecentTrafficRow struct {
 	Route          string                           `json:"route"`
 	Result         string                           `json:"result"`
 	StatusCode     int                              `json:"status_code"`
+	AttemptCount   int                              `json:"attempt_count"`
 	ObservedAt     string                           `json:"observed_at,omitempty"`
 	Timing         *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
 	TokenUsage     *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
@@ -69,6 +70,8 @@ type RecentTrafficRow struct {
 	ModelResolved         string                        `json:"model_resolved,omitempty"`
 	ModelResolutionMode   string                        `json:"model_resolution_mode,omitempty"`
 	WorkspaceRouteModelID string                        `json:"workspace_route_model,omitempty"`
+	ProviderSpec          string                        `json:"provider_spec,omitempty"`
+	ProviderModel         string                        `json:"provider_model,omitempty"`
 	Mutations             []trafficevidence.Mutation    `json:"wire_patch_mutations,omitempty"`
 	ExchangeDiagnostics   []string                      `json:"exchange_diagnostics,omitempty"`
 	StageReports          []trafficevidence.StageReport `json:"exchange_stage_reports,omitempty"`
@@ -240,10 +243,13 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 		Route:                 trafficEvent.Route().String(),
 		Result:                trafficEvent.Result().String(),
 		StatusCode:            trafficEvent.StatusCode(),
+		AttemptCount:          trafficEvent.AttemptCount(),
 		ModelRequested:        trafficEvent.ModelRequested(),
 		ModelResolved:         trafficEvent.ModelResolved(),
 		ModelResolutionMode:   trafficEvent.ModelResolutionMode(),
 		WorkspaceRouteModelID: trafficEvent.WorkspaceRouteModelID(),
+		ProviderSpec:          trafficEvent.ProviderSpec(),
+		ProviderModel:         trafficEvent.ProviderModel(),
 		Mutations:             trafficEvent.Mutations(),
 		ExchangeDiagnostics:   trafficEvent.ExchangeDiagnostics(),
 		StageReports:          trafficEvent.StageReports(),

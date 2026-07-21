@@ -24,7 +24,6 @@ import (
 )
 
 const websocketRequestTypeResponseCreate = "response.create"
-const maxWebsocketRequestBodyBytes = 1 << 20
 
 type streamDrainCounters struct {
 	EventCount  int
@@ -47,7 +46,7 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 }
 
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
-	conn.MaxPayloadBytes = maxWebsocketRequestBodyBytes
+	conn.MaxPayloadBytes = maxOperatorJSONBodyBytes
 	if h.requestIngress == nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.InternalError("exchange ingress is not configured"))))
 		return
@@ -115,7 +114,7 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 }
 
 func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, raw []byte) error {
-	if len(raw) > maxWebsocketRequestBodyBytes {
+	if int64(len(raw)) > maxOperatorJSONBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary

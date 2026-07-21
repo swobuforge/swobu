@@ -51,7 +51,11 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclara
 		if name == "" {
 			return canonical.ToolPolicy{}, canonical.BadRequest("messages request tool_choice specific requires a tool name")
 		}
-		resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeFunction)
+		toolType := canonical.ToolTypeFunction
+		if name == canonical.WebSearchToolKey().Name() {
+			toolType = canonical.ToolTypeWebSearch
+		}
+		resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, toolType)
 		if err != nil {
 			return canonical.ToolPolicy{}, err
 		}
@@ -96,7 +100,11 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.Too
 		if !ok {
 			return nil, canonical.BadRequest("messages request tool_choice specific requires a tool id")
 		}
-		decl, _, err := canonical.ResolveToolDeclarationByKey(tools, specific, canonical.ToolTypeFunction)
+		wireType := canonical.ToolTypeFunction
+		if specific.Kind() == canonical.ToolKindWebSearch {
+			wireType = canonical.ToolTypeWebSearch
+		}
+		decl, _, err := canonical.ResolveToolDeclarationByKey(tools, specific, wireType)
 		if err != nil {
 			return nil, err
 		}

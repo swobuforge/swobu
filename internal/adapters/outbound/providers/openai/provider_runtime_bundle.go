@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
@@ -41,14 +42,34 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 type chatCompletionsCodec struct{ protocolcodec.Codec }
 
 func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
-	return c.Codec.EncodeChat(req, func(document *chatcompletions.ProviderRequestDocument) (bool, error) {
-		value, ok := document.Payload["max_tokens"]
-		if ok {
-			delete(document.Payload, "max_tokens")
-			document.Payload["max_completion_tokens"] = value
+	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
+		return carrier.Document{}, nil, err
+	}
+	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
+		document, err := chatcompletions.LowerProviderRequestDocument(
+			req.Canonical,
+			req.Delivery,
+			sink,
+			req.ExchangeID,
+			chatcompletions.EncodeOptions{Compatibility: req.Compatibility},
+		)
+		if err != nil {
+			return chatcompletions.ProviderRequestDocument{}, err
 		}
-		return false, nil
+		if err := chatcompletions.ApplyStandardProviderRequestReasoning(&document, req.Canonical, sink, req.ExchangeID); err != nil {
+			return chatcompletions.ProviderRequestDocument{}, err
+		}
+		return document, nil
 	})
+	if err != nil {
+		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+	}
+	if document.MaxTokens != nil {
+		document.MaxCompletionTokens = document.MaxTokens
+		document.MaxTokens = nil
+	}
+	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
+	return encoded, decisions, err
 }
 
 var _ provider.Codec = chatCompletionsCodec{}

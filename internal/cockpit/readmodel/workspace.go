@@ -13,7 +13,6 @@ type WorkspaceReadModel struct {
 	Slug            string
 	State           WorkspaceState
 	ClientBaseURL   string
-	RunCommands     []RunCommandReadModel
 	Routes          []RouteReadModel
 	Activity        ActivityReadModel
 	ProviderOptions []ProviderOptionReadModel

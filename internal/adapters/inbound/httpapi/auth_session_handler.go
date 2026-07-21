@@ -68,7 +68,10 @@ func (h ChatGPTLoginHandler) serveGenericStart(w http.ResponseWriter, req *http.
 		DraftSubject string `json:"draft_subject"`
 		AuthMode     string `json:"auth_mode"`
 	}
-	_ = json.NewDecoder(req.Body).Decode(&body)
+	if err := decodeOperatorJSONObject(w, req, &body, "auth session start request"); err != nil {
+		writeChatGPTLoginError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
 	slog.Debug("auth session start HTTP request",
 		"component", "httpapi",
 		"provider_spec", strings.TrimSpace(strings.ToLower(body.ProviderSpec)), // swobu:io-string source=boundary

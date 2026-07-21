@@ -11,8 +11,7 @@ func (s *responsesResponseStream) handleReasoningDelta(frame streamFrame, kind c
 	itemID := fallbackItemID(frame.ItemID, "reasoning", frame.OutputIndex)
 	state := s.reasoningStates[itemID]
 	if state == nil {
-		ordinal := s.ordinalFor(itemID, frame.OutputIndex)
-		state = &responsesReasoningState{ordinal: ordinal, id: frame.ItemID}
+		state = &responsesReasoningState{id: frame.ItemID}
 		s.reasoningStates[itemID] = state
 	}
 	partIndex := len(state.parts)
@@ -41,8 +40,7 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 	itemID := fallbackItemID(frame.Item.ID, "reasoning", frame.OutputIndex)
 	state := s.reasoningStates[itemID]
 	if state == nil {
-		ordinal := s.ordinalFor(itemID, frame.OutputIndex)
-		state = &responsesReasoningState{ordinal: ordinal, id: frame.Item.ID, status: frame.Item.Status}
+		state = &responsesReasoningState{id: frame.Item.ID, status: frame.Item.Status}
 	}
 	parts := make([]canonical.ReasoningPart, 0, len(state.parts))
 	for _, streamed := range state.parts {
@@ -67,11 +65,21 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 		if err != nil {
 			return false, err
 		}
-		if len(content) > 0 || frame.Item.EncryptedContent != "" {
-			return false, canonical.UnsupportedOperation("responses manual reasoning state is not supported in P0")
+		for _, trace := range content {
+			if strings.TrimSpace(trace.Type) != "reasoning_text" { // swobu:io-string source=provider-wire
+				continue
+			}
+			part, err := canonical.NewReasoningPart(canonical.ReasoningPartTrace, trace.Text)
+			if err != nil {
+				return false, canonical.InternalError("responses streamed reasoning trace is invalid")
+			}
+			parts = append(parts, part)
 		}
 	}
 	if len(parts) == 0 {
+		if frame.OutputIndex != nil && *frame.OutputIndex >= 0 {
+			s.ordinalOffset--
+		}
 		delete(s.reasoningStates, itemID)
 		return true, nil
 	}
@@ -79,7 +87,8 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 	if err != nil {
 		return false, canonical.InternalError("responses streamed reasoning item is invalid")
 	}
-	s.enqueueItemCompleted("", state.ordinal, item)
+	ordinal := s.ordinalFor(itemID, frame.OutputIndex)
+	s.enqueueItemCompleted("", ordinal, item)
 	delete(s.reasoningStates, itemID)
 	return true, nil
 }

@@ -1,6 +1,7 @@
 package canonical
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -28,12 +29,47 @@ func NewCanonicalResponse(response ResponseRef, model string, items []CanonicalI
 	if strings.TrimSpace(finishReason) == "" { // swobu:io-string source=domain
 		return CanonicalResponse{}, fmt.Errorf("canonical response completion reason is required")
 	}
-	for index, item := range items {
-		if err := validateResponseItem(index, item); err != nil {
-			return CanonicalResponse{}, err
-		}
+	if err := validateResponseItems(items); err != nil {
+		return CanonicalResponse{}, err
 	}
 	return newCanonicalResponse(response, model, items, finishReason, usage), nil
+}
+
+func validateResponseItems(items []CanonicalItem) error {
+	lifecycle := newResponseToolLifecycleValidator()
+	for index, item := range items {
+		if err := validateResponseItem(index, item); err != nil {
+			return err
+		}
+		if err := lifecycle.Observe(item); err != nil {
+			return fmt.Errorf("canonical response item %d %w", index, err)
+		}
+	}
+	return nil
+}
+
+// responseToolLifecycleValidator owns correlation among completed response
+// items. Wire streams and materialized responses feed the same transitions.
+type responseToolLifecycleValidator struct {
+	webSearchCalls map[ToolCallID]struct{}
+}
+
+var errWebSearchResultWithoutCall = errors.New("web-search result has no prior call")
+
+func newResponseToolLifecycleValidator() responseToolLifecycleValidator {
+	return responseToolLifecycleValidator{webSearchCalls: make(map[ToolCallID]struct{})}
+}
+
+func (v *responseToolLifecycleValidator) Observe(item CanonicalItem) error {
+	if call, ok := item.ToolCall(); ok && call.Tool().Kind() == ToolKindWebSearch {
+		v.webSearchCalls[call.CallID()] = struct{}{}
+	}
+	if result, ok := item.ToolResult(); ok {
+		if _, found := v.webSearchCalls[result.CallID()]; !found {
+			return errWebSearchResultWithoutCall
+		}
+	}
+	return nil
 }
 
 func validateResponseItem(index int, item CanonicalItem) error {
@@ -52,7 +88,13 @@ func validateResponseItem(index int, item CanonicalItem) error {
 			return fmt.Errorf("canonical response item %d is invalid reasoning", index)
 		}
 	case ItemKindToolResult:
-		return fmt.Errorf("canonical response item %d is a request-only tool result", index)
+		result, ok := item.ToolResult()
+		if !ok {
+			return fmt.Errorf("canonical response item %d is an invalid tool result", index)
+		}
+		if _, search := result.WebSearch(); !search {
+			return fmt.Errorf("canonical response item %d is a request-only tool result", index)
+		}
 	default:
 		return fmt.Errorf("canonical response item %d kind %q is unsupported", index, item.Kind())
 	}

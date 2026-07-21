@@ -92,7 +92,12 @@ func (r azureBackendAdapter) ResolveBackend(target provider.TargetSnapshot) (pro
 	if err != nil {
 		return provider.Backend{}, canonical.BadEndpoint("azure resource locator is required")
 	}
-	backend := provider.Backend{Target: target.Clone(), Codec: protocolcodec.Codec{ProviderID: target.ProviderID(), Protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, r.Send)}
+	codec := protocolcodec.Codec{Protocol: target.ProtocolKind}
+	var providerCodec provider.Codec = codec
+	if target.ProtocolKind == protocolkind.Messages {
+		providerCodec = messagesCodec{Codec: codec}
+	}
+	backend := provider.Backend{Target: target.Clone(), Codec: providerCodec, Transport: provider.BindTransport(target, r.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

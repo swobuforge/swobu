@@ -21,18 +21,19 @@ type messageBody struct {
 }
 
 type contentID struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
-	Content   any             `json:"content,omitempty"`
-	Source    any             `json:"source,omitempty"`
-	Thinking  *string         `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Data      string          `json:"data,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	IsError   bool                  `json:"is_error,omitempty"`
+	Content   any                   `json:"content,omitempty"`
+	Source    any                   `json:"source,omitempty"`
+	Thinking  *string               `json:"thinking,omitempty"`
+	Signature string                `json:"signature,omitempty"`
+	Data      string                `json:"data,omitempty"`
+	Citations []messagesCitationDTO `json:"citations,omitempty"`
 }
 
 // EncodeOptions selects destination-specific image behavior while keeping the
@@ -41,17 +42,41 @@ type EncodeOptions struct {
 	Compatibility compat.CompatibilityPolicy
 }
 
+// ProviderRequestDocument is the standard Messages lowering before an exact
+// provider owns any typed dialect adaptation.
+type ProviderRequestDocument struct {
+	Payload map[string]any
+	Tools   []ProviderRequestTool
+}
+
 func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
+	document, err := LowerProviderRequestDocument(req, d, sink, exchangeID, options)
+	if err != nil {
+		return carrier.Document{}, err
+	}
+	return EncodeProviderRequestDocument(document)
+}
+
+// LowerProviderRequestDocument produces a typed Messages document without
+// crossing the JSON boundary.
+func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.Document{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
+		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
 	}
 	items := req.Items()
+	items, projectionDecisions, err := projectMessagesWebSearchLifecycles(items, compat.RequestItemsKind)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if err := commitMessagesProjectionDecisions(sink, exchangeID, projectionDecisions); err != nil {
+		return ProviderRequestDocument{}, err
+	}
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items, tools, sink, exchangeID, options)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	payload := map[string]any{
 		"model":    req.Model(),
@@ -59,35 +84,37 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	}
 	loweredInstructions := flattenInstructionsForMessages(req.Instructions())
 	if err := commitMessagesInstructionDecisions(sink, exchangeID, loweredInstructions); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if loweredInstructions.Text != "" {
 		payload["system"] = loweredInstructions.Text
 	}
-	if wireTools, err := encodeMessagesTools(tools, sink, exchangeID); err != nil {
-		return carrier.Document{}, err
-	} else if len(wireTools) > 0 {
-		payload["tools"] = wireTools
+	wireTools, err := encodeMessagesTools(tools, sink, exchangeID, options)
+	if err != nil {
+		return ProviderRequestDocument{}, err
 	}
 	if err := encodeMessagesGenerationControls(payload, req.Controls(), req.Reasoning()); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if err := encodeMessagesReasoning(payload, req.Reasoning()); err != nil {
 		if decisionErr := emitMessagesDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
-			return carrier.Document{}, decisionErr
+			return ProviderRequestDocument{}, decisionErr
 		}
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.Document{}, err
+		if decisionErr := emitMessagesDecision(sink, exchangeID, compat.RequestOutputFormat, compat.Reject); decisionErr != nil {
+			return ProviderRequestDocument{}, decisionErr
+		}
+		return ProviderRequestDocument{}, err
 	}
 	choice, err := encodeMessagesToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), len(tools) > 0)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if choice != nil {
 		payload["tool_choice"] = choice
@@ -95,7 +122,18 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
-	raw, err := json.Marshal(payload)
+	return ProviderRequestDocument{Payload: payload, Tools: wireTools}, nil
+}
+
+// EncodeProviderRequestDocument performs the single serialization boundary
+// after standard lowering or exact-provider typed composition.
+func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Document, error) {
+	if len(document.Tools) > 0 {
+		document.Payload["tools"] = document.Tools
+	} else {
+		delete(document.Payload, "tools")
+	}
+	raw, err := json.Marshal(document.Payload)
 	if err != nil {
 		return carrier.Document{}, canonical.BadRequest("conversation request could not be encoded for the messages protocol")
 	}
@@ -138,7 +176,11 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 	if message, ok := item.Message(); ok {
 		for _, part := range message.Content() {
 			if text, ok := part.Text(); ok {
-				blocks = append(blocks, contentID{Type: "text", Text: text.Text()})
+				citations, err := encodeMessagesCitations(text.Text(), part.Citations())
+				if err != nil {
+					return nil, err
+				}
+				blocks = append(blocks, contentID{Type: "text", Text: text.Text(), Citations: citations})
 				continue
 			}
 			if owner != canonical.TurnOwnerUser {
@@ -164,6 +206,13 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		return append(blocks, block), nil
 	}
 	if result, ok := item.ToolResult(); ok {
+		if search, ok := result.WebSearch(); ok {
+			content, err := encodeMessagesWebSearchResult(search)
+			if err != nil {
+				return nil, err
+			}
+			return append(blocks, contentID{Type: "web_search_tool_result", ToolUseID: result.CallID().String(), Content: content}), nil
+		}
 		content, err := encodeMessagesToolResultContent(result.Content(), sink, exchangeID, options)
 		if err != nil {
 			return nil, err
@@ -190,8 +239,19 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDecl
 		return contentID{}, canonical.InternalError("messages tool-call item is invalid")
 	}
 	tool := call.Tool()
+	if tool.Kind() == canonical.ToolKindWebSearch {
+		search, ok := call.Input().WebSearch()
+		if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
+			return contentID{}, canonical.UnsupportedOperation("messages protocol requires one search query per server-tool call")
+		}
+		input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
+		if err != nil {
+			return contentID{}, canonical.InternalError("messages web-search call could not be encoded")
+		}
+		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: "web_search", Input: input}, nil
+	}
 	if tool.Kind() != canonical.ToolKindFunction {
-		return contentID{}, canonical.UnsupportedOperation("messages protocol only supports function tool calls")
+		return contentID{}, canonical.UnsupportedOperation("messages protocol tool-call kind is unsupported")
 	}
 	name := tool.Name()
 	object, ok := call.Input().Object()
@@ -278,38 +338,50 @@ func emitMessagesDecision(sink compat.Sink, exchangeID string, feature compat.Fe
 	return nil
 }
 
-func encodeMessagesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]messagesToolDTO, error) {
+func encodeMessagesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, options EncodeOptions) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
-	// Messages wire has no strict tool-schema field; provider adapters emit the
-	// compatibility decision before this encoder runs.
-	out := make([]messagesToolDTO, 0, len(tools))
 	for _, tool := range tools {
-		decl, ok := tool.Function()
-		if !ok {
-			return nil, canonical.UnsupportedOperation("messages protocol only supports function tool declarations")
+		if decl, ok := tool.Function(); ok {
+			if strict, specified := decl.Strict().Get(); specified && strict {
+				if err := emitMessagesDecision(sink, exchangeID, compat.RequestToolsSchemaStrict, compat.Drop); err != nil {
+					return nil, err
+				}
+				break
+			}
 		}
-		wire, err := encodeMessagesFunctionTool(tool, decl)
-		if err != nil {
-			return nil, err
+	}
+	out := make([]ProviderRequestTool, 0, len(tools))
+	for _, tool := range tools {
+		if decl, ok := tool.Function(); ok {
+			wire, err := encodeMessagesFunctionTool(tool, decl)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, wire)
+			continue
 		}
-		out = append(out, wire)
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			out = append(out, ProviderRequestTool{Type: "web_search", Name: "web_search"})
+			continue
+		}
+		return nil, canonical.UnsupportedOperation("messages protocol does not support this tool declaration")
 	}
 	return out, nil
 }
 
-func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (messagesToolDTO, error) {
+func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
 	schema, err := messagesToolSchema(decl.InputSchema())
 	if err != nil {
-		return messagesToolDTO{}, err
+		return ProviderRequestTool{}, err
 	}
 	name := declaration.Key().Name()
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
-		return messagesToolDTO{}, canonical.BadRequest("messages protocol tool declarations require a name")
+		return ProviderRequestTool{}, canonical.BadRequest("messages protocol tool declarations require a name")
 	}
-	return messagesToolDTO{
+	return ProviderRequestTool{
 		Name:        name,
 		Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
 		InputSchema: schema,

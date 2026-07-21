@@ -14,7 +14,10 @@
 // catalog probing. The Cockpit adapter decodes opaque probe diagnostics before
 // this feature receives typed Bedrock authentication evidence. Catalog success
 // controls creation validity while optional STS identity enriches the Bedrock
-// form. Bedrock has one authentication field: an absent credential reference
+// form. Edit may enter catalog-loading state before the component is mounted;
+// BindApp resumes that pending operation while persisted model/protocol values
+// remain non-authoritative selection seeds until reconciliation. Bedrock has
+// one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine
 // login-session workflow.

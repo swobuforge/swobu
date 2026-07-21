@@ -5,6 +5,7 @@ import "strings"
 const (
 	ToolTypeFunction     = "function"
 	ToolTypeCustom       = "custom"
+	ToolTypeWebSearch    = "web_search"
 	ToolNamespaceRequest = "request"
 )
 
@@ -12,8 +13,9 @@ const (
 type ToolKind string
 
 const (
-	ToolKindFunction ToolKind = "function"
-	ToolKindCustom   ToolKind = "custom"
+	ToolKindFunction  ToolKind = "function"
+	ToolKindCustom    ToolKind = "custom"
+	ToolKindWebSearch ToolKind = "web_search"
 )
 
 // ToolKey is the single canonical identity shared by a declaration and calls
@@ -32,13 +34,24 @@ func NewToolKey(namespace string, kind ToolKind, name string) (ToolKey, error) {
 	if namespace == "" || name == "" {
 		return ToolKey{}, BadRequest("canonical tool key requires namespace and name")
 	}
-	if kind != ToolKindFunction && kind != ToolKindCustom {
+	if kind != ToolKindFunction && kind != ToolKindCustom && kind != ToolKindWebSearch {
 		return ToolKey{}, BadRequest("canonical tool key kind is invalid")
 	}
 	if strings.Contains(namespace, "//") || strings.Contains(name, "/") {
 		return ToolKey{}, BadRequest("canonical tool key namespace or name is invalid")
 	}
 	return ToolKey{namespace: namespace, kind: kind, name: name}, nil
+}
+
+// WebSearchToolKey returns the one fixed request identity for the built-in
+// exchange-resolved web-search tool. Wire aliases and provider versions must
+// normalize to this key rather than creating new canonical identities.
+func WebSearchToolKey() ToolKey {
+	key, err := NewRequestToolKey(ToolKindWebSearch, ToolTypeWebSearch)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
 
 // NewRequestToolKey constructs a request-scoped key from a possibly
@@ -192,7 +205,7 @@ func ResolveHistoricalToolKeyByName(tools []ToolDeclaration, name string, kind T
 // ToolIdentityFromWire preserves a client transcript's literal flat identity.
 // Provider aliases are resolved only through the exact attempt-local table.
 func ToolIdentityFromWire(raw string, kind ToolKind) (ToolKey, error) {
-	if raw == "" || strings.TrimSpace(raw) != raw {
+	if raw == "" || strings.TrimSpace(raw) != raw { // swobu:io-string source=domain
 		return ToolKey{}, BadRequest("canonical wire tool identity is invalid")
 	}
 	return NewRequestToolKey(kind, raw)

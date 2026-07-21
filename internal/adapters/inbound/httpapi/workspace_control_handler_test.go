@@ -120,7 +120,7 @@ func TestWorkspaceControlHandlerRejectsMalformedTrailingJSON(t *testing.T) {
 	}
 }
 
-func TestWorkspaceControlHandlerUpdateRejectsBodyIdentityAndProvider(t *testing.T) {
+func TestWorkspaceControlHandlerUpdateIgnoresUnknownBodyMembers(t *testing.T) {
 	handler := NewWorkspaceControlHandler(workspaces.Service{})
 	for name, body := range map[string]string{
 		"body id":   `{"target":{"id":"other","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:KEY"}}}}`,
@@ -131,8 +131,8 @@ func TestWorkspaceControlHandlerUpdateRejectsBodyIdentityAndProvider(t *testing.
 			request := httptest.NewRequest(http.MethodPut, "/_swobu/workspaces/dev/routes/chat/targets/a", strings.NewReader(body))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if response.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+			if response.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d body=%s, want service call after permissive decode", response.Code, response.Body.String())
 			}
 		})
 	}

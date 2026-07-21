@@ -292,26 +292,32 @@ func (w *TargetConfig) startCatalogProbe() {
 	w.invalidateCatalogEvidence()
 	w.Catalog.Set(catalogOperationState{Loading: true})
 	w.Error.Set("")
-	if w.hasLiveApp() {
-		seq := w.catalogProbeSeq
-		app := w.app
-		draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), "", "", w.Route.ID)
-		queries := w.TargetSetupQueries
-		ctx := w.actionContext()
-		go func() {
-			result, probeErr := probeCatalogSnapshot(ctx, queries, draft)
-			if app == nil {
-				return
-			}
-			app.QueueUpdate(func() {
-				if seq != w.catalogProbeSeq || !w.catalogLoading() {
-					return
-				}
-				w.SetCatalogResult(result, probeErr)
-			})
-		}()
+	w.launchPendingCatalogProbe()
+}
+
+// launchPendingCatalogProbe starts catalog I/O only after the feature has a
+// live app that can safely receive the result. Open may establish the loading
+// state before mount; the in-flight guard makes BindApp resumption idempotent.
+func (w *TargetConfig) launchPendingCatalogProbe() {
+	if !w.catalogLoading() || w.catalogProbeInFlight || !w.hasLiveApp() {
 		return
 	}
+	w.catalogProbeInFlight = true
+	seq := w.catalogProbeSeq
+	app := w.app
+	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), "", "", w.Route.ID)
+	queries := w.TargetSetupQueries
+	ctx := w.actionContext()
+	go func() {
+		result, probeErr := probeCatalogSnapshot(ctx, queries, draft)
+		app.QueueUpdate(func() {
+			if seq != w.catalogProbeSeq || !w.catalogLoading() {
+				return
+			}
+			w.catalogProbeInFlight = false
+			w.SetCatalogResult(result, probeErr)
+		})
+	}()
 }
 
 // ContinueSetup advances from provider-specific setup when the current draft
@@ -360,6 +366,7 @@ func (w *TargetConfig) RefreshBedrockIdentity() {
 func (w *TargetConfig) invalidateCatalogEvidence() {
 	w.Catalog.Set(catalogOperationState{})
 	w.catalogProbeSeq++
+	w.catalogProbeInFlight = false
 }
 
 // ChangeProvider returns to the empty provider picker. Changing

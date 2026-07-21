@@ -9,7 +9,6 @@ import (
 
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
-	"github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
@@ -43,20 +42,15 @@ type operatorClient interface {
 	ProbeTarget(context.Context, workspaceapi.Connection, string) (operatorclient.ModelCatalogResult, error)
 }
 type LiveOperatorAdapter struct {
-	client     operatorClient
-	addr       string
-	runCommand runCommandExecutor
-	commandIO  runCommandIOConfig
+	client operatorClient
+	addr   string
 }
 
 func NewLiveOperatorAdapter(httpClient *http.Client, addr string) *LiveOperatorAdapter {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	a := &LiveOperatorAdapter{client: operatorclient.New(httpClient, config.BaseURL(addr)), addr: addr, commandIO: processRunCommandIO()}
-	a.runCommand = func(ctx context.Context, cmd clientprofile.RunCommandSpec) error {
-		return executeClientRunCommand(ctx, cmd, a.commandIO)
-	}
+	a := &LiveOperatorAdapter{client: operatorclient.New(httpClient, config.BaseURL(addr)), addr: addr}
 	ui.RegisterEffectHooks(browser.Open, clipboard.TryWriteText, clipboard.WriteTempFileFallback)
 	return a
 }
@@ -284,27 +278,6 @@ func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.De
 	}
 	return readmodel.RouteReadModel{}, errors.New("committed route missing from workspace response")
 }
-func (a *LiveOperatorAdapter) ExecuteRunCommand(ctx context.Context, request ports.ExecuteRunCommandRequest) (ports.RunExecutionResult, error) {
-	if request.WorkspaceID == "" || request.RunCommandID == "" {
-		return ports.RunExecutionResult{}, errors.New("workspace and run command are required")
-	}
-	workspace, err := a.LoadWorkspace(ctx, request.WorkspaceID)
-	if err != nil {
-		return ports.RunExecutionResult{}, err
-	}
-	modelID := string(request.RouteID)
-	if modelID == "" && len(workspace.Routes) > 0 {
-		modelID = workspace.Routes[0].ModelName
-	}
-	command, ok := clientprofile.ResolveRunCommand(string(request.RunCommandID), workspace.ClientBaseURL, modelID)
-	if !ok {
-		return ports.RunExecutionResult{}, ErrUnsupportedCommand
-	}
-	if err := a.runCommand(ctx, command); err != nil {
-		return ports.RunExecutionResult{}, err
-	}
-	return ports.RunExecutionResult{}, nil
-}
 func (a *LiveOperatorAdapter) StorePastedCredential(_ context.Context, req ports.StorePastedCredentialRequest) (ports.StorePastedCredentialResult, error) {
 	policy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
 	ref, err := credentialsadapter.StoreMaterializedCredential(req.ProviderSpec, req.Name, req.Secret, policy)
@@ -367,7 +340,6 @@ func (a *LiveOperatorAdapter) RetryAuthSession(ctx context.Context, id string) (
 var _ ports.WorkspaceQueries = (*LiveOperatorAdapter)(nil)
 var _ ports.WorkspaceCommands = (*LiveOperatorAdapter)(nil)
 var _ ports.RouteCommands = (*LiveOperatorAdapter)(nil)
-var _ ports.RunExecutor = (*LiveOperatorAdapter)(nil)
 var _ ports.ActivityQueries = (*LiveOperatorAdapter)(nil)
 var _ ports.TargetAuthCommands = (*LiveOperatorAdapter)(nil)
 var _ ports.TargetCredentialCommands = (*LiveOperatorAdapter)(nil)

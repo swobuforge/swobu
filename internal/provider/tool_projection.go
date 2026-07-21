@@ -122,6 +122,12 @@ func rewriteAttemptToolKeys(request canonical.CanonicalRequest, table ToolProjec
 			projectedDeclarations[i], err = canonical.NewFunctionTool(key, function.Description(), function.InputSchema(), function.Strict())
 		} else if custom, ok := declaration.Custom(); ok {
 			projectedDeclarations[i], err = canonical.NewCustomTool(key, custom.Description(), custom.Format())
+		} else if declaration.Kind() == canonical.ToolKindWebSearch {
+			// Web search has one fixed canonical identity. Unlike caller-named
+			// tools, it has no declaration name that attempt projection may alias.
+			projectedDeclarations[i] = canonical.NewWebSearchDeclaration()
+		} else {
+			return canonical.CanonicalRequest{}, canonical.InternalError("provider attempt projection encountered an invalid tool declaration")
 		}
 		if err != nil {
 			return canonical.CanonicalRequest{}, err
