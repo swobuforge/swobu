@@ -517,8 +517,6 @@ func TestSendProviderRequest_StreamingMessagesRoutesToMantlePath(t *testing.T) {
 }
 
 func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *testing.T) {
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
-
 	sawBody := make(chan string, 1)
 	sawErr := make(chan error, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -548,12 +546,13 @@ func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *test
 		},
 	})
 	exec := NewExecutor(upstream.Client())
+	exec.credentials = testCredentialProvider{token: "test-token"}
 	sink := &recordingDecisionSink{}
 	req := newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		newBedrockTarget(upstream.URL, "", protocolkind.Messages),
+		newBedrockTarget(upstream.URL, "secret:test", protocolkind.Messages),
 		sink,
 	)
 	req.ExchangeID = "ex-bedrock-cache-breakpoint"

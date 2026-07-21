@@ -57,9 +57,7 @@ func TestResolveBedrockAuthCredentialReferenceSelectsBearer(t *testing.T) {
 }
 
 func TestResolveBedrockAuthReloadsAWSConfiguration(t *testing.T) {
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "first-access")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "first-secret")
+	setStaticAWSCredentials(t, "first-access", "first-secret", "")
 	first, err := resolveBedrockAuth(context.Background(), nil, "", "eu-west-2")
 	if err != nil {
 		t.Fatal(err)
@@ -81,4 +79,15 @@ func TestResolveBedrockAuthReloadsAWSConfiguration(t *testing.T) {
 	if firstCredentials.AccessKeyID != "first-access" || secondCredentials.AccessKeyID != "second-access" {
 		t.Fatalf("AWS config was not reloaded: first=%q second=%q", firstCredentials.AccessKeyID, secondCredentials.AccessKeyID)
 	}
+}
+
+func setStaticAWSCredentials(t *testing.T, accessKey, secretKey, sessionToken string) {
+	t.Helper()
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_DEFAULT_PROFILE", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", accessKey)
+	t.Setenv("AWS_SECRET_ACCESS_KEY", secretKey)
+	t.Setenv("AWS_SESSION_TOKEN", sessionToken)
 }
