@@ -28,6 +28,7 @@ const (
 	// are resolved and enforced independently by exchange ingress.
 	maxCompressedRequestBodyBytes int64 = 48 << 20
 	maxDecodedRequestBodyBytes    int64 = 48 << 20
+	clientClosedRequestStatus           = 499
 )
 
 type requestIngress interface {
@@ -123,8 +124,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, err)
+		deliveryResult := exchangeFailureDeliveryResult(err)
+		if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
+			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
+			return
+		}
 		writeExchangeError(writer, err)
-		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, transportpkg.DeliveryResult{Kind: transportpkg.DeliveryExchangeFailed, Err: err})
+		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
 	writeModelResolutionHeaders(writer)
@@ -155,6 +161,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
+}
+
+func exchangeFailureDeliveryResult(err error) transportpkg.DeliveryResult {
+	kind := transportpkg.DeliveryExchangeFailed
+	if errors.Is(err, context.Canceled) {
+		kind = transportpkg.DeliveryClientCancelled
+	}
+	return transportpkg.DeliveryResult{Kind: kind, Err: err}
 }
 
 func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, workspace routing.WorkspaceSlug) {
@@ -264,17 +278,23 @@ func logRequestOutcome(
 		errorMessage = err.Error()
 		result = "swobu_error"
 		errorOrigin = string(canonical.ErrorOriginSwobu)
-		var backendErr canonical.BackendError
-		if errors.As(err, &backendErr) {
-			result = "backend_error"
-			statusCode = backendErr.StatusCode
-			errorOrigin = string(canonical.ErrorOriginBackend)
-			targetID = strings.TrimSpace(backendErr.TargetID) // swobu:io-string source=boundary
+		if errors.Is(err, context.Canceled) {
+			result = "canceled"
+			statusCode = clientClosedRequestStatus
+			errorOrigin = "client"
 		} else {
-			statusCode = statusCodeForExchangeError(err)
-			var swobuErr canonical.Error
-			if errors.As(err, &swobuErr) {
-				errorCode = string(swobuErr.Code)
+			var backendErr canonical.BackendError
+			if errors.As(err, &backendErr) {
+				result = "backend_error"
+				statusCode = backendErr.StatusCode
+				errorOrigin = string(canonical.ErrorOriginBackend)
+				targetID = strings.TrimSpace(backendErr.TargetID) // swobu:io-string source=boundary
+			} else {
+				statusCode = statusCodeForExchangeError(err)
+				var swobuErr canonical.Error
+				if errors.As(err, &swobuErr) {
+					errorCode = string(swobuErr.Code)
+				}
 			}
 		}
 	}
@@ -317,6 +337,9 @@ func logRequestOutcome(
 }
 
 func statusCodeForExchangeError(err error) int {
+	if errors.Is(err, context.Canceled) {
+		return clientClosedRequestStatus
+	}
 	var swobuErr canonical.Error
 	if errors.As(err, &swobuErr) {
 		return statusCodeForSwobuError(swobuErr.Code)

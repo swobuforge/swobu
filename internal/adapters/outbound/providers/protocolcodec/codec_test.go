@@ -50,6 +50,20 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsWebSearchFailsAsUnsupportedBackend(t *testing.T) {
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+		Tools: canonical.Specify(set),
+	})
+	_, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	var unsupported provider.UnsupportedError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("error = %T %v, want provider.UnsupportedError", err, err)
+	}
+}
+
 func TestDecodePreservesExchangeIdentityAndCancellation(t *testing.T) {
 	codec := Codec{Protocol: protocolkind.ChatCompletions}
 	request := provider.Request{ExchangeID: "exchange-identity", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}

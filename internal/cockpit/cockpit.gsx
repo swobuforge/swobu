@@ -19,7 +19,7 @@ const cockpitRefreshTimeout = 5 * time.Second
 //
 // It owns shell composition, body viewport clipping, and selected top-level
 // readmodel data. It does not own feature drafts, submit lifecycle, route
-// mutation, target mutation, run execution, or model refresh policy.
+// mutation, target mutation, or model refresh policy.
 type Cockpit struct {
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]

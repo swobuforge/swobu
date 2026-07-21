@@ -9,7 +9,14 @@
 // historical calls remain intelligible without the current ToolSet. The active
 // closed ToolDeclaration set owns present-tense callability and schema binding.
 // JSONObject owns deterministic object-semantic values, while ToolSet owns
-// declaration uniqueness, lookup, and source order.
+// declaration uniqueness, lookup, and source order. Function and custom tools
+// are caller-resolved. Web search is a stateless marker for provider-hosted
+// search availability; source-protocol preferences and provider dialects stay
+// outside canonical. Observed web-search lifecycles retain their original call
+// identity, action, action inputs, result, sources, and citations. They are
+// historical facts, not a promise that every destination wire can serialize
+// every lifecycle shape. Citation excerpts belong to citation evidence, never
+// to returned-source metadata.
 //
 // Request-band omission is stored with each field through Specified values;
 // typed InstructionSet values preserve directive role and order. MessageRole
@@ -25,7 +32,11 @@
 // tool results cannot become provider output. Completed items remain
 // response-projection checkpoints.
 //
-// Provider wire names, aliases, transport DTOs, and runtime mechanics remain
-// outside this package. ResponseRef is the typed exception for response identity
-// and exact-target native-resumption refinement.
+// Canonical may contain typed protocol-native refinements when they remain
+// attached beneath their canonical semantic owner, as opaque thinking remains
+// attached to reasoning and Responses identity remains attached to ResponseRef.
+// Independent protocol replay transcripts do not acquire canonical ownership;
+// Responses stateless transcript state lives beside canonical in
+// domain/responsesnative. Provider wire names, aliases, transport DTOs, and
+// runtime mechanics remain outside this package.
 package canonical

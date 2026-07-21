@@ -5,10 +5,8 @@ import (
 	"strings"
 	"time"
 
-	clientprofile "github.com/swobuforge/swobu/internal/app/operator/clientprofile"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/exchange"
 )
 
 // ModelReloader owns the refresh policy after workspace mutations. It loads
@@ -91,9 +89,6 @@ func (r *ModelReloader) localSaveProjection(current readmodel.CockpitReadModel, 
 	if !merged.IsDraft() && merged.ClientBaseURL == "" {
 		merged.ClientBaseURL = derivedClientBaseURL(current, merged.Slug)
 	}
-	if !merged.IsDraft() && len(merged.RunCommands) == 0 && merged.ClientBaseURL != "" {
-		merged.RunCommands = runCommandsForBaseURL(merged.ClientBaseURL)
-	}
 	return selectWorkspace(updateWorkspaceInModel(current, merged), saved.ID)
 }
 
@@ -117,30 +112,6 @@ func derivedClientBaseURL(current readmodel.CockpitReadModel, slug string) strin
 	return "http://127.0.0.1:7926/c/" + slug
 }
 
-func runCommandsForBaseURL(baseURL string) []readmodel.RunCommandReadModel {
-	profiles := clientprofile.Catalog()
-	commands := make([]readmodel.RunCommandReadModel, 0, len(profiles))
-	for _, profile := range profiles {
-		identity := profile.Identity()
-		actions := profile.Actions(baseURL)
-		if len(actions) == 0 {
-			continue
-		}
-		action := actions[0]
-		commands = append(commands, readmodel.RunCommandReadModel{
-			ID:             readmodel.RunCommandID(identity.ID),
-			ClientID:       readmodel.ClientID(identity.ID),
-			Label:          identity.Label,
-			CommandName:    identity.ID,
-			TargetRouteID:  readmodel.RouteID(exchange.PublicModelIDSwobu),
-			TargetLabel:    exchange.PublicModelIDSwobu,
-			Effect:         readmodel.RunCommandOpensClient,
-			CommandPreview: action.Content,
-		})
-	}
-	return commands
-}
-
 func mergeWorkspaceProjection(current readmodel.WorkspaceReadModel, saved readmodel.WorkspaceReadModel) readmodel.WorkspaceReadModel {
 	merged := current
 	if saved.ID != "" {
@@ -152,9 +123,6 @@ func mergeWorkspaceProjection(current readmodel.WorkspaceReadModel, saved readmo
 	merged.State = saved.State
 	if saved.ClientBaseURL != "" {
 		merged.ClientBaseURL = saved.ClientBaseURL
-	}
-	if len(merged.RunCommands) == 0 && len(saved.RunCommands) > 0 {
-		merged.RunCommands = saved.RunCommands
 	}
 	if len(merged.Routes) == 0 && len(saved.Routes) > 0 {
 		merged.Routes = saved.Routes

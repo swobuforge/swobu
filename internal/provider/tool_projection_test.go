@@ -95,3 +95,41 @@ func TestAttemptToolProjectionPrefersUnoccupiedSafeNamespacedLeaf(t *testing.T) 
 		t.Fatalf("safe unoccupied leaf emitted compatibility decisions: %#v", decisions)
 	}
 }
+
+func TestAttemptToolProjectionPreservesWebSearch(t *testing.T) {
+	functionKey, _ := canonical.NewToolKey(canonical.ToolNamespaceRequest, canonical.ToolKindFunction, "lookup")
+	functionRequest := projectionTestRequest(t, functionKey)
+	declarations := append(functionRequest.Tools(), canonical.NewWebSearchDeclaration())
+	set, err := canonical.NewToolSet(declarations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID, _ := canonical.NewToolCallID("search_call")
+	input, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{
+		Action: canonical.WebSearchActionSearch, Queries: []string{"one"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Tools: canonical.Specify(set), Items: []canonical.CanonicalItem{call}})
+
+	projected, table, _, err := ProjectAttemptTools(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := projected.Tools()
+	if len(tools) != 2 || tools[1].Kind() != canonical.ToolKindWebSearch || tools[1].Key() != canonical.WebSearchToolKey() {
+		t.Fatalf("projected tools = %#v", tools)
+	}
+	if wire, err := table.WireName(canonical.WebSearchToolKey()); err != nil || wire != canonical.ToolTypeWebSearch {
+		t.Fatalf("web-search projection = %q, %v", wire, err)
+	}
+	projectedCall, ok := projected.Items()[0].ToolCall()
+	if !ok || projectedCall.Tool() != canonical.WebSearchToolKey() || projectedCall.CallID() != callID {
+		t.Fatalf("projected web-search call = %#v", projected.Items()[0])
+	}
+}

@@ -88,6 +88,16 @@ func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.S
 	if len(tools) == 0 {
 		return nil, nil
 	}
+	for _, tool := range tools {
+		if decl, ok := tool.Function(); ok {
+			if strict, specified := decl.Strict().Get(); specified && strict {
+				if err := emitChatImageDecision(sink, exchangeID, compat.RequestToolsSchemaStrict, compat.Exact); err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+	}
 	out := make([]chatCompletionsToolDefinitionDTO, 0, len(tools))
 	for _, tool := range tools {
 		wire, err := encodeChatCompletionsTool(tool)

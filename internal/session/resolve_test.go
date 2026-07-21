@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -75,6 +76,59 @@ func TestBeginRejectsPreviousResponse(t *testing.T) {
 	request := makeRequest("gpt-4o", makeItems("hello"), &canonical.ResponseRef{SwobuID: "resp_old"})
 	if _, err := Begin(request); err == nil || err.Error() != "session begin request contains previous response" {
 		t.Fatalf("Begin error = %v", err)
+	}
+}
+
+func TestResponsesTargetLosingNativeHandleApplicabilityUsesStatelessCurrentInput(t *testing.T) {
+	original := testBackendTarget(t, "gpt-4o")
+	previousRequest := makeRequest("gpt-4o", makeItems("one"), nil)
+	record := checkpoint("resp_previous", previousRequest, makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "answer")), nativeResponses(original, "provider_previous"))
+	record.InputSegment = previousRequest
+	batch, err := responsesnative.NewItems([][]byte{[]byte(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.ResponsesOutput = batch
+	current := makeRequest("gpt-4o", makeItems("two"), &canonical.ResponseRef{SwobuID: "resp_previous"})
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved = WithResponsesHistory(resolved, []Checkpoint{record})
+	changed := original
+	changed.TargetVersion++
+	stateless := resolved.ForResponsesTarget(changed)
+	if _, hasPrevious := stateless.PreviousResponse(); hasPrevious || len(stateless.Items()) != 1 || resolved.Responses.History().Len() != 1 {
+		t.Fatalf("stateless request = %#v history=%d", stateless, resolved.Responses.History().Len())
+	}
+	native := resolved.ForResponsesTarget(original)
+	if _, hasPrevious := native.PreviousResponse(); !hasPrevious || len(native.Items()) != 1 {
+		t.Fatalf("native request = %#v", native)
+	}
+}
+
+func TestMixedResponsesAncestryFallsBackToCompletePortableHistory(t *testing.T) {
+	full := makeRequest("gpt-4o", makeItems("legacy input", "legacy answer", "current input"), nil)
+	resolved := ResolvedRequest{Full: full, CurrentInput: makeRequest("gpt-4o", makeItems("current input"), nil)}
+
+	legacy := Checkpoint{InputSegment: makeRequest("gpt-4o", makeItems("legacy input"), nil)}
+	nativeOutput, err := responsesnative.NewItems([][]byte{
+		[]byte(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"native answer"}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := Checkpoint{
+		InputSegment:    makeRequest("gpt-4o", makeItems("current input"), nil),
+		ResponsesOutput: nativeOutput,
+	}
+
+	resolved = WithResponsesHistory(resolved, []Checkpoint{legacy, native})
+	if got := resolved.Responses.History().Len(); got != 0 {
+		t.Fatalf("native history turns = %d, want none for an incomplete chain", got)
+	}
+	if got := len(resolved.ForResponsesStateless().Items()); got != len(full.Items()) {
+		t.Fatalf("stateless fallback items = %d, want complete portable history %d", got, len(full.Items()))
 	}
 }
 

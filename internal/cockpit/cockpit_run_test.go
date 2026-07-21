@@ -109,3 +109,42 @@ func TestIsInteractiveTerminal_RequiresBothStdinAndStdoutTerminals(t *testing.T)
 		t.Fatal("pipe stdin with pty stdout should not be interactive")
 	}
 }
+
+func TestStopCockpitOnContextExitsWithRetiredApp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	appStopped := make(chan struct{})
+	watcherDone := make(chan struct{})
+	stopCalls := make(chan struct{}, 1)
+	go func() {
+		defer close(watcherDone)
+		stopCockpitOnContext(ctx, appStopped, func() { stopCalls <- struct{}{} })
+	}()
+
+	close(appStopped)
+	<-watcherDone
+	cancel()
+	select {
+	case <-stopCalls:
+		t.Fatal("retired app watcher reacted to later root cancellation")
+	default:
+	}
+}
+
+func TestStopCockpitOnContextStopsLiveAppOnRootCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	appStopped := make(chan struct{})
+	stopCalls := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stopCockpitOnContext(ctx, appStopped, func() { stopCalls <- struct{}{} })
+	}()
+
+	cancel()
+	<-done
+	select {
+	case <-stopCalls:
+	default:
+		t.Fatal("root cancellation did not stop the live app")
+	}
+}

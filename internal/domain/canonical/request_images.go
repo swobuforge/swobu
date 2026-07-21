@@ -30,6 +30,9 @@ func WalkRequestImages(request CanonicalRequest, visit func(RequestPartRef, Imag
 			}
 		}
 		if result, ok := item.ToolResult(); ok {
+			if _, search := result.WebSearch(); search {
+				continue
+			}
 			for partIndex, part := range result.Content() {
 				if image, ok := part.Image(); ok {
 					if err := visit(RequestPartRef{Item: uint32(itemIndex), Part: uint32(partIndex)}, ImageInToolResult, image); err != nil {
@@ -67,6 +70,14 @@ func RewriteRequestImages(request CanonicalRequest, rewrite func(RequestPartRef,
 			continue
 		}
 		if result, ok := item.ToolResult(); ok {
+			if search, ok := result.WebSearch(); ok {
+				prepared, err := NewWebSearchResultItem(result.CallID(), search)
+				if err != nil {
+					return CanonicalRequest{}, err
+				}
+				items[itemIndex] = prepared
+				continue
+			}
 			parts := result.Content()
 			for partIndex, part := range parts {
 				image, ok := part.Image()

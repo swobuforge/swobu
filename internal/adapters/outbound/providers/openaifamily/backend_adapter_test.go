@@ -193,7 +193,7 @@ func TestCustomMessagesReplaysOpaqueThinking(t *testing.T) {
 	}
 }
 
-func TestResponsesEncryptedCaptureIsComposedOnlyForOfficialOpenAI(t *testing.T) {
+func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.T) {
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "lookup", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("reasoning-model"),
@@ -206,8 +206,8 @@ func TestResponsesEncryptedCaptureIsComposedOnlyForOfficialOpenAI(t *testing.T) 
 		policy     ProviderRoutePolicy
 		want       bool
 	}{
-		{name: "official_openai", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), want: false},
-		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), want: false},
+		{name: "official_openai", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), want: true},
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := provider.NewTargetSnapshot("target", string(tc.providerID), "https://example.test/v1", "", protocolkind.Responses, "", "responses")
@@ -225,6 +225,14 @@ func TestResponsesEncryptedCaptureIsComposedOnlyForOfficialOpenAI(t *testing.T) 
 				t.Fatalf("encrypted capture presence = %t, want %t: %s", got, tc.want, document.RawBytes())
 			}
 		})
+	}
+}
+
+func TestOutboundRequestDebugRedactsStatelessResponsesInput(t *testing.T) {
+	raw := []byte(`{"model":"gpt","input":[{"type":"reasoning","encrypted_content":"ciphertext"},{"type":"program","code":"secret program"}],"stream":true}`)
+	redacted := string(redactProviderRequestInput(raw))
+	if strings.Contains(redacted, "ciphertext") || strings.Contains(redacted, "secret program") || !strings.Contains(redacted, `"input":"[REDACTED]"`) {
+		t.Fatalf("redacted request = %s", redacted)
 	}
 }
 

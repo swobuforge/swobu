@@ -53,13 +53,16 @@ func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.Activ
 		RouteID:     readmodel.RouteID(row.Route),
 		// Prefer the workspace route model name (what the client sent) over the
 		// internal provider config ref so the Cockpit activity row is human readable.
-		RouteLabel: firstNonEmpty(row.WorkspaceRouteModelID, row.Route),
-		Status:     activityStatus(row.Result, row.StatusCode),
-		HTTPStatus: row.StatusCode,
-		Duration:   trafficDuration(row),
-		Error:      row.StatusCode >= 400 || row.Result == "backend_error" || row.Result == "swobu_error",
-		TokensIn:   inputTokens(row.TokenUsage),
-		TokensOut:  outputTokens(row.TokenUsage),
+		RouteLabel:    firstNonEmpty(row.WorkspaceRouteModelID, row.Route),
+		ProviderSpec:  row.ProviderSpec,
+		ProviderModel: row.ProviderModel,
+		Status:        activityStatus(row.Result, row.StatusCode),
+		HTTPStatus:    row.StatusCode,
+		AttemptCount:  row.AttemptCount,
+		Duration:      trafficDuration(row),
+		Error:         row.StatusCode >= 400 || row.Result == "backend_error" || row.Result == "swobu_error",
+		TokensIn:      inputTokens(row.TokenUsage),
+		TokensOut:     outputTokens(row.TokenUsage),
 	}
 }
 

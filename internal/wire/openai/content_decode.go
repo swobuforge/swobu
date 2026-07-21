@@ -35,6 +35,8 @@ type ContentPartItem struct {
 	Thinking     string                `json:"thinking,omitempty"`
 	Signature    string                `json:"signature,omitempty"`
 	Data         string                `json:"data,omitempty"`
+	Annotations  json.RawMessage       `json:"annotations,omitempty"`
+	Citations    json.RawMessage       `json:"citations,omitempty"`
 }
 
 func AuthorForRole(role string) canonical.MessageRole {

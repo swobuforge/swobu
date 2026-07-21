@@ -168,8 +168,16 @@ func validateCompletedItem(state *itemStreamState, item CanonicalItem) error {
 			if err != nil || projected.String() != object.String() {
 				return fmt.Errorf("completed object arguments do not match streamed deltas")
 			}
-		} else if text, ok := call.Input().Text(); !ok || text != state.args {
-			return fmt.Errorf("completed text arguments do not match streamed deltas")
+		} else if text, ok := call.Input().Text(); ok {
+			if text != state.args {
+				return fmt.Errorf("completed text arguments do not match streamed deltas")
+			}
+		} else if _, ok := call.Input().WebSearch(); ok {
+			if state.args != "" {
+				return fmt.Errorf("completed web-search input conflicts with untyped argument deltas")
+			}
+		} else {
+			return fmt.Errorf("completed tool input has no supported branch")
 		}
 	default:
 		return fmt.Errorf("completed item kind %q is unsupported", item.Kind())

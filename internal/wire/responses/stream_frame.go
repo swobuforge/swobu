@@ -11,26 +11,28 @@ import (
 )
 
 type streamFrame struct {
-	Type         string `json:"type"`
-	ID           string `json:"id"`
-	Model        string `json:"model"`
-	Delta        string `json:"delta"`
-	Input        string `json:"input"`
-	Status       string `json:"status"`
-	CallID       string `json:"call_id"`
-	Name         string `json:"name"`
-	ItemID       string `json:"item_id"`
-	OutputIndex  *int   `json:"output_index"`
-	SummaryIndex *int   `json:"summary_index"`
-	ContentIndex *int   `json:"content_index"`
-	Arguments    string `json:"arguments"`
+	RawItem      json.RawMessage   `json:"-"`
+	RawOutput    []json.RawMessage `json:"-"`
+	Type         string            `json:"type"`
+	ID           string            `json:"id"`
+	Model        string            `json:"model"`
+	Delta        string            `json:"delta"`
+	Input        string            `json:"input"`
+	Status       string            `json:"status"`
+	CallID       string            `json:"call_id"`
+	Name         string            `json:"name"`
+	ItemID       string            `json:"item_id"`
+	OutputIndex  *int              `json:"output_index"`
+	SummaryIndex *int              `json:"summary_index"`
+	ContentIndex *int              `json:"content_index"`
+	Arguments    string            `json:"arguments"`
 	Response     struct {
 		ID                string                         `json:"id"`
 		Model             string                         `json:"model"`
 		Status            string                         `json:"status"`
 		IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 		ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
-		Output            []responsesWireOutputItemDTO   `json:"output,omitempty"`
+		Output            []json.RawMessage              `json:"output,omitempty"`
 		OutputText        string                         `json:"output_text,omitempty"`
 	} `json:"response"`
 	Item struct {
@@ -45,6 +47,7 @@ type streamFrame struct {
 		Summary          []responsesReasoningSummaryDTO `json:"summary"`
 		Content          json.RawMessage                `json:"content"`
 		EncryptedContent string                         `json:"encrypted_content"`
+		Action           json.RawMessage                `json:"action"`
 	} `json:"item"`
 }
 
@@ -68,7 +71,10 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		}
 		return true, canonical.Event{}, nil
 	case "response.reasoning_text.delta":
-		return false, canonical.Event{}, canonical.UnsupportedOperation("responses reasoning trace streaming is not supported in P0")
+		if err := s.handleReasoningDelta(frame, canonical.ReasoningPartTrace); err != nil {
+			return false, canonical.Event{}, err
+		}
+		return true, canonical.Event{}, nil
 	case "response.function_call_arguments.delta":
 		if err := s.handleToolArgumentsDelta(frame, canonical.ToolTypeFunction); err != nil {
 			return false, canonical.Event{}, err
@@ -82,8 +88,8 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		}
 		return true, canonical.Event{}, nil
 	case "response.output_item.added":
-		if strings.TrimSpace(frame.Item.Type) == "mcp_call" { // swobu:io-string source=boundary
-			return false, canonical.Event{}, canonical.UnsupportedOperation("responses MCP streaming is not implemented")
+		if strings.TrimSpace(frame.Item.Type) == "web_search_call" { // swobu:io-string source=provider-wire
+			return true, canonical.Event{}, nil
 		}
 		handled, err := s.handleOutputItemAdded(frame)
 		if err != nil {
@@ -155,22 +161,22 @@ func (s *responsesResponseStream) handleResponseCreated(ctx context.Context, fra
 
 func (s *responsesResponseStream) handleOutputTextDelta(frame streamFrame) error {
 	s.emittedOutput = true
-	if s.textOpen && frame.OutputIndex != nil && uint32(*frame.OutputIndex) != s.textOrdinal {
+	if s.textState != nil && !s.textState.accepts(frame.OutputIndex) {
 		s.closeOpenText(canonical.EnvelopeStatusCompleted)
 	}
-	if !s.textOpen {
+	if s.textState == nil {
 		start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)
 		if err != nil {
 			return err
 		}
-		s.textOpen = true
-		s.textOrdinal = s.ordinalFor("text", frame.OutputIndex)
-		s.textEnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, s.textOrdinal))
-		s.enqueueItemStart(s.textEnvID, s.textOrdinal, start)
-		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: s.textOrdinal}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
+		ordinal := s.ordinalFor("text", frame.OutputIndex)
+		envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, ordinal))
+		s.textState = newResponsesTextState(envID, ordinal, frame.OutputIndex)
+		s.enqueueItemStart(envID, ordinal, start)
+		s.enqueue(canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
 	}
-	s.text.WriteString(frame.Delta)
-	s.enqueueTextDelta(s.textEnvID, s.textOrdinal, frame.Delta)
+	s.textState.text.WriteString(frame.Delta)
+	s.enqueueTextDelta(s.textState.envID, s.textState.ordinal, frame.Delta)
 	return nil
 }
 
@@ -199,8 +205,7 @@ func (s *responsesResponseStream) handleOutputItemAdded(frame streamFrame) (bool
 		if _, exists := s.reasoningStates[itemID]; exists {
 			return false, nil
 		}
-		ordinal := s.ordinalFor(itemID, frame.OutputIndex)
-		s.reasoningStates[itemID] = &responsesReasoningState{ordinal: ordinal, id: frame.Item.ID, status: frame.Item.Status}
+		s.reasoningStates[itemID] = &responsesReasoningState{id: frame.Item.ID, status: frame.Item.Status}
 		return true, nil
 	}
 	var toolType string
@@ -250,7 +255,12 @@ func (s *responsesResponseStream) handleOutputItemDone(frame streamFrame) (bool,
 		return s.completeToolState(frame, canonical.ToolTypeFunction, false, true)
 	case "custom_tool_call":
 		return s.completeToolState(frame, canonical.ToolTypeCustom, false, true)
+	case "web_search_call":
+		return s.completeWebSearchItem(frame)
+	case "message":
+		return s.completeMessageItem(frame)
 	default:
+		// Exact native capture retains output kinds without portable P0 meaning.
 		return false, nil
 	}
 }
@@ -348,6 +358,9 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 		s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 		return nil
 	} else {
+		if err := s.completeNativeOutput(frame.RawOutput); err != nil {
+			return err
+		}
 		usedFallback := false
 		fallbackItems := []canonical.CanonicalItem(nil)
 		if !s.emittedOutput {

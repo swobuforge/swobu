@@ -169,6 +169,8 @@ type TrafficEvent struct {
 	modelRequested            string
 	modelResolved             string
 	workspaceRouteModelID     string
+	providerSpec              string
+	providerModel             string
 	tokenUsage                TokenUsage
 	wireMutations             []Mutation
 	exchangeDiagnostics       []string
@@ -196,6 +198,8 @@ type TrafficEventInput struct {
 	ModelRequested            string
 	ModelResolved             string
 	WorkspaceRouteModelID     string
+	ProviderSpec              string
+	ProviderModel             string
 	TokenUsage                TokenUsage
 	Mutations                 []Mutation
 	ExchangeDiagnostics       []string
@@ -286,6 +290,8 @@ func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, err
 		modelRequested:            normalizedInput.ModelRequested,
 		modelResolved:             normalizedInput.ModelResolved,
 		workspaceRouteModelID:     normalizedInput.WorkspaceRouteModelID,
+		providerSpec:              strings.TrimSpace(normalizedInput.ProviderSpec),  // swobu:io-string source=boundary
+		providerModel:             strings.TrimSpace(normalizedInput.ProviderModel), // swobu:io-string source=boundary
 		tokenUsage:                normalizedInput.TokenUsage,
 		wireMutations:             cloneMutations(normalizedInput.Mutations),
 		exchangeDiagnostics:       slices.Clone(normalizedInput.ExchangeDiagnostics),
@@ -444,6 +450,8 @@ func (e TrafficEvent) ModelResolutionMode() string       { return e.modelResolut
 func (e TrafficEvent) ModelRequested() string            { return e.modelRequested }
 func (e TrafficEvent) ModelResolved() string             { return e.modelResolved }
 func (e TrafficEvent) WorkspaceRouteModelID() string     { return e.workspaceRouteModelID }
+func (e TrafficEvent) ProviderSpec() string              { return e.providerSpec }
+func (e TrafficEvent) ProviderModel() string             { return e.providerModel }
 func (e TrafficEvent) TokenUsage() TokenUsage            { return e.tokenUsage }
 func (e TrafficEvent) Mutations() []Mutation {
 	return cloneMutations(e.wireMutations)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -394,6 +395,36 @@ func TestResponsesHistoryResumesAtCurrentFunctionCallOutput(t *testing.T) {
 	}`)
 	if second.RequestFingerprint != direct.RequestFingerprint {
 		t.Fatal("rebased function-call-output fingerprint differs from the same direct contribution")
+	}
+}
+
+func TestResponsesRebasedCurrentInputPreservesUnknownNativeFields(t *testing.T) {
+	raw := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":"one"},{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"answer"}]},{"type":"message","role":"user","content":"two","future":null,"large":9007199254740993}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Request.RebasedRequest == nil {
+		t.Fatal("expected implicit history rebase")
+	}
+	items := decoded.Request.RebasedRequest.ResponsesInput.JSONObjects()
+	if len(items) != 1 || !strings.Contains(string(items[0]), `"future":null`) || !strings.Contains(string(items[0]), `9007199254740993`) {
+		t.Fatalf("rebased native input = %s", items)
+	}
+}
+
+func TestResponsesRequestFingerprintIncludesUnknownNativeFields(t *testing.T) {
+	decode := func(value int) historyfingerprint.Request {
+		t.Helper()
+		raw := []byte(fmt.Sprintf(`{"model":"m","input":[{"type":"program_output","id":"po_1","future":%d}]}`, value))
+		decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decoded.Request.RequestFingerprint
+	}
+	if decode(1) == decode(2) {
+		t.Fatal("unknown native field was omitted from request identity")
 	}
 }
 

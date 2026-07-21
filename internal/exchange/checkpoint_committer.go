@@ -10,24 +10,32 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // checkpointCommitter joins canonical capture with the optional codec history
 // leaf. A successful client-visible response ID is gated on its canonical
-// checkpoint; only history-fingerprint composition is best effort.
+// checkpoint because client projections can omit continuation-critical opaque
+// reasoning and resolved media. Client wire storage hints never participate;
+// only history-fingerprint composition is best effort.
 type checkpointCommitter struct {
 	once sync.Once
 	err  error
 
-	exchangeID    string
-	workspaceSlug string
-	store         session.Store
-	request       canonical.CanonicalRequest
-	resolvedMedia session.ResolvedMedia
-	advance       *historyAdvance
-	capture       *checkpointCaptureResponseStream
+	exchangeID      string
+	workspaceSlug   string
+	store           session.Store
+	request         canonical.CanonicalRequest
+	inputSegment    canonical.CanonicalRequest
+	responsesInput  responsesnative.Items
+	predecessor     *canonical.SwobuResponseID
+	resolvedMedia   session.ResolvedMedia
+	responsesOutput provider.ResponsesOutputSource
+	advance         *historyAdvance
+	capture         *checkpointCaptureResponseStream
 }
 
 // CheckpointCommitError identifies failure to make a client-visible response
@@ -75,7 +83,14 @@ func (c *checkpointCommitter) commit(ctx context.Context, completion wire.Respon
 		return checkpointCommitError(errors.New("checkpoint response capture did not complete"))
 	}
 	c.once.Do(func() {
+		var nativeBatch responsesnative.Items
+		if c.responsesOutput != nil {
+			if batch, available := c.responsesOutput.ResponsesOutput(); available {
+				nativeBatch = batch
+			}
+		}
 		record := session.Checkpoint{
+			Predecessor: cloneSwobuResponseID(c.predecessor), InputSegment: c.inputSegment.Clone(), ResponsesInput: c.responsesInput.Clone(), ResponsesOutput: nativeBatch,
 			Request: c.request.Clone(), Response: captured.response,
 			ResolvedMedia: c.resolvedMedia.Clone(), CreatedAt: time.Now().UTC(),
 		}

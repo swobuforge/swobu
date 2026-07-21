@@ -18,6 +18,7 @@ type RecentTrafficRow struct {
 	Route          string                       `json:"route"`
 	Result         string                       `json:"result"`
 	StatusCode     int                          `json:"status_code"`
+	AttemptCount   int                          `json:"attempt_count"`
 	ObservedAt     string                       `json:"observed_at,omitempty"`
 	Timing         *RecentTrafficTimingRecord   `json:"timing,omitempty"`
 	TokenUsage     *RecentTrafficTokenUseRecord `json:"token_usage,omitempty"`
@@ -26,6 +27,8 @@ type RecentTrafficRow struct {
 	ModelResolved         string                `json:"model_resolved,omitempty"`
 	ModelResolutionMode   string                `json:"model_resolution_mode,omitempty"`
 	WorkspaceRouteModelID string                `json:"workspace_route_model,omitempty"`
+	ProviderSpec          string                `json:"provider_spec,omitempty"`
+	ProviderModel         string                `json:"provider_model,omitempty"`
 	ExchangeDiagnostics   []string              `json:"exchange_diagnostics,omitempty"`
 	StageReports          []ExchangeStageReport `json:"exchange_stage_reports,omitempty"`
 }

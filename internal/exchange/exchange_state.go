@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -22,14 +23,24 @@ import (
 // exchangeState is the complete control truth for one exchange. Only reduce
 // replaces this value; external command handlers receive immutable commands.
 type exchangeState struct {
-	input                exchangeInput
-	swobuResponseID      canonical.SwobuResponseID
-	prepared             *session.ResolvedRequest
-	mediaFetchCache      mediaFetchCache
-	route                routePlan
-	providerCallAttempts []providerCallAttempt
-	phase                phase
-	advance              *historyAdvance
+	input                 exchangeInput
+	swobuResponseID       canonical.SwobuResponseID
+	prepared              *session.ResolvedRequest
+	predecessorCheckpoint *session.Checkpoint
+	responsesAncestry     *responsesAncestryResolution
+	mediaFetchCache       mediaFetchCache
+	route                 routePlan
+	providerCallAttempts  []providerCallAttempt
+	phase                 phase
+	advance               *historyAdvance
+}
+
+// responsesAncestryResolution is present only after a Responses attempt asks
+// for stateless native replay. An empty history is a resolved unavailable
+// refinement, so portable full history remains authoritative without repeating
+// the optional store walk.
+type responsesAncestryResolution struct {
+	history responsesnative.History
 }
 
 // historyAdvance is the complete optional input for composing the completed
@@ -46,6 +57,7 @@ type exchangeInput struct {
 	clientFamily       canonical.ClientFamily
 	clientDelivery     delivery.Delivery
 	request            canonical.CanonicalRequest
+	responsesInput     responsesnative.Items
 	rebasedRequest     *wire.RebasedRequest
 	requestFingerprint historyfingerprint.Request
 	workspace          routing.Workspace
@@ -81,6 +93,13 @@ type loadingCheckpointPhase struct {
 }
 
 func (loadingCheckpointPhase) isPhase() {}
+
+type loadingResponsesAncestryPhase struct {
+	selection providerCallSelection
+	target    provider.TargetSnapshot
+}
+
+func (loadingResponsesAncestryPhase) isPhase() {}
 
 type preparingProviderAttemptPhase struct {
 	selection providerCallSelection
@@ -124,6 +143,13 @@ type checkpointLoaded struct {
 
 func (checkpointLoaded) isExchangeEvent() {}
 
+type responsesAncestryLoaded struct {
+	selection providerCallSelection
+	history   responsesnative.History
+}
+
+func (responsesAncestryLoaded) isExchangeEvent() {}
+
 type providerAttemptPrepared struct {
 	selection  providerCallSelection
 	request    canonical.CanonicalRequest
@@ -161,6 +187,15 @@ type loadCheckpointCommand struct {
 
 func (loadCheckpointCommand) isCommand() {}
 
+type loadResponsesAncestryCommand struct {
+	store         session.Store
+	workspaceSlug string
+	selection     providerCallSelection
+	latest        session.Checkpoint
+}
+
+func (loadResponsesAncestryCommand) isCommand() {}
+
 type prepareProviderAttemptCommand struct {
 	selection  providerCallSelection
 	request    canonical.CanonicalRequest
@@ -196,6 +231,9 @@ type providerCall struct {
 	exchangeID     string
 	workspaceSlug  string
 	fullRequest    canonical.CanonicalRequest
+	inputSegment   canonical.CanonicalRequest
+	responsesInput responsesnative.Items
+	predecessor    *canonical.SwobuResponseID
 	resolvedMedia  session.ResolvedMedia
 	advance        *historyAdvance
 }
@@ -221,6 +259,8 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reduceStarting(s, event, runner)
 	case loadingCheckpointPhase:
 		return reduceLoadingCheckpoint(s, p, event, runner)
+	case loadingResponsesAncestryPhase:
+		return reduceLoadingResponsesAncestry(s, p, event, runner)
 	case preparingProviderAttemptPhase:
 		return reducePreparingProviderAttempt(s, p, event, runner)
 	case callingProviderPhase:
@@ -230,6 +270,18 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 	default:
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: unknown phase %T", s.phase)
 	}
+}
+
+func reduceLoadingResponsesAncestry(s exchangeState, phase loadingResponsesAncestryPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
+	loaded, ok := event.(responsesAncestryLoaded)
+	if !ok {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: loading Responses ancestry received %T", event)
+	}
+	if loaded.selection != phase.selection {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: loaded Responses ancestry changed provider selection")
+	}
+	s.responsesAncestry = &responsesAncestryResolution{history: loaded.history.Clone()}
+	return advanceProviderExecutionFrom(s, runner, phase.selection)
 }
 
 func reducePreparingProviderAttempt(s exchangeState, phase preparingProviderAttemptPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
@@ -304,6 +356,7 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	}
+	prepared = session.WithResponsesInput(prepared, s.input.responsesInput)
 	s.prepared = &prepared
 	s.advance = &historyAdvance{Request: s.input.requestFingerprint}
 	return advanceProviderExecution(s, runner)
@@ -330,7 +383,12 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 	if !found && !loaded.match.IsMissing() {
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: checkpoint lookup returned invalid match")
 	}
+	if found {
+		checkpoint := record.Clone()
+		s.predecessorCheckpoint = &checkpoint
+	}
 	var prepared session.ResolvedRequest
+	nativeInput := s.input.responsesInput
 	var err error
 	if phase.explicit {
 		prepared, err = session.Resume(s.input.request, record)
@@ -342,6 +400,7 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		// The codec-rebased request is a candidate only. ForTarget selects it
 		// solely when the checkpoint has an exact usable native handle.
 		prepared, err = session.ResumeHistory(s.input.request, s.input.rebasedRequest.Request, record)
+		nativeInput = s.input.rebasedRequest.ResponsesInput
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	} else {
@@ -353,6 +412,7 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	}
+	prepared = session.WithResponsesInput(prepared, nativeInput)
 	s.prepared = &prepared
 	return advanceProviderExecution(s, runner)
 }
@@ -441,8 +501,16 @@ func advanceProviderExecutionFrom(s exchangeState, runner runtimeBundle, selecti
 		call, target, preparedEvidence, preparation, err := prepareProviderCall(s, selection, runner, nil)
 		evidence = evidence.append(preparedEvidence)
 		if preparation != nil {
-			s.phase = preparingProviderAttemptPhase{selection: selection, target: target}
-			return reducerOutcome{nextState: s, command: *preparation, evidence: evidence}, nil
+			switch command := preparation.(type) {
+			case loadResponsesAncestryCommand:
+				s.phase = loadingResponsesAncestryPhase{selection: selection, target: target}
+				return reducerOutcome{nextState: s, command: command, evidence: evidence}, nil
+			case prepareProviderAttemptCommand:
+				s.phase = preparingProviderAttemptPhase{selection: selection, target: target}
+				return reducerOutcome{nextState: s, command: command, evidence: evidence}, nil
+			default:
+				return reducerOutcome{}, fmt.Errorf("exchange invariant: unsupported provider preparation command %T", preparation)
+			}
 		}
 		if err == nil {
 			return beginProviderCallAttempt(s, selection, call, evidence)

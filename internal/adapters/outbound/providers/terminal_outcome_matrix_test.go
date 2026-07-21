@@ -195,7 +195,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				exchange.NewExecutionContract(tc.providerDelivery),
 				provider.NewTargetSnapshot("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "", tc.providerProtocol),
 			)
-			providerCodec := protocolcodec.Codec{ProviderID: tc.providerID, Protocol: tc.protocolKind}
+			providerCodec := protocolcodec.Codec{Protocol: tc.protocolKind}
 
 			ingress, err := executeProviderRequest(registry, context.Background(), req)
 			if err != nil {

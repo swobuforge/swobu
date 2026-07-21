@@ -32,7 +32,7 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 		nil,
 		nil,
 	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","workspace":"main","route":"chat","target_id":"target","auth_mode":"browser"}`))
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","workspace":"main","route":"chat","target_id":"target","auth_mode":"browser","future_option":true}`))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -47,6 +47,22 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 	}
 	if body["expires_at"] != "2026-05-18T12:00:00Z" {
 		t.Fatalf("expires_at = %v", body["expires_at"])
+	}
+}
+
+func TestChatGPTLoginHandlerGenericStartRejectsMalformedBody(t *testing.T) {
+	t.Parallel()
+	handler := NewAuthSessionHandler(
+		func(_ context.Context, _ authplane.StartInput) (authplane.StartOutput, error) {
+			t.Fatal("start should not be called for malformed JSON")
+			return authplane.StartOutput{}, nil
+		}, nil, nil, nil,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"auth_mode":`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 

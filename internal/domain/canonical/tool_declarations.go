@@ -10,6 +10,9 @@ import (
 type ToolDeclaration struct {
 	function *FunctionTool
 	custom   *CustomTool
+	// builtIn discriminates only payload-free built-ins. Function and custom
+	// identity is derived from the branch that already owns their payload.
+	builtIn ToolKind
 }
 
 // FunctionTool is an ordinary JSON-schema callable declaration.
@@ -34,7 +37,7 @@ func NewFunctionTool(key ToolKey, description string, inputSchema ToolSchema, st
 	if inputSchema.IsEmpty() {
 		return ToolDeclaration{}, fmt.Errorf("canonical function tool requires an input schema")
 	}
-	tool := FunctionTool{key: key.Clone(), description: strings.TrimSpace(description), inputSchema: inputSchema.Clone(), strict: cloneSpecified(strict, func(v bool) bool { return v })}
+	tool := FunctionTool{key: key.Clone(), description: strings.TrimSpace(description), inputSchema: inputSchema.Clone(), strict: cloneSpecified(strict, func(v bool) bool { return v })} // swobu:io-string source=domain
 	return ToolDeclaration{function: &tool}, nil
 }
 
@@ -42,27 +45,37 @@ func NewCustomTool(key ToolKey, description string, format ToolFormat) (ToolDecl
 	if key.IsZero() || key.Kind() != ToolKindCustom {
 		return ToolDeclaration{}, fmt.Errorf("canonical custom tool requires a custom key")
 	}
-	tool := CustomTool{key: key.Clone(), description: strings.TrimSpace(description), format: format.Clone()}
+	tool := CustomTool{key: key.Clone(), description: strings.TrimSpace(description), format: format.Clone()} // swobu:io-string source=domain
 	return ToolDeclaration{custom: &tool}, nil
+}
+
+// NewWebSearchDeclaration constructs the single fixed-key web-search declaration.
+func NewWebSearchDeclaration() ToolDeclaration {
+	return ToolDeclaration{builtIn: ToolKindWebSearch}
 }
 
 func (d ToolDeclaration) Kind() ToolKind {
 	switch {
-	case d.function != nil && d.custom == nil:
+	case d.function != nil && d.custom == nil && d.builtIn == "":
 		return ToolKindFunction
-	case d.function == nil && d.custom != nil:
+	case d.function == nil && d.custom != nil && d.builtIn == "":
 		return ToolKindCustom
+	case d.function == nil && d.custom == nil && d.builtIn == ToolKindWebSearch:
+		return ToolKindWebSearch
 	default:
 		return ""
 	}
 }
 
 func (d ToolDeclaration) Key() ToolKey {
-	if d.function != nil && d.custom == nil {
+	if d.Kind() == ToolKindFunction {
 		return d.function.key.Clone()
 	}
-	if d.function == nil && d.custom != nil {
+	if d.Kind() == ToolKindCustom {
 		return d.custom.key.Clone()
+	}
+	if d.Kind() == ToolKindWebSearch {
+		return WebSearchToolKey()
 	}
 	return ToolKey{}
 }
@@ -87,6 +100,9 @@ func (d ToolDeclaration) Clone() ToolDeclaration {
 	}
 	if c, ok := d.Custom(); ok {
 		return ToolDeclaration{custom: &c}
+	}
+	if d.Kind() == ToolKindWebSearch {
+		return NewWebSearchDeclaration()
 	}
 	return ToolDeclaration{}
 }

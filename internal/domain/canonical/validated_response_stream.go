@@ -10,16 +10,17 @@ import (
 // ValidatedResponseStream enforces response/item/content lifecycle invariants
 // before each event reaches either client projection or checkpoint commit.
 type ValidatedResponseStream struct {
-	upstream     ResponseStream
-	responseID   EnvelopeID
-	identitySeen bool
-	itemsSeen    bool
-	finishSeen   bool
-	usageSeen    bool
-	errorSeen    bool
-	assembler    *itemStreamAssembler
-	responseDone bool
-	lastSequence int64
+	upstream      ResponseStream
+	responseID    EnvelopeID
+	identitySeen  bool
+	itemsSeen     bool
+	finishSeen    bool
+	usageSeen     bool
+	errorSeen     bool
+	assembler     *itemStreamAssembler
+	responseDone  bool
+	lastSequence  int64
+	toolLifecycle responseToolLifecycleValidator
 }
 
 // NewValidatedResponseStream wraps provider-decoded canonical events at the
@@ -90,6 +91,7 @@ func (r *ValidatedResponseStream) applyEnvelopeStart(event Event) error {
 	}
 	r.responseID = event.EnvID
 	r.assembler = newItemStreamAssembler()
+	r.toolLifecycle = newResponseToolLifecycleValidator()
 	return nil
 }
 
@@ -136,6 +138,12 @@ func (r *ValidatedResponseStream) applyItemEvent(event Event) error {
 	}
 	if err := r.assembler.apply(event.Kind, itemEvent); err != nil {
 		return err
+	}
+	if event.Kind == EventItemCompleted {
+		completed := itemEvent.Payload.(ItemCompletedPayload)
+		if err := r.toolLifecycle.Observe(completed.Item); err != nil {
+			return fmt.Errorf("response web-search result item %d has no prior completed call: %w", itemEvent.Position.Item, err)
+		}
 	}
 	r.itemsSeen = true
 	return nil

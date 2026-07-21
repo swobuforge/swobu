@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -434,6 +435,47 @@ func TestCompletedResponseWithoutHistoryFingerprintStillCommitsExplicitCheckpoin
 	if record.HistoryFingerprint != nil {
 		t.Fatalf("history fingerprint = %#v, want nil", record.HistoryFingerprint)
 	}
+}
+
+func TestCheckpointCommitPersistsResponsesNativeInputOutputAndPredecessor(t *testing.T) {
+	store := session.NewMemoryStore()
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "swobu_native_batch"}, "m", []canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "ok")}, "completed", canonical.NewUnknownTokenUsage())
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := responsesnative.NewItems([][]byte{[]byte(`{"type":"reasoning","encrypted_content":"cipher"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := responsesnative.NewItems([][]byte{[]byte(`{"type":"function_call_output","call_id":"call_1","output":"ok","caller":"client"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	predecessor := canonical.SwobuResponseID("swobu_previous")
+	committer := &checkpointCommitter{
+		exchangeID: "native_batch", workspaceSlug: "alpha", store: store,
+		request: testCanonicalRequest("m"), inputSegment: testCanonicalRequest("m"), responsesInput: input, predecessor: &predecessor,
+		responsesOutput: testResponsesOutputSource{batch: batch},
+		capture:         &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: response}},
+	}
+	if err := committer.commitDocument(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	record, found, err := store.Get(context.Background(), "alpha", "swobu_native_batch")
+	if err != nil || !found {
+		t.Fatalf("checkpoint = (%t, %v)", found, err)
+	}
+	if record.Predecessor == nil || *record.Predecessor != predecessor || record.ResponsesOutput.Len() != 1 || record.ResponsesInput.IsZero() {
+		t.Fatalf("native checkpoint state missing: %#v", record)
+	}
+}
+
+type testResponsesOutputSource struct {
+	batch responsesnative.Items
+}
+
+func (s testResponsesOutputSource) ResponsesOutput() (responsesnative.Items, bool) {
+	return s.batch.Clone(), true
 }
 
 func TestHistoryComposeFailureUsesOptionalIndexDiagnosticAndStillCommits(t *testing.T) {

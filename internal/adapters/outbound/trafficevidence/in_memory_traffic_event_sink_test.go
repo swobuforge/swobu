@@ -33,13 +33,15 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Workspace: "acme",
-		RequestID:    requestID,
-		Route:        route,
-		Result:       trafficevidence.ResultClassSuccess,
-		StatusCode:   200,
-		Timing:       timing,
-		TokenUsage:   usage,
-		ClientFamily: trafficevidence.ClientFamily("responses"),
+		RequestID:     requestID,
+		Route:         route,
+		Result:        trafficevidence.ResultClassSuccess,
+		StatusCode:    200,
+		Timing:        timing,
+		TokenUsage:    usage,
+		ClientFamily:  trafficevidence.ClientFamily("responses"),
+		ProviderSpec:  "anthropic",
+		ProviderModel: "claude-sonnet-4-6",
 		Mutations: []trafficevidence.Mutation{{
 			Stage:         "encode",
 			PatchID:       "p.encode",
@@ -81,6 +83,9 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	}
 	if _, ok := row["token_usage"]; !ok {
 		t.Fatalf("row missing token_usage object: %#v", row)
+	}
+	if row["provider_spec"] != "anthropic" || row["provider_model"] != "claude-sonnet-4-6" {
+		t.Fatalf("row resolved target = %#v/%#v", row["provider_spec"], row["provider_model"])
 	}
 	if _, ok := row["wire_patch_mutations"]; !ok {
 		t.Fatalf("row missing wire_patch_mutations: %#v", row)

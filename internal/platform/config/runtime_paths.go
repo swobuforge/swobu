@@ -41,6 +41,12 @@ func defaultStateRoot() string {
 	return filepath.Join(home, ".swobu", "state")
 }
 
+// DefaultStateRoot returns the canonical root for Swobu-managed runtime state.
+// Callers must keep generated artifacts beneath a concern-specific subtree.
+func DefaultStateRoot() string {
+	return defaultStateRoot()
+}
+
 func DefaultAuthCredentialFilePath() string {
 	return filepath.Join(defaultStateRoot(), "auth", "chatgpt.json")
 }

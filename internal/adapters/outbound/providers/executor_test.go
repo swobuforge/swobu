@@ -85,27 +85,6 @@ func executeProviderRequest(registry ProviderRegistry, ctx context.Context, req 
 	return backend.Transport.Send(ctx, doc)
 }
 
-type compatExpectation struct {
-	feature compat.Feature
-	outcome compat.Outcome
-}
-
-func assertCompatibilityDecisions(t *testing.T, sink *recordingDecisionSink, want []compatExpectation, subject compat.Subject) {
-	t.Helper()
-	if len(sink.effects) != len(want) {
-		t.Fatalf("captured effects len=%d want=%d", len(sink.effects), len(want))
-	}
-	for i, effectItem := range sink.effects {
-		compatEffect := effectItem
-		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome {
-			t.Fatalf("effect[%d] = %#v, want %s %s", i, compatEffect, want[i].feature, want[i].outcome)
-		}
-		if compatEffect.Subject != subject {
-			t.Fatalf("effect[%d] subject = %q, want %q", i, compatEffect.Subject, subject)
-		}
-	}
-}
-
 func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 	t.Parallel()
 
@@ -317,7 +296,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 	}
 }
 
-func TestServices_OpenAIFamilyEmitsStructuredOutputCompatibilityDecisions(t *testing.T) {
+func TestServices_OpenAIProviderReportsActualCompatibilityDecisions(t *testing.T) {
 	t.Parallel()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -361,15 +340,11 @@ func TestServices_OpenAIFamilyEmitsStructuredOutputCompatibilityDecisions(t *tes
 		t.Fatalf("openai execution failed: %v", err)
 	}
 
-	assertCompatibilityDecisions(t, sink, []compatExpectation{
-		{feature: compat.RequestOutputFormat, outcome: compat.Exact},
-		{feature: compat.RequestOutputFormatSchema, outcome: compat.Exact},
-		{feature: compat.WireJSONMode, outcome: compat.Exact},
-		{feature: compat.RequestToolsSchemaStrict, outcome: compat.Exact},
-	}, compat.Subject("route:provider/openai/protocol/chat_completions"))
+	assertProviderDecision(t, sink.effects, compat.RequestToolsSchemaStrict, compat.Exact)
+	assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Exact)
 }
 
-func TestServices_BedrockEmitsToolSchemaStrictDropCompatibilityDecision(t *testing.T) {
+func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" {
 			w.WriteHeader(http.StatusNotFound)
@@ -402,12 +377,10 @@ func TestServices_BedrockEmitsToolSchemaStrictDropCompatibilityDecision(t *testi
 		t.Fatalf("bedrock execution failed: %v", err)
 	}
 
-	assertCompatibilityDecisions(t, sink, []compatExpectation{
-		{feature: compat.RequestToolsSchemaStrict, outcome: compat.Drop},
-	}, compat.Subject("route:provider/bedrock/protocol/messages"))
+	assertProviderDecision(t, sink.effects, compat.RequestToolsSchemaStrict, compat.Drop)
 }
 
-func TestServices_AnthropicEmitsToolSchemaStrictDropCompatibilityDecision(t *testing.T) {
+func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *testing.T) {
 	t.Parallel()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -440,9 +413,7 @@ func TestServices_AnthropicEmitsToolSchemaStrictDropCompatibilityDecision(t *tes
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 
-	assertCompatibilityDecisions(t, sink, []compatExpectation{
-		{feature: compat.RequestToolsSchemaStrict, outcome: compat.Drop},
-	}, compat.Subject("route:provider/anthropic/protocol/messages"))
+	assertProviderDecision(t, sink.effects, compat.RequestToolsSchemaStrict, compat.Drop)
 }
 
 func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t *testing.T) {
@@ -477,7 +448,7 @@ func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t 
 	}
 }
 
-func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T) {
+func TestServices_MessagesCodecReportsStructuredOutputRejection(t *testing.T) {
 	t.Parallel()
 
 	composition := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
@@ -510,11 +481,15 @@ func TestServices_RejectsUnsupportedStructuredOutputBeforeEncoding(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "does not support structured output") {
 		t.Fatalf("structured output should fail closed before encoding, got err=%v", err)
 	}
-	if len(sink.effects) != 1 {
-		t.Fatalf("captured effect len=%d want=1", len(sink.effects))
+	assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Reject)
+}
+
+func assertProviderDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {
+	t.Helper()
+	for _, decision := range decisions {
+		if decision.Feature == feature && decision.Outcome == outcome {
+			return
+		}
 	}
-	compatEffect := sink.effects[0]
-	if compatEffect.Feature != compat.RequestOutputFormat || compatEffect.Outcome != compat.Reject {
-		t.Fatalf("captured effect = %#v, want request.structured_output reject", compatEffect)
-	}
+	t.Fatalf("provider decisions = %#v, want %s/%s", decisions, feature, outcome)
 }

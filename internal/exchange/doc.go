@@ -13,6 +13,8 @@
 //   - Explicit-ID versus exact client-history predecessor selection, atomic
 //     rebased-request handling, history composition, canonical response capture,
 //     and post-client-encode commit
+//   - Lazy, attempt-scoped Responses ancestry loading only when a selected
+//     Responses attempt cannot use exact native delta continuation
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
 //   - The reducer-owned provider-result edge where future concrete tool
@@ -36,5 +38,6 @@
 // requirements record issued-call facts; generic provider errors never infer
 // which feature caused a failure. Alternatives do not add nested retry loops,
 // synchronized route cursors, or phase booleans. Candidate-scoped preparation
-// failure advances routing; malformed request-global media fails the exchange.
+// failure advances routing regardless of declared tools; malformed
+// request-global media fails the exchange.
 package exchange

@@ -89,7 +89,7 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesLiteralToolChoice(t *tes
 	}
 }
 
-func TestDecodeRequest_RejectsNamespaceWithoutSupportedChildren(t *testing.T) {
+func TestDecodeRequest_RejectsNestedWebSearchBecauseBuiltInCannotBeRenamed(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -124,8 +124,8 @@ func TestDecodeRequest_RejectsNamespaceWithoutSupportedChildren(t *testing.T) {
 	if compatErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
 	}
-	if !strings.Contains(compatErr.Message, "unsupported tool type") {
-		t.Fatalf("error message = %q, want unsupported type failure", compatErr.Message)
+	if !strings.Contains(compatErr.Message, "cannot be nested or renamed") {
+		t.Fatalf("error message = %q, want fixed built-in identity failure", compatErr.Message)
 	}
 }
 

@@ -83,8 +83,15 @@ type ToolCallItem struct {
 
 // ToolResultItem is one ordered correlated result with ordered content.
 type ToolResultItem struct {
-	callID  ToolCallID
-	content []ToolResultPart
+	callID    ToolCallID
+	content   *ToolContentResult
+	webSearch *WebSearchResult
+}
+
+// ToolContentResult is the ordinary caller-resolved function/custom result
+// branch retained by NewToolResultItem.
+type ToolContentResult struct {
+	parts   []ToolResultPart
 	isError bool
 }
 
@@ -108,10 +115,12 @@ type ReasoningItem struct {
 	opaque OpaqueThinking
 }
 
-// ToolInput is the closed object-or-raw-text input grammar for a tool call.
+// ToolInput is the closed object, raw-text, or web-search input grammar for a
+// tool call.
 type ToolInput struct {
-	object *JSONObject
-	text   *string
+	object    *JSONObject
+	text      *string
+	webSearch *WebSearchCall
 }
 
 // NewMessageItem validates and constructs one message without coalescing or
@@ -155,6 +164,10 @@ func NewToolCallItem(callID ToolCallID, tool ToolKey, input ToolInput) (Canonica
 		if _, ok := input.Text(); !ok {
 			return CanonicalItem{}, fmt.Errorf("canonical custom tool call requires text input")
 		}
+	case ToolKindWebSearch:
+		if _, ok := input.WebSearch(); !ok {
+			return CanonicalItem{}, fmt.Errorf("canonical web-search call requires web-search input")
+		}
 	default:
 		return CanonicalItem{}, fmt.Errorf("canonical tool kind %q is not callable", tool.Kind())
 	}
@@ -171,8 +184,22 @@ func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool
 	if err != nil {
 		return CanonicalItem{}, err
 	}
-	result := ToolResultItem{callID: callID, content: cloned, isError: isError}
+	contentResult := ToolContentResult{parts: cloned, isError: isError}
+	result := ToolResultItem{callID: callID, content: &contentResult}
 	return CanonicalItem{toolResult: &result}, nil
+}
+
+// NewWebSearchResultItem constructs one exchange-resolved search result.
+func NewWebSearchResultItem(callID ToolCallID, result WebSearchResult) (CanonicalItem, error) {
+	if callID.IsZero() {
+		return CanonicalItem{}, fmt.Errorf("canonical web-search result requires a call id")
+	}
+	if !result.valid() {
+		return CanonicalItem{}, fmt.Errorf("canonical web-search result is invalid")
+	}
+	cloned := result.Clone()
+	item := ToolResultItem{callID: callID, webSearch: &cloned}
+	return CanonicalItem{toolResult: &item}, nil
 }
 
 func NewReasoningPart(kind ReasoningPartKind, text string) (ReasoningPart, error) {
@@ -213,6 +240,17 @@ func NewTextToolInput(text string) ToolInput {
 	return ToolInput{text: &cloned}
 }
 
+// NewWebSearchToolInput validates and constructs a typed provider-observed
+// search input. Validation errors remain visible to the wire boundary that
+// supplied the action instead of becoming an unrelated zero-input failure.
+func NewWebSearchToolInput(call WebSearchCall) (ToolInput, error) {
+	if err := call.Validate(); err != nil {
+		return ToolInput{}, err
+	}
+	cloned := call.Clone()
+	return ToolInput{webSearch: &cloned}, nil
+}
+
 // Kind returns the populated branch kind, or the zero kind for an invalid
 // package-local zero value.
 func (i CanonicalItem) Kind() ItemKind {
@@ -241,6 +279,8 @@ func (i CanonicalItem) Owner() TurnOwner {
 			return TurnOwnerUser
 		case MessageRoleAssistant:
 			return TurnOwnerAssistant
+		default:
+			return ""
 		}
 	case ItemKindToolCall:
 		return TurnOwnerAssistant
@@ -317,11 +357,33 @@ func (c ToolCallItem) Input() ToolInput   { return c.input.Clone() }
 func (c ToolCallItem) Clone() ToolCallItem {
 	return ToolCallItem{callID: c.callID, tool: c.tool.Clone(), input: c.input.Clone()}
 }
-func (r ToolResultItem) CallID() ToolCallID        { return r.callID }
-func (r ToolResultItem) Content() []ToolResultPart { return cloneToolResultParts(r.content) }
-func (r ToolResultItem) IsError() bool             { return r.isError }
+func (r ToolResultItem) CallID() ToolCallID { return r.callID }
+func (r ToolResultItem) Content() []ToolResultPart {
+	if r.content == nil || r.webSearch != nil {
+		return nil
+	}
+	return cloneToolResultParts(r.content.parts)
+}
+func (r ToolResultItem) IsError() bool {
+	return r.content != nil && r.webSearch == nil && r.content.isError
+}
+
+// WebSearch returns the typed search-result branch when it is the sole branch.
+func (r ToolResultItem) WebSearch() (WebSearchResult, bool) {
+	if r.webSearch == nil || r.content != nil {
+		return WebSearchResult{}, false
+	}
+	return r.webSearch.Clone(), true
+}
 func (r ToolResultItem) Clone() ToolResultItem {
-	return ToolResultItem{callID: r.callID, content: cloneToolResultParts(r.content), isError: r.isError}
+	if r.content != nil && r.webSearch == nil {
+		content := ToolContentResult{parts: cloneToolResultParts(r.content.parts), isError: r.content.isError}
+		return ToolResultItem{callID: r.callID, content: &content}
+	}
+	if search, ok := r.WebSearch(); ok {
+		return ToolResultItem{callID: r.callID, webSearch: &search}
+	}
+	return ToolResultItem{}
 }
 func (p ReasoningPart) Kind() ReasoningPartKind { return p.kind }
 func (p ReasoningPart) Text() string            { return p.text }
@@ -333,7 +395,7 @@ func (r ReasoningItem) Clone() ReasoningItem {
 
 // Object returns an independent object input when populated.
 func (i ToolInput) Object() (JSONObject, bool) {
-	if i.object == nil || i.text != nil {
+	if i.object == nil || i.text != nil || i.webSearch != nil {
 		return JSONObject{}, false
 	}
 	return i.object.Clone(), true
@@ -341,10 +403,18 @@ func (i ToolInput) Object() (JSONObject, bool) {
 
 // Text returns raw text input when populated.
 func (i ToolInput) Text() (string, bool) {
-	if i.text == nil || i.object != nil {
+	if i.text == nil || i.object != nil || i.webSearch != nil {
 		return "", false
 	}
 	return *i.text, true
+}
+
+// WebSearch returns the typed search call when populated.
+func (i ToolInput) WebSearch() (WebSearchCall, bool) {
+	if i.webSearch == nil || i.object != nil || i.text != nil {
+		return WebSearchCall{}, false
+	}
+	return i.webSearch.Clone(), true
 }
 
 // Clone returns an independent tool input.
@@ -352,14 +422,28 @@ func (i ToolInput) Clone() ToolInput {
 	if i.object != nil && i.text == nil {
 		return NewJSONObjectToolInput(*i.object)
 	}
-	if i.text != nil && i.object == nil {
+	if i.text != nil && i.object == nil && i.webSearch == nil {
 		return NewTextToolInput(*i.text)
+	}
+	if i.webSearch != nil && i.object == nil && i.text == nil {
+		cloned := i.webSearch.Clone()
+		return ToolInput{webSearch: &cloned}
 	}
 	return ToolInput{}
 }
 
 func (i ToolInput) valid() bool {
-	return (i.object == nil) != (i.text == nil)
+	branches := 0
+	if i.object != nil {
+		branches++
+	}
+	if i.text != nil {
+		branches++
+	}
+	if i.webSearch != nil {
+		branches++
+	}
+	return branches == 1
 }
 
 func validMessageRole(role MessageRole) bool {

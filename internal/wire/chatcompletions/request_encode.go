@@ -33,13 +33,11 @@ type ProviderRequestMessage struct {
 // ProviderRequestDocument is the standard Chat Completions lowering before
 // its single serialization boundary.
 type ProviderRequestDocument struct {
-	Payload  map[string]any
-	Messages []ProviderRequestMessage
+	Payload             map[string]any
+	Messages            []ProviderRequestMessage
+	MaxTokens           *int
+	MaxCompletionTokens *int
 }
-
-// RequestMutation changes provider-owned dialect fields before serialization
-// and reports whether it owns reasoning lowering for this dialect.
-type RequestMutation func(*ProviderRequestDocument) (reasoningHandled bool, err error)
 
 type toolCallBody struct {
 	ID       string            `json:"id,omitempty"`
@@ -59,33 +57,40 @@ type toolCustomBody struct {
 }
 
 func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (carrier.Document, error) {
-	return EncodeCarrierWithMutation(req, d, sink, exchangeID, options, nil)
+	document, err := LowerProviderRequestDocument(req, d, sink, exchangeID, options)
+	if err != nil {
+		return carrier.Document{}, err
+	}
+	if err := ApplyStandardProviderRequestReasoning(&document, req, sink, exchangeID); err != nil {
+		return carrier.Document{}, err
+	}
+	return EncodeProviderRequestDocument(document)
 }
 
-// EncodeCarrierWithMutation lowers the standard protocol document, applies
-// one provider dialect mutation, and serializes once.
-func EncodeCarrierWithMutation(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions, mutate RequestMutation) (carrier.Document, error) {
+// LowerProviderRequestDocument produces the neutral typed Chat Completions
+// document before an exact provider owns any dialect adaptation.
+func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return carrier.Document{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
+		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
 	}
 	items := req.Items()
 	tools := req.Tools()
 	wireMessages, err := encodeItems(items, tools, sink, exchangeID, options.Compatibility)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	wireTools, err := encodeChatCompletionsTools(tools, sink, exchangeID)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if d.Mode == delivery.Streaming && hasChatCompletionsCustomTools(tools) {
-		return carrier.Document{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
+		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
 	}
 	choice, err := encodeChatCompletionsToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 
 	payload := map[string]any{
@@ -103,33 +108,29 @@ func EncodeCarrierWithMutation(req canonical.CanonicalRequest, d delivery.Delive
 		payload["tools"] = wireTools
 	}
 	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
 	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	}
+	var maxTokens *int
+	if value, ok := req.Controls().Limits.MaxOutputTokens.Value(); ok {
+		maxTokens = &value
+	}
+	delete(payload, "max_tokens")
 	payload["messages"] = wireMessages
-	document := ProviderRequestDocument{Payload: payload, Messages: wireMessages}
-	reasoningHandled := false
-	if mutate != nil {
-		var mutationErr error
-		reasoningHandled, mutationErr = mutate(&document)
-		if mutationErr != nil {
-			return carrier.Document{}, mutationErr
-		}
-	}
-	if !reasoningHandled {
-		if err := encodeChatCompletionsReasoning(payload, req); err != nil {
-			if decisionErr := emitChatImageDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
-				return carrier.Document{}, decisionErr
-			}
-			return carrier.Document{}, err
-		}
-	}
+	document := ProviderRequestDocument{Payload: payload, Messages: wireMessages, MaxTokens: maxTokens}
 	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
-		return carrier.Document{}, err
+		return ProviderRequestDocument{}, err
 	} else if len(responseFormat) > 0 {
 		payload["response_format"] = json.RawMessage(responseFormat)
+		if req.OutputFormat().Kind == canonical.OutputFormatJSONSchema {
+			for _, feature := range []compat.Feature{compat.RequestOutputFormat, compat.RequestOutputFormatSchema, compat.WireJSONMode} {
+				if err := emitChatImageDecision(sink, exchangeID, feature, compat.Exact); err != nil {
+					return ProviderRequestDocument{}, err
+				}
+			}
+		}
 	}
 	if choice != nil {
 		payload["tool_choice"] = choice
@@ -137,6 +138,35 @@ func EncodeCarrierWithMutation(req canonical.CanonicalRequest, d delivery.Delive
 	logChatCompletionsEncodeShape(req, wireMessages, choice, d)
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
+	}
+	return document, nil
+}
+
+// ApplyStandardProviderRequestReasoning composes the standard Chat
+// Completions reasoning spelling into a typed provider document. Exact
+// providers with a different reasoning contract intentionally omit it.
+func ApplyStandardProviderRequestReasoning(document *ProviderRequestDocument, req canonical.CanonicalRequest, sink compat.Sink, exchangeID string) error {
+	if err := encodeChatCompletionsReasoning(document.Payload, req); err != nil {
+		if decisionErr := emitChatImageDecision(sink, exchangeID, compat.RequestReasoning, compat.Reject); decisionErr != nil {
+			return decisionErr
+		}
+		return err
+	}
+	return nil
+}
+
+// EncodeProviderRequestDocument performs the single serialization boundary
+// after shared lowering or exact-provider adaptation.
+func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Document, error) {
+	if document.MaxTokens != nil {
+		document.Payload["max_tokens"] = *document.MaxTokens
+	} else {
+		delete(document.Payload, "max_tokens")
+	}
+	if document.MaxCompletionTokens != nil {
+		document.Payload["max_completion_tokens"] = *document.MaxCompletionTokens
+	} else {
+		delete(document.Payload, "max_completion_tokens")
 	}
 	raw, err := json.Marshal(document.Payload)
 	if err != nil {

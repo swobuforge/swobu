@@ -7,7 +7,7 @@ type messagesRequestDTO struct {
 	System                 json.RawMessage          `json:"system,omitempty"`
 	Messages               []messagesMessageDTO     `json:"messages"`
 	PreviousResponseWireID string                   `json:"previous_response_id"`
-	Tools                  []messagesToolDTO        `json:"tools,omitempty"`
+	Tools                  []ProviderRequestTool    `json:"tools,omitempty"`
 	ToolChoice             json.RawMessage          `json:"tool_choice,omitempty"`
 	DisableParallelToolUse json.RawMessage          `json:"disable_parallel_tool_use,omitempty"`
 	ResponseFormat         json.RawMessage          `json:"response_format,omitempty"`
@@ -35,7 +35,9 @@ type messagesMessageDTO struct {
 	Content json.RawMessage `json:"content"`
 }
 
-type messagesToolDTO struct {
+// ProviderRequestTool is one typed Messages tool declaration before exact-
+// provider spelling and the single JSON serialization boundary.
+type ProviderRequestTool struct {
 	Type              string          `json:"type,omitempty"`
 	Name              string          `json:"name"`
 	Description       string          `json:"description,omitempty"`
@@ -45,6 +47,7 @@ type messagesToolDTO struct {
 	BlockedDomains    []string        `json:"blocked_domains,omitempty"`
 	UserLocation      json.RawMessage `json:"user_location,omitempty"`
 	ResponseInclusion string          `json:"response_inclusion,omitempty"`
+	AllowedCallers    []string        `json:"allowed_callers,omitempty"`
 }
 
 type messagesResponseDTO struct {
@@ -65,14 +68,27 @@ type messagesUsageDTO struct {
 }
 
 type messagesResponsePartDTO struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Thinking  *string         `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Data      string          `json:"data,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	Thinking  *string               `json:"thinking,omitempty"`
+	Signature string                `json:"signature,omitempty"`
+	Data      string                `json:"data,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage       `json:"content,omitempty"`
+	IsError   bool                  `json:"is_error,omitempty"`
+	Citations []messagesCitationDTO `json:"citations,omitempty"`
+}
+
+type messagesCitationDTO struct {
+	Type           string `json:"type"`
+	URL            string `json:"url"`
+	Title          string `json:"title,omitempty"`
+	CitedText      string `json:"cited_text,omitempty"`
+	StartCharIndex *int   `json:"start_char_index,omitempty"`
+	EndCharIndex   *int   `json:"end_char_index,omitempty"`
 }
 
 type messagesStartEventDTO struct {
@@ -112,14 +128,18 @@ type messagesContentBlockStartDTO struct {
 }
 
 type messagesContentBlockBodyDTO struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Thinking  *string         `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Data      string          `json:"data,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	Thinking  *string               `json:"thinking,omitempty"`
+	Signature string                `json:"signature,omitempty"`
+	Data      string                `json:"data,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage       `json:"content,omitempty"`
+	IsError   bool                  `json:"is_error,omitempty"`
+	Citations []messagesCitationDTO `json:"citations,omitempty"`
 }
 
 type messagesContentBlockDeltaDTO struct {
@@ -129,11 +149,12 @@ type messagesContentBlockDeltaDTO struct {
 }
 
 type messagesContentBlockDeltaBodyDTO struct {
-	Type        string `json:"type"`
-	Text        string `json:"text,omitempty"`
-	PartialJSON string `json:"partial_json,omitempty"`
-	Thinking    string `json:"thinking,omitempty"`
-	Signature   string `json:"signature,omitempty"`
+	Type        string               `json:"type"`
+	Text        string               `json:"text,omitempty"`
+	PartialJSON string               `json:"partial_json,omitempty"`
+	Thinking    string               `json:"thinking,omitempty"`
+	Signature   string               `json:"signature,omitempty"`
+	Citation    *messagesCitationDTO `json:"citation,omitempty"`
 }
 
 type messagesContentBlockStopDTO struct {

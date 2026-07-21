@@ -15,8 +15,9 @@ const (
 
 // MessagePart is the closed content grammar legal inside a message.
 type MessagePart struct {
-	text  *TextPart
-	image *ImagePart
+	text      *TextPart
+	image     *ImagePart
+	citations []WebCitation
 }
 
 // ToolResultPart is the distinct closed content grammar legal inside a tool
@@ -72,6 +73,20 @@ func NewTextMessagePart(text string) MessagePart {
 	leaf := NewTextValue(text)
 	return MessagePart{text: &leaf}
 }
+
+// NewCitedTextMessagePart validates citations against UTF-8 byte offsets in
+// the exact emitted text.
+func NewCitedTextMessagePart(text string, citations []WebCitation) (MessagePart, error) {
+	out := make([]WebCitation, len(citations))
+	for index, citation := range citations {
+		if err := citation.validate(text); err != nil {
+			return MessagePart{}, fmt.Errorf("canonical web citation %d: %w", index, err)
+		}
+		out[index] = citation.Clone()
+	}
+	leaf := NewTextValue(text)
+	return MessagePart{text: &leaf, citations: out}, nil
+}
 func NewImageMessagePart(image ImagePart) MessagePart {
 	leaf := image.Clone()
 	return MessagePart{image: &leaf}
@@ -125,6 +140,18 @@ func (p MessagePart) Kind() PartKind {
 	}
 	return ""
 }
+
+// Citations returns independent trusted source annotations for a text part.
+func (p MessagePart) Citations() []WebCitation {
+	if p.Kind() != PartKindText || len(p.citations) == 0 {
+		return nil
+	}
+	out := make([]WebCitation, len(p.citations))
+	for index := range p.citations {
+		out[index] = p.citations[index].Clone()
+	}
+	return out
+}
 func (p MessagePart) Text() (TextPart, bool) {
 	if p.Kind() != PartKindText {
 		return TextPart{}, false
@@ -139,7 +166,11 @@ func (p MessagePart) Image() (ImagePart, bool) {
 }
 func (p MessagePart) Clone() MessagePart {
 	if text, ok := p.Text(); ok {
-		return NewTextMessagePart(text.Text())
+		cloned, err := NewCitedTextMessagePart(text.Text(), p.citations)
+		if err != nil {
+			return MessagePart{}
+		}
+		return cloned
 	}
 	if image, ok := p.Image(); ok {
 		return NewImageMessagePart(image)

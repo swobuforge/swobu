@@ -71,14 +71,12 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 	if err != nil {
 		return canonical.ReasoningControls{}, err
 	}
-	if includeEncrypted {
-		return canonical.ReasoningControls{}, canonical.UnsupportedOperation("responses encrypted reasoning continuation is not supported in P0")
-	}
+	_ = includeEncrypted // capture policy is Responses-native, not readable canonical disclosure
 	return canonical.NewReasoningControls(params)
 }
 
 func decodeResponsesReasoningInclude(raw json.RawMessage) (bool, error) {
-	trimmed := strings.TrimSpace(string(raw))
+	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=provider-wire
 	if trimmed == "" || trimmed == "null" {
 		return false, nil
 	}
@@ -88,6 +86,9 @@ func decodeResponsesReasoningInclude(raw json.RawMessage) (bool, error) {
 	}
 	includeEncrypted := false
 	for _, value := range values {
+		if value == "web_search_call.action.sources" {
+			continue
+		}
 		if value != "reasoning.encrypted_content" {
 			return false, canonical.UnsupportedOperation("responses include entry is unsupported")
 		}

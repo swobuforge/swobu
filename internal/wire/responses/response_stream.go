@@ -1,16 +1,19 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
@@ -28,8 +31,8 @@ func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.Byt
 		toolStates:      map[string]responsesToolState{},
 		toolInputs:      map[string]string{},
 		reasoningStates: map[string]*responsesReasoningState{},
-		textOpen:        false,
 		latestUsage:     canonical.NewUnknownTokenUsage(),
+		nativeItems:     map[int]json.RawMessage{},
 		request:         request.Clone(),
 	}
 }
@@ -44,17 +47,21 @@ type responsesResponseStream struct {
 	toolStates      map[string]responsesToolState
 	toolInputs      map[string]string
 	reasoningStates map[string]*responsesReasoningState
-	textOpen        bool
-	textEnvID       canonical.EnvelopeID
+	textState       *responsesTextState
 	emittedOutput   bool
 	started         bool
 	completed       bool
 	latestUsage     canonical.TokenUsage
 	seq             int64
 	request         canonical.CanonicalRequest
-	textOrdinal     uint32
-	text            strings.Builder
 	nextOrdinal     uint32
+	// ordinalOffset is the signed cardinality delta between provider output
+	// items and emitted canonical items. Expanded search results increase it;
+	// intentionally omitted empty reasoning artifacts decrease it.
+	ordinalOffset int64
+	nativeMu      sync.RWMutex
+	nativeItems   map[int]json.RawMessage
+	nativeBatch   responsesnative.Items
 }
 
 type responsesReasoningStreamPartState struct {
@@ -63,10 +70,36 @@ type responsesReasoningStreamPartState struct {
 }
 
 type responsesReasoningState struct {
-	ordinal uint32
-	id      string
-	status  string
-	parts   []*responsesReasoningStreamPartState
+	id     string
+	status string
+	parts  []*responsesReasoningStreamPartState
+}
+
+// responsesTextState binds one open provider message to its canonical
+// placement. Keeping both coordinate systems in one optional state prevents a
+// partially open lifecycle after one-to-many item projection.
+type responsesTextState struct {
+	envID                  canonical.EnvelopeID
+	ordinal                uint32
+	providerOutputIndex    int
+	hasProviderOutputIndex bool
+	text                   strings.Builder
+}
+
+func newResponsesTextState(envID canonical.EnvelopeID, ordinal uint32, outputIndex *int) *responsesTextState {
+	state := &responsesTextState{envID: envID, ordinal: ordinal}
+	if outputIndex != nil {
+		state.providerOutputIndex = *outputIndex
+		state.hasProviderOutputIndex = true
+	}
+	return state
+}
+
+func (s *responsesTextState) accepts(outputIndex *int) bool {
+	if outputIndex == nil {
+		return true
+	}
+	return s != nil && s.hasProviderOutputIndex && s.providerOutputIndex == *outputIndex
 }
 
 func (s *responsesResponseStream) Decisions() []compat.Decision {
@@ -87,9 +120,9 @@ type responsesToolState struct {
 	closed        bool
 }
 
-// ordered state machine over text, tool calls, and terminal frames.
-// Reasoning is not part of the current canonical v0 grammar and must fail
-// closed instead of disappearing from decode.
+// ordered state machine over text, tool calls, reasoning projection, and
+// terminal frames. Exact native items are captured separately from these
+// progressive portable events.
 func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, error) {
 	if len(s.pending) > 0 {
 		event := s.pending[0]
@@ -139,6 +172,20 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {
 			return canonical.Event{}, canonical.InternalError("responses stream event is invalid JSON")
 		}
+		var native struct {
+			Item     json.RawMessage `json:"item"`
+			Response struct {
+				Output []json.RawMessage `json:"output"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal(rawFrame, &native); err != nil {
+			return canonical.Event{}, canonical.InternalError("responses stream event native item is invalid JSON")
+		}
+		frame.RawItem = native.Item
+		frame.RawOutput = native.Response.Output
+		if strings.TrimSpace(frame.Type) == "response.output_item.done" && frame.OutputIndex != nil && len(bytes.TrimSpace(frame.RawItem)) > 0 { // swobu:io-string source=provider-wire
+			s.nativeItems[*frame.OutputIndex] = append(json.RawMessage(nil), frame.RawItem...)
+		}
 		handled, _, nextErr := s.handleFrame(ctx, frame)
 		if nextErr != nil {
 			return canonical.Event{}, nextErr
@@ -150,6 +197,44 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 			continue
 		}
 	}
+}
+
+func (s *responsesResponseStream) completeNativeOutput(terminal []json.RawMessage) error {
+	items := terminal
+	if len(items) == 0 && len(s.nativeItems) > 0 {
+		items = make([]json.RawMessage, len(s.nativeItems))
+		for index := range items {
+			raw, ok := s.nativeItems[index]
+			if !ok {
+				return canonical.InternalError("responses stream native output order is incomplete")
+			}
+			items[index] = raw
+		}
+	}
+	rawItems := make([][]byte, len(items))
+	for index := range items {
+		var header struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(items[index], &header); err != nil || strings.TrimSpace(header.Type) == "" { // swobu:io-string source=provider-wire
+			return canonical.InternalError("responses stream output contains a malformed native item")
+		}
+		rawItems[index] = items[index]
+	}
+	batch, err := responsesnative.NewItems(rawItems)
+	if err != nil {
+		return canonical.InternalError("responses stream native output contains an invalid item")
+	}
+	s.nativeMu.Lock()
+	s.nativeBatch = batch
+	s.nativeMu.Unlock()
+	return nil
+}
+
+func (s *responsesResponseStream) ResponsesOutput() (responsesnative.Items, bool) {
+	s.nativeMu.RLock()
+	defer s.nativeMu.RUnlock()
+	return s.nativeBatch.Clone(), s.completed && !s.nativeBatch.IsZero()
 }
 
 func (s *responsesResponseStream) Close(context.Context) error {
@@ -236,17 +321,17 @@ func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, 
 }
 
 func (s *responsesResponseStream) closeOpenText(status canonical.EnvelopeStatus) {
-	if s.textOpen {
-		if status == canonical.EnvelopeStatusCompleted {
-			item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(s.text.String())})
-			if err == nil {
-				s.enqueueItemCompleted(s.textEnvID, s.textOrdinal, item)
-			}
-		}
-		s.textOpen = false
-		s.textEnvID = ""
-		s.text.Reset()
+	state := s.textState
+	if state == nil {
+		return
 	}
+	if status == canonical.EnvelopeStatusCompleted {
+		item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(state.text.String())})
+		if err == nil {
+			s.enqueueItemCompleted(state.envID, state.ordinal, item)
+		}
+	}
+	s.textState = nil
 }
 
 func (s *responsesResponseStream) closeOpenTools(status canonical.EnvelopeStatus) {
@@ -332,7 +417,11 @@ func (s *responsesResponseStream) ordinalFor(itemID string, outputIndex *int) ui
 		return state.ordinal
 	}
 	if outputIndex != nil && *outputIndex >= 0 {
-		ordinal := uint32(*outputIndex)
+		adjusted := int64(*outputIndex) + s.ordinalOffset
+		if adjusted < 0 {
+			adjusted = int64(s.nextOrdinal)
+		}
+		ordinal := uint32(adjusted)
 		if ordinal >= s.nextOrdinal {
 			s.nextOrdinal = ordinal + 1
 		}

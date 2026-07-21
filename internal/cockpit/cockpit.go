@@ -56,12 +56,21 @@ func Run(ctx context.Context, addr string, stdin io.Reader, stdout, stderr io.Wr
 		return err
 	}
 	if ctx.Done() != nil {
-		go func() {
-			<-ctx.Done()
-			app.Stop()
-		}()
+		go stopCockpitOnContext(ctx, app.StopCh(), app.Stop)
 	}
-	return app.Run()
+	if err := app.Run(); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+// stopCockpitOnContext binds root cancellation only to the app lifetime.
+func stopCockpitOnContext(ctx context.Context, appStopped <-chan struct{}, stop func()) {
+	select {
+	case <-ctx.Done():
+		stop()
+	case <-appStopped:
+	}
 }
 
 func isInteractiveTerminal(stdin io.Reader, stdout io.Writer) bool {

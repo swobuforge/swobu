@@ -26,15 +26,20 @@ func TestResponsesReasoningRequestNormalizesToMinimalControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(document.RawBytes()), `"summary":"auto"`) || !strings.Contains(string(document.RawBytes()), `"effort":"high"`) {
+	if !strings.Contains(string(document.RawBytes()), `"summary":"auto"`) || !strings.Contains(string(document.RawBytes()), `"effort":"high"`) || !strings.Contains(string(document.RawBytes()), `"reasoning.encrypted_content"`) {
 		t.Fatalf("encoded = %s", document.RawBytes())
 	}
 }
 
-func TestResponsesRejectsManualEncryptedContinuation(t *testing.T) {
+func TestResponsesPreservesClientEncryptedContinuation(t *testing.T) {
 	raw := []byte(`{"model":"gpt","input":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"brief"}],"encrypted_content":"secret"}]}`)
-	if _, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{})); err == nil {
-		t.Fatal("manual encrypted continuation was accepted")
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := decoded.Request.ResponsesInput.JSONObjects()
+	if len(items) != 1 || !strings.Contains(string(items[0]), `"encrypted_content":"secret"`) {
+		t.Fatalf("native input was not preserved: %s", items)
 	}
 }
 

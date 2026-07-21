@@ -58,6 +58,9 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 	if state == nil {
 		return nil, nil
 	}
+	if state.toolType == canonical.ToolTypeWebSearch {
+		return e.closeWebSearchItem(itemID, state.webAction)
+	}
 	args := state.arguments.String()
 	argsDoneType := "response.function_call_arguments.done"
 	argsDone := responsesToolArgumentsDoneEventDTO{
@@ -117,6 +120,12 @@ func (e *ResponseStreamWireEncoder) flushOpenItems() ([][]byte, error) {
 
 func responsesWireToolItem(itemID string, callID string, name string, toolType string, status string, payload string) any {
 	normalizedType := strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
+	if normalizedType == canonical.ToolTypeWebSearch {
+		if strings.TrimSpace(callID) != "" { // swobu:io-string source=domain
+			itemID = callID
+		}
+		return responsesWireOutputItemDTO{ID: itemID, Type: "web_search_call", Status: status}
+	}
 	if normalizedType == canonical.ToolTypeCustom {
 		return responsesOutputItemCustomToolCallDTO{
 			ID:     itemID,
@@ -135,4 +144,75 @@ func responsesWireToolItem(itemID string, callID string, name string, toolType s
 		Name:      name,
 		Arguments: payload,
 	}
+}
+
+func (e *ResponseStreamWireEncoder) completeWebSearchCall(itemID string, completed *canonical.CanonicalItem) ([][]byte, error) {
+	state := e.toolItems[itemID]
+	if state == nil || completed == nil {
+		return nil, canonical.InternalError("responses web-search stream call is incomplete")
+	}
+	call, ok := completed.ToolCall()
+	if !ok {
+		return nil, canonical.InternalError("responses web-search stream call checkpoint is invalid")
+	}
+	search, ok := call.Input().WebSearch()
+	if !ok {
+		return nil, canonical.InternalError("responses web-search stream call lacks typed input")
+	}
+	action, err := encodeResponsesWebSearchAction(search)
+	if err != nil {
+		return nil, err
+	}
+	state.webAction = action
+	return nil, nil
+}
+
+func (e *ResponseStreamWireEncoder) completeWebSearchResult(completed *canonical.CanonicalItem) ([][]byte, error) {
+	if completed == nil {
+		return nil, nil
+	}
+	result, ok := completed.ToolResult()
+	if !ok {
+		return nil, nil
+	}
+	search, ok := result.WebSearch()
+	if !ok {
+		return nil, nil
+	}
+	for itemID, state := range e.toolItems {
+		if state.toolType != canonical.ToolTypeWebSearch || state.callID != result.CallID().String() {
+			continue
+		}
+		if len(state.webAction) == 0 {
+			return nil, canonical.InternalError("responses web-search stream result precedes its call checkpoint")
+		}
+		action, err := encodeResponsesWebSearchSources(search, state.webAction)
+		if err != nil {
+			return nil, err
+		}
+		return e.closeWebSearchItem(itemID, action)
+	}
+	return nil, canonical.InternalError("responses web-search stream result has no prior call")
+}
+
+func (e *ResponseStreamWireEncoder) closeWebSearchItem(itemID string, action json.RawMessage) ([][]byte, error) {
+	state := e.toolItems[itemID]
+	if state == nil {
+		return nil, nil
+	}
+	if len(action) == 0 {
+		return nil, canonical.InternalError("responses web-search stream call has no completed action")
+	}
+	wireID := state.callID
+	if strings.TrimSpace(wireID) == "" { // swobu:io-string source=domain
+		wireID = state.itemID
+	}
+	item := responsesWireOutputItemDTO{ID: wireID, Type: "web_search_call", Status: "completed", Action: action}
+	done, err := json.Marshal(responsesOutputItemEventDTO{Type: "response.output_item.done", OutputIndex: state.outputIndex, Item: item})
+	if err != nil {
+		return nil, canonical.InternalError("responses web-search event encoding failed")
+	}
+	e.outputItems = append(e.outputItems, item)
+	delete(e.toolItems, itemID)
+	return [][]byte{done}, nil
 }

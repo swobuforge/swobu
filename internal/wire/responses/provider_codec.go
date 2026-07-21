@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
@@ -15,18 +16,14 @@ import (
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request}, d, sink, exchangeID, EncodeOptions{})
+		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request, Responses: input.Responses.Clone()}, d, sink, exchangeID, EncodeOptions{})
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
-	return (ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, d, exchangeID, options, nil)
-}
-
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithMutation(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions, mutate RequestMutation) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithMutation(EncodeInput{Request: input.Request}, d, sink, exchangeID, options, mutate)
+		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request, Responses: input.Responses.Clone()}, d, sink, exchangeID, options)
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }
@@ -40,7 +37,11 @@ func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, reque
 	stream, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (canonical.ResponseStream, error) {
 		return decodeResponseBuffered(ctx, request, doc.RawBytes(), exchangeID, sink)
 	})
-	return wire.ProviderDecodeResult{Stream: stream, Decisions: decisions}, err
+	batch, batchErr := captureBufferedResponsesOutput(doc.RawBytes())
+	if err == nil && batchErr != nil {
+		return wire.ProviderDecodeResult{}, batchErr
+	}
+	return wire.ProviderDecodeResult{Stream: stream, Decisions: decisions, ResponsesOutput: staticResponsesOutput{batch: batch}}, err
 }
 
 func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
@@ -52,5 +53,13 @@ func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(request canonical.Canonica
 	reader, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (*responsesResponseStream, error) {
 		return decodeResponseStream(request, stream, exchangeID, sink), nil
 	})
-	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, TerminalDecisions: reader}, err
+	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, TerminalDecisions: reader, ResponsesOutput: reader}, err
+}
+
+type staticResponsesOutput struct {
+	batch responsesnative.Items
+}
+
+func (s staticResponsesOutput) ResponsesOutput() (responsesnative.Items, bool) {
+	return s.batch.Clone(), !s.batch.IsZero()
 }

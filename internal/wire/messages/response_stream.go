@@ -66,6 +66,9 @@ type streamContentBlock struct {
 	reasoningType string
 	signature     strings.Builder
 	data          string
+	searchResult  json.RawMessage
+	searchError   bool
+	citations     []messagesCitationDTO
 }
 
 type streamEnvelope struct {
@@ -82,24 +85,29 @@ type messageStartFrame struct {
 type contentBlockStartFrame struct {
 	Index        int `json:"index"`
 	ContentBlock struct {
-		Type      string          `json:"type"`
-		ID        string          `json:"id"`
-		Name      string          `json:"name"`
-		Input     json.RawMessage `json:"input"`
-		Thinking  string          `json:"thinking"`
-		Signature string          `json:"signature"`
-		Data      string          `json:"data"`
+		Type      string                `json:"type"`
+		ID        string                `json:"id"`
+		Name      string                `json:"name"`
+		Input     json.RawMessage       `json:"input"`
+		Thinking  string                `json:"thinking"`
+		Signature string                `json:"signature"`
+		Data      string                `json:"data"`
+		ToolUseID string                `json:"tool_use_id"`
+		Content   json.RawMessage       `json:"content"`
+		IsError   bool                  `json:"is_error"`
+		Citations []messagesCitationDTO `json:"citations"`
 	} `json:"content_block"`
 }
 
 type contentBlockDeltaFrame struct {
 	Index int `json:"index"`
 	Delta struct {
-		Type        string `json:"type"`
-		Text        string `json:"text"`
-		PartialJSON string `json:"partial_json"`
-		Thinking    string `json:"thinking"`
-		Signature   string `json:"signature"`
+		Type        string              `json:"type"`
+		Text        string              `json:"text"`
+		PartialJSON string              `json:"partial_json"`
+		Thinking    string              `json:"thinking"`
+		Signature   string              `json:"signature"`
+		Citation    messagesCitationDTO `json:"citation"`
 	} `json:"delta"`
 }
 
@@ -206,6 +214,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	switch contentBlockType {
 	case "text":
 		block.ItemKind = canonical.ItemKindMessage
+		block.citations = append(block.citations, payload.ContentBlock.Citations...)
 		start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)
 		if err != nil {
 			return err
@@ -241,8 +250,31 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		block.ItemKind = canonical.ItemKindReasoning
 		block.reasoningType = "redacted_thinking"
 		block.data = payload.ContentBlock.Data
-	case "server_tool_use", "web_search_tool_result":
-		return canonical.UnsupportedOperation("messages provider tool lifecycle streaming is not implemented")
+	case "server_tool_use":
+		if strings.TrimSpace(payload.ContentBlock.Name) != "web_search" { // swobu:io-string source=provider-wire
+			return canonical.UnsupportedOperation("messages streamed server-tool type is unsupported")
+		}
+		block.ItemKind = canonical.ItemKindToolCall
+		callID, err := canonical.NewToolCallID(payload.ContentBlock.ID)
+		if err != nil {
+			return canonical.InternalError("messages streamed web-search call is missing id")
+		}
+		block.CallID, block.Tool = callID, canonical.WebSearchToolKey()
+		block.initialInput = append(json.RawMessage(nil), payload.ContentBlock.Input...)
+		start, err := canonical.NewToolCallStart(callID, block.Tool)
+		if err != nil {
+			return err
+		}
+		s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: start}})
+	case "web_search_tool_result":
+		block.ItemKind = canonical.ItemKindToolResult
+		callID, err := canonical.NewToolCallID(payload.ContentBlock.ToolUseID)
+		if err != nil {
+			return canonical.InternalError("messages streamed web-search result is missing tool_use_id")
+		}
+		block.CallID = callID
+		block.searchResult = append(json.RawMessage(nil), payload.ContentBlock.Content...)
+		block.searchError = payload.ContentBlock.IsError
 	default:
 		return canonical.InternalError("messages stream content block type is unsupported")
 	}
@@ -273,11 +305,9 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 			return canonical.InternalError("messages stream tool_use mixed initial input with argument deltas")
 		}
 		block.args.WriteString(payload.Delta.PartialJSON)
-		s.enqueue(canonical.Event{
-			Kind:    canonical.EventArgsDelta,
-			EnvID:   s.blockEnvID(payload.Index),
-			Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON}},
-		})
+		if block.Tool.Kind() != canonical.ToolKindWebSearch {
+			s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, EnvID: s.blockEnvID(payload.Index), Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: uint32(payload.Index)}, Payload: canonical.ArgsDeltaPayload{Args: payload.Delta.PartialJSON}}})
+		}
 	case "thinking_delta":
 		text := payload.Delta.Thinking
 		if text == "" {
@@ -286,6 +316,8 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 		block.text.WriteString(text)
 	case "signature_delta":
 		block.signature.WriteString(payload.Delta.Signature)
+	case "citations_delta", "citation_delta":
+		block.citations = append(block.citations, payload.Delta.Citation)
 	default:
 		return canonical.InternalError("messages stream delta type is unsupported")
 	}
@@ -306,8 +338,20 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 	var err error
 	switch block.ItemKind {
 	case canonical.ItemKindMessage:
-		item, err = canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(block.text.String())})
+		part, partErr := decodeMessagesCitedText(block.text.String(), block.citations)
+		if partErr != nil {
+			return partErr
+		}
+		item, err = canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{part})
 	case canonical.ItemKindToolCall:
+		if block.Tool.Kind() == canonical.ToolKindWebSearch {
+			raw := block.initialInput
+			if block.args.Len() > 0 {
+				raw = json.RawMessage(block.args.String())
+			}
+			item, err = decodeMessagesWebSearchCall(block.CallID.String(), raw)
+			break
+		}
 		if block.args.Len() == 0 {
 			raw := block.initialInput
 			if len(raw) == 0 {
@@ -325,6 +369,8 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 			return canonical.InternalError("messages streamed tool_use input is invalid")
 		}
 		item, err = canonical.NewToolCallItem(block.CallID, block.Tool, canonical.NewJSONObjectToolInput(object))
+	case canonical.ItemKindToolResult:
+		item, err = decodeMessagesWebSearchResult(block.CallID.String(), block.searchResult, block.searchError)
 	case canonical.ItemKindReasoning:
 		wireBlock := contentID{Type: block.reasoningType}
 		if block.reasoningType == "redacted_thinking" {

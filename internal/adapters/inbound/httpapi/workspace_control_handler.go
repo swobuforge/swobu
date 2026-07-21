@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
@@ -174,25 +173,11 @@ func (h workspaceControlHandlers) setCredential(w http.ResponseWriter, r *http.R
 }
 
 func decodeWorkspaceJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	if err := decodeOperatorJSONObject(w, r, target, "workspace command"); err != nil {
 		writeWorkspaceJSON(w, http.StatusBadRequest, workspaces.CommandError{Code: workspaces.InvalidArgument, Message: "invalid command body: " + err.Error()})
 		return false
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		writeWorkspaceJSON(w, http.StatusBadRequest, workspaces.CommandError{Code: workspaces.InvalidArgument, Message: "invalid trailing command body: " + errorText(err)})
-		return false
-	}
 	return true
-}
-
-func errorText(err error) string {
-	if err == nil {
-		return "multiple JSON values are unsupported"
-	}
-	return err.Error()
 }
 
 func (h workspaceControlHandlers) writeWorkspace(w http.ResponseWriter, value workspaces.Workspace, err error) {

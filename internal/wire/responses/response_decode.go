@@ -10,6 +10,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -19,7 +20,7 @@ type responseEnvelope struct {
 	Model             string                         `json:"model"`
 	Status            string                         `json:"status"`
 	OutputText        string                         `json:"output_text"`
-	Output            []responsesWireOutputItemDTO   `json:"output"`
+	Output            []json.RawMessage              `json:"output"`
 	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 }
@@ -120,9 +121,17 @@ func emitNativeResponseIDCaptured(ctx context.Context, sink compat.Sink, exchang
 	}})
 }
 
-func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, items []responsesWireOutputItemDTO, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+	items, err := rawResponsesOutputItems(wireItems)
+	if err != nil {
+		return nil, err
+	}
 	output := make([]canonical.CanonicalItem, 0, len(items))
-	for _, item := range items {
+	for _, rawItem := range items {
+		var item responsesWireOutputItemDTO
+		if err := json.Unmarshal(rawItem, &item); err != nil {
+			return nil, canonical.InternalError("responses output item is invalid JSON")
+		}
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
 		switch itemType {
 		case "message":
@@ -168,8 +177,15 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 				return nil, canonical.InternalError("responses custom tool call is invalid")
 			}
 			output = append(output, call)
+		case "web_search_call":
+			lifecycle, err := decodeResponsesWebSearchLifecycle(item.ID, item.Action, strings.TrimSpace(item.Status) == "completed") // swobu:io-string source=provider-wire
+			if err != nil {
+				return nil, err
+			}
+			output = append(output, lifecycle...)
 		case "mcp_call":
-			return nil, canonical.UnsupportedOperation("responses MCP output is not implemented")
+			// The native batch retains this complete item even though portable
+			// canonical has no P0 projection for it.
 		case "reasoning":
 			reasoning, present, err := decodeResponsesReasoningItem(item)
 			if err != nil {
@@ -179,7 +195,8 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 				output = append(output, reasoning)
 			}
 		default:
-			return nil, canonical.UnsupportedOperation("responses output item type is not implemented")
+			// Future native items remain exact continuation truth without being
+			// assigned speculative portable semantics.
 		}
 	}
 	if len(output) == 0 && strings.TrimSpace(outputText) != "" { // swobu:io-string source=boundary
@@ -192,6 +209,25 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 	return output, nil
 }
 
+func rawResponsesOutputItems(items any) ([]json.RawMessage, error) {
+	switch values := items.(type) {
+	case []json.RawMessage:
+		return values, nil
+	case []responsesWireOutputItemDTO:
+		raw := make([]json.RawMessage, len(values))
+		for index, item := range values {
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				return nil, canonical.InternalError("responses output item could not be decoded")
+			}
+			raw[index] = encoded
+		}
+		return raw, nil
+	default:
+		return nil, canonical.InternalError("responses output items have an invalid shape")
+	}
+}
+
 func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO) (canonical.CanonicalItem, error) {
 	parts, err := openaiwire.DecodeContentParts(item.Content, "responses message content is invalid")
 	if err != nil {
@@ -202,7 +238,15 @@ func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO) (canonica
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		switch partType {
 		case "text", "output_text", "input_text":
-			content = append(content, canonical.NewTextMessagePart(part.Text))
+			citations, err := decodeResponsesAnnotations(part.Text, part.Annotations)
+			if err != nil {
+				return err
+			}
+			messagePart, err := canonical.NewCitedTextMessagePart(part.Text, citations)
+			if err != nil {
+				return canonical.InternalError("responses output URL citations are invalid")
+			}
+			content = append(content, messagePart)
 		default:
 			return canonical.UnsupportedOperation("responses output item content part type is not implemented")
 		}
@@ -224,10 +268,7 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.Ca
 	if err != nil {
 		return canonical.CanonicalItem{}, false, err
 	}
-	if len(content) > 0 || item.EncryptedContent != "" {
-		return canonical.CanonicalItem{}, false, canonical.UnsupportedOperation("responses manual reasoning state is not supported in P0")
-	}
-	parts := make([]canonical.ReasoningPart, 0, len(item.Summary))
+	parts := make([]canonical.ReasoningPart, 0, len(item.Summary)+len(content))
 	for _, summary := range item.Summary {
 		if strings.TrimSpace(summary.Type) != "summary_text" { // swobu:io-string source=provider-wire
 			return canonical.CanonicalItem{}, false, canonical.UnsupportedOperation("responses reasoning summary part type is not implemented")
@@ -235,6 +276,16 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.Ca
 		part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary.Text)
 		if err != nil {
 			return canonical.CanonicalItem{}, false, canonical.InternalError("responses reasoning part is invalid")
+		}
+		parts = append(parts, part)
+	}
+	for _, trace := range content {
+		if strings.TrimSpace(trace.Type) != "reasoning_text" { // swobu:io-string source=provider-wire
+			continue
+		}
+		part, err := canonical.NewReasoningPart(canonical.ReasoningPartTrace, trace.Text)
+		if err != nil {
+			return canonical.CanonicalItem{}, false, canonical.InternalError("responses reasoning trace is invalid")
 		}
 		parts = append(parts, part)
 	}
@@ -246,6 +297,30 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.Ca
 		return canonical.CanonicalItem{}, false, canonical.InternalError("responses reasoning item is invalid")
 	}
 	return reasoning, true, nil
+}
+
+func captureBufferedResponsesOutput(raw []byte) (responsesnative.Items, error) {
+	var envelope struct {
+		Output []json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return responsesnative.Items{}, canonical.InternalError("responses output is invalid JSON")
+	}
+	items := make([][]byte, len(envelope.Output))
+	for index := range envelope.Output {
+		var header struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(envelope.Output[index], &header); err != nil || strings.TrimSpace(header.Type) == "" { // swobu:io-string source=provider-wire
+			return responsesnative.Items{}, canonical.InternalError("responses output contains a malformed native item")
+		}
+		items[index] = envelope.Output[index]
+	}
+	batch, err := responsesnative.NewItems(items)
+	if err != nil {
+		return responsesnative.Items{}, canonical.InternalError("responses output contains an invalid native item")
+	}
+	return batch, nil
 }
 
 func decodeResponsesReasoningContent(raw json.RawMessage) ([]responsesReasoningTextDTO, error) {

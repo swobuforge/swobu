@@ -1,0 +1,23 @@
+  new target · Azure AI                                                               cancel ↵
+     provider          Azure AI                                                       change ↵
+     project           example/demo                                                   edit ↵
+     credential        environment · AZURE_OPENAI_API_KEY                             change ↵
+     deployment        gpt-5.6-sol                                                    change ↵
+   > protocol          required                                                       choose ↵
+     create                                                                           complete setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

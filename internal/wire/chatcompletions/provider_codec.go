@@ -14,12 +14,8 @@ import (
 )
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
-	return (ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithMutation(input, delivery, exchangeID, options, nil)
-}
-
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithMutation(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, options EncodeOptions, mutate RequestMutation) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithMutation(input.Request, delivery, sink, exchangeID, options, mutate)
+		return EncodeCarrierWithDecisions(input.Request, delivery, sink, exchangeID, options)
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }

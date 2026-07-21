@@ -43,12 +43,6 @@ func (fakeRoutePorts) DeleteTarget(context.Context, DeleteTargetRequest) (readmo
 	return readmodel.RouteReadModel{}, nil
 }
 
-type fakeRunExecutor struct{}
-
-func (fakeRunExecutor) ExecuteRunCommand(context.Context, ExecuteRunCommandRequest) (RunExecutionResult, error) {
-	return RunExecutionResult{}, nil
-}
-
 type fakeActivityQueries struct{}
 
 func (fakeActivityQueries) ListActivity(context.Context, ListActivityRequest) (readmodel.ActivityReadModel, error) {
@@ -59,6 +53,5 @@ func TestPortInterfacesSeparateCockpitConcerns(t *testing.T) {
 	var _ WorkspaceQueries = fakeWorkspacePorts{}
 	var _ WorkspaceCommands = fakeWorkspacePorts{}
 	var _ RouteCommands = fakeRoutePorts{}
-	var _ RunExecutor = fakeRunExecutor{}
 	var _ ActivityQueries = fakeActivityQueries{}
 }

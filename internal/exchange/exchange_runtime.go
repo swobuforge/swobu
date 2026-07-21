@@ -78,6 +78,7 @@ func encodeClientOutput(ctx context.Context, call providerCall, envelope canonic
 		}
 		streamResult.Stream.Body = &checkpointingReadCloser{
 			ctx: ctx, inner: streamResult.Stream.Body, committer: committer, completion: streamResult.Completion,
+			sink: sink, exchangeID: call.exchangeID, decisions: streamResult.TerminalDecisions,
 		}
 		return NewStreamingResponse(streamResult.Stream), nil
 	}

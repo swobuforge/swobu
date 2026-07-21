@@ -8,5 +8,7 @@ import (
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	return openaifamily.NewRuntime(client, credentials, openaifamily.NewCustomPolicy())
+	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.NewCustomPolicy())
+	bundle.BackendResolver = backendResolver{standard: bundle.BackendResolver}
+	return bundle
 }

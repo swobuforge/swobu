@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -40,6 +41,15 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 			if errors.Is(err, io.EOF) {
 				code, message = "provider_stream_incomplete", "provider stream ended before completed"
 			}
+			slog.Warn("provider response stream failed after start",
+				"component", "exchange",
+				"event", "provider_stream_failed_after_start",
+				"exchange_id", s.last.ExchangeID,
+				"code", code,
+				"last_event_kind", s.last.Kind,
+				"last_event_seq", s.last.Seq,
+				"error", err,
+			)
 			s.pending = terminalFailureEvents(s.last, code, message)
 			s.terminated = true
 			return s.Next(ctx)

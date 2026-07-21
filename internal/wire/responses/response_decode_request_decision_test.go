@@ -1,10 +1,11 @@
 package responses
 
 import (
-	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestDecodeClientRequestRejectsMissingToolResultCallID(t *testing.T) {

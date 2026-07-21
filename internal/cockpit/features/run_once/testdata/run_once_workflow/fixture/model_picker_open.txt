@@ -1,7 +1,0 @@
-Codex run
-  model             gpt-4.1 default                                                   close ↵
-> gpt-4.1           default · incomplete · no targets                                 select ↵
-  gpt-4.1-alt       incomplete · no targets                                           select ↵
-command        codex --model gpt-4.1              run ↵
-
-

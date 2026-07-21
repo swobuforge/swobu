@@ -19,15 +19,18 @@ type bufferedResponseBody struct {
 }
 
 type bufferedContentBlockBody struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Input     json.RawMessage `json:"input"`
-	ToolUseID string          `json:"tool_use_id"`
-	Thinking  string          `json:"thinking"`
-	Signature string          `json:"signature"`
-	Data      string          `json:"data"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text"`
+	ID        string                `json:"id"`
+	Name      string                `json:"name"`
+	Input     json.RawMessage       `json:"input"`
+	ToolUseID string                `json:"tool_use_id"`
+	Thinking  string                `json:"thinking"`
+	Signature string                `json:"signature"`
+	Data      string                `json:"data"`
+	Content   json.RawMessage       `json:"content"`
+	IsError   bool                  `json:"is_error"`
+	Citations []messagesCitationDTO `json:"citations"`
 }
 
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
@@ -86,7 +89,11 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		blockType := strings.TrimSpace(block.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		switch blockType {
 		case "text":
-			textParts = append(textParts, canonical.NewTextMessagePart(block.Text))
+			part, err := decodeMessagesCitedText(block.Text, block.Citations)
+			if err != nil {
+				return nil, err
+			}
+			textParts = append(textParts, part)
 		case "tool_use":
 			if err := flushMessage(); err != nil {
 				return nil, canonical.InternalError("messages response message item is invalid")
@@ -142,8 +149,27 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 				return nil, canonical.InternalError("messages response redacted thinking block is invalid")
 			}
 			items = append(items, item)
-		case "server_tool_use", "web_search_tool_result":
-			return nil, canonical.UnsupportedOperation("messages provider tool lifecycle output is not implemented")
+		case "server_tool_use":
+			if err := flushMessage(); err != nil {
+				return nil, canonical.InternalError("messages response message item is invalid")
+			}
+			if strings.TrimSpace(block.Name) != "web_search" { // swobu:io-string source=provider-wire
+				return nil, canonical.UnsupportedOperation("messages server-tool type is unsupported")
+			}
+			item, err := decodeMessagesWebSearchCall(block.ID, block.Input)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		case "web_search_tool_result":
+			if err := flushMessage(); err != nil {
+				return nil, canonical.InternalError("messages response message item is invalid")
+			}
+			item, err := decodeMessagesWebSearchResult(block.ToolUseID, block.Content, block.IsError)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
 		default:
 			return nil, canonical.InternalError("messages response content block is unsupported")
 		}
