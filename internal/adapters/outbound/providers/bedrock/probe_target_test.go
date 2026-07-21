@@ -18,10 +18,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestProbeTargetCatalogSuccessSurvivesSTSIdentityFailure(t *testing.T) {
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "access")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
-	t.Setenv("AWS_SESSION_TOKEN", "session")
+	setStaticAWSCredentials(t, "access", "secret", "session")
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-1"}]}`)), Request: req}, nil
 	})}
@@ -81,10 +78,7 @@ func TestProbeTargetReportsTruthfulFailureStage(t *testing.T) {
 }
 
 func TestProbeTargetCatalogFailureIncludesRefreshedAWSIdentity(t *testing.T) {
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "access")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
-	t.Setenv("AWS_SESSION_TOKEN", "session")
+	setStaticAWSCredentials(t, "access", "secret", "session")
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("catalog timeout")
 	})}

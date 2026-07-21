@@ -8,7 +8,7 @@ SWOBU_VERSION ?= dev
 SWOBU_LDFLAGS := -s -w -X $(MODULE_PATH)/internal/app/operator/controlplane.swobuVersion=$(SWOBU_VERSION)
 GO_TEST_FLAGS ?= -failfast -timeout=5m
 
-.PHONY: help check check-fmt check-test test generate build artifacts clean fmt-check lint
+.PHONY: help check check-fmt check-test test generate build artifacts clean fmt-check lint audit
 
 help: ## Show public entrypoints
 	@awk 'BEGIN {FS = ":.*## "; print "swobucli/opencore entrypoints:"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -51,6 +51,9 @@ lint:
 	@CGO_ENABLED=0 $(GO) build ./...
 	@CGO_ENABLED=0 $(GO) vet ./...
 	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/check-opencore-lint
+
+audit: ## Run advisory whole-tree naming, structure, provenance, and clone diagnostics
+	@cd ../tools && CGO_ENABLED=0 $(GO) run ./cmd/check-opencore-lint --audit
 
 clean:
 	rm -rf .out dist

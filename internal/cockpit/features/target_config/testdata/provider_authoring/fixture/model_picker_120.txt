@@ -6,14 +6,13 @@
         search            gpt-4_
 
       > GPT-4.1                                                                                           select ↵
-        GPT-4.1 mini                                                                                      select ↵
+        GPT-4.1 small                                                                                     select ↵
         GPT-4o                                                                                            select ↵
 
         3 of 3 shown                                                                                      ↑↓ search
      protocol          OpenAI · Responses · stream                                                        change ↵
      routing           fallback after step 1                                                              change ↵
      create                                                                                               create ↵
-
 
 
 

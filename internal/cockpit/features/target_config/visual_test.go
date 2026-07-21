@@ -251,7 +251,7 @@ func renderModelPicker(t *testing.T, width int) string {
 	catalog := w.Catalog.Get()
 	catalog.Result.Deployments = []readmodel.ModelDeploymentReadModel{
 		{ID: "GPT-4.1", Name: "GPT-4.1", ModelName: "GPT-4.1"},
-		{ID: "gpt-4.1-mini", Name: "GPT-4.1 mini", ModelName: "gpt-4.1-mini"},
+		{ID: "gpt-4.1-small", Name: "GPT-4.1 small", ModelName: "gpt-4.1-small"},
 		{ID: "gpt-4o", Name: "GPT-4o", ModelName: "gpt-4o"},
 	}
 	w.Catalog.Set(catalog)
