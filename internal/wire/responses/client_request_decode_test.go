@@ -12,6 +12,35 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
+func TestResponsesCaptureDropsClientSyntheticFunctionCallID(t *testing.T) {
+	raw := []byte(`{"model":"gpt-4.1-mini","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],"input":[{"type":"function_call","id":"item_0","call_id":"call_1","name":"search","arguments":"{}","future_member":true},{"type":"function_call","id":"fc_123","call_id":"call_2","name":"search","arguments":"{}"}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := decoded.Request.ResponsesInput.JSONObjects()
+	if len(items) != 2 {
+		t.Fatalf("native input item count = %d, want 2", len(items))
+	}
+	var synthetic, providerOwned map[string]json.RawMessage
+	if err := json.Unmarshal(items[0], &synthetic); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := synthetic["id"]; found {
+		t.Fatalf("synthetic function-call id survived replay capture: %s", items[0])
+	}
+	if _, found := synthetic["future_member"]; !found {
+		t.Fatalf("unknown member was not preserved: %s", items[0])
+	}
+	if err := json.Unmarshal(items[1], &providerOwned); err != nil {
+		t.Fatal(err)
+	}
+	if string(providerOwned["id"]) != `"fc_123"` {
+		t.Fatalf("provider function-call id was not preserved: %s", items[1])
+	}
+}
+
 func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 

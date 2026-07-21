@@ -70,13 +70,43 @@ func captureResponsesInputItems(raw json.RawMessage) (responsesnative.Items, err
 	}
 	values := make([][]byte, len(items))
 	for index := range items {
-		values[index] = items[index]
+		value, err := replayableResponsesInputItem(items[index])
+		if err != nil {
+			return responsesnative.Items{}, canonical.BadRequest("responses request input contains an invalid native item")
+		}
+		values[index] = value
 	}
 	preserved, err := responsesnative.NewItems(values)
 	if err != nil {
 		return responsesnative.Items{}, canonical.BadRequest("responses request input contains an invalid native item")
 	}
 	return preserved, nil
+}
+
+// replayableResponsesInputItem owns the distinction between client-local item
+// identity and provider continuation identity. Some Responses clients assign
+// UI-oriented IDs such as "item_0" to function calls. Those values are valid
+// client input metadata but invalid when replayed to a provider, whose
+// function-call IDs occupy the "fc" namespace. All other opaque members remain
+// untouched so future Responses fields survive the protocol boundary.
+func replayableResponsesInputItem(raw json.RawMessage) ([]byte, error) {
+	var identity struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		return nil, err
+	}
+	if identity.Type != "function_call" || identity.ID == "" || strings.HasPrefix(identity.ID, "fc") {
+		return raw, nil
+	}
+
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, err
+	}
+	delete(object, "id")
+	return json.Marshal(object)
 }
 
 // swobu:lint ignore function-complexity because=Responses request decoding validates all request bands at one protocol boundary.
