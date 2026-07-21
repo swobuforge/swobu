@@ -83,12 +83,18 @@ func captureResponsesInputItems(raw json.RawMessage) (responsesnative.Items, err
 	return preserved, nil
 }
 
+var responsesProviderItemIDPrefixes = map[string]string{
+	"function_call":   "fc",
+	"message":         "msg",
+	"reasoning":       "rs",
+	"web_search_call": "ws",
+}
+
 // replayableResponsesInputItem owns the distinction between client-local item
 // identity and provider continuation identity. Some Responses clients assign
-// UI-oriented IDs such as "item_0" to function calls. Those values are valid
-// client input metadata but invalid when replayed to a provider, whose
-// function-call IDs occupy the "fc" namespace. All other opaque members remain
-// untouched so future Responses fields survive the protocol boundary.
+// UI-oriented IDs such as "item_0" to known input items. Those values are valid
+// client metadata but invalid when replayed into provider-owned ID namespaces.
+// Unknown item kinds remain opaque so future Responses fields survive intact.
 func replayableResponsesInputItem(raw json.RawMessage) ([]byte, error) {
 	var identity struct {
 		Type string `json:"type"`
@@ -97,7 +103,8 @@ func replayableResponsesInputItem(raw json.RawMessage) ([]byte, error) {
 	if err := json.Unmarshal(raw, &identity); err != nil {
 		return nil, err
 	}
-	if identity.Type != "function_call" || identity.ID == "" || strings.HasPrefix(identity.ID, "fc") {
+	prefix, providerOwned := responsesProviderItemIDPrefixes[identity.Type]
+	if !providerOwned || identity.ID == "" || strings.HasPrefix(identity.ID, prefix) {
 		return raw, nil
 	}
 
