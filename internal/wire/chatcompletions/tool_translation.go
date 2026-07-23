@@ -11,7 +11,7 @@ import (
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes tool declaration variants.
-func decodeChatCompletionsTools(tools []chatCompletionsToolDefinitionDTO, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeChatCompletionsTools(tools []ProviderRequestTool, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -84,7 +84,7 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 	return canonical.NewToolSchemaObject(object), nil
 }
 
-func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -98,8 +98,11 @@ func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.S
 			}
 		}
 	}
-	out := make([]chatCompletionsToolDefinitionDTO, 0, len(tools))
+	out := make([]ProviderRequestTool, 0, len(tools))
 	for _, tool := range tools {
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			continue
+		}
 		wire, err := encodeChatCompletionsTool(tool)
 		if err != nil {
 			return nil, err
@@ -109,9 +112,9 @@ func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.S
 	return out, nil
 }
 
-func encodeChatCompletionsTool(tool canonical.ToolDeclaration) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsTool(tool canonical.ToolDeclaration) (ProviderRequestTool, error) {
 	if tool.Kind() == "" {
-		return chatCompletionsToolDefinitionDTO{}, canonical.BadRequest("chat completions request tool declarations are invalid")
+		return ProviderRequestTool{}, canonical.BadRequest("chat completions request tool declarations are invalid")
 	}
 	if decl, ok := tool.Function(); ok {
 		return encodeChatCompletionsFunctionTool(tool, decl)
@@ -119,20 +122,20 @@ func encodeChatCompletionsTool(tool canonical.ToolDeclaration) (chatCompletionsT
 	if decl, ok := tool.Custom(); ok {
 		return encodeChatCompletionsCustomTool(tool, decl)
 	}
-	return chatCompletionsToolDefinitionDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool declarations; got " + chatCompletionsUnsupportedToolKind(tool))
+	return ProviderRequestTool{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool declarations; got " + chatCompletionsUnsupportedToolKind(tool))
 }
 
-func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
 	name := declaration.Key().Name()
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
-		return chatCompletionsToolDefinitionDTO{}, canonical.BadRequest("chat completions request tool declarations require a name")
+		return ProviderRequestTool{}, canonical.BadRequest("chat completions request tool declarations require a name")
 	}
 	parameters, err := chatCompletionsToolParametersFromSchema(decl.InputSchema())
 	if err != nil {
-		return chatCompletionsToolDefinitionDTO{}, err
+		return ProviderRequestTool{}, err
 	}
-	wire := chatCompletionsToolDefinitionDTO{
+	wire := ProviderRequestTool{
 		Type: "function",
 		Function: &chatCompletionsToolDefinitionFunctionDTO{
 			Name:        name,
@@ -146,13 +149,13 @@ func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, de
 	return wire, nil
 }
 
-func encodeChatCompletionsCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool) (chatCompletionsToolDefinitionDTO, error) {
+func encodeChatCompletionsCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool) (ProviderRequestTool, error) {
 	name := declaration.Key().Name()
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
-		return chatCompletionsToolDefinitionDTO{}, canonical.BadRequest("chat completions request custom tools require a name")
+		return ProviderRequestTool{}, canonical.BadRequest("chat completions request custom tools require a name")
 	}
-	wire := chatCompletionsToolDefinitionDTO{
+	wire := ProviderRequestTool{
 		Type: "custom",
 		Custom: &chatCompletionsToolDefinitionCustomDTO{
 			Name:        name,
@@ -162,7 +165,7 @@ func encodeChatCompletionsCustomTool(declaration canonical.ToolDeclaration, decl
 	if !decl.Format().IsEmpty() {
 		format, err := chatCompletionsToolFormatFromCanonical(decl.Format())
 		if err != nil {
-			return chatCompletionsToolDefinitionDTO{}, err
+			return ProviderRequestTool{}, err
 		}
 		wire.Custom.Format = format
 	}
@@ -353,8 +356,12 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 					"name": name,
 				},
 			}, nil
+		case canonical.ToolTypeWebSearch:
+			return map[string]any{
+				"type": canonical.ToolTypeWebSearch,
+			}, nil
 		default:
-			return nil, canonical.UnsupportedOperation("chat completions protocol only supports function and custom specific tool choice")
+			return nil, canonical.UnsupportedOperation("chat completions protocol only supports function, custom, and web search specific tool choice")
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

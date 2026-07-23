@@ -29,6 +29,7 @@ const (
 	ProviderSpecChatGPT    ProviderID = "chatgpt"
 	ProviderSpecAnthropic  ProviderID = "anthropic"
 	ProviderSpecOpenRouter ProviderID = "openrouter"
+	ProviderSpecZAI        ProviderID = "zai"
 	ProviderSpecBedrock    ProviderID = "bedrock"
 	ProviderSpecAzure      ProviderID = "azure"
 	ProviderSpecCustom     ProviderID = "custom"

@@ -3,21 +3,21 @@ package chatcompletions
 import "encoding/json"
 
 type chatCompletionsRequestDTO struct {
-	Model                  string                             `json:"model"`
-	Messages               []chatCompletionsMessageDTO        `json:"messages"`
-	PreviousResponseWireID string                             `json:"previous_response_id"`
-	Tools                  []chatCompletionsToolDefinitionDTO `json:"tools,omitempty"`
-	ToolChoice             json.RawMessage                    `json:"tool_choice,omitempty"`
-	ParallelToolCalls      json.RawMessage                    `json:"parallel_tool_calls,omitempty"`
-	ResponseFormat         json.RawMessage                    `json:"response_format,omitempty"`
-	Temperature            json.RawMessage                    `json:"temperature,omitempty"`
-	MaxTokens              json.RawMessage                    `json:"max_tokens,omitempty"`
-	MaxCompletionTokens    json.RawMessage                    `json:"max_completion_tokens,omitempty"`
-	TopP                   json.RawMessage                    `json:"top_p,omitempty"`
-	Stop                   json.RawMessage                    `json:"stop,omitempty"`
-	ReasoningEffort        json.RawMessage                    `json:"reasoning_effort,omitempty"`
-	Stream                 json.RawMessage                    `json:"stream,omitempty"`
-	StreamOptions          json.RawMessage                    `json:"stream_options,omitempty"`
+	Model                  string                      `json:"model"`
+	Messages               []chatCompletionsMessageDTO `json:"messages"`
+	PreviousResponseWireID string                      `json:"previous_response_id"`
+	Tools                  []ProviderRequestTool       `json:"tools,omitempty"`
+	ToolChoice             json.RawMessage             `json:"tool_choice,omitempty"`
+	ParallelToolCalls      json.RawMessage             `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat         json.RawMessage             `json:"response_format,omitempty"`
+	Temperature            json.RawMessage             `json:"temperature,omitempty"`
+	MaxTokens              json.RawMessage             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens    json.RawMessage             `json:"max_completion_tokens,omitempty"`
+	TopP                   json.RawMessage             `json:"top_p,omitempty"`
+	Stop                   json.RawMessage             `json:"stop,omitempty"`
+	ReasoningEffort        json.RawMessage             `json:"reasoning_effort,omitempty"`
+	Stream                 json.RawMessage             `json:"stream,omitempty"`
+	StreamOptions          json.RawMessage             `json:"stream_options,omitempty"`
 }
 
 type chatCompletionsMessageDTO struct {
@@ -44,7 +44,7 @@ type chatCompletionsToolCallCustomDTO struct {
 	Input string `json:"input"`
 }
 
-type chatCompletionsToolDefinitionDTO struct {
+type ProviderRequestTool struct {
 	Type     string                                    `json:"type"`
 	Function *chatCompletionsToolDefinitionFunctionDTO `json:"function,omitempty"`
 	Custom   *chatCompletionsToolDefinitionCustomDTO   `json:"custom,omitempty"`

@@ -1,6 +1,9 @@
 package routing
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TargetDraft is the raw, boundary-neutral input finalized into one Target.
 // Transport and persistence adapters populate it without interpreting provider
@@ -17,6 +20,7 @@ type ConnectionDraft struct {
 	OpenAI     *CredentialConnectionDraft
 	Anthropic  *CredentialConnectionDraft
 	OpenRouter *CredentialConnectionDraft
+	ZAI        *ZAIConnectionDraft
 	ChatGPT    *CredentialConnectionDraft
 	Ollama     *OllamaConnectionDraft
 	Azure      *AzureConnectionDraft
@@ -26,6 +30,12 @@ type ConnectionDraft struct {
 
 // CredentialConnectionDraft carries one unresolved credential locator.
 type CredentialConnectionDraft struct{ Credential string }
+
+// ZAIConnectionDraft carries the selected Z.AI access product and credential.
+type ZAIConnectionDraft struct {
+	Access     string
+	Credential string
+}
 
 // OllamaConnectionDraft carries an optional local base URL.
 type OllamaConnectionDraft struct{ BaseURL string }
@@ -77,7 +87,14 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 	if err != nil {
 		return Target{}, err
 	}
-	protocol, err := ParseProtocol(draft.Protocol, connection.Provider(), facts.ProtocolSupported)
+	rawProtocol := strings.TrimSpace(draft.Protocol)
+	if _, derived := derivedProtocolForConnection(connection); derived {
+		if rawProtocol != "" {
+			return Target{}, pathError("target.protocol", "Z.AI protocol is derived and must be omitted")
+		}
+		return NewTarget(id, model, Protocol{}, connection)
+	}
+	protocol, err := ParseProtocol(rawProtocol, connection.Provider(), facts.ProtocolSupported)
 	if err != nil {
 		return Target{}, err
 	}
@@ -88,7 +105,7 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 // requiring unrelated target identity, model, or protocol fields.
 func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (Connection, error) {
 	count := 0
-	for _, present := range []bool{draft.OpenAI != nil, draft.Anthropic != nil, draft.OpenRouter != nil, draft.ChatGPT != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
+	for _, present := range []bool{draft.OpenAI != nil, draft.Anthropic != nil, draft.OpenRouter != nil, draft.ZAI != nil, draft.ChatGPT != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
 		if present {
 			count++
 		}
@@ -104,6 +121,13 @@ func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (C
 	}
 	if draft.OpenRouter != nil {
 		return NewOpenRouterConnection(draft.OpenRouter.Credential)
+	}
+	if draft.ZAI != nil {
+		access, err := ParseZAIAccess(draft.ZAI.Access)
+		if err != nil {
+			return nil, err
+		}
+		return NewZAIConnection(access, draft.ZAI.Credential)
 	}
 	if draft.ChatGPT != nil {
 		return NewChatGPTConnection(draft.ChatGPT.Credential)

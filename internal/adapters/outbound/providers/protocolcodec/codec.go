@@ -17,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/messages"
 	"github.com/swobuforge/swobu/internal/wire/responses"
+	"github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 // Codec lowers canonical semantics through one standard protocol family.
@@ -28,14 +29,21 @@ type Codec struct {
 func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
 	var decisions []compat.Decision
 	var err error
-	if err := ValidateEncodeRequest(req); err != nil {
+	if c.Protocol != protocolkind.ChatCompletions {
+		err = ValidateEncodeRequest(req)
+	}
+	if err != nil {
 		return carrier.Document{}, decisions, err
 	}
 	input := wire.ProviderEncodeInput{Request: req.Canonical, Responses: req.Responses.Clone()}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility})
+		var document chatcompletions.ProviderRequestDocument
+		document, result.Decisions, err = LowerChatCompletionsRequest(req)
+		if err == nil {
+			result.Document, err = chatcompletions.EncodeProviderRequestDocument(document)
+		}
 	case protocolkind.Responses:
 		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", responses.EncodeOptions{Compatibility: req.Compatibility})
 	case protocolkind.Messages:
@@ -48,6 +56,31 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 		return result.Document, decisions, MarkUnsupportedByBackend(err)
 	}
 	return result.Document, decisions, err
+}
+
+// LowerChatCompletionsRequest owns the single standard typed lowering sequence
+// used by both the protocol codec and exact-provider dialect decorators.
+func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.ProviderRequestDocument, []compat.Decision, error) {
+	if err := ValidateEncodeRequest(req); err != nil {
+		return chatcompletions.ProviderRequestDocument{}, nil, err
+	}
+	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
+		document, err := chatcompletions.LowerProviderRequestDocument(
+			req.Canonical,
+			req.Delivery,
+			sink,
+			req.ExchangeID,
+			chatcompletions.EncodeOptions{Compatibility: req.Compatibility},
+		)
+		if err != nil {
+			return chatcompletions.ProviderRequestDocument{}, err
+		}
+		if err := chatcompletions.ApplyStandardProviderRequestReasoning(&document, req.Canonical, sink, req.ExchangeID); err != nil {
+			return chatcompletions.ProviderRequestDocument{}, err
+		}
+		return document, nil
+	})
+	return document, decisions, err
 }
 
 // ValidateEncodeRequest enforces transport-independent protocol codec input

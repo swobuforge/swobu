@@ -35,8 +35,8 @@ type messagesMessageDTO struct {
 	Content json.RawMessage `json:"content"`
 }
 
-// ProviderRequestTool is one typed Messages tool declaration before exact-
-// provider spelling and the single JSON serialization boundary.
+// ProviderRequestTool is one typed Messages tool declaration before optional
+// exact-provider adaptation and the single JSON serialization boundary.
 type ProviderRequestTool struct {
 	Type              string          `json:"type,omitempty"`
 	Name              string          `json:"name"`

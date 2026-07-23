@@ -57,6 +57,17 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclar
 		return canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), nil
 	case "required":
 		return canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil
+	case canonical.ToolTypeWebSearch:
+		decl, _, err := canonical.ResolveToolDeclarationByKey(
+			tools,
+			canonical.WebSearchToolKey(),
+			canonical.ToolTypeWebSearch,
+		)
+		if err != nil {
+			return canonical.ToolPolicy{}, err
+		}
+		specific := decl.Key()
+		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific), nil
 	case "function", "custom":
 		name := strings.TrimSpace(objectMode.Name) // swobu:io-string source=provider-wire
 		fieldPath := "tool_choice.name"

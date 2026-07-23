@@ -81,6 +81,12 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if got := DefaultEnvKeyForSpec("bedrock"); got != "AWS_BEARER_TOKEN_BEDROCK" {
 		t.Fatalf("bedrock default env key = %q", got)
 	}
+	if got := DefaultExecuteBaseURL("zai"); got != "" {
+		t.Fatalf("Z.AI must not have an access-independent endpoint, got %q", got)
+	}
+	if got := ConcreteProviderProtocolsForSpec("zai"); len(got) != 1 || got[0] != "chat_completions_stream" {
+		t.Fatalf("Z.AI protocols = %#v, want fixed streaming Chat Completions", got)
+	}
 	if got := DefaultAuthHeaderForSpec("custom"); got != "Authorization" {
 		t.Fatalf("custom endpoint default auth header = %q", got)
 	}

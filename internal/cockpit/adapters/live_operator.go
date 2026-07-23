@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
@@ -40,6 +39,7 @@ type operatorClient interface {
 	CancelAuthSession(context.Context, string) error
 	RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error)
 	ProbeTarget(context.Context, workspaceapi.Connection, string) (operatorclient.ModelCatalogResult, error)
+	StorePastedCredential(context.Context, string, string, string) (string, error)
 }
 type LiveOperatorAdapter struct {
 	client operatorClient
@@ -278,9 +278,8 @@ func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.De
 	}
 	return readmodel.RouteReadModel{}, errors.New("committed route missing from workspace response")
 }
-func (a *LiveOperatorAdapter) StorePastedCredential(_ context.Context, req ports.StorePastedCredentialRequest) (ports.StorePastedCredentialResult, error) {
-	policy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
-	ref, err := credentialsadapter.StoreMaterializedCredential(req.ProviderSpec, req.Name, req.Secret, policy)
+func (a *LiveOperatorAdapter) StorePastedCredential(ctx context.Context, req ports.StorePastedCredentialRequest) (ports.StorePastedCredentialResult, error) {
+	ref, err := a.client.StorePastedCredential(ctx, req.ProviderSpec, req.Name, req.Secret)
 	if err != nil {
 		return ports.StorePastedCredentialResult{}, err
 	}

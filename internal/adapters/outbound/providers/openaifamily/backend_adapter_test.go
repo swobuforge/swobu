@@ -63,6 +63,38 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 	}
 }
 
+func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+		Tools: canonicaltest.SpecifiedToolSet(t, canonical.NewWebSearchDeclaration()),
+	})
+	for _, tc := range []struct {
+		name       string
+		providerID profile.ProviderID
+		policy     ProviderRoutePolicy
+	}{
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy()},
+		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := provider.NewTargetSnapshot("backend", string(tc.providerID), "https://example.test/v1", "", protocolkind.ChatCompletions, "", "chat_completions")
+			target.Model = request.Model()
+			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(document.RawBytes()), `"web_search_options":{}`) {
+				t.Fatalf("%s target did not inherit protocol web search: %s", tc.name, document.RawBytes())
+			}
+		})
+	}
+}
+
 func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
 	effort := canonical.InferenceEffortHigh
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})

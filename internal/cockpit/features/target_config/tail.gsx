@@ -17,7 +17,7 @@ func setupAllowsModelChoice(w *TargetConfig) bool {
 	if w.RequiresInteractiveAuth() && strings.TrimSpace(w.Draft.Get().CredentialRef) == "" {
 		return false
 	}
-	if w.IsCustomFlow() {
+	if w.UsesManualModelEntry() {
 		return w.setupState().Ready() && !w.catalogLoading()
 	}
 	return w.catalogValidated()
@@ -40,7 +40,7 @@ func ModelPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 		}
 	})
 	picker.AutoFocus = true
-	if w.IsCustomFlow() { picker.Mode = ui.SearchPickerOpen }
+	if w.UsesManualModelEntry() { picker.Mode = ui.SearchPickerOpen }
 	return picker
 }
 
@@ -226,7 +226,7 @@ templ (t *targetTail) Render() {
 	<div class="flex-col w-full">
 		if targetCatalogLoading(t.root) {
 			@ModelCatalogLoading(t.root)
-		} else if t.root.IsCustomFlow() && setupAllowsModelChoice(t.root) {
+		} else if t.root.UsesManualModelEntry() && setupAllowsModelChoice(t.root) {
 			@ModelSelectRow(t.root)
 		} else if targetCatalogFailed(t.root) && t.root.IsBedrockFlow() {
 			@InertTargetField(TargetModelLabel(t.root), "waiting for setup", "")

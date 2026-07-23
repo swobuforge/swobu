@@ -45,12 +45,14 @@ func providerPickerOrder(p profile.Profile) int {
 		return 2
 	case profile.ProviderSpecOpenRouter:
 		return 3
-	case profile.ProviderSpecOllama:
+	case profile.ProviderSpecZAI:
 		return 4
-	case profile.ProviderSpecAzure:
+	case profile.ProviderSpecOllama:
 		return 5
-	case profile.ProviderSpecCustom:
+	case profile.ProviderSpecAzure:
 		return 6
+	case profile.ProviderSpecCustom:
+		return 7
 	default:
 		return 100
 	}

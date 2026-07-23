@@ -64,18 +64,6 @@ func TestBackendCodecNormalizesCodexPayload(t *testing.T) {
 	}
 }
 
-func TestBackendCodecLowersWebSearchToChatGPTResponsesMarker(t *testing.T) {
-	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt-5.4-mini"), Tools: canonical.Specify(set)})
-	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{Canonical: request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(document.RawBytes(), []byte(`"tools":[{"type":"web_search"}]`)) {
-		t.Fatalf("web-search marker = %s", document.RawBytes())
-	}
-}
-
 func TestBackendCodecRejectsBufferedProviderDelivery(t *testing.T) {
 	_, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{

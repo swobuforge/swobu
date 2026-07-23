@@ -20,9 +20,8 @@ import (
 )
 
 const (
-	anthropicVersionHeaderValue       = "2023-06-01"
-	currentDirectWebSearchToolVersion = "web_search_20260209"
-	swobuCallerUAHeaderValue          = "swobu/dev"
+	anthropicVersionHeaderValue = "2023-06-01"
+	swobuCallerUAHeaderValue    = "swobu/dev"
 )
 
 type BackendAdapter struct {
@@ -58,7 +57,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 	}
 	backend := provider.Backend{
 		Target:    target.Clone(),
-		Codec:     messagesCodec{Codec: protocolcodec.Codec{Protocol: protocolkind.Messages}},
+		Codec:     protocolcodec.Codec{Protocol: protocolkind.Messages},
 		Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {

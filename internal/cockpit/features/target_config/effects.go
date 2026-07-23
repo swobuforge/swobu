@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 func credentialDisplay(w *TargetConfig) string {
@@ -174,8 +175,12 @@ func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploym
 func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 	w.SelectedModel.Set(model)
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
-	options := resolveProtocolOptions(w.Draft.Get().ProviderSpec, model)
 	w.Error.Set("")
+	if w.IsZAIFlow() {
+		w.CommitEdit(w.actionContext())
+		return
+	}
+	options := resolveProtocolOptions(w.Draft.Get().ProviderSpec, model)
 	switch len(options) {
 	case 0:
 		w.Error.Set("no supported protocol for selected model")
@@ -264,10 +269,10 @@ func (w *TargetConfig) ProbeCatalog() {
 	w.SetCatalogResult(result, err)
 }
 
-// ReadyAndProbe commits the projected setup inputs, enters LoadingCatalog,
-// and probes the catalog asynchronously when a live app exists.
-// Callers without a live app must drive ProbeCatalog themselves after the
-// loading state is visible.
+// ReadyAndProbe commits setup inputs. Z.AI stops there because it has no model
+// discovery; other providers enter LoadingCatalog and probe asynchronously
+// when a live app exists. Callers without a live app must drive ProbeCatalog
+// after the loading state is visible.
 func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 	credentialRef = strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
 	baseURL = strings.TrimSpace(baseURL)             // swobu:io-string source=boundary
@@ -279,12 +284,21 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 		return d
 	})
 	w.BaseURL.Set(baseURL)
+	if w.IsZAIFlow() {
+		w.invalidateCatalogEvidence()
+		w.Error.Set("")
+		return
+	}
 	w.invalidateCatalogSelection()
 	w.startCatalogProbe()
 }
 
 // startCatalogProbe owns both the loading transition and probe execution.
 func (w *TargetConfig) startCatalogProbe() {
+	if w.IsZAIFlow() {
+		w.invalidateCatalogEvidence()
+		return
+	}
 	if !w.refreshSetup().Ready() {
 		w.Catalog.Set(catalogOperationState{})
 		return
@@ -353,6 +367,22 @@ func (w *TargetConfig) SelectBedrockRegion(region string) {
 		return d
 	})
 	w.invalidateCatalogSelection()
+	w.Error.Set("")
+	w.advanceFromSetup()
+}
+
+// SelectZAIAccess commits one closed Z.AI access product. The operator-authored
+// open-set model remains stable; the fixed protocol is never draft state.
+func (w *TargetConfig) SelectZAIAccess(raw string) {
+	access, err := routing.ParseZAIAccess(raw)
+	if err != nil {
+		w.Error.Set(err.Error())
+		return
+	}
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.ZAIAccess = string(access)
+		return d
+	})
 	w.Error.Set("")
 	w.advanceFromSetup()
 }
@@ -691,7 +721,9 @@ func (w *TargetConfig) Create(ctx context.Context) {
 	model := w.SelectedModel.Get()
 	placement := w.Placement.Get()
 	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol)
-	if protocol == "" {
+	if w.IsZAIFlow() {
+		protocol = ""
+	} else if protocol == "" {
 		w.Error.Set("complete setup")
 		return
 	}
@@ -750,7 +782,12 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 	model := w.SelectedModel.Get()
 	modelID := strings.TrimSpace(model.ModelName)
 	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol)
-	if modelID == "" || protocol == "" {
+	if w.IsZAIFlow() {
+		protocol = ""
+	} else if protocol == "" {
+		return
+	}
+	if modelID == "" {
 		return
 	}
 	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), modelID, protocol, w.Route.ID)

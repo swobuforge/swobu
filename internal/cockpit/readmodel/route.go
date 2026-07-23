@@ -41,6 +41,7 @@ type TargetReadModel struct {
 	Provider         string
 	Model            string
 	ProviderProtocol string
+	ZAIAccess        string
 	BaseURL          string
 	AuthHeader       string
 	CredentialRef    string

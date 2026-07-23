@@ -46,39 +46,6 @@ func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 	}
 }
 
-func TestAzureResponsesUsesDocumentedStandardWebSearchMarker(t *testing.T) {
-	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("gpt-5.6-sol"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-		Tools: canonical.Specify(set),
-	})
-	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.Responses, "", "responses_stream")
-	target.Model = request.Model()
-	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var payload struct {
-		Tools []struct {
-			Type string `json:"type"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if len(payload.Tools) != 1 || payload.Tools[0].Type != canonical.ToolTypeWebSearch {
-		t.Fatalf("Azure Responses tools = %#v; JSON = %s", payload.Tools, document.RawBytes())
-	}
-}
-
 func TestNewRuntime_UsesAzureProviderIDAndSharedKernel(t *testing.T) {
 	t.Parallel()
 

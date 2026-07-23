@@ -24,10 +24,11 @@
 // preserving the native protocol graph for history replay.
 // Provider auth, base URL, and transport behavior stay in provider wiring
 // packages.
-// Web search lowers first to a typed neutral {type:web_search,name:web_search}
-// request document; exact provider packages own any versioned final spelling
-// before this package's single serialization boundary. Messages
-// history can represent only a search action with exactly one query. A
+// Direct web search lowers to the protocol-owned versioned declaration with a
+// direct caller. Exact providers may replace that typed declaration only when
+// their observed wire grammar differs, before this package's single
+// serialization boundary. Messages history can represent only a search action
+// with exactly one query. A
 // completed unrepresentable call/result lifecycle is omitted atomically with
 // one compatibility decision, while an unresolved call rejects so routing may
 // fall back. The strict leaf call encoder never fabricates or skips an item.

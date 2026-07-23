@@ -21,6 +21,12 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 		return routing.NewAnthropicConnection(credential)
 	case profile.ProviderSpecOpenRouter:
 		return routing.NewOpenRouterConnection(credential)
+	case profile.ProviderSpecZAI:
+		access, err := routing.ParseZAIAccess(draft.ZAIAccess)
+		if err != nil {
+			return nil, err
+		}
+		return routing.NewZAIConnection(access, credential)
 	case profile.ProviderSpecChatGPT:
 		return routing.NewChatGPTConnection(credential)
 	case profile.ProviderSpecOllama:
@@ -61,11 +67,15 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.Target
 	}
 	draft := readmodel.TargetDraft{
 		ProviderSpec:     spec,
+		ZAIAccess:        strings.TrimSpace(target.ZAIAccess),
 		Locator:          locator,
 		CredentialRef:    strings.TrimSpace(target.CredentialRef),    // swobu:io-string source=boundary
 		ProviderProtocol: strings.TrimSpace(target.ProviderProtocol), // swobu:io-string source=boundary
 		ModelID:          strings.TrimSpace(target.Model),            // swobu:io-string source=boundary
 		RouteModelID:     strings.TrimSpace(string(routeID)),         // swobu:io-string source=boundary
+	}
+	if profile.ProviderID(spec) == profile.ProviderSpecZAI {
+		draft.ProviderProtocol = ""
 	}
 	if profile.ProviderID(spec) == profile.ProviderSpecCustom {
 		draft.CredentialHeader = strings.TrimSpace(target.AuthHeader) // swobu:io-string source=boundary
@@ -79,7 +89,11 @@ func currentTargetDraft(draft readmodel.TargetDraft, locator, modelID, protocol 
 	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock {
 		draft.Locator = strings.TrimSpace(locator) // swobu:io-string source=boundary
 	}
-	draft.ProviderProtocol = strings.TrimSpace(protocol)    // swobu:io-string source=boundary
+	if profile.ProviderID(draft.ProviderSpec) == profile.ProviderSpecZAI {
+		draft.ProviderProtocol = ""
+	} else {
+		draft.ProviderProtocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary
+	}
 	draft.ModelID = strings.TrimSpace(modelID)              // swobu:io-string source=boundary
 	draft.RouteModelID = strings.TrimSpace(string(routeID)) // swobu:io-string source=boundary
 	return draft

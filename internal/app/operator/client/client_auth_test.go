@@ -2,10 +2,43 @@ package operatorclient
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+func TestClientStoresPastedCredentialThroughDaemon(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/_swobu/credentials" {
+			t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			ProviderSpec string `json:"provider_spec"`
+			Name         string `json:"name"`
+			Secret       string `json:"secret"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ProviderSpec != "zai" || body.Name != "cockpit/target/personal/zai/target" || body.Secret != "zai-secret" {
+			t.Fatalf("unexpected credential command: %#v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credential_ref":"secretfile:cockpit/target/personal/zai/target"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.Client(), server.URL)
+	ref, err := c.StorePastedCredential(context.Background(), "zai", "cockpit/target/personal/zai/target", "zai-secret")
+	if err != nil {
+		t.Fatalf("StorePastedCredential returned error: %v", err)
+	}
+	if ref != "secretfile:cockpit/target/personal/zai/target" {
+		t.Fatalf("credential ref = %q", ref)
+	}
+}
 
 func TestClientStartAuthSession(t *testing.T) {
 	t.Parallel()

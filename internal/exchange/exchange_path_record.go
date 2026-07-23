@@ -84,6 +84,9 @@ func ProviderTargetFromConnection(targetID string, connection routing.Connection
 		credential = connection.Credential().String()
 	case routing.OpenRouterConnection:
 		credential = connection.Credential().String()
+	case routing.ZAIConnection:
+		baseURL = connection.BaseURL()
+		credential = connection.Credential().String()
 	case routing.ChatGPTConnection:
 		credential = connection.Credential().String()
 	case routing.OllamaConnection:

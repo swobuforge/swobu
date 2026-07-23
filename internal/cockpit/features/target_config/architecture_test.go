@@ -279,6 +279,7 @@ func TestTargetConfigViewHasExplicitProviderHierarchy(t *testing.T) {
 		"@CustomProviderForm(w)",
 		"@BedrockProviderForm(w)",
 		"@ChatGPTProviderForm(w)",
+		"@ZAIProviderForm(w)",
 		"@HTTPProviderForm(w)",
 	} {
 		if !strings.Contains(src, required) {

@@ -31,3 +31,48 @@ func TestCredentialLocatorsMatchResolverSyntax(t *testing.T) {
 		}
 	}
 }
+
+func TestZAIAccessIsClosedAndRequired(t *testing.T) {
+	accesses := []struct {
+		access  ZAIAccess
+		baseURL string
+	}{
+		{ZAIAccessGeneralAPI, "https://api.z.ai/api/paas/v4"},
+		{ZAIAccessCodingPlan, "https://api.z.ai/api/coding/paas/v4"},
+	}
+	if got := ZAIAccesses(); len(got) != len(accesses) {
+		t.Fatalf("Z.AI accesses = %#v", got)
+	}
+	for _, test := range accesses {
+		access := test.access
+		parsed, err := ParseZAIAccess(string(access))
+		if err != nil {
+			t.Fatalf("ParseZAIAccess(%q): %v", access, err)
+		}
+		connection, err := NewZAIConnection(parsed, "env:ZAI_API_KEY")
+		if err != nil {
+			t.Fatalf("NewZAIConnection(%q): %v", access, err)
+		}
+		if connection.Access() != access || access.Label() == "" || connection.BaseURL() != test.baseURL {
+			t.Fatalf("connection access projection = %#v, access = %q, want base URL %q", connection, access, test.baseURL)
+		}
+	}
+	for _, raw := range []string{"", "default", "coding"} {
+		if _, err := ParseZAIAccess(raw); err == nil {
+			t.Errorf("ParseZAIAccess(%q) unexpectedly succeeded", raw)
+		}
+	}
+	if got := ZAIAccess("future").Label(); got != "" {
+		t.Fatalf("unknown access label = %q", got)
+	}
+	if got := (ZAIConnection{}).BaseURL(); got != "" {
+		t.Fatalf("zero connection base URL = %q", got)
+	}
+	connection, err := NewZAIConnection(ZAIAccess(" coding_plan "), "env:ZAI_API_KEY")
+	if err != nil {
+		t.Fatalf("whitespace access: %v", err)
+	}
+	if connection.Access() != ZAIAccessCodingPlan || connection.BaseURL() != "https://api.z.ai/api/coding/paas/v4" {
+		t.Fatalf("whitespace access was not normalized: %#v", connection)
+	}
+}
