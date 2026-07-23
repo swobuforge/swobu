@@ -40,8 +40,8 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 		ResolveConfigPath: func() string {
 			return "/tmp/swobu-test-config.yaml"
 		},
-		SpawnForegroundDaemon: func(context.Context, string) error {
-			return nil
+		SpawnForegroundDaemon: func(context.Context, string, string) (<-chan error, error) {
+			return make(chan error), nil
 		},
 		ReadinessTimeout: 2 * time.Second,
 	})
@@ -92,9 +92,9 @@ func TestAttachOrStart_AcceptsReachableDegradedState(t *testing.T) {
 		Addr:   strings.TrimPrefix(srv.URL, "http://"),
 		Client: &http.Client{Timeout: 500 * time.Millisecond},
 		Report: startupReporterForTests(io.Discard),
-		SpawnForegroundDaemon: func(context.Context, string) error {
+		SpawnForegroundDaemon: func(context.Context, string, string) (<-chan error, error) {
 			calledSpawn = true
-			return nil
+			return make(chan error), nil
 		},
 	})
 	if err != nil {
@@ -159,12 +159,12 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 		ResolveConfigPath: func() string {
 			return "/tmp/swobu-test-config.json"
 		},
-		SpawnForegroundDaemon: func(context.Context, string) error {
+		SpawnForegroundDaemon: func(context.Context, string, string) (<-chan error, error) {
 			if !downRequested.Load() {
 				t.Fatalf("spawn called before down request")
 			}
 			started.Store(true)
-			return nil
+			return make(chan error), nil
 		},
 		ReadinessTimeout: 2 * time.Second,
 	})
@@ -233,8 +233,8 @@ func TestRestart_PropagatesAttachStartFailureAfterDown(t *testing.T) {
 		ResolveConfigPath: func() string {
 			return "/tmp/swobu-test-config.json"
 		},
-		SpawnForegroundDaemon: func(context.Context, string) error {
-			return errors.New("spawn failed")
+		SpawnForegroundDaemon: func(context.Context, string, string) (<-chan error, error) {
+			return nil, errors.New("spawn failed")
 		},
 		ReadinessTimeout: 500 * time.Millisecond,
 	})
@@ -252,8 +252,8 @@ func TestAttachOrStart_StartupFailureRendersNextActions(t *testing.T) {
 		Client:            &http.Client{Timeout: 50 * time.Millisecond},
 		Report:            startupReporterForTests(&stdout),
 		ResolveConfigPath: func() string { return "/tmp/swobu-test-config.yaml" },
-		SpawnForegroundDaemon: func(context.Context, string) error {
-			return errors.New("bad config")
+		SpawnForegroundDaemon: func(context.Context, string, string) (<-chan error, error) {
+			return nil, errors.New("bad config")
 		},
 	})
 	if err == nil {
@@ -263,8 +263,57 @@ func TestAttachOrStart_StartupFailureRendersNextActions(t *testing.T) {
 	if !strings.Contains(out, "╭─ startup failed ") {
 		t.Fatalf("stdout missing startup failed block; stdout=%q", out)
 	}
-	if !strings.Contains(out, "next: run `swobu status`") {
+	if !strings.Contains(out, "next: run `swobu status --addr 127.0.0.1:1`") {
 		t.Fatalf("stdout missing next action; stdout=%q", out)
+	}
+}
+
+func TestAttachOrStart_ChildExitBeforeReadinessReportsExactRecovery(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	configPath := "/tmp/swobu locked/config.yaml"
+	exited := make(chan error, 1)
+	exited <- errors.New("exit status 2")
+	var events []StartupEvent
+	_, err := AttachOrStart(context.Background(), AttachOrStartInput{
+		Addr:              addr,
+		Client:            &http.Client{Timeout: 100 * time.Millisecond},
+		ResolveConfigPath: func() string { return configPath },
+		SpawnForegroundDaemon: func(_ context.Context, gotConfigPath, gotAddr string) (<-chan error, error) {
+			if gotConfigPath != configPath || gotAddr != addr {
+				t.Fatalf("spawn input = (%q, %q), want (%q, %q)", gotConfigPath, gotAddr, configPath, addr)
+			}
+			return exited, nil
+		},
+		Report: startupReporterFunc(func(event StartupEvent) {
+			events = append(events, event)
+		}),
+		ReadinessTimeout: 2 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("AttachOrStart returned nil error, want child exit failure")
+	}
+	if !strings.Contains(err.Error(), "daemon startup failed") || strings.Contains(err.Error(), "readiness failed") {
+		t.Fatalf("error = %q, want startup failure classification", err)
+	}
+	last := events[len(events)-1]
+	if last.Kind != StartupEventStartupFailed {
+		t.Fatalf("last event = %q, want startup failure; events=%#v", last.Kind, events)
+	}
+	if !strings.Contains(last.Text, "daemon exited before readiness") || !strings.Contains(last.Text, "exit status 2") {
+		t.Fatalf("failure text = %q, want early child exit", last.Text)
+	}
+	actions := strings.Join(last.NextAction, "\n")
+	if !strings.Contains(actions, fmt.Sprintf("another daemon owns %q", configPath)) ||
+		!strings.Contains(actions, fmt.Sprintf("swobu daemon --addr %s --config %q", addr, configPath)) ||
+		!strings.Contains(actions, fmt.Sprintf("swobu status --addr %s", addr)) {
+		t.Fatalf("recovery actions do not contain resolved values:\n%s", actions)
 	}
 }
 
@@ -288,8 +337,8 @@ func TestAttachOrStart_StartupTimeoutRendersNextActions(t *testing.T) {
 		ResolveConfigPath: func() string {
 			return "/tmp/swobu-test-config.yaml"
 		},
-		SpawnForegroundDaemon: func(context.Context, string) error {
-			return nil
+		SpawnForegroundDaemon: func(context.Context, string, string) (<-chan error, error) {
+			return make(chan error), nil
 		},
 		ReadinessTimeout: 50 * time.Millisecond,
 	})
@@ -300,7 +349,7 @@ func TestAttachOrStart_StartupTimeoutRendersNextActions(t *testing.T) {
 	if !strings.Contains(out, "╭─ startup timed out ") {
 		t.Fatalf("stdout missing startup timed out block; stdout=%q", out)
 	}
-	if !strings.Contains(out, "next: run `swobu status`") {
+	if !strings.Contains(out, "next: run `swobu status --addr ") {
 		t.Fatalf("stdout missing timeout next action; stdout=%q", out)
 	}
 }

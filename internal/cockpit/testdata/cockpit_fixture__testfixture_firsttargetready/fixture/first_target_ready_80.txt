@@ -7,9 +7,8 @@
      delete            workspace                                  delete ↵
 
   model routes ▾
-     gpt               default · incomplete · no targets          collapse ↵
+     gpt               no targets                                 collapse ↵
         name              gpt                                     edit ↵
-        default           yes                                     current
         delete            gpt                                     delete ↵
 
         new target · OpenAI                                       cancel ↵

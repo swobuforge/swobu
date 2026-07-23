@@ -14,3 +14,10 @@ func TestRouteReadModelUsesStructuralTiers(t *testing.T) {
 		t.Fatalf("TargetTier=%d,%v", tier, ok)
 	}
 }
+
+func TestRouteReadModelZeroTargetsUsesPlainSummary(t *testing.T) {
+	route := RouteReadModel{ID: "dev", ModelName: "dev", Enabled: true, Default: true}
+	if got, want := route.RowValue(), "no targets"; got != want {
+		t.Fatalf("RowValue() = %q, want %q", got, want)
+	}
+}

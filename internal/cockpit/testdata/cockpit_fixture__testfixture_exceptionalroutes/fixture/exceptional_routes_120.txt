@@ -10,7 +10,7 @@
      gpt               default · 2 fallback steps                                                         expand ↵
      free              3 balanced targets · degraded 429 x9                                               expand ↵
      local             1 target · blocked unreachable                                                     expand ↵
-     route-new         incomplete · no targets                                                            expand ↵
+     route-new         no targets                                                                         expand ↵
      add model route                                                                                      add ↵
 
   activity ▾
@@ -19,5 +19,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ↑↓ move   ↵ action   ? help   esc back   tab switch
-
 

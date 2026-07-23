@@ -27,9 +27,7 @@ templ (s *SectionView) Render() {
 									@RouteNameRowComponent(s, route)
 								</div>
 								// --- Default toggle -------------------------------------
-								if route.TargetCount() == 0 {
-									@SectionInertRow("default", "no", "target first")
-								} else {
+								if route.TargetCount() > 0 {
 									<div key={s.routeDefaultRowKey(route)} class="w-full">
 										@RouteDefaultRowComponent(s, route)
 									</div>
