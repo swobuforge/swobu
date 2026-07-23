@@ -8,12 +8,9 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	otlpmetrichttp "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-	otlptracehttp "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type MetricsEmitterConfig struct {
@@ -23,14 +20,16 @@ type MetricsEmitterConfig struct {
 	ExportInterval time.Duration
 }
 
+// MetricsEmitter uploads anonymous aggregate counters only (Path A: opt-out is
+// defensible because the payload is non-personal). There is no trace exporter,
+// no error span, no stack, no identifier — see ErrorSignal for the bounded
+// error dimensions carried as counter attributes.
 type MetricsEmitter struct {
 	provider      *sdkmetric.MeterProvider
-	traceProvider *sdktrace.TracerProvider
 	requestsTotal metric.Int64Counter
 	installsTotal metric.Int64Counter
 	ticksTotal    metric.Int64Counter
 	errorTotal    metric.Int64Counter
-	tracer        trace.Tracer
 }
 
 var _ Emitter = (*MetricsEmitter)(nil)
@@ -63,57 +62,34 @@ func NewMetricsEmitter(ctx context.Context, cfg MetricsEmitterConfig) (*MetricsE
 	}
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader), sdkmetric.WithResource(res))
 	meter := provider.Meter("github.com/swobuforge/swobu/internal/telemetry")
-	traceOpts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(endpoint)}
-	traceOpts = append(traceOpts, otlptracehttp.WithURLPath("/api/v1/traces"))
-	if len(cfg.Headers) > 0 {
-		traceOpts = append(traceOpts, otlptracehttp.WithHeaders(cfg.Headers))
-	}
-	if cfg.Timeout > 0 {
-		traceOpts = append(traceOpts, otlptracehttp.WithTimeout(cfg.Timeout))
-	}
-	traceExporter, err := otlptracehttp.New(ctx, traceOpts...)
-	if err != nil {
-		_ = provider.Shutdown(context.Background())
-		return nil, fmt.Errorf("create otel trace exporter: %w", err)
-	}
-	traceProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithResource(res),
-	)
 
 	requestsTotal, err := meter.Int64Counter("swobu_requests_total")
 	if err != nil {
 		_ = provider.Shutdown(context.Background())
-		_ = traceProvider.Shutdown(context.Background())
 		return nil, fmt.Errorf("create swobu_requests_total: %w", err)
 	}
 	installsTotal, err := meter.Int64Counter("swobu_installs_total")
 	if err != nil {
 		_ = provider.Shutdown(context.Background())
-		_ = traceProvider.Shutdown(context.Background())
 		return nil, fmt.Errorf("create swobu_installs_total: %w", err)
 	}
 	ticksTotal, err := meter.Int64Counter("swobu_telemetry_ticks_total")
 	if err != nil {
 		_ = provider.Shutdown(context.Background())
-		_ = traceProvider.Shutdown(context.Background())
 		return nil, fmt.Errorf("create swobu_telemetry_ticks_total: %w", err)
 	}
 	errorTotal, err := meter.Int64Counter("swobu_errors_total")
 	if err != nil {
 		_ = provider.Shutdown(context.Background())
-		_ = traceProvider.Shutdown(context.Background())
 		return nil, fmt.Errorf("create swobu_errors_total: %w", err)
 	}
 
 	return &MetricsEmitter{
 		provider:      provider,
-		traceProvider: traceProvider,
 		requestsTotal: requestsTotal,
 		installsTotal: installsTotal,
 		ticksTotal:    ticksTotal,
 		errorTotal:    errorTotal,
-		tracer:        traceProvider.Tracer("github.com/swobuforge/swobu/internal/telemetry/error"),
 	}, nil
 }
 
@@ -123,9 +99,6 @@ func (e *MetricsEmitter) Shutdown(ctx context.Context) error {
 	}
 	if e.provider != nil {
 		_ = e.provider.Shutdown(ctx)
-	}
-	if e.traceProvider != nil {
-		return e.traceProvider.Shutdown(ctx)
 	}
 	return nil
 }
@@ -160,26 +133,30 @@ func (e *MetricsEmitter) EmitCounts(ctx context.Context, state string, count2xx,
 	}
 	if count5xx > 0 {
 		e.requestsTotal.Add(ctx, count5xx, metric.WithAttributes(attribute.String("result_class", "5xx")))
-		e.errorTotal.Add(ctx, count5xx, metric.WithAttributes(attribute.String("error_class", "5xx")))
 	}
 }
 
-func (e *MetricsEmitter) EmitErrorTrace(ctx context.Context, errorTrace ErrorTracePayload) {
-	if e == nil || e.tracer == nil {
+// EmitError records a bounded, content-free error signal as aggregate counter
+// attributes (result class × provider family × operation × duration bucket).
+// It carries no message, stack, route, or identifier — anonymous by construction.
+func (e *MetricsEmitter) EmitError(ctx context.Context, signal ErrorSignal) {
+	if e == nil {
 		return
 	}
-	_, span := e.tracer.Start(ctx, "swobu.error")
-	span.SetAttributes(
-		attribute.Int("http.status_code", errorTrace.StatusCode),
-		attribute.String("result.class", strings.TrimSpace(errorTrace.ResultClass)), // swobu:io-string source=boundary
-		attribute.String("provider.family", normalizeProviderFamily(errorTrace.ProviderRoute)),
-		attribute.String("operation", strings.TrimSpace(errorTrace.Operation)), // swobu:io-string source=boundary
-	)
-	if errorTrace.DurationMS != nil {
-		span.SetAttributes(attribute.Int("duration.ms", *errorTrace.DurationMS))
+	e.errorTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("result_class", errorDimension(signal.ResultClass)),
+		attribute.String("provider_family", errorDimension(signal.ProviderFamily)),
+		attribute.String("operation", errorDimension(signal.Operation)),
+		attribute.String("duration_bucket", errorDimension(signal.DurationBucket)),
+	))
+}
+
+// errorDimension trims a bounded error attribute and collapses empties to
+// "unknown" so free-form values never reach the payload.
+func errorDimension(value string) string {
+	v := strings.TrimSpace(value) // swobu:io-string source=boundary
+	if v == "" {
+		return "unknown"
 	}
-	if stack := strings.TrimSpace(errorTrace.DebugRawStack); stack != "" { // swobu:io-string source=boundary
-		span.SetAttributes(attribute.String("debug.raw_stack", stack))
-	}
-	span.End()
+	return v
 }

@@ -15,11 +15,8 @@ const (
 	EnvTelemetryEndpoint              = "SWOBU_TELEMETRY_ENDPOINT_URL"
 	EnvTelemetryExportIntervalSeconds = "SWOBU_TELEMETRY_EXPORT_INTERVAL_SECONDS"
 	EnvTelemetryDebugStdoutSink       = "SWOBU_TELEMETRY_STDOUT_SINK_DEBUG"
-	EnvTelemetryDebugTraceStack       = "SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG"
-	EnvTelemetryErrorTraceMaxPerTick  = "SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK"
 	EnvDoNotTrack                     = "DO_NOT_TRACK"
 	EnvSkipVersionNotice              = "SWOBU_SKIP_VERSION_NOTICE"
-	EnvSkipTelemetryNotice            = "SWOBU_SKIP_TELEMETRY_NOTICE"
 )
 
 func EnvTruthy(value string) bool {

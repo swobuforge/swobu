@@ -50,9 +50,12 @@ func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
 	if splashIdx < 0 {
 		t.Fatalf("stdout missing splash; stdout=%q", out)
 	}
-	requireClosedNotice(t, out, "Telemetry Disclosure", nil)
-	if telemetryIdx := strings.Index(out, "╭─ Telemetry Disclosure "); telemetryIdx >= 0 && splashIdx > telemetryIdx {
-		t.Fatalf("splash must render before telemetry disclosure; stdout=%q", out)
+	noticeIdx := strings.Index(out, telemetry.FirstRunNoticeText())
+	if noticeIdx < 0 {
+		t.Fatalf("stdout missing one-line telemetry notice; stdout=%q", out)
+	}
+	if splashIdx > noticeIdx {
+		t.Fatalf("splash must render before telemetry notice; stdout=%q", out)
 	}
 	if !strings.Contains(out, "starting daemon runtime") {
 		t.Fatalf("stdout missing daemon runtime narration; stdout=%q", out)
@@ -77,28 +80,5 @@ func TestStartupReporter_UsesCarriageReturnsForSplashAndReady(t *testing.T) {
 	withoutCRLF := strings.ReplaceAll(text, "\r\n", "")
 	if strings.Contains(withoutCRLF, "\n") {
 		t.Fatalf("startup output contains bare LF; stdout=%q", text)
-	}
-}
-
-func TestRunner_DaemonSkipsTelemetryNoticeWhenEnvSet(t *testing.T) {
-	t.Setenv("SWOBU_HOME", filepath.Join(t.TempDir(), "swobu-home"))
-	t.Setenv("SWOBU_SKIP_TELEMETRY_NOTICE", "1")
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	runner := Runner{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Start: func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error) {
-			return nil, fmt.Errorf("stop after notice check")
-		},
-	}
-
-	exitCode := runner.Run(context.Background(), []string{"daemon", "--config", "/tmp/swobu-config.yaml"})
-	if exitCode != ExitDown {
-		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
-	}
-	if strings.Contains(stdout.String(), "Telemetry Disclosure") {
-		t.Fatalf("stdout should not contain telemetry disclosure when skip env is set; stdout=%q", stdout.String())
 	}
 }

@@ -15,7 +15,6 @@ func TestStore_EnsureNoticeShownWithDisclosure_PrintsOnceAndPersists(t *testing.
 	store := Store{
 		StatePath: statePath,
 		Now:       func() time.Time { return time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC) },
-		Rand:      bytes.NewReader([]byte{0x01, 0x02, 0x03, 0x04}),
 	}
 
 	var out bytes.Buffer

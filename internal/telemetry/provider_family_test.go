@@ -19,8 +19,8 @@ func TestNormalizeProviderFamily(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := normalizeProviderFamily(tc.in); got != tc.want {
-				t.Fatalf("normalizeProviderFamily(%q) = %q, want %q", tc.in, got, tc.want)
+			if got := NormalizeProviderFamily(tc.in); got != tc.want {
+				t.Fatalf("NormalizeProviderFamily(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

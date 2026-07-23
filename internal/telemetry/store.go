@@ -1,10 +1,8 @@
 package telemetry
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,25 +13,25 @@ import (
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
+// State carries only the operator's own preference and a first-run notice flag.
+// It holds no install identifier (D1): nothing in this struct is transmitted,
+// and no persistent pseudonymous id is ever generated.
 type State struct {
-	Enabled            bool   `json:"enabled"`
-	AnonymousInstallID string `json:"anonymous_install_id"`
-	FirstSeenAt        string `json:"first_seen_at"`
-	NoticeShown        bool   `json:"notice_shown"`
-	LastUploadAt       string `json:"last_upload_at,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	FirstSeenAt  string `json:"first_seen_at"`
+	NoticeShown  bool   `json:"notice_shown"`
+	LastUploadAt string `json:"last_upload_at,omitempty"`
 }
 
 type Store struct {
 	StatePath string
 	Now       func() time.Time
-	Rand      io.Reader
 }
 
 func NewStore() Store {
 	return Store{
 		StatePath: platformconfig.DefaultTelemetryStatePath(),
 		Now:       time.Now,
-		Rand:      rand.Reader,
 	}
 }
 
@@ -52,9 +50,6 @@ func (s Store) LoadOrCreate() (State, error) {
 		if err := json.Unmarshal(data, &state); err != nil {
 			return State{}, fmt.Errorf("decode telemetry state: %w", err)
 		}
-		if strings.TrimSpace(state.AnonymousInstallID) == "" { // swobu:io-string source=boundary
-			state.AnonymousInstallID = newAnonymousInstallID(s.Rand, now)
-		}
 		if strings.TrimSpace(state.FirstSeenAt) == "" { // swobu:io-string source=boundary
 			state.FirstSeenAt = now().UTC().Format(time.RFC3339)
 		}
@@ -65,10 +60,9 @@ func (s Store) LoadOrCreate() (State, error) {
 	}
 
 	state := State{
-		Enabled:            true,
-		AnonymousInstallID: newAnonymousInstallID(s.Rand, now),
-		FirstSeenAt:        now().UTC().Format(time.RFC3339),
-		NoticeShown:        false,
+		Enabled:     true,
+		FirstSeenAt: now().UTC().Format(time.RFC3339),
+		NoticeShown: false,
 	}
 	if err := writeState(path, state); err != nil {
 		return State{}, err
@@ -106,10 +100,9 @@ func (s Store) Reset() (State, error) {
 		return State{}, fmt.Errorf("remove telemetry state: %w", err)
 	}
 	state := State{
-		Enabled:            enabled,
-		AnonymousInstallID: newAnonymousInstallID(s.Rand, now),
-		FirstSeenAt:        now().UTC().Format(time.RFC3339),
-		NoticeShown:        false,
+		Enabled:     enabled,
+		FirstSeenAt: now().UTC().Format(time.RFC3339),
+		NoticeShown: false,
 	}
 	if err := writeState(path, state); err != nil {
 		return State{}, err
@@ -142,21 +135,19 @@ func (s Store) InspectPreview() ([]byte, error) {
 		enabled = false
 	}
 	preview := struct {
-		SchemaVersion      int    `json:"schema_version"`
-		Kind               string `json:"kind"`
-		AnonymousInstallID string `json:"anonymous_install_id"`
-		SwobuVersion       string `json:"swobu_version"`
-		OS                 string `json:"os"`
-		Arch               string `json:"arch"`
-		TelemetryEnabled   bool   `json:"telemetry_enabled"`
+		SchemaVersion    int    `json:"schema_version"`
+		Kind             string `json:"kind"`
+		SwobuVersion     string `json:"swobu_version"`
+		OS               string `json:"os"`
+		Arch             string `json:"arch"`
+		TelemetryEnabled bool   `json:"telemetry_enabled"`
 	}{
-		SchemaVersion:      1,
-		Kind:               "install_summary",
-		AnonymousInstallID: state.AnonymousInstallID,
-		SwobuVersion:       controlplane.SwobuVersion(),
-		OS:                 runtime.GOOS,
-		Arch:               runtime.GOARCH,
-		TelemetryEnabled:   enabled,
+		SchemaVersion:    1,
+		Kind:             "install_summary",
+		SwobuVersion:     controlplane.SwobuVersion(),
+		OS:               runtime.GOOS,
+		Arch:             runtime.GOARCH,
+		TelemetryEnabled: enabled,
 	}
 	out, err := json.Marshal(preview)
 	if err != nil {
@@ -185,20 +176,6 @@ func writeState(path string, state State) error {
 		return fmt.Errorf("move telemetry state file: %w", err)
 	}
 	return nil
-}
-
-func newAnonymousInstallID(r io.Reader, now func() time.Time) string {
-	if r == nil {
-		r = rand.Reader
-	}
-	if now == nil {
-		now = time.Now
-	}
-	buf := make([]byte, 4)
-	if _, err := io.ReadFull(r, buf); err == nil {
-		return fmt.Sprintf("anon_%x", buf)
-	}
-	return fmt.Sprintf("anon_%x", now().UnixNano())
 }
 
 func DoNotTrackEnabled() bool {

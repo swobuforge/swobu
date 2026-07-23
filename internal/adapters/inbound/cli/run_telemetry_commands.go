@@ -53,19 +53,17 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitC
 		return ExitDown
 	}
 	payload := struct {
-		Enabled            bool   `json:"enabled"`
-		DoNotTrack         bool   `json:"do_not_track"`
-		AnonymousInstallID string `json:"anonymous_install_id"`
-		FirstSeenAt        string `json:"first_seen_at"`
-		NoticeShown        bool   `json:"notice_shown"`
-		LastUploadAt       string `json:"last_upload_at,omitempty"`
+		Enabled      bool   `json:"enabled"`
+		DoNotTrack   bool   `json:"do_not_track"`
+		FirstSeenAt  string `json:"first_seen_at"`
+		NoticeShown  bool   `json:"notice_shown"`
+		LastUploadAt string `json:"last_upload_at,omitempty"`
 	}{
-		Enabled:            state.Enabled && !telemetry.DoNotTrackEnabled(),
-		DoNotTrack:         telemetry.DoNotTrackEnabled(),
-		AnonymousInstallID: state.AnonymousInstallID,
-		FirstSeenAt:        state.FirstSeenAt,
-		NoticeShown:        state.NoticeShown,
-		LastUploadAt:       state.LastUploadAt,
+		Enabled:      state.Enabled && !telemetry.DoNotTrackEnabled(),
+		DoNotTrack:   telemetry.DoNotTrackEnabled(),
+		FirstSeenAt:  state.FirstSeenAt,
+		NoticeShown:  state.NoticeShown,
+		LastUploadAt: state.LastUploadAt,
 	}
 	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())

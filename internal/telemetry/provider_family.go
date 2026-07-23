@@ -8,7 +8,10 @@ import (
 
 const providerFamilyOther = "other"
 
-func normalizeProviderFamily(rawRoute string) string {
+// NormalizeProviderFamily collapses a provider route/endpoint to a bounded
+// provider-family enum. Custom or unrecognized routes resolve to "other" so no
+// user-specific endpoint (re-identifying) ever leaves the machine.
+func NormalizeProviderFamily(rawRoute string) string {
 	route := strings.TrimSpace(strings.ToLower(rawRoute)) // swobu:io-string source=boundary
 	if route == "" {
 		return providerFamilyOther

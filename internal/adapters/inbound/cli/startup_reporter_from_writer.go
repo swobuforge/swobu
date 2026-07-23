@@ -85,18 +85,6 @@ func noticeRows(text string, nextActions []string) []string {
 	return rows
 }
 
-func splitNoticeRows(text string) []string {
-	rows := make([]string, 0)
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") { // swobu:io-string source=boundary
-		trimmed := strings.TrimSpace(line) // swobu:io-string source=boundary
-		if trimmed == "" {
-			continue
-		}
-		rows = append(rows, trimmed)
-	}
-	return rows
-}
-
 func splashLines() []string {
 	return []string{
 		" ",
