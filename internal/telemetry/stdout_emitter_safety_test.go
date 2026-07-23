@@ -6,18 +6,16 @@ import (
 	"testing"
 )
 
-func TestStdoutEmitter_ErrorTracePayload_DoesNotContainForbiddenTelemetryTokens(t *testing.T) {
+func TestStdoutEmitter_ErrorSignal_DoesNotContainForbiddenTelemetryTokens(t *testing.T) {
 	t.Parallel()
 
 	var sink strings.Builder
 	emitter := NewStdoutEmitter(&sink)
-	durationMS := 1450
-	emitter.EmitErrorTrace(context.Background(), ErrorTracePayload{
-		StatusCode:    500,
-		ResultClass:   "backend_error",
-		ProviderRoute: "openai:gpt-4.1",
-		Operation:     "responses.create",
-		DurationMS:    &durationMS,
+	emitter.EmitError(context.Background(), ErrorSignal{
+		ResultClass:    "backend_error",
+		ProviderFamily: "openai",
+		Operation:      "responses.create",
+		DurationBucket: "1_5s",
 	})
 
 	payload := strings.ToLower(sink.String()) // swobu:io-string source=domain

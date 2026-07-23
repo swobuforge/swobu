@@ -22,7 +22,6 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 
 	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 	t.Setenv(platformconfig.EnvDoNotTrack, "1")
-	t.Setenv(platformconfig.EnvSkipTelemetryNotice, "1")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -192,7 +191,6 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttac
 
 	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 	t.Setenv(platformconfig.EnvDoNotTrack, "1")
-	t.Setenv(platformconfig.EnvSkipTelemetryNotice, "1")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

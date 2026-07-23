@@ -8,12 +8,22 @@ import (
 	"sync"
 )
 
+// ErrorSignal is the bounded, content-free error signal recorded as aggregate
+// counter attributes. It deliberately carries no message, stack, route, or
+// identifier — those are forbidden by the Path A anonymity contract.
+type ErrorSignal struct {
+	ResultClass    string
+	ProviderFamily string
+	Operation      string
+	DurationBucket string
+}
+
 // Emitter is the telemetry runtime sink contract used by bootstrap.
 type Emitter interface {
 	Shutdown(context.Context) error
 	EmitInstall(context.Context, State, string, string, string)
 	EmitCounts(context.Context, string, int64, int64, int64, int64)
-	EmitErrorTrace(context.Context, ErrorTracePayload)
+	EmitError(context.Context, ErrorSignal)
 }
 
 type stdoutEmitter struct {
@@ -53,16 +63,14 @@ func (e *stdoutEmitter) EmitCounts(_ context.Context, state string, count2xx, co
 	})
 }
 
-func (e *stdoutEmitter) EmitErrorTrace(_ context.Context, trace ErrorTracePayload) {
+func (e *stdoutEmitter) EmitError(_ context.Context, signal ErrorSignal) {
 	e.write(map[string]any{
-		"telemetry_debug":    true,
-		"kind":               "error_trace",
-		"status_code":        trace.StatusCode,
-		"result_class":       strings.TrimSpace(trace.ResultClass),   // swobu:io-string source=boundary
-		"provider_route":     strings.TrimSpace(trace.ProviderRoute), // swobu:io-string source=boundary
-		"operation":          strings.TrimSpace(trace.Operation),     // swobu:io-string source=boundary
-		"duration_ms":        trace.DurationMS,
-		"debug_raw_stack_on": strings.TrimSpace(trace.DebugRawStack) != "", // swobu:io-string source=boundary
+		"telemetry_debug": true,
+		"kind":            "error",
+		"result_class":    strings.TrimSpace(signal.ResultClass),   // swobu:io-string source=boundary
+		"provider_family": strings.TrimSpace(signal.ProviderFamily), // swobu:io-string source=boundary
+		"operation":       strings.TrimSpace(signal.Operation),     // swobu:io-string source=boundary
+		"duration_bucket": strings.TrimSpace(signal.DurationBucket), // swobu:io-string source=boundary
 	})
 }
 

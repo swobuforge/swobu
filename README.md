@@ -208,9 +208,6 @@ swobu                  # open Cockpit
 swobu daemon           # start the daemon in the foreground
 swobu status           # print daemon health
 swobu daemon down      # stop the daemon
-swobu telemetry status # print the telemetry setting
-swobu telemetry on     # enable telemetry
-swobu telemetry off    # disable telemetry
 swobu version          # print the version
 ```
 
@@ -297,21 +294,11 @@ Swobu is not, today:
 
 ## Security and privacy
 
-Swobu is local-first. By default, Swobu:
-
-- binds to the loopback address;
-- keeps control traffic on your machine;
-- does not send prompts, completions, or auth material through default telemetry.
-
-Local-first is not offline-only. If you route to a hosted backend, the request still goes to that backend.
-
-Turn telemetry off:
-
-```sh
-swobu telemetry off
-```
-
-For telemetry details, read [`docs/telemetry.md`](./docs/telemetry.md).
+Swobu is local-first: it binds to the loopback address, keeps control traffic
+on your machine, and sends only **anonymous aggregate telemetry** (counts — no
+prompts, completions, auth, or identifiers). Turn it off with
+`swobu telemetry off` or `DO_NOT_TRACK`. Local-first is not offline-only; if you
+route to a hosted backend, the request still goes to that backend.
 
 ---
 

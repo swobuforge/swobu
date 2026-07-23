@@ -4,8 +4,6 @@ import (
 	"context"
 	"os"
 	"runtime"
-	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +17,6 @@ import (
 const (
 	embeddedTelemetryEndpoint       = "https://swobu.com"
 	embeddedTelemetryExportInterval = time.Hour
-	errorTraceRateWindow            = time.Minute
 )
 
 type embeddedTelemetryRuntimeState struct {
@@ -31,8 +28,6 @@ type embeddedTelemetryRuntimeState struct {
 	doneCh                chan struct{}
 	eventsCh              chan trafficevidence.TrafficEvent
 	seenTerminalRequestID map[string]struct{}
-	errorTraceWindowStart time.Time
-	errorTracesInWindow   int
 }
 
 func (d *Daemon) startTelemetryRuntime() {
@@ -69,9 +64,6 @@ func (d *Daemon) stopTelemetryRuntimeWithContext(ctx context.Context) {
 
 func (d *Daemon) runTelemetryRuntime() {
 	defer close(d.telemetry.doneCh)
-	if !d.ensureTelemetryNoticeState() {
-		return
-	}
 	if !d.initTelemetryEmitter(context.Background()) {
 		return
 	}
@@ -116,14 +108,6 @@ func (d *Daemon) initTelemetryEmitter(ctx context.Context) bool {
 	return true
 }
 
-func (d *Daemon) ensureTelemetryNoticeState() bool {
-	state, err := d.telemetry.store.LoadOrCreate()
-	if err != nil {
-		return false
-	}
-	return state.NoticeShown
-}
-
 func (d *Daemon) emitInstallTelemetryBestEffort(ctx context.Context) {
 	if d.telemetry.emitter == nil {
 		return
@@ -164,7 +148,7 @@ func (d *Daemon) emitEventTelemetryBestEffort(ctx context.Context, event traffic
 		}
 	}
 	d.telemetry.emitter.EmitCounts(ctx, state, d2xx, d429, d4xx, d5xx)
-	d.emitErrorTraceForEventBestEffort(ctx, event)
+	d.emitErrorCounterBestEffort(ctx, event)
 }
 
 func classifyStatusCodeCounters(statusCode int) (int64, int64, int64, int64) {
@@ -197,57 +181,44 @@ func (d *Daemon) observeTelemetryEvent(event trafficevidence.TrafficEvent) {
 	}
 }
 
-func (d *Daemon) emitErrorTraceForEventBestEffort(ctx context.Context, event trafficevidence.TrafficEvent) {
+// emitErrorCounterBestEffort records a bounded, content-free error signal as
+// aggregate counter attributes (result class × provider family × operation ×
+// duration bucket). No message, stack, route, or identifier is emitted — this
+// is the anonymous replacement for the deleted OTLP error-span path.
+func (d *Daemon) emitErrorCounterBestEffort(ctx context.Context, event trafficevidence.TrafficEvent) {
 	if d == nil || d.telemetry.emitter == nil {
-		return
-	}
-	limit := telemetryErrorTraceMaxPerTick()
-	if limit <= 0 {
 		return
 	}
 	if event.StatusCode() < 400 {
 		return
 	}
-	now := d.telemetry.now
-	if now == nil {
-		now = time.Now
+	ms, hasDuration := event.Timing().DurationMillis()
+	signal := telemetry.ErrorSignal{
+		ResultClass:    strings.TrimSpace(event.Result().String()),      // swobu:io-string source=boundary
+		ProviderFamily: telemetry.NormalizeProviderFamily(event.Route().String()),
+		Operation:      strings.TrimSpace(string(event.NormalizedOp())), // swobu:io-string source=boundary
+		DurationBucket: bucketDurationMillis(ms, hasDuration),
 	}
-	current := now()
-	if d.telemetry.errorTraceWindowStart.IsZero() || current.Sub(d.telemetry.errorTraceWindowStart) >= errorTraceRateWindow {
-		d.telemetry.errorTraceWindowStart = current
-		d.telemetry.errorTracesInWindow = 0
-	}
-	if d.telemetry.errorTracesInWindow >= limit {
-		return
-	}
-	d.telemetry.errorTracesInWindow++
-	trace := telemetry.ErrorTracePayload{
-		StatusCode:    event.StatusCode(),
-		ResultClass:   strings.TrimSpace(event.Result().String()),      // swobu:io-string source=boundary
-		ProviderRoute: strings.TrimSpace(event.Route().String()),       // swobu:io-string source=boundary
-		Operation:     strings.TrimSpace(string(event.NormalizedOp())), // swobu:io-string source=boundary
-	}
-	if durationMS, ok := event.Timing().DurationMillis(); ok {
-		trace.DurationMS = &durationMS
-	}
-	if telemetryTraceDebugEnabled() {
-		trace.DebugRawStack = string(debug.Stack())
-	}
-	d.telemetry.emitter.EmitErrorTrace(ctx, trace)
+	d.telemetry.emitter.EmitError(ctx, signal)
 }
 
-func telemetryTraceDebugEnabled() bool {
-	return platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvTelemetryDebugTraceStack))
-}
-
-func telemetryErrorTraceMaxPerTick() int {
-	raw := strings.TrimSpace(os.Getenv(platformconfig.EnvTelemetryErrorTraceMaxPerTick)) // swobu:io-string source=boundary
-	if raw == "" {
-		return 20
+// bucketDurationMillis collapses a request duration into a bounded bucket so
+// telemetry never carries per-request timing (re-identifying when correlated
+// with an observed address).
+func bucketDurationMillis(ms int, ok bool) string {
+	if !ok {
+		return "unknown"
 	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return 20
+	switch {
+	case ms < 100:
+		return "0_100ms"
+	case ms < 500:
+		return "100_500ms"
+	case ms < 1000:
+		return "500ms_1s"
+	case ms < 5000:
+		return "1_5s"
+	default:
+		return "5s_plus"
 	}
-	return n
 }

@@ -315,20 +315,19 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 }
 
 func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
-	if platformconfig.EnvTruthy(os.Getenv(platformconfig.EnvSkipTelemetryNotice)) {
-		return nil
-	}
 	store := telemetry.NewStore()
 	state, err := store.LoadOrCreate()
 	if err != nil {
-		return err
+		return nil // best-effort: a notice-store failure must not block daemon start.
 	}
 	if state.NoticeShown {
 		return nil
 	}
-	writeNoticeBlock(out, "Telemetry Disclosure", splitNoticeRows(telemetry.FirstRunNoticeText()))
-	_, err = store.MarkNoticeShown()
-	return err
+	if out != nil {
+		_, _ = fmt.Fprintln(out, telemetry.FirstRunNoticeText()) // swobu:io-string source=boundary
+	}
+	_, _ = store.MarkNoticeShown()
+	return nil
 }
 
 func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.Writer, args []string) ExitCode {

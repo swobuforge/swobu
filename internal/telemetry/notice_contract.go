@@ -6,31 +6,11 @@ import (
 	"strings"
 )
 
-const firstRunNoticeText = `Swobu runs as a local boundary between clients and model backends.
-It sends anonymous aggregate reliability and usage summaries by default (opt-out).
-
-Never sent:
-- prompts
-- responses
-- request or response bodies
-- API keys
-- Authorization headers
-- raw headers
-- raw config
-- file paths
-- repo names
-- usernames
-- hostnames
-
-Status:
-  swobu telemetry status
-
-Disable:
-  swobu telemetry off
-
-Global opt-out:
-  export DO_NOT_TRACK=true
-`
+// firstRunNoticeText is the single non-blocking one-line telemetry notice,
+// printed once on first daemon start. Telemetry is anonymous by construction
+// (aggregate counters only — no content, no identifiers), so this is an FYI,
+// not a gate: the daemon starts regardless of notice state.
+const firstRunNoticeText = "Anonymous aggregate telemetry on (counts only — no content, no identifiers). Turn off: swobu telemetry off or DO_NOT_TRACK."
 
 func FirstRunNoticeText() string {
 	return firstRunNoticeText

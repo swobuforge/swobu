@@ -14,7 +14,7 @@ import (
 type fakeTelemetryEmitter struct {
 	installCalls int
 	countCalls   int
-	errorTraces  []telemetry.ErrorTracePayload
+	errorSignals []telemetry.ErrorSignal
 	lastState    string
 	last2xx      int64
 	last429      int64
@@ -37,8 +37,8 @@ func (e *fakeTelemetryEmitter) EmitCounts(_ context.Context, state string, count
 	e.last5xx = count5xx
 }
 
-func (e *fakeTelemetryEmitter) EmitErrorTrace(_ context.Context, trace telemetry.ErrorTracePayload) {
-	e.errorTraces = append(e.errorTraces, trace)
+func (e *fakeTelemetryEmitter) EmitError(_ context.Context, signal telemetry.ErrorSignal) {
+	e.errorSignals = append(e.errorSignals, signal)
 }
 
 func TestEmitEventTelemetryBestEffort_UsesTerminalEventAndDeduplicatesByRequestID(t *testing.T) {
@@ -65,8 +65,9 @@ func TestEmitEventTelemetryBestEffort_UsesTerminalEventAndDeduplicatesByRequestI
 	}
 }
 
-func TestEmitEventTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStackByDefault(t *testing.T) {
-	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK", "1")
+// Every error records an anonymous, content-free counter signal — one per error,
+// no cap, no stack, no route. The deleted OTLP error-span path is gone.
+func TestEmitEventTelemetryBestEffort_EmitsAnonymousErrorCounterForEachError(t *testing.T) {
 	statePath := writeTelemetryStateFixture(t)
 	emitter := &fakeTelemetryEmitter{}
 	daemon := &Daemon{
@@ -80,33 +81,15 @@ func TestEmitEventTelemetryBestEffort_EmitsCappedErrorTracesWithoutRawStackByDef
 	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_a", trafficevidence.ResultClassBackendError, 500))
 	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_b", trafficevidence.ResultClassBackendError, 500))
 
-	if got := len(emitter.errorTraces); got != 1 {
-		t.Fatalf("error traces=%d, want 1 (capped)", got)
+	if got := len(emitter.errorSignals); got != 2 {
+		t.Fatalf("error signals=%d, want 2 (one per error, no cap)", got)
 	}
-	if emitter.errorTraces[0].DebugRawStack != "" {
-		t.Fatal("debug raw stack present by default, want empty")
+	signal := emitter.errorSignals[0]
+	if signal.ProviderFamily != "openai" {
+		t.Fatalf("provider_family = %q, want openai (route collapsed to family)", signal.ProviderFamily)
 	}
-}
-
-func TestEmitEventTelemetryBestEffort_EmitsRawStackOnlyInTraceDebugMode(t *testing.T) {
-	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_MAX_PER_TICK", "2")
-	t.Setenv("SWOBU_TELEMETRY_ERROR_TRACE_STACK_DEBUG", "1")
-	statePath := writeTelemetryStateFixture(t)
-	emitter := &fakeTelemetryEmitter{}
-	daemon := &Daemon{
-		telemetry: embeddedTelemetryRuntimeState{
-			store:                 telemetry.Store{StatePath: statePath},
-			emitter:               emitter,
-			now:                   time.Now,
-			seenTerminalRequestID: make(map[string]struct{}),
-		},
-	}
-	daemon.emitEventTelemetryBestEffort(context.Background(), mustTerminalTrafficEvent(t, "req_1", trafficevidence.ResultClassBackendError, 500))
-	if len(emitter.errorTraces) != 1 {
-		t.Fatalf("error traces=%d, want 1", len(emitter.errorTraces))
-	}
-	if emitter.errorTraces[0].DebugRawStack == "" {
-		t.Fatal("debug raw stack empty, want populated in trace debug mode")
+	if signal.Operation != "responses.create" {
+		t.Fatalf("operation = %q, want responses.create", signal.Operation)
 	}
 }
 
@@ -143,7 +126,6 @@ func writeTelemetryStateFixture(t *testing.T) string {
 	}
 	state := `{
   "enabled": true,
-  "anonymous_install_id": "anon_test",
   "first_seen_at": "2026-04-30T00:00:00Z",
   "notice_shown": true
 }`
