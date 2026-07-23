@@ -114,7 +114,7 @@ func (r RouteReadModel) HasBalancedTier() bool {
 // RowValue derives the bounded route row value used by Cockpit sections.
 // Grammar is mechanical per the structural model route RFC:
 //
-//	targets == 0                     → "incomplete · no targets"
+//	targets == 0                     → "no targets"
 //	steps == 1 && targets == 1       → "1 target"
 //	steps == 1 && targets > 1        → "N balanced targets"
 //	steps > 1 && one target/step     → "N fallback steps"
@@ -126,7 +126,7 @@ func (r RouteReadModel) RowValue() string {
 	var base string
 	switch {
 	case targets == 0:
-		base = "incomplete · no targets"
+		base = "no targets"
 	case tiers == 1 && targets == 1:
 		base = "1 target"
 	case tiers == 1 && targets > 1:
@@ -145,7 +145,7 @@ func (r RouteReadModel) RowValue() string {
 	case RouteDisabled:
 		return base + " · disabled"
 	default:
-		if r.Default {
+		if r.Default && targets > 0 {
 			return "default · " + base
 		}
 		return base

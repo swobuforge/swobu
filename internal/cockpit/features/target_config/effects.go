@@ -465,6 +465,8 @@ func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries,
 // state onto the ChatGPT-owned session and shared form error.
 // ---------------------------------------------------------------------------
 
+const chatGPTAuthPollInterval = time.Second
+
 func authSubjectLocator(w *TargetConfig) string {
 	return fmt.Sprintf("subject:%s#%s", strings.TrimSpace(string(w.WorkspaceID)), strings.TrimSpace(string(w.Route.ID)))
 }
@@ -479,6 +481,7 @@ func (w *TargetConfig) setAuthFailure(message string) {
 }
 
 func (w *TargetConfig) startInteractiveAuth() {
+	w.stopAuthSessionObserver()
 	mode, _ := w.interactiveAuthMode()
 	if mode == "" {
 		w.setAuthFailure("interactive auth is unavailable for provider " + w.Draft.Get().ProviderSpec)
@@ -533,6 +536,7 @@ func (w *TargetConfig) RefreshAuthSession() {
 		w.setAuthFailure("auth session commands are not wired yet")
 		return
 	}
+	w.stopAuthSessionObserver()
 	ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
 	defer cancel()
 	result, err := w.TargetAuthCommands.PollAuthSession(ctx, session.SessionID)
@@ -544,6 +548,7 @@ func (w *TargetConfig) RefreshAuthSession() {
 }
 
 func (w *TargetConfig) CancelAuthSession() {
+	w.stopAuthSessionObserver()
 	session := w.AuthSession.Get()
 	if w.TargetAuthCommands != nil && strings.TrimSpace(session.SessionID) != "" {
 		ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
@@ -555,11 +560,28 @@ func (w *TargetConfig) CancelAuthSession() {
 }
 
 func (w *TargetConfig) applyAuthSessionResult(result readmodel.AuthSessionReadModel) {
+	current := w.AuthSession.Get()
+	if strings.EqualFold(strings.TrimSpace(result.State), "pending") {
+		// Poll responses intentionally contain lifecycle state only. Preserve the
+		// browser URL and device code established by Start while the same session
+		// remains pending.
+		if result.AuthorizeURL == "" {
+			result.AuthorizeURL = current.AuthorizeURL
+		}
+		if result.UserCode == "" {
+			result.UserCode = current.UserCode
+		}
+		if result.ProviderSpec == "" {
+			result.ProviderSpec = current.ProviderSpec
+		}
+	}
 	w.AuthSession.Set(result)
 	switch strings.ToLower(strings.TrimSpace(result.State)) {
 	case "", "pending":
 		w.Error.Set("")
+		w.launchPendingAuthSessionObserver()
 	case "succeeded":
+		w.stopAuthSessionObserver()
 		credentialRef := strings.TrimSpace(result.CredentialRef)
 		if credentialRef == "" {
 			w.setAuthFailure("auth session succeeded without credential ref")
@@ -567,20 +589,86 @@ func (w *TargetConfig) applyAuthSessionResult(result readmodel.AuthSessionReadMo
 		}
 		w.SetSetupReady(credentialRef, "")
 	case "canceled":
+		w.stopAuthSessionObserver()
 		w.resetFlowState()
 		w.Lifecycle.Set(LifecycleOpen)
 	case "expired", "failed":
+		w.stopAuthSessionObserver()
 		msg := strings.TrimSpace(result.ErrorMessage)
 		if msg == "" {
 			msg = "auth session " + strings.TrimSpace(result.State)
 		}
 		w.setAuthFailure(msg)
 	default:
+		w.stopAuthSessionObserver()
 		msg := strings.TrimSpace(result.ErrorMessage)
 		if msg == "" {
 			msg = "auth session " + strings.TrimSpace(result.State)
 		}
 		w.setAuthFailure(msg)
+	}
+}
+
+// launchPendingAuthSessionObserver observes the daemon-owned ChatGPT session
+// only while this mounted feature truthfully projects it as pending. OAuth and
+// credential persistence remain daemon concerns; the observer merely requests
+// the next lifecycle projection and returns terminal state through QueueUpdate.
+func (w *TargetConfig) launchPendingAuthSessionObserver() {
+	if !w.authSessionPending() || w.TargetAuthCommands == nil || !w.hasLiveApp() || w.cancelAuthObserver != nil {
+		return
+	}
+	sessionID := strings.TrimSpace(w.AuthSession.Get().SessionID)
+	if sessionID == "" {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(w.actionContext())
+	w.cancelAuthObserver = cancel
+	w.authObserverSeq++
+	seq := w.authObserverSeq
+	app := w.app
+	commands := w.TargetAuthCommands
+
+	go func() {
+		ticker := time.NewTicker(chatGPTAuthPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-app.StopCh():
+				return
+			case <-ticker.C:
+				pollCtx, cancelPoll := context.WithTimeout(ctx, 10*time.Second)
+				result, err := commands.PollAuthSession(pollCtx, sessionID)
+				cancelPoll()
+				if err == nil && strings.EqualFold(strings.TrimSpace(result.State), "pending") {
+					continue
+				}
+				app.QueueUpdate(func() {
+					if seq != w.authObserverSeq {
+						return
+					}
+					w.cancelAuthObserver = nil
+					if err != nil {
+						w.setAuthFailure(err.Error())
+						return
+					}
+					w.applyAuthSessionResult(result)
+				})
+				return
+			}
+		}
+	}()
+}
+
+// stopAuthSessionObserver retires the current observer and invalidates any
+// result already queued by it. It is safe to call on every terminal/reset edge.
+func (w *TargetConfig) stopAuthSessionObserver() {
+	w.authObserverSeq++
+	if w.cancelAuthObserver != nil {
+		w.cancelAuthObserver()
+		w.cancelAuthObserver = nil
 	}
 }
 

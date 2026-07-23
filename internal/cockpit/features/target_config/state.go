@@ -352,6 +352,7 @@ func newStates() appState {
 // source of truth), then re-derives the route/target-dependent placement and
 // drops non-state caches. Lifecycle, provider, and form error are caller-owned.
 func (w *TargetConfig) resetFlowState() {
+	w.stopAuthSessionObserver()
 	w.resetSetupState()
 	w.Placement.Set(defaultPlacementForRoute(w.Route))
 	w.catalogProbeSeq++

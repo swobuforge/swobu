@@ -14,13 +14,17 @@
 // catalog probing. The Cockpit adapter decodes opaque probe diagnostics before
 // this feature receives typed Bedrock authentication evidence. Catalog success
 // controls creation validity while optional STS identity enriches the Bedrock
-// form. Edit may enter catalog-loading state before the component is mounted;
-// BindApp resumes that pending operation while persisted model/protocol values
-// remain non-authoritative selection seeds until reconciliation. Bedrock has
+// form. Every catalog-backed edit enters catalog-loading state before the
+// component is mounted; BindApp resumes that pending operation while persisted
+// model/protocol values remain non-authoritative selection seeds until
+// reconciliation. Custom Endpoint retains its open-set authored model without
+// requiring discovery. Bedrock has
 // one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine
-// login-session workflow.
+// login-session workflow. A mounted pending ChatGPT browser session is observed
+// through the local daemon until it succeeds or fails; manual refresh remains a
+// recovery action, and the observer ends with the form, mount, app, or session.
 // Custom Endpoint treats catalog discovery as best-effort and uses the shared
 // open-set model picker so an operator-authored model ID remains sufficient.
 // An incomplete create row is status, not an interaction target; only a ready

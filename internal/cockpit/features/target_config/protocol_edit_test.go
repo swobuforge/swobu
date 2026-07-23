@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
@@ -72,6 +73,76 @@ func TestEditAzureTargetResumesCatalogProbeAfterMount(t *testing.T) {
 	}
 }
 
+func TestEditChatGPTTargetResumesCatalogProbeAndOpensModelPicker(t *testing.T) {
+	target := readmodel.TargetReadModel{
+		ID:               "primary",
+		Model:            "gpt-5.2-codex",
+		Provider:         string(profile.ProviderSpecChatGPT),
+		ProviderProtocol: "responses_stream",
+		CredentialRef:    "secret:chatgpt/session",
+	}
+	route := readmodel.RouteReadModel{ID: "dev", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+	probed := make(chan struct{}, 2)
+	config := NewEditTargetConfig("dev", route, target, nil, nil)
+	config.TargetSetupQueries = targetProbeQueriesFunc(func(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
+		probed <- struct{}{}
+		return readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{
+			ID: target.Model, Name: target.Model, ModelName: target.Model,
+			SupportedProviderProtocols: []string{target.ProviderProtocol},
+			DefaultProviderProtocol:    target.ProviderProtocol,
+		}}}, nil
+	})
+
+	config.Open()
+	harness, err := testkit.NewHarnessAt(config, 100, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(harness.Close)
+	harness.Open()
+
+	select {
+	case <-probed:
+	case <-time.After(time.Second):
+		t.Fatal("mount did not start ChatGPT edit catalog validation")
+	}
+	deadline := time.Now().Add(time.Second)
+	frame := ""
+	for {
+		frame = harness.FrameTrimmed()
+		if !config.catalogLoading() && strings.Contains(frame, "model             "+target.Model) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ChatGPT edit did not settle after catalog validation:\n%s", frame)
+		}
+	}
+	if strings.Contains(frame, "waiting for setup") {
+		t.Fatalf("signed-in ChatGPT edit remained blocked on setup:\n%s", frame)
+	}
+	if !strings.Contains(frame, "model             "+target.Model) || !strings.Contains(frame, "change ↵") {
+		t.Fatalf("ChatGPT model did not become editable after validation:\n%s", frame)
+	}
+
+	for attempts := 0; attempts < 8 && !strings.Contains(frame, "> model"); attempts++ {
+		harness.FocusNext()
+		frame = harness.FrameTrimmed()
+	}
+	if !strings.Contains(frame, "> model") {
+		t.Fatalf("ChatGPT model did not own selection before activation:\n%s", frame)
+	}
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	frame = harness.FrameTrimmed()
+	if !strings.Contains(frame, "search") || !strings.Contains(frame, target.Model) {
+		t.Fatalf("Enter on ChatGPT model did not open its picker:\n%s", frame)
+	}
+	select {
+	case <-probed:
+		t.Fatal("ChatGPT edit launched catalog validation more than once")
+	default:
+	}
+}
+
 func TestEditCustomTargetProtocolRemainsChangeable(t *testing.T) {
 	t.Parallel()
 
@@ -84,6 +155,12 @@ func TestEditCustomTargetProtocolRemainsChangeable(t *testing.T) {
 	}
 	route := readmodel.RouteReadModel{ID: "primary", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
 	config := NewEditTargetConfig("dev", route, target, nil, nil)
+	probed := make(chan struct{}, 1)
+	config.TargetSetupQueries = targetProbeQueriesFunc(func(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
+		probed <- struct{}{}
+		return readmodel.ModelCatalogReadModel{}, nil
+	})
+	config.Open()
 
 	frame := testkit.RenderMountedTrimmed(t, TargetConfigTail(config), 100, 12)
 	if !strings.Contains(frame, "protocol          OpenAI · Responses · stream") || !strings.Contains(frame, "change ↵") {
@@ -91,6 +168,11 @@ func TestEditCustomTargetProtocolRemainsChangeable(t *testing.T) {
 	}
 	if strings.Contains(frame, "protocol          OpenAI · Responses · stream                fixed") {
 		t.Fatalf("existing custom protocol was narrowed to a fixed singleton:\n%s", frame)
+	}
+	select {
+	case <-probed:
+		t.Fatal("open-set Custom Endpoint edit must not require catalog validation")
+	default:
 	}
 }
 

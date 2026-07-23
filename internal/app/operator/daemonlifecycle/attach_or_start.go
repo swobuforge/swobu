@@ -67,7 +67,7 @@ type AttachOrStartInput struct {
 	Client                *http.Client
 	ReadinessTimeout      time.Duration
 	ResolveConfigPath     func() string
-	SpawnForegroundDaemon func(ctx context.Context, configPath string) error
+	SpawnForegroundDaemon func(ctx context.Context, configPath, addr string) (<-chan error, error)
 	Report                StartupReporter
 }
 
@@ -82,7 +82,7 @@ type RestartInput struct {
 	Client                *http.Client
 	ReadinessTimeout      time.Duration
 	ResolveConfigPath     func() string
-	SpawnForegroundDaemon func(ctx context.Context, configPath string) error
+	SpawnForegroundDaemon func(ctx context.Context, configPath, addr string) (<-chan error, error)
 	Report                StartupReporter
 }
 
@@ -155,14 +155,12 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	if spawn == nil {
 		spawn = defaultSpawnForegroundDaemon
 	}
-	if err := spawn(ctx, configPath); err != nil {
+	daemonExited, err := spawn(ctx, configPath, addr)
+	if err != nil {
 		report.Report(StartupEvent{
-			Kind: StartupEventStartupFailed,
-			Text: fmt.Sprintf("start daemon: %v", err),
-			NextAction: []string{
-				"run `swobu daemon --config <path>` for foreground diagnostics",
-				"run `swobu status`",
-			},
+			Kind:       StartupEventStartupFailed,
+			Text:       fmt.Sprintf("start daemon: %v", err),
+			NextAction: startupFailureActions(addr, configPath),
 		})
 		return StatusPayload{}, fmt.Errorf("start daemon: %w", err)
 	}
@@ -175,26 +173,21 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 	}
 	readinessCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	status, err := waitForDaemonReadiness(readinessCtx, client, addr)
+	status, err := waitForDaemonReadiness(readinessCtx, client, addr, daemonExited)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			report.Report(StartupEvent{
-				Kind: StartupEventStartupTimedOut,
-				Text: "daemon readiness timed out",
-				NextAction: []string{
-					"run `swobu status`",
-					"run `swobu daemon --config <path>` for foreground diagnostics",
-				},
+				Kind:       StartupEventStartupTimedOut,
+				Text:       "daemon readiness timed out",
+				NextAction: startupFailureActions(addr, configPath),
 			})
 		} else {
 			report.Report(StartupEvent{
-				Kind: StartupEventStartupFailed,
-				Text: fmt.Sprintf("daemon readiness failed: %v", err),
-				NextAction: []string{
-					"run `swobu status`",
-					"run `swobu daemon --config <path>` for foreground diagnostics",
-				},
+				Kind:       StartupEventStartupFailed,
+				Text:       fmt.Sprintf("daemon exited before readiness: %v", err),
+				NextAction: startupFailureActions(addr, configPath),
 			})
+			return StatusPayload{}, fmt.Errorf("daemon startup failed: %w", err)
 		}
 		return StatusPayload{}, fmt.Errorf("daemon readiness failed (check `swobu status` and foreground daemon diagnostics): %w", err)
 	}
@@ -278,10 +271,15 @@ func Restart(ctx context.Context, in RestartInput) error {
 	return err
 }
 
-func waitForDaemonReadiness(ctx context.Context, client *http.Client, addr string) (StatusPayload, error) {
+func waitForDaemonReadiness(ctx context.Context, client *http.Client, addr string, daemonExited <-chan error) (StatusPayload, error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		select {
+		case err := <-daemonExited:
+			return StatusPayload{}, daemonExitError(err)
+		default:
+		}
 		payload, class := FetchStatus(ctx, client, addr)
 		if class != StatusClassDown && isReadinessState(payload.State) {
 			return payload, nil
@@ -289,8 +287,25 @@ func waitForDaemonReadiness(ctx context.Context, client *http.Client, addr strin
 		select {
 		case <-ctx.Done():
 			return StatusPayload{}, ctx.Err()
+		case err := <-daemonExited:
+			return StatusPayload{}, daemonExitError(err)
 		case <-ticker.C:
 		}
+	}
+}
+
+func daemonExitError(err error) error {
+	if err == nil {
+		return errors.New("daemon process stopped")
+	}
+	return fmt.Errorf("daemon process stopped: %w", err)
+}
+
+func startupFailureActions(addr, configPath string) []string {
+	return []string{
+		fmt.Sprintf("if another daemon owns %q, stop it using its current address", configPath),
+		fmt.Sprintf("run `swobu daemon --addr %s --config %q` for foreground diagnostics", addr, configPath),
+		fmt.Sprintf("run `swobu status --addr %s`", addr),
 	}
 }
 
@@ -304,11 +319,22 @@ func isReadinessState(state string) bool {
 	}
 }
 
-func defaultSpawnForegroundDaemon(_ context.Context, configPath string) error {
+func defaultSpawnForegroundDaemon(_ context.Context, configPath, addr string) (<-chan error, error) {
 	executablePath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve swobu executable: %w", err)
+		return nil, fmt.Errorf("resolve swobu executable: %w", err)
 	}
-	command := exec.Command(executablePath, "daemon", "--config", configPath)
-	return command.Start()
+	command := exec.Command(executablePath, "daemon", "--config", configPath, "--addr", addr)
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	// Start confirms only that the OS created the process. Wait owns process
+	// reclamation and lets AttachOrStart distinguish an early child failure from
+	// an HTTP readiness timeout.
+	exited := make(chan error, 1)
+	go func() {
+		exited <- command.Wait()
+		close(exited)
+	}()
+	return exited, nil
 }

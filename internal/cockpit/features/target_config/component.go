@@ -93,6 +93,8 @@ type TargetConfig struct {
 	app                   *tui.App
 	catalogProbeSeq       int64
 	catalogProbeInFlight  bool
+	authObserverSeq       int64
+	cancelAuthObserver    context.CancelFunc
 	operationContext      context.Context
 	cancelOperations      context.CancelFunc
 	credentialReadDir     func(string) ([]ui.FileBrowserEntry, error)
@@ -152,15 +154,15 @@ func (w *TargetConfig) Open() {
 	}
 	w.Error.Set("")
 	if w.mode == targetConfigModeEdit && w.Draft.Get().ProviderSpec != "" && w.SelectedModel.Get().ModelName != "" {
-		if w.IsBedrockFlow() || w.IsAzureFlow() {
-			w.Lifecycle.Set(LifecycleOpen)
-			// Persisted edit values are selection seeds, not stale setup input.
-			// Keep them visible until the current catalog either hydrates or
-			// rejects them; setup changes use ReadyAndProbe's destructive path.
-			w.startCatalogProbe()
-			return
-		}
 		w.Lifecycle.Set(LifecycleOpen)
+		// Persisted catalog-backed edit values are selection seeds, not stale
+		// capability evidence. Keep them visible until the current catalog either
+		// hydrates or rejects them; setup changes use ReadyAndProbe's destructive
+		// path. Custom Endpoint is open-set, so its authored model is authoritative
+		// without catalog validation.
+		if !w.IsCustomFlow() {
+			w.startCatalogProbe()
+		}
 		return
 	}
 	w.Lifecycle.Set(LifecycleOpen)
@@ -199,6 +201,7 @@ func (w *TargetConfig) Back() bool {
 func (w *TargetConfig) Close() {
 	w.Lifecycle.Set(LifecycleClosed)
 	w.DeleteArmed.Set(false)
+	w.stopAuthSessionObserver()
 	if w.cancelOperations != nil {
 		w.cancelOperations()
 	}
@@ -302,11 +305,13 @@ func (w *TargetConfig) BindApp(app *tui.App) {
 	// that Open marked pending now that async results can return through the
 	// app update loop.
 	w.launchPendingCatalogProbe()
+	w.launchPendingAuthSessionObserver()
 }
 
 // UnbindApp drops the live app handle. go-tui does not unbind State values, so
 // they remain attached until the target config is rebound on a fresh app.
 func (w *TargetConfig) UnbindApp() {
+	w.stopAuthSessionObserver()
 	w.app = nil
 }
 
