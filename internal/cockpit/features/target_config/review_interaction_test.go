@@ -64,6 +64,24 @@ func TestCredentialChangeInvalidatesCreate(t *testing.T) {
 	}
 }
 
+func TestCustomManualModelEditStillSchedulesBestEffortCatalogProbe(t *testing.T) {
+	target := readmodel.TargetReadModel{
+		ID:               "custom",
+		Model:            "manual-model",
+		Provider:         string(profile.ProviderSpecCustom),
+		ProviderProtocol: "chat_completions_stream",
+		BaseURL:          "http://127.0.0.1:11434/v1",
+	}
+	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+	w := NewEditTargetConfig("personal", route, target, nil, nil)
+
+	w.Open()
+
+	if !w.catalogLoading() {
+		t.Fatal("Custom Endpoint edit did not schedule best-effort catalog probe")
+	}
+}
+
 func TestCredentialPasteUsesOwnerContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

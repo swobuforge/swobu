@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 var (
@@ -21,6 +22,9 @@ var (
 	providerProtocolsOllama = []ProviderProtocolSpec{
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+	}
+	providerProtocolsZAI = []ProviderProtocolSpec{
+		{Name: routing.ZAIProviderProtocol, Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
 	}
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
@@ -124,6 +128,18 @@ func catalog() []Profile {
 			Credential:          CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENROUTER_API_KEY"},
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
+		},
+		{
+			ProviderID:          ProviderSpecZAI,
+			ProviderDisplayName: "Z.AI",
+			SetupHint:           "access / API key",
+			SetupKeywords:       []string{"access", "General API", "Coding Plan", "credential", "model", "GLM"},
+			Locator: LocatorSpec{
+				Kind: LocatorFixed,
+			},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ZAI_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsZAI),
 		},
 		{
 			ProviderID:          ProviderSpecBedrock,

@@ -35,6 +35,7 @@ func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
 
 	projectedFunctionName := namespacedFunctionTool.Key().Name()
 	projectedCustomName := namespacedCustomTool.Key().Name()
+	webSearchTool := canonical.NewWebSearchDeclaration()
 
 	tests := []struct {
 		name         string
@@ -50,6 +51,13 @@ func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
 		{name: "string none", raw: `"none"`, tools: []canonical.ToolDeclaration{plainFunctionTool}, wantMode: canonical.ToolPolicyNone},
 		{name: "string auto", raw: `"auto"`, tools: []canonical.ToolDeclaration{plainFunctionTool}, wantMode: canonical.ToolPolicyAuto},
 		{name: "string required", raw: `"required"`, tools: []canonical.ToolDeclaration{plainFunctionTool}, wantMode: canonical.ToolPolicyRequired},
+		{
+			name:         "object web search",
+			raw:          `{"type":"web_search"}`,
+			tools:        []canonical.ToolDeclaration{webSearchTool},
+			wantMode:     canonical.ToolPolicySpecific,
+			wantSpecific: webSearchTool.Key().String(),
+		},
 		{
 			name:         "object plain function",
 			raw:          `{"type":"function","name":"grep"}`,

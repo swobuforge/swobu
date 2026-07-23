@@ -29,6 +29,9 @@ func connectionsEqual(left, right Connection) bool {
 	case OpenRouterConnection:
 		right, ok := right.(OpenRouterConnection)
 		return ok && left.credential.String() == right.credential.String()
+	case ZAIConnection:
+		right, ok := right.(ZAIConnection)
+		return ok && left.access == right.access && left.credential.String() == right.credential.String()
 	case ChatGPTConnection:
 		right, ok := right.(ChatGPTConnection)
 		return ok && left.credential.String() == right.credential.String()
@@ -134,6 +137,79 @@ func NewOpenRouterConnection(raw string) (OpenRouterConnection, error) {
 func (OpenRouterConnection) Provider() Provider              { return ProviderOpenRouter }
 func (OpenRouterConnection) isConnection()                   {}
 func (c OpenRouterConnection) Credential() credentialref.Ref { return c.credential }
+
+// ZAIAccess identifies the Z.AI commercial API surface selected by the
+// operator. It is durable routing intent because it determines where requests
+// execute and which account balance they consume.
+type ZAIAccess string
+
+const (
+	ZAIAccessGeneralAPI ZAIAccess = "general_api"
+	ZAIAccessCodingPlan ZAIAccess = "coding_plan"
+	// ZAIProviderProtocol is the one execution protocol derived for every Z.AI
+	// target. Access selects the commercial endpoint, never the wire family.
+	ZAIProviderProtocol = "chat_completions_stream"
+)
+
+// ZAIAccesses returns the closed Z.AI access products for authoring.
+func ZAIAccesses() []ZAIAccess {
+	return []ZAIAccess{ZAIAccessGeneralAPI, ZAIAccessCodingPlan}
+}
+
+func ParseZAIAccess(raw string) (ZAIAccess, error) {
+	access := ZAIAccess(strings.TrimSpace(raw))
+	switch access {
+	case ZAIAccessGeneralAPI, ZAIAccessCodingPlan:
+		return access, nil
+	default:
+		return "", pathError("connection.zai.access", fmt.Sprintf("unsupported access %q", raw))
+	}
+}
+
+// Label returns the operator-facing name of an access product.
+func (a ZAIAccess) Label() string {
+	switch a {
+	case ZAIAccessGeneralAPI:
+		return "General API"
+	case ZAIAccessCodingPlan:
+		return "Coding Plan"
+	default:
+		return ""
+	}
+}
+
+type ZAIConnection struct {
+	access     ZAIAccess
+	credential credentialref.Ref
+}
+
+func NewZAIConnection(access ZAIAccess, raw string) (ZAIConnection, error) {
+	normalized, err := ParseZAIAccess(string(access))
+	if err != nil {
+		return ZAIConnection{}, err
+	}
+	ref, err := parseCredential("connection.zai.credential", raw)
+	if err != nil {
+		return ZAIConnection{}, err
+	}
+	return ZAIConnection{access: normalized, credential: ref}, nil
+}
+func (ZAIConnection) Provider() Provider  { return ProviderZAI }
+func (ZAIConnection) isConnection()       {}
+func (c ZAIConnection) Access() ZAIAccess { return c.access }
+
+// BaseURL returns the endpoint implied by the validated access product.
+func (c ZAIConnection) BaseURL() string {
+	switch c.access {
+	case ZAIAccessGeneralAPI:
+		return "https://api.z.ai/api/paas/v4"
+	case ZAIAccessCodingPlan:
+		return "https://api.z.ai/api/coding/paas/v4"
+	default:
+		return ""
+	}
+}
+func (c ZAIConnection) Credential() credentialref.Ref { return c.credential }
 
 type ChatGPTConnection struct{ credential credentialref.Ref }
 
@@ -272,6 +348,8 @@ func setConnectionCredential(connection Connection, raw string) (Connection, err
 		return NewAnthropicConnection(raw)
 	case OpenRouterConnection:
 		return NewOpenRouterConnection(raw)
+	case ZAIConnection:
+		return NewZAIConnection(c.access, raw)
 	case ChatGPTConnection:
 		return NewChatGPTConnection(raw)
 	case AzureConnection:

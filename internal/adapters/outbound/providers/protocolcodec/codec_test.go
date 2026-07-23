@@ -1,10 +1,12 @@
 package protocolcodec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
@@ -50,17 +53,50 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsWebSearchFailsAsUnsupportedBackend(t *testing.T) {
+func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
 		Tools: canonical.Specify(set),
 	})
-	_, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	var unsupported provider.UnsupportedError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T %v, want provider.UnsupportedError", err, err)
+	document, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(document.RawBytes()), `"web_search_options":{}`) {
+		t.Fatalf("protocol default missing from %s", document.RawBytes())
+	}
+}
+
+func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	request := provider.Request{
+		ExchangeID: "exchange-shared-lowering",
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("model"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+			Tools: canonical.Specify(set),
+		}),
+		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	}
+	typed, typedDecisions, err := LowerChatCompletionsRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromTyped, err := chatcompletions.EncodeProviderRequestDocument(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromCodec, codecDecisions, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fromTyped.RawBytes(), fromCodec.RawBytes()) {
+		t.Fatalf("shared typed lowering = %s, codec = %s", fromTyped.RawBytes(), fromCodec.RawBytes())
+	}
+	if !reflect.DeepEqual(typedDecisions, codecDecisions) {
+		t.Fatalf("shared decisions = %#v, codec decisions = %#v", typedDecisions, codecDecisions)
 	}
 }
 

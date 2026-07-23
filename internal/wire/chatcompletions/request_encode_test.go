@@ -59,3 +59,43 @@ func TestEncodeCarrier_OmitsDisclosureOnlyReasoning(t *testing.T) {
 		t.Fatal("empty document")
 	}
 }
+
+func TestEncodeCarrier_LowersOpenAIHostedSearchOptions(t *testing.T) {
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+		Tools: canonical.Specify(set),
+	})
+
+	for _, tc := range []struct {
+		name     string
+		delivery delivery.Delivery
+	}{
+		{name: "buffered", delivery: delivery.BufferedDelivery()},
+		{name: "streaming", delivery: delivery.StreamingDelivery(delivery.FramingSSE)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			document, err := EncodeCarrier(req, tc.delivery)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body struct {
+				Tools            []map[string]any `json:"tools"`
+				WebSearchOptions *map[string]any  `json:"web_search_options"`
+			}
+			if err := json.Unmarshal(document.RawBytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Tools) != 0 {
+				t.Fatalf("tools = %#v, want hosted search outside the tools union", body.Tools)
+			}
+			if body.WebSearchOptions == nil || len(*body.WebSearchOptions) != 0 {
+				t.Fatalf("web_search_options = %#v, want explicit empty options", body.WebSearchOptions)
+			}
+		})
+	}
+}

@@ -17,16 +17,17 @@
 // form. Every catalog-backed edit enters catalog-loading state before the
 // component is mounted; BindApp resumes that pending operation while persisted
 // model/protocol values remain non-authoritative selection seeds until
-// reconciliation. Custom Endpoint retains its open-set authored model without
-// requiring discovery. Bedrock has
+// reconciliation. Z.AI retains its open-set authored model and never initiates
+// catalog discovery. Bedrock has
 // one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine
 // login-session workflow. A mounted pending ChatGPT browser session is observed
 // through the local daemon until it succeeds or fails; manual refresh remains a
 // recovery action, and the observer ends with the form, mount, app, or session.
-// Custom Endpoint treats catalog discovery as best-effort and uses the shared
-// open-set model picker so an operator-authored model ID remains sufficient.
+// Custom Endpoint uses best-effort discovery plus the open-set model picker;
+// Z.AI uses the same picker without discovery. In both cases the
+// operator-authored model ID remains authoritative.
 // An incomplete create row is status, not an interaction target; only a ready
 // create action participates in selection and Enter dispatch.
 //

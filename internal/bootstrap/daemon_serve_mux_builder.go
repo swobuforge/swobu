@@ -51,6 +51,14 @@ func buildDaemonServeMux(
 		return nil
 	}))
 	mux.Handle("/_swobu/target-probe", httpapi.NewTargetProbeHandler(runtime))
+	persistCredential := func(providerSpec string, keyName string, secret string) (string, error) {
+		return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
+	}
+	mux.Handle("/_swobu/credentials", httpapi.NewCredentialStoreHandler(
+		func(_ context.Context, providerSpec string, keyName string, secret string) (string, error) {
+			return persistCredential(providerSpec, keyName, secret)
+		},
+	))
 	workspaceService, err := workspaces.NewService(daemon.configStore)
 	if err != nil {
 		return nil, nil, err
@@ -60,9 +68,7 @@ func buildDaemonServeMux(
 	mux.Handle("/_swobu/workspaces/", workspaceControl)
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
 		PublicBaseURL: daemonPublicBaseURLFromAddr(addr),
-		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec string, keyName string, secret string) (string, error) {
-			return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
-		}),
+		CredentialOut: chatgptlogin.CredentialWriterFunc(persistCredential),
 	})
 	authDriver, err := authplane.NewChatGPTAuthMethodDriver(chatGPTLogin)
 	if err != nil {

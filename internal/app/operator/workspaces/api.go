@@ -57,6 +57,7 @@ type Connection struct {
 	OpenAI     *CredentialConnection `json:"openai,omitempty"`
 	Anthropic  *CredentialConnection `json:"anthropic,omitempty"`
 	OpenRouter *CredentialConnection `json:"openrouter,omitempty"`
+	ZAI        *ZAIConnection        `json:"zai,omitempty"`
 	ChatGPT    *CredentialConnection `json:"chatgpt,omitempty"`
 	Ollama     *OllamaConnection     `json:"ollama,omitempty"`
 	Azure      *AzureConnection      `json:"azure,omitempty"`
@@ -64,6 +65,10 @@ type Connection struct {
 	Custom     *CustomConnection     `json:"custom,omitempty"`
 }
 type CredentialConnection struct {
+	Credential string `json:"credential"`
+}
+type ZAIConnection struct {
+	Access     string `json:"access"`
 	Credential string `json:"credential"`
 }
 type OllamaConnection struct {
@@ -121,6 +126,8 @@ func ConnectionFromRouting(connection routing.Connection) Connection {
 		out.Anthropic = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.OpenRouterConnection:
 		out.OpenRouter = &CredentialConnection{Credential: c.Credential().String()}
+	case routing.ZAIConnection:
+		out.ZAI = &ZAIConnection{Access: string(c.Access()), Credential: c.Credential().String()}
 	case routing.ChatGPTConnection:
 		out.ChatGPT = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.OllamaConnection:
@@ -165,6 +172,9 @@ func (c Connection) routingDraft() routing.ConnectionDraft {
 	}
 	if c.OpenRouter != nil {
 		draft.OpenRouter = &routing.CredentialConnectionDraft{Credential: c.OpenRouter.Credential}
+	}
+	if c.ZAI != nil {
+		draft.ZAI = &routing.ZAIConnectionDraft{Access: c.ZAI.Access, Credential: c.ZAI.Credential}
 	}
 	if c.ChatGPT != nil {
 		draft.ChatGPT = &routing.CredentialConnectionDraft{Credential: c.ChatGPT.Credential}

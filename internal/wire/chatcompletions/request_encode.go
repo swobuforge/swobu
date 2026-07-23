@@ -35,8 +35,11 @@ type ProviderRequestMessage struct {
 type ProviderRequestDocument struct {
 	Payload             map[string]any
 	Messages            []ProviderRequestMessage
+	Tools               []ProviderRequestTool
+	ToolChoice          any
 	MaxTokens           *int
 	MaxCompletionTokens *int
+	providerTools       any
 }
 
 type toolCallBody struct {
@@ -67,8 +70,8 @@ func EncodeCarrierWithDecisions(req canonical.CanonicalRequest, d delivery.Deliv
 	return EncodeProviderRequestDocument(document)
 }
 
-// LowerProviderRequestDocument produces the neutral typed Chat Completions
-// document before an exact provider owns any dialect adaptation.
+// LowerProviderRequestDocument produces the standard typed Chat Completions
+// document before any exact-provider dialect adaptation.
 func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Delivery, sink compat.Sink, exchangeID string, options EncodeOptions) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
@@ -97,15 +100,15 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
+	if hasChatCompletionsWebSearch(tools) {
+		payload["web_search_options"] = map[string]any{}
+	}
 	if instructions := req.Instructions().Instructions(); len(instructions) > 0 {
 		prefix := make([]ProviderRequestMessage, 0, len(instructions))
 		for _, instruction := range instructions {
 			prefix = append(prefix, ProviderRequestMessage{Role: string(instruction.Role()), Content: instruction.Text(), SourceStart: -1, SourceEnd: -1})
 		}
 		wireMessages = append(prefix, wireMessages...)
-	}
-	if len(wireTools) > 0 {
-		payload["tools"] = wireTools
 	}
 	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
 		return ProviderRequestDocument{}, err
@@ -119,7 +122,7 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	}
 	delete(payload, "max_tokens")
 	payload["messages"] = wireMessages
-	document := ProviderRequestDocument{Payload: payload, Messages: wireMessages, MaxTokens: maxTokens}
+	document := ProviderRequestDocument{Payload: payload, Messages: wireMessages, Tools: wireTools, ToolChoice: choice, MaxTokens: maxTokens}
 	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
 		return ProviderRequestDocument{}, err
 	} else if len(responseFormat) > 0 {
@@ -132,14 +135,18 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 			}
 		}
 	}
-	if choice != nil {
-		payload["tool_choice"] = choice
-	}
 	logChatCompletionsEncodeShape(req, wireMessages, choice, d)
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
 	return document, nil
+}
+
+// ReplaceTools lets an exact provider compose its own typed tool union before
+// the protocol's single serialization boundary. Provider syntax remains in the
+// provider package; this document only owns where the final tools value lives.
+func (d *ProviderRequestDocument) ReplaceTools(tools any) {
+	d.providerTools = tools
 }
 
 // ApplyStandardProviderRequestReasoning composes the standard Chat
@@ -158,6 +165,18 @@ func ApplyStandardProviderRequestReasoning(document *ProviderRequestDocument, re
 // EncodeProviderRequestDocument performs the single serialization boundary
 // after shared lowering or exact-provider adaptation.
 func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Document, error) {
+	if document.providerTools != nil {
+		document.Payload["tools"] = document.providerTools
+	} else if len(document.Tools) > 0 {
+		document.Payload["tools"] = document.Tools
+	} else {
+		delete(document.Payload, "tools")
+	}
+	if document.ToolChoice != nil {
+		document.Payload["tool_choice"] = document.ToolChoice
+	} else {
+		delete(document.Payload, "tool_choice")
+	}
 	if document.MaxTokens != nil {
 		document.Payload["max_tokens"] = *document.MaxTokens
 	} else {
@@ -182,6 +201,15 @@ func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Do
 		raw,
 		carrier.Meta{},
 	), nil
+}
+
+func hasChatCompletionsWebSearch(tools []canonical.ToolDeclaration) bool {
+	for _, tool := range tools {
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			return true
+		}
+	}
+	return false
 }
 
 func logChatCompletionsEncodeShape(req canonical.CanonicalRequest, wireMessages []ProviderRequestMessage, choice any, d delivery.Delivery) {

@@ -51,6 +51,41 @@ func TestOpenRouterRequestMutationPreservesRawJSONIntegers(t *testing.T) {
 	}
 }
 
+func TestOpenRouterOwnsFinalWebSearchDialectAcrossProtocols(t *testing.T) {
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	webSearchKey := canonical.WebSearchToolKey()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      canonical.Specify("model"),
+		Items:      []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+		Tools:      canonical.Specify(set),
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &webSearchKey)),
+	})
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		t.Run(string(protocol), func(t *testing.T) {
+			backend := openRouterBackendForProtocol(t, request.Model(), protocol)
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(document.RawBytes(), []byte(`"type":"openrouter:web_search"`)) {
+				t.Fatalf("final OpenRouter JSON = %s", document.RawBytes())
+			}
+			if bytes.Contains(document.RawBytes(), []byte(`"type":"web_search"`)) {
+				t.Fatalf("standard marker leaked into OpenRouter JSON = %s", document.RawBytes())
+			}
+			if bytes.Contains(document.RawBytes(), []byte(`"web_search_options":`)) {
+				t.Fatalf("standard web-search options leaked into OpenRouter JSON = %s", document.RawBytes())
+			}
+			if !bytes.Contains(document.RawBytes(), []byte(`"tool_choice":{"type":"openrouter:web_search"}`)) {
+				t.Fatalf("OpenRouter-specific choice missing from JSON = %s", document.RawBytes())
+			}
+		})
+	}
+}
+
 func TestOpenRouterResponseTransformsPreserveUnownedRawJSON(t *testing.T) {
 	raw := []byte(`{"id":"resp","usage":{"extension":9007199254740993},"choices":[{"message":{"role":"assistant","content":"ok","reasoning":"think","extension":{"constant":9007199254740993}}}]}`)
 	document := carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{})
@@ -300,8 +335,12 @@ func openRouterReasoningItem(t *testing.T, summary string) canonical.CanonicalIt
 }
 
 func openRouterBackend(t *testing.T, model string) provider.Backend {
+	return openRouterBackendForProtocol(t, model, protocolkind.ChatCompletions)
+}
+
+func openRouterBackendForProtocol(t *testing.T, model string, protocol protocolkind.ProtocolKind) provider.Backend {
 	t.Helper()
-	target := provider.NewTargetSnapshot("openrouter", string(profile.ProviderSpecOpenRouter), "https://openrouter.test/api/v1", "env:OPENROUTER_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
+	target := provider.NewTargetSnapshot("openrouter", string(profile.ProviderSpecOpenRouter), "https://openrouter.test/api/v1", "env:OPENROUTER_API_KEY", protocol, "", string(protocol))
 	target.Model = model
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {

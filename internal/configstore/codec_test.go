@@ -16,6 +16,7 @@ workspaces:
               - {id: openai, model: gpt-5, protocol: responses, connection: {openai: {credential: env:OPENAI_API_KEY}}}
               - {id: anthropic, model: claude, protocol: messages, connection: {anthropic: {credential: env:ANTHROPIC_API_KEY}}}
               - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
+              - {id: zai, model: manual-model, connection: {zai: {access: coding_plan, credential: env:ZAI_API_KEY}}}
               - {id: chatgpt, model: gpt-5, protocol: responses_stream, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
               - {id: ollama, model: llama, protocol: chat_completions, connection: {ollama: {}}}
               - {id: azure, model: deployment, protocol: responses, connection: {azure: {project_endpoint: https://example.services.ai.azure.com/api/projects/prod, credential: env:AZURE_OPENAI_API_KEY}}}
@@ -44,6 +45,34 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "custom:") || strings.Contains(string(raw), "openai_"+"compatible") {
 		t.Fatalf("custom connection identity changed during round trip:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "protocol: chat_completions_stream") {
+		t.Fatalf("derived Z.AI protocol was persisted:\n%s", raw)
+	}
+}
+
+func TestCodecRejectsZAIWithoutExplicitAccess(t *testing.T) {
+	raw := strings.Replace(allVariantsYAML, "access: coding_plan, ", "", 1)
+	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "connection.zai.access") {
+		t.Fatalf("decode error = %v, want missing Z.AI access rejection", err)
+	}
+	raw = strings.Replace(allVariantsYAML, "access: coding_plan", "access: enterprise", 1)
+	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "connection.zai.access") {
+		t.Fatalf("decode error = %v, want unknown Z.AI access rejection", err)
+	}
+}
+
+func TestCodecRejectsEveryAuthoredZAIProtocol(t *testing.T) {
+	for _, protocol := range []string{"chat_completions_stream", "responses"} {
+		raw := strings.Replace(
+			allVariantsYAML,
+			"id: zai, model: manual-model, connection:",
+			"id: zai, model: manual-model, protocol: "+protocol+", connection:",
+			1,
+		)
+		if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "Z.AI protocol is derived and must be omitted") {
+			t.Fatalf("protocol %q decode error = %v, want authored Z.AI protocol rejection", protocol, err)
+		}
 	}
 }
 

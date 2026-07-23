@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
+	"github.com/swobuforge/swobu/internal/wire/responses"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
@@ -41,8 +42,22 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 	if err := decorateOpenRouterThinking(&document, req.Canonical.Items()); err != nil {
 		return carrier.Document{}, decisions, err
 	}
+	delete(document.Payload, "web_search_options")
+	if hasCanonicalWebSearch(req.Canonical.Tools()) {
+		document.Tools = append(document.Tools, chatcompletions.ProviderRequestTool{Type: "openrouter:web_search"})
+	}
+	replaceOpenRouterWebSearchChoice(document.ToolChoice)
 	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
 	return encoded, decisions, err
+}
+
+func hasCanonicalWebSearch(tools []canonical.ToolDeclaration) bool {
+	for _, tool := range tools {
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			return true
+		}
+	}
+	return false
 }
 
 func (c reasoningCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
@@ -472,3 +487,46 @@ func (b *openRouterSSEReadCloser) takeReasoning() (canonical.CanonicalItem, bool
 func (b *openRouterSSEReadCloser) Close() error { return b.reader.Close() }
 
 var _ provider.Codec = reasoningCodec{}
+
+// responsesCodec owns OpenRouter's exact Responses request composition while
+// the standard codec retains shared response decoding.
+type responsesCodec struct{ standard protocolcodec.Codec }
+
+func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
+		return carrier.Document{}, nil, err
+	}
+	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (responses.ProviderRequestDocument, error) {
+		return responses.LowerProviderRequestDocument(
+			responses.EncodeInput{Request: req.Canonical, Responses: req.Responses.Clone()},
+			req.Delivery,
+			sink,
+			req.ExchangeID,
+			responses.EncodeOptions{Compatibility: req.Compatibility},
+		)
+	})
+	if err != nil {
+		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+	}
+	for index := range document.Tools {
+		if document.Tools[index].Type == canonical.ToolTypeWebSearch {
+			document.Tools[index].Type = "openrouter:web_search"
+		}
+	}
+	replaceOpenRouterWebSearchChoice(document.ToolChoice)
+	encoded, err := responses.EncodeProviderRequestDocument(document)
+	return encoded, decisions, err
+}
+
+func (c responsesCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	return c.standard.Decode(ctx, req, ingress)
+}
+
+var _ provider.Codec = responsesCodec{}
+
+func replaceOpenRouterWebSearchChoice(choice any) {
+	object, ok := choice.(map[string]any)
+	if ok && object["type"] == canonical.ToolTypeWebSearch {
+		object["type"] = "openrouter:web_search"
+	}
+}

@@ -6,6 +6,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 // chatGPTReadiness is the ChatGPT arm of the feature's derived form status.
@@ -121,6 +122,8 @@ func (w *TargetConfig) interactiveAuthMode() (string, string) {
 
 func providerReadiness(w *TargetConfig, base providerSetupState) providerSetupState {
 	switch profile.ProviderID(base.ProviderSpec) {
+	case profile.ProviderSpecZAI:
+		return zaiReadiness(w, base)
 	case profile.ProviderSpecChatGPT:
 		return chatGPTReadiness(w, base)
 	case profile.ProviderSpecBedrock:
@@ -132,6 +135,15 @@ func providerReadiness(w *TargetConfig, base providerSetupState) providerSetupSt
 	default:
 		return httpReadiness(w, base)
 	}
+}
+
+func zaiReadiness(w *TargetConfig, base providerSetupState) providerSetupState {
+	setup := base
+	if _, err := routing.ParseZAIAccess(w.Draft.Get().ZAIAccess); err != nil {
+		setup.Status = setupMissingLocator
+		return setup
+	}
+	return httpReadiness(w, setup)
 }
 
 // genericCredentialRowVisible is the shared credential eligibility calculation
@@ -191,21 +203,27 @@ func (w *TargetConfig) CurrentProtocolOptions() []protocolOption {
 	return resolveProtocolOptions(w.Draft.Get().ProviderSpec, w.SelectedModel.Get())
 }
 
+// UsesManualModelEntry reports providers whose operator-authored model is
+// authoritative without live catalog evidence.
+func (w *TargetConfig) UsesManualModelEntry() bool {
+	return w.IsCustomFlow() || w.IsZAIFlow()
+}
+
 func (w *TargetConfig) catalogResult() readmodel.ModelCatalogReadModel { return w.Catalog.Get().Result }
 func (w *TargetConfig) catalogLoading() bool                           { return w.Catalog.Get().Loading }
 func (w *TargetConfig) catalogFailed() bool                            { return w.Catalog.Get().Err != "" }
 func (w *TargetConfig) createFailed() bool                             { return w.SaveOperation.Get().Err != "" }
 func (w *TargetConfig) readyToCreate() bool {
+	protocolReady := w.IsZAIFlow() || strings.TrimSpace(w.Draft.Get().ProviderProtocol) != ""
 	return w.setupState().Ready() &&
 		w.modelSelectionValidated() &&
-		strings.TrimSpace(w.Draft.Get().ProviderProtocol) != ""
+		protocolReady
 }
 
-// modelSelectionValidated makes Custom Endpoint discovery optional: its
-// operator-authored model is authoritative when /models is unsupported.
+// modelSelectionValidated makes open-set provider model entry authoritative.
 // Catalog-backed providers still require current discovery evidence.
 func (w *TargetConfig) modelSelectionValidated() bool {
-	if w.IsCustomFlow() {
+	if w.UsesManualModelEntry() {
 		return strings.TrimSpace(w.SelectedModel.Get().ModelName) != ""
 	}
 	return w.catalogValidated() && w.selectedModelIsInCurrentCatalog()
@@ -360,6 +378,7 @@ func (w *TargetConfig) resetFlowState() {
 
 func (w *TargetConfig) resetSetupState() {
 	d := w.Draft.Get()
+	d.ZAIAccess = ""
 	d.CredentialRef = ""
 	d.CredentialHeader = ""
 	w.Draft.Set(d)

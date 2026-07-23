@@ -53,6 +53,7 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 		"openai":     {"responses", Connection{OpenAI: &CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, routing.ProviderOpenAI},
 		"anthropic":  {"messages", Connection{Anthropic: &CredentialConnection{Credential: "env:ANTHROPIC_API_KEY"}}, routing.ProviderAnthropic},
 		"openrouter": {"chat_completions", Connection{OpenRouter: &CredentialConnection{Credential: "env:OPENROUTER_API_KEY"}}, routing.ProviderOpenRouter},
+		"zai":        {"", Connection{ZAI: &ZAIConnection{Access: "coding_plan", Credential: "env:ZAI_API_KEY"}}, routing.ProviderZAI},
 		"chatgpt":    {"responses_stream", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
 		"ollama":     {"chat_completions", Connection{Ollama: &OllamaConnection{}}, routing.ProviderOllama},
 		"azure":      {"responses", Connection{Azure: &AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/prod", Credential: "env:AZURE_KEY"}}, routing.ProviderAzure},
@@ -66,6 +67,9 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 			}
 			if target.Provider() != test.provider {
 				t.Fatalf("provider = %q, want %q", target.Provider(), test.provider)
+			}
+			if test.provider == routing.ProviderZAI && target.Protocol().String() != routing.ZAIProviderProtocol {
+				t.Fatalf("derived Z.AI protocol = %q", target.Protocol().String())
 			}
 		})
 	}

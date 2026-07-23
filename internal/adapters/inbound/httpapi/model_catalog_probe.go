@@ -134,6 +134,8 @@ func connectionCredentialRef(connection routing.Connection) string {
 		return c.Credential().String()
 	case routing.OpenRouterConnection:
 		return c.Credential().String()
+	case routing.ZAIConnection:
+		return c.Credential().String()
 	case routing.ChatGPTConnection:
 		return c.Credential().String()
 	case routing.AzureConnection:

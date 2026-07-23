@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/zai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -39,6 +40,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),
 		azure.NewRuntime(client, credentials),
 		openrouter.NewRuntime(client, credentials),
+		zai.NewRuntime(client, credentials),
 		ollama.NewRuntime(client, credentials),
 		custom.NewRuntime(client, credentials),
 	})

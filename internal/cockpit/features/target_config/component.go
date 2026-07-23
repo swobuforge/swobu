@@ -153,16 +153,17 @@ func (w *TargetConfig) Open() {
 		w.operationContext, w.cancelOperations = context.WithCancel(context.Background())
 	}
 	w.Error.Set("")
-	if w.mode == targetConfigModeEdit && w.Draft.Get().ProviderSpec != "" && w.SelectedModel.Get().ModelName != "" {
+	if w.mode == targetConfigModeEdit &&
+		w.Draft.Get().ProviderSpec != "" &&
+		w.SelectedModel.Get().ModelName != "" &&
+		!w.IsZAIFlow() {
 		w.Lifecycle.Set(LifecycleOpen)
 		// Persisted catalog-backed edit values are selection seeds, not stale
 		// capability evidence. Keep them visible until the current catalog either
 		// hydrates or rejects them; setup changes use ReadyAndProbe's destructive
-		// path. Custom Endpoint is open-set, so its authored model is authoritative
-		// without catalog validation.
-		if !w.IsCustomFlow() {
-			w.startCatalogProbe()
-		}
+		// path for every discovery-capable provider. Z.AI keeps its authored
+		// model authoritative without initiating catalog validation.
+		w.startCatalogProbe()
 		return
 	}
 	w.Lifecycle.Set(LifecycleOpen)

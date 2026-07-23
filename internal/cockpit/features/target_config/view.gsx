@@ -83,6 +83,8 @@ templ (w *TargetConfig) Render() {
 						@BedrockProviderForm(w)
 					} else if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecChatGPT {
 						@ChatGPTProviderForm(w)
+					} else if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecZAI {
+						@ZAIProviderForm(w)
 					} else {
 						@HTTPProviderForm(w)
 					}

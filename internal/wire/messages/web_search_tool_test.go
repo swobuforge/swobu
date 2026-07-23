@@ -47,13 +47,13 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 	}
 }
 
-func TestEncodeMessagesWebSearchUsesNeutralMarker(t *testing.T) {
+func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
 	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(tools[0])
-	if string(raw) != `{"type":"web_search","name":"web_search"}` {
+	if string(raw) != `{"type":"web_search_20260209","name":"web_search","allowed_callers":["direct"]}` {
 		t.Fatalf("tool = %s", raw)
 	}
 }

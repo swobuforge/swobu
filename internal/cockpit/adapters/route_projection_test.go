@@ -36,6 +36,9 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 		{"openai", func() (routing.Connection, error) { return routing.NewOpenAIConnection("env:OPENAI_API_KEY") }, func(c targetConnection) bool { return c.openAI }},
 		{"anthropic", func() (routing.Connection, error) { return routing.NewAnthropicConnection("env:ANTHROPIC_API_KEY") }, func(c targetConnection) bool { return c.anthropic }},
 		{"openrouter", func() (routing.Connection, error) { return routing.NewOpenRouterConnection("env:OPENROUTER_API_KEY") }, func(c targetConnection) bool { return c.openRouter }},
+		{"zai", func() (routing.Connection, error) {
+			return routing.NewZAIConnection(routing.ZAIAccessCodingPlan, "env:ZAI_API_KEY")
+		}, func(c targetConnection) bool { return c.zai }},
 		{"chatgpt", func() (routing.Connection, error) { return routing.NewChatGPTConnection("secret:chatgpt/session") }, func(c targetConnection) bool { return c.chatGPT }},
 		{"ollama", func() (routing.Connection, error) { return routing.NewOllamaConnection("http://127.0.0.1:11434") }, func(c targetConnection) bool { return c.ollama }},
 		{"azure", func() (routing.Connection, error) {
@@ -62,7 +65,7 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 			}
 			arms := targetConnection{
 				openAI: target.Connection.OpenAI != nil, anthropic: target.Connection.Anthropic != nil,
-				openRouter: target.Connection.OpenRouter != nil, chatGPT: target.Connection.ChatGPT != nil,
+				openRouter: target.Connection.OpenRouter != nil, zai: target.Connection.ZAI != nil, chatGPT: target.Connection.ChatGPT != nil,
 				ollama: target.Connection.Ollama != nil, azure: target.Connection.Azure != nil,
 				bedrock: target.Connection.Bedrock != nil, custom: target.Connection.Custom != nil,
 			}
@@ -74,7 +77,7 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 }
 
 type targetConnection struct {
-	openAI, anthropic, openRouter, chatGPT, ollama, azure, bedrock, custom bool
+	openAI, anthropic, openRouter, zai, chatGPT, ollama, azure, bedrock, custom bool
 }
 
 func TestPlacementFromReadModelHasOnlyOptionalBalanceTarget(t *testing.T) {

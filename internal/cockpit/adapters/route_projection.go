@@ -39,6 +39,9 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadM
 		out.CredentialRef = target.Connection.Anthropic.Credential
 	case target.Connection.OpenRouter != nil:
 		out.CredentialRef = target.Connection.OpenRouter.Credential
+	case target.Connection.ZAI != nil:
+		out.ZAIAccess = target.Connection.ZAI.Access
+		out.CredentialRef = target.Connection.ZAI.Credential
 	case target.Connection.ChatGPT != nil:
 		out.CredentialRef = target.Connection.ChatGPT.Credential
 	case target.Connection.Ollama != nil:

@@ -13,6 +13,7 @@ type openAIProviderRoutePolicy struct{}
 type ollamaProviderRoutePolicy struct{}
 type customProviderRoutePolicy struct{}
 type openRouterProviderRoutePolicy struct{}
+type zaiProviderRoutePolicy struct{}
 
 func (openAIProviderRoutePolicy) ProviderID() profile.ProviderID {
 	return profile.ProviderSpecOpenAI
@@ -34,6 +35,11 @@ func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 }
 func (openRouterProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
 
+func (zaiProviderRoutePolicy) ProviderID() profile.ProviderID {
+	return profile.ProviderSpecZAI
+}
+func (zaiProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
+
 // NewOpenAIPolicy returns the OpenAI route policy.
 func NewOpenAIPolicy() ProviderRoutePolicy { return openAIProviderRoutePolicy{} }
 
@@ -47,3 +53,7 @@ func NewCustomPolicy() ProviderRoutePolicy {
 
 // NewOpenRouterPolicy returns the OpenRouter route policy.
 func NewOpenRouterPolicy() ProviderRoutePolicy { return openRouterProviderRoutePolicy{} }
+
+// NewZAIPolicy returns the shared Z.AI route policy. Access-specific endpoints
+// are derived from routing intent before provider execution reaches this layer.
+func NewZAIPolicy() ProviderRoutePolicy { return zaiProviderRoutePolicy{} }

@@ -68,6 +68,7 @@ type ProviderRequestDocument struct {
 	InputSpecified bool
 	Tools          []ProviderRequestTool
 	ToolsSpecified bool
+	ToolChoice     any
 	Store          *bool
 }
 
@@ -130,9 +131,6 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, sink c
 	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" || responsesRefined && req.InstructionsSpecified() {
 		payload["instructions"] = instructions
 	}
-	if choice != nil {
-		payload["tool_choice"] = choice
-	}
 	wireTools, err := encodeResponsesTools(tools, sink, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -186,6 +184,7 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, sink c
 		InputSpecified: payloadInput != nil,
 		Tools:          wireTools,
 		ToolsSpecified: toolsSpecified,
+		ToolChoice:     choice,
 	}, nil
 }
 
@@ -201,6 +200,11 @@ func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Do
 		document.Payload["tools"] = document.Tools
 	} else {
 		delete(document.Payload, "tools")
+	}
+	if document.ToolChoice != nil {
+		document.Payload["tool_choice"] = document.ToolChoice
+	} else {
+		delete(document.Payload, "tool_choice")
 	}
 	if document.Store != nil {
 		document.Payload["store"] = *document.Store

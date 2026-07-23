@@ -32,7 +32,7 @@ type tierDTO struct {
 type targetDTO struct {
 	ID         string        `yaml:"id"`
 	Model      string        `yaml:"model"`
-	Protocol   string        `yaml:"protocol"`
+	Protocol   string        `yaml:"protocol,omitempty"`
 	Connection connectionDTO `yaml:"connection"`
 }
 
@@ -40,6 +40,7 @@ type connectionDTO struct {
 	OpenAI     *credentialConnectionDTO `yaml:"openai,omitempty"`
 	Anthropic  *credentialConnectionDTO `yaml:"anthropic,omitempty"`
 	OpenRouter *credentialConnectionDTO `yaml:"openrouter,omitempty"`
+	ZAI        *zaiConnectionDTO        `yaml:"zai,omitempty"`
 	ChatGPT    *credentialConnectionDTO `yaml:"chatgpt,omitempty"`
 	Ollama     *ollamaConnectionDTO     `yaml:"ollama,omitempty"`
 	Azure      *azureConnectionDTO      `yaml:"azure,omitempty"`
@@ -47,6 +48,10 @@ type connectionDTO struct {
 	Custom     *customConnectionDTO     `yaml:"custom,omitempty"`
 }
 type credentialConnectionDTO struct {
+	Credential string `yaml:"credential"`
+}
+type zaiConnectionDTO struct {
+	Access     string `yaml:"access"`
 	Credential string `yaml:"credential"`
 }
 type ollamaConnectionDTO struct {
@@ -161,6 +166,9 @@ func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 	if dto.OpenRouter != nil {
 		draft.OpenRouter = &routing.CredentialConnectionDraft{Credential: dto.OpenRouter.Credential}
 	}
+	if dto.ZAI != nil {
+		draft.ZAI = &routing.ZAIConnectionDraft{Access: dto.ZAI.Access, Credential: dto.ZAI.Credential}
+	}
 	if dto.ChatGPT != nil {
 		draft.ChatGPT = &routing.CredentialConnectionDraft{Credential: dto.ChatGPT.Credential}
 	}
@@ -229,6 +237,9 @@ func encodeTarget(target routing.Target) (targetDTO, error) {
 		dto.Connection.Anthropic = &credentialConnectionDTO{Credential: c.Credential().String()}
 	case routing.OpenRouterConnection:
 		dto.Connection.OpenRouter = &credentialConnectionDTO{Credential: c.Credential().String()}
+	case routing.ZAIConnection:
+		dto.Protocol = ""
+		dto.Connection.ZAI = &zaiConnectionDTO{Access: string(c.Access()), Credential: c.Credential().String()}
 	case routing.ChatGPTConnection:
 		dto.Connection.ChatGPT = &credentialConnectionDTO{Credential: c.Credential().String()}
 	case routing.OllamaConnection:

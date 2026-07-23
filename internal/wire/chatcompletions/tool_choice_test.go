@@ -23,7 +23,6 @@ func TestDecodeChatCompletionsToolChoice_DefaultsBySurface(t *testing.T) {
 
 		"edit files",
 		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
-
 	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
 	projectedCustomName := providertest.ProjectedToolName(t, customTool)
 
@@ -104,6 +103,7 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 
 		"edit files",
 		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
+	webSearchTool := canonical.NewWebSearchDeclaration()
 
 	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
 	projectedCustomName := providertest.ProjectedToolName(t, customTool)
@@ -128,6 +128,12 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 			policy: specificToolPolicy(customTool.Key(), canonical.ToolTypeCustom),
 			tools:  []canonical.ToolDeclaration{customTool},
 			want:   `{"type":"custom","custom":{"name":"` + projectedCustomName + `"}}`,
+		},
+		{
+			name:   "specific web search",
+			policy: specificToolPolicy(webSearchTool.Key(), canonical.ToolTypeWebSearch),
+			tools:  []canonical.ToolDeclaration{webSearchTool},
+			want:   `{"type":"web_search"}`,
 		},
 	}
 

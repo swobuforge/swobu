@@ -4,6 +4,7 @@ package readmodel
 // the adapter translates a complete draft into one semantic target command.
 type TargetDraft struct {
 	ProviderSpec     string
+	ZAIAccess        string
 	Locator          string
 	CredentialRef    string
 	CredentialHeader string

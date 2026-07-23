@@ -13,7 +13,11 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-const defaultMessagesMaxTokens = 256
+const (
+	defaultMessagesMaxTokens         = 256
+	directWebSearchToolType          = "web_search_20260209"
+	directWebSearchAllowedCallerType = "direct"
+)
 
 type messageBody struct {
 	Role    string      `json:"role"`
@@ -42,8 +46,8 @@ type EncodeOptions struct {
 	Compatibility compat.CompatibilityPolicy
 }
 
-// ProviderRequestDocument is the standard Messages lowering before an exact
-// provider owns any typed dialect adaptation.
+// ProviderRequestDocument is the standard Messages lowering before any
+// exact-provider typed dialect adaptation.
 type ProviderRequestDocument struct {
 	Payload map[string]any
 	Tools   []ProviderRequestTool
@@ -363,7 +367,11 @@ func encodeMessagesTools(tools []canonical.ToolDeclaration, sink compat.Sink, ex
 			continue
 		}
 		if tool.Kind() == canonical.ToolKindWebSearch {
-			out = append(out, ProviderRequestTool{Type: "web_search", Name: "web_search"})
+			out = append(out, ProviderRequestTool{
+				Type:           directWebSearchToolType,
+				Name:           canonical.WebSearchToolKey().Name(),
+				AllowedCallers: []string{directWebSearchAllowedCallerType},
+			})
 			continue
 		}
 		return nil, canonical.UnsupportedOperation("messages protocol does not support this tool declaration")

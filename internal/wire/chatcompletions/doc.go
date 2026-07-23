@@ -12,8 +12,10 @@
 // conversation items. The package also owns success-stream decoding for this
 // protocol only, including reasoning-token usage accounting when the wire shape
 // provides it. Standard reasoning_effort belongs to this protocol grammar.
-// Provider dialects and extensions remain outside this package and may wrap
-// this codec only at the exact-provider seam.
+// Provider-hosted web search follows the OpenAI-owned Chat Completions grammar:
+// a top-level web_search_options object rather than an entry in tools. Exact
+// providers with a different spelling replace that lowering before the single
+// serialization boundary. Other provider dialects remain outside this package.
 // Empty tool surfaces omit tool_choice because the choice is inert
 // there and some backends reject an explicit no-tool field. It must not take on
 // endpoint selection, provider wiring, or non-chat public contract semantics.
