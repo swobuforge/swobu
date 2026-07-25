@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -15,9 +14,6 @@ type ResolvedRequest struct {
 	Full          canonical.CanonicalRequest
 	Delta         canonical.CanonicalRequest
 	ResolvedMedia ResolvedMedia
-	Responses     responsesnative.RequestState
-	CurrentInput  canonical.CanonicalRequest
-	Predecessor   *canonical.SwobuResponseID
 }
 
 // ForTarget returns the valid request representation for one exact target
@@ -29,27 +25,6 @@ func (p ResolvedRequest) ForTarget(target provider.TargetSnapshot) canonical.Can
 		return p.Delta.Clone()
 	}
 	return p.Full.Clone()
-}
-
-// ForResponsesTarget selects native delta continuation when applicable;
-// otherwise it returns only the current invocation input with effective
-// request bands. Exact ancestral output is carried separately in
-// Responses.RequestState and must not be reconstructed from Full.
-func (p ResolvedRequest) ForResponsesTarget(target provider.TargetSnapshot) canonical.CanonicalRequest {
-	if previous, ok := p.Delta.PreviousResponse(); ok && previous.Responses != nil &&
-		previous.Responses.AppliesTo(target.TargetID, target.TargetVersion) {
-		return p.Delta.Clone()
-	}
-	return p.ForResponsesStateless()
-}
-
-// ForResponsesStateless returns the current invocation segment when exact
-// native history exists, otherwise the ordinary portable full history.
-func (p ResolvedRequest) ForResponsesStateless() canonical.CanonicalRequest {
-	if p.Responses.History().Len() == 0 {
-		return p.Full.Clone()
-	}
-	return inheritRequestBands(p.Full, p.CurrentInput, nil)
 }
 
 // PreviousSwobuResponseID returns the explicit workspace-local checkpoint key
@@ -73,7 +48,7 @@ func Begin(request canonical.CanonicalRequest) (ResolvedRequest, error) {
 	}
 	complete := withoutPreviousResponse(request)
 	current := requestWithoutPreviousResponse(request)
-	return ResolvedRequest{Full: complete, Delta: current, CurrentInput: current}, nil
+	return ResolvedRequest{Full: complete, Delta: current}, nil
 }
 
 // Resume applies request to one already-loaded immutable checkpoint. The
@@ -101,14 +76,10 @@ func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Resolved
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	current := requestWithoutPreviousResponse(effective)
-	predecessor := response.SwobuID
 	return ResolvedRequest{
 		Full:          materialize(checkpoint, effective),
 		Delta:         inheritRequestBands(checkpoint.Request, effective, &response),
 		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
-		CurrentInput:  current,
-		Predecessor:   &predecessor,
 	}, nil
 }
 
@@ -134,37 +105,11 @@ func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.Canoni
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	current := requestWithoutPreviousResponse(effective)
-	predecessor := response.SwobuID
 	return ResolvedRequest{
 		Full:          materialize(checkpoint, effective),
 		Delta:         inheritRequestBands(checkpoint.Request, effective, &response),
 		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
-		CurrentInput:  current,
-		Predecessor:   &predecessor,
 	}, nil
-}
-
-// WithResponsesHistory publishes exact native output batches oldest-first only
-// when every checkpoint can contribute its invocation boundary. A legacy gap
-// makes the entire native refinement unavailable; publishing a suffix would
-// cause Responses lowering to discard the missing portable history.
-func WithResponsesHistory(request ResolvedRequest, ancestry []Checkpoint) ResolvedRequest {
-	turns := make([]responsesnative.Turn, 0, len(ancestry))
-	for _, checkpoint := range ancestry {
-		if checkpoint.ResponsesOutput.IsZero() {
-			request.Responses = responsesnative.NewRequestState(request.Responses.Input(), responsesnative.History{})
-			return request
-		}
-		turns = append(turns, responsesnative.NewTurn(checkpoint.InputSegment, checkpoint.ResponsesInput, checkpoint.ResponsesOutput))
-	}
-	request.Responses = responsesnative.NewRequestState(request.Responses.Input(), responsesnative.NewHistory(turns))
-	return request
-}
-
-func WithResponsesInput(request ResolvedRequest, input responsesnative.Items) ResolvedRequest {
-	request.Responses = responsesnative.NewRequestState(input, request.Responses.History())
-	return request
 }
 
 // resolveToolContinuation validates tool-result correlation and writes the
@@ -209,7 +154,7 @@ func resolveToolContinuation(checkpoint Checkpoint, current canonical.CanonicalR
 	if explicit, ok := compute.Get(); ok {
 		prior, priorSet := priorCompute.Get()
 		if !priorSet || !equalReasoningCompute(explicit, prior) {
-			return canonical.CanonicalRequest{}, canonical.UnsupportedOperation("current reasoning compute conflicts with unfinished tool turn")
+			return canonical.CanonicalRequest{}, canonical.BadRequest("current reasoning compute conflicts with unfinished tool turn")
 		}
 	} else {
 		compute = priorCompute
@@ -219,13 +164,14 @@ func resolveToolContinuation(checkpoint Checkpoint, current canonical.CanonicalR
 	if explicit, ok := controls.Effort.Get(); ok {
 		prior, priorSet := priorEffort.Get()
 		if !priorSet || explicit != prior {
-			return canonical.CanonicalRequest{}, canonical.UnsupportedOperation("current inference effort conflicts with unfinished tool turn")
+			return canonical.CanonicalRequest{}, canonical.BadRequest("current inference effort conflicts with unfinished tool turn")
 		}
 	} else {
 		controls.Effort = priorEffort
 	}
 	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
 		Compute: compute, Disclosure: current.Reasoning().DisclosureField(),
+		ResponsesContext: current.Reasoning().ResponsesContextField(),
 	})
 	if err != nil {
 		return canonical.CanonicalRequest{}, err

@@ -56,11 +56,11 @@ func (s *responsesResponseStream) enqueueCompletedOutputItemAt(ordinal uint32, i
 		if result, ok := item.ToolResult(); !ok {
 			return canonical.InternalError("responses completed tool result is invalid")
 		} else if _, search := result.WebSearch(); !search {
-			return canonical.UnsupportedOperation("responses completed content tool results are request-only")
+			return canonical.InternalError("canonical Responses output contains a request-only content tool result")
 		}
 		s.enqueueItemCompleted(envID, ordinal, item)
 	default:
-		return canonical.UnsupportedOperation("responses completed output item kind is unsupported")
+		return canonical.NotImplemented("Swobu cannot project this canonical completed item kind to Responses output")
 	}
 	return nil
 }

@@ -29,7 +29,7 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 type unsupportedDiscovery struct{}
 
 func (unsupportedDiscovery) ProbeTarget(context.Context, provider.TargetSnapshot) (provider.TargetProbeResult, error) {
-	return provider.TargetProbeResult{}, canonical.UnsupportedOperation("Z.AI model discovery is unavailable")
+	return provider.TargetProbeResult{}, canonical.NotImplemented("Swobu does not implement Z.AI model discovery")
 }
 
 type backendResolver struct{ standard provider.BackendResolver }
@@ -57,11 +57,11 @@ type webSearchOptions struct {
 func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
 	document, decisions, err := protocolcodec.LowerChatCompletionsRequest(req)
 	if err != nil {
-		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+		return carrier.Document{}, decisions, err
 	}
 
 	if err := rewriteWebSearch(&document); err != nil {
-		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+		return carrier.Document{}, decisions, err
 	}
 
 	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
@@ -75,7 +75,7 @@ func rewriteWebSearch(document *chatcompletions.ProviderRequestDocument) error {
 	}
 	options, ok := raw.(map[string]any)
 	if !ok || len(options) != 0 {
-		return canonical.UnsupportedOperation("Z.AI does not support the requested web-search options")
+		return provider.NewCandidateIncompatibility("Z.AI target cannot represent the requested canonical web-search options")
 	}
 	delete(document.Payload, "web_search_options")
 	tools := make([]requestTool, 0, len(document.Tools)+1)

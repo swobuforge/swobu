@@ -52,7 +52,7 @@ func TestDaemonPersistsAndResolvesPastedZAICredentialAcrossTargetReload(t *testi
 	if response.status != http.StatusCreated {
 		t.Fatalf("Z.AI target create status=%d body=%s", response.status, response.body)
 	}
-	if err := daemon.Close(context.Background()); err != nil {
+	if err := daemon.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +75,7 @@ func TestDaemonPersistsAndResolvesPastedZAICredentialAcrossTargetReload(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restarted.Close(context.Background())
+	defer restarted.Close()
 	response = requestWorkspace(t, http.MethodGet, restarted.BaseURL()+"/_swobu/workspaces/zai-persisted", "")
 	for _, token := range []string{`"provider":"zai"`, `"protocol":"chat_completions_stream"`, `"access":"coding_plan"`, result.CredentialRef} {
 		if response.status != http.StatusOK || !strings.Contains(response.body, token) {
@@ -112,7 +112,7 @@ func TestWorkspaceCommandPersistsAcrossDaemonRestart(t *testing.T) {
 	if response.status != http.StatusCreated || !strings.Contains(response.body, `"slug":"persisted"`) {
 		t.Fatalf("create status=%d body=%s", response.status, response.body)
 	}
-	if err := first.Close(context.Background()); err != nil {
+	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,7 +130,7 @@ func TestWorkspaceCommandPersistsAcrossDaemonRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close(context.Background())
+	defer second.Close()
 	response = requestWorkspace(t, http.MethodGet, second.BaseURL()+"/_swobu/workspaces/persisted", "")
 	if response.status != http.StatusOK || !strings.Contains(response.body, `"default_route":"chat"`) || !strings.Contains(response.body, `"id":"primary"`) {
 		t.Fatalf("restored status=%d body=%s", response.status, response.body)
@@ -143,7 +143,7 @@ func TestStartCreatesMissingRoutingConfigThroughStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer daemon.Close(context.Background())
+	defer daemon.Close()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

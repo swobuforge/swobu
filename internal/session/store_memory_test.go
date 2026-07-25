@@ -165,7 +165,7 @@ func TestMemoryStoreEvictsOldestExpiringRecordAtCapacity(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreDefensivelyCopiesResponsesRefinement(t *testing.T) {
+func TestMemoryStoreDefensivelyCopiesResponsesContinuation(t *testing.T) {
 	store := NewMemoryStore()
 	scope := "alpha"
 	target := testBackendTarget(t, "m")

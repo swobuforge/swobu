@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -59,11 +60,11 @@ func encodeChatCompletionsReasoning(payload map[string]any, request canonical.Ca
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			if request.Controls().Effort.IsSpecified() {
-				return canonical.UnsupportedOperation("chat completions cannot combine disabled reasoning with effort")
+				return provider.NewCandidateIncompatibility("Chat Completions cannot represent disabled reasoning with inference effort")
 			}
 			payload["reasoning_effort"] = "none"
 		case canonical.ReasoningAutomatic, canonical.ReasoningBudget:
-			return canonical.UnsupportedOperation("chat completions reasoning_effort cannot express explicit reasoning compute")
+			return provider.NewCandidateIncompatibility("Chat Completions reasoning_effort cannot represent explicit canonical reasoning compute")
 		}
 	}
 	if effort, ok := request.Controls().Effort.Get(); ok {

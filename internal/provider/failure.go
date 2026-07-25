@@ -14,28 +14,36 @@ type classifiedFailure interface {
 	providerFailure()
 }
 
-// UnsupportedError means a valid canonical request cannot be represented by
-// one exact backend. Compatibility evidence is unrelated to this control fact.
-type UnsupportedError struct {
+// CandidateIncompatibilityError means one exact target cannot represent a valid
+// canonical request. Exchange may try another candidate with the unchanged
+// request; this type is never a public client error.
+type CandidateIncompatibilityError struct {
 	Cause error
 }
 
-func (e UnsupportedError) Error() string {
+func (e CandidateIncompatibilityError) Error() string {
 	if e.Cause == nil {
-		return "request is unsupported by provider backend"
+		return "canonical request is incompatible with provider candidate"
 	}
-	return fmt.Sprintf("request is unsupported by provider backend: %v", e.Cause)
+	return fmt.Sprintf("canonical request is incompatible with provider candidate: %v", e.Cause)
 }
 
-func (e UnsupportedError) Unwrap() error  { return e.Cause }
-func (UnsupportedError) providerFailure() {}
+func (e CandidateIncompatibilityError) Unwrap() error  { return e.Cause }
+func (CandidateIncompatibilityError) providerFailure() {}
 
-// UnsupportedByBackend marks an exact-backend representation failure.
-func UnsupportedByBackend(err error) error {
+// CandidateIncompatible retains a typed cause while marking an exact-target
+// representation failure.
+func CandidateIncompatible(err error) error {
 	if err == nil {
 		return nil
 	}
-	return UnsupportedError{Cause: err}
+	return CandidateIncompatibilityError{Cause: err}
+}
+
+// NewCandidateIncompatibility marks an exact-target representation failure
+// without constructing or wrapping a public Swobu error.
+func NewCandidateIncompatibility(message string) error {
+	return CandidateIncompatible(errors.New(message))
 }
 
 // UnavailableError means provider I/O could not produce a usable backend
@@ -51,7 +59,7 @@ func (UnavailableError) providerFailure() {}
 
 // RejectedError means the backend returned a response rejecting this request.
 // Rejection is terminal unless the adapter has positively identified the
-// narrower UnsupportedError contract.
+// narrower CandidateIncompatibilityError contract.
 type RejectedError struct{ Cause error }
 
 func (e RejectedError) Error() string {

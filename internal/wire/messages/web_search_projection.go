@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // projectMessagesWebSearchLifecycles removes only completed call/result pairs
@@ -40,7 +41,7 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		}
 		resultIndex, completed := results[callID]
 		if !completed {
-			return nil, nil, canonical.UnsupportedOperation("messages cannot project unresolved web-search call " + callID)
+			return nil, nil, provider.NewCandidateIncompatibility("Messages cannot represent unresolved canonical web-search call " + callID)
 		}
 		drop[call.index] = struct{}{}
 		drop[resultIndex] = struct{}{}

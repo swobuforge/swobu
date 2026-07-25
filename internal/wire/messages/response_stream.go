@@ -252,7 +252,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		block.data = payload.ContentBlock.Data
 	case "server_tool_use":
 		if strings.TrimSpace(payload.ContentBlock.Name) != "web_search" { // swobu:io-string source=provider-wire
-			return canonical.UnsupportedOperation("messages streamed server-tool type is unsupported")
+			return canonical.NotImplemented("Swobu has no canonical projection for this streamed Messages server-tool type")
 		}
 		block.ItemKind = canonical.ItemKindToolCall
 		callID, err := canonical.NewToolCallID(payload.ContentBlock.ID)

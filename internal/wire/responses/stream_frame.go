@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -81,7 +82,7 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		}
 		return true, canonical.Event{}, nil
 	case "response.mcp_call_arguments.delta":
-		return false, canonical.Event{}, canonical.UnsupportedOperation("responses MCP streaming is not implemented")
+		return true, canonical.Event{}, nil
 	case "response.custom_tool_call_input.delta":
 		if err := s.handleToolArgumentsDelta(frame, canonical.ToolTypeCustom); err != nil {
 			return false, canonical.Event{}, err
@@ -105,7 +106,7 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		}
 		return true, canonical.Event{}, nil
 	case "response.mcp_call_arguments.done":
-		return false, canonical.Event{}, canonical.UnsupportedOperation("responses MCP streaming is not implemented")
+		return true, canonical.Event{}, nil
 	case "response.custom_tool_call_input.done":
 		if _, err := s.handleToolArgumentsDone(frame, canonical.ToolTypeCustom); err != nil {
 			return false, canonical.Event{}, err
@@ -155,7 +156,7 @@ func (s *responsesResponseStream) handleResponseCreated(ctx context.Context, fra
 		model = strings.TrimSpace(frame.Response.Model) // swobu:io-string source=boundary
 	}
 	s.enqueueEnvelopeStart(s.responseEnvID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: model}, canonical.EventMetadataFields{})
-	s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseEnvID, Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{Responses: &canonical.ResponsesNativeRef{ProviderResponseID: canonical.NewResponsesNativeResponseID(providerResponseID)}}}})
+	s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseEnvID, Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(providerResponseID)}}}})
 	return nil
 }
 
@@ -199,7 +200,6 @@ func (s *responsesResponseStream) handleToolArgumentsDelta(frame streamFrame, to
 func (s *responsesResponseStream) handleOutputItemAdded(frame streamFrame) (bool, error) {
 	itemType := strings.TrimSpace(frame.Item.Type) // swobu:io-string source=boundary
 	if itemType == "reasoning" {
-		s.emittedOutput = true
 		s.closeOpenText(canonical.EnvelopeStatusCompleted)
 		itemID := fallbackItemID(frame.Item.ID, "reasoning", frame.OutputIndex)
 		if _, exists := s.reasoningStates[itemID]; exists {
@@ -216,7 +216,10 @@ func (s *responsesResponseStream) handleOutputItemAdded(frame streamFrame) (bool
 	case "custom_tool_call":
 		s.emittedOutput = true
 		toolType = canonical.ToolTypeCustom
+	case "message", "web_search_call":
+		return false, nil
 	default:
+		s.omitProviderOutput(frame.OutputIndex)
 		return false, nil
 	}
 	itemID := fallbackItemID(frame.Item.ID, frame.Item.CallID, frame.OutputIndex)
@@ -256,12 +259,41 @@ func (s *responsesResponseStream) handleOutputItemDone(frame streamFrame) (bool,
 	case "custom_tool_call":
 		return s.completeToolState(frame, canonical.ToolTypeCustom, false, true)
 	case "web_search_call":
+		rawAction := bytes.TrimSpace(frame.Item.Action)
+		if len(rawAction) == 0 || bytes.Equal(rawAction, []byte("null")) {
+			if strings.TrimSpace(frame.Item.Status) != "completed" { // swobu:io-string source=provider-wire
+				return false, canonical.InternalError("responses streamed actionless web-search marker is not completed")
+			}
+			s.omitProviderOutput(frame.OutputIndex)
+			return true, nil
+		}
+		state, err := decodeResponsesWebSearchLifecycleState(frame.Item.Status)
+		if err != nil {
+			return false, canonical.NotImplemented("Swobu cannot project this valid streamed Responses web-search history state")
+		}
+		if state != responsesWebSearchSucceeded {
+			return false, canonical.InternalError("responses completed web-search stream item is not terminal")
+		}
 		return s.completeWebSearchItem(frame)
 	case "message":
 		return s.completeMessageItem(frame)
 	default:
-		// Exact native capture retains output kinds without portable P0 meaning.
-		return false, nil
+		if len(frame.RawItem) == 0 {
+			return false, canonical.InternalError("responses completed opaque item is missing")
+		}
+		items, err := decodeCompletedResponsesItem(s.request, frame.RawItem)
+		if err != nil {
+			return false, err
+		}
+		if err := s.enqueueCompletedOutputItems(items); err != nil {
+			return false, err
+		}
+		if len(items) == 0 {
+			s.omitProviderOutput(frame.OutputIndex)
+		} else {
+			s.emittedOutput = true
+		}
+		return true, nil
 	}
 }
 
@@ -358,9 +390,6 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 		s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 		return nil
 	} else {
-		if err := s.completeNativeOutput(frame.RawOutput); err != nil {
-			return err
-		}
 		usedFallback := false
 		fallbackItems := []canonical.CanonicalItem(nil)
 		if !s.emittedOutput {

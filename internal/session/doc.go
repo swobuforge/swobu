@@ -10,9 +10,9 @@
 // materializes canonical checkpoint truth plus the codec-rebased current
 // invocation, restoring opaque thinking hidden from client projection. It may also
 // build a native-resumption delta when the matched checkpoint contains a valid
-// exact-target provider handle. Current reasoning controls and effort are
-// normally remain per invocation. When matching tool results continue an
-// unfinished assistant turn, omitted compute and effort are resolved from the
+// exact-target provider handle. Reasoning controls and effort normally remain
+// local to each invocation. When matching tool results continue an unfinished
+// assistant turn, omitted compute and effort are resolved from the
 // checkpoint request directly into the effective Full and Delta requests;
 // explicit conflicts reject. Partial result batches are legal, while duplicate
 // or foreign call IDs are malformed continuations.

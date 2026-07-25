@@ -32,11 +32,9 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
-	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Workspace: "acme",
+	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Workspace: "acme", RequestPath: "/responses",
 		RequestID:     requestID,
 		Route:         route,
-		Result:        trafficevidence.ResultClassSuccess,
-		StatusCode:    200,
 		Timing:        timing,
 		TokenUsage:    usage,
 		ClientFamily:  trafficevidence.ClientFamily("responses"),
@@ -55,7 +53,7 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 			Applied: []string{"p.encode"},
 			Mutated: true,
 		}},
-	})
+	}, trafficevidence.TerminalOutcome{Result: trafficevidence.ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"})
 	if err != nil {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}

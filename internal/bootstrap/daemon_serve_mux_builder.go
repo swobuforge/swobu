@@ -47,7 +47,7 @@ func buildDaemonServeMux(
 		return daemon.StatusProjectionForScope(scope)
 	}))
 	mux.Handle("/_swobu/down", httpapi.NewShutdownHandler(func(context.Context) error {
-		go func() { _ = daemon.Close(context.Background()) }()
+		go func() { _ = daemon.Close() }()
 		return nil
 	}))
 	mux.Handle("/_swobu/target-probe", httpapi.NewTargetProbeHandler(runtime))

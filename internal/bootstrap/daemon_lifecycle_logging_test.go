@@ -13,8 +13,10 @@ import (
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
-func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
-	t.Parallel()
+func TestDaemonLifecycle_CloseIsIdempotentAndEmitsStructuredLifecycleEvents(t *testing.T) {
+	// Opt out so product telemetry does not attempt a real upload during the
+	// test. (Not t.Parallel: t.Setenv.)
+	t.Setenv("DO_NOT_TRACK", "1")
 
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o700); err != nil {
@@ -37,8 +39,11 @@ func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap.Start returned error: %v", err)
 	}
-	if err := daemon.Close(context.Background()); err != nil {
+	if err := daemon.Close(); err != nil {
 		t.Fatalf("daemon.Close returned error: %v", err)
+	}
+	if err := daemon.Close(); err != nil {
+		t.Fatalf("second daemon.Close returned error: %v", err)
 	}
 
 	text := logs.String()
@@ -49,6 +54,11 @@ func TestDaemonLifecycle_EmitsStructuredLifecycleEvents(t *testing.T) {
 	assertContainsLogEvent(t, text, "initialization_completed")
 	assertContainsLogEvent(t, text, "graceful_shutdown_requested")
 	assertContainsLogEvent(t, text, "graceful_shutdown_completed")
+	for _, event := range []string{"graceful_shutdown_requested", "graceful_shutdown_completed"} {
+		if got := strings.Count(text, "event="+event); got != 1 {
+			t.Fatalf("%s count = %d, want 1; logs=%s", event, got, text)
+		}
+	}
 }
 
 func TestDaemonLifecycle_StartFailureIncludesErrorDetailsInErrorAndLogs(t *testing.T) {

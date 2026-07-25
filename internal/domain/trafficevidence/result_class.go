@@ -12,6 +12,8 @@ const (
 	ResultClassCancelled                  ResultClass = "cancelled"
 	ResultClassUnsupportedOperation       ResultClass = "unsupported_operation"
 	ResultClassUnsupportedDeliveryVariant ResultClass = "unsupported_delivery_variant"
+	ResultClassNotImplemented             ResultClass = "not_implemented"
+	ResultClassNoCompatibleTarget         ResultClass = "no_compatible_target"
 )
 
 func ParseResultClass(raw string) (ResultClass, error) {
@@ -22,7 +24,9 @@ func ParseResultClass(raw string) (ResultClass, error) {
 		ResultClassBackendError,
 		ResultClassCancelled,
 		ResultClassUnsupportedOperation,
-		ResultClassUnsupportedDeliveryVariant:
+		ResultClassUnsupportedDeliveryVariant,
+		ResultClassNotImplemented,
+		ResultClassNoCompatibleTarget:
 		return value, nil
 	default:
 		return "", fmt.Errorf("unknown result class %q", raw)

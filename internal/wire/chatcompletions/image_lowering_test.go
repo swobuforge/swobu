@@ -42,7 +42,8 @@ func TestEncodeChatToolResultImageRejects(t *testing.T) {
 	if err == nil {
 		t.Fatal("Chat Completions accepted a tool-result image")
 	}
-	if !doc.IsEmpty() || len(sink.effects) != 1 || sink.effects[0].Feature != compat.RequestItemsToolResultImage || sink.effects[0].Outcome != compat.Reject {
+	if !doc.IsEmpty() || !decisionRecorded(sink.effects, compat.RequestItemsToolResultImage, compat.Reject) ||
+		!decisionRecorded(sink.effects, compat.RequestItemsToolResultContentBoundaries, compat.Approx) {
 		t.Fatalf("rejection doc=%#v decisions=%#v", doc, sink.effects)
 	}
 }

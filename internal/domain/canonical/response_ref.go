@@ -20,17 +20,17 @@ func (id SwobuResponseID) IsZero() bool {
 	return strings.TrimSpace(string(id)) == "" // swobu:io-string source=domain
 }
 
-// ResponsesNativeResponseID is an opaque response identity issued by one
+// ResponsesResponseID is an opaque response identity issued by one
 // Responses-compatible provider. It is never a Swobu checkpoint key or client ID.
-type ResponsesNativeResponseID string
+type ResponsesResponseID string
 
-// NewResponsesNativeResponseID preserves one provider-issued identity exactly.
-func NewResponsesNativeResponseID(raw string) ResponsesNativeResponseID {
-	return ResponsesNativeResponseID(raw)
+// NewResponsesResponseID preserves one provider-issued identity exactly.
+func NewResponsesResponseID(raw string) ResponsesResponseID {
+	return ResponsesResponseID(raw)
 }
 
-func (id ResponsesNativeResponseID) String() string { return string(id) }
-func (id ResponsesNativeResponseID) isBlank() bool {
+func (id ResponsesResponseID) String() string { return string(id) }
+func (id ResponsesResponseID) isBlank() bool {
 	return strings.TrimSpace(string(id)) == "" // swobu:io-string source=domain
 }
 
@@ -38,13 +38,14 @@ func (id ResponsesNativeResponseID) isBlank() bool {
 // request that selects it. Provider-native handles remain optional typed children.
 type ResponseRef struct {
 	SwobuID   SwobuResponseID
-	Responses *ResponsesNativeRef
+	Responses *ResponsesContinuation
 }
 
-// ResponsesNativeRef preserves a Responses-native provider handle and the
-// exact routing target generation for which that handle is valid.
-type ResponsesNativeRef struct {
-	ProviderResponseID ResponsesNativeResponseID
+// ResponsesContinuation is consumed by session target projection to choose
+// native Delta continuation only for the exact target generation that created
+// the provider response; every other target receives materialized Full history.
+type ResponsesContinuation struct {
+	ProviderResponseID ResponsesResponseID
 	TargetID           string
 	TargetVersion      uint64
 }
@@ -72,7 +73,7 @@ func (r ResponseRef) ValidateCommittedResponse() error {
 
 // ValidateBound requires every fact needed to safely reuse a native provider
 // response ID for one exact target generation.
-func (r ResponsesNativeRef) ValidateBound() error {
+func (r ResponsesContinuation) ValidateBound() error {
 	if r.ProviderResponseID.isBlank() {
 		return errors.New("Responses native reference requires a provider response ID")
 	}
@@ -96,6 +97,6 @@ func (r ResponseRef) Clone() ResponseRef {
 
 // AppliesTo reports whether the Responses-native handle is valid for one
 // exact routing-owned target generation.
-func (r ResponsesNativeRef) AppliesTo(targetID string, targetVersion uint64) bool {
+func (r ResponsesContinuation) AppliesTo(targetID string, targetVersion uint64) bool {
 	return r.ValidateBound() == nil && r.TargetID == targetID && r.TargetVersion == targetVersion
 }

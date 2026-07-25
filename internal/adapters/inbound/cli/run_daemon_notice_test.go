@@ -10,7 +10,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/swobuforge/swobu/internal/bootstrap"
-	"github.com/swobuforge/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/producttelemetry"
 )
 
 func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
@@ -24,12 +24,14 @@ func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
 		Stderr: &stderr,
 		Start: func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error) {
 			startCalled = true
-			state, err := telemetry.NewStore().LoadOrCreate()
+			// The daemon claimed the notice before start, so a second claim must
+			// lose (return false): the marker already exists.
+			claimed, err := producttelemetry.ClaimNotice()
 			if err != nil {
-				t.Fatalf("LoadOrCreate returned error: %v", err)
+				t.Fatalf("ClaimNotice returned error: %v", err)
 			}
-			if !state.NoticeShown {
-				t.Fatal("notice_shown = false before daemon start")
+			if claimed {
+				t.Fatal("notice was not already claimed before daemon start")
 			}
 			return nil, fmt.Errorf("stop after notice check")
 		},
@@ -50,7 +52,7 @@ func TestRunner_DaemonShowsNoticeBeforeStart(t *testing.T) {
 	if splashIdx < 0 {
 		t.Fatalf("stdout missing splash; stdout=%q", out)
 	}
-	noticeIdx := strings.Index(out, telemetry.FirstRunNoticeText())
+	noticeIdx := strings.Index(out, producttelemetry.FirstRunNoticeText())
 	if noticeIdx < 0 {
 		t.Fatalf("stdout missing one-line telemetry notice; stdout=%q", out)
 	}

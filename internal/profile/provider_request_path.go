@@ -1,7 +1,8 @@
 package profile
 
 import (
-	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"fmt"
+
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
@@ -11,7 +12,7 @@ import (
 func ProviderRequestPath(providerSpec string, kind protocolkind.ProtocolKind) (string, error) {
 	providerID, ok := ParseProviderID(providerSpec)
 	if !ok {
-		return "", canonical.BadEndpoint("provider id is unsupported")
+		return "", fmt.Errorf("provider id is unsupported")
 	}
 	switch providerID {
 	case ProviderSpecBedrock:
@@ -23,7 +24,7 @@ func ProviderRequestPath(providerSpec string, kind protocolkind.ProtocolKind) (s
 		case protocolkind.Messages:
 			return "/messages", nil
 		default:
-			return "", canonical.UnsupportedOperation("bedrock provider does not implement the requested protocol")
+			return "", fmt.Errorf("Bedrock target does not implement protocol %q", kind)
 		}
 	default:
 		switch kind {
@@ -34,7 +35,7 @@ func ProviderRequestPath(providerSpec string, kind protocolkind.ProtocolKind) (s
 		case protocolkind.Messages:
 			return "/messages", nil
 		default:
-			return "", canonical.UnsupportedOperation("protocol kind is not implemented")
+			return "", fmt.Errorf("target protocol kind %q has no request path", kind)
 		}
 	}
 }

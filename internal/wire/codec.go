@@ -23,7 +23,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
-	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -67,9 +66,8 @@ type ClientMessageResult struct {
 
 // ClientRequestResult is the payload returned by DecodeClientRequest.
 type ClientRequestResult struct {
-	Request        canonical.CanonicalRequest
-	Delivery       delivery.Delivery
-	ResponsesInput responsesnative.Items
+	Request  canonical.CanonicalRequest
+	Delivery delivery.Delivery
 	// RequestFingerprint identifies the current protocol-native contribution
 	// relative to the predecessor selected by decode semantics.
 	RequestFingerprint historyfingerprint.Request
@@ -82,9 +80,8 @@ type ClientRequestResult struct {
 // RebasedRequest couples one reconstructed completed history with the complete
 // current invocation after only that historical prefix has been removed.
 type RebasedRequest struct {
-	Previous       historyfingerprint.History
-	Request        canonical.CanonicalRequest
-	ResponsesInput responsesnative.Items
+	Previous historyfingerprint.History
+	Request  canonical.CanonicalRequest
 }
 
 // CompletionState is the write-once lifecycle of streamed response
@@ -161,8 +158,7 @@ func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
 
 // ProviderEncodeInput is the declarative canonical input for provider encoders.
 type ProviderEncodeInput struct {
-	Request   canonical.CanonicalRequest
-	Responses responsesnative.RequestState
+	Request canonical.CanonicalRequest
 }
 
 // ProviderEncodeResult is the concrete provider-request lowering result.
@@ -178,5 +174,4 @@ type ProviderDecodeResult struct {
 	Stream            canonical.ResponseStream
 	Decisions         []compat.Decision
 	TerminalDecisions provider.DecisionSource
-	ResponsesOutput   provider.ResponsesOutputSource
 }

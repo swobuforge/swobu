@@ -15,8 +15,8 @@ type ResolvedMediaAsset struct {
 	bytes     []byte
 }
 
-func NewResolvedMediaAsset(mediaType canonical.ImageMediaType, data []byte) (ResolvedMediaAsset, error) {
-	if mediaType == "" || len(data) == 0 {
+func newResolvedMediaAsset(mediaType canonical.ImageMediaType, data []byte) (ResolvedMediaAsset, error) {
+	if _, err := canonical.NewInlineImage(mediaType, data, canonical.Unspecified[canonical.ImageDetail]()); err != nil {
 		return ResolvedMediaAsset{}, fmt.Errorf("resolved media asset is invalid")
 	}
 	return ResolvedMediaAsset{mediaType: mediaType, bytes: append([]byte(nil), data...)}, nil
@@ -37,17 +37,21 @@ type resolvedMediaBindingRef struct {
 }
 
 // ResolvedMedia is checkpoint media with private occurrence bindings and owned
-// assets. Bind and Merge normalize identical assets; a future persistence
-// decoder must rebuild values through those checked operations.
+// assets. Bind and Merge normalize identical assets. ValidateForRequest proves
+// that bindings exactly cover every URL-image occurrence; a future persistence
+// decoder must rebuild values through these checked operations.
 type ResolvedMedia struct {
 	assets   []ResolvedMediaAsset
 	bindings []resolvedMediaBindingRef
 }
 
-// Bind returns an owned copy with one occurrence bound to an existing or new
-// byte asset. A position may have only one durable meaning.
+// Bind returns an owned copy with one validated URL occurrence bound to an
+// existing or new byte asset. A position may have only one durable meaning.
 func (m ResolvedMedia) Bind(position canonical.RequestPartRef, sourceURL string, mediaType canonical.ImageMediaType, data []byte) (ResolvedMedia, error) {
-	asset, err := NewResolvedMediaAsset(mediaType, data)
+	if _, err := canonical.NewURLImage(sourceURL, canonical.Unspecified[canonical.ImageDetail]()); err != nil {
+		return ResolvedMedia{}, fmt.Errorf("resolved media source URL is invalid")
+	}
+	asset, err := newResolvedMediaAsset(mediaType, data)
 	if err != nil {
 		return ResolvedMedia{}, err
 	}
@@ -136,7 +140,7 @@ func (m ResolvedMedia) Validate() error {
 		referenced[binding.asset] = true
 	}
 	for _, asset := range m.assets {
-		if _, err := NewResolvedMediaAsset(asset.mediaType, asset.bytes); err != nil {
+		if _, err := newResolvedMediaAsset(asset.mediaType, asset.bytes); err != nil {
 			return err
 		}
 	}
@@ -148,8 +152,9 @@ func (m ResolvedMedia) Validate() error {
 	return nil
 }
 
-// ValidateForRequest additionally proves every binding names the URL at its
-// exact durable request-tree occurrence.
+// ValidateForRequest proves bidirectional equality between bindings and URL
+// images: every binding names its exact occurrence, and every occurrence has
+// exactly one immutable asset.
 func (m ResolvedMedia) ValidateForRequest(request canonical.CanonicalRequest) error {
 	if err := m.Validate(); err != nil {
 		return err
@@ -167,6 +172,10 @@ func (m ResolvedMedia) ValidateForRequest(request canonical.CanonicalRequest) er
 		if urls[binding.position] != binding.sourceURL {
 			return fmt.Errorf("resolved media binding does not match request occurrence")
 		}
+		delete(urls, binding.position)
+	}
+	if len(urls) != 0 {
+		return fmt.Errorf("resolved media is missing %d request occurrence binding(s)", len(urls))
 	}
 	return nil
 }

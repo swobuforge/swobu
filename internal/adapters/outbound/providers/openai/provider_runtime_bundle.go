@@ -62,7 +62,7 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 		return document, nil
 	})
 	if err != nil {
-		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+		return carrier.Document{}, decisions, err
 	}
 	if document.MaxTokens != nil {
 		document.MaxCompletionTokens = document.MaxTokens

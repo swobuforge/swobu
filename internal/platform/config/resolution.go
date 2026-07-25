@@ -2,9 +2,7 @@ package config
 
 import (
 	"os"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // ResolveTelemetryEndpoint applies env override over the built-in endpoint.
@@ -13,19 +11,6 @@ func ResolveTelemetryEndpoint(defaultValue string) string {
 		return explicit
 	}
 	return strings.TrimSpace(defaultValue) // swobu:io-string source=boundary
-}
-
-// ResolveTelemetryExportInterval applies env override over a built-in export interval.
-func ResolveTelemetryExportInterval(defaultValue time.Duration) time.Duration {
-	raw := strings.TrimSpace(os.Getenv(EnvTelemetryExportIntervalSeconds)) // swobu:io-string source=boundary
-	if raw == "" {
-		return defaultValue
-	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds <= 0 {
-		return defaultValue
-	}
-	return time.Duration(seconds) * time.Second
 }
 
 // ResolveConfigPath resolves the config path for `swobu daemon`.

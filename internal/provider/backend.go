@@ -7,7 +7,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 )
 
 // Codec owns final canonical/provider-wire conversion for one exact backend.
@@ -24,21 +23,12 @@ type DecisionSource interface {
 	Decisions() []compat.Decision
 }
 
-// ResponsesOutputSource exposes a complete Responses-native continuation
-// batch only after the provider response reaches a checkpoint-safe terminal.
-// No layer outside Responses capture and checkpoint persistence interprets it.
-type ResponsesOutputSource interface {
-	ResponsesOutput() (responsesnative.Items, bool)
-}
-
-// DecodedResponse is one invocation-bound provider decode result. Portable
-// semantics enter the canonical stream; independent Responses replay output
-// remains beside it until checkpoint persistence.
+// DecodedResponse is one invocation-bound provider decode result. All durable
+// response semantics enter the canonical stream.
 type DecodedResponse struct {
 	Stream            canonical.ResponseStream
 	Decisions         []compat.Decision
 	TerminalDecisions DecisionSource
-	ResponsesOutput   ResponsesOutputSource
 }
 
 // Transport performs external I/O over a final provider wire document. It has

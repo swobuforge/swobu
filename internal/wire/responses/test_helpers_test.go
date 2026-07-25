@@ -17,8 +17,8 @@ func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []co
 func testResponsesPrevious(swobuID, providerID string) *canonical.ResponseRef {
 	return &canonical.ResponseRef{
 		SwobuID: canonical.NewSwobuResponseID(swobuID),
-		Responses: &canonical.ResponsesNativeRef{
-			ProviderResponseID: canonical.NewResponsesNativeResponseID(providerID),
+		Responses: &canonical.ResponsesContinuation{
+			ProviderResponseID: canonical.NewResponsesResponseID(providerID),
 			TargetID:           "target", TargetVersion: 1,
 		},
 	}

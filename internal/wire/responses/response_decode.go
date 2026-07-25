@@ -10,7 +10,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -101,7 +100,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		emitNativeResponseIDCaptured(ctx, sink, exchangeID, dto.ID)
 		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 			exchangeID,
-			canonical.ResponseRef{Responses: &canonical.ResponsesNativeRef{ProviderResponseID: canonical.NewResponsesNativeResponseID(dto.ID)}},
+			canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(dto.ID)}},
 			dto.Model,
 			items,
 			terminalReason,
@@ -122,6 +121,35 @@ func emitNativeResponseIDCaptured(ctx context.Context, sink compat.Sink, exchang
 }
 
 func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+	items, err := rawResponsesOutputItems(wireItems)
+	if err != nil {
+		return nil, err
+	}
+	output := make([]canonical.CanonicalItem, 0, len(items))
+	for _, raw := range items {
+		decoded, err := decodeCompletedResponsesItem(request, raw)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, decoded...)
+	}
+	if len(output) == 0 && strings.TrimSpace(outputText) != "" { // swobu:io-string source=boundary
+		message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(outputText)})
+		if err != nil {
+			return nil, canonical.InternalError("responses output text is invalid")
+		}
+		output = append(output, message)
+	}
+	return output, nil
+}
+
+// decodeCompletedResponsesItem is the sole complete Responses item switch for
+// buffered output and terminal streaming objects.
+func decodeCompletedResponsesItem(request canonical.CanonicalRequest, raw json.RawMessage) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSet(context.Background(), request, []json.RawMessage{raw}, "", "", nil)
+}
+
+func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
 	items, err := rawResponsesOutputItems(wireItems)
 	if err != nil {
 		return nil, err
@@ -178,14 +206,25 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 			}
 			output = append(output, call)
 		case "web_search_call":
-			lifecycle, err := decodeResponsesWebSearchLifecycle(item.ID, item.Action, strings.TrimSpace(item.Status) == "completed") // swobu:io-string source=provider-wire
+			rawAction := bytes.TrimSpace(item.Action)
+			if len(rawAction) == 0 || bytes.Equal(rawAction, []byte("null")) {
+				if strings.TrimSpace(item.Status) != "completed" { // swobu:io-string source=provider-wire
+					return nil, canonical.InternalError("responses actionless web-search marker is not completed")
+				}
+				// The marker has no visible-output or continuation consumer.
+				break
+			}
+			state, err := decodeResponsesWebSearchLifecycleState(item.Status)
+			if err != nil {
+				return nil, canonical.NotImplemented("Swobu cannot project this valid Responses web-search history state")
+			}
+			lifecycle, err := decodeResponsesWebSearchLifecycle(item.ID, item.Action, state)
 			if err != nil {
 				return nil, err
 			}
 			output = append(output, lifecycle...)
 		case "mcp_call":
-			// The native batch retains this complete item even though portable
-			// canonical has no P0 projection for it.
+			// No demonstrated client-output or continuation consumer.
 		case "reasoning":
 			reasoning, present, err := decodeResponsesReasoningItem(item)
 			if err != nil {
@@ -195,8 +234,8 @@ func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, 
 				output = append(output, reasoning)
 			}
 		default:
-			// Future native items remain exact continuation truth without being
-			// assigned speculative portable semantics.
+			// Unknown provider output is ignored until a named behavioral
+			// consumer justifies a narrowly typed canonical representation.
 		}
 	}
 	if len(output) == 0 && strings.TrimSpace(outputText) != "" { // swobu:io-string source=boundary
@@ -248,7 +287,7 @@ func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO) (canonica
 			}
 			content = append(content, messagePart)
 		default:
-			return canonical.UnsupportedOperation("responses output item content part type is not implemented")
+			return canonical.NotImplemented("Swobu has no canonical projection for this Responses output content part type")
 		}
 		return nil
 	})
@@ -271,7 +310,7 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.Ca
 	parts := make([]canonical.ReasoningPart, 0, len(item.Summary)+len(content))
 	for _, summary := range item.Summary {
 		if strings.TrimSpace(summary.Type) != "summary_text" { // swobu:io-string source=provider-wire
-			return canonical.CanonicalItem{}, false, canonical.UnsupportedOperation("responses reasoning summary part type is not implemented")
+			return canonical.CanonicalItem{}, false, canonical.NotImplemented("Swobu has no canonical projection for this Responses reasoning summary part type")
 		}
 		part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary.Text)
 		if err != nil {
@@ -289,38 +328,21 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.Ca
 		}
 		parts = append(parts, part)
 	}
-	if len(parts) == 0 {
+	var opaque canonical.OpaqueThinking
+	if item.EncryptedContent != "" {
+		opaque, err = canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: item.EncryptedContent})
+		if err != nil {
+			return canonical.CanonicalItem{}, false, canonical.InternalError("responses encrypted reasoning is invalid")
+		}
+	}
+	if len(parts) == 0 && opaque.IsZero() {
 		return canonical.CanonicalItem{}, false, nil
 	}
-	reasoning, err := canonical.NewReasoningItem(parts, canonical.OpaqueThinking{})
+	reasoning, err := canonical.NewReasoningItem(parts, opaque)
 	if err != nil {
 		return canonical.CanonicalItem{}, false, canonical.InternalError("responses reasoning item is invalid")
 	}
 	return reasoning, true, nil
-}
-
-func captureBufferedResponsesOutput(raw []byte) (responsesnative.Items, error) {
-	var envelope struct {
-		Output []json.RawMessage `json:"output"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return responsesnative.Items{}, canonical.InternalError("responses output is invalid JSON")
-	}
-	items := make([][]byte, len(envelope.Output))
-	for index := range envelope.Output {
-		var header struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(envelope.Output[index], &header); err != nil || strings.TrimSpace(header.Type) == "" { // swobu:io-string source=provider-wire
-			return responsesnative.Items{}, canonical.InternalError("responses output contains a malformed native item")
-		}
-		items[index] = envelope.Output[index]
-	}
-	batch, err := responsesnative.NewItems(items)
-	if err != nil {
-		return responsesnative.Items{}, canonical.InternalError("responses output contains an invalid native item")
-	}
-	return batch, nil
 }
 
 func decodeResponsesReasoningContent(raw json.RawMessage) ([]responsesReasoningTextDTO, error) {

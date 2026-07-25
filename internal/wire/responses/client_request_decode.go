@@ -11,10 +11,14 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
+)
+
+const (
+	responsesDecodeViewFull           = "full"
+	responsesDecodeViewRebasedCurrent = "rebased_current"
 )
 
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
@@ -22,8 +26,9 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 	if err := shared.DecodeExtensibleRequestObject(doc.RawBytes(), &dto, "responses request"); err != nil {
 		return wire.ClientDecodeResult{}, err
 	}
+	exchangeID := strings.TrimSpace(doc.Meta.Opaque["exchange_id"]) // swobu:io-string source=boundary
 	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, "")
+		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, exchangeID, responsesDecodeViewFull)
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
@@ -32,11 +37,7 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
-		nativeInput, err := captureResponsesInputItems(dto.Input)
-		if err != nil {
-			return wire.ClientRequestResult{}, err
-		}
-		result := wire.ClientRequestResult{Request: request, Delivery: delivery, ResponsesInput: nativeInput, RequestFingerprint: history.request}
+		result := wire.ClientRequestResult{Request: request, Delivery: delivery, RequestFingerprint: history.request}
 		if !explicit && history.previous != nil {
 			rebasedDTO := dto
 			rebasedDTO.Input = history.current
@@ -44,76 +45,15 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 			if err != nil {
 				return wire.ClientRequestResult{}, err
 			}
-			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, "")
+			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, exchangeID, responsesDecodeViewRebasedCurrent)
 			if err != nil {
 				return wire.ClientRequestResult{}, err
 			}
-			rebasedNative, err := captureResponsesInputItems(history.current)
-			if err != nil {
-				return wire.ClientRequestResult{}, err
-			}
-			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased, ResponsesInput: rebasedNative}
+			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased}
 		}
 		return result, nil
 	})
 	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
-}
-
-func captureResponsesInputItems(raw json.RawMessage) (responsesnative.Items, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || trimmed[0] != '[' {
-		return responsesnative.Items{}, nil
-	}
-	var items []json.RawMessage
-	if err := json.Unmarshal(trimmed, &items); err != nil {
-		return responsesnative.Items{}, canonical.BadRequest("responses request input is invalid")
-	}
-	values := make([][]byte, len(items))
-	for index := range items {
-		value, err := replayableResponsesInputItem(items[index])
-		if err != nil {
-			return responsesnative.Items{}, canonical.BadRequest("responses request input contains an invalid native item")
-		}
-		values[index] = value
-	}
-	preserved, err := responsesnative.NewItems(values)
-	if err != nil {
-		return responsesnative.Items{}, canonical.BadRequest("responses request input contains an invalid native item")
-	}
-	return preserved, nil
-}
-
-var responsesProviderItemIDPrefixes = map[string]string{
-	"function_call":   "fc",
-	"message":         "msg",
-	"reasoning":       "rs",
-	"web_search_call": "ws",
-}
-
-// replayableResponsesInputItem owns the distinction between client-local item
-// identity and provider continuation identity. Some Responses clients assign
-// UI-oriented IDs such as "item_0" to known input items. Those values are valid
-// client metadata but invalid when replayed into provider-owned ID namespaces.
-// Unknown item kinds remain opaque so future Responses fields survive intact.
-func replayableResponsesInputItem(raw json.RawMessage) ([]byte, error) {
-	var identity struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &identity); err != nil {
-		return nil, err
-	}
-	prefix, providerOwned := responsesProviderItemIDPrefixes[identity.Type]
-	if !providerOwned || identity.ID == "" || strings.HasPrefix(identity.ID, prefix) {
-		return raw, nil
-	}
-
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &object); err != nil {
-		return nil, err
-	}
-	delete(object, "id")
-	return json.Marshal(object)
 }
 
 // swobu:lint ignore function-complexity because=Responses request decoding validates all request bands at one protocol boundary.
@@ -123,11 +63,11 @@ func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier
 	if err := shared.DecodeExtensibleRequestObject(raw, &dto, "responses request"); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
+	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID, responsesDecodeViewFull)
 }
 
 // swobu:lint ignore function-complexity because=Responses request decoding validates all request bands at one protocol boundary.
-func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto responsesRequestDTO, raw []byte, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto responsesRequestDTO, raw []byte, sink compat.Sink, exchangeID string, decodeView string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	if err := decodeResponsesWebSearchInclude(dto.Include, sink, exchangeID); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -138,7 +78,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto resp
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseWireID)) // swobu:io-string source=boundary
+	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseWireID), exchangeID, decodeView) // swobu:io-string source=boundary
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "responses")
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -159,23 +99,30 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto resp
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	conversation, tools, err := decodeResponsesInput(dto.Input, tools, supplied.Tools, sink, exchangeID, decoder.ImageLimits)
+	if err != nil {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+	}
+	// A present empty additional_tools array remains a specified empty tool
+	// band. Non-nil declarations carry that wire occurrence without retaining
+	// the source carrier in canonical state.
+	supplied.Tools = supplied.Tools || tools != nil
 	toolSet, err := canonical.NewToolSet(tools)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses tools are invalid")
 	}
-	conversation, err := decodeResponsesInput(dto.Input, tools, sink, exchangeID, decoder.ImageLimits)
-	if err != nil {
-		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
-	}
 	if err := shared.ValidateImageDecodeLimits(conversation, decoder.ImageLimits); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request image limits are exceeded")
 	}
+	logResponsesRequestImages(conversation, exchangeID, decodeView)
 	if len(conversation) == 0 && !responsesNativeInputPresent(dto.Input) && strings.TrimSpace(dto.PreviousResponseWireID) == "" { // swobu:io-string source=boundary
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request is missing required fields")
 	}
 	slog.Debug("responses request tools",
 		"component", "httpapi",
 		"event", "responses_request_tools",
+		"exchange_id", exchangeID,
+		"decode_view", decodeView,
 		"tool_count", len(tools),
 		"function_tool_count", responsesToolKindCount(tools, canonical.ToolTypeFunction),
 		"custom_tool_count", responsesToolKindCount(tools, canonical.ToolTypeCustom),
@@ -284,7 +231,7 @@ func decodeResponsesInstructions(raw json.RawMessage) (string, error) {
 	return strings.TrimSpace(instructions), nil // swobu:io-string source=boundary
 }
 
-func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
+func logResponsesRawInput(input json.RawMessage, previousResponseID string, exchangeID string, decodeView string) {
 	raw := strings.TrimSpace(string(input)) // swobu:io-string source=boundary
 	shape := "null"
 	if raw != "" && raw != "null" {
@@ -302,8 +249,84 @@ func logResponsesRawInput(input json.RawMessage, previousResponseID string) {
 	slog.Debug("responses input summary",
 		"component", "httpapi",
 		"event", "responses_input_summary",
+		"exchange_id", exchangeID,
+		"decode_view", decodeView,
 		"has_previous_response_id", previousResponseID != "",
 		"input_shape", shape,
 		"encoded_bytes", len(input),
 	)
+}
+
+// logResponsesRequestImages records placement and correlation provenance only.
+// Payload text, bytes, data URLs, source URLs, and tool arguments must never
+// cross this diagnostic boundary.
+func logResponsesRequestImages(items []canonical.CanonicalItem, exchangeID string, decodeView string) {
+	toolCalls := make(map[canonical.ToolCallID]canonical.ToolKey)
+	messageImageCount := 0
+	toolResultImageCount := 0
+	firstItem, firstPart := -1, -1
+	firstCallID, firstToolName, firstToolKind, firstSource := "", "", "", ""
+
+	for itemIndex, item := range items {
+		if call, ok := item.ToolCall(); ok {
+			toolCalls[call.CallID()] = call.Tool()
+			continue
+		}
+		if message, ok := item.Message(); ok {
+			for _, part := range message.Content() {
+				if _, ok := part.Image(); ok {
+					messageImageCount++
+				}
+			}
+			continue
+		}
+		result, ok := item.ToolResult()
+		if !ok {
+			continue
+		}
+		for partIndex, part := range result.Content() {
+			image, ok := part.Image()
+			if !ok {
+				continue
+			}
+			toolResultImageCount++
+			if firstItem >= 0 {
+				continue
+			}
+			firstItem, firstPart = itemIndex, partIndex
+			firstCallID = result.CallID().String()
+			firstSource = responsesImageSourceKind(image)
+			if tool, exists := toolCalls[result.CallID()]; exists {
+				firstToolName = tool.Name()
+				firstToolKind = string(tool.Kind())
+			}
+		}
+	}
+	if messageImageCount+toolResultImageCount == 0 {
+		return
+	}
+	slog.Debug("responses request images",
+		"component", "httpapi",
+		"event", "responses_request_images",
+		"exchange_id", exchangeID,
+		"decode_view", decodeView,
+		"message_image_count", messageImageCount,
+		"tool_result_image_count", toolResultImageCount,
+		"first_tool_result_item", firstItem,
+		"first_tool_result_part", firstPart,
+		"first_tool_call_id", firstCallID,
+		"first_tool_name", firstToolName,
+		"first_tool_kind", firstToolKind,
+		"first_source", firstSource,
+	)
+}
+
+func responsesImageSourceKind(image canonical.ImagePart) string {
+	if _, ok := image.Source().Inline(); ok {
+		return "inline"
+	}
+	if _, ok := image.Source().URL(); ok {
+		return "url"
+	}
+	return ""
 }

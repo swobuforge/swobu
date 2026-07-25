@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // responsesToolWireName returns the Responses wire token for one function or
@@ -13,7 +14,7 @@ import (
 // Attempt preparation has already projected every provider-facing key.
 func responsesToolWireName(tool canonical.ToolDeclaration) (string, error) {
 	if tool.Kind() != canonical.ToolKindFunction && tool.Kind() != canonical.ToolKindCustom {
-		return "", canonical.UnsupportedOperation("responses protocol only supports known tool declaration types")
+		return "", provider.NewCandidateIncompatibility("Responses cannot represent this canonical tool declaration type")
 	}
 	trimmedName := strings.TrimSpace(tool.Key().Name()) // swobu:io-string source=boundary
 	if trimmedName == "" {

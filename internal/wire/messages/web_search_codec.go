@@ -70,7 +70,7 @@ func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, i
 	sources := make([]canonical.WebSource, 0, len(blocks))
 	for _, block := range blocks {
 		if block.Type != "web_search_result" {
-			return canonical.CanonicalItem{}, canonical.UnsupportedOperation("messages web-search result block type is unsupported")
+			return canonical.CanonicalItem{}, canonical.NotImplemented("Swobu has no canonical projection for this Messages web-search result block type")
 		}
 		webURL, err := canonical.NewWebURL(block.URL)
 		if err != nil {
@@ -105,7 +105,7 @@ func decodeMessagesCitedText(text string, citations []messagesCitationDTO) (cano
 	canonicalCitations := make([]canonical.WebCitation, 0, len(citations))
 	for _, citation := range citations {
 		if citation.Type != "web_search_result_location" && citation.Type != "web_search_result" {
-			return canonical.MessagePart{}, canonical.UnsupportedOperation("messages citation type is unsupported")
+			return canonical.MessagePart{}, canonical.NotImplemented("Swobu has no canonical projection for this Messages citation type")
 		}
 		webURL, err := canonical.NewWebURL(citation.URL)
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -58,7 +59,7 @@ func encodeResponsesTool(tool canonical.ToolDeclaration) (ProviderRequestTool, e
 	if tool.Kind() == canonical.ToolKindWebSearch {
 		return ProviderRequestTool{Type: canonical.ToolTypeWebSearch}, nil
 	}
-	return ProviderRequestTool{}, canonical.UnsupportedOperation("responses protocol only supports known tool declaration types")
+	return ProviderRequestTool{}, provider.NewCandidateIncompatibility("Responses cannot represent this canonical tool declaration type")
 }
 
 func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {

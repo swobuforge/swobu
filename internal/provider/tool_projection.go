@@ -165,7 +165,11 @@ func rewriteAttemptToolKeys(request canonical.CanonicalRequest, table ToolProjec
 		}
 		toolPolicy = canonical.Specify(policy)
 	}
-	params := canonical.RequestParams{Model: request.ModelField(), Instructions: request.InstructionsField(), Items: items, ToolPolicy: toolPolicy, ToolCallBatch: request.ToolCallBatchField(), Controls: request.Controls(), OutputFormat: request.OutputFormatField()}
+	params := canonical.RequestParams{
+		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: items,
+		ToolPolicy: toolPolicy, ToolCallBatch: request.ToolCallBatchField(), Controls: request.Controls(),
+		Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
+	}
 	if request.ToolsSpecified() {
 		params.Tools = canonical.Specify(toolSet)
 	}

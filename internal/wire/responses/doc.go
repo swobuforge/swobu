@@ -11,14 +11,16 @@
 // reasoning-token usage accounting.
 // User-message and tool-result images preserve URL or inline sources; tool
 // results retain ordered mixed content through Responses content arrays.
+// Request diagnostics correlate full and implicitly rebased decode views by
+// carrier exchange metadata and report only safe image counts, coordinates,
+// call/tool identity, and source kind.
 // Responses summary and reasoning_text output map through portable canonical
-// reasoning. Independently, every complete native response.output item is
-// captured in order for exact stateless continuation; encrypted, program, and
-// unknown state remains opaque. A usable previous_response_id selects native
-// delta continuation. Otherwise a selected Responses attempt may replay a
-// complete native checkpoint ancestry and falls back to portable full history
-// when that optional ancestry is unavailable. Synthetic client response item
-// IDs are presentation-only.
+// reasoning. Every complete response.output item is decoded into the one
+// canonical history graph: known semantics use typed branches and refinements,
+// while unknown item types alone remain opaque. A usable previous_response_id
+// selects target-bound Delta continuation; otherwise the codec lowers canonical
+// Full history without a parallel native transcript. Synthetic client response
+// item IDs are presentation-only.
 // Buffered and streaming
 // paths complete the same canonical items. Stream projection keeps web-search
 // calls in the web_search_call grammar until their typed action and optional
@@ -33,14 +35,20 @@
 // requests but do not identify history; response envelopes do not participate.
 // Stateless client history may omit output-item presentation IDs or retain an
 // actionless completed web-search marker. Observed actions receive only a
-// request-local pairing ID; actionless markers remain exact native input and
-// do not acquire fabricated portable meaning.
-// Provider request encoding selects exact native input and stateless native
-// history before attempting portable conversation lowering. Exact providers
-// compose typed tool and input fields before this package's one serialization.
-// The independent replay transcript is owned by domain/responsesnative rather
-// than canonical because it is carried beside, not beneath, semantic request
-// and response artifacts.
+// request-local pairing ID; the actionless case is a typed partial-lifecycle
+// marker, and canonical does not fabricate an unobserved action. Stateless
+// request lowering folds typed WebSearchCall/WebSearchResult pairs back into
+// one web_search_call by canonical call ID, including non-adjacent results.
+// Provider request encoding always lowers canonical Full or Delta. Only
+// Responses facts with named behavioral consumers enter canonical: encrypted
+// reasoning, invocation reasoning context, and the additional_tools invocation
+// preamble. That preamble is validated as an alternate carrier for canonical
+// tool declarations and never becomes an item, replay refinement, or source
+// flag. Unsupported contained tool discriminators report their safe wire
+// location and observed type without exposing declaration payloads. Request
+// item kinds without an implemented semantic projection are rejected; unknown
+// provider output and actionless search markers are not durable conversation
+// state.
 // The nullable boolean client `store` field is validated and discarded at this
 // wire boundary. It is not canonical state and cannot govern the mandatory
 // session checkpoint committed by exchange execution.

@@ -7,7 +7,6 @@ import (
 )
 
 func (s *responsesResponseStream) handleReasoningDelta(frame streamFrame, kind canonical.ReasoningPartKind) error {
-	s.emittedOutput = true
 	itemID := fallbackItemID(frame.ItemID, "reasoning", frame.OutputIndex)
 	state := s.reasoningStates[itemID]
 	if state == nil {
@@ -50,7 +49,15 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 		}
 		parts = append(parts, part)
 	}
-	if len(parts) == 0 {
+	var opaque canonical.OpaqueThinking
+	if frame.Item.EncryptedContent != "" {
+		var opaqueErr error
+		opaque, opaqueErr = canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: frame.Item.EncryptedContent})
+		if opaqueErr != nil {
+			return false, canonical.InternalError("responses streamed encrypted reasoning is invalid")
+		}
+	}
+	if len(parts) == 0 && opaque.IsZero() {
 		for _, summary := range frame.Item.Summary {
 			if strings.TrimSpace(summary.Type) != "summary_text" { // swobu:io-string source=provider-wire
 				return false, canonical.InternalError("responses streamed reasoning summary type is invalid")
@@ -76,19 +83,18 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 			parts = append(parts, part)
 		}
 	}
-	if len(parts) == 0 {
-		if frame.OutputIndex != nil && *frame.OutputIndex >= 0 {
-			s.ordinalOffset--
-		}
+	if len(parts) == 0 && opaque.IsZero() {
+		s.omitProviderOutput(frame.OutputIndex)
 		delete(s.reasoningStates, itemID)
 		return true, nil
 	}
-	item, err := canonical.NewReasoningItem(parts, canonical.OpaqueThinking{})
+	item, err := canonical.NewReasoningItem(parts, opaque)
 	if err != nil {
 		return false, canonical.InternalError("responses streamed reasoning item is invalid")
 	}
 	ordinal := s.ordinalFor(itemID, frame.OutputIndex)
 	s.enqueueItemCompleted("", ordinal, item)
+	s.emittedOutput = true
 	delete(s.reasoningStates, itemID)
 	return true, nil
 }

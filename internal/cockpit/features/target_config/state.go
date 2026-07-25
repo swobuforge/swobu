@@ -115,7 +115,8 @@ func (w *TargetConfig) RequiresInteractiveAuth() bool {
 // interactiveAuthMode is ChatGPT workflow policy, not a provider-catalog fact.
 func (w *TargetConfig) interactiveAuthMode() (string, string) {
 	if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecChatGPT {
-		return "browser", "browser login"
+		mode := w.ChatGPTAuthMode.Get()
+		return mode.requestValue(), mode.label()
 	}
 	return "", ""
 }
@@ -293,6 +294,27 @@ type createOperationState struct {
 	Err string
 }
 
+type chatGPTAuthMode uint8
+
+const (
+	chatGPTAuthBrowser chatGPTAuthMode = iota
+	chatGPTAuthDevice
+)
+
+func (m chatGPTAuthMode) requestValue() string {
+	if m == chatGPTAuthDevice {
+		return "device"
+	}
+	return "browser"
+}
+
+func (m chatGPTAuthMode) label() string {
+	if m == chatGPTAuthDevice {
+		return "device code"
+	}
+	return "browser login"
+}
+
 // state.go owns the target_config reactive state shape: the appState struct
 // (the go-tui reactive fields embedded by TargetConfig), its constructor
 // newStates, and app binding. It is the single source of truth for which fields
@@ -316,6 +338,7 @@ type appState struct {
 
 	BaseURL                *tui.State[string]
 	CredentialHeaderEdited *tui.State[bool]
+	ChatGPTAuthMode        *tui.State[chatGPTAuthMode]
 	AuthSession            *tui.State[readmodel.AuthSessionReadModel]
 
 	Catalog       *tui.State[catalogOperationState]
@@ -336,6 +359,7 @@ func (s appState) bindApp(app *tui.App) {
 	s.Draft.BindApp(app)
 	s.BaseURL.BindApp(app)
 	s.CredentialHeaderEdited.BindApp(app)
+	s.ChatGPTAuthMode.BindApp(app)
 	s.AuthSession.BindApp(app)
 	s.Catalog.BindApp(app)
 	s.SaveOperation.BindApp(app)
@@ -354,6 +378,7 @@ func newStates() appState {
 		BaseURL:     tui.NewState(""),
 
 		CredentialHeaderEdited: tui.NewState(false),
+		ChatGPTAuthMode:        tui.NewState(chatGPTAuthBrowser),
 		AuthSession:            tui.NewState(readmodel.AuthSessionReadModel{}),
 
 		Catalog:       tui.NewState(catalogOperationState{}),
@@ -384,6 +409,7 @@ func (w *TargetConfig) resetSetupState() {
 	w.Draft.Set(d)
 	w.BaseURL.Set("")
 	w.CredentialHeaderEdited.Set(false)
+	w.ChatGPTAuthMode.Set(chatGPTAuthBrowser)
 	w.AuthSession.Set(readmodel.AuthSessionReadModel{})
 	w.Catalog.Set(catalogOperationState{})
 	w.SaveOperation.Set(createOperationState{})

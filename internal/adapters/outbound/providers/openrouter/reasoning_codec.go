@@ -33,7 +33,7 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 		return chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, sink, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility})
 	})
 	if err != nil {
-		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+		return carrier.Document{}, decisions, err
 	}
 	delete(document.Payload, "reasoning_effort")
 	if err := applyOpenRouterReasoningRequest(document.Payload, req.Canonical); err != nil {
@@ -96,7 +96,7 @@ func applyOpenRouterReasoningRequest(payload map[string]any, req canonical.Canon
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			if effortSet {
-				return canonical.UnsupportedOperation("OpenRouter cannot combine disabled reasoning with effort")
+				return provider.NewCandidateIncompatibility("OpenRouter target cannot combine disabled canonical reasoning with inference effort")
 			}
 			out["enabled"] = false
 		case canonical.ReasoningAutomatic:
@@ -498,7 +498,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 	}
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (responses.ProviderRequestDocument, error) {
 		return responses.LowerProviderRequestDocument(
-			responses.EncodeInput{Request: req.Canonical, Responses: req.Responses.Clone()},
+			responses.EncodeInput{Request: req.Canonical},
 			req.Delivery,
 			sink,
 			req.ExchangeID,
@@ -506,7 +506,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 		)
 	})
 	if err != nil {
-		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+		return carrier.Document{}, decisions, err
 	}
 	for index := range document.Tools {
 		if document.Tools[index].Type == canonical.ToolTypeWebSearch {

@@ -53,10 +53,6 @@ const (
 	targetConfigModeEdit
 )
 
-// TargetConfigChildOptionLabel preserves the parent row label gutter for
-// nested option rows without rendering visible label text.
-const TargetConfigChildOptionLabel = " "
-
 // appState (the reactive state shape), newStates, and bindApp live in state.go.
 
 // TargetConfig owns the state machine for adding a target to a route. Provider-

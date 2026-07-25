@@ -10,11 +10,12 @@
 // apply fallback policy to those types but must not infer availability from an
 // unknown HTTP status or compatibility decision.
 //
-// Image placement is a static protocol-grammar fact. Exchange materializes
-// every URL image into validated immutable bytes before provider execution so
-// retries and full-history execution observe the same content. MediaFetcher owns bounded network
-// I/O only, while InspectImage is the shared pure validator for fetched and
-// inline bytes. Codecs receive prepared legal inline carriers and remain pure.
+// Exchange materializes every URL image into validated immutable bytes before
+// provider execution so retries and full-history execution observe the same
+// content. MediaFetcher owns bounded network I/O only, while InspectImage is the
+// shared pure validator for fetched and inline bytes. Codecs receive prepared
+// legal inline carriers, remain pure, and solely own exact target-grammar
+// projection and compatibility evidence.
 // Attempt-local tool allocation reserves legal literal names before
 // assigning salted bounded aliases, so every valid tool set is projectable.
 // Protocol-specific response identity stays in typed canonical native handles.

@@ -5,7 +5,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/responses"
@@ -22,14 +21,14 @@ func newBackendCodec(_ string) backendCodec {
 
 func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
 	if req.Delivery != delivery.StreamingDelivery(delivery.FramingSSE) {
-		return carrier.Document{}, nil, canonical.UnsupportedDelivery("chatgpt provider requires SSE streaming delivery")
+		return carrier.Document{}, nil, provider.NewCandidateIncompatibility("ChatGPT target requires SSE streaming delivery")
 	}
 	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
 		return carrier.Document{}, nil, err
 	}
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (responses.ProviderRequestDocument, error) {
 		return responses.LowerProviderRequestDocument(
-			responses.EncodeInput{Request: req.Canonical, Responses: req.Responses.Clone()},
+			responses.EncodeInput{Request: req.Canonical},
 			req.Delivery,
 			sink,
 			req.ExchangeID,
@@ -37,7 +36,7 @@ func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.D
 		)
 	})
 	if err != nil {
-		return carrier.Document{}, decisions, protocolcodec.MarkUnsupportedByBackend(err)
+		return carrier.Document{}, decisions, err
 	}
 	if input, ok := document.Input.(string); ok {
 		document.Input = []any{map[string]any{"type": "message", "role": "user", "content": input}}

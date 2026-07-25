@@ -22,9 +22,17 @@
 // one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine
-// login-session workflow. A mounted pending ChatGPT browser session is observed
-// through the local daemon until it succeeds or fails; manual refresh remains a
-// recovery action, and the observer ends with the form, mount, app, or session.
+// login-session workflow. Browser login is the default and device code is an
+// explicit form-owned choice. Pending authentication remains selectable;
+// changing mode cancels the active session before starting its replacement. A
+// pending session always renders its complete login URL as wrapped terminal
+// text nested beneath one best-effort open action; auth choices use the normal
+// child-row indentation without a placeholder label column. Opener failure
+// does not mutate the form, so the visible URL remains the manual-selection
+// hedge. A
+// mounted pending ChatGPT session is observed through the local daemon until it
+// succeeds or fails; manual refresh remains a recovery action, and the observer
+// ends with the form, mount, app, or session.
 // Custom Endpoint uses best-effort discovery plus the open-set model picker;
 // Z.AI uses the same picker without discovery. In both cases the
 // operator-authored model ID remains authoritative.

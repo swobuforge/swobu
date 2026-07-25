@@ -26,5 +26,8 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, _ canon
 }
 
 func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {
-	return wire.ClientMessageResult{}, canonical.UnsupportedDelivery("chat completions does not support message-oriented client delivery")
+	return wire.ClientMessageResult{}, canonical.ClientUnsupportedDelivery(
+		"Chat Completions does not support message-oriented client delivery",
+		"Use buffered or SSE HTTP delivery and retry",
+	)
 }

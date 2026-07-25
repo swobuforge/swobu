@@ -17,12 +17,26 @@ const (
 	ErrorCodeBadEndpoint          ErrorCode = "BAD_ENDPOINT"
 	ErrorCodeBadRequest           ErrorCode = "BAD_REQUEST"
 	ErrorCodeUnknownTarget        ErrorCode = "UNKNOWN_TARGET"
+	ErrorCodeNotImplemented       ErrorCode = "NOT_IMPLEMENTED"
+	ErrorCodeNoCompatibleTarget   ErrorCode = "NO_COMPATIBLE_TARGET"
 )
 
 const (
 	ErrorOriginSwobu   ErrorOrigin = "swobu"
 	ErrorOriginBackend ErrorOrigin = "backend"
 )
+
+// ValidErrorCode reports whether c is a canonical error code. It is the strict
+// membership test the terminal-event constructor uses to reject a typed-but-
+// non-canonical value at the source. An empty code ("no canonical error") is not
+// itself a code; callers gate it separately.
+func ValidErrorCode(c ErrorCode) bool {
+	switch c {
+	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoCompatibleTarget:
+		return true
+	}
+	return false
+}
 
 type Error struct {
 	Code    ErrorCode
@@ -38,8 +52,8 @@ func (e Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// NewSwobuError builds a typed Swobu-originated failure for the protocol contract.
-func NewSwobuError(code ErrorCode, message string) Error {
+// newSwobuError builds a typed Swobu-originated failure for the protocol contract.
+func newSwobuError(code ErrorCode, message string) Error {
 	return Error{
 		Code:    code,
 		Message: message,
@@ -48,31 +62,61 @@ func NewSwobuError(code ErrorCode, message string) Error {
 }
 
 func UnsupportedEndpoint(message string) Error {
-	return NewSwobuError(ErrorCodeUnsupportedEndpoint, message)
+	return newSwobuError(ErrorCodeUnsupportedEndpoint, message)
 }
 
 func InternalError(message string) Error {
-	return NewSwobuError(ErrorCodeInternal, message)
+	return newSwobuError(ErrorCodeInternal, message)
 }
 
 func BadEndpoint(message string) Error {
-	return NewSwobuError(ErrorCodeBadEndpoint, message)
+	return newSwobuError(ErrorCodeBadEndpoint, message)
 }
 
 func BadRequest(message string) Error {
-	return NewSwobuError(ErrorCodeBadRequest, message)
+	return newSwobuError(ErrorCodeBadRequest, message)
 }
 
-func UnsupportedOperation(message string) Error {
-	return NewSwobuError(ErrorCodeUnsupportedOperation, message)
+// ClientUnsupportedOperation reports a caller-controlled public operation that
+// can be changed without changing the user's intent. retryChange is included in
+// the public message so the caller receives the action that makes the request
+// supportable.
+func ClientUnsupportedOperation(message, retryChange string) Error {
+	if message == "" {
+		message = "the requested public operation is unsupported"
+	}
+	if retryChange == "" {
+		return InternalError("client unsupported operation is missing its retry change")
+	}
+	return newSwobuError(ErrorCodeUnsupportedOperation, message+". "+retryChange)
+}
+
+// NotImplemented reports valid or forward-valid protocol semantics whose
+// required codec or canonical path is absent from Swobu.
+func NotImplemented(message string) Error {
+	return newSwobuError(ErrorCodeNotImplemented, message)
+}
+
+// NoCompatibleTarget reports that every configured candidate rejected the
+// unchanged canonical request as unrepresentable.
+func NoCompatibleTarget(message string) Error {
+	return newSwobuError(ErrorCodeNoCompatibleTarget, message)
 }
 
 func UnknownTarget(message string) Error {
-	return NewSwobuError(ErrorCodeUnknownTarget, message)
+	return newSwobuError(ErrorCodeUnknownTarget, message)
 }
 
-func UnsupportedDelivery(message string) Error {
-	return NewSwobuError(ErrorCodeUnsupportedDelivery, message)
+// ClientUnsupportedDelivery reports a caller-controlled delivery mode with a
+// concrete supported alternative.
+func ClientUnsupportedDelivery(message, retryChange string) Error {
+	if message == "" {
+		message = "the requested delivery mode is unsupported"
+	}
+	if retryChange == "" {
+		return InternalError("client unsupported delivery is missing its retry change")
+	}
+	return newSwobuError(ErrorCodeUnsupportedDelivery, message+". "+retryChange)
 }
 
 type BackendError struct {

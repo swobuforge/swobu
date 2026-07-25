@@ -342,9 +342,9 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","tool_choice":"required"}`), carrier.Meta{})
 
 	_, err := exec.Send(context.Background(), target, doc)
-	var unsupported provider.UnsupportedError
+	var unsupported provider.CandidateIncompatibilityError
 	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T, want provider.UnsupportedError", err)
+		t.Fatalf("error = %T, want provider.CandidateIncompatibilityError", err)
 	}
 }
 

@@ -2,9 +2,10 @@ package zai
 
 import (
 	"encoding/json"
-	"strings"
+	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
@@ -65,8 +66,9 @@ func TestRewriteWebSearchTranslatesOnlyEmptyStandardOptions(t *testing.T) {
 	}
 
 	document.Payload["web_search_options"] = map[string]any{"max_results": 5}
-	if err := rewriteWebSearch(&document); err == nil ||
-		!strings.Contains(err.Error(), "does not support the requested web-search options") {
-		t.Fatalf("non-empty options error = %v", err)
+	err = rewriteWebSearch(&document)
+	var incompatible provider.CandidateIncompatibilityError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("non-empty options error = %T %v, want candidate incompatibility", err, err)
 	}
 }

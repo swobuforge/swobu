@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+// Every terminal-event literal in this file carries the valid terminal-fact set:
+// canonical RequestPath + ProviderSpec on the base, and a TerminalOutcome (Result
+// included) on the outcome band. The constructor validates both (see
+// NewTerminalTrafficEvent), so an event missing one is rejected before the
+// behavior under test can be reached. The typed string fields take untyped string
+// constants directly.
+
+// successOutcome is the terminal outcome shared by the success-shaped fixtures.
+// Result lives on the outcome band alongside the delivery facts it must agree with.
+func successOutcome() TerminalOutcome {
+	return TerminalOutcome{Result: ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"}
+}
+
 func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	requestID, err := ParseRequestID("req-1")
 	if err != nil {
@@ -45,14 +58,13 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 		Mutated: true,
 	}}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+		RequestPath: "/responses", ProviderSpec: "openai",
 		ClientProtocol:      "openai_compat",
 		ClientHandler:       "codex",
 		ClientFamily:        "chat_completions",
 		NormalizedOp:        "/chat/completions",
 		Route:               route,
 		AdaptationChain:     chain,
-		Result:              ResultClassSuccess,
-		StatusCode:          200,
 		TokenUsage:          usage,
 		ModelRequested:      "client-model",
 		ModelResolved:       "resolved-model",
@@ -60,7 +72,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 		Mutations:           mutations,
 		ExchangeDiagnostics: diagnostics,
 		StageReports:        stageReports,
-	})
+	}, successOutcome())
 	if err != nil {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}
@@ -133,11 +145,10 @@ func TestTrafficEvent_PreservesZeroProviderCallAttempts(t *testing.T) {
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{
 		RequestID:    requestID,
 		Workspace:    "alpha",
+		RequestPath:  "/responses",
+		ProviderSpec: "openai",
 		Route:        route,
-		Result:       ResultClassBackendError,
-		StatusCode:   500,
-		AttemptCount: 0,
-	})
+	}, TerminalOutcome{Result: ResultClassBackendError, StatusCode: 500, DeliveryKind: "exchange_failed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,10 +167,9 @@ func TestTrafficEvent_RejectsTerminalInProgressResult(t *testing.T) {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	if _, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassInProgress,
-		StatusCode: 200,
-	}); err == nil {
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
+	}, TerminalOutcome{Result: ResultClassInProgress, StatusCode: 200, DeliveryKind: "succeeded"}); err == nil {
 		t.Fatal("terminal events should reject in_progress result class")
 	}
 }
@@ -208,14 +218,13 @@ func TestTrafficEvent_RejectsDuplicateStageReports(t *testing.T) {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		StageReports: []StageReport{
 			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"p.a"}, Mutated: true},
 			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"p.b"}, Mutated: true},
 		},
-	})
+	}, successOutcome())
 	if err == nil {
 		t.Fatal("expected duplicate stage report error, got nil")
 	}
@@ -231,13 +240,12 @@ func TestTrafficEvent_RejectsMutatedStageReportWithoutAppliedPatches(t *testing.
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		StageReports: []StageReport{
 			{Stage: "provider.wire.out", Carrier: "wire_document", Mutated: true},
 		},
-	})
+	}, successOutcome())
 	if err == nil {
 		t.Fatal("expected mutated-without-applied error, got nil")
 	}
@@ -253,13 +261,12 @@ func TestTrafficEvent_RejectsStageReportWithEmptyStage(t *testing.T) {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		StageReports: []StageReport{
 			{Stage: " ", Carrier: "wire_document", Applied: []string{"p.a"}, Mutated: true},
 		},
-	})
+	}, successOutcome())
 	if err == nil {
 		t.Fatal("expected empty stage report error, got nil")
 	}
@@ -275,13 +282,12 @@ func TestTrafficEvent_RejectsStageReportWithEmptyCarrier(t *testing.T) {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		StageReports: []StageReport{
 			{Stage: "provider.wire.out", Carrier: " ", Applied: []string{"p.a"}, Mutated: true},
 		},
-	})
+	}, successOutcome())
 	if err == nil {
 		t.Fatal("expected empty carrier report error, got nil")
 	}
@@ -297,9 +303,8 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		Mutations: []Mutation{{
 			Stage:         "encode",
 			PatchID:       "p.encode",
@@ -312,7 +317,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 			Applied: []string{"p.encode"},
 			Mutated: true,
 		}},
-	})
+	}, successOutcome())
 	if err != nil {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}
@@ -342,9 +347,8 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		StageReports: []StageReport{
 			{
 				Stage:   " Provider.Wire.Out ",
@@ -353,7 +357,7 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 				Mutated: true,
 			},
 		},
-	})
+	}, successOutcome())
 	if err != nil {
 		t.Fatalf("NewTerminalTrafficEvent returned error: %v", err)
 	}
@@ -382,14 +386,13 @@ func TestTrafficEvent_DetectsDuplicateStageReportsAfterNormalization(t *testing.
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
 	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
-		Route:      route,
-		Result:     ResultClassSuccess,
-		StatusCode: 200,
+		RequestPath: "/responses", ProviderSpec: "openai",
+		Route: route,
 		StageReports: []StageReport{
 			{Stage: "provider.wire.out", Carrier: "wire_document", Applied: []string{"p.a"}, Mutated: true},
 			{Stage: " Provider.Wire.Out ", Carrier: " Wire_Document ", Applied: []string{"p.b"}, Mutated: true},
 		},
-	})
+	}, successOutcome())
 	if err == nil {
 		t.Fatal("expected duplicate stage report error after normalization, got nil")
 	}

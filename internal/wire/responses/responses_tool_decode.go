@@ -30,7 +30,7 @@ func decodeResponsesTools(tools []responsesToolDefinitionDTO, sink compat.Sink, 
 		}
 	}
 	if len(out) == 0 {
-		return nil, canonical.UnsupportedOperation("responses request namespace declarations contain no supported child tools")
+		return nil, canonical.NotImplemented("Swobu cannot yet project a Responses namespace declaration without a supported child tool")
 	}
 	return out, nil
 }
@@ -98,7 +98,7 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, index int, si
 	if len(tool.SearchContentTypes) > 0 {
 		for _, contentType := range tool.SearchContentTypes {
 			if strings.EqualFold(strings.TrimSpace(contentType), "image") {
-				return canonical.ToolDeclaration{}, canonical.UnsupportedOperation("responses image-search intent is not supported")
+				return canonical.ToolDeclaration{}, canonical.NotImplemented("Swobu cannot yet project Responses image-search intent")
 			}
 		}
 		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/search_content_types", index))); err != nil {
@@ -106,7 +106,7 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, index int, si
 		}
 	}
 	if strings.TrimSpace(tool.OutputFormat) != "" { // swobu:io-string source=boundary
-		return canonical.ToolDeclaration{}, canonical.UnsupportedOperation("responses image-search output format is not supported")
+		return canonical.ToolDeclaration{}, canonical.NotImplemented("Swobu cannot yet project Responses image-search output format")
 	}
 	if tool.ExternalWebAccess != nil {
 		if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/external_web_access", index))); err != nil {

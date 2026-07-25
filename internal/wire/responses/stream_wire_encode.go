@@ -228,7 +228,7 @@ func (e *ResponseStreamWireEncoder) encodeTextDelta(event sse.StreamEvent) ([][]
 
 func (e *ResponseStreamWireEncoder) encodeContentStarted(event sse.StreamEvent) ([][]byte, error) {
 	if event.PartKind != canonical.PartKindText {
-		return nil, canonical.UnsupportedOperation("responses streaming content part kind is not implemented")
+		return nil, canonical.NotImplemented("Swobu cannot project this canonical content part kind to a Responses stream")
 	}
 	frames, err := e.ensureTextItem(event.ItemID)
 	if err != nil || e.textItem == nil {
@@ -252,7 +252,7 @@ func (e *ResponseStreamWireEncoder) encodeToolArgumentsDelta(event sse.StreamEve
 		return frames, nil
 	}
 	if state.toolType == canonical.ToolTypeWebSearch {
-		return nil, canonical.UnsupportedOperation("responses web-search stream cannot contain function arguments")
+		return nil, canonical.InternalError("canonical Responses web-search stream contains function arguments")
 	}
 	if state.callID == "" {
 		state.callID = event.ToolUseID
