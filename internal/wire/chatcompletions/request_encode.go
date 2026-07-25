@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // EncodeOptions carries request-wide compatibility behavior.
@@ -76,7 +76,11 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the chat completions protocol")
+		return ProviderRequestDocument{}, provider.NewCandidateIncompatibility("Chat Completions target cannot represent the requested canonical delivery mode")
+	}
+	contextRejected, contextErr := projectChatResponsesReasoningContext(req.Reasoning(), sink, exchangeID, options.Compatibility)
+	if contextErr != nil && !contextRejected {
+		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
 	tools := req.Tools()
@@ -84,12 +88,15 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
+	if contextErr != nil {
+		return ProviderRequestDocument{}, contextErr
+	}
 	wireTools, err := encodeChatCompletionsTools(tools, sink, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if d.Mode == delivery.Streaming && hasChatCompletionsCustomTools(tools) {
-		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("chat completions streaming does not support custom tool declarations")
+		return ProviderRequestDocument{}, provider.NewCandidateIncompatibility("Chat Completions streaming cannot represent canonical custom tool declarations")
 	}
 	choice, err := encodeChatCompletionsToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
 	if err != nil {
@@ -140,6 +147,19 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		payload["stream"] = true
 	}
 	return document, nil
+}
+
+// projectChatResponsesReasoningContext makes protocol loss target-local.
+// Recording precedes other structural lowering so an independent image/tool
+// rejection cannot erase the context evidence.
+func projectChatResponsesReasoningContext(reasoning canonical.ReasoningControls, sink compat.Sink, exchangeID string, _ compat.CompatibilityPolicy) (bool, error) {
+	if !reasoning.ResponsesContextField().IsSpecified() {
+		return false, nil
+	}
+	if err := emitChatImageDecision(sink, exchangeID, compat.RequestReasoningContextResponses, compat.Drop); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // ReplaceTools lets an exact provider compose its own typed tool union before
@@ -281,7 +301,13 @@ func chatCompletionsWireToolChoice(choice any) string {
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
 func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, policy compat.CompatibilityPolicy) ([]ProviderRequestMessage, error) {
+	var err error
+	items, err = projectChatResponsesItems(items, sink, exchangeID, policy)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ProviderRequestMessage, 0, len(items))
+	var activeBatch *chatActiveToolBatch
 	for i := 0; i < len(items); {
 		sourceStart := i
 		for i < len(items) && items[i].Kind() == canonical.ItemKindReasoning {
@@ -292,54 +318,13 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		}
 		item := items[i]
 		if item.Kind() == canonical.ItemKindToolResult {
-			result, ok := item.ToolResult()
-			if !ok || result.CallID().IsZero() {
-				return nil, canonical.InternalError("chat completions tool-result item payload is invalid")
-			}
-			for _, part := range result.Content() {
-				if part.Kind() == canonical.PartKindImage {
-					if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultImage, compat.Reject); err != nil {
-						return nil, err
-					}
-					return nil, canonical.UnsupportedOperation("chat completions tool results do not support images")
-				}
-			}
-			if result.IsError() {
-				outcome := compat.Approx
-				if policy.EffectiveMode() == compat.CompatibilityStrict {
-					outcome = compat.Reject
-				}
-				if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultIsError, outcome); err != nil {
-					return nil, err
-				}
-				if outcome == compat.Reject {
-					return nil, canonical.UnsupportedOperation("chat completions cannot preserve tool-result error state")
-				}
-			}
-			if len(result.Content()) > 1 {
-				outcome := compat.Approx
-				if policy.EffectiveMode() == compat.CompatibilityStrict {
-					outcome = compat.Reject
-				}
-				if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultContentBoundaries, outcome); err != nil {
-					return nil, err
-				}
-				if outcome == compat.Reject {
-					return nil, canonical.UnsupportedOperation("chat completions cannot preserve tool-result content boundaries")
-				}
-			}
-			text, err := toolResultTextOnlyContent(result.Content(), "chat completions tool results")
+			run, next, updatedBatch, err := encodeChatToolResultRun(items, i, activeBatch, sink, exchangeID, policy)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, ProviderRequestMessage{
-				Role:        "tool",
-				Content:     text,
-				ToolCallID:  result.CallID().String(),
-				SourceStart: sourceStart,
-				SourceEnd:   i + 1,
-			})
-			i++
+			out = append(out, run...)
+			activeBatch = updatedBatch
+			i = next
 			continue
 		}
 		wire := ProviderRequestMessage{SourceStart: sourceStart}
@@ -354,9 +339,10 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		} else if item.Kind() == canonical.ItemKindToolCall {
 			wire.Role = "assistant"
 		} else {
-			return nil, canonical.UnsupportedOperation("canonical item is not supported on the chat completions protocol")
+			return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent this canonical item kind")
 		}
 		if wire.Role == "assistant" {
+			callIDs := make([]canonical.ToolCallID, 0)
 			for i < len(items) && items[i].Kind() == canonical.ItemKindToolCall {
 				call, _ := items[i].ToolCall()
 				encoded, err := encodeChatToolCall(call, tools)
@@ -364,13 +350,35 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 					return nil, err
 				}
 				wire.ToolCalls = append(wire.ToolCalls, encoded)
+				callIDs = append(callIDs, call.CallID())
 				i++
+			}
+			if len(callIDs) > 0 {
+				if activeBatch != nil && !activeBatch.closed() {
+					return nil, provider.NewCandidateIncompatibility("Chat Completions cannot start a canonical tool-call batch while a prior batch is unresolved")
+				}
+				activeBatch = newChatActiveToolBatch(callIDs)
 			}
 		}
 		wire.SourceEnd = i
 		out = append(out, wire)
 	}
 	return out, nil
+}
+
+func projectChatResponsesItems(items []canonical.CanonicalItem, sink compat.Sink, exchangeID string, _ compat.CompatibilityPolicy) ([]canonical.CanonicalItem, error) {
+	projected := make([]canonical.CanonicalItem, 0, len(items))
+	for _, item := range items {
+		if reasoning, ok := item.Reasoning(); ok {
+			if _, present := reasoning.Opaque().Responses(); present {
+				if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsResponsesReasoningReplay, compat.Drop); err != nil {
+					return nil, err
+				}
+			}
+		}
+		projected = append(projected, item)
+	}
+	return projected, nil
 }
 
 func encodeChatMessageContent(author canonical.MessageRole, parts []canonical.MessagePart, sink compat.Sink, exchangeID string, policy compat.CompatibilityPolicy) (any, error) {
@@ -387,33 +395,17 @@ func encodeChatMessageContent(author canonical.MessageRole, parts []canonical.Me
 		}
 		if part.Kind() == canonical.PartKindImage {
 			if author != canonical.MessageRoleUser {
-				return nil, canonical.UnsupportedOperation("chat completions only accepts image input in user messages")
+				return nil, provider.NewCandidateIncompatibility("Chat Completions accepts canonical image input only in user messages")
 			}
 			imagePart, _ := part.Image()
-			rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(imagePart)
+			encoded, err := encodeChatImage(imagePart, compat.RequestItemsMessageImageDetail, sink, exchangeID, policy)
 			if err != nil {
-				return nil, canonical.InternalError("canonical image source is invalid")
+				return nil, err
 			}
-			if detail == canonical.ImageDetailOriginal {
-				if policy.EffectiveMode() == compat.CompatibilityStrict {
-					if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsMessageImageDetail, compat.Reject); err != nil {
-						return nil, err
-					}
-					return nil, canonical.UnsupportedOperation("chat completions cannot lower original image detail under strict policy")
-				}
-				if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsMessageImageDetail, compat.Approx); err != nil {
-					return nil, err
-				}
-				detail = canonical.ImageDetailHigh
-			}
-			image := map[string]string{"url": rawURL}
-			if detail != "" {
-				image["detail"] = string(detail)
-			}
-			out = append(out, map[string]any{"type": "image_url", "image_url": image})
+			out = append(out, encoded)
 			continue
 		}
-		return nil, canonical.UnsupportedOperation("chat completions cannot lower this content kind")
+		return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent this canonical content kind")
 	}
 	return out, nil
 }
@@ -450,7 +442,7 @@ func encodeChatToolCall(call canonical.ToolCallItem, _ []canonical.ToolDeclarati
 		}
 		return toolCallBody{ID: call.CallID().String(), Type: "custom", Custom: &toolCustomBody{Name: name, Input: text}}, nil
 	default:
-		return toolCallBody{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool calls")
+		return toolCallBody{}, provider.NewCandidateIncompatibility("Chat Completions cannot represent this canonical tool-call kind")
 	}
 }
 
@@ -459,7 +451,7 @@ func textOnlyContent(parts []canonical.MessagePart, surface string) (string, err
 	for _, part := range parts {
 		value, ok := part.Text()
 		if !ok {
-			return "", canonical.UnsupportedOperation(surface + " do not support this content kind")
+			return "", provider.NewCandidateIncompatibility(surface + " cannot represent this canonical content kind")
 		}
 		text.WriteString(value.Text())
 	}
@@ -471,7 +463,7 @@ func toolResultTextOnlyContent(parts []canonical.ToolResultPart, surface string)
 	for _, part := range parts {
 		value, ok := part.Text()
 		if !ok {
-			return "", canonical.UnsupportedOperation(surface + " do not support this content kind")
+			return "", provider.NewCandidateIncompatibility(surface + " cannot represent this canonical content kind")
 		}
 		text.WriteString(value.Text())
 	}

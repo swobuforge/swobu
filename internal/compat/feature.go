@@ -32,6 +32,7 @@ const (
 	RequestItemsToolResultContent           Feature = "request.items.tool_result.content"
 	RequestItemsToolResultContentBoundaries Feature = "request.items.tool_result.content.boundaries"
 	RequestItemsToolResultIsError           Feature = "request.items.tool_result.is_error"
+	RequestItemsResponsesReasoningReplay    Feature = "request.items.reasoning.responses_replay"
 	RequestTools                            Feature = "request.tools"
 	RequestToolsKind                        Feature = "request.tools.kind"
 	RequestToolsName                        Feature = "request.tools.name"
@@ -48,6 +49,8 @@ const (
 	RequestControlsStopSequences            Feature = "request.controls.stop_sequences"
 	RequestControlsEffort                   Feature = "request.controls.effort"
 	RequestReasoning                        Feature = "request.reasoning"
+	RequestReasoningContext                 Feature = "request.reasoning.context"
+	RequestReasoningContextResponses        Feature = "request.reasoning.context.responses"
 	RequestPreviousResponse                 Feature = "request.previous_response"
 	RequestPreviousResponseResponses        Feature = "request.previous_response.responses"
 

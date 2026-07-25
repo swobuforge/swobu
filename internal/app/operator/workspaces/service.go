@@ -10,7 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
-type Service struct{ store *configstore.Store }
+type Service struct {
+	store *configstore.Store
+}
 
 func NewService(store *configstore.Store) (Service, error) {
 	if store == nil {
@@ -119,9 +121,13 @@ func (s Service) CreateWorkspace(ctx context.Context, cmd CreateWorkspace) (Work
 	if e != nil {
 		return Workspace{}, commandError(e)
 	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) {
+	ws, e := s.update(ctx, slug, func(c routing.Config) (routing.Config, error) {
 		return c.CreateWorkspace(routing.WorkspaceSeed{Slug: slug, Route: name, Target: target})
 	})
+	if e != nil {
+		return ws, e
+	}
+	return ws, nil
 }
 func (s Service) RenameWorkspace(ctx context.Context, cmd RenameWorkspace) (Workspace, error) {
 	from, e := routing.ParseWorkspaceSlug(cmd.Slug)

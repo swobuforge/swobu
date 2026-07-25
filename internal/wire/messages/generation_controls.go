@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -109,7 +110,7 @@ func encodeMessagesReasoning(payload map[string]any, reasoning canonical.Reasoni
 	compute, computeSet := reasoning.ComputeField().Get()
 	if computeSet {
 		if disclosure, present := reasoning.DisclosureField().Get(); present && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
-			return canonical.UnsupportedOperation("unfinished disabled Messages reasoning cannot satisfy readable disclosure")
+			return provider.NewCandidateIncompatibility("Messages cannot represent disabled reasoning with readable disclosure")
 		}
 		thinking := map[string]any{}
 		switch compute.Kind() {

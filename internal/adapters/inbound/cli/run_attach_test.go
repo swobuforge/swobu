@@ -13,7 +13,7 @@ import (
 	"time"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
-	"github.com/swobuforge/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/producttelemetry"
 )
 
 func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing.T) {
@@ -55,12 +55,12 @@ func TestRunner_InteractiveShowsNoticeBeforeAttachOrStart(t *testing.T) {
 		IsInteractive: func() bool { return true },
 		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
 			attachCalled = true
-			state, err := telemetry.NewStore().LoadOrCreate()
+			claimed, err := producttelemetry.ClaimNotice()
 			if err != nil {
-				t.Fatalf("LoadOrCreate returned error: %v", err)
+				t.Fatalf("ClaimNotice returned error: %v", err)
 			}
-			if !state.NoticeShown {
-				t.Fatal("notice_shown = false before attach/start")
+			if claimed {
+				t.Fatal("notice was not already claimed before attach/start")
 			}
 			return fmt.Errorf("stop after notice check")
 		},

@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/producttelemetry"
 )
 
 func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
@@ -15,10 +16,7 @@ func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	runner := Runner{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	}
+	runner := Runner{Stdout: &stdout, Stderr: &stderr}
 
 	exitCode := runner.Run(context.Background(), []string{"telemetry", "status"})
 	if exitCode != ExitHealthy {
@@ -53,6 +51,9 @@ func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
 	if togglePayload.Enabled {
 		t.Fatal("off enabled = true, want false")
 	}
+	if status, _ := producttelemetry.Status(); status.Enabled {
+		t.Fatal("preference not persisted as disabled after off")
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -84,40 +85,32 @@ func TestRunner_TelemetryCommand_DoNotTrackOverride(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &statusPayload); err != nil {
 		t.Fatalf("status output is not JSON: %v; raw=%q", err, stdout.String())
 	}
-	if statusPayload.Enabled {
-		t.Fatal("status enabled = true, want false under DO_NOT_TRACK")
+	// enabled is the persisted preference, independent of DO_NOT_TRACK: no `off`
+	// was issued, so it stays true; do_not_track reports the override. The caller
+	// composes the two (effective upload is disabled by do_not_track here).
+	if !statusPayload.Enabled {
+		t.Fatal("status enabled = false, want true (persisted preference is independent of DO_NOT_TRACK)")
 	}
 	if !statusPayload.DoNotTrack {
 		t.Fatal("status do_not_track = false, want true")
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runner.Run(context.Background(), []string{"telemetry", "log"})
-	if exitCode != ExitDown {
-		t.Fatalf("log exit code = %d, want %d", exitCode, ExitDown)
 	}
 }
 
 func TestRunner_TelemetryCommand_UnknownSubcommandFails(t *testing.T) {
 	var stderr bytes.Buffer
-	runner := Runner{
-		Stderr: &stderr,
-	}
+	runner := Runner{Stderr: &stderr}
 
 	exitCode := runner.Run(context.Background(), []string{"telemetry", "flush"})
 	if exitCode != ExitDown {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
-	}
-	if got := stderr.String(); got == "" {
-		t.Fatal("stderr is empty, want unknown telemetry subcommand message")
 	}
 	if got := stderr.String(); !strings.Contains(got, `unknown telemetry subcommand "flush"`) {
 		t.Fatalf("stderr missing unknown telemetry subcommand message; stderr=%q", got)
 	}
 }
 
-func TestRunner_TelemetryCommand_WritesStateUnderSwobuHome(t *testing.T) {
+// `telemetry off` writes the preference document under SWOBU_HOME.
+func TestRunner_TelemetryCommand_WritesPreferenceUnderSwobuHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "swobu-home")
 	t.Setenv("SWOBU_HOME", root)
 	var stdout bytes.Buffer
@@ -128,9 +121,13 @@ func TestRunner_TelemetryCommand_WritesStateUnderSwobuHome(t *testing.T) {
 	if exitCode != ExitHealthy {
 		t.Fatalf("off exit code = %d, want %d, stderr=%s", exitCode, ExitHealthy, stderr.String())
 	}
-	statePath := filepath.Join(root, "state", "telemetry", "state.json")
-	if _, err := os.Stat(statePath); err != nil {
-		t.Fatalf("state path not written under SWOBU_HOME: %v", err)
+	prefPath := filepath.Join(root, "state", "telemetry", "preference.json")
+	status, err := producttelemetry.Status()
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status.Enabled {
+		t.Fatalf("status.Enabled = true, want false (preference written under %s)", prefPath)
 	}
 }
 

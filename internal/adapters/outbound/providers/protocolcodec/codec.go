@@ -4,7 +4,6 @@ package protocolcodec
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -35,7 +34,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 	if err != nil {
 		return carrier.Document{}, decisions, err
 	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical, Responses: req.Responses.Clone()}
+	input := wire.ProviderEncodeInput{Request: req.Canonical}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
@@ -49,12 +48,9 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 	case protocolkind.Messages:
 		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{Compatibility: req.Compatibility})
 	default:
-		return carrier.Document{}, decisions, provider.UnsupportedByBackend(canonical.BadEndpoint("selected provider protocol has no request codec"))
+		return carrier.Document{}, decisions, provider.NewCandidateIncompatibility("selected provider protocol has no request codec")
 	}
 	decisions = append(decisions, result.Decisions...)
-	if err != nil {
-		return result.Document, decisions, MarkUnsupportedByBackend(err)
-	}
 	return result.Document, decisions, err
 }
 
@@ -87,27 +83,12 @@ func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.Provider
 // invariants for standard and exact-provider typed compositions.
 func ValidateEncodeRequest(req provider.Request) error {
 	if err := req.Delivery.Validate(); err != nil {
-		return canonical.UnsupportedDelivery("provider delivery is invalid")
+		return canonical.InternalError("provider delivery is invalid")
 	}
 	if req.Delivery.IsStreaming() && req.Delivery.Framing != delivery.FramingSSE {
-		return provider.UnsupportedByBackend(canonical.UnsupportedDelivery("provider codec supports only SSE streaming delivery"))
+		return provider.NewCandidateIncompatibility("provider codec supports only SSE streaming delivery")
 	}
 	return nil
-}
-
-// MarkUnsupportedByBackend retains backend-failover classification after an
-// exact provider has composed a typed protocol document.
-func MarkUnsupportedByBackend(err error) error {
-	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) {
-		return err
-	}
-	switch canonicalErr.Code {
-	case canonical.ErrorCodeUnsupportedOperation, canonical.ErrorCodeUnsupportedDelivery, canonical.ErrorCodeUnsupportedEndpoint:
-		return provider.UnsupportedByBackend(err)
-	default:
-		return err
-	}
 }
 
 // Decode implements provider.Codec.
@@ -124,7 +105,7 @@ func (c Codec) Decode(ctx context.Context, request provider.Request, ingress pro
 	}
 	decoded := provider.DecodedResponse{
 		Stream: result.Stream, Decisions: result.Decisions,
-		TerminalDecisions: result.TerminalDecisions, ResponsesOutput: result.ResponsesOutput,
+		TerminalDecisions: result.TerminalDecisions,
 	}
 	return decoded, err
 }
@@ -139,7 +120,7 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 	case protocolkind.Messages:
 		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
 	default:
-		return wire.ProviderDecodeResult{}, canonical.BadEndpoint("selected provider protocol has no document codec")
+		return wire.ProviderDecodeResult{}, canonical.InternalError("selected provider protocol has no document codec")
 	}
 }
 
@@ -153,7 +134,7 @@ func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request)
 	case protocolkind.Messages:
 		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
 	default:
-		return wire.ProviderDecodeResult{}, canonical.BadEndpoint("selected provider protocol has no stream codec")
+		return wire.ProviderDecodeResult{}, canonical.InternalError("selected provider protocol has no stream codec")
 	}
 }
 

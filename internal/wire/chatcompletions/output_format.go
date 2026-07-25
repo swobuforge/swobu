@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 type chatCompletionsResponseFormatDTO struct {
@@ -48,9 +49,9 @@ func decodeChatCompletionsOutputFormat(raw json.RawMessage) (canonical.OutputFor
 			Strict:      strict,
 		})
 	case "json_object":
-		return canonical.OutputFormat{}, canonical.UnsupportedOperation("chat completions request json_object response_format is not supported on swobu v0")
+		return canonical.OutputFormat{}, canonical.NotImplemented("Swobu cannot yet preserve Chat Completions json_object response_format")
 	default:
-		return canonical.OutputFormat{}, canonical.UnsupportedOperation("chat completions request response_format type is not supported")
+		return canonical.OutputFormat{}, canonical.NotImplemented("Swobu cannot yet project this Chat Completions response_format type")
 	}
 }
 
@@ -65,7 +66,7 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 		return nil, nil
 	}
 	if format.Kind != canonical.OutputFormatJSONSchema {
-		return nil, canonical.UnsupportedOperation("chat completions protocol does not support the requested output format")
+		return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent the canonical output format")
 	}
 	dto := chatCompletionsResponseFormatDTO{
 		Type: string(canonical.OutputFormatJSONSchema),

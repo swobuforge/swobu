@@ -9,25 +9,84 @@ import (
 
 type chatGPTProviderForm struct{ target *TargetConfig }
 
+type chatGPTAuthModeMenu struct {
+	target         *TargetConfig
+	backout        func()
+	replaceSession bool
+}
+
 func ChatGPTProviderForm(w *TargetConfig) tui.Component { return &chatGPTProviderForm{target: w} }
 
-func ChatGPTAuthControl(w *TargetConfig) *ui.SelectableRow {
-	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-start"), "authentication", "signed out", "sign in ↵", w.ContinueSetup)
-	row.AutoFocus = true
+func ChatGPTAuthControl(w *TargetConfig) *ui.Select {
+	_, label := w.interactiveAuthMode()
+	return ui.NewSelect(ui.SelectProps{
+		ID: TargetAddMountKey(w, "auth-mode"),
+		Label: "authentication",
+		Value: label,
+		Action: "choose ↵",
+		AutoFocus: true,
+		Body: func(backout func()) tui.Component {
+			return &chatGPTAuthModeMenu{target: w, backout: backout}
+		},
+	})
+}
+
+func ChatGPTPendingAuthControl(w *TargetConfig) *ui.Select {
+	return ui.NewSelect(ui.SelectProps{
+		ID: TargetAddMountKey(w, "auth-mode-pending"),
+		Label: "authentication",
+		Value: chatGPTAuthModeLabel(w),
+		Action: "change ↵",
+		Body: func(backout func()) tui.Component {
+			return &chatGPTAuthModeMenu{target: w, backout: backout, replaceSession: true}
+		},
+	})
+}
+
+func (m *chatGPTAuthModeMenu) KeyMap() tui.KeyMap {
+	return ui.BackScope(func() bool { return true }, m.backout)
+}
+
+func (m *chatGPTAuthModeMenu) choose(mode chatGPTAuthMode) {
+	m.backout()
+	if m.replaceSession {
+		m.target.replaceInteractiveAuth(mode)
+		return
+	}
+	m.target.ChatGPTAuthMode.Set(mode)
+	m.target.startInteractiveAuth()
+}
+
+func ChatGPTAuthModeOption(m *chatGPTAuthModeMenu, mode chatGPTAuthMode) *ui.SelectableRow {
+	action := "sign in ↵"
+	if m.replaceSession { action = "switch ↵" }
+	row := ui.NewSelectableRow(
+		TargetAddMountKey(m.target, "auth-mode-"+mode.requestValue()),
+		"",
+		mode.label(),
+		action,
+		func() { m.choose(mode) },
+	)
+	row.AutoFocus = mode == m.target.ChatGPTAuthMode.Get()
 	return row
 }
 
-func ChatGPTAuthSummary(w *TargetConfig) *ui.SelectableRow {
+func chatGPTAuthModeLabel(w *TargetConfig) string {
 	_, label := w.interactiveAuthMode()
 	if label == "" { label = "browser login" }
-	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-pending"), "authentication", label, "pending", nil)
+	return label
+}
+
+func chatGPTAuthURL(w *TargetConfig) string {
+	url := ""
+	if session := w.AuthSession.Get(); session.SessionID != "" { url = session.AuthorizeURL }
+	return url
 }
 
 func ChatGPTAuthOpenBrowser(w *TargetConfig) *ui.SelectableRow {
-	url := ""
-	if session := w.AuthSession.Get(); session.SessionID != "" { url = session.AuthorizeURL }
-	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-open"), "open", url, "open ↵", func() {
-		if err := ui.OpenURL(url); err != nil { w.Error.Set(err.Error()) }
+	url := chatGPTAuthURL(w)
+	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-open"), "login URL", "", "open ↵", func() {
+		_ = ui.OpenURL(url)
 	})
 }
 
@@ -64,11 +123,14 @@ func ChatGPTAuthUserCode(w *TargetConfig) *ui.SelectableRow {
 }
 
 templ (f *chatGPTProviderForm) Render() {
-	<div class="flex-col w-full" deps={f.target.Draft, f.target.BaseURL}>
+	<div class="flex-col w-full" deps={f.target.Draft, f.target.BaseURL, f.target.ChatGPTAuthMode}>
 		if targetAuthPending(f.target) {
 			<div deps={f.target.AuthSession, f.target.Error}>
-				@ChatGPTAuthSummary(f.target)
+				@ChatGPTPendingAuthControl(f.target)
 				@ChatGPTAuthOpenBrowser(f.target)
+				<div class="pl-3 w-full">
+					@ChatGPTAuthURLText(f.target)
+				</div>
 				if strings.TrimSpace(f.target.AuthSession.Get().UserCode) != "" {
 					@ChatGPTAuthUserCode(f.target)
 				}
@@ -84,5 +146,18 @@ templ (f *chatGPTProviderForm) Render() {
 				@ChatGPTAuthSignedIn(f.target)
 			}
 		}
+	</div>
+}
+
+templ (m *chatGPTAuthModeMenu) Render() {
+	<div class="flex-col w-full">
+		@ChatGPTAuthModeOption(m, chatGPTAuthBrowser)
+		@ChatGPTAuthModeOption(m, chatGPTAuthDevice)
+	</div>
+}
+
+templ ChatGPTAuthURLText(w *TargetConfig) {
+	<div class="flex-col w-full h-auto pl-2">
+		<span class="w-full h-auto" minWidth={0}>{chatGPTAuthURL(w)}</span>
 	</div>
 }

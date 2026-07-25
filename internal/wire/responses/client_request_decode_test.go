@@ -7,50 +7,34 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestResponsesCaptureKeepsOnlyProviderOwnedIDsForKnownItems(t *testing.T) {
+func TestResponsesKnownItemPresentationMetadataDoesNotEnterReplay(t *testing.T) {
 	raw := []byte(`{"model":"gpt-4.1-mini","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],"input":[{"type":"function_call","id":"item_0","call_id":"call_1","name":"search","arguments":"{}","future_member":true},{"type":"function_call","id":"fc_123","call_id":"call_2","name":"search","arguments":"{}"},{"type":"message","id":"item_1","role":"user","content":"hello"},{"type":"message","id":"msg_123","role":"assistant","status":"completed","content":"hi"}]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	items := decoded.Request.ResponsesInput.JSONObjects()
+	items := decoded.Request.Request.Items()
 	if len(items) != 4 {
-		t.Fatalf("native input item count = %d, want 4", len(items))
+		t.Fatalf("canonical item count = %d, want 4", len(items))
 	}
-	var synthetic, providerOwned map[string]json.RawMessage
-	if err := json.Unmarshal(items[0], &synthetic); err != nil {
+	document, err := EncodeCarrierWithDecisions(
+		EncodeInput{Request: decoded.Request.Request},
+		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+	)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, found := synthetic["id"]; found {
-		t.Fatalf("synthetic function-call id survived replay capture: %s", items[0])
-	}
-	if _, found := synthetic["future_member"]; !found {
-		t.Fatalf("unknown member was not preserved: %s", items[0])
-	}
-	if err := json.Unmarshal(items[1], &providerOwned); err != nil {
-		t.Fatal(err)
-	}
-	if string(providerOwned["id"]) != `"fc_123"` {
-		t.Fatalf("provider function-call id was not preserved: %s", items[1])
-	}
-	var syntheticMessage, providerMessage map[string]json.RawMessage
-	if err := json.Unmarshal(items[2], &syntheticMessage); err != nil {
-		t.Fatal(err)
-	}
-	if _, found := syntheticMessage["id"]; found {
-		t.Fatalf("synthetic message id survived replay capture: %s", items[2])
-	}
-	if err := json.Unmarshal(items[3], &providerMessage); err != nil {
-		t.Fatal(err)
-	}
-	if string(providerMessage["id"]) != `"msg_123"` {
-		t.Fatalf("provider message id was not preserved: %s", items[3])
+	for _, presentationID := range []string{"item_0", "fc_123", "item_1", "msg_123"} {
+		if strings.Contains(string(document.RawBytes()), presentationID) {
+			t.Fatalf("presentation id %q survived replay: %s", presentationID, document.RawBytes())
+		}
 	}
 }
 

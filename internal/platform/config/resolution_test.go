@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestResolveConfigPath_Preference(t *testing.T) {
@@ -31,26 +30,26 @@ func TestDefaultConfigPath_UsesSwobuHomeWhenNoExplicitConfigPath(t *testing.T) {
 	}
 }
 
-func TestDefaultTelemetryStatePath_UsesSwobuHome(t *testing.T) {
+func TestDefaultTelemetryStateDir_UsesSwobuHome(t *testing.T) {
 	withRuntimeGOOS(t, "linux")
 	root := filepath.Join(t.TempDir(), "swobu-home")
 	t.Setenv(EnvSwobuHome, root)
-	want := filepath.Join(root, "state", "telemetry", "state.json")
-	if got := DefaultTelemetryStatePath(); got != want {
-		t.Fatalf("DefaultTelemetryStatePath()=%q want %q", got, want)
+	want := filepath.Join(root, "state", "telemetry")
+	if got := DefaultTelemetryStateDir(); got != want {
+		t.Fatalf("DefaultTelemetryStateDir()=%q want %q", got, want)
 	}
 }
 
-func TestDefaultTelemetryStatePath_UsesUserConfigDirStateOnNonLinux(t *testing.T) {
+func TestDefaultTelemetryStateDir_UsesUserConfigDirStateOnNonLinux(t *testing.T) {
 	withRuntimeGOOS(t, "windows")
 	t.Setenv(EnvSwobuHome, "")
 	t.Setenv(EnvXDGStateHome, "")
 	configHome := filepath.Join(t.TempDir(), "config-home")
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 
-	want := filepath.Join(configHome, "swobu", "state", "telemetry", "state.json")
-	if got := DefaultTelemetryStatePath(); got != want {
-		t.Fatalf("DefaultTelemetryStatePath()=%q want %q", got, want)
+	want := filepath.Join(configHome, "swobu", "state", "telemetry")
+	if got := DefaultTelemetryStateDir(); got != want {
+		t.Fatalf("DefaultTelemetryStateDir()=%q want %q", got, want)
 	}
 }
 
@@ -65,26 +64,6 @@ func TestResolveTelemetryEndpoint_Preference(t *testing.T) {
 func TestResolveTelemetryEndpoint_DefaultWhenEnvMissing(t *testing.T) {
 	if got := ResolveTelemetryEndpoint("https://swobu.com"); got != "https://swobu.com" {
 		t.Fatalf("default telemetry endpoint = %q, want %q", got, "https://swobu.com")
-	}
-}
-
-func TestResolveTelemetryExportInterval_DefaultWhenEnvMissing(t *testing.T) {
-	if got := ResolveTelemetryExportInterval(15 * time.Minute); got != 15*time.Minute {
-		t.Fatalf("default telemetry export interval = %s, want %s", got, 15*time.Minute)
-	}
-}
-
-func TestResolveTelemetryExportInterval_OverrideSeconds(t *testing.T) {
-	t.Setenv(EnvTelemetryExportIntervalSeconds, "90")
-	if got := ResolveTelemetryExportInterval(15 * time.Minute); got != 90*time.Second {
-		t.Fatalf("telemetry export interval override = %s, want %s", got, 90*time.Second)
-	}
-}
-
-func TestResolveTelemetryExportInterval_InvalidFallsBackToDefault(t *testing.T) {
-	t.Setenv(EnvTelemetryExportIntervalSeconds, "abc")
-	if got := ResolveTelemetryExportInterval(15 * time.Minute); got != 15*time.Minute {
-		t.Fatalf("invalid telemetry export interval = %s, want %s", got, 15*time.Minute)
 	}
 }
 

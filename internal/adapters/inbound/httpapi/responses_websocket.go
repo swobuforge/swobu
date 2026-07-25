@@ -130,7 +130,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 		_ = json.Unmarshal(t, &requestType)
 	}
 	if strings.TrimSpace(requestType) != websocketRequestTypeResponseCreate { // swobu:io-string source=boundary
-		return canonical.UnsupportedOperation("websocket request type is not implemented")
+		return canonical.NotImplemented("Swobu cannot yet process this Responses websocket request type")
 	}
 	delete(envelope, "type")
 	payload, err := json.Marshal(envelope)
@@ -161,11 +161,11 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *trafficevidence.Timing) transportpkg.DeliveryResult {
 	streaming, ok := response.(exchange.MessageStreamingResponse)
 	if !ok {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.UnsupportedDelivery("websocket responses require message-oriented streaming output")}
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("websocket response is not message-oriented streaming output")}
 	}
 	transportResponse := streaming.Response
 	if transportResponse.Header.Get("Content-Type") != "application/json" {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.UnsupportedDelivery("websocket responses require websocket-framed streaming output")}
+		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("websocket response does not use websocket framing")}
 	}
 	if transportResponse.Messages == nil {
 		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing message stream")}

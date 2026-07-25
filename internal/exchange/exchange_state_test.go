@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
@@ -24,6 +27,19 @@ type candidateSelectiveRuntime struct {
 }
 
 type targetMutatingRuntime struct{ candidateSelectiveRuntime }
+
+type protocolProjectionRuntime struct {
+	testRuntimeResolver
+	transport testProviderTransport
+}
+
+func (r protocolProjectionRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	return provider.Backend{
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport: provider.BindTransport(target, r.transport),
+	}, nil
+}
 
 func (r targetMutatingRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	backend, err := r.candidateSelectiveRuntime.ResolveBackend(target)
@@ -58,7 +74,7 @@ func (decisionOnlyRejectCodec) Encode(provider.Request) (carrier.Document, []com
 		Feature: compat.RequestOutputFormat,
 		Outcome: compat.Reject,
 		Subject: "test:unmarked-a",
-	}}, canonical.UnsupportedOperation("request was rejected without a backend-local marker")
+	}}, canonical.NotImplemented("Swobu cannot implement this request projection")
 }
 
 func (decisionOnlyRejectCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
@@ -72,7 +88,7 @@ func (unsupportedTestCodec) Encode(provider.Request) (carrier.Document, []compat
 		Feature: compat.RequestOutputFormat,
 		Outcome: compat.Reject,
 		Subject: "test:candidate-a",
-	}}, provider.UnsupportedByBackend(canonical.UnsupportedOperation("candidate cannot represent requested output"))
+	}}, provider.NewCandidateIncompatibility("candidate cannot represent requested output")
 }
 
 func (unsupportedTestCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
@@ -317,7 +333,7 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 		Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
 		PreviousResponse: &canonical.ResponseRef{
 			SwobuID: "swobu_resp_123",
-			Responses: &canonical.ResponsesNativeRef{
+			Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789",
 				TargetID:           target.ID().String(),
 				TargetVersion:      uint64(target.Version()),
@@ -411,7 +427,7 @@ func TestReducerRetriesUnstructured400WithoutNativeReference(t *testing.T) {
 		}),
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
 		}),
@@ -442,7 +458,7 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 		Full: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: nativeTarget.ID().String(), TargetVersion: uint64(nativeTarget.Version()),
 			}},
 		}),
@@ -508,7 +524,7 @@ func TestReducerDoesNotRetryNativePreviousResponseWithoutReferenceOn500(t *testi
 		Full: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
 		}),
@@ -537,7 +553,7 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 		Full: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()) + 1,
 			}},
 		}),
@@ -573,7 +589,7 @@ func TestNativeRequestDecodeFailureDoesNotTriggerSemanticRetry(t *testing.T) {
 		Full: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
 		}),
@@ -708,23 +724,22 @@ func TestFallbackEligiblePreparationFailureSkipsCandidateWithoutConsumingAttempt
 	}
 }
 
-func TestCandidateScopedAsyncPreparationFailureAdvancesRoute(t *testing.T) {
+func TestPostMaterializationCodecFailureAdvancesRoute(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
-		requestpathTarget(t, "media-a"),
+		requestpathTarget(t, "incompatible-a"),
 		requestpathTarget(t, "media-b"),
 	}}
 	prepared := mustBeginSession(t, s.input.request)
 	s.prepared = &prepared
-	s.phase = preparingProviderAttemptPhase{
+	s.phase = materializingAttemptImagesPhase{
 		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		target:    provider.TargetSnapshot{TargetID: "media-a"},
+		target:    provider.TargetSnapshot{TargetID: "incompatible-a"},
 	}
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
-	outcome, err := reduce(context.Background(), s, providerAttemptPrepared{
+	outcome, err := reduce(context.Background(), s, attemptImagesMaterialized{
 		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		err:       preparationError(PreparationCandidate, "candidate protocol cannot preserve image placement"),
 	}, runner)
 	if err != nil {
 		t.Fatal(err)
@@ -733,6 +748,168 @@ func TestCandidateScopedAsyncPreparationFailureAdvancesRoute(t *testing.T) {
 	if attempt.candidateIndex != 1 || attempt.target.TargetID != "media-b" {
 		t.Fatalf("candidate fallback = %#v", attempt.providerCallAttempt)
 	}
+}
+
+func TestStrictChatImageProjectionFallsBackToResponsesAfterMaterialization(t *testing.T) {
+	request := requestWithResponsesReasoningContext(t, closedToolImageRequest(t))
+	s := reducerTestState(t)
+	s.input.request = request
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTargetWithProtocol(t, "strict-chat", "chat_completions"),
+		requestpathTargetWithProtocol(t, "responses-b", "responses"),
+	}}
+	prepared := mustBeginSession(t, request)
+	s.prepared = &prepared
+	s.phase = materializingAttemptImagesPhase{
+		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		target: provider.TargetSnapshot{
+			TargetID: "strict-chat", ProtocolKind: protocolkind.ChatCompletions, Model: "upstream-strict-chat",
+		},
+	}
+	runner := withRuntime(nil)
+	runner.Policy.Compatibility = compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}
+	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
+
+	first, err := reduce(context.Background(), s, attemptImagesMaterialized{
+		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		request:   request,
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialize, ok := first.command.(materializeAttemptImagesCommand)
+	if !ok || materialize.selection.candidateIndex != 1 {
+		t.Fatalf("strict Chat fallback command = %#v, want Responses materialization", first.command)
+	}
+	for _, expected := range []struct {
+		feature compat.Feature
+		outcome compat.Outcome
+	}{
+		{compat.RequestReasoningContextResponses, compat.Drop},
+		{compat.RequestItemsToolResultImage, compat.Reject},
+	} {
+		found := false
+		for _, decision := range first.evidence.decisions {
+			found = found || decision.Feature == expected.feature && decision.Outcome == expected.outcome
+		}
+		if !found {
+			t.Fatalf("strict Chat evidence = %#v, missing independent %s/%s", first.evidence.decisions, expected.feature, expected.outcome)
+		}
+	}
+	second, err := reduce(context.Background(), first.nextState, attemptImagesMaterialized{
+		selection: materialize.selection,
+		request:   request,
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := second.command.(callProviderCommand)
+	if !ok || call.backend.Target.TargetID != "responses-b" {
+		t.Fatalf("post-fallback provider command = %#v", second.command)
+	}
+	if !strings.Contains(string(call.document.RawBytes()), `"context":"all_turns"`) {
+		t.Fatalf("Responses fallback lost reasoning context: %s", call.document.RawBytes())
+	}
+	if len(second.nextState.providerCallAttempts) != 1 || second.nextState.providerCallAttempts[0].candidateIndex != 1 {
+		t.Fatalf("provider attempts = %#v", second.nextState.providerCallAttempts)
+	}
+	evidence := summarizeRoutingEvidence(
+		second.nextState.providerCallAttempts,
+		second.nextState.evaluatedCandidateCount,
+		true,
+	)
+	if evidence.providerCallCount != 1 || !evidence.fallbackRecovered {
+		t.Fatalf("routing evidence = %#v, want one provider call with fallback recovery", evidence)
+	}
+}
+
+func requestWithResponsesReasoningContext(t *testing.T, request canonical.CanonicalRequest) canonical.CanonicalRequest {
+	t.Helper()
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: request.Reasoning().ComputeField(), Disclosure: request.Reasoning().DisclosureField(),
+		ResponsesContext: canonical.Specify(canonical.ResponsesReasoningContextAllTurns),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, hasPrevious := request.PreviousResponse()
+	var previousPointer *canonical.ResponseRef
+	if hasPrevious {
+		previousPointer = &previous
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: request.Items(),
+		Tools: request.ToolsField(), PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
+		ToolCallBatch: request.ToolCallBatchField(), Controls: request.Controls(), Reasoning: reasoning,
+		OutputFormat: request.OutputFormatField(),
+	})
+}
+
+func TestStrictChatImageProjectionExhaustionReportsNoCompatibleTarget(t *testing.T) {
+	request := closedToolImageRequest(t)
+	s := reducerTestState(t)
+	s.input.request = request
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTargetWithProtocol(t, "strict-chat", "chat_completions"),
+	}}
+	prepared := mustBeginSession(t, request)
+	s.prepared = &prepared
+	s.phase = materializingAttemptImagesPhase{
+		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		target: provider.TargetSnapshot{
+			TargetID: "strict-chat", ProtocolKind: protocolkind.ChatCompletions, Model: "upstream-strict-chat",
+		},
+	}
+	runner := withRuntime(nil)
+	runner.Policy.Compatibility = compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}
+	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
+	outcome, err := reduce(context.Background(), s, attemptImagesMaterialized{
+		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		request:   request,
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, ok := outcome.nextState.phase.(failedPhase)
+	if !ok || failed.target.TargetID != "strict-chat" {
+		t.Fatalf("terminal phase = %#v", outcome.nextState.phase)
+	}
+	var terminal canonical.Error
+	if !errors.As(failed.problem, &terminal) || terminal.Code != canonical.ErrorCodeNoCompatibleTarget {
+		t.Fatalf("terminal error = %T %v, want no compatible target", failed.problem, failed.problem)
+	}
+}
+
+func closedToolImageRequest(t *testing.T) canonical.CanonicalRequest {
+	t.Helper()
+	callID, _ := canonical.NewToolCallID("call_image")
+	tool, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "inspect")
+	input, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolCallItem(callID, tool, canonical.NewJSONObjectToolInput(input))
+	image, _ := canonical.NewInlineImage(canonical.ImageMediaPNG, []byte{0x89, 'P', 'N', 'G'}, canonical.Unspecified[canonical.ImageDetail]())
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
+		canonical.NewImageToolResultPart(image),
+	}, false)
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{call, result},
+	})
+}
+
+func requestpathTargetWithProtocol(t *testing.T, id string, rawProtocol string) routing.Target {
+	t.Helper()
+	targetID, _ := routing.ParseTargetID(id)
+	model, _ := routing.ParseUpstreamModel("upstream-" + id)
+	connection, _ := routing.NewCustomConnection("https://example.test/v1", nil)
+	protocol, err := routing.ParseProtocol(rawProtocol, routing.ProviderCustom, func(routing.Provider, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return target
 }
 
 func TestBackendResolutionMustPreserveResolvedTargetProjection(t *testing.T) {
@@ -763,7 +940,7 @@ func TestProviderCallRequirementsAndEvidenceSubjectUseActualAttempt(t *testing.T
 		Full: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
 		}),
@@ -791,7 +968,7 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	s.prepared = &session.ResolvedRequest{
 		Full: s.input.request,
 		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"), PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesNativeRef{
+			Model: canonical.Specify("a"), PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
 				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
 			}},
 		}),
@@ -800,7 +977,7 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: active.id,
-		err:       provider.UnsupportedByBackend(canonical.UnsupportedOperation("tool choice is unsupported")),
+		err:       provider.NewCandidateIncompatibility("candidate cannot represent canonical tool choice"),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -855,12 +1032,59 @@ func TestBackendLocalUnsupportedAdvancesRoute(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil)
+	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil, canonical.NormalizedPathResponses)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if providerCalls != 1 {
 		t.Fatalf("provider calls = %d, want only compatible candidate B", providerCalls)
+	}
+}
+
+func TestFailedResponsesWebSearchProviderOutputIsSwobuOwnedAndTerminal(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTargetWithProtocol(t, "responses-a", "responses"),
+		requestpathTargetWithProtocol(t, "responses-b", "responses"),
+	}}
+	prepared := mustBeginSession(t, s.input.request)
+	s.prepared = &prepared
+	runner := withRuntime(nil)
+	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
+
+	started, err := advanceProviderExecution(s, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := activeProviderAttempt(t, started.nextState)
+	failedSearch := carrier.NewDocument(
+		protocolkind.Responses,
+		"application/json",
+		nil,
+		[]byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`),
+		carrier.Meta{},
+	)
+	failed, err := reduce(
+		context.Background(),
+		started.nextState,
+		providerIngressReceived{attemptID: first.id, ingress: provider.DocumentIngress{Document: failedSearch}},
+		runner,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedFirst, ok := findProviderCallAttempt(failed.nextState, first.id)
+	if !ok || recordedFirst.failure == nil {
+		t.Fatalf("failed Responses attempt = %#v", recordedFirst)
+	}
+	var canonicalError canonical.Error
+	if !errors.As(recordedFirst.failure.Cause, &canonicalError) ||
+		canonicalError.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("failed Responses cause = %#v, want %s", recordedFirst.failure.Cause, canonical.ErrorCodeNotImplemented)
+	}
+	terminal, ok := failed.nextState.phase.(failedPhase)
+	if !ok || terminal.target.TargetID != "responses-a" {
+		t.Fatalf("terminal phase = %#v, want first target failure", failed.nextState.phase)
 	}
 }
 
@@ -882,7 +1106,7 @@ func TestCompatibilityRejectDoesNotMakeFailureFallbackEligible(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil)
+	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil, canonical.NormalizedPathResponses)
 	if err == nil {
 		t.Fatal("unmarked codec rejection unexpectedly succeeded through fallback")
 	}
@@ -930,7 +1154,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
 	})
 
-	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), workspace, nil)
+	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), workspace, nil, canonical.NormalizedPathResponses)
 	if err != nil {
 		t.Fatal(err)
 	}

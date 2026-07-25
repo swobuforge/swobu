@@ -40,7 +40,7 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "second turn")},
-		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous", Responses: &canonical.ResponsesNativeRef{
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous", Responses: &canonical.ResponsesContinuation{
 			ProviderResponseID: "provider_previous", TargetID: "target", TargetVersion: 1,
 		}},
 	})

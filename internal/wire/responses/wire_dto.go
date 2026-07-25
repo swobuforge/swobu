@@ -23,9 +23,9 @@ type responsesRequestDTO struct {
 }
 
 type responsesReasoningRequestDTO struct {
-	Effort  string `json:"effort,omitempty"`
-	Summary string `json:"summary,omitempty"`
-	Context string `json:"context,omitempty"`
+	Effort  string          `json:"effort,omitempty"`
+	Summary string          `json:"summary,omitempty"`
+	Context json.RawMessage `json:"context,omitempty"`
 }
 
 type responsesTextDTO struct {
@@ -53,7 +53,6 @@ type responsesWireOutputItemDTO struct {
 	ServerLabel      string                         `json:"server_label,omitempty"`
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
-	Phase            string                         `json:"phase,omitempty"`
 	Action           json.RawMessage                `json:"action,omitempty"`
 }
 
@@ -70,6 +69,7 @@ type responsesReasoningTextDTO struct {
 type responsesInputItemDTO struct {
 	Type             string                         `json:"type"`
 	Role             string                         `json:"role"`
+	Tools            json.RawMessage                `json:"tools"`
 	Content          json.RawMessage                `json:"content"`
 	CallID           string                         `json:"call_id"`
 	ID               string                         `json:"id"`
@@ -77,7 +77,6 @@ type responsesInputItemDTO struct {
 	Arguments        json.RawMessage                `json:"arguments"`
 	Output           json.RawMessage                `json:"output"`
 	Status           string                         `json:"status,omitempty"`
-	Phase            string                         `json:"phase,omitempty"`
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 	Action           json.RawMessage                `json:"action,omitempty"`

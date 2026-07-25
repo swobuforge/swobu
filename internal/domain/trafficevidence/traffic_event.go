@@ -6,6 +6,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/transport"
 )
 
 // Route identifies the chosen execution destination in traffic-evidence form.
@@ -152,6 +156,7 @@ type TrafficEvent struct {
 	eventKind                 EventKind
 	workspace                 string
 	clientProtocol            ClientProtocol
+	requestPath               canonical.NormalizedPath
 	clientHandler             ClientHandler
 	clientFamily              ClientFamily
 	normalizedOp              NormalizedOp
@@ -161,15 +166,18 @@ type TrafficEvent struct {
 	adaptationChain           []string
 	result                    ResultClass
 	statusCode                int
+	deliveryKind              transport.DeliveryResultKind
+	canonicalErrorCode        canonical.ErrorCode
 	timing                    Timing
 	attemptCount              int
+	fallbackRecovered         bool
 	continuityRecovered       bool
 	continuityRecoveryTrigger string
 	modelResolutionMode       string
 	modelRequested            string
 	modelResolved             string
 	workspaceRouteModelID     string
-	providerSpec              string
+	providerSpec              profile.ProviderID
 	providerModel             string
 	tokenUsage                TokenUsage
 	wireMutations             []Mutation
@@ -181,6 +189,7 @@ type TrafficEventInput struct {
 	RequestID                 RequestID
 	Workspace                 string
 	ClientProtocol            ClientProtocol
+	RequestPath               canonical.NormalizedPath
 	ClientHandler             ClientHandler
 	ClientFamily              ClientFamily
 	NormalizedOp              NormalizedOp
@@ -188,17 +197,14 @@ type TrafficEventInput struct {
 	BridgeID                  string
 	DecisionReason            string
 	AdaptationChain           []string
-	Result                    ResultClass
-	StatusCode                int
 	Timing                    Timing
-	AttemptCount              int
 	ContinuityRecovered       bool
 	ContinuityRecoveryTrigger string
 	ModelResolutionMode       string
 	ModelRequested            string
 	ModelResolved             string
 	WorkspaceRouteModelID     string
-	ProviderSpec              string
+	ProviderSpec              profile.ProviderID
 	ProviderModel             string
 	TokenUsage                TokenUsage
 	Mutations                 []Mutation
@@ -259,47 +265,94 @@ func cloneStageReports(src []StageReport) []StageReport {
 	return out
 }
 
-func NewTerminalTrafficEvent(input TrafficEventInput) (TrafficEvent, error) {
-	return newTrafficEvent(EventKindProviderTerminal, input)
+// TerminalOutcome is the terminal-only fact band: the concrete delivery result
+// and its routing/recovery context. It is composed into an event only by
+// NewTerminalTrafficEvent, so a non-terminal event cannot represent a terminal
+// delivery result, a recovered fallback, or a terminal error code — the invalid
+// aggregate is not representable, not merely rejected at runtime.
+type TerminalOutcome struct {
+	Result             ResultClass
+	StatusCode         int
+	DeliveryKind       transport.DeliveryResultKind
+	CanonicalErrorCode canonical.ErrorCode
+	AttemptCount       int
+	FallbackRecovered  bool
 }
 
-func newTrafficEvent(kind EventKind, input TrafficEventInput) (TrafficEvent, error) {
-	normalizedInput, err := normalizeTrafficEventInput(kind, input)
+// validStatus reports whether code is a transport-valid HTTP status for a terminal
+// event: 0 (no response received) or a real status in 100-599. It matches the V1
+// schema's status_code constraint, so every constructed terminal event is
+// transport-valid, not merely nonnegative.
+func validStatus(code int) bool {
+	return code == 0 || (code >= 100 && code <= 599)
+}
+
+// NewTerminalTrafficEvent composes a base of kind-agnostic facts with the
+// terminal-only outcome band. Terminal facts live on TerminalOutcome, not the
+// shared input; the owned domain types are validated once here, the single
+// chokepoint that protects every traffic-evidence consumer (telemetry included).
+func NewTerminalTrafficEvent(base TrafficEventInput, outcome TerminalOutcome) (TrafficEvent, error) {
+	normalized, err := normalizeTrafficEventInput(base)
 	if err != nil {
 		return TrafficEvent{}, err
 	}
+	if !outcome.Result.IsTerminal() {
+		return TrafficEvent{}, fmt.Errorf("terminal events must use a terminal result class")
+	}
+	if !validStatus(outcome.StatusCode) {
+		return TrafficEvent{}, fmt.Errorf("terminal traffic event status code %d is not a valid HTTP status (0 or 100-599)", outcome.StatusCode)
+	}
+	if outcome.AttemptCount < 0 {
+		return TrafficEvent{}, fmt.Errorf("attempt count cannot be negative")
+	}
+	if !canonical.ValidNormalizedPath(normalized.RequestPath) {
+		return TrafficEvent{}, fmt.Errorf("terminal traffic event request path %q is not canonical", normalized.RequestPath)
+	}
+	if _, ok := profile.ParseProviderID(string(normalized.ProviderSpec)); !ok {
+		return TrafficEvent{}, fmt.Errorf("terminal traffic event provider %q is not a catalog id", normalized.ProviderSpec)
+	}
+	if !transport.ValidDeliveryResultKind(outcome.DeliveryKind) {
+		return TrafficEvent{}, fmt.Errorf("terminal traffic event delivery kind %q is not recognized", outcome.DeliveryKind)
+	}
+	if outcome.CanonicalErrorCode != "" && !canonical.ValidErrorCode(outcome.CanonicalErrorCode) {
+		return TrafficEvent{}, fmt.Errorf("terminal traffic event canonical error code %q is not recognized", outcome.CanonicalErrorCode)
+	}
 	return TrafficEvent{
-		requestID:                 normalizedInput.RequestID,
-		eventKind:                 kind,
-		workspace:                 normalizedInput.Workspace,
-		clientProtocol:            normalizedInput.ClientProtocol,
-		clientHandler:             normalizedInput.ClientHandler,
-		clientFamily:              normalizedInput.ClientFamily,
-		normalizedOp:              normalizedInput.NormalizedOp,
-		route:                     normalizedInput.Route,
-		bridgeID:                  normalizedInput.BridgeID,
-		decisionReason:            normalizedInput.DecisionReason,
-		adaptationChain:           slices.Clone(normalizedInput.AdaptationChain),
-		result:                    normalizedInput.Result,
-		statusCode:                normalizedInput.StatusCode,
-		timing:                    normalizedInput.Timing,
-		attemptCount:              normalizedInput.AttemptCount,
-		continuityRecovered:       normalizedInput.ContinuityRecovered,
-		continuityRecoveryTrigger: normalizedInput.ContinuityRecoveryTrigger,
-		modelResolutionMode:       normalizedInput.ModelResolutionMode,
-		modelRequested:            normalizedInput.ModelRequested,
-		modelResolved:             normalizedInput.ModelResolved,
-		workspaceRouteModelID:     normalizedInput.WorkspaceRouteModelID,
-		providerSpec:              strings.TrimSpace(normalizedInput.ProviderSpec),  // swobu:io-string source=boundary
-		providerModel:             strings.TrimSpace(normalizedInput.ProviderModel), // swobu:io-string source=boundary
-		tokenUsage:                normalizedInput.TokenUsage,
-		wireMutations:             cloneMutations(normalizedInput.Mutations),
-		exchangeDiagnostics:       slices.Clone(normalizedInput.ExchangeDiagnostics),
-		exchangeStageReports:      cloneStageReports(normalizedInput.StageReports),
+		requestID:                 normalized.RequestID,
+		eventKind:                 EventKindProviderTerminal,
+		workspace:                 normalized.Workspace,
+		clientProtocol:            normalized.ClientProtocol,
+		requestPath:               normalized.RequestPath,
+		clientHandler:             normalized.ClientHandler,
+		clientFamily:              normalized.ClientFamily,
+		normalizedOp:              normalized.NormalizedOp,
+		route:                     normalized.Route,
+		bridgeID:                  normalized.BridgeID,
+		decisionReason:            normalized.DecisionReason,
+		adaptationChain:           slices.Clone(normalized.AdaptationChain),
+		result:                    outcome.Result,
+		statusCode:                outcome.StatusCode,
+		deliveryKind:              outcome.DeliveryKind,
+		canonicalErrorCode:        outcome.CanonicalErrorCode,
+		timing:                    normalized.Timing,
+		attemptCount:              outcome.AttemptCount,
+		fallbackRecovered:         outcome.FallbackRecovered,
+		continuityRecovered:       normalized.ContinuityRecovered,
+		continuityRecoveryTrigger: normalized.ContinuityRecoveryTrigger,
+		modelResolutionMode:       normalized.ModelResolutionMode,
+		modelRequested:            normalized.ModelRequested,
+		modelResolved:             normalized.ModelResolved,
+		workspaceRouteModelID:     normalized.WorkspaceRouteModelID,
+		providerSpec:              normalized.ProviderSpec,
+		providerModel:             strings.TrimSpace(normalized.ProviderModel), // swobu:io-string source=boundary
+		tokenUsage:                normalized.TokenUsage,
+		wireMutations:             cloneMutations(normalized.Mutations),
+		exchangeDiagnostics:       slices.Clone(normalized.ExchangeDiagnostics),
+		exchangeStageReports:      cloneStageReports(normalized.StageReports),
 	}, nil
 }
 
-func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (TrafficEventInput, error) {
+func normalizeTrafficEventInput(input TrafficEventInput) (TrafficEventInput, error) {
 	if input.RequestID.IsZero() {
 		return TrafficEventInput{}, fmt.Errorf("request id is required")
 	}
@@ -308,24 +361,6 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 	}
 	if input.Route.TargetID() == "" {
 		return TrafficEventInput{}, fmt.Errorf("route is required")
-	}
-	if input.StatusCode < 0 {
-		return TrafficEventInput{}, fmt.Errorf("status code must not be negative")
-	}
-	switch kind {
-	case EventKindProviderInflight:
-		if input.Result != ResultClassInProgress {
-			return TrafficEventInput{}, fmt.Errorf("in-flight events must use in_progress result class")
-		}
-		if input.StatusCode != 0 {
-			return TrafficEventInput{}, fmt.Errorf("in-flight events must use status code 0")
-		}
-	case EventKindProviderTerminal:
-		if !input.Result.IsTerminal() {
-			return TrafficEventInput{}, fmt.Errorf("terminal events must use a terminal result class")
-		}
-	default:
-		return TrafficEventInput{}, fmt.Errorf("unknown event kind %q", kind)
 	}
 	if input.ClientProtocol == "" {
 		input.ClientProtocol = ClientProtocolUnknown
@@ -344,9 +379,6 @@ func normalizeTrafficEventInput(kind EventKind, input TrafficEventInput) (Traffi
 	}
 	if strings.TrimSpace(input.DecisionReason) == "" { // swobu:io-string source=domain
 		input.DecisionReason = "selected_provider_config"
-	}
-	if input.AttemptCount < 0 {
-		return TrafficEventInput{}, fmt.Errorf("attempt count cannot be negative")
 	}
 	input.ModelResolutionMode = strings.TrimSpace(input.ModelResolutionMode)     // swobu:io-string source=domain
 	input.ModelRequested = strings.TrimSpace(input.ModelRequested)               // swobu:io-string source=domain
@@ -429,30 +461,34 @@ func normalizeTrafficEventUniqueStrings(src []string) []string {
 	return unique
 }
 
-func (e TrafficEvent) RequestID() RequestID              { return e.requestID }
-func (e TrafficEvent) EventKind() EventKind              { return e.eventKind }
-func (e TrafficEvent) Workspace() string                 { return e.workspace }
-func (e TrafficEvent) ClientProtocol() ClientProtocol    { return e.clientProtocol }
-func (e TrafficEvent) ClientHandler() ClientHandler      { return e.clientHandler }
-func (e TrafficEvent) ClientFamily() ClientFamily        { return e.clientFamily }
-func (e TrafficEvent) NormalizedOp() NormalizedOp        { return e.normalizedOp }
-func (e TrafficEvent) Route() Route                      { return e.route }
-func (e TrafficEvent) BridgeID() string                  { return e.bridgeID }
-func (e TrafficEvent) DecisionReason() string            { return e.decisionReason }
-func (e TrafficEvent) AdaptationChain() []string         { return slices.Clone(e.adaptationChain) }
-func (e TrafficEvent) Result() ResultClass               { return e.result }
-func (e TrafficEvent) StatusCode() int                   { return e.statusCode }
-func (e TrafficEvent) Timing() Timing                    { return e.timing }
-func (e TrafficEvent) AttemptCount() int                 { return e.attemptCount }
-func (e TrafficEvent) ContinuityRecovered() bool         { return e.continuityRecovered }
-func (e TrafficEvent) ContinuityRecoveryTrigger() string { return e.continuityRecoveryTrigger }
-func (e TrafficEvent) ModelResolutionMode() string       { return e.modelResolutionMode }
-func (e TrafficEvent) ModelRequested() string            { return e.modelRequested }
-func (e TrafficEvent) ModelResolved() string             { return e.modelResolved }
-func (e TrafficEvent) WorkspaceRouteModelID() string     { return e.workspaceRouteModelID }
-func (e TrafficEvent) ProviderSpec() string              { return e.providerSpec }
-func (e TrafficEvent) ProviderModel() string             { return e.providerModel }
-func (e TrafficEvent) TokenUsage() TokenUsage            { return e.tokenUsage }
+func (e TrafficEvent) RequestID() RequestID                       { return e.requestID }
+func (e TrafficEvent) EventKind() EventKind                       { return e.eventKind }
+func (e TrafficEvent) Workspace() string                          { return e.workspace }
+func (e TrafficEvent) ClientProtocol() ClientProtocol             { return e.clientProtocol }
+func (e TrafficEvent) RequestPath() canonical.NormalizedPath      { return e.requestPath }
+func (e TrafficEvent) ClientHandler() ClientHandler               { return e.clientHandler }
+func (e TrafficEvent) ClientFamily() ClientFamily                 { return e.clientFamily }
+func (e TrafficEvent) NormalizedOp() NormalizedOp                 { return e.normalizedOp }
+func (e TrafficEvent) Route() Route                               { return e.route }
+func (e TrafficEvent) BridgeID() string                           { return e.bridgeID }
+func (e TrafficEvent) DecisionReason() string                     { return e.decisionReason }
+func (e TrafficEvent) AdaptationChain() []string                  { return slices.Clone(e.adaptationChain) }
+func (e TrafficEvent) Result() ResultClass                        { return e.result }
+func (e TrafficEvent) StatusCode() int                            { return e.statusCode }
+func (e TrafficEvent) DeliveryKind() transport.DeliveryResultKind { return e.deliveryKind }
+func (e TrafficEvent) CanonicalErrorCode() canonical.ErrorCode    { return e.canonicalErrorCode }
+func (e TrafficEvent) Timing() Timing                             { return e.timing }
+func (e TrafficEvent) AttemptCount() int                          { return e.attemptCount }
+func (e TrafficEvent) FallbackRecovered() bool                    { return e.fallbackRecovered }
+func (e TrafficEvent) ContinuityRecovered() bool                  { return e.continuityRecovered }
+func (e TrafficEvent) ContinuityRecoveryTrigger() string          { return e.continuityRecoveryTrigger }
+func (e TrafficEvent) ModelResolutionMode() string                { return e.modelResolutionMode }
+func (e TrafficEvent) ModelRequested() string                     { return e.modelRequested }
+func (e TrafficEvent) ModelResolved() string                      { return e.modelResolved }
+func (e TrafficEvent) WorkspaceRouteModelID() string              { return e.workspaceRouteModelID }
+func (e TrafficEvent) ProviderSpec() profile.ProviderID           { return e.providerSpec }
+func (e TrafficEvent) ProviderModel() string                      { return e.providerModel }
+func (e TrafficEvent) TokenUsage() TokenUsage                     { return e.tokenUsage }
 func (e TrafficEvent) Mutations() []Mutation {
 	return cloneMutations(e.wireMutations)
 }

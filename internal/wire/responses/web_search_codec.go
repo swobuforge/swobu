@@ -52,7 +52,7 @@ func (s *responsesResponseStream) completeWebSearchItem(frame streamFrame) (bool
 	if itemID == "" {
 		itemID = strings.TrimSpace(frame.ItemID)
 	} // swobu:io-string source=provider-wire
-	lifecycle, err := decodeResponsesWebSearchLifecycle(itemID, frame.Item.Action, true)
+	lifecycle, err := decodeResponsesWebSearchLifecycle(itemID, frame.Item.Action, responsesWebSearchSucceeded)
 	if err != nil {
 		return false, err
 	}
@@ -68,7 +68,30 @@ func (s *responsesResponseStream) completeWebSearchItem(frame streamFrame) (bool
 	return true, nil
 }
 
-func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, completed bool) ([]canonical.CanonicalItem, error) {
+type responsesWebSearchLifecycleState uint8
+
+const (
+	responsesWebSearchPending responsesWebSearchLifecycleState = iota + 1
+	responsesWebSearchSucceeded
+)
+
+// decodeResponsesWebSearchLifecycleState collapses wire-only pending aliases.
+// Failed durable history is rejected until canonical has a failure value that
+// can preserve its execution meaning without inventing a message.
+func decodeResponsesWebSearchLifecycleState(raw string) (responsesWebSearchLifecycleState, error) {
+	switch strings.TrimSpace(raw) { // swobu:io-string source=boundary
+	case "", "in_progress", "searching":
+		return responsesWebSearchPending, nil
+	case "completed":
+		return responsesWebSearchSucceeded, nil
+	case "failed":
+		return 0, fmt.Errorf("failed web-search history has no canonical failure detail")
+	default:
+		return 0, fmt.Errorf("web-search status is unsupported")
+	}
+}
+
+func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState) ([]canonical.CanonicalItem, error) {
 	callID, err := canonical.NewToolCallID(strings.TrimSpace(id)) // swobu:io-string source=provider-wire
 	if err != nil {
 		return nil, canonical.InternalError("responses web-search call is missing id")
@@ -115,13 +138,13 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, com
 			return nil, canonical.InternalError("responses web-search sources are invalid")
 		}
 	}
-	if !completed && !sourcesDisclosed {
+	if state == responsesWebSearchPending && !sourcesDisclosed {
 		return items, nil
 	}
 	sources := make([]canonical.WebSource, 0, len(wireSources))
 	for _, wireSource := range wireSources {
 		if kind := strings.TrimSpace(wireSource.Type); kind != "" && kind != "url" { // swobu:io-string source=provider-wire
-			return nil, canonical.UnsupportedOperation("responses web-search returned a non-URL source")
+			return nil, canonical.NotImplemented("Swobu cannot project a Responses web-search source without a URL")
 		}
 		webURL, err := canonical.NewWebURL(wireSource.URL)
 		if err != nil {
@@ -156,7 +179,7 @@ func decodeResponsesAnnotations(text string, raw json.RawMessage) ([]canonical.W
 	citations := make([]canonical.WebCitation, 0, len(annotations))
 	for _, annotation := range annotations {
 		if strings.TrimSpace(annotation.Type) != "url_citation" { // swobu:io-string source=provider-wire
-			return nil, canonical.UnsupportedOperation("responses output annotation type is not implemented")
+			return nil, canonical.NotImplemented("Swobu has no canonical projection for this Responses output annotation type")
 		}
 		webURL, err := canonical.NewWebURL(annotation.URL)
 		if err != nil {

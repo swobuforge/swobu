@@ -21,9 +21,13 @@
 // endpoint selection, provider wiring, or non-chat public contract semantics.
 // Client request decoding also normalizes stringified function_call.arguments
 // payloads emitted by OpenCode-style client bridges.
-// User images preserve URL or inline sources. Tool-result images reject, and
-// unsupported explicit detail is approximated only under an explicit codec
-// option with compatibility evidence.
+// User images preserve URL or inline sources. Tool-result images reject under
+// strict compatibility. Compatibility mode may project them into one
+// attempt-local synthetic user image message only after the active assistant
+// tool-call batch is provably closed; deterministic markers retain canonical
+// call/item/part association, and the projection never becomes history.
+// Unsupported explicit detail is approximated only with compatibility
+// evidence.
 // Client-visible messages define the private chat-completions history
 // fingerprint scheme. Root invocation fields remain on rebased requests but do
 // not identify history; response envelopes do not participate.

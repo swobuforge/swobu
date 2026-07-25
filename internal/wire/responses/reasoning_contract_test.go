@@ -2,14 +2,92 @@ package responses
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 )
+
+func TestResponsesReasoningContextDecodesAndEncodesExactly(t *testing.T) {
+	for _, value := range []canonical.ResponsesReasoningContext{
+		canonical.ResponsesReasoningContextAuto,
+		canonical.ResponsesReasoningContextAllTurns,
+		canonical.ResponsesReasoningContextCurrentTurn,
+	} {
+		t.Run(string(value), func(t *testing.T) {
+			raw := []byte(`{"model":"gpt","input":"hi","reasoning":{"context":"` + string(value) + `"}}`)
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, present := decoded.Request.Request.Reasoning().ResponsesContextField().Get()
+			if !present || got != value {
+				t.Fatalf("decoded context = (%q,%t), want (%q,true)", got, present, value)
+			}
+			document, err := EncodeCarrierWithDecisions(EncodeInput{Request: decoded.Request.Request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(document.RawBytes()), `"context":"`+string(value)+`"`) {
+				t.Fatalf("encoded = %s", document.RawBytes())
+			}
+			result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(
+				wire.ProviderEncodeInput{Request: decoded.Request.Request},
+				delivery.BufferedDelivery(),
+				"exchange",
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertResponsesDecision(t, result.Decisions, compat.RequestReasoningContextResponses, compat.Exact)
+		})
+	}
+}
+
+func TestResponsesReasoningContextRejectsMalformedValuesAsBadRequest(t *testing.T) {
+	for _, rawContext := range []string{`"future"`, `""`, `17`, `{}`} {
+		raw := []byte(`{"model":"gpt","input":"hi","reasoning":{"context":` + rawContext + `}}`)
+		_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+		var canonicalErr canonical.Error
+		if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+			t.Fatalf("context %s error = %#v, want typed bad request", rawContext, err)
+		}
+	}
+}
+
+func TestResponsesReasoningContextSurvivesImplicitRebase(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt",
+		"reasoning":{"context":"current_turn"},
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
+			{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
+		]
+	}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Request.RebasedRequest == nil {
+		t.Fatal("expected implicit Responses rebase")
+	}
+	for name, request := range map[string]canonical.CanonicalRequest{
+		"full":    decoded.Request.Request,
+		"rebased": decoded.Request.RebasedRequest.Request,
+	} {
+		contextValue, present := request.Reasoning().ResponsesContextField().Get()
+		if !present || contextValue != canonical.ResponsesReasoningContextCurrentTurn {
+			t.Fatalf("%s context = (%q,%t)", name, contextValue, present)
+		}
+	}
+}
 
 func TestResponsesReasoningRequestNormalizesToMinimalControls(t *testing.T) {
 	raw := []byte(`{"model":"gpt","input":"hi","reasoning":{"effort":"high","summary":"detailed"}}`)
@@ -37,9 +115,14 @@ func TestResponsesPreservesClientEncryptedContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := decoded.Request.ResponsesInput.JSONObjects()
-	if len(items) != 1 || !strings.Contains(string(items[0]), `"encrypted_content":"secret"`) {
-		t.Fatalf("native input was not preserved: %s", items)
+	items := decoded.Request.Request.Items()
+	reasoning, ok := items[0].Reasoning()
+	if len(items) != 1 || !ok {
+		t.Fatalf("canonical reasoning was not preserved: %#v", items)
+	}
+	replay, ok := reasoning.Opaque().Responses()
+	if !ok || replay.EncryptedContent != "secret" {
+		t.Fatalf("encrypted reasoning replay = %#v", replay)
 	}
 }
 
@@ -102,10 +185,10 @@ func assertNoReasoningItem(t *testing.T, stream canonical.ResponseStream) {
 	}
 }
 
-func TestResponsesNativeContinuationUsesProviderHandle(t *testing.T) {
+func TestResponsesContinuationUsesProviderHandle(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt"), PreviousResponse: &canonical.ResponseRef{
-			SwobuID: "resp", Responses: &canonical.ResponsesNativeRef{ProviderResponseID: "provider_resp", TargetID: "target", TargetVersion: 1},
+			SwobuID: "resp", Responses: &canonical.ResponsesContinuation{ProviderResponseID: "provider_resp", TargetID: "target", TargetVersion: 1},
 		},
 	})
 	document, err := EncodeCarrierWithDecisions(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -28,7 +29,7 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 	if len(stopSequences) > 0 {
 		// Responses v0 does not carry stop sequences in canonical form; fail
 		// closed rather than silently dropping supported user intent.
-		return canonical.GenerationControls{}, canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
+		return canonical.GenerationControls{}, canonical.NotImplemented("Swobu cannot yet preserve Responses stop sequences")
 	}
 	var effort *canonical.InferenceEffort
 	if dto.Reasoning != nil && strings.TrimSpace(dto.Reasoning.Effort) != "" && strings.TrimSpace(dto.Reasoning.Effort) != "none" { // swobu:io-string source=boundary
@@ -63,8 +64,13 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 		default:
 			return canonical.ReasoningControls{}, canonical.BadRequest("responses reasoning summary is invalid")
 		}
-		if value := strings.TrimSpace(dto.Context); value != "" { // swobu:io-string source=boundary
-			return canonical.ReasoningControls{}, canonical.UnsupportedOperation("responses reasoning context is not supported in P0")
+		if isRawControlSet(dto.Context) {
+			var rawContext string
+			if err := json.Unmarshal(dto.Context, &rawContext); err != nil {
+				return canonical.ReasoningControls{}, canonical.BadRequest("responses reasoning context is invalid")
+			}
+			contextValue := canonical.ResponsesReasoningContext(rawContext)
+			params.ResponsesContext = canonical.Specify(contextValue)
 		}
 	}
 	includeEncrypted, err := decodeResponsesReasoningInclude(includeRaw)
@@ -90,7 +96,7 @@ func decodeResponsesReasoningInclude(raw json.RawMessage) (bool, error) {
 			continue
 		}
 		if value != "reasoning.encrypted_content" {
-			return false, canonical.UnsupportedOperation("responses include entry is unsupported")
+			return false, canonical.NotImplemented("Swobu cannot yet project this Responses include entry")
 		}
 		includeEncrypted = true
 	}
@@ -101,17 +107,17 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	wireReasoning := map[string]any{}
 	if compute, ok := reasoning.ComputeField().Get(); ok {
 		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
-			return canonical.UnsupportedOperation("unfinished disabled Responses reasoning cannot satisfy readable disclosure")
+			return provider.NewCandidateIncompatibility("Responses cannot represent disabled reasoning with readable disclosure")
 		}
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			wireReasoning["effort"] = "none"
 		case canonical.ReasoningAutomatic:
 			if !effortField.IsSpecified() {
-				return canonical.UnsupportedOperation("Responses target has no proof that omitted effort enables dynamic reasoning")
+				return provider.NewCandidateIncompatibility("Responses target has no proof that omitted effort enables dynamic reasoning")
 			}
 		case canonical.ReasoningBudget:
-			return canonical.UnsupportedOperation("Responses protocol cannot preserve a numeric reasoning budget")
+			return provider.NewCandidateIncompatibility("Responses cannot represent a numeric reasoning budget")
 		}
 	}
 	if effort, ok := effortField.Get(); ok {
@@ -122,6 +128,9 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	}
 	if disclosure, ok := reasoning.DisclosureField().Get(); ok && disclosure == canonical.ReasoningDisclosureSummary {
 		wireReasoning["summary"] = "auto"
+	}
+	if contextValue, ok := reasoning.ResponsesContextField().Get(); ok {
+		wireReasoning["context"] = contextValue
 	}
 	if len(wireReasoning) > 0 {
 		payload["reasoning"] = wireReasoning
@@ -140,7 +149,7 @@ func encodeResponsesGenerationControls(payload map[string]any, controls canonica
 		payload["top_p"] = value
 	}
 	if len(controls.Limits.StopSequences) > 0 {
-		return canonical.UnsupportedOperation("responses protocol does not support stop sequences on swobu v0")
+		return provider.NewCandidateIncompatibility("Responses cannot represent canonical stop sequences")
 	}
 	return nil
 }

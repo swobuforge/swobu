@@ -24,6 +24,10 @@ func statusCodeForSwobuError(code canonical.ErrorCode) int {
 		return http.StatusNotFound
 	case canonical.ErrorCodeUnsupportedOperation, canonical.ErrorCodeUnsupportedDelivery:
 		return http.StatusBadRequest
+	case canonical.ErrorCodeNotImplemented:
+		return http.StatusNotImplemented
+	case canonical.ErrorCodeNoCompatibleTarget:
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}

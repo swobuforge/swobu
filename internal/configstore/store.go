@@ -167,6 +167,10 @@ func (s *Store) Update(ctx context.Context, edit func(routing.Config) (routing.C
 	return next.Clone(), nil
 }
 
+// Close is terminal and one-shot: it marks the store closed, then releases the
+// cross-process file lock and closes the lock file, joining both errors. A close
+// operation is not retryable, so it never leaves the store in an "open but
+// unlocked" state.
 func (s *Store) Close() error {
 	if s == nil {
 		return nil
@@ -180,10 +184,9 @@ func (s *Store) Close() error {
 	if s.lock == nil {
 		return nil
 	}
-	errUnlock := releaseFileLock(s.lock)
-	errClose := s.lock.Close()
+	lock := s.lock
 	s.lock = nil
-	return errors.Join(errUnlock, errClose)
+	return errors.Join(releaseFileLock(lock), lock.Close())
 }
 
 func ensureConfigDirectory(path string) error {

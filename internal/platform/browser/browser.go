@@ -3,26 +3,41 @@ package browser
 
 import (
 	"fmt"
-	"os/exec"
-	"runtime"
+	"io"
+	"net/url"
 	"strings"
+	"sync"
+
+	clibrowser "github.com/cli/browser"
 )
 
+var openMu sync.Mutex
+
 // Open starts the default browser for the given raw URL.
-// It returns an error if the URL is empty or the platform command fails.
+// It accepts only absolute HTTP(S) URLs and returns platform opener failures.
+// Child-process output is discarded so a failed platform opener cannot paint
+// diagnostics over a terminal UI. The mutex protects cli/browser's writer
+// globals while they are temporarily redirected.
 func Open(raw string) error {
-	url := strings.TrimSpace(raw)
-	if url == "" {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return fmt.Errorf("browser open: URL is missing")
 	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
+	target, err := url.Parse(raw)
+	if err != nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
+		return fmt.Errorf("browser open: URL must be absolute HTTP(S)")
 	}
-	return cmd.Start()
+
+	openMu.Lock()
+	previousStdout, previousStderr := clibrowser.Stdout, clibrowser.Stderr
+	clibrowser.Stdout, clibrowser.Stderr = io.Discard, io.Discard
+	defer func() {
+		clibrowser.Stdout, clibrowser.Stderr = previousStdout, previousStderr
+		openMu.Unlock()
+	}()
+
+	if err := clibrowser.OpenURL(target.String()); err != nil {
+		return fmt.Errorf("browser open: %w", err)
+	}
+	return nil
 }

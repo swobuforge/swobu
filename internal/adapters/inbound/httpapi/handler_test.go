@@ -161,7 +161,11 @@ func TestHandler_LogsSwobuErrorDetailsOnFailure(t *testing.T) {
 	defer setDefaultLogger()
 
 	handler := newTestHandler(staticRequestIngress{
-		err: canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool declarations; got namespace"),
+		out: exchange.RequestOutput{Target: provider.TargetSnapshot{TargetID: "selected-chat"}},
+		err: canonical.ClientUnsupportedOperation(
+			"chat completions endpoint does not support namespace tool declarations",
+			"Change the tool declaration to function or custom and retry",
+		),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("User-Agent", "Codex/1.0")
@@ -180,8 +184,9 @@ func TestHandler_LogsSwobuErrorDetailsOnFailure(t *testing.T) {
 		"request_id=req_swobu",
 		"result=swobu_error",
 		"error_origin=swobu",
+		"target_id=selected-chat",
 		"error_code=UNSUPPORTED_OPERATION",
-		"error_message=\"UNSUPPORTED_OPERATION: chat completions protocol only supports function and custom tool declarations; got namespace\"",
+		"error_message=\"UNSUPPORTED_OPERATION: chat completions endpoint does not support namespace tool declarations. Change the tool declaration to function or custom and retry\"",
 		"status_code=400",
 	} {
 		if !strings.Contains(out, want) {

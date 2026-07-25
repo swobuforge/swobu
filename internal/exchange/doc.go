@@ -37,7 +37,7 @@
 // closed transitions only when an implemented alternative exists. Attempt
 // requirements record issued-call facts; generic provider errors never infer
 // which feature caused a failure. Alternatives do not add nested retry loops,
-// synchronized route cursors, or phase booleans. Candidate-scoped preparation
-// failure advances routing regardless of declared tools; malformed
-// request-global media fails the exchange.
+// synchronized route cursors, or phase booleans. Request-image materialization
+// is protocol-independent and malformed or unavailable client media fails the
+// exchange. A later typed backend-local codec rejection may advance routing.
 package exchange

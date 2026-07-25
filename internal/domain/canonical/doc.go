@@ -32,11 +32,25 @@
 // tool results cannot become provider output. Completed items remain
 // response-projection checkpoints.
 //
-// Canonical may contain typed protocol-native refinements when they remain
-// attached beneath their canonical semantic owner, as opaque thinking remains
-// attached to reasoning and Responses identity remains attached to ResponseRef.
-// Independent protocol replay transcripts do not acquire canonical ownership;
-// Responses stateless transcript state lives beside canonical in
-// domain/responsesnative. Provider wire names, aliases, transport DTOs, and
-// runtime mechanics remain outside this package.
+// # Canonical admission
+//
+// A fact belongs in the canonical graph only when omitting it can change:
+//
+//   - client-visible output,
+//   - model or provider behavior on this or a later invocation, or
+//   - correctness of execution, continuation, correlation, or projection.
+//
+// Wire presence and byte-equivalent round-trip are not sufficient reasons.
+//
+// A protocol-specific fact requires a named consumer and a behavioral test.
+// Unknown members on known items are ignored. Unknown item kinds are rejected
+// unless a concrete continuation requirement justifies a narrowly typed
+// representation.
+//
+// Canonical therefore stores the minimum sufficient state for observable
+// projection, inference-equivalent continuation, and correct execution. Typed
+// protocol-native values remain only beneath the semantic owner whose named
+// consumer needs them, such as encrypted reasoning replay and a target-bound
+// continuation handle. Independent protocol transcripts, provider wire names,
+// aliases, transport DTOs, and runtime mechanics remain outside this package.
 package canonical

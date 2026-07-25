@@ -99,7 +99,7 @@ func decodeOpenAIContentMessage(raw json.RawMessage) (canonical.CanonicalItem, b
 				content = append(content, canonical.NewTextMessagePart(text))
 			}
 		default:
-			return canonical.UnsupportedOperation("chat completions response content contains an unsupported part type")
+			return canonical.NotImplemented("Swobu has no canonical projection for this Chat Completions response content part type")
 		}
 		return nil
 	})

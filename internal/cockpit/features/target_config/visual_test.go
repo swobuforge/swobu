@@ -1,6 +1,8 @@
 package target_config
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -8,6 +10,7 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
@@ -16,6 +19,7 @@ import (
 
 const providerAuthoringFixtureDir = "testdata/provider_authoring/fixture"
 const providerAuthoringFixtureHeight = 24
+const chatGPTVisualLoginURL = "https://auth.openai.com/oauth/authorize?client_id=app_test&redirect_uri=http%3A%2F%2F127.0.0.1%3A7926%2Fcallback&response_type=code&scope=openid%20profile%20email&state=fixture-state"
 
 var requiredProviderAuthoringVisualNames = []string{
 	"api_key_missing", "api_key_environment_ready",
@@ -25,7 +29,7 @@ var requiredProviderAuthoringVisualNames = []string{
 	"bedrock_aws_identity", "bedrock_environment_api_key", "bedrock_target_api_key", "bedrock_auth_failure", "bedrock_credential_menu",
 	"azure_project_required", "azure_credential_required", "azure_protocol_required", "azure_ready",
 	"ollama_default_url", "ollama_editing_url",
-	"chatgpt_signed_out", "chatgpt_pending", "chatgpt_signed_in", "chatgpt_failed",
+	"chatgpt_signed_out", "chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending", "chatgpt_open_failed", "chatgpt_signed_in", "chatgpt_failed",
 	"model_picker", "deployment_picker", "protocol_picker", "ready_to_create",
 }
 
@@ -100,7 +104,9 @@ func TestProviderAuthoringVisualRegistryAndFixturesAreClosed(t *testing.T) {
 
 func providerAuthoringVisualWidths(name string) []int {
 	switch name {
-	case "bedrock_aws_identity", "credential_file_browser", "model_picker", "protocol_picker", "chatgpt_pending":
+	case "bedrock_aws_identity", "credential_file_browser", "model_picker", "protocol_picker",
+		"chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending",
+		"chatgpt_open_failed":
 		return []int{80, 100, 120}
 	default:
 		return []int{100}
@@ -189,14 +195,18 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "chatgpt_signed_out", build: func(t *testing.T) tui.Component {
 			return authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
 		}},
+		{name: "chatgpt_auth_mode_picker", render: renderChatGPTAuthModePicker},
 		{name: "chatgpt_pending", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
 			w.AuthSession.Set(readmodel.AuthSessionReadModel{
 				ProviderSpec: string(profile.ProviderSpecChatGPT), SessionID: "login-1", State: "pending",
-				AuthorizeURL: "https://auth.openai.com/device", UserCode: "ABCD-EFGH",
+				AuthorizeURL: chatGPTVisualLoginURL,
 			})
 			return w
 		}},
+		{name: "chatgpt_pending_auth_mode_picker", render: renderChatGPTPendingAuthModePicker},
+		{name: "chatgpt_device_pending", render: renderChatGPTDevicePending},
+		{name: "chatgpt_open_failed", render: renderChatGPTOpenFailure},
 		{name: "chatgpt_signed_in", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "secret:chatgpt/session")
 			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), State: "succeeded", CredentialRef: "secret:chatgpt/session"})
@@ -384,6 +394,124 @@ func renderAzureCredentialRequired(t *testing.T, width int) string {
 	for _, char := range "https://example.services.ai.azure.com/api/projects/demo" {
 		harness.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: char})
 	}
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	return harness.FrameTrimmed()
+}
+
+func renderChatGPTOpenFailure(t *testing.T, width int) string {
+	t.Helper()
+	var openedURL string
+	restoreEffects := ui.RegisterEffectHooks(func(url string) error {
+		openedURL = url
+		return errors.New("no browser is available")
+	}, nil, nil)
+	defer restoreEffects()
+
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{
+		ProviderSpec: string(profile.ProviderSpecChatGPT),
+		SessionID:    "login-1",
+		State:        "pending",
+		AuthorizeURL: chatGPTVisualLoginURL,
+	})
+	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
+	if frame := harness.FrameTrimmed(); !strings.Contains(frame, "> login URL") {
+		t.Fatalf("login URL row was not selected before activation:\n%s", frame)
+	}
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if openedURL != chatGPTVisualLoginURL {
+		t.Fatalf("opened URL = %q, want exact session URL %q", openedURL, chatGPTVisualLoginURL)
+	}
+	if got := w.Error.Get(); got != "" {
+		t.Fatalf("open failure mutated form error = %q", got)
+	}
+	frame := harness.FrameTrimmed()
+	if !strings.Contains(compactVisualLines(frame), chatGPTVisualLoginURL) {
+		t.Fatalf("complete wrapped login URL is not visible:\n%s", frame)
+	}
+	return frame
+}
+
+func compactVisualLines(frame string) string {
+	lines := strings.Split(frame, "\n")
+	var compact strings.Builder
+	for _, line := range lines {
+		compact.WriteString(strings.TrimSpace(line))
+	}
+	return compact.String()
+}
+
+func renderChatGPTAuthModePicker(t *testing.T, width int) string {
+	t.Helper()
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	return harness.FrameTrimmed()
+}
+
+func renderChatGPTPendingAuthModePicker(t *testing.T, width int) string {
+	t.Helper()
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{
+		ProviderSpec: string(profile.ProviderSpecChatGPT),
+		SessionID:    "sess-browser",
+		State:        "pending",
+		AuthorizeURL: chatGPTVisualLoginURL,
+	})
+	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	return harness.FrameTrimmed()
+}
+
+func renderChatGPTDevicePending(t *testing.T, width int) string {
+	t.Helper()
+	commands := &authCommandsStub{
+		started: make(chan struct{}),
+		polled:  make(chan struct{}, 1),
+		start: func(_ context.Context, req ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {
+			if req.AuthMode != "device" {
+				t.Fatalf("auth mode = %q, want device", req.AuthMode)
+			}
+			return readmodel.AuthSessionReadModel{
+				ProviderSpec: string(profile.ProviderSpecChatGPT),
+				SessionID:    "sess-device",
+				AuthorizeURL: "https://auth.openai.com/codex/device",
+				UserCode:     "ABCD-EFGH",
+				State:        "pending",
+			}, nil
+		},
+		poll: func(context.Context, string) (readmodel.AuthSessionReadModel, error) {
+			return readmodel.AuthSessionReadModel{State: "pending"}, nil
+		},
+	}
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.TargetAuthCommands = commands
+	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 	return harness.FrameTrimmed()
 }

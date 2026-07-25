@@ -164,12 +164,12 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 	case canonical.ItemKindMessage:
 		message, _ := item.Message()
 		if message.Role() != canonical.MessageRoleAssistant {
-			return canonical.UnsupportedOperation("messages response items must be assistant-authored")
+			return canonical.InternalError("canonical response contains a non-assistant Messages output item")
 		}
 		for _, part := range message.Content() {
 			text, ok := part.Text()
 			if !ok {
-				return canonical.UnsupportedOperation("messages response image output is not implemented")
+				return canonical.NotImplemented("Swobu cannot project canonical image output to Messages response history")
 			}
 			citations, err := encodeMessagesCitations(text.Text(), part.Citations())
 			if err != nil {
@@ -184,7 +184,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		if tool.Kind() == canonical.ToolKindWebSearch {
 			search, ok := call.Input().WebSearch()
 			if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-				return canonical.UnsupportedOperation("messages response requires one search query per server-tool call")
+				return canonical.NotImplemented("Swobu cannot project this canonical web-search call to Messages response history")
 			}
 			input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
 			if err != nil {
@@ -194,7 +194,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 			return nil
 		}
 		if tool.Kind() != canonical.ToolKindFunction {
-			return canonical.UnsupportedOperation("messages response tool-call kind is unsupported")
+			return canonical.NotImplemented("Swobu cannot project this canonical tool-call kind to Messages response history")
 		}
 		object, ok := call.Input().Object()
 		if !ok {
@@ -208,7 +208,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		result, _ := item.ToolResult()
 		search, ok := result.WebSearch()
 		if !ok {
-			return canonical.UnsupportedOperation("messages protocol does not support function tool-result output items")
+			return canonical.InternalError("canonical provider response contains a request-only function tool result")
 		}
 		content, err := encodeMessagesWebSearchResult(search)
 		if err != nil {
@@ -258,7 +258,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		s.content = append(s.content, native)
 		return nil
 	default:
-		return canonical.UnsupportedOperation("messages protocol does not support this output item kind")
+		return canonical.NotImplemented("Swobu cannot project this canonical output item kind to Messages response history")
 	}
 }
 

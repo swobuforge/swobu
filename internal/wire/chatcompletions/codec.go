@@ -56,7 +56,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 	case sse.StreamEventItemStarted:
 		if event.ItemKind == canonical.ItemKindToolCall {
 			if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom { // swobu:io-string source=domain
-				return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
+				return nil, canonical.NotImplemented("Swobu cannot project canonical custom tool calls to a Chat Completions stream")
 			}
 			index := len(s.toolByID)
 			s.toolByID[event.ItemID] = index
@@ -104,7 +104,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		return [][]byte{sse.SSEData(raw)}, nil
 	case sse.StreamEventToolUseArgumentsDelta:
 		if strings.ToLower(strings.TrimSpace(event.ToolType)) == canonical.ToolTypeCustom { // swobu:io-string source=domain
-			return nil, canonical.UnsupportedOperation("chat completions streaming does not support custom tool calls")
+			return nil, canonical.NotImplemented("Swobu cannot project canonical custom tool calls to a Chat Completions stream")
 		}
 		index, ok := s.toolByID[event.ItemID]
 		if !ok {
@@ -171,7 +171,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 			[]byte("data: [DONE]\n\n"),
 		}, nil
 	default:
-		return nil, canonical.UnsupportedOperation("chat completions streaming event is not implemented")
+		return nil, canonical.NotImplemented("Swobu cannot project this canonical event to a Chat Completions stream")
 	}
 }
 
@@ -188,7 +188,7 @@ func chatMessageFromOutput(output canonical.CanonicalResponse) (chatCompletionsR
 		case canonical.ItemKindMessage:
 			messageItem, _ := item.Message()
 			if messageItem.Role() != canonical.MessageRoleAssistant {
-				return chatCompletionsResponseMessageDTO{}, canonical.UnsupportedOperation("chat completions response messages must be assistant-authored")
+				return chatCompletionsResponseMessageDTO{}, canonical.InternalError("canonical response contains a non-assistant Chat Completions output message")
 			}
 			content, err := textOnlyContent(messageItem.Content(), "chat completions responses")
 			if err != nil {
@@ -207,7 +207,7 @@ func chatMessageFromOutput(output canonical.CanonicalResponse) (chatCompletionsR
 			// the client projection never exposes backend dialect fields.
 			continue
 		default:
-			return chatCompletionsResponseMessageDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports text and tool use output items")
+			return chatCompletionsResponseMessageDTO{}, canonical.NotImplemented("Swobu cannot project this canonical output item kind to Chat Completions")
 		}
 	}
 	if content := text.String(); content != "" {
@@ -255,7 +255,7 @@ func chatToolCallFromOutputItem(item canonical.CanonicalItem) (chatCompletionsRe
 			},
 		}, nil
 	default:
-		return chatCompletionsResponseToolCallDTO{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool output items")
+		return chatCompletionsResponseToolCallDTO{}, canonical.NotImplemented("Swobu cannot project this canonical tool output kind to Chat Completions")
 	}
 }
 

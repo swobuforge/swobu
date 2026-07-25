@@ -126,7 +126,7 @@ func providerCallRequirements(call providerCall) []compat.Feature {
 }
 
 func routeFailoverEligible(err error) bool {
-	var unsupported provider.UnsupportedError
+	var unsupported provider.CandidateIncompatibilityError
 	var unavailable provider.UnavailableError
 	return errors.As(err, &unsupported) || errors.As(err, &unavailable)
 }

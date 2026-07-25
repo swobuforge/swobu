@@ -27,7 +27,7 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, request
 
 func (e ResponseStreamEncoder) EncodeResponseMessages(ctx context.Context, request canonical.CanonicalRequest, events canonical.ResponseStream, d delivery.Delivery) (wire.ClientMessageResult, error) {
 	if d.Framing != delivery.FramingWebSocket {
-		return wire.ClientMessageResult{}, canonical.UnsupportedDelivery("responses message encoding requires websocket delivery")
+		return wire.ClientMessageResult{}, canonical.InternalError("Responses message encoder requires websocket delivery")
 	}
 	completion, complete, fail := wire.NewResponseCompletion()
 	encoder := responsesFingerprintingEncoder(request, NewJSONEnvelopeStreamEncoder(request).EncodeEnvelopeEvent, complete, fail)

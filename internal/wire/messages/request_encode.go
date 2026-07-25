@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -67,7 +68,11 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return ProviderRequestDocument{}, canonical.UnsupportedDelivery("conversation requests do not implement the requested delivery mode on the messages protocol")
+		return ProviderRequestDocument{}, provider.NewCandidateIncompatibility("Messages target cannot represent the requested canonical delivery mode")
+	}
+	contextRejected, contextErr := projectMessagesResponsesReasoningContext(req.Reasoning(), sink, exchangeID, options.Compatibility)
+	if contextErr != nil && !contextRejected {
+		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
 	items, projectionDecisions, err := projectMessagesWebSearchLifecycles(items, compat.RequestItemsKind)
@@ -81,6 +86,9 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	wireMessages, err := encodeItems(items, tools, sink, exchangeID, options)
 	if err != nil {
 		return ProviderRequestDocument{}, err
+	}
+	if contextErr != nil {
+		return ProviderRequestDocument{}, contextErr
 	}
 	payload := map[string]any{
 		"model":    req.Model(),
@@ -129,6 +137,18 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	return ProviderRequestDocument{Payload: payload, Tools: wireTools}, nil
 }
 
+// projectMessagesResponsesReasoningContext owns the known standard-grammar
+// mismatch without changing portable reasoning or current request history.
+func projectMessagesResponsesReasoningContext(reasoning canonical.ReasoningControls, sink compat.Sink, exchangeID string, _ compat.CompatibilityPolicy) (bool, error) {
+	if !reasoning.ResponsesContextField().IsSpecified() {
+		return false, nil
+	}
+	if err := emitMessagesDecision(sink, exchangeID, compat.RequestReasoningContextResponses, compat.Drop); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // EncodeProviderRequestDocument performs the single serialization boundary
 // after standard lowering or exact-provider typed composition.
 func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Document, error) {
@@ -154,11 +174,16 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 	if len(items) == 0 {
 		return nil, canonical.BadRequest("messages protocol requires at least one canonical item")
 	}
+	var err error
+	items, err = projectMessagesResponsesItems(items, sink, exchangeID, options.Compatibility)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]messageBody, 0, len(items))
 	for i := 0; i < len(items); {
 		owner := items[i].Owner()
 		if owner != canonical.TurnOwnerUser && owner != canonical.TurnOwnerAssistant {
-			return nil, canonical.UnsupportedOperation("messages protocol cannot lower interleaved system or developer messages")
+			return nil, provider.NewCandidateIncompatibility("Messages cannot represent interleaved canonical system or developer messages")
 		}
 		wire := messageBody{Role: string(owner)}
 		for i < len(items) && items[i].Owner() == owner {
@@ -176,6 +201,21 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 	return out, nil
 }
 
+func projectMessagesResponsesItems(items []canonical.CanonicalItem, sink compat.Sink, exchangeID string, _ compat.CompatibilityPolicy) ([]canonical.CanonicalItem, error) {
+	projected := make([]canonical.CanonicalItem, 0, len(items))
+	for _, item := range items {
+		if reasoning, ok := item.Reasoning(); ok {
+			if _, present := reasoning.Opaque().Responses(); present {
+				if err := emitMessagesDecision(sink, exchangeID, compat.RequestItemsResponsesReasoningReplay, compat.Drop); err != nil {
+					return nil, err
+				}
+			}
+		}
+		projected = append(projected, item)
+	}
+	return projected, nil
+}
+
 func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, tools []canonical.ToolDeclaration, owner canonical.TurnOwner, sink compat.Sink, exchangeID string, options EncodeOptions) ([]contentID, error) {
 	if message, ok := item.Message(); ok {
 		for _, part := range message.Content() {
@@ -188,11 +228,11 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 				continue
 			}
 			if owner != canonical.TurnOwnerUser {
-				return nil, canonical.UnsupportedOperation("messages protocol only accepts image input in user messages")
+				return nil, provider.NewCandidateIncompatibility("Messages accepts canonical image input only in user messages")
 			}
 			image, ok := part.Image()
 			if !ok {
-				return nil, canonical.UnsupportedOperation("messages protocol cannot lower this content kind")
+				return nil, provider.NewCandidateIncompatibility("Messages cannot represent this canonical content kind")
 			}
 			block, err := encodeMessagesImage(image, sink, exchangeID, options, compat.RequestItemsMessageImageDetail)
 			if err != nil {
@@ -234,7 +274,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		}
 		return append(blocks, block), nil
 	}
-	return nil, canonical.UnsupportedOperation("canonical item is not supported on the messages protocol")
+	return nil, provider.NewCandidateIncompatibility("Messages cannot represent this canonical item kind")
 }
 
 func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDeclaration) (contentID, error) {
@@ -246,7 +286,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDecl
 	if tool.Kind() == canonical.ToolKindWebSearch {
 		search, ok := call.Input().WebSearch()
 		if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-			return contentID{}, canonical.UnsupportedOperation("messages protocol requires one search query per server-tool call")
+			return contentID{}, provider.NewCandidateIncompatibility("Messages requires one search query per canonical server-tool call")
 		}
 		input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
 		if err != nil {
@@ -255,7 +295,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDecl
 		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: "web_search", Input: input}, nil
 	}
 	if tool.Kind() != canonical.ToolKindFunction {
-		return contentID{}, canonical.UnsupportedOperation("messages protocol tool-call kind is unsupported")
+		return contentID{}, provider.NewCandidateIncompatibility("Messages cannot represent this canonical tool-call kind")
 	}
 	name := tool.Name()
 	object, ok := call.Input().Object()
@@ -270,7 +310,7 @@ func messagesTextOnlyContent(parts []canonical.MessagePart, surface string) (str
 	for _, part := range parts {
 		text, ok := part.Text()
 		if !ok {
-			return "", canonical.UnsupportedOperation(surface + " do not support this content kind")
+			return "", provider.NewCandidateIncompatibility(surface + " cannot represent this canonical content kind")
 		}
 		builder.WriteString(text.Text())
 	}
@@ -291,7 +331,7 @@ func encodeMessagesToolResultContent(parts []canonical.ToolResultPart, sink comp
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, canonical.UnsupportedOperation("messages tool results do not support this content kind")
+			return nil, provider.NewCandidateIncompatibility("Messages tool results cannot represent this canonical content kind")
 		}
 		block, err := encodeMessagesImage(image, sink, exchangeID, options, compat.RequestItemsToolResultImageDetail)
 		if err != nil {
@@ -308,7 +348,7 @@ func encodeMessagesImage(image canonical.ImagePart, sink compat.Sink, exchangeID
 			if err := emitMessagesImageDecision(sink, exchangeID, detailFeature, compat.Reject); err != nil {
 				return contentID{}, err
 			}
-			return contentID{}, canonical.UnsupportedOperation("messages protocol cannot lower an image detail preference")
+			return contentID{}, provider.NewCandidateIncompatibility("Messages cannot represent a canonical image detail preference")
 		}
 		if err := emitMessagesImageDecision(sink, exchangeID, detailFeature, compat.Approx); err != nil {
 			return contentID{}, err
@@ -374,7 +414,7 @@ func encodeMessagesTools(tools []canonical.ToolDeclaration, sink compat.Sink, ex
 			})
 			continue
 		}
-		return nil, canonical.UnsupportedOperation("messages protocol does not support this tool declaration")
+		return nil, provider.NewCandidateIncompatibility("Messages cannot represent this canonical tool declaration")
 	}
 	return out, nil
 }

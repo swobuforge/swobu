@@ -42,7 +42,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 }
 
 func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, []compat.Decision, error) {
-	items, decisions, err := projectMessagesWebSearchLifecycles(output.Items(), compat.ResponseItemsKind)
+	items, webDecisions, err := projectMessagesWebSearchLifecycles(output.Items(), compat.ResponseItemsKind)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -52,7 +52,7 @@ func messagesResponseContent(request canonical.CanonicalRequest, output canonica
 			return nil, nil, err
 		}
 	}
-	return state.content, decisions, nil
+	return state.content, webDecisions, nil
 }
 
 func mustMarshalMessagesContent(content []messagesResponsePartDTO) json.RawMessage {

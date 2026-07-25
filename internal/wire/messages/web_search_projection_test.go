@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
@@ -197,9 +198,9 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 
 	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable}})
 	_, err = EncodeCarrierWithDecisions(unresolved, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
-	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeUnsupportedOperation {
-		t.Fatal("unresolved unrepresentable call was omitted")
+	var incompatible provider.CandidateIncompatibilityError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)
 	}
 }
 

@@ -36,7 +36,7 @@ func TestOfficialOpenAIResponsesUsesVersionedCanonicalRefinement(t *testing.T) {
 		},
 	})
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt-test"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{
-		SwobuID: "swobu_previous", Responses: &canonical.ResponsesNativeRef{
+		SwobuID: "swobu_previous", Responses: &canonical.ResponsesContinuation{
 			ProviderResponseID: "provider_response_from_previous_target_version", TargetID: backend.Target.TargetID, TargetVersion: backend.Target.TargetVersion,
 		},
 	}})

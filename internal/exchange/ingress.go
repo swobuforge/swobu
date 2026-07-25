@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
@@ -142,15 +143,16 @@ type RequestOutput struct {
 // TrafficEvidenceInput is the immutable exchange fact set completed by the
 // inbound delivery owner's concrete DeliveryResult.
 type TrafficEvidenceInput struct {
-	workspace                routing.Workspace
-	routeName                routing.RouteName
-	exchangeID               string
-	clientHandler            trafficevidence.ClientHandler
-	clientFamily             canonical.ClientFamily
-	request                  canonical.CanonicalRequest
-	target                   provider.TargetSnapshot
-	response                 ClientResponse
-	providerCallAttemptCount int
+	workspace     routing.Workspace
+	routeName     routing.RouteName
+	exchangeID    string
+	clientHandler trafficevidence.ClientHandler
+	clientFamily  canonical.ClientFamily
+	requestPath   canonical.NormalizedPath
+	request       canonical.CanonicalRequest
+	target        provider.TargetSnapshot
+	response      ClientResponse
+	routing       terminalRoutingEvidence
 }
 
 // HandleRequest resolves the endpoint name, derives client semantics from the
@@ -192,7 +194,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	}
 	clientCodec := h.runner.Runtime.ClientCodec(clientFamily)
 	if clientCodec == nil {
-		return RequestOutput{}, canonical.UnsupportedOperation("client family is not implemented")
+		return RequestOutput{}, canonical.NotImplemented("Swobu has no client codec for this request family")
 	}
 	exchangeID := strings.TrimSpace(in.ExchangeID) // swobu:io-string source=boundary
 	if exchangeID == "" {
@@ -213,7 +215,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	}
 	runner.Policy = resolved.Clone()
 
-	requestDoc, err := newClientRequestDocument(clientFamily, in.Request, runner.Policy.Limits.MaxRequestBytes)
+	requestDoc, err := newClientRequestDocument(clientFamily, in.Request, runner.Policy.Limits.MaxRequestBytes, exchangeID)
 	if err != nil {
 		return RequestOutput{}, err
 	}
@@ -228,7 +230,10 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
-	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, workspace, in.Timing)
+	// The normalized path is threaded into the exchange input so terminal evidence
+	// is complete on both success and failure — an exchange error finalizes the
+	// evidence inside runExchange, where it already holds the path.
+	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, workspace, in.Timing, normalizedPath)
 	if err != nil {
 		return out, err
 	}
@@ -250,26 +255,31 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportp
 	if routeErr != nil {
 		return trafficevidence.TrafficEvent{}, routeErr
 	}
-
 	resultClass, statusCode := requestOutcomeEvidence(result, evidence.response)
-	input := trafficevidence.TrafficEventInput{
+	base := trafficevidence.TrafficEventInput{
 		RequestID:             requestID,
 		Workspace:             evidence.workspace.Slug().String(),
 		ClientHandler:         evidence.clientHandler,
 		ClientFamily:          trafficevidence.ClientFamily(evidence.clientFamily),
+		RequestPath:           evidence.requestPath,
 		Route:                 route,
-		Result:                resultClass,
-		StatusCode:            statusCode,
 		Timing:                timing,
-		AttemptCount:          evidence.providerCallAttemptCount,
 		ModelRequested:        evidence.request.Model(),
 		ModelResolved:         evidence.request.Model(),
 		WorkspaceRouteModelID: evidence.routeName.String(),
-		ProviderSpec:          evidence.target.ProviderSpec,
+		ProviderSpec:          profile.ProviderID(evidence.target.ProviderSpec),
 		ProviderModel:         evidence.target.Model,
 		ExchangeDiagnostics:   requestOutcomeDiagnostics(result.Err),
 	}
-	return trafficevidence.NewTerminalTrafficEvent(input)
+	outcome := trafficevidence.TerminalOutcome{
+		Result:             resultClass,
+		StatusCode:         statusCode,
+		DeliveryKind:       result.Kind,
+		CanonicalErrorCode: terminalCanonicalErrorCode(result.Err),
+		AttemptCount:       evidence.routing.providerCallCount,
+		FallbackRecovered:  evidence.routing.fallbackRecovered,
+	}
+	return trafficevidence.NewTerminalTrafficEvent(base, outcome)
 }
 
 func requestOutcomeEvidence(deliveryResult transportpkg.DeliveryResult, response ClientResponse) (trafficevidence.ResultClass, int) {
@@ -302,6 +312,23 @@ func requestOutcomeEvidence(deliveryResult transportpkg.DeliveryResult, response
 	return trafficevidence.ResultClassSwobuError, http.StatusInternalServerError
 }
 
+// terminalCanonicalErrorCode extracts the typed canonical error code from a
+// terminal delivery error when the cause is already a canonical Swobu error. It
+// returns "" for backend failures (which carry only an HTTP status, reported as
+// status_code) and for deliveries without a typed canonical cause. This is a raw
+// source fact carried on the product report; the analytical failure taxonomy is
+// derived downstream. See product-telemetry.md.
+func terminalCanonicalErrorCode(err error) canonical.ErrorCode {
+	if err == nil {
+		return ""
+	}
+	var swobuErr canonical.Error
+	if errors.As(err, &swobuErr) {
+		return swobuErr.Code
+	}
+	return ""
+}
+
 func clientResponseStatus(response ClientResponse) int {
 	switch response := response.(type) {
 	case BufferedResponse:
@@ -318,6 +345,10 @@ func requestOutcomeFromSwobuError(code canonical.ErrorCode) trafficevidence.Resu
 		return trafficevidence.ResultClassUnsupportedOperation
 	case canonical.ErrorCodeUnsupportedDelivery:
 		return trafficevidence.ResultClassUnsupportedDeliveryVariant
+	case canonical.ErrorCodeNotImplemented:
+		return trafficevidence.ResultClassNotImplemented
+	case canonical.ErrorCodeNoCompatibleTarget:
+		return trafficevidence.ResultClassNoCompatibleTarget
 	case canonical.ErrorCodeBadEndpoint, canonical.ErrorCodeUnsupportedEndpoint, canonical.ErrorCodeUnknownTarget:
 		return trafficevidence.ResultClassSwobuError
 	case canonical.ErrorCodeBadRequest, canonical.ErrorCodeInternal:
@@ -335,6 +366,10 @@ func requestOutcomeStatusForSwobuError(code canonical.ErrorCode) int {
 		return http.StatusNotFound
 	case canonical.ErrorCodeUnsupportedOperation, canonical.ErrorCodeUnsupportedDelivery:
 		return http.StatusBadRequest
+	case canonical.ErrorCodeNotImplemented:
+		return http.StatusNotImplemented
+	case canonical.ErrorCodeNoCompatibleTarget:
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}
@@ -347,7 +382,7 @@ func requestOutcomeDiagnostics(err error) []string {
 	return []string{strings.TrimSpace(err.Error())} // swobu:io-string source=boundary
 }
 
-func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest, maxBytes int64) (carrier.Document, error) {
+func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest, maxBytes int64, exchangeID string) (carrier.Document, error) {
 	body, err := readTransportRequestBody(req.Body, maxBytes)
 	if err != nil {
 		return carrier.Document{}, canonical.BadRequest("request body could not be read")
@@ -361,7 +396,7 @@ func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.Tr
 		mediaType,
 		cloneHeader(req.Header),
 		body,
-		carrier.Meta{},
+		carrier.Meta{Opaque: map[string]string{"exchange_id": strings.TrimSpace(exchangeID)}},
 	), nil
 }
 

@@ -34,5 +34,8 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, request
 }
 
 func (e ResponseStreamEncoder) EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (wire.ClientMessageResult, error) {
-	return wire.ClientMessageResult{}, canonical.UnsupportedDelivery("messages does not support message-oriented client delivery")
+	return wire.ClientMessageResult{}, canonical.ClientUnsupportedDelivery(
+		"Messages does not support message-oriented client delivery",
+		"Use buffered or SSE HTTP delivery and retry",
+	)
 }

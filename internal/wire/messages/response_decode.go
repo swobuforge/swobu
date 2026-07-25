@@ -154,7 +154,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 				return nil, canonical.InternalError("messages response message item is invalid")
 			}
 			if strings.TrimSpace(block.Name) != "web_search" { // swobu:io-string source=provider-wire
-				return nil, canonical.UnsupportedOperation("messages server-tool type is unsupported")
+				return nil, canonical.NotImplemented("Swobu has no canonical projection for this Messages server-tool output type")
 			}
 			item, err := decodeMessagesWebSearchCall(block.ID, block.Input)
 			if err != nil {

@@ -9,15 +9,13 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/responsesnative"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 )
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
 // exact backend and lowers one final wire document without external I/O.
-func prepareProviderCall(s exchangeState, selection providerCallSelection, runner runtimeBundle, preparedOverride *providerAttemptPrepared) (providerCall, provider.TargetSnapshot, exchangeEvidence, command, error) {
+func prepareProviderCall(s exchangeState, selection providerCallSelection, runner runtimeBundle, preparedOverride *attemptImagesMaterialized) (providerCall, provider.TargetSnapshot, exchangeEvidence, command, error) {
 	target, ok := s.route.at(selection.candidateIndex)
 	if !ok {
 		return providerCall{}, provider.TargetSnapshot{}, exchangeEvidence{}, nil, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
@@ -31,41 +29,22 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		return providerCall{}, path.target, exchangeEvidence{}, nil, err
 	}
 	if err := backend.Validate(); err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.UnsupportedOperation("required provider backend is incomplete")
+		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.InternalError("required provider backend is incomplete")
 	}
 	if !backend.Target.Equal(path.target) {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.UnsupportedOperation("resolved provider backend changed target execution projection")
+		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.InternalError("resolved provider backend changed target execution projection")
 	}
 	clientCodec := runner.Runtime.ClientCodec(s.input.clientFamily)
 	if clientCodec == nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.UnsupportedOperation("required client codec not resolved")
+		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.InternalError("required client codec not resolved")
 	}
 	resolved := *s.prepared
-	if s.responsesAncestry != nil {
-		resolved.Responses = responsesnative.NewRequestState(resolved.Responses.Input(), s.responsesAncestry.history)
-	}
-	if path.target.ProtocolKind == protocolkind.Responses &&
-		responsesAttemptNeedsAncestry(resolved, path.target, selection) &&
-		s.predecessorCheckpoint != nil && s.responsesAncestry == nil {
-		return providerCall{}, path.target, exchangeEvidence{}, loadResponsesAncestryCommand{
-			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(),
-			selection: selection, latest: s.predecessorCheckpoint.Clone(),
-		}, nil
-	}
 	var canonicalRequest canonical.CanonicalRequest
 	switch selection.requestChoice {
 	case providerRequestPreferred:
-		if path.target.ProtocolKind == protocolkind.Responses {
-			canonicalRequest = resolved.ForResponsesTarget(path.target)
-		} else {
-			canonicalRequest = resolved.ForTarget(path.target)
-		}
+		canonicalRequest = resolved.ForTarget(path.target)
 	case providerRequestFullHistory:
-		if path.target.ProtocolKind == protocolkind.Responses {
-			canonicalRequest = resolved.ForResponsesStateless()
-		} else {
-			canonicalRequest = resolved.Full.Clone()
-		}
+		canonicalRequest = resolved.Full.Clone()
 	default:
 		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
 	}
@@ -75,8 +54,8 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		usedMedia = preparedOverride.usedMedia.Clone()
 	} else if requestHasImages(canonicalRequest) {
 		historicalMedia := historicalMediaForAttempt(canonicalRequest, s.prepared.ResolvedMedia)
-		command := prepareProviderAttemptCommand{
-			selection: selection, request: canonicalRequest.Clone(), semantic: s.prepared.Full.Clone(), protocol: backend.Target.ProtocolKind,
+		command := materializeAttemptImagesCommand{
+			selection: selection, request: canonicalRequest.Clone(), semantic: s.prepared.Full.Clone(),
 			policy: runner.Policy.ImageFetch, limits: runner.Policy.Limits.Media,
 			fetcher: runner.ImageFetcher, fetchCache: cloneMediaFetchCache(s.mediaFetchCache), historical: historicalMedia,
 		}
@@ -89,7 +68,6 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	providerRequest := provider.Request{
 		ExchangeID:     s.input.exchangeID,
 		Canonical:      bindRequestToTarget(attemptRequest, path.target.Model),
-		Responses:      responsesStateForProtocol(resolved.Responses, path.target.ProtocolKind),
 		Delivery:       path.delivery,
 		Compatibility:  runner.Policy.Compatibility,
 		ToolProjection: toolProjection,
@@ -118,18 +96,9 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
 		workspaceSlug: workspaceSlug, fullRequest: s.prepared.Full.Clone(),
-		inputSegment: s.prepared.CurrentInput.Clone(), predecessor: cloneSwobuResponseID(s.prepared.Predecessor),
-		responsesInput: s.prepared.Responses.Input(),
-		resolvedMedia:  resolvedMedia,
-		advance:        s.advance,
+		resolvedMedia: resolvedMedia,
+		advance:       s.advance,
 	}, path.target, evidence, nil, nil
-}
-
-func responsesStateForProtocol(state responsesnative.RequestState, protocol protocolkind.ProtocolKind) responsesnative.RequestState {
-	if protocol != protocolkind.Responses {
-		return responsesnative.RequestState{}
-	}
-	return state.Clone()
 }
 
 func attributeCanonicalDecisionsToRoute(decisions []compat.Decision, target provider.TargetSnapshot) []compat.Decision {
@@ -144,14 +113,6 @@ func attributeCanonicalDecisionsToRoute(decisions []compat.Decision, target prov
 		}
 	}
 	return attributed
-}
-
-func responsesAttemptNeedsAncestry(resolved session.ResolvedRequest, target provider.TargetSnapshot, selection providerCallSelection) bool {
-	if selection.requestChoice == providerRequestFullHistory {
-		return true
-	}
-	previous, ok := resolved.Delta.PreviousResponse()
-	return !ok || previous.Responses == nil || !previous.Responses.AppliesTo(target.TargetID, target.TargetVersion)
 }
 
 // rebaseAttemptMedia converts positions in the attempted request into the
@@ -200,8 +161,7 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
 		store:   runner.CheckpointStore,
-		request: call.fullRequest.Clone(), inputSegment: call.inputSegment.Clone(), responsesInput: call.responsesInput.Clone(), predecessor: cloneSwobuResponseID(call.predecessor),
-		resolvedMedia: call.resolvedMedia.Clone(), responsesOutput: decoded.ResponsesOutput,
+		request: call.fullRequest.Clone(), resolvedMedia: call.resolvedMedia.Clone(),
 		advance: call.advance, capture: capture,
 	}
 	response, err := encodeClientOutput(ctx, call, capture, incremental, runner.DecisionSink, committer)

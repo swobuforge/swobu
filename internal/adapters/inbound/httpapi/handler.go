@@ -123,7 +123,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExchangeID:      requestID,
 	})
 	if err != nil {
-		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, err)
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, err)
 		deliveryResult := exchangeFailureDeliveryResult(err)
 		if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
@@ -134,7 +134,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeModelResolutionHeaders(writer)
-	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, nil)
+	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, nil)
 
 	deliveryResult := writeSuccessResponse(r.Context(), writer, requestID, family, out)
 	if deliveryResult.Kind != transportpkg.DeliverySucceeded {
@@ -173,7 +173,10 @@ func exchangeFailureDeliveryResult(err error) transportpkg.DeliveryResult {
 
 func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, workspace routing.WorkspaceSlug) {
 	if r.Method != http.MethodGet {
-		writeSwobuError(w, canonical.UnsupportedOperation("models endpoint only supports GET"))
+		writeSwobuError(w, canonical.ClientUnsupportedOperation(
+			"models endpoint does not support this method",
+			"Change the HTTP method to GET and retry",
+		))
 		return
 	}
 	if h.requestIngress == nil {
@@ -266,12 +269,15 @@ func logRequestOutcome(
 	endpoint string,
 	family canonical.ClientFamily,
 	normalizedPath canonical.NormalizedPath,
+	targetID string,
 	err error,
 ) {
 	result := "success"
 	statusCode := http.StatusOK
 	errorOrigin := ""
-	targetID := ""
+	// RequestOutput is authoritative after selection. A backend error can fill
+	// target identity only when orchestration returned no terminal snapshot.
+	targetID = strings.TrimSpace(targetID) // swobu:io-string source=boundary
 	errorMessage := ""
 	errorCode := ""
 	if err != nil {
@@ -288,7 +294,9 @@ func logRequestOutcome(
 				result = "backend_error"
 				statusCode = backendErr.StatusCode
 				errorOrigin = string(canonical.ErrorOriginBackend)
-				targetID = strings.TrimSpace(backendErr.TargetID) // swobu:io-string source=boundary
+				if targetID == "" {
+					targetID = strings.TrimSpace(backendErr.TargetID) // swobu:io-string source=boundary
+				}
 			} else {
 				statusCode = statusCodeForExchangeError(err)
 				var swobuErr canonical.Error
@@ -405,23 +413,22 @@ func (h Handler) finalizeTrafficEvidence(ctx context.Context, requestID string, 
 	if timing != nil {
 		timing.MarkEnded(time.Now())
 	}
-	if out.TrafficEvidence == nil || h.trafficEvidence == nil || timing == nil {
-		return
+	if out.TrafficEvidence != nil && h.trafficEvidence != nil && timing != nil {
+		event, err := exchange.BuildTerminalTrafficEvent(out.TrafficEvidence, result, *timing)
+		if err == nil {
+			h.trafficEvidence.Append(ctx, event)
+			return
+		}
+		slog.Warn("traffic evidence commit failed",
+			"component", "httpapi",
+			"event", "traffic_evidence_commit_failed",
+			"request_id", requestID,
+			"endpoint", endpoint,
+			"ingress_family", string(family),
+			"normalized_op", string(normalizedPath),
+			"error", err,
+		)
 	}
-	event, err := exchange.BuildTerminalTrafficEvent(out.TrafficEvidence, result, *timing)
-	if err == nil {
-		h.trafficEvidence.Append(ctx, event)
-		return
-	}
-	slog.Warn("traffic evidence commit failed",
-		"component", "httpapi",
-		"event", "traffic_evidence_commit_failed",
-		"request_id", requestID,
-		"endpoint", endpoint,
-		"ingress_family", string(family),
-		"normalized_op", string(normalizedPath),
-		"error", err,
-	)
 }
 
 func (w *committingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

@@ -12,11 +12,9 @@ const (
 	EnvXDGStateHome              = "XDG_STATE_HOME"
 	EnvAuthCredentialWritePolicy = "SWOBU_AUTH_CREDENTIAL_WRITE_POLICY"
 
-	EnvTelemetryEndpoint              = "SWOBU_TELEMETRY_ENDPOINT_URL"
-	EnvTelemetryExportIntervalSeconds = "SWOBU_TELEMETRY_EXPORT_INTERVAL_SECONDS"
-	EnvTelemetryDebugStdoutSink       = "SWOBU_TELEMETRY_STDOUT_SINK_DEBUG"
-	EnvDoNotTrack                     = "DO_NOT_TRACK"
-	EnvSkipVersionNotice              = "SWOBU_SKIP_VERSION_NOTICE"
+	EnvTelemetryEndpoint = "SWOBU_TELEMETRY_ENDPOINT_URL"
+	EnvDoNotTrack        = "DO_NOT_TRACK"
+	EnvSkipVersionNotice = "SWOBU_SKIP_VERSION_NOTICE"
 )
 
 func EnvTruthy(value string) bool {

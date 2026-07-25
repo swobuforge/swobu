@@ -30,48 +30,7 @@ type responsesHistoryItemDTO struct {
 	ServerLabel      string                         `json:"server_label,omitempty"`
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
-	Phase            string                         `json:"phase,omitempty"`
 	Action           json.RawMessage                `json:"action,omitempty"`
-	Unknown          map[string]json.RawMessage     `json:"-"`
-}
-
-func (d *responsesHistoryItemDTO) UnmarshalJSON(raw []byte) error {
-	type known responsesHistoryItemDTO
-	var decoded known
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return err
-	}
-	*d = responsesHistoryItemDTO(decoded)
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	for _, name := range []string{"type", "id", "status", "role", "content", "call_id", "name", "arguments", "input", "output", "server_label", "summary", "encrypted_content", "phase", "action"} {
-		delete(fields, name)
-	}
-	if len(fields) > 0 {
-		d.Unknown = fields
-	}
-	return nil
-}
-
-func (d responsesHistoryItemDTO) MarshalJSON() ([]byte, error) {
-	type known responsesHistoryItemDTO
-	base, err := json.Marshal(known(d))
-	if err != nil {
-		return nil, err
-	}
-	if len(d.Unknown) == 0 {
-		return base, nil
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(base, &fields); err != nil {
-		return nil, err
-	}
-	for name, value := range d.Unknown {
-		fields[name] = append(json.RawMessage(nil), value...)
-	}
-	return json.Marshal(fields)
 }
 
 type responsesHistoryResult struct {
@@ -118,6 +77,10 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (
 
 	var previous *historyfingerprint.History
 	requestStart := 0
+	preambleEnd := 0
+	if len(items) > 0 && strings.TrimSpace(items[0].Type) == "additional_tools" { // swobu:io-string source=boundary
+		preambleEnd = 1
+	}
 	for index := 0; index < len(items); {
 		if !isResponsesHistoryOutput(items[index]) {
 			index++
@@ -148,14 +111,20 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (
 		requestStart = responseEnd
 		index = responseEnd
 	}
-	current, err := fingerprintResponsesRequestValue(items[requestStart:])
+	currentItems := items[requestStart:]
+	currentRawItems := rawItems[requestStart:]
+	if preambleEnd > 0 && requestStart >= preambleEnd {
+		currentItems = append(append([]responsesHistoryItemDTO(nil), items[:preambleEnd]...), currentItems...)
+		currentRawItems = append(append([]json.RawMessage(nil), rawItems[:preambleEnd]...), currentRawItems...)
+	}
+	current, err := fingerprintResponsesRequestValue(currentItems)
 	if err != nil {
 		return responsesHistoryResult{}, err
 	}
 	// Rebase identity through normalized DTOs, but retain current native input
 	// from the original objects so unknown fields, nulls, and large numbers are
 	// not destroyed by fingerprint morphology.
-	currentRaw, err := json.Marshal(rawItems[requestStart:])
+	currentRaw, err := json.Marshal(currentRawItems)
 	if err != nil {
 		return responsesHistoryResult{}, err
 	}
@@ -201,35 +170,61 @@ func fingerprintResponsesResponseValue(items []responsesHistoryItemDTO) (history
 }
 
 func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]responsesHistoryItemDTO, error) {
-	normalized := append([]responsesHistoryItemDTO(nil), items...)
-	for index := range normalized {
+	normalized := make([]responsesHistoryItemDTO, 0, len(items))
+	for index := range items {
+		if !admittedResponsesHistoryItem(items[index]) {
+			continue
+		}
+		item := items[index]
+		if strings.TrimSpace(item.Type) != "web_search_call" { // swobu:io-string source=boundary
+			// Presentation IDs and generic wire statuses have no history
+			// consumer. Web search is the exception because its ID is the
+			// semantic call/result correlation and status selects lifecycle.
+			item.ID = ""
+			item.Status = ""
+		} else if strings.TrimSpace(item.Status) == "searching" { // swobu:io-string source=boundary
+			item.Status = "in_progress"
+		}
 		var err error
-		normalized[index].Content, err = normalizeResponsesRawJSON(items[index].Content)
+		item.Content, err = normalizeResponsesRawJSON(items[index].Content)
 		if err != nil {
 			return nil, err
 		}
-		if normalized[index].Type == "function_call" && len(items[index].Arguments) > 0 {
+		if item.Type == "function_call" && len(items[index].Arguments) > 0 {
 			arguments, err := decodeResponsesFunctionCallArguments(items[index].Arguments)
 			if err != nil {
 				return nil, err
 			}
-			normalized[index].Arguments, err = json.Marshal(arguments.String())
+			item.Arguments, err = json.Marshal(arguments.String())
 		} else {
-			normalized[index].Arguments, err = normalizeResponsesRawJSON(items[index].Arguments)
+			item.Arguments, err = normalizeResponsesRawJSON(items[index].Arguments)
 		}
 		if err != nil {
 			return nil, err
 		}
-		normalized[index].Output, err = normalizeResponsesRawJSON(items[index].Output)
+		item.Output, err = normalizeResponsesRawJSON(items[index].Output)
 		if err != nil {
 			return nil, err
 		}
-		normalized[index].Action, err = normalizeResponsesRawJSON(items[index].Action)
+		item.Action, err = normalizeResponsesRawJSON(items[index].Action)
 		if err != nil {
 			return nil, err
 		}
+		normalized = append(normalized, item)
 	}
 	return normalized, nil
+}
+
+func admittedResponsesHistoryItem(item responsesHistoryItemDTO) bool {
+	switch strings.TrimSpace(item.Type) { // swobu:io-string source=boundary
+	case "message", "function_call", "custom_tool_call", "function_call_output", "reasoning":
+		return true
+	case "web_search_call":
+		action := bytes.TrimSpace(item.Action)
+		return len(action) > 0 && !bytes.Equal(action, []byte("null"))
+	default:
+		return false
+	}
 }
 
 func normalizeResponsesRawJSON(source json.RawMessage) (json.RawMessage, error) {
@@ -268,13 +263,13 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 	case canonical.ItemKindMessage:
 		message, _ := item.Message()
 		if message.Role() != canonical.MessageRoleAssistant {
-			return canonical.UnsupportedOperation("responses output messages must be assistant-authored")
+			return canonical.InternalError("canonical response contains a non-assistant Responses output message")
 		}
 		content := make([]responsesOutputTextItemDTO, 0, len(message.Content()))
 		for _, part := range message.Content() {
 			text, ok := part.Text()
 			if !ok {
-				return canonical.UnsupportedOperation("responses image output is not implemented")
+				return canonical.NotImplemented("Swobu cannot project canonical image output to Responses history")
 			}
 			annotations, err := encodeResponsesAnnotations(text.Text(), part.Citations())
 			if err != nil {
@@ -328,7 +323,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 			}
 			history.Action = action
 		default:
-			return canonical.UnsupportedOperation("responses output tool kind is unsupported")
+			return canonical.NotImplemented("Swobu cannot project this canonical tool-call kind to Responses history")
 		}
 		s.items = append(s.items, history)
 		return nil
@@ -336,7 +331,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		result, _ := item.ToolResult()
 		search, ok := result.WebSearch()
 		if !ok {
-			return canonical.UnsupportedOperation("responses output content tool results are request-only")
+			return canonical.InternalError("canonical Responses output contains a request-only content tool result")
 		}
 		for index := len(s.items) - 1; index >= 0; index-- {
 			if s.items[index].Type != "web_search_call" || s.items[index].ID != result.CallID().String() {
@@ -358,6 +353,9 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		// replay because P0 supports only native ResponseRef continuation.
 		history.ID = fmt.Sprintf("rs_swobu_%d", ordinal)
 		history.Status = "completed"
+		if replay, ok := reasoning.Opaque().Responses(); ok {
+			history.EncryptedContent = replay.EncryptedContent
+		}
 		for _, part := range reasoning.Parts() {
 			if disclosureSet && disclosure == canonical.ReasoningDisclosureNone {
 				continue
@@ -370,7 +368,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		s.items = append(s.items, history)
 		return nil
 	default:
-		return canonical.UnsupportedOperation("responses output item kind is unsupported")
+		return canonical.NotImplemented("Swobu cannot project this canonical output item kind to Responses history")
 	}
 }
 

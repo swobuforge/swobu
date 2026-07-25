@@ -93,30 +93,56 @@ func validReasoningDisclosure(value ReasoningDisclosure) bool {
 	return value == ReasoningDisclosureNone || value == ReasoningDisclosureSummary
 }
 
-// ReasoningControlsParams carries independently specified compute and
-// disclosure fields.
+// ResponsesReasoningContext controls how a Responses target makes persisted
+// reasoning available to one invocation. Explicit auto remains distinct from
+// omission because the provider may report or evolve its default separately.
+type ResponsesReasoningContext string
+
+const (
+	ResponsesReasoningContextAuto        ResponsesReasoningContext = "auto"
+	ResponsesReasoningContextAllTurns    ResponsesReasoningContext = "all_turns"
+	ResponsesReasoningContextCurrentTurn ResponsesReasoningContext = "current_turn"
+)
+
+func validResponsesReasoningContext(value ResponsesReasoningContext) bool {
+	switch value {
+	case ResponsesReasoningContextAuto, ResponsesReasoningContextAllTurns, ResponsesReasoningContextCurrentTurn:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReasoningControlsParams carries independently specified compute, disclosure,
+// and Responses invocation-context fields.
 type ReasoningControlsParams struct {
-	Compute    Specified[ReasoningCompute]
-	Disclosure Specified[ReasoningDisclosure]
+	Compute          Specified[ReasoningCompute]
+	Disclosure       Specified[ReasoningDisclosure]
+	ResponsesContext Specified[ResponsesReasoningContext]
 }
 
 // ReasoningControls is the shallow canonical reasoning request band.
 type ReasoningControls struct {
-	compute    Specified[ReasoningCompute]
-	disclosure Specified[ReasoningDisclosure]
+	compute          Specified[ReasoningCompute]
+	disclosure       Specified[ReasoningDisclosure]
+	responsesContext Specified[ResponsesReasoningContext]
 }
 
 // NewReasoningControls validates one reasoning request band.
 func NewReasoningControls(params ReasoningControlsParams) (ReasoningControls, error) {
 	controls := ReasoningControls{
-		compute:    cloneSpecified(params.Compute, func(value ReasoningCompute) ReasoningCompute { return value }),
-		disclosure: cloneSpecified(params.Disclosure, func(value ReasoningDisclosure) ReasoningDisclosure { return value }),
+		compute:          cloneSpecified(params.Compute, func(value ReasoningCompute) ReasoningCompute { return value }),
+		disclosure:       cloneSpecified(params.Disclosure, func(value ReasoningDisclosure) ReasoningDisclosure { return value }),
+		responsesContext: cloneSpecified(params.ResponsesContext, func(value ResponsesReasoningContext) ResponsesReasoningContext { return value }),
 	}
 	if compute, ok := controls.compute.Get(); ok && compute.Kind() == "" {
 		return ReasoningControls{}, BadRequest("reasoning compute is invalid")
 	}
 	if disclosure, ok := controls.disclosure.Get(); ok && !validReasoningDisclosure(disclosure) {
 		return ReasoningControls{}, BadRequest("reasoning disclosure is invalid")
+	}
+	if context, ok := controls.responsesContext.Get(); ok && !validResponsesReasoningContext(context) {
+		return ReasoningControls{}, BadRequest("responses reasoning context is invalid")
 	}
 	if compute, computeSet := controls.compute.Get(); computeSet && compute.Kind() == ReasoningDisabled {
 		if disclosure, disclosureSet := controls.disclosure.Get(); disclosureSet && disclosure != ReasoningDisclosureNone {
@@ -136,12 +162,22 @@ func (c ReasoningControls) DisclosureField() Specified[ReasoningDisclosure] {
 	return cloneSpecified(c.disclosure, func(value ReasoningDisclosure) ReasoningDisclosure { return value })
 }
 
-// Clone returns an independent value.
-func (c ReasoningControls) Clone() ReasoningControls {
-	return ReasoningControls{compute: c.ComputeField(), disclosure: c.DisclosureField()}
+// ResponsesContextField returns the per-invocation Responses reasoning context.
+// Responses request encoding consumes this value; session checkpoints do not
+// inherit it.
+func (c ReasoningControls) ResponsesContextField() Specified[ResponsesReasoningContext] {
+	return cloneSpecified(c.responsesContext, func(value ResponsesReasoningContext) ResponsesReasoningContext { return value })
 }
 
-// IsZero reports whether neither request field was supplied.
+// Clone returns an independent value.
+func (c ReasoningControls) Clone() ReasoningControls {
+	return ReasoningControls{
+		compute: c.ComputeField(), disclosure: c.DisclosureField(),
+		responsesContext: c.ResponsesContextField(),
+	}
+}
+
+// IsZero reports whether no reasoning request field was supplied.
 func (c ReasoningControls) IsZero() bool {
-	return !c.compute.IsSpecified() && !c.disclosure.IsSpecified()
+	return !c.compute.IsSpecified() && !c.disclosure.IsSpecified() && !c.responsesContext.IsSpecified()
 }

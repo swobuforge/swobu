@@ -19,3 +19,14 @@ type DeliveryResult struct {
 	Kind DeliveryResultKind
 	Err  error
 }
+
+// ValidDeliveryResultKind reports whether k is a recognized delivery outcome. It
+// is the strict membership test the terminal-event constructor uses to reject a
+// typed-but-unknown value at the source.
+func ValidDeliveryResultKind(k DeliveryResultKind) bool {
+	switch k {
+	case DeliverySucceeded, DeliveryClientCancelled, DeliveryClientWriteFailed, DeliveryProviderStreamFailed, DeliveryCheckpointCommitFailed, DeliveryExchangeFailed:
+		return true
+	}
+	return false
+}

@@ -110,7 +110,7 @@ func (s *chatCompletionsResponseHistoryState) appendItem(item canonical.Canonica
 	case canonical.ItemKindMessage:
 		message, _ := item.Message()
 		if message.Role() != canonical.MessageRoleAssistant {
-			return canonical.UnsupportedOperation("chat completions response messages must be assistant-authored")
+			return canonical.InternalError("canonical response contains a non-assistant Chat Completions output message")
 		}
 		content, err := textOnlyContent(message.Content(), "chat completions responses")
 		if err != nil {
@@ -141,7 +141,7 @@ func (s *chatCompletionsResponseHistoryState) appendItem(item canonical.Canonica
 		// contract and therefore absent from its reconstructed history value.
 		return nil
 	default:
-		return canonical.UnsupportedOperation("chat completions protocol only supports text and tool use output items")
+		return canonical.NotImplemented("Swobu cannot project this canonical output item kind to Chat Completions response history")
 	}
 }
 

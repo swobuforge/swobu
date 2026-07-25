@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func decodeResponsesOutputFormat(text *responsesTextDTO) (canonical.OutputFormat, error) {
@@ -34,7 +35,7 @@ func decodeResponsesOutputFormat(text *responsesTextDTO) (canonical.OutputFormat
 			Strict:      strict,
 		})
 	default:
-		return canonical.OutputFormat{}, canonical.UnsupportedOperation("responses request text.format type is not supported")
+		return canonical.OutputFormat{}, canonical.NotImplemented("Swobu cannot yet project this Responses request text.format type")
 	}
 }
 
@@ -65,6 +66,6 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 		}
 		return &responsesTextDTO{Format: dto}, nil
 	default:
-		return nil, canonical.UnsupportedOperation("responses protocol does not support the requested output format")
+		return nil, provider.NewCandidateIncompatibility("Responses cannot represent the canonical output format")
 	}
 }

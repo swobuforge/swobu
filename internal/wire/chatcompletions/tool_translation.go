@@ -7,6 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -122,7 +123,7 @@ func encodeChatCompletionsTool(tool canonical.ToolDeclaration) (ProviderRequestT
 	if decl, ok := tool.Custom(); ok {
 		return encodeChatCompletionsCustomTool(tool, decl)
 	}
-	return ProviderRequestTool{}, canonical.UnsupportedOperation("chat completions protocol only supports function and custom tool declarations; got " + chatCompletionsUnsupportedToolKind(tool))
+	return ProviderRequestTool{}, provider.NewCandidateIncompatibility("Chat Completions cannot represent canonical tool declaration kind " + chatCompletionsUnsupportedToolKind(tool))
 }
 
 func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
@@ -361,7 +362,7 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 				"type": canonical.ToolTypeWebSearch,
 			}, nil
 		default:
-			return nil, canonical.UnsupportedOperation("chat completions protocol only supports function, custom, and web search specific tool choice")
+			return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent this canonical specific tool choice")
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

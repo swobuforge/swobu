@@ -278,7 +278,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				return err
 			}
 			if strings.TrimSpace(part.Name) != "web_search" { // swobu:io-string source=boundary
-				return canonical.UnsupportedOperation("messages server-tool type is unsupported")
+				return canonical.NotImplemented("Swobu has no canonical projection for this Messages server-tool type")
 			}
 			toolUseID := strings.TrimSpace(part.ID) // swobu:io-string source=boundary
 			if toolUseID == "" {

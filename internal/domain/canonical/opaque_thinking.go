@@ -7,6 +7,7 @@ type opaqueThinkingKind uint8
 const (
 	opaqueThinkingMessages opaqueThinkingKind = iota + 1
 	opaqueThinkingOpenRouter
+	opaqueThinkingResponses
 )
 
 // OpaqueThinking is one complete, reasoning-only replay unit. The private tag
@@ -14,6 +15,26 @@ const (
 type OpaqueThinking struct {
 	kind opaqueThinkingKind
 	raw  []byte
+}
+
+// ResponsesReasoningReplay is consumed by stateless Responses request
+// encoding to restore provider-hidden reasoning state on a later invocation.
+type ResponsesReasoningReplay struct {
+	EncryptedContent string
+}
+
+func NewResponsesOpaqueThinking(replay ResponsesReasoningReplay) (OpaqueThinking, error) {
+	if replay.EncryptedContent == "" {
+		return OpaqueThinking{}, BadRequest("responses encrypted reasoning is empty")
+	}
+	return OpaqueThinking{kind: opaqueThinkingResponses, raw: []byte(replay.EncryptedContent)}, nil
+}
+
+func (o OpaqueThinking) Responses() (ResponsesReasoningReplay, bool) {
+	if o.kind != opaqueThinkingResponses || len(o.raw) == 0 {
+		return ResponsesReasoningReplay{}, false
+	}
+	return ResponsesReasoningReplay{EncryptedContent: string(o.raw)}, true
 }
 
 // NewMessagesOpaqueThinking admits one non-empty complete Messages block.
@@ -64,7 +85,7 @@ func (o OpaqueThinking) validate() error {
 	if o.IsZero() {
 		return nil
 	}
-	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingOpenRouter) || len(o.raw) == 0 {
+	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingOpenRouter && o.kind != opaqueThinkingResponses) || len(o.raw) == 0 {
 		return fmt.Errorf("opaque thinking is invalid")
 	}
 	return nil

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -478,8 +479,9 @@ func TestServices_MessagesCodecReportsStructuredOutputRejection(t *testing.T) {
 	req.DecisionSink = sink
 
 	_, err = executeProviderRequest(composition, context.Background(), req)
-	if err == nil || !strings.Contains(err.Error(), "does not support structured output") {
-		t.Fatalf("structured output should fail closed before encoding, got err=%v", err)
+	var incompatible provider.CandidateIncompatibilityError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("structured output error = %T %v, want candidate incompatibility", err, err)
 	}
 	assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Reject)
 }

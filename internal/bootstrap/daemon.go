@@ -3,6 +3,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -18,8 +19,8 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/producttelemetry"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/telemetry"
 )
 
 type HealthState string
@@ -39,17 +40,24 @@ type Status struct {
 
 // Daemon is the live process boundary produced by bootstrap. It owns listener
 // lifetime, runtime health, and graceful shutdown for the local daemon.
+//
+// Close owns cleanup: it drives http.Server.Shutdown (which stops accepting and
+// waits for active handlers to finish before returning), then stops telemetry and
+// closes the config store. Cleanup therefore never overlaps an in-flight request.
+// There is no retryable shutdown state machine and no force-close mode: a handler
+// that ignores cancellation will block Close, which is the process supervisor's
+// boundary to break. Close runs once and returns the cached terminal result.
 type Daemon struct {
 	configStore       *configstore.Store
 	server            *http.Server
 	listener          net.Listener
 	logger            *slog.Logger
-	done              chan struct{}
-	closeOnce         sync.Once
+	serveDone         chan struct{}
 	serveErr          error
-	serveErrMu        sync.Mutex
+	closeOnce         sync.Once
+	closeErr          error
 	trafficEventStore *trafficevidencestore.InMemoryTrafficEventSink
-	telemetry         embeddedTelemetryRuntimeState
+	telemetry         *producttelemetry.Runtime
 }
 
 var daemonReadHeaderTimeout = 10 * time.Second
@@ -96,11 +104,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	daemon := &Daemon{
 		configStore: store,
 		logger:      logger,
-		done:        make(chan struct{}),
-		telemetry: embeddedTelemetryRuntimeState{
-			store: telemetry.NewStore(),
-			now:   time.Now,
-		},
+		serveDone:   make(chan struct{}),
 	}
 
 	if (in.Providers == nil) != (in.ModelCatalog == nil) {
@@ -152,65 +156,61 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	daemon.server = server
 	daemon.listener = listener
 	chatGPTLogin.SetPublicBaseURL("http://" + listener.Addr().String())
-	go func() {
-		defer close(daemon.done)
-		err := server.Serve(listener)
-		if err != nil && err != http.ErrServerClosed {
-			daemon.serveErrMu.Lock()
-			daemon.serveErr = err
-			daemon.serveErrMu.Unlock()
-			logger.Error("daemon lifecycle", "component", "daemon", "event", "serve_failure", "error", err.Error())
-		}
-	}()
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "initialization_completed", "addr", listener.Addr().String())
+	// Start every owned subsystem before exposing the server goroutine, so a fast
+	// serve failure cannot run cleanup against subsystems that have not started.
 	daemon.startTelemetryRuntime()
+	go daemon.serve()
 	storeOwnedByDaemon = true
 
 	return daemon, nil
 }
 
-func (d *Daemon) Close(ctx context.Context) error {
+// serve runs the HTTP server until it exits and publishes the serve result. It
+// performs no cleanup — Close owns that, because Serve can return (with
+// http.ErrServerClosed) while Shutdown is still draining active handlers, so
+// request-owned dependencies must not close until Shutdown returns. Closing
+// serveDone publishes serveErr with the necessary memory ordering.
+func (d *Daemon) serve() {
+	err := d.server.Serve(d.listener)
+	if errors.Is(err, http.ErrServerClosed) {
+		err = nil
+	} else if err != nil && d.logger != nil {
+		d.logger.Error("daemon lifecycle", "component", "daemon", "event", "serve_failure", "error", err.Error())
+	}
+	d.serveErr = err
+	close(d.serveDone)
+}
+
+// Close stops request serving before closing request-owned dependencies. Shutdown
+// stops accepting and waits for active handlers to finish; only then are telemetry
+// and the config store closed. It runs once and returns the cached terminal
+// result (the join of shutdown, serve, and cleanup errors).
+func (d *Daemon) Close() error {
 	if d == nil || d.server == nil {
 		return nil
 	}
-	if d.logger != nil {
-		d.logger.Info("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_requested")
-	}
-	var shutdownErr error
 	d.closeOnce.Do(func() {
-		shutdownErr = d.server.Shutdown(ctx)
-	})
-	if shutdownErr != nil {
 		if d.logger != nil {
-			d.logger.Error("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_failed", "error", shutdownErr.Error())
+			d.logger.Info("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_requested")
 		}
-		return shutdownErr
-	}
-	d.stopTelemetryRuntimeWithContext(ctx)
-	if d.configStore != nil {
-		if err := d.configStore.Close(); err != nil {
-			return err
+		shutdownErr := d.server.Shutdown(context.Background())
+		<-d.serveDone
+		d.stopTelemetryRuntime()
+		var storeErr error
+		if d.configStore != nil {
+			storeErr = d.configStore.Close()
 		}
-	}
-	select {
-	case <-d.done:
-		serveErr := d.serveError()
-		if serveErr != nil {
-			if d.logger != nil {
-				d.logger.Error("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_failed", "error", serveErr.Error())
+		d.closeErr = errors.Join(shutdownErr, d.serveErr, storeErr)
+		if d.logger != nil {
+			if d.closeErr != nil {
+				d.logger.Error("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_failed", "error", d.closeErr.Error())
+			} else {
+				d.logger.Info("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_completed")
 			}
-			return serveErr
 		}
-		if d.logger != nil {
-			d.logger.Info("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_completed")
-		}
-		return nil
-	case <-ctx.Done():
-		if d.logger != nil {
-			d.logger.Warn("daemon lifecycle", "component", "daemon", "event", "graceful_shutdown_timed_out", "error", ctx.Err().Error())
-		}
-		return ctx.Err()
-	}
+	})
+	return d.closeErr
 }
 
 func (d *Daemon) Addr() string {
@@ -294,15 +294,9 @@ func (d *Daemon) Wait(ctx context.Context) error {
 		return fmt.Errorf("daemon is nil")
 	}
 	select {
-	case <-d.done:
-		return d.serveError()
+	case <-d.serveDone:
+		return d.serveErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (d *Daemon) serveError() error {
-	d.serveErrMu.Lock()
-	defer d.serveErrMu.Unlock()
-	return d.serveErr
 }

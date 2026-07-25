@@ -554,6 +554,39 @@ func (w *TargetConfig) startInteractiveAuth() {
 	w.applyAuthSessionResult(session)
 }
 
+// replaceInteractiveAuth retires the active ChatGPT session before starting a
+// session in the newly selected mode. A failed cancel preserves the current
+// pending session and prevents parallel browser/device observers.
+func (w *TargetConfig) replaceInteractiveAuth(mode chatGPTAuthMode) {
+	if !w.authSessionPending() {
+		w.ChatGPTAuthMode.Set(mode)
+		w.startInteractiveAuth()
+		return
+	}
+	if w.TargetAuthCommands == nil {
+		w.Error.Set("auth session commands are not wired yet")
+		return
+	}
+
+	sessionID := strings.TrimSpace(w.AuthSession.Get().SessionID)
+	w.stopAuthSessionObserver()
+	if sessionID != "" {
+		ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
+		err := w.TargetAuthCommands.CancelAuthSession(ctx, sessionID)
+		cancel()
+		if err != nil {
+			w.Error.Set(err.Error())
+			w.launchPendingAuthSessionObserver()
+			return
+		}
+	}
+
+	w.resetFlowState()
+	w.Lifecycle.Set(LifecycleOpen)
+	w.ChatGPTAuthMode.Set(mode)
+	w.startInteractiveAuth()
+}
+
 func (w *TargetConfig) RefreshAuthSession() {
 	if !w.authSessionPending() {
 		return

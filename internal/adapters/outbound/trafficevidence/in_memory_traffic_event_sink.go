@@ -248,7 +248,7 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 		ModelResolved:         trafficEvent.ModelResolved(),
 		ModelResolutionMode:   trafficEvent.ModelResolutionMode(),
 		WorkspaceRouteModelID: trafficEvent.WorkspaceRouteModelID(),
-		ProviderSpec:          trafficEvent.ProviderSpec(),
+		ProviderSpec:          string(trafficEvent.ProviderSpec()),
 		ProviderModel:         trafficEvent.ProviderModel(),
 		Mutations:             trafficEvent.Mutations(),
 		ExchangeDiagnostics:   trafficEvent.ExchangeDiagnostics(),

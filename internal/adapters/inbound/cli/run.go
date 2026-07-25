@@ -21,7 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	platformlogging "github.com/swobuforge/swobu/internal/platform/logging"
-	"github.com/swobuforge/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/producttelemetry"
 	"golang.org/x/term"
 )
 
@@ -286,7 +286,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 		return ExitDown
 	}
 	defer func() {
-		_ = daemon.Close(context.Background())
+		_ = daemon.Close()
 		logger.Info("daemon lifecycle", "component", "daemon", "event", "process_stop")
 	}()
 
@@ -295,15 +295,9 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 
 	select {
 	case <-signalCtx.Done():
+		// The deferred daemon.Close() performs graceful shutdown on the single
+		// exit path; do not close twice or wait here.
 		logger.Info("daemon lifecycle", "component", "daemon", "event", "signal_received", "signal", "interrupt_or_sigterm")
-		_ = daemon.Close(context.Background())
-		if errors.Is(signalCtx.Err(), context.Canceled) {
-			return ExitHealthy
-		}
-		if waitErr := daemon.Wait(context.Background()); waitErr != nil && !errors.Is(waitErr, context.Canceled) {
-			_, _ = fmt.Fprintln(stderr, waitErr.Error())
-			return ExitDown
-		}
 		return ExitHealthy
 	case <-daemonDone(daemon):
 		if waitErr := daemon.Wait(context.Background()); waitErr != nil && !errors.Is(waitErr, context.Canceled) {
@@ -315,18 +309,13 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 }
 
 func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
-	store := telemetry.NewStore()
-	state, err := store.LoadOrCreate()
-	if err != nil {
-		return nil // best-effort: a notice-store failure must not block daemon start.
+	// The claim is the single atomic create-if-absent, so a concurrent process
+	// cannot also print. The notice prints only when this process won the claim;
+	// a store failure is best-effort and never blocks daemon start.
+	claimed, err := producttelemetry.ClaimNotice()
+	if err == nil && claimed && out != nil {
+		_, _ = fmt.Fprintln(out, producttelemetry.FirstRunNoticeText())
 	}
-	if state.NoticeShown {
-		return nil
-	}
-	if out != nil {
-		_, _ = fmt.Fprintln(out, telemetry.FirstRunNoticeText()) // swobu:io-string source=boundary
-	}
-	_, _ = store.MarkNoticeShown()
 	return nil
 }
 

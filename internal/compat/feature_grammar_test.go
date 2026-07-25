@@ -32,6 +32,11 @@ var scopedFeatures = []scopedFeature{
 		Protocol: protocolkind.Responses,
 	},
 	{
+		Feature:  compat.RequestReasoningContextResponses,
+		Base:     compat.RequestReasoningContext,
+		Protocol: protocolkind.Responses,
+	},
+	{
 		Feature:  compat.ResponseIDResponses,
 		Base:     compat.ResponseID,
 		Protocol: protocolkind.Responses,

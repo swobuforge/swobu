@@ -35,6 +35,37 @@ func TestDisabledReasoningConflictsWithSummaryDisclosure(t *testing.T) {
 	}
 }
 
+func TestReasoningControlsPreserveClosedResponsesContextPresence(t *testing.T) {
+	for _, value := range []ResponsesReasoningContext{
+		ResponsesReasoningContextAuto,
+		ResponsesReasoningContextAllTurns,
+		ResponsesReasoningContextCurrentTurn,
+	} {
+		controls, err := NewReasoningControls(ReasoningControlsParams{ResponsesContext: Specify(value)})
+		if err != nil {
+			t.Fatalf("%q rejected: %v", value, err)
+		}
+		got, present := controls.Clone().ResponsesContextField().Get()
+		if !present || got != value {
+			t.Fatalf("cloned context = (%q,%t), want (%q,true)", got, present, value)
+		}
+	}
+	omitted, err := NewReasoningControls(ReasoningControlsParams{
+		ResponsesContext: Unspecified[ResponsesReasoningContext](),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if omitted.ResponsesContextField().IsSpecified() {
+		t.Fatal("omitted Responses context became specified")
+	}
+	if _, err := NewReasoningControls(ReasoningControlsParams{
+		ResponsesContext: Specify(ResponsesReasoningContext("future")),
+	}); err == nil {
+		t.Fatal("unknown Responses reasoning context was accepted")
+	}
+}
+
 func TestReasoningPartsAndOpaqueThinkingRemainDistinct(t *testing.T) {
 	summary, _ := NewReasoningPart(ReasoningPartSummary, "summary")
 	trace, _ := NewReasoningPart(ReasoningPartTrace, "trace")

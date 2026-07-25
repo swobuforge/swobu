@@ -3,6 +3,7 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -81,7 +82,7 @@ func TestDecodeRequestRejectsIDLessCodexWebSearchHistoryWithInvalidAction(t *tes
 	}
 }
 
-func TestDecodeRequestResumesOpaqueCodexWebSearchHistory(t *testing.T) {
+func TestDecodeRequestUsesActionlessCodexMarkerOnlyForHistoryPartition(t *testing.T) {
 	raw := []byte(`{
 		"model":"default",
 		"tools":[{"type":"web_search"}],
@@ -97,11 +98,12 @@ func TestDecodeRequestResumesOpaqueCodexWebSearchHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.Request.RebasedRequest == nil {
-		t.Fatal("expected opaque completed Codex history to rebase")
+		t.Fatal("expected actionless completed Codex history to rebase")
 	}
-	items := decoded.Request.RebasedRequest.ResponsesInput.JSONObjects()
-	if len(items) != 1 || !strings.Contains(string(items[0]), "verify it") {
-		t.Fatalf("rebased native input = %s, want current user item", items)
+	items := decoded.Request.RebasedRequest.Request.Items()
+	message, ok := items[0].Message()
+	if len(items) != 1 || !ok || message.Role() != canonical.MessageRoleUser {
+		t.Fatalf("rebased canonical input = %#v, want current user item", items)
 	}
 }
 
@@ -217,7 +219,7 @@ func TestDecodeBufferedWebSearchLifecycleAndUnicodeCitation(t *testing.T) {
 }
 
 func TestDecodeCompletedWebSearchWithUndisclosedSourcesPairsEmptyResult(t *testing.T) {
-	items, err := decodeResponsesWebSearchLifecycle("ws_undisclosed", json.RawMessage(`{"type":"search","queries":["deadline"],"sources":null}`), true)
+	items, err := decodeResponsesWebSearchLifecycle("ws_undisclosed", json.RawMessage(`{"type":"search","queries":["deadline"],"sources":null}`), responsesWebSearchSucceeded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,11 +242,178 @@ func TestDecodeCompletedWebSearchWithUndisclosedSourcesPairsEmptyResult(t *testi
 }
 
 func TestDecodeUnresolvedWebSearchWithUndisclosedSourcesRemainsCallOnly(t *testing.T) {
-	items, err := decodeResponsesWebSearchLifecycle("ws_unresolved", json.RawMessage(`{"type":"search","queries":["deadline"],"sources":null}`), false)
+	items, err := decodeResponsesWebSearchLifecycle("ws_unresolved", json.RawMessage(`{"type":"search","queries":["deadline"],"sources":null}`), responsesWebSearchPending)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolCall {
 		t.Fatalf("unresolved lifecycle = %#v", items)
+	}
+}
+
+func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing.T) {
+	tests := []struct {
+		name        string
+		wire        string
+		wantItems   int
+		wantStatus  string
+		wantSources int
+	}{
+		{
+			name:        "completed with sources",
+			wire:        `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules","title":"Rules"}]}}`,
+			wantItems:   2,
+			wantStatus:  "completed",
+			wantSources: 1,
+		},
+		{
+			name:        "unresolved with undisclosed sources",
+			wire:        `{"type":"web_search_call","id":"ws_2","status":"in_progress","action":{"type":"search","queries":["deadline"],"sources":null}}`,
+			wantItems:   1,
+			wantStatus:  "in_progress",
+			wantSources: -1,
+		},
+		{
+			name:        "searching alias collapses to unresolved",
+			wire:        `{"type":"web_search_call","id":"ws_searching","status":"searching","action":{"type":"search","queries":["deadline"],"sources":null}}`,
+			wantItems:   1,
+			wantStatus:  "in_progress",
+			wantSources: -1,
+		},
+		{
+			name:        "completed with undisclosed sources",
+			wire:        `{"type":"web_search_call","id":"ws_3","status":"completed","action":{"type":"search","queries":["deadline"],"sources":null}}`,
+			wantItems:   2,
+			wantStatus:  "completed",
+			wantSources: 0,
+		},
+		{
+			name:        "idless completed Codex replay",
+			wire:        `{"type":"web_search_call","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[]}}`,
+			wantItems:   2,
+			wantStatus:  "completed",
+			wantSources: 0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{"model":"m","input":[` + test.wire + `]}`)
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
+				carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := decoded.Request.Request.Items()
+			if len(items) != test.wantItems {
+				t.Fatalf("canonical items = %d, want %d", len(items), test.wantItems)
+			}
+			call, ok := items[0].ToolCall()
+			if !ok || call.Tool().Kind() != canonical.ToolKindWebSearch {
+				t.Fatalf("canonical call = %#v", items[0])
+			}
+			if test.wantItems == 2 {
+				result, ok := items[1].ToolResult()
+				if !ok || result.CallID() != call.CallID() {
+					t.Fatalf("canonical result = %#v", items[1])
+				}
+			}
+
+			document, err := EncodeCarrierWithDecisions(
+				EncodeInput{Request: decoded.Request.Request},
+				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				Input []json.RawMessage `json:"input"`
+			}
+			if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Input) != 1 {
+				t.Fatalf("wire input = %s", document.RawBytes())
+			}
+			var item responsesWireOutputItemDTO
+			if err := json.Unmarshal(payload.Input[0], &item); err != nil {
+				t.Fatal(err)
+			}
+			if item.Type != "web_search_call" || item.ID != call.CallID().String() || item.Status != test.wantStatus {
+				t.Fatalf("folded item = %#v", item)
+			}
+			var action responsesWebSearchActionDTO
+			if err := json.Unmarshal(item.Action, &action); err != nil {
+				t.Fatal(err)
+			}
+			if test.wantSources < 0 {
+				if len(action.Sources) != 0 {
+					t.Fatalf("unresolved action disclosed sources: %s", item.Action)
+				}
+				return
+			}
+			var sources []responsesWebSearchSourceDTO
+			if err := json.Unmarshal(action.Sources, &sources); err != nil {
+				t.Fatalf("completed action sources = %s: %v", action.Sources, err)
+			}
+			if len(sources) != test.wantSources {
+				t.Fatalf("sources = %#v", sources)
+			}
+		})
+	}
+}
+
+func TestResponsesRequestWebSearchFoldSupportsNonAdjacentResult(t *testing.T) {
+	lifecycle, err := decodeResponsesWebSearchLifecycle(
+		"ws_non_adjacent",
+		json.RawMessage(`{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules"}]}`),
+		responsesWebSearchSucceeded,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, _ := canonical.NewMessageItem(
+		canonical.MessageRoleAssistant,
+		[]canonical.MessagePart{canonical.NewTextMessagePart("working")},
+	)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{lifecycle[0], message, lifecycle[1]},
+	})
+	document, err := EncodeCarrierWithDecisions(
+		EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Input) != 2 ||
+		!strings.Contains(string(payload.Input[0]), `"type":"web_search_call"`) ||
+		!strings.Contains(string(payload.Input[0]), `"status":"completed"`) ||
+		!strings.Contains(string(payload.Input[1]), `"type":"message"`) {
+		t.Fatalf("non-adjacent fold = %s", document.RawBytes())
+	}
+}
+
+func TestResponsesFailedWebSearchHistoryIsRejectedRatherThanMadePending(t *testing.T) {
+	requestRaw := []byte(`{"model":"m","input":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`)
+	_, err := (ClientRequestDecoder{}).DecodeClientRequest(
+		carrier.NewDocument("", "application/json", nil, requestRaw, carrier.Meta{}),
+	)
+	var clientError canonical.Error
+	if !errors.As(err, &clientError) || clientError.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("failed client history error = %#v, want %s", err, canonical.ErrorCodeBadRequest)
+	}
+
+	providerRaw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`)
+	_, err = decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, providerRaw, "ex", nil)
+	var providerError canonical.Error
+	if !errors.As(err, &providerError) || providerError.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("failed provider history error = %#v, want %s", err, canonical.ErrorCodeNotImplemented)
 	}
 }

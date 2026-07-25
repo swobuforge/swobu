@@ -110,11 +110,11 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		case canonical.ItemKindReasoning:
 			return nil, nil
 		default:
-			return nil, canonical.UnsupportedOperation("messages streaming output item kind is not implemented")
+			return nil, canonical.NotImplemented("Swobu cannot project this canonical output item kind to a Messages stream")
 		}
 	case sse.StreamEventContentStarted:
 		if event.PartKind != canonical.PartKindText {
-			return nil, canonical.UnsupportedOperation("messages streaming content part kind is not implemented")
+			return nil, canonical.NotImplemented("Swobu cannot project this canonical content part kind to a Messages stream")
 		}
 		key := messagesStreamPartKey(event.ItemID, event.PartOrdinal)
 		if _, exists := s.blockIndexByID[key]; exists {
@@ -216,7 +216,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			return append(frames, more...), err
 		}
 		if len(s.unresolvedWebSearchCallIDs) > 0 {
-			return nil, canonical.UnsupportedOperation("messages cannot project unresolved web-search call")
+			return nil, canonical.NotImplemented("Swobu cannot project an unresolved canonical web-search call to a Messages response")
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
 		for _, index := range s.blockIndexByID {
@@ -259,7 +259,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		logMessagesEgressStreamFrame(frame)
 		return [][]byte{frame}, nil
 	default:
-		return nil, canonical.UnsupportedOperation("messages streaming event is not implemented")
+		return nil, canonical.NotImplemented("Swobu cannot project this canonical event to a Messages stream")
 	}
 }
 

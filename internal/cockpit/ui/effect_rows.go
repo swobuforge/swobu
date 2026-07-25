@@ -8,8 +8,9 @@ import (
 	tui "github.com/grindlemire/go-tui"
 )
 
-// OpenURL opens url in the system browser. It reports the error to stderr
-// and returns it so callers may log or ignore at their discretion.
+// OpenURL opens url in the system browser and returns any activation error.
+// The platform adapter owns suppressing child-process output so terminal
+// surfaces may decide whether an error needs an operator-visible transition.
 func OpenURL(url string) error {
 	open, _, _ := currentEffectHooks()
 	return open(url)

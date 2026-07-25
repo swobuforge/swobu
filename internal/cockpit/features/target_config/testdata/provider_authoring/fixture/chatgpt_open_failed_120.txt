@@ -1,0 +1,23 @@
+  new target · ChatGPT                                                                                    cancel ↵
+     provider          ChatGPT                                                                            change ↵
+     authentication    browser login                                                                      change ↵
+   > login URL                                                                                            open ↵
+        https://auth.openai.com/oauth/authorize?client_id=app_test&redirect_uri=http%3A%2F%2F127.0.0.1%3A7926%2Fcallback
+        &response_type=code&scope=openid%20profile%20email&state=fixture-state
+     status            waiting for login                                                                  refresh ↵
+     cancel                                                                                               cancel ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

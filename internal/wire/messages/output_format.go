@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // Messages does not have an exact structured-output field in the current
@@ -14,7 +15,7 @@ func rejectMessagesStructuredOutput(raw json.RawMessage) error {
 	if trimmed == "" || trimmed == "null" {
 		return nil
 	}
-	return canonical.UnsupportedOperation("messages protocol does not support structured output on swobu v0")
+	return canonical.NotImplemented("Swobu cannot yet preserve Messages structured output")
 }
 
 func rejectMessagesOutputFormat(format canonical.OutputFormat) error {
@@ -28,7 +29,7 @@ func rejectMessagesOutputFormat(format canonical.OutputFormat) error {
 		return nil
 	}
 	if format.Kind == canonical.OutputFormatJSONSchema {
-		return canonical.UnsupportedOperation("messages protocol does not support structured output on swobu v0")
+		return provider.NewCandidateIncompatibility("Messages cannot represent canonical structured output")
 	}
-	return canonical.UnsupportedOperation("messages protocol does not support the requested output format")
+	return provider.NewCandidateIncompatibility("Messages cannot represent the canonical output format")
 }

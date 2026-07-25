@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestResponsesEventReaderAllowsOpaqueOnlyMCPStreamFrames(t *testing.T) {
+func TestResponsesEventReaderIgnoresUnknownMCPStreamStart(t *testing.T) {
 	s := &responsesResponseStream{exchangeID: "ex", responseEnvID: "r", toolStates: map[string]responsesToolState{}, toolInputs: map[string]string{}, latestUsage: canonical.NewUnknownTokenUsage()}
 	frame := streamFrame{Type: "response.output_item.added"}
 	frame.Item.Type = "mcp_call"

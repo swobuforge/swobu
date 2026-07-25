@@ -67,7 +67,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	path, err := profile.ProviderRequestPath(target.ProviderID(), target.ProtocolKind)
 	if err != nil {
-		return nil, err
+		return nil, provider.NewCandidateIncompatibility(err.Error())
 	}
 
 	wireReqCarrier := doc

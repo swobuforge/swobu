@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/swobuforge/swobu/internal/telemetry"
+	"github.com/swobuforge/swobu/internal/producttelemetry"
 )
 
 func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
@@ -46,24 +46,17 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitC
 	if rejectUnexpectedPositionalArgs(fs, stderr) {
 		return ExitDown
 	}
-	store := telemetry.NewStore()
-	state, err := store.LoadOrCreate()
+	status, err := producttelemetry.Status()
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
 	payload := struct {
-		Enabled      bool   `json:"enabled"`
-		DoNotTrack   bool   `json:"do_not_track"`
-		FirstSeenAt  string `json:"first_seen_at"`
-		NoticeShown  bool   `json:"notice_shown"`
-		LastUploadAt string `json:"last_upload_at,omitempty"`
+		Enabled    bool `json:"enabled"`
+		DoNotTrack bool `json:"do_not_track"`
 	}{
-		Enabled:      state.Enabled && !telemetry.DoNotTrackEnabled(),
-		DoNotTrack:   telemetry.DoNotTrackEnabled(),
-		FirstSeenAt:  state.FirstSeenAt,
-		NoticeShown:  state.NoticeShown,
-		LastUploadAt: state.LastUploadAt,
+		Enabled:    status.Enabled,
+		DoNotTrack: status.DoNotTrack,
 	}
 	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
@@ -72,6 +65,10 @@ func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitC
 	return ExitHealthy
 }
 
+// runTelemetrySetEnabled writes the preference directly to the local preference
+// document with a fresh revision. A running daemon's telemetry runtime adopts it
+// at its next preference poll and discards any aggregate collected under the old
+// revision (product-telemetry.md §6). No daemon control surface is involved.
 func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, args []string) ExitCode {
 	fs := flag.NewFlagSet("telemetry toggle", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -88,8 +85,7 @@ func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, ar
 	if rejectUnexpectedPositionalArgs(fs, stderr) {
 		return ExitDown
 	}
-	store := telemetry.NewStore()
-	state, err := store.SetEnabled(enabled)
+	persisted, err := producttelemetry.SetEnabled(enabled)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
@@ -97,7 +93,7 @@ func runTelemetrySetEnabled(stdout io.Writer, stderr io.Writer, enabled bool, ar
 	payload := struct {
 		Enabled bool `json:"enabled"`
 	}{
-		Enabled: state.Enabled,
+		Enabled: persisted,
 	}
 	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())

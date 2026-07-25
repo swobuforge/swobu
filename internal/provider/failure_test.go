@@ -54,10 +54,10 @@ func TestNormalizeFailureFailsClosedByConcreteClass(t *testing.T) {
 }
 
 func TestNormalizeFailurePreservesExplicitUnsupported(t *testing.T) {
-	err := NormalizeFailure(UnsupportedByBackend(errors.New("unsupported")))
-	var unsupported UnsupportedError
+	err := NormalizeFailure(CandidateIncompatible(errors.New("unsupported")))
+	var unsupported CandidateIncompatibilityError
 	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T, want UnsupportedError", err)
+		t.Fatalf("error = %T, want CandidateIncompatibilityError", err)
 	}
 }
 
