@@ -8,14 +8,11 @@ import (
 )
 
 func TestFlattenInstructionsForResponsesPreservesWhitespaceAndReportsBlockLoss(t *testing.T) {
-	set, err := canonical.NewInstructionSet([]canonical.Instruction{
+	items := []canonical.CanonicalItem{
 		canonicaltest.MustInstruction(canonical.MessageRoleSystem, " first "),
 		canonicaltest.MustInstruction(canonical.MessageRoleSystem, "second\n"),
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	lowered := flattenInstructionsForResponses(set)
+	lowered := flattenInstructionsForResponses(items)
 	if lowered.Text != " first \n\nsecond\n" || lowered.Exact || len(lowered.Decisions) != 1 {
 		t.Fatalf("lowered = %#v", lowered)
 	}

@@ -1,0 +1,82 @@
+{
+  "model": "gpt-codex",
+  "instructions": "",
+  "client_metadata": {
+    "ws_request_header_x_openai_internal_codex_responses_lite": "true"
+  },
+  "input": [
+    {
+      "type": "additional_tools",
+      "role": "developer",
+      "tools": [
+        {
+          "type": "namespace",
+          "name": "workspace",
+          "description": "Workspace tools",
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read one file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "tool_search",
+          "execution": "client",
+          "description": "Load additional tools",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "developer",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Use the available tools when needed."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "test"
+        }
+      ]
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "reasoning": {
+    "effort": "medium",
+    "summary": "auto",
+    "context": "all_turns"
+  },
+  "stream": true
+}

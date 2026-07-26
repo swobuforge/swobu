@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestDecodeMessagesWebSearchDropsDynamicCallerPreference(t *testing.T) {
@@ -30,7 +31,7 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tools := decoded.Request.Request.Tools(); len(tools) != 1 || tools[0].Kind() != canonical.ToolKindWebSearch {
+	if tools := canonicaltest.Tools(decoded.Request.Request); len(tools) != 1 || tools[0].Kind() != canonical.ToolKindWebSearch {
 		t.Fatalf("tools = %#v", tools)
 	}
 	want := map[compat.Subject]bool{}
@@ -48,7 +49,7 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 }
 
 func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
-	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, "", EncodeOptions{})
+	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

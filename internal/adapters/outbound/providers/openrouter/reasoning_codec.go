@@ -30,7 +30,7 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 		return carrier.Document{}, nil, err
 	}
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
-		return chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, sink, "", chatcompletions.EncodeOptions{Compatibility: req.Compatibility})
+		return chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, sink, "")
 	})
 	if err != nil {
 		return carrier.Document{}, decisions, err
@@ -42,8 +42,12 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 	if err := decorateOpenRouterThinking(&document, req.Canonical.Items()); err != nil {
 		return carrier.Document{}, decisions, err
 	}
+	environment, err := canonical.EffectiveTools(req.Canonical)
+	if err != nil {
+		return carrier.Document{}, decisions, err
+	}
 	delete(document.Payload, "web_search_options")
-	if hasCanonicalWebSearch(req.Canonical.Tools()) {
+	if hasCanonicalWebSearch(environment.Declarations()) {
 		document.Tools = append(document.Tools, chatcompletions.ProviderRequestTool{Type: "openrouter:web_search"})
 	}
 	replaceOpenRouterWebSearchChoice(document.ToolChoice)
@@ -96,7 +100,7 @@ func applyOpenRouterReasoningRequest(payload map[string]any, req canonical.Canon
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			if effortSet {
-				return provider.NewCandidateIncompatibility("OpenRouter target cannot combine disabled canonical reasoning with inference effort")
+				return provider.NewIncompatibleTarget("OpenRouter target cannot combine disabled canonical reasoning with inference effort")
 			}
 			out["enabled"] = false
 		case canonical.ReasoningAutomatic:
@@ -114,7 +118,11 @@ func applyOpenRouterReasoningRequest(payload map[string]any, req canonical.Canon
 	if disclosure, set := req.Reasoning().DisclosureField().Get(); set {
 		// Keep backend capture independent whenever this request may open a tool
 		// continuation; client projection enforces disclosure again.
-		if disclosure == canonical.ReasoningDisclosureNone && !canOpenToolContinuation(req) {
+		canContinue, err := canOpenToolContinuation(req)
+		if err != nil {
+			return err
+		}
+		if disclosure == canonical.ReasoningDisclosureNone && !canContinue {
 			out["exclude"] = true
 		}
 	}
@@ -124,11 +132,19 @@ func applyOpenRouterReasoningRequest(payload map[string]any, req canonical.Canon
 	return nil
 }
 
-func canOpenToolContinuation(req canonical.CanonicalRequest) bool {
-	if len(req.Tools()) == 0 {
-		return false
+func canOpenToolContinuation(req canonical.CanonicalRequest) (bool, error) {
+	environment, err := canonical.EffectiveTools(req)
+	if err != nil {
+		return false, err
 	}
-	return req.EffectiveToolPolicy().Mode != canonical.ToolPolicyNone
+	if len(environment.Declarations()) == 0 {
+		return false, nil
+	}
+	policy, err := req.EffectiveToolPolicy()
+	if err != nil {
+		return false, err
+	}
+	return policy.Mode != canonical.ToolPolicyNone, nil
 }
 
 type openRouterRequestMessage struct {
@@ -502,7 +518,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 			req.Delivery,
 			sink,
 			req.ExchangeID,
-			responses.EncodeOptions{Compatibility: req.Compatibility},
+			responses.EncodeOptions{},
 		)
 	})
 	if err != nil {

@@ -128,7 +128,7 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		recordExchangeEvidenceBestEffort(ctx, runner.DecisionSink, in.ExchangeID, exchangeEvidence{decisions: backendErrorShapeDecisions(call, err)})
 		return nil, err
 	}
-	response, decisionsEffects, err := completeProviderCall(ctx, call, ingress, responseID, runner)
+	response, _, decisionsEffects, err := completeProviderCall(ctx, call, ingress, responseID, runner)
 	commitDecisionsBestEffort(ctx, runner.DecisionSink, in.ExchangeID, decisionsEffects)
 	return response, err
 }

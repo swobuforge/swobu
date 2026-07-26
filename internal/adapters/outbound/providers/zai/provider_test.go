@@ -67,7 +67,7 @@ func TestRewriteWebSearchTranslatesOnlyEmptyStandardOptions(t *testing.T) {
 
 	document.Payload["web_search_options"] = map[string]any{"max_results": 5}
 	err = rewriteWebSearch(&document)
-	var incompatible provider.CandidateIncompatibilityError
+	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("non-empty options error = %T %v, want candidate incompatibility", err, err)
 	}

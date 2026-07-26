@@ -18,13 +18,12 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestOpenRouterAutomaticReasoningIsExactUnderStrictCompatibility(t *testing.T) {
+func TestOpenRouterAutomaticReasoningIsExact(t *testing.T) {
 	reasoning, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute())})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Reasoning: reasoning})
 	backend := openRouterBackend(t, request.Model())
 	document, decisions, err := backend.Codec.Encode(provider.Request{
 		Canonical: request, Delivery: delivery.BufferedDelivery(),
-		Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,9 +57,11 @@ func TestOpenRouterOwnsFinalWebSearchDialectAcrossProtocols(t *testing.T) {
 	}
 	webSearchKey := canonical.WebSearchToolKey()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:      canonical.Specify("model"),
-		Items:      []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-		Tools:      canonical.Specify(set),
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, set.Declarations()...),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+		},
 		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &webSearchKey)),
 	})
 	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {

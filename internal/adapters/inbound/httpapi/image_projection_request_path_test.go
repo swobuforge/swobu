@@ -11,8 +11,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -64,52 +62,9 @@ func (r imageIncidentRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 	}, nil
 }
 
-func TestResponsesImageIncidentStrictChatRouteReturnsTyped502WithoutProviderCall(t *testing.T) {
-	restore, logs := testDebugLogger()
-	defer restore()
+func TestResponsesImageIncidentCallsChatWithSyntheticImageOnce(t *testing.T) {
 	transport := &imageIncidentTransport{}
-	handler := imageIncidentHandler(t, compat.CompatibilityStrict, transport)
-	request := httptest.NewRequest(http.MethodPost, "/c/personal/responses", strings.NewReader(imageIncidentResponsesRequest()))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Request-Id", "req_image_strict")
-	response := httptest.NewRecorder()
-
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502\nbody: %s", response.Code, response.Body.String())
-	}
-	var body struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Error.Code != string(canonical.ErrorCodeNoCompatibleTarget) {
-		t.Fatalf("error code = %q, want %q", body.Error.Code, canonical.ErrorCodeNoCompatibleTarget)
-	}
-	if transport.calls != 0 {
-		t.Fatalf("provider transport calls = %d, want zero", transport.calls)
-	}
-	for _, want := range []string{
-		"event=responses_request_images",
-		"decode_view=full",
-		"decode_view=rebased_current",
-		"event=request_outcome",
-		"status_code=502",
-		"target_id=chat-image",
-	} {
-		if !strings.Contains(logs.String(), want) {
-			t.Fatalf("logs missing %q\nlogs:\n%s", want, logs.String())
-		}
-	}
-}
-
-func TestResponsesImageIncidentCompatibilityCallsChatWithSyntheticImageOnce(t *testing.T) {
-	transport := &imageIncidentTransport{}
-	handler := imageIncidentHandler(t, compat.CompatibilityCompat, transport)
+	handler := imageIncidentHandler(t, transport)
 	request := httptest.NewRequest(http.MethodPost, "/c/personal/responses", strings.NewReader(imageIncidentResponsesRequest()))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Request-Id", "req_image_compat")
@@ -169,20 +124,18 @@ func TestResponsesImageIncidentCompatibilityCallsChatWithSyntheticImageOnce(t *t
 	}
 }
 
-func imageIncidentHandler(t *testing.T, mode compat.CompatibilityMode, transport *imageIncidentTransport) Handler {
+func imageIncidentHandler(t *testing.T, transport *imageIncidentTransport) Handler {
 	t.Helper()
 	workspace := imageIncidentWorkspace(t)
 	runtime := imageIncidentRuntime{
 		RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(),
 		transport:            transport,
 	}
-	policy := exchange.DefaultWorkspacePolicy()
-	policy.Compatibility = compat.CompatibilityPolicy{Mode: mode}
 	ingress := exchange.NewIngress(
 		imageIncidentWorkspaceLookup{workspace: workspace},
 		runtime,
 		exchange.RuntimePoliciesSpec{
-			PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: policy},
+			PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 		},
 	)
 	return NewHandler(ingress, nil)

@@ -192,6 +192,170 @@ func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
 	}
 }
 
+func TestResumeRepeatsRequestContextOnlyForMatchingUnfinishedTurn(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	tool := canonicaltest.MustFunctionTool(key, "lookup", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.MustInstruction(canonical.MessageRoleDeveloper, "base"),
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "start"),
+		},
+	})
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	record := checkpoint("resp_previous", previousRequest, makeResponse(call), nil)
+	callID, _ := canonical.NewToolCallID("call_1")
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prelude, rest, err := canonical.SplitRequestPrelude(resolved.Delta.Items())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prelude.Items()) != 2 || len(rest) != 1 || rest[0].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("unfinished-turn delta = %#v", resolved.Delta.Items())
+	}
+
+	completedRecord := checkpoint("resp_previous", previousRequest, makeResponse(
+		mustMessageItem(canonical.MessageRoleAssistant, "done"),
+	), nil)
+	next := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: makeItems("next"),
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+	completed, err := Resume(next, completedRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prelude, _, err = canonical.SplitRequestPrelude(completed.Delta.Items())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prelude.Items()) != 0 {
+		t.Fatalf("completed turn retained request context: %#v", prelude.Items())
+	}
+}
+
+func TestResumeReplacesCurrentRequestContextBandsAtomically(t *testing.T) {
+	oldKey := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "old")
+	newKey := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "new")
+	oldTool := canonicaltest.MustFunctionTool(oldKey, "old", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	newTool := canonicaltest.MustFunctionTool(newKey, "new", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.MustInstruction(canonical.MessageRoleDeveloper, "old instructions"),
+			canonicaltest.ToolDeclarations(t, oldTool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "start"),
+		},
+	})
+	call := canonicaltest.ToolCall(t, "call_1", oldKey, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	record := checkpoint("resp_previous", previous, makeResponse(call), nil)
+	callID, _ := canonical.NewToolCallID("call_1")
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	currentDirective, _ := canonical.NewScopedMessageItem(
+		canonical.MessageRoleDeveloper,
+		[]canonical.MessagePart{canonical.NewTextMessagePart("new instructions")},
+		canonical.ContextScopeRequest,
+	)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			currentDirective,
+			canonicaltest.ToolDeclarations(t, newTool),
+			result,
+		},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prelude, _, err := canonical.SplitRequestPrelude(resolved.Delta.Items())
+	if err != nil {
+		t.Fatal(err)
+	}
+	preludeItems := prelude.Items()
+	if len(preludeItems) != 2 {
+		t.Fatalf("resolved prelude = %#v", preludeItems)
+	}
+	message, _ := preludeItems[0].Message()
+	text, _ := message.Content()[0].Text()
+	if text.Text() != "new instructions" {
+		t.Fatalf("resolved directive = %q", text.Text())
+	}
+	declarations, _ := preludeItems[1].ToolDeclarations()
+	if _, found := declarations.Tools().Lookup(oldKey); found {
+		t.Fatal("previous tool band was unioned into explicit current tools")
+	}
+	if _, found := declarations.Tools().Lookup(newKey); !found {
+		t.Fatal("current tool band was lost")
+	}
+}
+
+func TestResumeExplicitEmptyDirectiveDoesNotRepeatPriorDirective(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	tool := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.MustInstruction(canonical.MessageRoleSystem, "old instructions"),
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "start"),
+		},
+	})
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	record := checkpoint("resp_previous", previous, makeResponse(call), nil)
+	callID, _ := canonical.NewToolCallID("call_1")
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	clear, _ := canonical.NewScopedMessageItem(
+		canonical.MessageRoleSystem,
+		[]canonical.MessagePart{canonical.NewTextMessagePart("")},
+		canonical.ContextScopeRequest,
+	)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{clear, result},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prelude, _, err := canonical.SplitRequestPrelude(resolved.Delta.Items())
+	if err != nil {
+		t.Fatal(err)
+	}
+	preludeItems := prelude.Items()
+	if len(preludeItems) != 2 {
+		t.Fatalf("resolved prelude = %#v", preludeItems)
+	}
+	message, _ := preludeItems[0].Message()
+	text, _ := message.Content()[0].Text()
+	if text.Text() != "" {
+		t.Fatalf("explicit empty directive inherited %q", text.Text())
+	}
+}
+
+func TestSplitRequestContextBandsRejectsAlternatingBands(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	tool := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	items := []canonical.CanonicalItem{
+		canonicaltest.MustInstruction(canonical.MessageRoleSystem, "a"),
+		canonicaltest.ToolDeclarations(t, tool),
+		canonicaltest.MustInstruction(canonical.MessageRoleDeveloper, "b"),
+	}
+	if _, _, err := canonical.SplitRequestPrelude(items); err == nil {
+		t.Fatal("alternating context bands were reordered instead of rejected")
+	}
+}
+
 func TestResumeRejectsToolResultWhenCheckpointHasNoToolCall(t *testing.T) {
 	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"), Items: makeItems("one"),
@@ -287,8 +451,6 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	semantic := prepared.Full
 	for name, specified := range map[string]bool{
 		"model":              semantic.ModelSpecified(),
-		"instructions":       semantic.InstructionsSpecified(),
-		"tools":              semantic.ToolsSpecified(),
 		"tool policy":        semantic.ToolPolicySpecified(),
 		"tool-call batching": semantic.ToolCallBatchSpecified(),
 		"output format":      semantic.OutputFormatSpecified(),
@@ -299,8 +461,6 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	}
 	for name, specified := range map[string]bool{
 		"model":              prepared.Delta.ModelSpecified(),
-		"instructions":       prepared.Delta.InstructionsSpecified(),
-		"tools":              prepared.Delta.ToolsSpecified(),
 		"tool policy":        prepared.Delta.ToolPolicySpecified(),
 		"tool-call batching": prepared.Delta.ToolCallBatchSpecified(),
 		"output format":      prepared.Delta.OutputFormatSpecified(),
@@ -309,10 +469,8 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 			t.Fatalf("source delta changed omitted %s into explicit empty", name)
 		}
 	}
-	emptyInstructions, _ := canonical.NewInstructionSet(nil)
-	emptyTools, _ := canonical.NewToolSet(nil)
 	explicit := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify(""), Instructions: canonical.Specify(emptyInstructions), Tools: canonical.Specify(emptyTools),
+		Model:      canonical.Specify(""),
 		ToolPolicy: canonical.Specify(canonical.ToolPolicy{}), ToolCallBatch: canonical.Specify(canonical.ToolCallBatchPolicy{}), OutputFormat: canonical.Specify(canonical.OutputFormat{}),
 	})
 	explicitPrepared, err := Begin(explicit)
@@ -322,8 +480,6 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	explicitDelta := explicitPrepared.Delta
 	for name, specified := range map[string]bool{
 		"model":              explicitDelta.ModelSpecified(),
-		"instructions":       explicitDelta.InstructionsSpecified(),
-		"tools":              explicitDelta.ToolsSpecified(),
 		"tool policy":        explicitDelta.ToolPolicySpecified(),
 		"tool-call batching": explicitDelta.ToolCallBatchSpecified(),
 		"output format":      explicitDelta.OutputFormatSpecified(),
@@ -358,14 +514,17 @@ func TestResumeUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
 		t.Fatal(err)
 	}
 	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("old"), Instructions: canonical.Specify(canonical.NewSystemInstructionSet("concise")),
-		Tools: canonical.Specify(mustTestToolSet(t, tool)), ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+		Model: canonical.Specify("old"), Items: []canonical.CanonicalItem{
+			canonicaltest.MustInstruction(canonical.MessageRoleSystem, "concise"),
+			canonicaltest.ToolDeclarations(t, tool),
+		},
+		ToolPolicy:    canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
 		ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)), OutputFormat: canonical.Specify(structured),
 		Controls: canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{"END"}}},
 	})
 	current := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify(""), Instructions: canonical.Specify(canonical.InstructionSet{}), Items: makeItems("turn2"),
-		Tools:            canonical.Specify(mustTestToolSet(t)),
+		Model:            canonical.Specify(""),
+		Items:            makeItems("turn2"),
 		ToolPolicy:       canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyNone, nil)),
 		ToolCallBatch:    canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchUnspecified)),
 		OutputFormat:     canonical.Specify(text),
@@ -376,20 +535,26 @@ func TestResumeUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Full.Model() != "" || canonicaltest.InstructionSetText(prepared.Full.Instructions()) != "" || len(prepared.Full.Tools()) != 0 || prepared.Full.Controls().Limits.StopSequences == nil || prepared.Full.ToolPolicy().Mode != canonical.ToolPolicyNone || prepared.Full.ToolCallBatch().Mode != canonical.ToolCallBatchUnspecified || prepared.Full.OutputFormat().Kind != canonical.OutputFormatText {
+	if prepared.Full.Model() != "" || canonicaltest.DirectiveText(prepared.Full.Items()) != "" || len(canonicaltest.Tools(prepared.Full)) != 0 || prepared.Full.Controls().Limits.StopSequences == nil || prepared.Full.ToolPolicy().Mode != canonical.ToolPolicyNone || prepared.Full.ToolCallBatch().Mode != canonical.ToolCallBatchUnspecified || prepared.Full.OutputFormat().Kind != canonical.OutputFormatText {
 		t.Fatalf("explicit clears not retained: %#v", prepared.Full)
 	}
 }
 
-func TestResumeInheritsUnspecifiedBands(t *testing.T) {
-	previous := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("old"), Instructions: canonical.Specify(canonical.NewSystemInstructionSet("concise"))})
+func TestResumeDoesNotInheritCompletedTurnContextOrControls(t *testing.T) {
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      canonical.Specify("old"),
+		Items:      []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "concise")},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+		Controls:   canonical.GenerationControls{Limits: canonical.GenerationLimits{StopSequences: []string{"END"}}},
+	})
 	current := canonical.NewCanonicalRequest(canonical.RequestParams{Items: makeItems("turn2"), PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_prev"}})
 	prepared, err := Resume(current, checkpoint("resp_prev", previous, makeResponse(), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Full.Model() != "old" || canonicaltest.InstructionSetText(prepared.Full.Instructions()) != "concise" {
-		t.Fatalf("bands not inherited: model=%q instructions=%q", prepared.Full.Model(), canonicaltest.InstructionSetText(prepared.Full.Instructions()))
+	if prepared.Full.Model() != "old" || canonicaltest.DirectiveText(prepared.Full.Items()) != "" ||
+		prepared.Full.ToolPolicySpecified() || prepared.Full.Controls().Limits.StopSequences != nil {
+		t.Fatalf("completed-turn request state was retained: %#v", prepared.Full)
 	}
 }
 

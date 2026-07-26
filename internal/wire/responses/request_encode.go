@@ -16,8 +16,7 @@ import (
 )
 
 type EncodeOptions struct {
-	Instructions  string
-	Compatibility compat.CompatibilityPolicy
+	Instructions string
 }
 
 type inputMessageItem struct {
@@ -81,10 +80,25 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, sink c
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return ProviderRequestDocument{}, provider.NewCandidateIncompatibility("Responses target cannot represent the requested canonical delivery mode")
+		return ProviderRequestDocument{}, provider.NewIncompatibleTarget("Responses target cannot represent the requested canonical delivery mode")
 	}
 
-	tools := req.Tools()
+	items := req.Items()
+	fullEnvironment, err := canonical.ToolEnvironmentAt(items, len(items))
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	tools := fullEnvironment.Declarations()
+	prelude, _, err := canonical.SplitRequestPrelude(items)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	requestItems := prelude.Items()
+	requestEnvironment, err := canonical.ToolEnvironmentAt(requestItems, len(requestItems))
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	requestTools := requestEnvironment.Declarations()
 	previous, hasPrevious := req.PreviousResponse()
 	responsesRefined := false
 	if hasPrevious {
@@ -96,29 +110,40 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, sink c
 		}
 		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(req, options.Compatibility, sink, exchangeID)
+	payloadInput, err := encodeInput(req, sink, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err := encodeToolChoice(req.EffectiveToolPolicy(), tools, sink, exchangeID)
+	policy, err := req.EffectiveToolPolicy()
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	logResponsesEncodeShape(req, payloadInput, choice, d)
+	choice, err := encodeToolChoice(policy, tools, sink, exchangeID)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
 
 	payload := map[string]any{"model": req.Model()}
-	loweredInstructions := flattenInstructionsForResponses(req.Instructions())
+	preludeItems := prelude.Items()
+	loweredInstructions := flattenInstructionsForResponses(preludeItems)
+	logResponsesEncodeShape(req, tools, loweredInstructions.Text, payloadInput, choice, policy, d)
 	if err := commitResponsesInstructionDecisions(sink, exchangeID, loweredInstructions); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" || responsesRefined && req.InstructionsSpecified() {
+	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" {
 		payload["instructions"] = instructions
 	}
-	wireTools, err := encodeResponsesTools(tools, sink, exchangeID)
+	wireTools, err := encodeResponsesTools(requestTools, sink, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	toolsSpecified := len(wireTools) > 0 || responsesRefined && req.ToolsSpecified()
+	toolsSpecified := false
+	for _, item := range preludeItems {
+		if _, ok := item.ToolDeclarations(); ok {
+			toolsSpecified = true
+			break
+		}
+	}
 	if toolsSpecified && wireTools == nil {
 		wireTools = []ProviderRequestTool{}
 	}
@@ -224,11 +249,11 @@ func mergedResponsesInstructions(requestInstructions string, optionInstructions 
 	}
 }
 
-func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice any, d delivery.Delivery) {
+func logResponsesEncodeShape(req canonical.CanonicalRequest, tools []canonical.ToolDeclaration, instructions string, input any, choice any, policy canonical.ToolPolicy, d delivery.Delivery) {
 	thread := req.Items()
 	encodedItems := thread
 	_, hasPrevious := req.PreviousResponse()
-	instructions := strings.TrimSpace(flattenInstructionsForResponses(req.Instructions()).Text) // swobu:io-string source=domain
+	instructions = strings.TrimSpace(instructions) // swobu:io-string source=domain
 	inputType := "nil"
 	if input != nil {
 		switch input.(type) {
@@ -252,11 +277,11 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, input any, choice a
 		"thread_tail_role", responsesTailRole(thread),
 		"encoded_tail_role", responsesTailRole(encodedItems),
 		"input_type", inputType,
-		"tool_count", len(req.Tools()),
-		"function_tool_count", responsesToolKindCount(req.Tools(), canonical.ToolTypeFunction),
-		"custom_tool_count", responsesToolKindCount(req.Tools(), canonical.ToolTypeCustom),
-		"tool_policy", strings.TrimSpace(string(req.EffectiveToolPolicy().Mode)), // swobu:io-string source=domain
-		"tool_policy_specific", toolPolicySpecificID(req.EffectiveToolPolicy()),
+		"tool_count", len(tools),
+		"function_tool_count", responsesToolKindCount(tools, canonical.ToolTypeFunction),
+		"custom_tool_count", responsesToolKindCount(tools, canonical.ToolTypeCustom),
+		"tool_policy", strings.TrimSpace(string(policy.Mode)), // swobu:io-string source=domain
+		"tool_policy_specific", toolPolicySpecificID(policy),
 		"tool_choice_wired", responsesWireToolChoice(choice),
 		"parallel_tool_calls", strings.TrimSpace(string(req.ToolCallBatch().Mode)), // swobu:io-string source=domain
 	)
@@ -318,19 +343,27 @@ func responsesWireToolChoice(choice any) string {
 	return "object"
 }
 
-func encodeInput(req canonical.CanonicalRequest, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, sink compat.Sink, exchangeID string) (any, error) {
 	items := req.Items()
 	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasResumptionInput(items) { // swobu:io-string source=boundary
 		return nil, nil
 	}
-	if input, ok, err := encodeSimpleInput(items); ok || err != nil {
+	_, history, err := canonical.SplitRequestPrelude(items)
+	if err != nil {
+		return nil, err
+	}
+	if input, ok, err := encodeSimpleInput(history); ok || err != nil {
 		return input, err
 	}
 	switch len(items) {
 	case 0:
 		return nil, nil
 	default:
-		return encodeConversation(req, items, req.Tools(), policy, sink, exchangeID)
+		environment, err := canonical.EffectiveTools(req)
+		if err != nil {
+			return nil, err
+		}
+		return encodeConversation(req, items, environment.Declarations(), sink, exchangeID)
 	}
 }
 
@@ -377,13 +410,16 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
-func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, policy compat.CompatibilityPolicy, sink compat.Sink, exchangeID string) ([]any, error) {
+func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
 	for _, current := range items {
 		switch current.Kind() {
 		case canonical.ItemKindMessage:
 			message, _ := current.Message()
+			if message.Scope() == canonical.ContextScopeRequest {
+				continue
+			}
 			content, err := encodeResponsesMessageContent(message.Role(), message.Content())
 			if err != nil {
 				return nil, err
@@ -397,6 +433,16 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				item.Status = "completed"
 			}
 			encoded = append(encoded, item)
+		case canonical.ItemKindToolDeclarations:
+			declarations, _ := current.ToolDeclarations()
+			if declarations.Scope() == canonical.ContextScopeRequest {
+				continue
+			}
+			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), sink, exchangeID)
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, map[string]any{"type": "additional_tools", "role": "developer", "tools": wireTools})
 		case canonical.ItemKindToolCall:
 			call, _ := current.ToolCall()
 			tool := call.Tool()
@@ -435,8 +481,22 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 					Status: "in_progress",
 					Action: action,
 				})
+			case canonical.ToolKindDiscovery:
+				object, ok := call.Input().Object()
+				if !ok {
+					return nil, canonical.BadRequest("responses tool discovery calls require object input")
+				}
+				executor, ok := call.DiscoveryExecutor()
+				if !ok {
+					return nil, canonical.InternalError("responses tool discovery call lost execution ownership")
+				}
+				execution := "client"
+				if executor == canonical.DiscoveryExecutorProvider {
+					execution = "server"
+				}
+				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": call.CallID().String(), "execution": execution, "arguments": json.RawMessage(object.String())})
 			default:
-				return nil, provider.NewCandidateIncompatibility("Responses cannot represent this canonical tool-call kind")
+				return nil, provider.NewIncompatibleTarget("Responses cannot represent this canonical tool-call kind")
 			}
 		case canonical.ItemKindToolResult:
 			result, _ := current.ToolResult()
@@ -460,15 +520,8 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				continue
 			}
 			if result.IsError() {
-				outcome := compat.Approx
-				if policy.EffectiveMode() == compat.CompatibilityStrict {
-					outcome = compat.Reject
-				}
-				if err := emitResponsesRequestDecision(sink, exchangeID, compat.RequestItemsToolResultIsError, outcome); err != nil {
+				if err := emitResponsesRequestDecision(sink, exchangeID, compat.RequestItemsToolResultIsError, compat.Approx); err != nil {
 					return nil, err
-				}
-				if outcome == compat.Reject {
-					return nil, provider.NewCandidateIncompatibility("Responses cannot preserve canonical tool-result error state")
 				}
 			}
 			content, err := encodeResponsesToolResultContent(result.Content())
@@ -481,6 +534,17 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				Output: content,
 			}
 			encoded = append(encoded, item)
+		case canonical.ItemKindToolDiscoveryResult:
+			result, _ := current.ToolDiscoveryResult()
+			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), sink, exchangeID)
+			if err != nil {
+				return nil, err
+			}
+			execution := "client"
+			if result.Executor() == canonical.DiscoveryExecutorProvider {
+				execution = "server"
+			}
+			encoded = append(encoded, map[string]any{"type": "tool_search_output", "call_id": result.CallID().String(), "status": "completed", "execution": execution, "tools": wireTools})
 		case canonical.ItemKindReasoning:
 			reasoning, _ := current.Reasoning()
 			item := map[string]any{"type": "reasoning"}
@@ -504,7 +568,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			}
 			encoded = append(encoded, item)
 		default:
-			return nil, provider.NewCandidateIncompatibility("Responses cannot represent this canonical item kind")
+			return nil, provider.NewIncompatibleTarget("Responses cannot represent this canonical item kind")
 		}
 	}
 	return encoded, nil
@@ -534,7 +598,7 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 		}
 		if part.Kind() == canonical.PartKindImage {
 			if author != canonical.MessageRoleUser {
-				return nil, provider.NewCandidateIncompatibility("Responses accepts canonical image input only in user messages")
+				return nil, provider.NewIncompatibleTarget("Responses accepts canonical image input only in user messages")
 			}
 			image, _ := part.Image()
 			rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
@@ -548,7 +612,7 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 			out = append(out, wireImage)
 			continue
 		}
-		return nil, provider.NewCandidateIncompatibility("Responses cannot represent this canonical content kind")
+		return nil, provider.NewIncompatibleTarget("Responses cannot represent this canonical content kind")
 	}
 	return out, nil
 }
@@ -558,7 +622,7 @@ func responsesTextOnlyContent(parts []canonical.MessagePart, surface string) (st
 	for _, part := range parts {
 		text, ok := part.Text()
 		if !ok {
-			return "", provider.NewCandidateIncompatibility(surface + " cannot represent this canonical content kind")
+			return "", provider.NewIncompatibleTarget(surface + " cannot represent this canonical content kind")
 		}
 		builder.WriteString(text.Text())
 	}
@@ -579,7 +643,7 @@ func encodeResponsesToolResultContent(parts []canonical.ToolResultPart) (any, er
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, provider.NewCandidateIncompatibility("Responses tool results cannot represent this canonical content kind")
+			return nil, provider.NewIncompatibleTarget("Responses tool results cannot represent this canonical content kind")
 		}
 		rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
 		if err != nil {

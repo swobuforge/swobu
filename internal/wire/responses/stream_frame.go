@@ -216,7 +216,7 @@ func (s *responsesResponseStream) handleOutputItemAdded(frame streamFrame) (bool
 	case "custom_tool_call":
 		s.emittedOutput = true
 		toolType = canonical.ToolTypeCustom
-	case "message", "web_search_call":
+	case "message", "web_search_call", "tool_search_call", "tool_search_output":
 		return false, nil
 	default:
 		s.omitProviderOutput(frame.OutputIndex)

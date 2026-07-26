@@ -24,9 +24,9 @@ func TestPreviousResponseUsesTypedProviderResponseRef(t *testing.T) {
 	}
 }
 
-func TestPreviousResponseEmitsExplicitEmptySpecifiedBands(t *testing.T) {
+func TestPreviousResponseDoesNotSynthesizeDeletedContextBands(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Instructions: canonical.Specify(canonical.InstructionSet{}), Tools: canonicaltest.SpecifiedToolSet(t),
+		Model:      canonical.Specify("m"),
 		ToolPolicy: canonical.Specify(canonical.ToolPolicy{}), ToolCallBatch: canonical.Specify(canonical.ToolCallBatchPolicy{}), OutputFormat: canonical.Specify(canonical.OutputFormat{}),
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}, PreviousResponse: testResponsesPrevious("swobu_1", "provider_1"),
 	})
@@ -38,10 +38,10 @@ func TestPreviousResponseEmitsExplicitEmptySpecifiedBands(t *testing.T) {
 	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := payload["instructions"]; !ok {
-		t.Fatal("explicit empty instructions omitted")
+	if _, ok := payload["instructions"]; ok {
+		t.Fatalf("deleted root instructions synthesized: %#v", payload)
 	}
-	if tools, ok := payload["tools"].([]any); !ok || len(tools) != 0 {
-		t.Fatalf("explicit empty tools=%#v", payload["tools"])
+	if _, ok := payload["tools"]; ok {
+		t.Fatalf("deleted root tools synthesized: %#v", payload)
 	}
 }

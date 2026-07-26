@@ -37,9 +37,9 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-5.3-codex"),
 		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tools.Declarations()...),
 			canonicaltest.Message(t, canonical.MessageRoleUser, `Call the record_action tool exactly once with {"action":"inspect"} and do not answer in prose.`),
 		},
-		Tools:         canonical.Specify(tools),
 		ToolPolicy:    canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
 		ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 	})

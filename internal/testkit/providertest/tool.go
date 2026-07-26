@@ -14,10 +14,18 @@ func ProjectedToolName(t testing.TB, declaration canonical.ToolDeclaration) stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(tools)})
+	item, err := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
 	projected, _, _, err := provider.ProjectAttemptTools(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return projected.Tools()[0].Key().Name()
+	environment, err := canonical.ToolEnvironmentAt(projected.Items(), len(projected.Items()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return environment.Declarations()[0].Key().Name()
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -68,6 +69,9 @@ type ClientMessageResult struct {
 type ClientRequestResult struct {
 	Request  canonical.CanonicalRequest
 	Delivery delivery.Delivery
+	// MCPAccess is request-private ingress state consumed only by the concrete
+	// request-scoped MCP runtime.
+	MCPAccess mcp.Access
 	// RequestFingerprint identifies the current protocol-native contribution
 	// relative to the predecessor selected by decode semantics.
 	RequestFingerprint historyfingerprint.Request

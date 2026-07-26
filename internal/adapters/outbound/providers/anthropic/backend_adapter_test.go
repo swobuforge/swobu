@@ -57,9 +57,9 @@ func TestSendProviderRequest_UsesContractDeliveryForStreamingRequests(t *testing
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("claude-sonnet-4-20250514"),
 		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())),
 			canonicaltest.Message(t, canonical.MessageRoleUser, "ping"),
 		},
-		Tools: canonicaltest.SpecifiedToolSet(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())),
 	})
 	target := provider.NewTargetSnapshot(
 		"backend-a",
@@ -134,9 +134,9 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("claude-sonnet-4-20250514"),
 		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool),
 			canonicaltest.Message(t, canonical.MessageRoleUser, "ping"),
 		},
-		Tools: canonicaltest.SpecifiedToolSet(t, tool),
 	})
 	target := provider.NewTargetSnapshot(
 		"backend-a",

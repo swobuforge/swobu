@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
@@ -19,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 type candidateSelectiveRuntime struct {
@@ -88,7 +88,7 @@ func (unsupportedTestCodec) Encode(provider.Request) (carrier.Document, []compat
 		Feature: compat.RequestOutputFormat,
 		Outcome: compat.Reject,
 		Subject: "test:candidate-a",
-	}}, provider.NewCandidateIncompatibility("candidate cannot represent requested output")
+	}}, provider.NewIncompatibleTarget("candidate cannot represent requested output")
 }
 
 func (unsupportedTestCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
@@ -174,11 +174,28 @@ func beginPreparedProviderCall(t *testing.T, state exchangeState) reducerOutcome
 	return outcome
 }
 
-func TestReducerStartProducesOneWireOnlyProviderCommand(t *testing.T) {
-	tr, err := reduce(context.Background(), reducerTestState(t), exchangeStarted{}, reducerRuntime())
+func startReducerProviderCall(t *testing.T, state exchangeState) reducerOutcome {
+	t.Helper()
+	preparing, err := reduce(context.Background(), state, exchangeStarted{}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
 	}
+	command, ok := preparing.command.(prepareMCPCommand)
+	if !ok {
+		t.Fatalf("command = %T, want prepareMCPCommand", preparing.command)
+	}
+	outcome, err := reduce(
+		context.Background(), preparing.nextState,
+		executeCommand(context.Background(), command), reducerRuntime(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return outcome
+}
+
+func TestReducerStartProducesOneWireOnlyProviderCommand(t *testing.T) {
+	tr := startReducerProviderCall(t, reducerTestState(t))
 	active := activeProviderAttempt(t, tr.nextState)
 	cmd, ok := tr.command.(callProviderCommand)
 	if !ok {
@@ -203,10 +220,7 @@ func TestReducerRejectsUnexpectedConcreteEvent(t *testing.T) {
 }
 
 func TestReducerSuccessDecodesProviderIngressBeforeTerminalHandoff(t *testing.T) {
-	started, err := reduce(context.Background(), reducerTestState(t), exchangeStarted{}, reducerRuntime())
-	if err != nil {
-		t.Fatal(err)
-	}
+	started := startReducerProviderCall(t, reducerTestState(t))
 	active := activeProviderAttempt(t, started.nextState)
 	ingress, err := active.call.backend.Transport.Send(context.Background(), active.call.document)
 	if err != nil {
@@ -269,7 +283,7 @@ func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	s := reducerTestState(t)
 	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Tools: canonical.Specify(tools),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools.Declarations()...)},
 	})
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTarget(t, "search-a"),
@@ -631,10 +645,7 @@ func TestProviderResultAttemptIdentityRejectsUnknownAndNonActiveCallingAttempts(
 }
 
 func TestDuplicateProviderResultForTerminalAttemptIsInvariantError(t *testing.T) {
-	started, err := reduce(context.Background(), reducerTestState(t), exchangeStarted{}, reducerRuntime())
-	if err != nil {
-		t.Fatal(err)
-	}
+	started := startReducerProviderCall(t, reducerTestState(t))
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: active.id,
@@ -750,79 +761,6 @@ func TestPostMaterializationCodecFailureAdvancesRoute(t *testing.T) {
 	}
 }
 
-func TestStrictChatImageProjectionFallsBackToResponsesAfterMaterialization(t *testing.T) {
-	request := requestWithResponsesReasoningContext(t, closedToolImageRequest(t))
-	s := reducerTestState(t)
-	s.input.request = request
-	s.route = routePlan{targets: []routing.Target{
-		requestpathTargetWithProtocol(t, "strict-chat", "chat_completions"),
-		requestpathTargetWithProtocol(t, "responses-b", "responses"),
-	}}
-	prepared := mustBeginSession(t, request)
-	s.prepared = &prepared
-	s.phase = materializingAttemptImagesPhase{
-		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		target: provider.TargetSnapshot{
-			TargetID: "strict-chat", ProtocolKind: protocolkind.ChatCompletions, Model: "upstream-strict-chat",
-		},
-	}
-	runner := withRuntime(nil)
-	runner.Policy.Compatibility = compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}
-	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
-
-	first, err := reduce(context.Background(), s, attemptImagesMaterialized{
-		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		request:   request,
-	}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	materialize, ok := first.command.(materializeAttemptImagesCommand)
-	if !ok || materialize.selection.candidateIndex != 1 {
-		t.Fatalf("strict Chat fallback command = %#v, want Responses materialization", first.command)
-	}
-	for _, expected := range []struct {
-		feature compat.Feature
-		outcome compat.Outcome
-	}{
-		{compat.RequestReasoningContextResponses, compat.Drop},
-		{compat.RequestItemsToolResultImage, compat.Reject},
-	} {
-		found := false
-		for _, decision := range first.evidence.decisions {
-			found = found || decision.Feature == expected.feature && decision.Outcome == expected.outcome
-		}
-		if !found {
-			t.Fatalf("strict Chat evidence = %#v, missing independent %s/%s", first.evidence.decisions, expected.feature, expected.outcome)
-		}
-	}
-	second, err := reduce(context.Background(), first.nextState, attemptImagesMaterialized{
-		selection: materialize.selection,
-		request:   request,
-	}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	call, ok := second.command.(callProviderCommand)
-	if !ok || call.backend.Target.TargetID != "responses-b" {
-		t.Fatalf("post-fallback provider command = %#v", second.command)
-	}
-	if !strings.Contains(string(call.document.RawBytes()), `"context":"all_turns"`) {
-		t.Fatalf("Responses fallback lost reasoning context: %s", call.document.RawBytes())
-	}
-	if len(second.nextState.providerCallAttempts) != 1 || second.nextState.providerCallAttempts[0].candidateIndex != 1 {
-		t.Fatalf("provider attempts = %#v", second.nextState.providerCallAttempts)
-	}
-	evidence := summarizeRoutingEvidence(
-		second.nextState.providerCallAttempts,
-		second.nextState.evaluatedCandidateCount,
-		true,
-	)
-	if evidence.providerCallCount != 1 || !evidence.fallbackRecovered {
-		t.Fatalf("routing evidence = %#v, want one provider call with fallback recovery", evidence)
-	}
-}
-
 func requestWithResponsesReasoningContext(t *testing.T, request canonical.CanonicalRequest) canonical.CanonicalRequest {
 	t.Helper()
 	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
@@ -838,46 +776,11 @@ func requestWithResponsesReasoningContext(t *testing.T, request canonical.Canoni
 		previousPointer = &previous
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: request.Items(),
-		Tools: request.ToolsField(), PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
+		Model: request.ModelField(), Items: request.Items(),
+		PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
 		ToolCallBatch: request.ToolCallBatchField(), Controls: request.Controls(), Reasoning: reasoning,
 		OutputFormat: request.OutputFormatField(),
 	})
-}
-
-func TestStrictChatImageProjectionExhaustionReportsNoCompatibleTarget(t *testing.T) {
-	request := closedToolImageRequest(t)
-	s := reducerTestState(t)
-	s.input.request = request
-	s.route = routePlan{targets: []routing.Target{
-		requestpathTargetWithProtocol(t, "strict-chat", "chat_completions"),
-	}}
-	prepared := mustBeginSession(t, request)
-	s.prepared = &prepared
-	s.phase = materializingAttemptImagesPhase{
-		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		target: provider.TargetSnapshot{
-			TargetID: "strict-chat", ProtocolKind: protocolkind.ChatCompletions, Model: "upstream-strict-chat",
-		},
-	}
-	runner := withRuntime(nil)
-	runner.Policy.Compatibility = compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}
-	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
-	outcome, err := reduce(context.Background(), s, attemptImagesMaterialized{
-		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		request:   request,
-	}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	failed, ok := outcome.nextState.phase.(failedPhase)
-	if !ok || failed.target.TargetID != "strict-chat" {
-		t.Fatalf("terminal phase = %#v", outcome.nextState.phase)
-	}
-	var terminal canonical.Error
-	if !errors.As(failed.problem, &terminal) || terminal.Code != canonical.ErrorCodeNoCompatibleTarget {
-		t.Fatalf("terminal error = %T %v, want no compatible target", failed.problem, failed.problem)
-	}
 }
 
 func closedToolImageRequest(t *testing.T) canonical.CanonicalRequest {
@@ -977,7 +880,7 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: active.id,
-		err:       provider.NewCandidateIncompatibility("candidate cannot represent canonical tool choice"),
+		err:       provider.NewIncompatibleTarget("candidate cannot represent canonical tool choice"),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)

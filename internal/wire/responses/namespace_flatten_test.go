@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestDecodeRequest_FlattensNamespaceToolsAndResolvesLiteralToolChoice(t *testing.T) {
+func TestDecodeRequest_PreservesNamespaceToolsAndResolvesLiteralToolChoice(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -50,27 +50,35 @@ func TestDecodeRequest_FlattensNamespaceToolsAndResolvesLiteralToolChoice(t *tes
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
 
-	tools := got.Tools()
-	if len(tools) != 2 {
-		t.Fatalf("tools len = %d, want 2", len(tools))
+	tools := canonicaltest.Tools(got)
+	if len(tools) != 1 {
+		t.Fatalf("tools len = %d, want one namespace", len(tools))
 	}
-	functionTool := requireToolDecl(t, tools, canonical.ToolTypeFunction, "grep")
-	customTool := requireToolDecl(t, tools, canonical.ToolTypeCustom, "apply_patch")
+	namespace, ok := tools[0].Namespace()
+	if !ok || namespace.Description() != "workspace tools" {
+		t.Fatalf("namespace = %#v", tools[0])
+	}
+	children := namespace.Tools()
+	if len(children) != 2 {
+		t.Fatalf("namespace children = %#v", children)
+	}
+	functionTool := requireToolDecl(t, children, canonical.ToolTypeFunction, "grep")
+	customTool := requireToolDecl(t, children, canonical.ToolTypeCustom, "apply_patch")
 
 	if functionTool.Key().String() != canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "workspace/grep").String() {
 		t.Fatalf("function tool id = %q, want workspace/grep", functionTool.Key())
 	}
 	function, _ := functionTool.Function()
-	if function.Description() != "workspace tools\n\nsearch text" {
-		t.Fatalf("function tool description = %q, want composed description", function.Description())
+	if function.Description() != "search text" {
+		t.Fatalf("function tool description = %q, want source child description", function.Description())
 	}
 
 	if customTool.Key().String() != canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "workspace/apply_patch").String() {
 		t.Fatalf("custom tool id = %q, want workspace/apply_patch", customTool.Key())
 	}
 	custom, _ := customTool.Custom()
-	if custom.Description() != "workspace tools\n\nedit files" {
-		t.Fatalf("custom tool description = %q, want composed description", custom.Description())
+	if custom.Description() != "edit files" {
+		t.Fatalf("custom tool description = %q, want source child description", custom.Description())
 	}
 
 	policy := got.ToolPolicy()
@@ -152,7 +160,7 @@ func TestDecodeRequest_DecodesUnnamespacedFlatFunctionToolName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
-	tools := got.Tools()
+	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
@@ -190,7 +198,7 @@ func TestDecodeRequest_DecodesLeadingUnderscorePlainFunctionToolNameRaw(t *testi
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
-	tools := got.Tools()
+	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
@@ -240,7 +248,7 @@ func TestDecodeRequest_DecodesProjectedLookingFlatFunctionToolNameAsRaw(t *testi
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
-	tools := got.Tools()
+	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}

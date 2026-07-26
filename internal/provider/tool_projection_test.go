@@ -21,7 +21,7 @@ func TestAttemptToolProjectionIsBoundedTotalAndCollisionSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
-	for _, declaration := range projected.Tools() {
+	for _, declaration := range canonicaltest.Tools(projected) {
 		name := declaration.Key().Name()
 		if len(name) > toolname.MaxLength || !toolname.Safe(name) {
 			t.Fatalf("unsafe projection %q", name)
@@ -31,12 +31,43 @@ func TestAttemptToolProjectionIsBoundedTotalAndCollisionSafe(t *testing.T) {
 		}
 		seen[name] = true
 		original, ok := table.OriginalKey(declaration.Key())
-		if !ok || original != request.Tools()[len(seen)-1].Key() {
+		if !ok || original != canonicaltest.Tools(request)[len(seen)-1].Key() {
 			t.Fatalf("projection did not round-trip: %#v", declaration.Key())
 		}
 	}
 	if wire, _ := table.WireName(plain); wire != "lookup" {
 		t.Fatalf("safe request name = %q, want preserved", wire)
+	}
+}
+
+func TestOneProjectionRewritesAttemptDecodeContextAndReverseLookup(t *testing.T) {
+	key, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, strings.Repeat("search", 20))
+	full := projectionTestRequest(t, key)
+	callID, _ := canonical.NewToolCallID("call_1")
+	input, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(input))
+	attempt := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{call},
+	})
+	projection, err := BuildToolProjection(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectedFull, _, err := projection.Rewrite(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectedAttempt, _, err := projection.Rewrite(attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarationWire := canonicaltest.Tools(projectedFull)[0].Key()
+	projectedCall, _ := projectedAttempt.Items()[0].ToolCall()
+	if projectedCall.Tool() != declarationWire {
+		t.Fatalf("attempt key %q differs from decode context %q", projectedCall.Tool(), declarationWire)
+	}
+	if original, ok := projection.Table().OriginalKey(projectedCall.Tool()); !ok || original != key {
+		t.Fatalf("reverse lookup = %q, %t", original, ok)
 	}
 }
 
@@ -51,7 +82,8 @@ func projectionTestRequest(t *testing.T, keys ...canonical.ToolKey) canonical.Ca
 	if err != nil {
 		t.Fatal(err)
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Tools: canonical.Specify(set)})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	return canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarationItem}})
 }
 
 func TestLiteralReservedLookingWireNameStaysRequestScoped(t *testing.T) {
@@ -70,10 +102,10 @@ func TestAttemptToolProjectionAvoidsLiteralAliasCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projected.Tools()) != 2 || projected.Tools()[0].Key().Name() == projected.Tools()[1].Key().Name() {
+	if len(canonicaltest.Tools(projected)) != 2 || canonicaltest.Tools(projected)[0].Key().Name() == canonicaltest.Tools(projected)[1].Key().Name() {
 		t.Fatal("projection allocator did not avoid a reserved literal name")
 	}
-	for _, declaration := range projected.Tools() {
+	for _, declaration := range canonicaltest.Tools(projected) {
 		if _, ok := table.OriginalKey(declaration.Key()); !ok {
 			t.Fatalf("projection lost reverse mapping for %q", declaration.Key().Name())
 		}
@@ -99,7 +131,7 @@ func TestAttemptToolProjectionPrefersUnoccupiedSafeNamespacedLeaf(t *testing.T) 
 func TestAttemptToolProjectionPreservesWebSearch(t *testing.T) {
 	functionKey, _ := canonical.NewToolKey(canonical.ToolNamespaceRequest, canonical.ToolKindFunction, "lookup")
 	functionRequest := projectionTestRequest(t, functionKey)
-	declarations := append(functionRequest.Tools(), canonical.NewWebSearchDeclaration())
+	declarations := append(canonicaltest.Tools(functionRequest), canonical.NewWebSearchDeclaration())
 	set, err := canonical.NewToolSet(declarations)
 	if err != nil {
 		t.Fatal(err)
@@ -115,21 +147,22 @@ func TestAttemptToolProjectionPreservesWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Tools: canonical.Specify(set), Items: []canonical.CanonicalItem{call}})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarationItem, call}})
 
 	projected, table, _, err := ProjectAttemptTools(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := projected.Tools()
+	tools := canonicaltest.Tools(projected)
 	if len(tools) != 2 || tools[1].Kind() != canonical.ToolKindWebSearch || tools[1].Key() != canonical.WebSearchToolKey() {
 		t.Fatalf("projected tools = %#v", tools)
 	}
 	if wire, err := table.WireName(canonical.WebSearchToolKey()); err != nil || wire != canonical.ToolTypeWebSearch {
 		t.Fatalf("web-search projection = %q, %v", wire, err)
 	}
-	projectedCall, ok := projected.Items()[0].ToolCall()
+	projectedCall, ok := projected.Items()[1].ToolCall()
 	if !ok || projectedCall.Tool() != canonical.WebSearchToolKey() || projectedCall.CallID() != callID {
-		t.Fatalf("projected web-search call = %#v", projected.Items()[0])
+		t.Fatalf("projected web-search call = %#v", projected.Items()[1])
 	}
 }

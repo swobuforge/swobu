@@ -31,6 +31,8 @@ type responsesHistoryItemDTO struct {
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 	Action           json.RawMessage                `json:"action,omitempty"`
+	Tools            json.RawMessage                `json:"tools,omitempty"`
+	Execution        string                         `json:"execution,omitempty"`
 }
 
 type responsesHistoryResult struct {
@@ -39,7 +41,7 @@ type responsesHistoryResult struct {
 	current  json.RawMessage
 }
 
-func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (responsesHistoryResult, error) {
+func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, retainLitePrelude bool) (responsesHistoryResult, error) {
 	trimmed := bytes.TrimSpace(input)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		request, err := fingerprintResponsesRequestValue(nil)
@@ -113,7 +115,7 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool) (
 	}
 	currentItems := items[requestStart:]
 	currentRawItems := rawItems[requestStart:]
-	if preambleEnd > 0 && requestStart >= preambleEnd {
+	if retainLitePrelude && preambleEnd > 0 && requestStart >= preambleEnd {
 		currentItems = append(append([]responsesHistoryItemDTO(nil), items[:preambleEnd]...), currentItems...)
 		currentRawItems = append(append([]json.RawMessage(nil), rawItems[:preambleEnd]...), currentRawItems...)
 	}
@@ -136,9 +138,12 @@ func isResponsesHistoryOutput(item responsesHistoryItemDTO) bool {
 	if typeName == "message" {
 		return strings.TrimSpace(item.Role) == "assistant" // swobu:io-string source=boundary
 	}
+	if typeName == "tool_search_output" {
+		return strings.TrimSpace(item.Execution) == "server"
+	}
 	// swobu:lint ignore string-switch because=protocol boundary partitions Responses history item variants.
 	switch typeName {
-	case "function_call", "custom_tool_call", "web_search_call", "reasoning", "program", "program_output", "compaction":
+	case "function_call", "custom_tool_call", "tool_search_call", "web_search_call", "reasoning", "program", "program_output", "compaction":
 		return true
 	default:
 		return false
@@ -210,14 +215,39 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 		if err != nil {
 			return nil, err
 		}
+		item.Tools, err = normalizeResponsesHistoryTools(items[index].Tools)
+		if err != nil {
+			return nil, err
+		}
 		normalized = append(normalized, item)
 	}
 	return normalized, nil
 }
 
+func normalizeResponsesHistoryTools(source json.RawMessage) (json.RawMessage, error) {
+	if len(bytes.TrimSpace(source)) == 0 {
+		return nil, nil
+	}
+	var tools []responsesToolDefinitionDTO
+	if err := json.Unmarshal(source, &tools); err != nil {
+		return normalizeResponsesRawJSON(source)
+	}
+	for index := range tools {
+		if strings.EqualFold(strings.TrimSpace(tools[index].Type), "mcp") {
+			tools[index].Headers = nil
+			tools[index].Authorization = nil
+		}
+	}
+	sanitized, err := json.Marshal(tools)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeResponsesRawJSON(sanitized)
+}
+
 func admittedResponsesHistoryItem(item responsesHistoryItemDTO) bool {
 	switch strings.TrimSpace(item.Type) { // swobu:io-string source=boundary
-	case "message", "function_call", "custom_tool_call", "function_call_output", "reasoning":
+	case "message", "additional_tools", "function_call", "custom_tool_call", "function_call_output", "tool_search_call", "tool_search_output", "reasoning":
 		return true
 	case "web_search_call":
 		action := bytes.TrimSpace(item.Action)
@@ -322,6 +352,22 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 				return err
 			}
 			history.Action = action
+		case canonical.ToolKindDiscovery:
+			object, ok := call.Input().Object()
+			if !ok {
+				return canonical.InternalError("responses output discovery call requires object input")
+			}
+			executor, ok := call.DiscoveryExecutor()
+			if !ok {
+				return canonical.InternalError("responses output discovery call lost execution ownership")
+			}
+			history.Type = "tool_search_call"
+			history.Name = ""
+			history.Execution = "client"
+			if executor == canonical.DiscoveryExecutorProvider {
+				history.Execution = "server"
+			}
+			history.Arguments = json.RawMessage(object.String())
 		default:
 			return canonical.NotImplemented("Swobu cannot project this canonical tool-call kind to Responses history")
 		}
@@ -345,6 +391,25 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 			return nil
 		}
 		return canonical.InternalError("responses web-search result has no prior call")
+	case canonical.ItemKindToolDiscoveryResult:
+		result, _ := item.ToolDiscoveryResult()
+		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), nil, "")
+		if err != nil {
+			return err
+		}
+		rawTools, err := json.Marshal(wireTools)
+		if err != nil {
+			return err
+		}
+		execution := "client"
+		if result.Executor() == canonical.DiscoveryExecutorProvider {
+			execution = "server"
+		}
+		s.items = append(s.items, responsesHistoryItemDTO{
+			Type: "tool_search_output", CallID: result.CallID().String(),
+			Execution: execution, Tools: rawTools,
+		})
+		return nil
 	case canonical.ItemKindReasoning:
 		reasoning, _ := item.Reasoning()
 		disclosure, disclosureSet := request.Reasoning().DisclosureField().Get()

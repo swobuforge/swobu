@@ -46,7 +46,7 @@ func TestChatCompatibilityRehomesClosedBatchToolResultImage(t *testing.T) {
 		Items: []canonical.CanonicalItem{call, result},
 	})
 	sink := &recordingDecisionSink{}
-	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange_1", EncodeOptions{})
+	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange_1")
 	if err != nil {
 		t.Fatalf("closed compatibility projection rejected: %v", err)
 	}
@@ -98,17 +98,10 @@ func TestChatToolResultImageProjectionRequiresClosedActiveBatch(t *testing.T) {
 	resultA := mustChatProjectionResult(t, "call_a", canonical.NewImageToolResultPart(image))
 
 	for _, tc := range []struct {
-		name    string
-		items   []canonical.CanonicalItem
-		options EncodeOptions
-		reason  string
+		name   string
+		items  []canonical.CanonicalItem
+		reason string
 	}{
-		{
-			name:    "strict closed batch",
-			items:   []canonical.CanonicalItem{callA, resultA},
-			options: EncodeOptions{Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}},
-			reason:  "strict compatibility requires exact placement",
-		},
 		{
 			name:   "no active batch",
 			items:  []canonical.CanonicalItem{resultA},
@@ -127,12 +120,11 @@ func TestChatToolResultImageProjectionRequiresClosedActiveBatch(t *testing.T) {
 				delivery.BufferedDelivery(),
 				sink,
 				"exchange_reject",
-				tc.options,
 			)
 			if err == nil || !strings.Contains(err.Error(), tc.reason) {
 				t.Fatalf("error = %v, want %q", err, tc.reason)
 			}
-			var incompatible provider.CandidateIncompatibilityError
+			var incompatible provider.IncompatibleTargetError
 			if !errors.As(err, &incompatible) {
 				t.Fatalf("error = %#v, want candidate incompatibility", err)
 			}
@@ -162,7 +154,7 @@ func TestChatCompatibilityProjectsParallelToolImagesAfterAllToolMessages(t *test
 		Items: []canonical.CanonicalItem{callA, callB, resultA, resultB},
 	})
 	sink := &recordingDecisionSink{}
-	document, err := LowerProviderRequestDocument(request, delivery.BufferedDelivery(), sink, "exchange_parallel", EncodeOptions{})
+	document, err := LowerProviderRequestDocument(request, delivery.BufferedDelivery(), sink, "exchange_parallel")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +207,6 @@ func TestChatCompatibilityImageOnlyToolResultKeepsToolContentNonEmpty(t *testing
 		delivery.BufferedDelivery(),
 		nil,
 		"",
-		EncodeOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -243,7 +234,7 @@ func TestChatToolImageCompatibilityDecisionsComposeIndependently(t *testing.T) {
 			Model: canonical.Specify("m"),
 			Items: []canonical.CanonicalItem{call, result},
 		}),
-		delivery.BufferedDelivery(), sink, "exchange_losses", EncodeOptions{},
+		delivery.BufferedDelivery(), sink, "exchange_losses",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -260,43 +251,6 @@ func TestChatToolImageCompatibilityDecisionsComposeIndependently(t *testing.T) {
 	}
 }
 
-func TestChatStrictToolImageDecisionsComposeBeforeRejection(t *testing.T) {
-	image := mustChatProjectionImage(t, canonical.Specify(canonical.ImageDetailOriginal))
-	call := mustChatProjectionCall(t, "call_strict_losses")
-	callID, _ := canonical.NewToolCallID("call_strict_losses")
-	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
-		canonical.NewTextToolResultPart("before"),
-		canonical.NewImageToolResultPart(image),
-	}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sink := &recordingDecisionSink{}
-	_, err = LowerProviderRequestDocument(
-		canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("m"),
-			Items: []canonical.CanonicalItem{call, result},
-		}),
-		delivery.BufferedDelivery(),
-		sink,
-		"exchange_strict_losses",
-		EncodeOptions{Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}},
-	)
-	if err == nil {
-		t.Fatal("strict tool-result image was accepted")
-	}
-	for _, feature := range []compat.Feature{
-		compat.RequestItemsToolResultImage,
-		compat.RequestItemsToolResultImageDetail,
-		compat.RequestItemsToolResultContentBoundaries,
-		compat.RequestItemsToolResultIsError,
-	} {
-		if !decisionRecorded(sink.effects, feature, compat.Reject) {
-			t.Fatalf("missing independent %q rejection in %#v", feature, sink.effects)
-		}
-	}
-}
-
 func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testing.T) {
 	image := mustChatProjectionImage(t, canonical.Unspecified[canonical.ImageDetail]())
 	history := []canonical.CanonicalItem{
@@ -308,7 +262,7 @@ func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testin
 			Model: canonical.Specify("m"),
 			Items: history,
 		}),
-		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+		delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -324,7 +278,7 @@ func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testin
 			Model: canonical.Specify("m"),
 			Items: append(append([]canonical.CanonicalItem(nil), history...), assistant, user),
 		}),
-		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+		delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
 		t.Fatal(err)

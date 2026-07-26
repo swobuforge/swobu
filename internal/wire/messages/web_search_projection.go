@@ -41,7 +41,7 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		}
 		resultIndex, completed := results[callID]
 		if !completed {
-			return nil, nil, provider.NewCandidateIncompatibility("Messages cannot represent unresolved canonical web-search call " + callID)
+			return nil, nil, provider.NewIncompatibleTarget("Messages cannot represent unresolved canonical web-search call " + callID)
 		}
 		drop[call.index] = struct{}{}
 		drop[resultIndex] = struct{}{}

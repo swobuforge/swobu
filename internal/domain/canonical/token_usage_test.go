@@ -35,3 +35,20 @@ func TestTokenUsage_RejectsNegativeReasoningTokens(t *testing.T) {
 		t.Fatal("NewTokenUsage should reject negative reasoning tokens")
 	}
 }
+
+func TestSumTokenUsageAccumulatesRoundsWithoutInventingUnknownFields(t *testing.T) {
+	inputOne, outputOne := 10, 2
+	inputTwo, outputTwo := 7, 3
+	first, _ := NewTokenUsage(TokenUsageParams{InputTokens: &inputOne, OutputTokens: &outputOne})
+	second, _ := NewTokenUsage(TokenUsageParams{InputTokens: &inputTwo, OutputTokens: &outputTwo})
+	total := SumTokenUsage(first, second)
+	if input, ok := total.InputTokens(); !ok || input != 17 {
+		t.Fatalf("input total = %d, %v", input, ok)
+	}
+	if output, ok := total.OutputTokens(); !ok || output != 5 {
+		t.Fatalf("output total = %d, %v", output, ok)
+	}
+	if _, ok := total.ReasoningTokens(); ok {
+		t.Fatal("unknown reasoning usage became a known total")
+	}
+}

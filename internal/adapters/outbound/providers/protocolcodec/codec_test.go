@@ -57,8 +57,10 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-		Tools: canonical.Specify(set),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, set.Declarations()...),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+		},
 	})
 	document, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
@@ -75,8 +77,10 @@ func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
 		ExchangeID: "exchange-shared-lowering",
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("model"),
-			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-			Tools: canonical.Specify(set),
+			Items: []canonical.CanonicalItem{
+				canonicaltest.ToolDeclarations(t, set.Declarations()...),
+				canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+			},
 		}),
 		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	}

@@ -97,8 +97,10 @@ func TestBedrockMessagesInheritsProtocolWebSearch(t *testing.T) {
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify(target.Model),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-		Tools: canonicaltest.SpecifiedToolSet(t, canonical.NewWebSearchDeclaration()),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonical.NewWebSearchDeclaration()),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+		},
 	})
 	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {

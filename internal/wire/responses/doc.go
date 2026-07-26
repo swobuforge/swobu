@@ -1,8 +1,9 @@
 // Package responses maps canonical response-generation semantics to and from
 // the responses wire protocol.
 //
-// It owns continuity-preserving request encoding, including Responses namespace
-// flattening at the wire edge, canonical structured-output lowering through
+// It owns continuity-preserving request encoding, including ordered
+// declaration contributions, preserved namespace trees, and semantic
+// tool-search call/output lifecycles. Canonical structured-output lowers through
 // text.format, and canonical tool-call batch lowering through
 // parallel_tool_calls. Plain flat tool names stay raw; namespace-bearing tool
 // names project only when the flat wire needs to carry scope. The package also
@@ -45,10 +46,11 @@
 // one web_search_call by canonical call ID, including non-adjacent results.
 // Provider request encoding always lowers canonical Full or Delta. Only
 // Responses facts with named behavioral consumers enter canonical: encrypted
-// reasoning, invocation reasoning context, and the additional_tools invocation
-// preamble. That preamble is validated as an alternate carrier for canonical
-// tool declarations and never becomes an item, replay refinement, or source
-// flag. Unsupported contained tool discriminators report their safe wire
+// reasoning, invocation reasoning context, and ordered additional_tools
+// declarations. Ordinary additional_tools is history-scoped. Only a complete
+// prefix carrying the HTTP Lite marker or WebSocket metadata equivalent becomes
+// request-scoped; marker evidence never enters canonical. Unsupported contained
+// tool discriminators report their safe wire
 // location and observed type without exposing declaration payloads. Request
 // item kinds without an implemented semantic projection are rejected; unknown
 // provider output and actionless search markers are not durable conversation

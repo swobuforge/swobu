@@ -52,21 +52,42 @@ func validateResponseItems(items []CanonicalItem) error {
 // items. Wire streams and materialized responses feed the same transitions.
 type responseToolLifecycleValidator struct {
 	webSearchCalls map[ToolCallID]struct{}
+	discoveryCalls map[ToolCallID]DiscoveryExecutor
 }
 
 var errWebSearchResultWithoutCall = errors.New("web-search result has no prior call")
+var errDiscoveryResultWithoutCall = errors.New("tool-discovery result has no prior call")
 
 func newResponseToolLifecycleValidator() responseToolLifecycleValidator {
-	return responseToolLifecycleValidator{webSearchCalls: make(map[ToolCallID]struct{})}
+	return responseToolLifecycleValidator{
+		webSearchCalls: make(map[ToolCallID]struct{}),
+		discoveryCalls: make(map[ToolCallID]DiscoveryExecutor),
+	}
 }
 
 func (v *responseToolLifecycleValidator) Observe(item CanonicalItem) error {
 	if call, ok := item.ToolCall(); ok && call.Tool().Kind() == ToolKindWebSearch {
 		v.webSearchCalls[call.CallID()] = struct{}{}
 	}
+	if call, ok := item.ToolCall(); ok && call.Tool().Kind() == ToolKindDiscovery {
+		executor, present := call.DiscoveryExecutor()
+		if !present {
+			return errors.New("tool-discovery call has no execution owner")
+		}
+		v.discoveryCalls[call.CallID()] = executor
+	}
 	if result, ok := item.ToolResult(); ok {
 		if _, found := v.webSearchCalls[result.CallID()]; !found {
 			return errWebSearchResultWithoutCall
+		}
+	}
+	if result, ok := item.ToolDiscoveryResult(); ok {
+		executor, found := v.discoveryCalls[result.CallID()]
+		if !found {
+			return errDiscoveryResultWithoutCall
+		}
+		if executor != result.Executor() {
+			return errors.New("tool-discovery result execution owner differs from its call")
 		}
 	}
 	return nil
@@ -95,6 +116,11 @@ func validateResponseItem(index int, item CanonicalItem) error {
 		if _, search := result.WebSearch(); !search {
 			return fmt.Errorf("canonical response item %d is a request-only tool result", index)
 		}
+	case ItemKindToolDiscoveryResult:
+		result, ok := item.ToolDiscoveryResult()
+		if !ok || result.Executor() != DiscoveryExecutorProvider {
+			return fmt.Errorf("canonical response item %d is an invalid tool-discovery result", index)
+		}
 	default:
 		return fmt.Errorf("canonical response item %d kind %q is unsupported", index, item.Kind())
 	}
@@ -114,4 +140,9 @@ func (o CanonicalResponse) Usage() TokenUsage        { return o.usage }
 // Clone returns a deep copy suitable for cross-boundary handoff.
 func (o CanonicalResponse) Clone() CanonicalResponse {
 	return newCanonicalResponse(o.response, o.model, o.items, o.finishReason, o.usage)
+}
+
+// WithUsage returns the same semantic response with exchange-aggregated usage.
+func (o CanonicalResponse) WithUsage(usage TokenUsage) CanonicalResponse {
+	return newCanonicalResponse(o.response, o.model, o.items, o.finishReason, usage)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/messages"
 	"github.com/swobuforge/swobu/internal/wire/responses"
@@ -50,8 +51,8 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 		t.Fatalf("checkpoint = (%t, %v)", found, err)
 	}
 	request := checkpoint.Request
-	if len(request.Tools()) != 1 {
-		t.Fatalf("checkpoint tools = %#v", request.Tools())
+	if len(canonicaltest.Tools(request)) != 1 {
+		t.Fatalf("checkpoint tools = %#v", canonicaltest.Tools(request))
 	}
 
 	responsesDocument, err := responses.EncodeCarrierWithDecisions(
@@ -60,13 +61,13 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertProjectedToolCarrier(t, responsesDocument.RawBytes(), "tools")
-	if strings.Contains(string(responsesDocument.RawBytes()), "additional_tools") {
-		t.Fatalf("Responses projection retained ingress carrier: %s", responsesDocument.RawBytes())
+	if !strings.Contains(string(responsesDocument.RawBytes()), `"type":"additional_tools"`) ||
+		!strings.Contains(string(responsesDocument.RawBytes()), `"name":"search"`) {
+		t.Fatalf("Responses projection lost ordered declaration carrier: %s", responsesDocument.RawBytes())
 	}
 
 	chatDocument, err := chatcompletions.EncodeCarrierWithDecisions(
-		request, delivery.BufferedDelivery(), nil, "", chatcompletions.EncodeOptions{},
+		request, delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +75,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	assertProjectedToolCarrier(t, chatDocument.RawBytes(), "tools")
 
 	messagesDocument, err := messages.EncodeCarrierWithDecisions(
-		request, delivery.BufferedDelivery(), nil, "", messages.EncodeOptions{},
+		request, delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
 		t.Fatal(err)

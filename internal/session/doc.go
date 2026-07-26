@@ -13,8 +13,10 @@
 // exact-target provider handle. Reasoning controls and effort normally remain
 // local to each invocation. When matching tool results continue an unfinished
 // assistant turn, omitted compute and effort are resolved from the
-// checkpoint request directly into the effective Full and Delta requests;
-// explicit conflicts reject. Partial result batches are legal, while duplicate
+// checkpoint request directly into the effective Full and Delta requests, and
+// missing request-scoped directives and declarations are repeated without
+// becoming history. They expire once the turn completes. Explicit compute or
+// effort conflicts reject. Partial result batches are legal, while duplicate
 // or foreign call IDs are malformed continuations.
 //
 // Checkpoints also retain validated external-media bytes bound to exact

@@ -14,7 +14,7 @@ import (
 // Attempt preparation has already projected every provider-facing key.
 func responsesToolWireName(tool canonical.ToolDeclaration) (string, error) {
 	if tool.Kind() != canonical.ToolKindFunction && tool.Kind() != canonical.ToolKindCustom {
-		return "", provider.NewCandidateIncompatibility("Responses cannot represent this canonical tool declaration type")
+		return "", provider.NewIncompatibleTarget("Responses cannot represent this canonical tool declaration type")
 	}
 	trimmedName := strings.TrimSpace(tool.Key().Name()) // swobu:io-string source=boundary
 	if trimmedName == "" {

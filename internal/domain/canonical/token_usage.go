@@ -111,3 +111,52 @@ func (u TokenUsage) TotalKnownTokens() (int, bool) {
 func (u TokenUsage) IsZero() bool {
 	return !u.hasInputTokens && !u.hasOutputTokens && !u.hasReasoningTokens && !u.hasCacheReadTokens && !u.hasCacheWriteTokens
 }
+
+// SumTokenUsage combines complete per-round accounting. A field remains
+// unknown when any round omitted it, preventing a partial sum from being
+// reported as the exchange total.
+func SumTokenUsage(rounds ...TokenUsage) TokenUsage {
+	if len(rounds) == 0 {
+		return NewUnknownTokenUsage()
+	}
+	type value struct {
+		total int
+		known bool
+	}
+	input := value{known: true}
+	output := value{known: true}
+	reasoning := value{known: true}
+	cacheRead := value{known: true}
+	cacheWrite := value{known: true}
+	for _, round := range rounds {
+		add := func(target *value, amount int, known bool) {
+			target.known = target.known && known
+			if known {
+				target.total += amount
+			}
+		}
+		amount, known := round.InputTokens()
+		add(&input, amount, known)
+		amount, known = round.OutputTokens()
+		add(&output, amount, known)
+		amount, known = round.ReasoningTokens()
+		add(&reasoning, amount, known)
+		amount, known = round.CacheReadTokens()
+		add(&cacheRead, amount, known)
+		amount, known = round.CacheWriteTokens()
+		add(&cacheWrite, amount, known)
+	}
+	pointer := func(value value) *int {
+		if !value.known {
+			return nil
+		}
+		total := value.total
+		return &total
+	}
+	usage, _ := NewTokenUsage(TokenUsageParams{
+		InputTokens: pointer(input), OutputTokens: pointer(output),
+		ReasoningTokens: pointer(reasoning), CacheReadTokens: pointer(cacheRead),
+		CacheWriteTokens: pointer(cacheWrite),
+	})
+	return usage
+}

@@ -12,28 +12,14 @@ import (
 
 func TestMessagesResponsesReasoningContextIsTargetLocalCompatibility(t *testing.T) {
 	request := messagesRequestWithResponsesReasoningContext(t)
-	for _, tc := range []struct {
-		name    string
-		mode    compat.CompatibilityMode
-		outcome compat.Outcome
-		wantErr bool
-	}{
-		{name: "strict", mode: compat.CompatibilityStrict, outcome: compat.Drop},
-		{name: "compat", mode: compat.CompatibilityCompat, outcome: compat.Drop},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sink := &compat.RecordingSink{}
-			document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange", EncodeOptions{
-				Compatibility: compat.CompatibilityPolicy{Mode: tc.mode},
-			})
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("error = %v, wantErr=%t", err, tc.wantErr)
-			}
-			assertMessagesReasoningContextDecision(t, sink.Decisions(), tc.outcome)
-			if !tc.wantErr && strings.Contains(string(document.RawBytes()), "all_turns") {
-				t.Fatalf("Messages request leaked Responses context: %s", document.RawBytes())
-			}
-		})
+	sink := &compat.RecordingSink{}
+	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMessagesReasoningContextDecision(t, sink.Decisions(), compat.Drop)
+	if strings.Contains(string(document.RawBytes()), "all_turns") {
+		t.Fatalf("Messages request leaked Responses context: %s", document.RawBytes())
 	}
 }
 

@@ -44,11 +44,11 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 			result.Document, err = chatcompletions.EncodeProviderRequestDocument(document)
 		}
 	case protocolkind.Responses:
-		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", responses.EncodeOptions{Compatibility: req.Compatibility})
+		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	case protocolkind.Messages:
-		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", messages.EncodeOptions{Compatibility: req.Compatibility})
+		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	default:
-		return carrier.Document{}, decisions, provider.NewCandidateIncompatibility("selected provider protocol has no request codec")
+		return carrier.Document{}, decisions, provider.NewIncompatibleTarget("selected provider protocol has no request codec")
 	}
 	decisions = append(decisions, result.Decisions...)
 	return result.Document, decisions, err
@@ -66,7 +66,6 @@ func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.Provider
 			req.Delivery,
 			sink,
 			req.ExchangeID,
-			chatcompletions.EncodeOptions{Compatibility: req.Compatibility},
 		)
 		if err != nil {
 			return chatcompletions.ProviderRequestDocument{}, err
@@ -86,7 +85,7 @@ func ValidateEncodeRequest(req provider.Request) error {
 		return canonical.InternalError("provider delivery is invalid")
 	}
 	if req.Delivery.IsStreaming() && req.Delivery.Framing != delivery.FramingSSE {
-		return provider.NewCandidateIncompatibility("provider codec supports only SSE streaming delivery")
+		return provider.NewIncompatibleTarget("provider codec supports only SSE streaming delivery")
 	}
 	return nil
 }

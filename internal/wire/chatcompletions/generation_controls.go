@@ -60,11 +60,11 @@ func encodeChatCompletionsReasoning(payload map[string]any, request canonical.Ca
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			if request.Controls().Effort.IsSpecified() {
-				return provider.NewCandidateIncompatibility("Chat Completions cannot represent disabled reasoning with inference effort")
+				return provider.NewIncompatibleTarget("Chat Completions cannot represent disabled reasoning with inference effort")
 			}
 			payload["reasoning_effort"] = "none"
 		case canonical.ReasoningAutomatic, canonical.ReasoningBudget:
-			return provider.NewCandidateIncompatibility("Chat Completions reasoning_effort cannot represent explicit canonical reasoning compute")
+			return provider.NewIncompatibleTarget("Chat Completions reasoning_effort cannot represent explicit canonical reasoning compute")
 		}
 	}
 	if effort, ok := request.Controls().Effort.Get(); ok {

@@ -48,7 +48,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 				t.Fatal(err)
 			}
 			asset, ok := resolved.ResolvedMedia.Resolve(
-				canonical.RequestPartRef{Item: 0, Part: 1},
+				canonical.RequestPartRef{Item: 1, Part: 1},
 				"https://example.test/image.png?version=one",
 			)
 			if !ok || string(asset.Bytes()) != "durable-image" {
@@ -93,17 +93,16 @@ func replayFixturePriorRequest(t *testing.T) (canonical.CanonicalRequest, sessio
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{message},
-		Tools: canonicaltest.SpecifiedToolSet(t,
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t,
 			canonicaltest.MustFunctionTool(
 				canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search"),
 				"", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
 			),
 			canonical.NewWebSearchDeclaration(),
-		),
+		), message},
 	})
 	media, err := (session.ResolvedMedia{}).Bind(
-		canonical.RequestPartRef{Item: 0, Part: 1},
+		canonical.RequestPartRef{Item: 1, Part: 1},
 		"https://example.test/image.png?version=one",
 		canonical.ImageMediaPNG, []byte("durable-image"),
 	)

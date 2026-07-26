@@ -59,9 +59,9 @@ func TestEncodeCarrier_WiresParallelToolCallsWhenToolsExist(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-4o-mini"),
 		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Unspecified[bool]())),
 			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
-		Tools:         canonicaltest.SpecifiedToolSet(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Unspecified[bool]())),
 		ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 	})
 	doc, err := EncodeCarrier(req, delivery.BufferedDelivery())

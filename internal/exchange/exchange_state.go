@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
@@ -30,6 +31,9 @@ type exchangeState struct {
 	evaluatedCandidateCount int
 	phase                   phase
 	advance                 *historyAdvance
+	mcp                     *mcp.Run
+	fallbackClosed          bool
+	providerUsage           []canonical.TokenUsage
 }
 
 // historyAdvance is the complete optional input for composing the completed
@@ -48,6 +52,7 @@ type exchangeInput struct {
 	request            canonical.CanonicalRequest
 	rebasedRequest     *wire.RebasedRequest
 	requestFingerprint historyfingerprint.Request
+	mcpAccess          mcp.Access
 	workspace          routing.Workspace
 	timing             *trafficevidence.Timing
 	// requestPath is the ingress-owned normalized path, captured before the
@@ -90,12 +95,27 @@ type materializingAttemptImagesPhase struct {
 	target    provider.TargetSnapshot
 }
 
+type preparingMCPPhase struct{}
+
+func (preparingMCPPhase) isPhase() {}
+
 func (materializingAttemptImagesPhase) isPhase() {}
 
 type callingProviderPhase struct {
 	attemptID providerCallAttemptID
 	call      providerCall
 }
+
+type callingMCPPhase struct {
+	selection     providerCallSelection
+	target        provider.TargetSnapshot
+	calls         []canonical.ToolCallItem
+	responseItems []canonical.CanonicalItem
+	results       []canonical.CanonicalItem
+	next          int
+}
+
+func (callingMCPPhase) isPhase() {}
 
 func (callingProviderPhase) isPhase() {}
 
@@ -136,6 +156,19 @@ type attemptImagesMaterialized struct {
 	err        error
 }
 
+type mcpPrepared struct {
+	full      canonical.CanonicalRequest
+	run       *mcp.Run
+	decisions []compat.Decision
+	err       error
+}
+
+func (mcpPrepared) isExchangeEvent() {}
+
+type mcpBatchStarted struct{ err error }
+
+func (mcpBatchStarted) isExchangeEvent() {}
+
 func (attemptImagesMaterialized) isExchangeEvent() {}
 
 type providerIngressReceived struct {
@@ -149,6 +182,13 @@ type providerCallFailed struct {
 	attemptID providerCallAttemptID
 	err       error
 }
+
+type mcpToolReturned struct {
+	result canonical.CanonicalItem
+	err    error
+}
+
+func (mcpToolReturned) isExchangeEvent() {}
 
 func (providerCallFailed) isExchangeEvent() {}
 
@@ -175,6 +215,13 @@ type materializeAttemptImagesCommand struct {
 	historical session.ResolvedMedia
 }
 
+type prepareMCPCommand struct {
+	full   canonical.CanonicalRequest
+	access mcp.Access
+}
+
+func (prepareMCPCommand) isCommand() {}
+
 func (materializeAttemptImagesCommand) isCommand() {}
 
 // callProviderCommand is the irreducible provider I/O operation. Its document
@@ -185,22 +232,38 @@ type callProviderCommand struct {
 	document  carrier.Document
 }
 
+type callMCPCommand struct {
+	run  *mcp.Run
+	call canonical.ToolCallItem
+}
+
+func (callMCPCommand) isCommand() {}
+
+type beginMCPBatchCommand struct {
+	run   *mcp.Run
+	calls []canonical.ToolCallItem
+}
+
+func (beginMCPBatchCommand) isCommand() {}
+
 func (callProviderCommand) isCommand() {}
 
 // providerCall is the complete immutable data needed to issue and finish one
 // provider call. It contains no alternative request or retry state.
 type providerCall struct {
-	backend        provider.Backend
-	request        provider.Request
-	document       carrier.Document
-	clientCodec    ClientCodec
-	clientDelivery delivery.Delivery
-	exchangeID     string
-	workspaceSlug  string
-	fullRequest    canonical.CanonicalRequest
-	inputSegment   canonical.CanonicalRequest
-	resolvedMedia  session.ResolvedMedia
-	advance        *historyAdvance
+	backend                provider.Backend
+	request                provider.Request
+	document               carrier.Document
+	clientCodec            ClientCodec
+	clientDelivery         delivery.Delivery
+	exchangeID             string
+	workspaceSlug          string
+	fullRequest            canonical.CanonicalRequest
+	projectedDecodeContext canonical.CanonicalRequest
+	inputSegment           canonical.CanonicalRequest
+	resolvedMedia          session.ResolvedMedia
+	advance                *historyAdvance
+	delayClientHandoff     bool
 }
 
 type reducerOutcome struct {
@@ -226,8 +289,12 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reduceLoadingCheckpoint(s, p, event, runner)
 	case materializingAttemptImagesPhase:
 		return reduceMaterializingAttemptImages(s, p, event, runner)
+	case preparingMCPPhase:
+		return reducePreparingMCP(s, event, runner)
 	case callingProviderPhase:
 		return reduceCallingProvider(ctx, s, p, event, runner)
+	case callingMCPPhase:
+		return reduceCallingMCP(s, p, event, runner)
 	case completedPhase, failedPhase:
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: terminal phase %T received event %T", p, event)
 	default:
@@ -261,7 +328,7 @@ func reduceMaterializingAttemptImages(s exchangeState, phase materializingAttemp
 				outcome.evidence = evidence.append(outcome.evidence)
 				return outcome, advanceErr
 			}
-			var incompatible provider.CandidateIncompatibilityError
+			var incompatible provider.IncompatibleTargetError
 			if errors.As(err, &incompatible) {
 				err = noCompatibleTarget(err)
 			}
@@ -304,7 +371,7 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 	}
 	s.prepared = &prepared
 	s.advance = &historyAdvance{Request: s.input.requestFingerprint}
-	return advanceProviderExecution(s, runner)
+	return beginMCPPreparation(s, runner)
 }
 
 func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
@@ -352,7 +419,7 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		return reducerOutcome{nextState: s}, nil
 	}
 	s.prepared = &prepared
-	return advanceProviderExecution(s, runner)
+	return beginMCPPreparation(s, runner)
 }
 
 func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingProviderPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
@@ -375,6 +442,10 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 			return reducerOutcome{}, err
 		}
 		evidence := exchangeEvidence{decisions: backendErrorShapeDecisions(phase.call, result.err)}
+		if s.fallbackClosed {
+			s.phase = failedPhase{problem: failure, target: attempt.target}
+			return reducerOutcome{nextState: s, evidence: evidence}, nil
+		}
 		outcome, err := advanceProviderExecution(s, runner)
 		outcome.evidence = evidence.append(outcome.evidence)
 		return outcome, err
@@ -383,13 +454,17 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if result.attemptID != phase.attemptID {
 			return reducerOutcome{}, fmt.Errorf("exchange invariant: provider call attempt %d returned while %d is active", result.attemptID, phase.attemptID)
 		}
-		response, completionDecisions, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
+		response, canonicalResponse, completionDecisions, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
 		decisions := append([]compat.Decision(nil), completionDecisions...)
 		if completionErr != nil {
 			var err error
 			s, err = failProviderCallAttempt(s, phase.attemptID, providerCallFailureBeforeHandoff, completionErr)
 			if err != nil {
 				return reducerOutcome{}, err
+			}
+			if s.fallbackClosed {
+				s.phase = failedPhase{problem: completionErr, target: attempt.target}
+				return reducerOutcome{nextState: s, evidence: exchangeEvidence{decisions: decisions}}, nil
 			}
 			outcome, err := advanceProviderExecution(s, runner)
 			outcome.evidence = exchangeEvidence{decisions: decisions}.append(outcome.evidence)
@@ -399,6 +474,31 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		s, err = completeProviderCallAttempt(s, phase.attemptID)
 		if err != nil {
 			return reducerOutcome{}, err
+		}
+		if canonicalResponse != nil {
+			rounds := append(append([]canonical.TokenUsage(nil), s.providerUsage...), canonicalResponse.Usage())
+			calls, err := s.mcp.Calls(*canonicalResponse)
+			if err != nil {
+				s.phase = failedPhase{problem: err, target: attempt.target}
+				return reducerOutcome{nextState: s, evidence: exchangeEvidence{decisions: decisions}}, nil
+			}
+			if len(calls) > 0 {
+				s.providerUsage = rounds
+				selection := providerCallSelection{candidateIndex: attempt.candidateIndex, requestChoice: providerRequestFullHistory}
+				mcpPhase := callingMCPPhase{
+					selection: selection, target: attempt.target, calls: calls,
+					responseItems: canonicalResponse.Items(),
+				}
+				outcome, beginErr := beginMCPBatch(s, mcpPhase)
+				outcome.evidence = exchangeEvidence{decisions: decisions}.append(outcome.evidence)
+				return outcome, beginErr
+			}
+			*canonicalResponse = canonicalResponse.WithUsage(canonical.SumTokenUsage(rounds...))
+			response, err = handoffCompletedProviderResponse(ctx, phase.call, *canonicalResponse, runner)
+			if err != nil {
+				s.phase = failedPhase{problem: err, target: attempt.target}
+				return reducerOutcome{nextState: s, evidence: exchangeEvidence{decisions: decisions}}, nil
+			}
 		}
 		s.phase = completedPhase{response: response, target: attempt.target}
 		decisions = append(decisions, previousResponseHandoffEvidence(*s.prepared, attempt, phase.attemptID)...)
@@ -458,7 +558,7 @@ func advanceProviderExecutionFrom(s exchangeState, runner runtimeBundle, selecti
 				selection = next
 				continue
 			}
-			var incompatible provider.CandidateIncompatibilityError
+			var incompatible provider.IncompatibleTargetError
 			if errors.As(err, &incompatible) {
 				err = noCompatibleTarget(err)
 			}
@@ -506,7 +606,7 @@ func terminateProviderExecution(s exchangeState) reducerOutcome {
 	}
 	last := s.providerCallAttempts[len(s.providerCallAttempts)-1]
 	problem := last.failure.Cause
-	var incompatible provider.CandidateIncompatibilityError
+	var incompatible provider.IncompatibleTargetError
 	if errors.As(problem, &incompatible) {
 		problem = noCompatibleTarget(problem)
 	}

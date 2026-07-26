@@ -10,7 +10,7 @@ import (
 
 func TestCustomToolResponseRoundTrip(t *testing.T) {
 	decl := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar"}`)))
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonicaltest.SpecifiedToolSet(t, decl)})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, decl)}})
 	callID, _ := canonical.NewToolCallID("call_1")
 	call, _ := canonical.NewToolCallItem(callID, decl.Key(), canonical.NewTextToolInput("patch contents"))
 	output := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{call}, "stop")

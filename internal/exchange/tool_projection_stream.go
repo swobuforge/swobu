@@ -33,6 +33,9 @@ func (s *canonicalToolProjectionStream) Next(ctx context.Context) (canonical.Eve
 		}
 		original, ok := s.table.OriginalKey(start.Tool)
 		if !ok {
+			if fixedCanonicalToolKey(start.Tool) {
+				return event, nil
+			}
 			return canonical.Event{}, canonical.InternalError("provider tool call has no attempted projection")
 		}
 		projected, err := canonical.NewToolCallStart(start.CallID, original)
@@ -47,6 +50,9 @@ func (s *canonicalToolProjectionStream) Next(ctx context.Context) (canonical.Eve
 		}
 		original, ok := s.table.OriginalKey(call.Tool())
 		if !ok {
+			if fixedCanonicalToolKey(call.Tool()) {
+				return event, nil
+			}
 			return canonical.Event{}, canonical.InternalError("completed provider tool call has no attempted projection")
 		}
 		item, rebuildErr := canonical.NewToolCallItem(call.CallID(), original, call.Input())
@@ -57,6 +63,10 @@ func (s *canonicalToolProjectionStream) Next(ctx context.Context) (canonical.Eve
 	}
 	event.Payload = itemEvent
 	return event, nil
+}
+
+func fixedCanonicalToolKey(key canonical.ToolKey) bool {
+	return key.Kind() == canonical.ToolKindWebSearch || key.Kind() == canonical.ToolKindDiscovery
 }
 
 func (s *canonicalToolProjectionStream) Close(ctx context.Context) error {

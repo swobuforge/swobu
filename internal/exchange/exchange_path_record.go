@@ -47,9 +47,7 @@ func bindRequestToTarget(request canonical.CanonicalRequest, modelID string) can
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:            canonical.Specify(modelID),
-		Instructions:     request.InstructionsField(),
 		Items:            request.Items(),
-		Tools:            request.ToolsField(),
 		PreviousResponse: previousResponse,
 		ToolPolicy:       request.ToolPolicyField(),
 		ToolCallBatch:    request.ToolCallBatchField(),

@@ -10,7 +10,10 @@
 // Canonical at_most_one tool batching lowers through
 // disable_parallel_tool_use inside tool_choice when the selected target
 // supports the exact field.
-// Canonical instructions lower to and decode from the top-level system field.
+// The top-level system field decodes as a request-scoped directive. Lowering
+// hoists only a leading directive/declaration prefix that the static Messages
+// fields can represent exactly; mid-history additions are target-local
+// incompatibilities.
 // Direct Messages lowering accepts URL and inline images; exact provider
 // composition may select inline-only lowering without teaching this reusable
 // grammar a provider identity.

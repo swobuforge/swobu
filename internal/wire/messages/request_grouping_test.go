@@ -22,7 +22,7 @@ func TestEncodeItemsGroupsMaximalAssistantOwnedSequence(t *testing.T) {
 		nil,
 		{canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "other"), "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())},
 	} {
-		messages, err := encodeItems([]canonical.CanonicalItem{before, call, after}, currentTools, nil, "", EncodeOptions{})
+		messages, err := encodeItems([]canonical.CanonicalItem{before, call, after}, currentTools, nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func TestEncodeItemsPreservesMultipleToolCallsBeforeAssistantText(t *testing.T) 
 	callB, _ := canonical.NewToolCallItem(callIDB, declB.Key(), canonical.NewJSONObjectToolInput(input))
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("done")})
 
-	messages, err := encodeItems([]canonical.CanonicalItem{callA, callB, message}, nil, nil, "", EncodeOptions{})
+	messages, err := encodeItems([]canonical.CanonicalItem{callA, callB, message}, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestEncodeItemsGroupsToolResultWithFollowingUserText(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("sunny")}, false)
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("thanks")})
 
-	messages, err := encodeItems([]canonical.CanonicalItem{result, message}, nil, nil, "", EncodeOptions{})
+	messages, err := encodeItems([]canonical.CanonicalItem{result, message}, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -186,7 +186,7 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 
 	completed := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable, resultItem, message}})
 	_, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (struct{}, error) {
-		_, err := EncodeCarrierWithDecisions(completed, delivery.BufferedDelivery(), sink, "exchange", EncodeOptions{})
+		_, err := EncodeCarrierWithDecisions(completed, delivery.BufferedDelivery(), sink, "exchange")
 		return struct{}{}, err
 	})
 	if err != nil {
@@ -197,8 +197,8 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 	}
 
 	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable}})
-	_, err = EncodeCarrierWithDecisions(unresolved, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
-	var incompatible provider.CandidateIncompatibilityError
+	_, err = EncodeCarrierWithDecisions(unresolved, delivery.BufferedDelivery(), nil, "")
+	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)
 	}
@@ -208,7 +208,7 @@ func TestMessagesSingleQuerySearchPreservesOriginalCallID(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("search_original")
 	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"one"}}))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{call}})
-	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

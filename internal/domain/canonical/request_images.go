@@ -105,8 +105,8 @@ func RewriteRequestImages(request CanonicalRequest, rewrite func(RequestPartRef,
 
 func requestWithRewrittenItems(request CanonicalRequest, items []CanonicalItem) CanonicalRequest {
 	params := RequestParams{
-		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: items,
-		Tools: request.ToolsField(), ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
+		Model: request.ModelField(), Items: items,
+		ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
 		Controls: request.Controls(), Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
 	}
 	if previous, ok := request.PreviousResponse(); ok {

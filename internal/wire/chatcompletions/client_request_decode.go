@@ -115,22 +115,21 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions tools are invalid")
 	}
-	params := canonical.RequestParams{
-		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
-		Items:            items,
-		Controls:         controls,
-		Reasoning:        reasoning,
-		PreviousResponse: previousResponse,
-	}
-	if len(instructions) > 0 {
-		set, err := canonical.NewInstructionSet(instructions)
+	contextItems := append([]canonical.CanonicalItem(nil), instructions...)
+	if dto.Tools != nil {
+		declarations, err := canonical.NewToolDeclarationsItem(toolSet, canonical.ContextScopeRequest)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
-		params.Instructions = canonical.Specify(set)
+		contextItems = append(contextItems, declarations)
 	}
-	if dto.Tools != nil {
-		params.Tools = canonical.Specify(toolSet)
+	contextItems = append(contextItems, items...)
+	params := canonical.RequestParams{
+		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
+		Items:            contextItems,
+		Controls:         controls,
+		Reasoning:        reasoning,
+		PreviousResponse: previousResponse,
 	}
 	if len(dto.ToolChoice) > 0 {
 		params.ToolPolicy = canonical.Specify(toolPolicy)
@@ -144,24 +143,22 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	return newChatCanonicalRequest(params, resolvedDelivery, decoder.ImageLimits)
 }
 
-func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []canonical.Instruction, error) {
+func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []canonical.CanonicalItem, error) {
 	items := make([]canonical.CanonicalItem, 0, len(messages))
-	instructions := make([]canonical.Instruction, 0, 2)
+	instructions := make([]canonical.CanonicalItem, 0, 2)
 	leadingInstructions := true
 	for idx, msg := range messages {
 		role := strings.TrimSpace(msg.Role) // swobu:io-string source=boundary
 		if leadingInstructions && (role == "system" || role == "developer") {
 			author := canonical.MessageRoleSystem
-			instructionRole := canonical.MessageRoleSystem
 			if role == "developer" {
 				author = canonical.MessageRoleDeveloper
-				instructionRole = canonical.MessageRoleDeveloper
 			}
 			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", author, imageLimits)
 			if err != nil {
 				return nil, nil, err
 			}
-			instruction, err := canonical.NewInstruction(instructionRole, joinItemText(textItems))
+			instruction, err := canonical.NewScopedMessageItem(author, []canonical.MessagePart{canonical.NewTextMessagePart(joinItemText(textItems))}, canonical.ContextScopeRequest)
 			if err != nil {
 				return nil, nil, err
 			}

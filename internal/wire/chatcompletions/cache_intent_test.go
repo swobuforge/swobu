@@ -17,8 +17,7 @@ func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
 	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-4o-mini"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, functionTool), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -61,7 +60,7 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
 	}
-	tools := got.Tools()
+	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 || tools[0].Key().Name() != "get_weather" {
 		t.Fatalf("tools = %#v key=%q", tools, tools[0].Key().String())
 	}

@@ -309,7 +309,11 @@ func (s *responsesResponseStream) ensureToolState(itemID string, ordinal uint32,
 	if normalizedType != canonical.ToolTypeFunction && normalizedType != canonical.ToolTypeCustom {
 		return responsesToolState{}, canonical.NotImplemented("Swobu has no canonical projection for this Responses stream tool-call kind")
 	}
-	resolved, _, err := canonical.ResolveToolDeclarationByName(s.request.Tools(), name, normalizedType)
+	environment, err := canonical.EffectiveTools(s.request)
+	if err != nil {
+		return responsesToolState{}, canonical.InternalError("responses stream tool environment is ambiguous")
+	}
+	resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), name, normalizedType)
 	if err != nil {
 		return responsesToolState{}, canonical.InternalError("responses stream tool call references an unknown or ambiguous tool")
 	}

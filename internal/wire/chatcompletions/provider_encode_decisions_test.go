@@ -12,7 +12,7 @@ import (
 
 func TestProviderEncodeDecisionsDescribeActualChatCompletionsProjection(t *testing.T) {
 	request := chatRequestWithStrictToolAndJSONSchema(t)
-	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "exchange", EncodeOptions{})
+	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func chatRequestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalReq
 	if err != nil {
 		t.Fatal(err)
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Tools: canonical.Specify(tools), OutputFormat: canonical.Specify(format)})
+	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools.Declarations()...), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, OutputFormat: canonical.Specify(format)})
 }
 
 func assertChatDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {

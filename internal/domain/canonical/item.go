@@ -10,10 +10,21 @@ import (
 type ItemKind string
 
 const (
-	ItemKindMessage    ItemKind = "message"
-	ItemKindToolCall   ItemKind = "tool_call"
-	ItemKindToolResult ItemKind = "tool_result"
-	ItemKindReasoning  ItemKind = "reasoning"
+	ItemKindMessage             ItemKind = "message"
+	ItemKindToolDeclarations    ItemKind = "tool_declarations"
+	ItemKindToolCall            ItemKind = "tool_call"
+	ItemKindToolResult          ItemKind = "tool_result"
+	ItemKindToolDiscoveryResult ItemKind = "tool_discovery_result"
+	ItemKindReasoning           ItemKind = "reasoning"
+)
+
+// ContextScope controls whether one model-visible context occurrence survives
+// the boundary after the current request.
+type ContextScope uint8
+
+const (
+	ContextScopeHistory ContextScope = iota
+	ContextScopeRequest
 )
 
 // TurnOwner identifies the conversational side that owns an ordered item.
@@ -39,10 +50,12 @@ const (
 // Private concrete branches make contradictory item combinations
 // unrepresentable outside this package.
 type CanonicalItem struct {
-	message    *MessageItem
-	toolCall   *ToolCallItem
-	toolResult *ToolResultItem
-	reasoning  *ReasoningItem
+	message             *MessageItem
+	toolDeclarations    *ToolDeclarationsItem
+	toolCall            *ToolCallItem
+	toolResult          *ToolResultItem
+	toolDiscoveryResult *ToolDiscoveryResultItem
+	reasoning           *ReasoningItem
 }
 
 // MessageItem owns one preserved wire message boundary and its ordered
@@ -50,6 +63,14 @@ type CanonicalItem struct {
 type MessageItem struct {
 	role    MessageRole
 	content []MessagePart
+	scope   ContextScope
+}
+
+// ToolDeclarationsItem is one ordered contribution to the model-visible tool
+// environment. Its scope belongs to this occurrence, not to the ToolSet.
+type ToolDeclarationsItem struct {
+	tools ToolSet
+	scope ContextScope
 }
 
 // ToolCallID is the canonical correlation identity shared by one tool call and
@@ -76,9 +97,10 @@ func (id ToolCallID) IsZero() bool { return id.value == "" }
 // ToolCallItem is one ordered tool invocation. CallID correlates a later result
 // while Tool is sufficient to interpret and re-encode this historical call.
 type ToolCallItem struct {
-	callID ToolCallID
-	tool   ToolKey
-	input  ToolInput
+	callID            ToolCallID
+	tool              ToolKey
+	input             ToolInput
+	discoveryExecutor DiscoveryExecutor
 }
 
 // ToolResultItem is one ordered correlated result with ordered content.
@@ -86,6 +108,14 @@ type ToolResultItem struct {
 	callID    ToolCallID
 	content   *ToolContentResult
 	webSearch *WebSearchResult
+}
+
+// ToolDiscoveryResultItem correlates one discovery call with the declarations
+// it loaded. Those declarations become available only after this item.
+type ToolDiscoveryResultItem struct {
+	callID   ToolCallID
+	tools    ToolSet
+	executor DiscoveryExecutor
 }
 
 // ToolContentResult is the ordinary caller-resolved function/custom result
@@ -126,8 +156,20 @@ type ToolInput struct {
 // NewMessageItem validates and constructs one message without coalescing or
 // sorting its content parts.
 func NewMessageItem(role MessageRole, content []MessagePart) (CanonicalItem, error) {
+	return NewScopedMessageItem(role, content, ContextScopeHistory)
+}
+
+// NewScopedMessageItem constructs one message occurrence. Request scope is
+// valid only for system/developer directives.
+func NewScopedMessageItem(role MessageRole, content []MessagePart, scope ContextScope) (CanonicalItem, error) {
 	if !validMessageRole(role) {
 		return CanonicalItem{}, fmt.Errorf("canonical message role %q is invalid", role)
+	}
+	if !validContextScope(scope) {
+		return CanonicalItem{}, fmt.Errorf("canonical message context scope is invalid")
+	}
+	if scope == ContextScopeRequest && role != MessageRoleSystem && role != MessageRoleDeveloper {
+		return CanonicalItem{}, fmt.Errorf("canonical request-scoped messages require system or developer role")
 	}
 	if role != MessageRoleUser {
 		for _, part := range content {
@@ -140,8 +182,17 @@ func NewMessageItem(role MessageRole, content []MessagePart) (CanonicalItem, err
 	if err != nil {
 		return CanonicalItem{}, err
 	}
-	message := MessageItem{role: role, content: cloned}
+	message := MessageItem{role: role, content: cloned, scope: scope}
 	return CanonicalItem{message: &message}, nil
+}
+
+// NewToolDeclarationsItem constructs one ordered declaration contribution.
+func NewToolDeclarationsItem(tools ToolSet, scope ContextScope) (CanonicalItem, error) {
+	if !validContextScope(scope) {
+		return CanonicalItem{}, fmt.Errorf("canonical tool declaration context scope is invalid")
+	}
+	item := ToolDeclarationsItem{tools: tools.Clone(), scope: scope}
+	return CanonicalItem{toolDeclarations: &item}, nil
 }
 
 // NewToolCallItem validates and constructs one correlated semantic tool call.
@@ -160,6 +211,8 @@ func NewToolCallItem(callID ToolCallID, tool ToolKey, input ToolInput) (Canonica
 		if _, ok := input.Object(); !ok {
 			return CanonicalItem{}, fmt.Errorf("canonical function call requires object input")
 		}
+	case ToolKindDiscovery:
+		return CanonicalItem{}, fmt.Errorf("canonical tool discovery call requires explicit execution ownership")
 	case ToolKindCustom:
 		if _, ok := input.Text(); !ok {
 			return CanonicalItem{}, fmt.Errorf("canonical custom tool call requires text input")
@@ -175,6 +228,22 @@ func NewToolCallItem(callID ToolCallID, tool ToolKey, input ToolInput) (Canonica
 	return CanonicalItem{toolCall: &call}, nil
 }
 
+// NewToolDiscoveryCallItem constructs one discovery call with the execution
+// owner needed for replay, projection, and result ownership.
+func NewToolDiscoveryCallItem(callID ToolCallID, input ToolInput, executor DiscoveryExecutor) (CanonicalItem, error) {
+	if callID.IsZero() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
+		return CanonicalItem{}, fmt.Errorf("canonical tool discovery call is invalid")
+	}
+	if _, ok := input.Object(); !ok {
+		return CanonicalItem{}, fmt.Errorf("canonical tool discovery call requires object input")
+	}
+	call := ToolCallItem{
+		callID: callID, tool: ToolDiscoveryKey(), input: input.Clone(),
+		discoveryExecutor: executor,
+	}
+	return CanonicalItem{toolCall: &call}, nil
+}
+
 // NewToolResultItem validates and constructs one correlated result.
 func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool) (CanonicalItem, error) {
 	if callID.IsZero() {
@@ -187,6 +256,16 @@ func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool
 	contentResult := ToolContentResult{parts: cloned, isError: isError}
 	result := ToolResultItem{callID: callID, content: &contentResult}
 	return CanonicalItem{toolResult: &result}, nil
+}
+
+// NewToolDiscoveryResultItem constructs one correlated declaration-loading
+// result. The loaded declarations are historical facts at this position.
+func NewToolDiscoveryResultItem(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor) (CanonicalItem, error) {
+	if callID.IsZero() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
+		return CanonicalItem{}, fmt.Errorf("canonical tool discovery result requires a call id")
+	}
+	result := ToolDiscoveryResultItem{callID: callID, tools: tools.Clone(), executor: executor}
+	return CanonicalItem{toolDiscoveryResult: &result}, nil
 }
 
 // NewWebSearchResultItem constructs one exchange-resolved search result.
@@ -255,13 +334,17 @@ func NewWebSearchToolInput(call WebSearchCall) (ToolInput, error) {
 // package-local zero value.
 func (i CanonicalItem) Kind() ItemKind {
 	switch {
-	case i.message != nil && i.toolCall == nil && i.toolResult == nil && i.reasoning == nil:
+	case i.message != nil && i.toolDeclarations == nil && i.toolCall == nil && i.toolResult == nil && i.toolDiscoveryResult == nil && i.reasoning == nil:
 		return ItemKindMessage
-	case i.message == nil && i.toolCall != nil && i.toolResult == nil && i.reasoning == nil:
+	case i.message == nil && i.toolDeclarations != nil && i.toolCall == nil && i.toolResult == nil && i.toolDiscoveryResult == nil && i.reasoning == nil:
+		return ItemKindToolDeclarations
+	case i.message == nil && i.toolDeclarations == nil && i.toolCall != nil && i.toolResult == nil && i.toolDiscoveryResult == nil && i.reasoning == nil:
 		return ItemKindToolCall
-	case i.message == nil && i.toolCall == nil && i.toolResult != nil && i.reasoning == nil:
+	case i.message == nil && i.toolDeclarations == nil && i.toolCall == nil && i.toolResult != nil && i.toolDiscoveryResult == nil && i.reasoning == nil:
 		return ItemKindToolResult
-	case i.message == nil && i.toolCall == nil && i.toolResult == nil && i.reasoning != nil:
+	case i.message == nil && i.toolDeclarations == nil && i.toolCall == nil && i.toolResult == nil && i.toolDiscoveryResult != nil && i.reasoning == nil:
+		return ItemKindToolDiscoveryResult
+	case i.message == nil && i.toolDeclarations == nil && i.toolCall == nil && i.toolResult == nil && i.toolDiscoveryResult == nil && i.reasoning != nil:
 		return ItemKindReasoning
 	default:
 		return ""
@@ -286,10 +369,24 @@ func (i CanonicalItem) Owner() TurnOwner {
 		return TurnOwnerAssistant
 	case ItemKindToolResult:
 		return TurnOwnerUser
+	case ItemKindToolDiscoveryResult:
+		result, _ := i.ToolDiscoveryResult()
+		if result.Executor() == DiscoveryExecutorProvider {
+			return TurnOwnerAssistant
+		}
+		return TurnOwnerUser
 	case ItemKindReasoning:
 		return TurnOwnerAssistant
 	}
 	return ""
+}
+
+// ToolDeclarations returns an independent declaration occurrence.
+func (i CanonicalItem) ToolDeclarations() (ToolDeclarationsItem, bool) {
+	if i.Kind() != ItemKindToolDeclarations {
+		return ToolDeclarationsItem{}, false
+	}
+	return i.toolDeclarations.Clone(), true
 }
 
 // Message returns an independent message value when this is a message item.
@@ -316,6 +413,14 @@ func (i CanonicalItem) ToolResult() (ToolResultItem, bool) {
 	return i.toolResult.Clone(), true
 }
 
+// ToolDiscoveryResult returns an independent discovery-result occurrence.
+func (i CanonicalItem) ToolDiscoveryResult() (ToolDiscoveryResultItem, bool) {
+	if i.Kind() != ItemKindToolDiscoveryResult {
+		return ToolDiscoveryResultItem{}, false
+	}
+	return i.toolDiscoveryResult.Clone(), true
+}
+
 func (i CanonicalItem) Reasoning() (ReasoningItem, bool) {
 	if i.Kind() != ItemKindReasoning {
 		return ReasoningItem{}, false
@@ -330,6 +435,10 @@ func (i CanonicalItem) Clone() CanonicalItem {
 		value := i.message.Clone()
 		cloned.message = &value
 	}
+	if i.toolDeclarations != nil {
+		value := i.toolDeclarations.Clone()
+		cloned.toolDeclarations = &value
+	}
 	if i.toolCall != nil {
 		value := i.toolCall.Clone()
 		cloned.toolCall = &value
@@ -337,6 +446,10 @@ func (i CanonicalItem) Clone() CanonicalItem {
 	if i.toolResult != nil {
 		value := i.toolResult.Clone()
 		cloned.toolResult = &value
+	}
+	if i.toolDiscoveryResult != nil {
+		value := i.toolDiscoveryResult.Clone()
+		cloned.toolDiscoveryResult = &value
 	}
 	if i.reasoning != nil {
 		value := i.reasoning.Clone()
@@ -347,15 +460,32 @@ func (i CanonicalItem) Clone() CanonicalItem {
 
 func (m MessageItem) Role() MessageRole      { return m.role }
 func (m MessageItem) Content() []MessagePart { return cloneMessageParts(m.content) }
+func (m MessageItem) Scope() ContextScope    { return m.scope }
 func (m MessageItem) Clone() MessageItem {
-	return MessageItem{role: m.role, content: cloneMessageParts(m.content)}
+	return MessageItem{role: m.role, content: cloneMessageParts(m.content), scope: m.scope}
+}
+
+func (d ToolDeclarationsItem) Tools() ToolSet      { return d.tools.Clone() }
+func (d ToolDeclarationsItem) Scope() ContextScope { return d.scope }
+func (d ToolDeclarationsItem) Clone() ToolDeclarationsItem {
+	return ToolDeclarationsItem{tools: d.tools.Clone(), scope: d.scope}
 }
 
 func (c ToolCallItem) CallID() ToolCallID { return c.callID }
 func (c ToolCallItem) Tool() ToolKey      { return c.tool.Clone() }
 func (c ToolCallItem) Input() ToolInput   { return c.input.Clone() }
+func (c ToolCallItem) DiscoveryExecutor() (DiscoveryExecutor, bool) {
+	if c.tool.Kind() != ToolKindDiscovery ||
+		(c.discoveryExecutor != DiscoveryExecutorClient && c.discoveryExecutor != DiscoveryExecutorProvider) {
+		return 0, false
+	}
+	return c.discoveryExecutor, true
+}
 func (c ToolCallItem) Clone() ToolCallItem {
-	return ToolCallItem{callID: c.callID, tool: c.tool.Clone(), input: c.input.Clone()}
+	return ToolCallItem{
+		callID: c.callID, tool: c.tool.Clone(), input: c.input.Clone(),
+		discoveryExecutor: c.discoveryExecutor,
+	}
 }
 func (r ToolResultItem) CallID() ToolCallID { return r.callID }
 func (r ToolResultItem) Content() []ToolResultPart {
@@ -384,6 +514,12 @@ func (r ToolResultItem) Clone() ToolResultItem {
 		return ToolResultItem{callID: r.callID, webSearch: &search}
 	}
 	return ToolResultItem{}
+}
+func (r ToolDiscoveryResultItem) CallID() ToolCallID          { return r.callID }
+func (r ToolDiscoveryResultItem) Tools() ToolSet              { return r.tools.Clone() }
+func (r ToolDiscoveryResultItem) Executor() DiscoveryExecutor { return r.executor }
+func (r ToolDiscoveryResultItem) Clone() ToolDiscoveryResultItem {
+	return ToolDiscoveryResultItem{callID: r.callID, tools: r.tools.Clone(), executor: r.executor}
 }
 func (p ReasoningPart) Kind() ReasoningPartKind { return p.kind }
 func (p ReasoningPart) Text() string            { return p.text }
@@ -453,6 +589,10 @@ func validMessageRole(role MessageRole) bool {
 	default:
 		return false
 	}
+}
+
+func validContextScope(scope ContextScope) bool {
+	return scope == ContextScopeHistory || scope == ContextScopeRequest
 }
 
 func cloneCanonicalItems(items []CanonicalItem) []CanonicalItem {

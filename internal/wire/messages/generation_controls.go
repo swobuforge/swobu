@@ -110,7 +110,7 @@ func encodeMessagesReasoning(payload map[string]any, reasoning canonical.Reasoni
 	compute, computeSet := reasoning.ComputeField().Get()
 	if computeSet {
 		if disclosure, present := reasoning.DisclosureField().Get(); present && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
-			return provider.NewCandidateIncompatibility("Messages cannot represent disabled reasoning with readable disclosure")
+			return provider.NewIncompatibleTarget("Messages cannot represent disabled reasoning with readable disclosure")
 		}
 		thinking := map[string]any{}
 		switch compute.Kind() {

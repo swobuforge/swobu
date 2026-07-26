@@ -72,6 +72,8 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 		{name: "custom tool call", input: `{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindCustom},
 		{name: "function call output", input: `{"type":"function_call_output","call_id":"call_1","output":"done"}`, wantKind: canonical.ItemKindToolResult},
 		{name: "reasoning", input: `{"type":"reasoning","summary":[{"type":"summary_text","text":"brief"}],"encrypted_content":"cipher"}`, wantKind: canonical.ItemKindReasoning},
+		{name: "tool search call", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":{"query":"files"}}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery},
+		{name: "tool search output", input: `{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"client","tools":[]}`, wantKind: canonical.ItemKindToolDiscoveryResult},
 	}
 
 	for _, tc := range tests {
