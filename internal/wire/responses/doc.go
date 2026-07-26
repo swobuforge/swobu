@@ -14,6 +14,10 @@
 // Request diagnostics correlate full and implicitly rebased decode views by
 // carrier exchange metadata and report only safe image counts, coordinates,
 // call/tool identity, and source kind.
+// Historical custom-tool calls carry a self-contained canonical key in the
+// established request-origin namespace and do not require a declaration in the
+// current effective tool environment. Their input member is required but may
+// contain empty text; all text, including whitespace, remains exact.
 // Responses summary and reasoning_text output map through portable canonical
 // reasoning. Every complete response.output item is decoded into the one
 // canonical history graph: known semantics use typed branches and refinements,

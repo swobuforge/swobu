@@ -75,6 +75,7 @@ type responsesInputItemDTO struct {
 	ID               string                         `json:"id"`
 	Name             string                         `json:"name"`
 	Arguments        json.RawMessage                `json:"arguments"`
+	Input            json.RawMessage                `json:"input"`
 	Output           json.RawMessage                `json:"output"`
 	Status           string                         `json:"status,omitempty"`
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
