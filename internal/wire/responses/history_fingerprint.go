@@ -247,7 +247,7 @@ func normalizeResponsesHistoryTools(source json.RawMessage) (json.RawMessage, er
 
 func admittedResponsesHistoryItem(item responsesHistoryItemDTO) bool {
 	switch strings.TrimSpace(item.Type) { // swobu:io-string source=boundary
-	case "message", "additional_tools", "function_call", "custom_tool_call", "function_call_output", "tool_search_call", "tool_search_output", "reasoning":
+	case "message", "additional_tools", "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output", "tool_search_call", "tool_search_output", "reasoning":
 		return true
 	case "web_search_call":
 		action := bytes.TrimSpace(item.Action)

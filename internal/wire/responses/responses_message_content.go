@@ -108,14 +108,14 @@ func responsesInputSubject(index int, field string) compat.Subject {
 	return compat.Subject("wire:/input/" + strconv.Itoa(index) + "/" + field)
 }
 
-func decodeResponseOutputParts(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
+func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return []canonical.ToolResultPart{canonical.NewTextToolResultPart(text)}, nil
 	}
 	var content []openaiwire.ContentPartItem
 	if err := json.Unmarshal(raw, &content); err != nil {
-		return nil, canonical.BadRequest("responses request function_call_output is invalid")
+		return nil, canonical.BadRequest("responses request " + itemType + " is invalid")
 	}
 	parts := make([]canonical.ToolResultPart, 0, len(content))
 	for _, part := range content {
@@ -132,17 +132,17 @@ func decodeResponseOutputParts(raw json.RawMessage, imageLimits shared.ImageDeco
 			parts = append(parts, canonical.NewTextToolResultPart(value))
 		case "input_image", "image_url":
 			if strings.TrimSpace(part.FileID) != "" { // swobu:io-string source=provider-wire
-				return nil, canonical.BadRequest("responses request function_call_output provider-scoped image file IDs are not portable")
+				return nil, canonical.BadRequest("responses request " + itemType + " provider-scoped image file IDs are not portable")
 			}
-			image, err := openaiwire.DecodeOpenAIImage(part.ImageURL, "responses function_call_output", imageLimits, part.Detail)
+			image, err := openaiwire.DecodeOpenAIImage(part.ImageURL, "responses "+itemType, imageLimits, part.Detail)
 			if err != nil {
 				return nil, err
 			}
 			parts = append(parts, canonical.NewImageToolResultPart(image))
 		case "input_file", "file":
-			return nil, canonical.BadRequest("responses request function_call_output file content is not portable")
+			return nil, canonical.BadRequest("responses request " + itemType + " file content is not portable")
 		default:
-			return nil, canonical.BadRequest("responses request function_call_output contains an unsupported part type")
+			return nil, canonical.BadRequest("responses request " + itemType + " contains an unsupported part type")
 		}
 	}
 	return parts, nil

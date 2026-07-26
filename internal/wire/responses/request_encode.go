@@ -33,7 +33,7 @@ type functionCallItem struct {
 	Arguments string `json:"arguments"`
 }
 
-type functionCallOutputItem struct {
+type toolCallOutputItem struct {
 	Type   string `json:"type"`
 	CallID string `json:"call_id"`
 	Output any    `json:"output"`
@@ -413,6 +413,7 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
+	callKinds := toolCallKindsByID(request.Items())
 	for _, current := range items {
 		switch current.Kind() {
 		case canonical.ItemKindMessage:
@@ -528,8 +529,12 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if err != nil {
 				return nil, err
 			}
-			item := functionCallOutputItem{
-				Type:   "function_call_output",
+			outputType := "function_call_output"
+			if callKinds[result.CallID()] == canonical.ToolKindCustom {
+				outputType = "custom_tool_call_output"
+			}
+			item := toolCallOutputItem{
+				Type:   outputType,
 				CallID: result.CallID().String(),
 				Output: content,
 			}
@@ -572,6 +577,18 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 		}
 	}
 	return encoded, nil
+}
+
+func toolCallKindsByID(items []canonical.CanonicalItem) map[canonical.ToolCallID]canonical.ToolKind {
+	kinds := make(map[canonical.ToolCallID]canonical.ToolKind)
+	for _, item := range items {
+		call, ok := item.ToolCall()
+		if !ok {
+			continue
+		}
+		kinds[call.CallID()] = call.Tool().Kind()
+	}
+	return kinds
 }
 
 func emitResponsesRequestDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome) error {
