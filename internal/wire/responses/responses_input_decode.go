@@ -116,6 +116,32 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				return nil, nil, canonical.BadRequest("responses request function_call is invalid")
 			}
 			decoded = append(decoded, call)
+		case "custom_tool_call":
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
+			if callID == "" {
+				return nil, nil, canonical.BadRequest("responses request custom_tool_call items require call_id")
+			}
+			if strings.TrimSpace(item.Name) == "" { // swobu:io-string source=boundary
+				return nil, nil, canonical.BadRequest("responses request custom_tool_call items require a name")
+			}
+			rawInput := bytes.TrimSpace(item.Input)
+			if len(rawInput) == 0 || bytes.Equal(rawInput, []byte("null")) {
+				return nil, nil, canonical.BadRequest("responses request custom_tool_call items require input")
+			}
+			var input string
+			if err := json.Unmarshal(rawInput, &input); err != nil {
+				return nil, nil, canonical.BadRequest("responses request custom_tool_call input must be a string")
+			}
+			toolKey, err := canonical.ToolIdentityFromWire(item.Name, canonical.ToolKindCustom)
+			if err != nil {
+				return nil, nil, canonical.BadRequest("responses request custom_tool_call has an invalid tool identity")
+			}
+			canonicalCallID, _ := canonical.NewToolCallID(callID)
+			call, err := canonical.NewToolCallItem(canonicalCallID, toolKey, canonical.NewTextToolInput(input))
+			if err != nil {
+				return nil, nil, canonical.BadRequest("responses request custom_tool_call is invalid")
+			}
+			decoded = append(decoded, call)
 		case "function_call_output":
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			if callID == "" {
@@ -175,7 +201,8 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				decoded = append(decoded, reasoning)
 			}
 		default:
-			return nil, nil, canonical.NotImplemented("Swobu has no canonical projection for this Responses request input item type")
+			path := fmt.Sprintf("/input/%d/type", idx)
+			return nil, nil, canonical.NotImplemented(fmt.Sprintf("Swobu has no canonical projection for Responses request %s item type %q", path, itemType))
 		}
 	}
 	return decoded, tools, nil

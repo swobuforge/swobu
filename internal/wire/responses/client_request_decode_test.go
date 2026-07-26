@@ -85,6 +85,109 @@ func TestDecodeClientRequest_AcceptsHistoricalFunctionCallWithoutCurrentTools(t 
 	}
 }
 
+func TestDecodeClientRequest_AcceptsHistoricalCustomToolCall(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"custom_tool_call","id":"ctc_123","call_id":"call_1","name":"apply_patch","input":"line one\n\nline three\n"}]}`)
+	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	items := got.Items()
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want one self-contained historical custom call", len(items))
+	}
+	call, ok := items[0].ToolCall()
+	if !ok {
+		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolCall)
+	}
+	if call.CallID().String() != "call_1" || call.Tool().Kind() != canonical.ToolKindCustom || call.Tool().Name() != "apply_patch" {
+		t.Fatalf("custom call identity = call_id:%q tool:%q, want call_1 and request/custom/apply_patch", call.CallID(), call.Tool())
+	}
+	input, ok := call.Input().Text()
+	if !ok || input != "line one\n\nline three\n" {
+		t.Fatalf("custom call input = %q, %t, want exact text input", input, ok)
+	}
+
+	encoded, err := EncodeCarrierWithDecisions(
+		EncodeInput{Request: got},
+		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatalf("EncodeCarrierWithDecisions returned err=%v", err)
+	}
+	for _, want := range []string{
+		`"type":"custom_tool_call"`,
+		`"call_id":"call_1"`,
+		`"name":"apply_patch"`,
+		`"input":"line one\n\nline three\n"`,
+	} {
+		if !strings.Contains(string(encoded.RawBytes()), want) {
+			t.Fatalf("encoded custom call = %s, want %s", encoded.RawBytes(), want)
+		}
+	}
+	if strings.Contains(string(encoded.RawBytes()), "ctc_123") {
+		t.Fatalf("presentation id survived canonical replay: %s", encoded.RawBytes())
+	}
+}
+
+func TestDecodeClientRequest_CustomToolCallInputPresence(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		input string
+	}{
+		{name: "omitted", input: ""},
+		{name: "null", input: `,"input":null`},
+		{name: "non-string", input: `,"input":42`},
+	} {
+		t.Run(tc.name+" is malformed", func(t *testing.T) {
+			raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"custom_tool_call","call_id":"call_1","name":"shell"` + tc.input + `}]}`)
+			_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+			var requestErr canonical.Error
+			if !errors.As(err, &requestErr) || requestErr.Code != canonical.ErrorCodeBadRequest {
+				t.Fatalf("DecodeClientRequest err = %v, want BAD_REQUEST", err)
+			}
+		})
+	}
+
+	t.Run("explicit empty is valid", func(t *testing.T) {
+		raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""}]}`)
+		got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+		if err != nil {
+			t.Fatalf("DecodeClientRequest returned err=%v", err)
+		}
+		call, ok := got.Items()[0].ToolCall()
+		if !ok {
+			t.Fatalf("decoded item kind = %q, want %q", got.Items()[0].Kind(), canonical.ItemKindToolCall)
+		}
+		input, ok := call.Input().Text()
+		if !ok || input != "" {
+			t.Fatalf("custom call input = %q, %t, want present empty text", input, ok)
+		}
+	})
+}
+
+func TestDecodeClientRequest_NotImplementedNamesInputItemTypeAndPath(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"future_valid_item"}]}`)
+	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	var compatErr canonical.Error
+	if !errors.As(err, &compatErr) {
+		t.Fatalf("DecodeClientRequest err type = %T, want canonical.Error", err)
+	}
+	if compatErr.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeNotImplemented)
+	}
+	for _, want := range []string{"/input/0/type", `"future_valid_item"`} {
+		if !strings.Contains(compatErr.Message, want) {
+			t.Fatalf("error message = %q, want %q", compatErr.Message, want)
+		}
+	}
+}
+
 func TestDecodeClientRequest_PreservesExplicitEmptyDurableBands(t *testing.T) {
 	raw := []byte(`{
 		"input":"continue",
