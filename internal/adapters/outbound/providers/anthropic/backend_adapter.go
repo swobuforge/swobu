@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"mime"
 	"net/http"
 	"strings"
 
@@ -109,7 +108,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		}()
 		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
-	if isSSEContentType(resp.Header.Get("Content-Type")) {
+	if httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type")) {
 		return provider.StreamIngress{Stream: carrier.ByteStream{
 			Header:    resp.Header.Clone(),
 			MediaType: resp.Header.Get("Content-Type"),
@@ -128,11 +127,6 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		raw,
 		carrier.Meta{},
 	)}, nil
-}
-
-func isSSEContentType(raw string) bool {
-	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(raw)) // swobu:io-string source=boundary
-	return err == nil && strings.EqualFold(mediaType, "text/event-stream")
 }
 
 var _ provider.BackendResolver = BackendAdapter{}

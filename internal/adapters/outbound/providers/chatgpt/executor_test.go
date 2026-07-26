@@ -64,10 +64,26 @@ func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	return &http.Response{
 		StatusCode: status,
-		Header:     make(http.Header),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
 	}, nil
+}
+
+type closeTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 type recordingDecisionSink struct {
@@ -382,8 +398,8 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 	var seenPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
@@ -409,6 +425,125 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 	}
 	if seenPath != "/backend-api/codex/responses" {
 		t.Fatalf("path=%q", seenPath)
+	}
+}
+
+func TestSend_NonSSEStreamingSuccessReturnsBoundedBackendFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "json", contentType: "application/json"},
+		{name: "malformed", contentType: `text/event-stream; charset="`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := &closeTrackingBody{Reader: strings.NewReader(strings.Repeat("x", (64<<10)+4096))}
+			client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				header := make(http.Header)
+				if tt.contentType != "" {
+					header.Set("Content-Type", tt.contentType)
+				}
+				header.Set("Retry-After", "7")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     header,
+					Body:       body,
+					Request:    req,
+				}, nil
+			})}
+			target := provider.NewTargetSnapshot(
+				"chatgpt-target",
+				string(profile.ProviderSpecChatGPT),
+				"https://chatgpt.com/backend-api/codex",
+				"secretfile:chatgpt/test",
+				protocolkind.Responses,
+				"",
+				"responses_stream",
+			)
+			doc := carrier.NewDocument(
+				protocolkind.Responses,
+				"application/json",
+				nil,
+				[]byte(`{"model":"gpt-5.4-mini","input":[],"stream":true}`),
+				carrier.Meta{},
+			)
+
+			_, err := NewExecutor(client, stubCredentialResolver{}).Send(context.Background(), target, doc)
+			var backendErr canonical.BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("error = %T, want canonical.BackendError", err)
+			}
+			if backendErr.StatusCode != http.StatusBadGateway {
+				t.Fatalf("status = %d, want %d", backendErr.StatusCode, http.StatusBadGateway)
+			}
+			if backendErr.Origin != canonical.ErrorOriginBackend {
+				t.Fatalf("origin = %q, want %q", backendErr.Origin, canonical.ErrorOriginBackend)
+			}
+			if backendErr.RetryAfterHeaderValue != "7" {
+				t.Fatalf("retry-after = %q, want 7", backendErr.RetryAfterHeaderValue)
+			}
+			if len(backendErr.Message) > 64<<10 {
+				t.Fatalf("backend evidence length = %d, want <= %d", len(backendErr.Message), 64<<10)
+			}
+			if !body.closed {
+				t.Fatal("non-SSE response body was not closed")
+			}
+		})
+	}
+}
+
+func TestSend_MissingContentTypeNormalizesChatGPTStreamCarrier(t *testing.T) {
+	t.Parallel()
+
+	const sse = "event: response.output_text.delta\ndata: {\"delta\":\"OK\"}\n\n"
+	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(sse)),
+			Request:    req,
+		}, nil
+	})}
+	target := provider.NewTargetSnapshot(
+		"chatgpt-target",
+		string(profile.ProviderSpecChatGPT),
+		"https://chatgpt.com/backend-api/codex",
+		"secretfile:chatgpt/test",
+		protocolkind.Responses,
+		"",
+		"responses_stream",
+	)
+	doc := carrier.NewDocument(
+		protocolkind.Responses,
+		"application/json",
+		nil,
+		[]byte(`{"model":"gpt-5.4-mini","input":[],"stream":true}`),
+		carrier.Meta{},
+	)
+
+	ingress, err := NewExecutor(client, stubCredentialResolver{}).Send(context.Background(), target, doc)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	streamIngress, ok := ingress.(provider.StreamIngress)
+	if !ok {
+		t.Fatalf("ingress = %T, want provider.StreamIngress", ingress)
+	}
+	if streamIngress.Stream.MediaType != "text/event-stream" {
+		t.Fatalf("media type = %q, want text/event-stream", streamIngress.Stream.MediaType)
+	}
+	raw, err := io.ReadAll(streamIngress.Stream.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	_ = streamIngress.Stream.Body.Close()
+	if string(raw) != sse {
+		t.Fatalf("stream body = %q, want %q", raw, sse)
 	}
 }
 
@@ -487,7 +622,8 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 		if auth != "Bearer token_fresh" {
 			t.Fatalf("second auth=%q", auth)
 		}
-		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
