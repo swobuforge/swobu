@@ -120,6 +120,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
+		_ = resp.Body.Close()
 		recoveredToken, refreshErr := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, true)
 		if refreshErr != nil || strings.TrimSpace(recoveredToken) == "" { // swobu:io-string source=boundary
 			return nil, backendErr
@@ -139,13 +140,24 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		}
 		resp = retryResp
 	}
+	rawContentType := strings.TrimSpace(resp.Header.Get("Content-Type")) // swobu:io-string source=boundary
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
 		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
+	if rawContentType != "" && !httpedge.IsEventStreamContentType(rawContentType) {
+		return nil, httpedge.ReadUnexpectedStreamingResponse(resp, target.TargetID)
+	}
+	// ChatGPT's SSE-only Codex endpoint can omit Content-Type on a successful
+	// stream. Normalize only absence at this exact-provider edge; an explicit
+	// non-SSE value remains a backend representation failure.
+	streamMediaType := rawContentType
+	if streamMediaType == "" {
+		streamMediaType = "text/event-stream"
+	}
 	return provider.StreamIngress{Stream: carrier.ByteStream{
 		Header:    resp.Header.Clone(),
-		MediaType: resp.Header.Get("Content-Type"),
+		MediaType: streamMediaType,
 		Body:      resp.Body,
 	}}, nil
 }

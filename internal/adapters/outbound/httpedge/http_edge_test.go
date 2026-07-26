@@ -1,8 +1,8 @@
-package openaifamily
+package httpedge
 
 import "testing"
 
-func TestIsSSEContentType(t *testing.T) {
+func TestIsEventStreamContentType(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -22,8 +22,8 @@ func TestIsSSEContentType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isSSEContentType(tt.raw); got != tt.want {
-				t.Fatalf("isSSEContentType(%q)=%t want=%t", tt.raw, got, tt.want)
+			if got := IsEventStreamContentType(tt.raw); got != tt.want {
+				t.Fatalf("IsEventStreamContentType(%q)=%t want=%t", tt.raw, got, tt.want)
 			}
 		})
 	}

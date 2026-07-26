@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"strings"
 
@@ -20,8 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
-
-const maxBackendEvidence = 64 << 10
 
 type BackendAdapter struct {
 	client      *http.Client
@@ -149,20 +146,11 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		}
 		return nil, classifiedErr
 	}
-	if requestStreaming && !isSSEContentType(resp.Header.Get("Content-Type")) {
-		defer func() { _ = resp.Body.Close() }()
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxBackendEvidence+1))
-		if len(raw) > maxBackendEvidence {
-			raw = raw[:maxBackendEvidence]
-		}
-		return nil, canonical.NewBackendError(
-			target.TargetID,
-			http.StatusBadGateway,
-			strings.TrimSpace(string(raw)),                    // swobu:io-string source=boundary
-			strings.TrimSpace(resp.Header.Get("Retry-After")), // swobu:io-string source=boundary
-		)
+	isEventStream := httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type"))
+	if requestStreaming && !isEventStream {
+		return nil, httpedge.ReadUnexpectedStreamingResponse(resp, target.TargetID)
 	}
-	if isSSEContentType(resp.Header.Get("Content-Type")) {
+	if isEventStream {
 		return provider.StreamIngress{Stream: carrier.ByteStream{
 			Header:    resp.Header.Clone(),
 			MediaType: resp.Header.Get("Content-Type"),
@@ -188,11 +176,6 @@ func requestsStreamingResponse(raw []byte) bool {
 		Stream bool `json:"stream"`
 	}
 	return json.Unmarshal(raw, &payload) == nil && payload.Stream
-}
-
-func isSSEContentType(raw string) bool {
-	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(raw)) // swobu:io-string source=boundary
-	return err == nil && strings.EqualFold(mediaType, "text/event-stream")
 }
 
 // applyCredential keeps auth resolution at the provider edge so canonicals and
