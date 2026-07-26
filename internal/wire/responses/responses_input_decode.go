@@ -165,7 +165,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				}
 				return nil, canonical.BadRequest("responses request function_call_output items require call_id")
 			}
-			output, err := decodeResponseOutputParts(item.Output, imageLimits)
+			output, err := decodeResponseOutputParts(item.Output, "function_call_output", imageLimits)
 			if err != nil {
 				return nil, err
 			}
@@ -173,6 +173,25 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			result, err := canonical.NewToolResultItem(canonicalCallID, output, false)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request function_call_output is invalid")
+			}
+			decoded = append(decoded, result)
+		case "custom_tool_call_output":
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
+			if callID == "" {
+				return nil, canonical.BadRequest("responses request custom_tool_call_output items require call_id")
+			}
+			rawOutput := bytes.TrimSpace(item.Output)
+			if len(rawOutput) == 0 || bytes.Equal(rawOutput, []byte("null")) {
+				return nil, canonical.BadRequest("responses request custom_tool_call_output items require output")
+			}
+			output, err := decodeResponseOutputParts(item.Output, "custom_tool_call_output", imageLimits)
+			if err != nil {
+				return nil, err
+			}
+			canonicalCallID, _ := canonical.NewToolCallID(callID)
+			result, err := canonical.NewToolResultItem(canonicalCallID, output, false)
+			if err != nil {
+				return nil, canonical.BadRequest("responses request custom_tool_call_output is invalid")
 			}
 			decoded = append(decoded, result)
 		case "tool_search_call":
